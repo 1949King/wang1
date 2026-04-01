@@ -1,0 +1,20 @@
+2026-02-03 18:41:10,211 - INFO - 🔧 成功导入 faster-whisper。
+2026-02-03 18:41:10,216 - WARNING - ⚠️  未能导入 MediaPipe: No module named 'mediapipe'
+2026-02-03 18:41:10,216 - WARNING -    姿态识别功能将不可用。
+2026-02-03 18:41:17,726 - INFO - 🔧 成功导入 EasyOCR。
+2026-02-03 18:41:18,717 - INFO - 🔧 成功导入 MoviePy。
+2026-02-03 18:41:18,717 - INFO - 🔧 成功导入 OpenCV 和 NumPy。
+2026-02-03 18:41:18,721 - WARNING - ⚠️  DashScope 未安装: No module named 'dashscope'
+2026-02-03 18:41:18,724 - WARNING - ⚠️  PyTorch 或 Transformers 未安装: No module named 'transformers'
+2026-02-03 18:41:18,726 - INFO - 🔧 成功导入 Pillow。
+2026-02-03 18:41:18,730 - WARNING - ⚠️  yt-dlp 未安装: No module named 'yt_dlp'
+2026-02-03 18:41:18,732 - INFO - ℹ️  pynvml 未安装 (不影响功能，但无法使用GPU加速): No module named 'pynvml'
+2026-02-03 18:41:18,736 - WARNING - ⚠️  gTTS 未安装: No module named 'gTTS'
+2026-02-03 18:41:18,736 - WARNING -    提示: 请运行 'pip install gTTS' 安装。
+2026-02-03 18:41:18,743 - WARNING - ⚠️ 无法导入 model_manager 模块: No module named 'model_manager'
+2026-02-03 18:41:18,747 - ERROR - ❌ 未能导入模型管理器或嘴型动画器: No module named 'lip_sync_animator'
+2026-02-03 18:41:18,748 - INFO - 请通过命令行参数指定模式和输入，或使用 ui_main.py 启动GUI。
+2026-02-03 18:41:18,748 - INFO - 示例:
+2026-02-03 18:41:18,748 - INFO -   python ai_video_editor_local.py theme "我的复仇计划" "output_theme.mp4" --lip-sync --style=reversal_face_slap
+2026-02-03 18:41:18,748 - INFO -   python ai_video_editor_local.py video "my_video.mp4" "output_video.mp4"
+2026-02-03 18:41:18,748 - INFO -   python ai_video_editor_local.py manage-models list

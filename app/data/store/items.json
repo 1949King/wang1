@@ -1,0 +1,120 @@
+{
+  "items": [
+    {
+      "id": "auto-clip",
+      "name": "智能剪辑",
+      "type": "plugin",
+      "category": "视频处理",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "AI 驱动的智能剪辑插件，自动识别精彩片段",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "AI",
+        "剪辑",
+        "自动化"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": false,
+      "is_official": true
+    },
+    {
+      "id": "subtitle-gen",
+      "name": "字幕生成",
+      "type": "skill",
+      "category": "字幕工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "自动生成视频字幕，支持多语言",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "字幕",
+        "AI",
+        "多语言"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "drama-remix",
+      "name": "短剧二创",
+      "type": "skill",
+      "category": "视频处理",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "短剧漫剧二创剪辑，自动生成二创内容",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "短剧",
+        "二创",
+        "漫剧"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": false,
+      "is_official": true
+    },
+    {
+      "id": "matrix-publish",
+      "name": "矩阵发布",
+      "type": "skill",
+      "category": "运营工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "多平台矩阵发布，一键分发到多个账号",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "运营",
+        "发布",
+        "矩阵"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": false,
+      "is_official": true
+    },
+    {
+      "id": "drama-finder",
+      "name": "短剧筛选",
+      "type": "skill",
+      "category": "运营工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "智能筛选热门短剧，分析热度与佣金",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "短剧",
+        "筛选",
+        "数据分析"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": false,
+      "is_official": true
+    }
+  ],
+  "updated_at": "2026-04-01T20:31:03.191876"
+}

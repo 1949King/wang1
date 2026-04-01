@@ -1,0 +1,24 @@
+🚀 开始安�?AI 视频剪辑软件 (本地�?...
+🔧 创建虚拟环境...
+📦 安装 Python 依赖...
+Requirement already satisfied: pip in .\venv\Lib\site-packages (26.0)
+Collecting gradio==4.28.3 (from -r requirements.txt (line 1))
+  Downloading gradio-4.28.3-py3-none-any.whl.metadata (15 kB)
+Collecting moviepy==1.0.3 (from -r requirements.txt (line 2))
+  Downloading moviepy-1.0.3.tar.gz (388 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting faster-whisper==0.10.0 (from -r requirements.txt (line 3))
+  Downloading faster_whisper-0.10.0-py3-none-any.whl.metadata (14 kB)
+Collecting easyocr==1.7.1 (from -r requirements.txt (line 4))
+  Downloading easyocr-1.7.1-py3-none-any.whl.metadata (11 kB)
+📁 创建必要目录...
+📝 创建 .env 文件...
+⚠️ 请编�?.env 文件填入你的 API Keys
+🎉 安装完成�?
+🌐 访问地址: http://127.0.0.1:7860
+�밴���������. . . 

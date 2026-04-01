@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "id": "subtitle-gen",
+      "name": "字幕生成",
+      "type": "skill",
+      "category": "字幕工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "自动生成视频字幕，支持多语言",
+      "icon": "",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "字幕",
+        "AI",
+        "多语言"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    }
+  ],
+  "updated_at": "2026-03-29T19:11:33.075678"
+}

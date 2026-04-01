@@ -1,0 +1,23 @@
+@echo off
+cd /d "%~dp0"
+
+where python >nul 2>nul
+if errorlevel 1 (
+    echo ❌ Python 未找到。
+    pause
+    exit /b 1
+)
+
+echo 🔄 检查并安装依赖...
+pip install -r requirements.txt || pip install tkinter openai-whisper easyocr moviepy dashscope transformers torch mediapipe pillow yt-dlp gTTS pynvml
+
+if not exist "ui_main.py" (
+    echo ❌ 找不到 ui_main.py 文件。
+    pause
+    exit /b 1
+)
+
+echo 🚀 启动 AI 视频编辑器 UI...
+python ui_main.py
+
+pause

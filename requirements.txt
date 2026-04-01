@@ -1,0 +1,44 @@
+# 核心依赖
+requests==2.32.5
+numpy==2.4.3
+Pillow>=11.3.0
+
+# 视频处理
+moviepy==1.0.3
+imageio-ffmpeg==0.6.0
+opencv-python-headless==4.13.0.92
+
+# AI模型
+faster-whisper==0.10.0
+easyocr==1.7.1
+transformers==5.3.0
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0
+mediapipe==0.10.7
+
+# API集成
+dashscope==1.18.0
+anthropic==0.25.2
+zhipuai==2.0.1
+
+# 其他工具
+gTTS==2.5.4
+yt-dlp==2026.3.17
+pynvml==13.0.1
+
+# 打包工具
+pyinstaller==6.19.0
+
+# UI框架
+PyQt6==6.10.2
+
+# 音频处理
+librosa==0.11.0
+numba==0.64.0
+
+# 性能监控
+psutil==7.2.2
+
+# 异步HTTP客户端
+aiohttp==3.10.5

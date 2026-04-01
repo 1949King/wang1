@@ -1,0 +1,7 @@
+{
+  "error_type": "ValueError",
+  "error_message": "AI未能生成有效脚本，无法继续处理。",
+  "context": "AI脚本视频处理",
+  "timestamp": "2026-02-09T00:27:31.448423",
+  "suggestion": "值错误，请检查输入参数是否合法"
+}

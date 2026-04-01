@@ -1,0 +1,16 @@
+2026-02-03 16:13:41,002 - INFO - 🔧 成功导入 faster-whisper。
+2026-02-03 16:13:41,006 - WARNING - ⚠️  未能导入 MediaPipe: No module named 'mediapipe'
+2026-02-03 16:13:41,006 - WARNING -    姿态识别功能将不可用。
+2026-02-03 16:13:47,619 - INFO - 🔧 成功导入 EasyOCR。
+2026-02-03 16:13:47,622 - ERROR - ❌ 未能导入 MoviePy: No module named 'moviepy'
+2026-02-03 16:13:47,622 - ERROR -    提示: 请运行 'pip install moviepy' 安装。
+2026-02-03 16:13:47,622 - CRITICAL - 💥 MoviePy 是核心依赖，缺失将导致程序无法运行。请安装后再启动。
+2026-02-03 16:13:47,627 - INFO - 🔧 成功导入 OpenCV 和 NumPy。
+2026-02-03 16:13:47,630 - WARNING - ⚠️  DashScope 未安装: No module named 'dashscope'
+2026-02-03 16:13:47,634 - WARNING - ⚠️  PyTorch 或 Transformers 未安装: No module named 'transformers'
+2026-02-03 16:13:47,634 - INFO - 🔧 成功导入 Pillow。
+2026-02-03 16:13:47,638 - WARNING - ⚠️  yt-dlp 未安装: No module named 'yt_dlp'
+2026-02-03 16:13:47,641 - INFO - ℹ️  pynvml 未安装 (不影响功能，但无法使用GPU加速): No module named 'pynvml'
+2026-02-03 16:13:47,645 - WARNING - ⚠️  gTTS 未安装: No module named 'gTTS'
+2026-02-03 16:13:47,645 - WARNING -    提示: 请运行 'pip install gTTS' 安装。
+2026-02-03 16:13:47,645 - CRITICAL - 💥 严重错误：MoviePy 依赖缺失，程序无法启动。请先安装 MoviePy。

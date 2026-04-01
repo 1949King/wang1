@@ -1,0 +1,12 @@
+{
+  "name": "抖音故事模板",
+  "description": "适合讲述故事的模板",
+  "aspect_ratio": "9:16",
+  "resolution": "1080x1920",
+  "duration": 30,
+  "effects": [
+    "transition_slide",
+    "text_animation"
+  ],
+  "music": "emotional"
+}

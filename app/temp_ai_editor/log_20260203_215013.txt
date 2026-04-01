@@ -1,0 +1,14 @@
+2026-02-03 21:50:25,408 - INFO - 🔧 成功导入 faster-whisper。
+2026-02-03 21:50:26,685 - INFO - 🔧 成功导入 MediaPipe。
+2026-02-03 21:50:30,394 - INFO - 🔧 成功导入 EasyOCR。
+2026-02-03 21:50:30,773 - INFO - 🔧 成功导入 MoviePy。
+2026-02-03 21:50:30,773 - INFO - 🔧 成功导入 OpenCV 和 NumPy。
+2026-02-03 21:50:30,773 - INFO - 🔧 成功导入 DashScope。
+2026-02-03 21:50:35,374 - INFO - 🔧 成功导入 PyTorch 和 Transformers。
+2026-02-03 21:50:35,374 - INFO - 🔧 成功导入 Pillow。
+2026-02-03 21:50:35,619 - INFO - 🔧 成功导入 yt-dlp。
+2026-02-03 21:50:35,621 - INFO - 🔧 成功导入 pynvml (用于GPU检测)。
+2026-02-03 21:50:35,624 - WARNING - ⚠️  gTTS 未安装: No module named 'gTTS'
+2026-02-03 21:50:35,624 - WARNING -    提示: 请运行 'pip install gTTS' 安装。
+2026-02-03 21:50:35,628 - WARNING - ⚠️ 无法导入 model_manager 模块: No module named 'model_manager'
+2026-02-03 21:50:35,631 - ERROR - ❌ 未能导入模型管理器或嘴型动画器: No module named 'lip_sync_animator'

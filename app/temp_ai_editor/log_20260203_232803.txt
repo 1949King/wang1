@@ -1,0 +1,15 @@
+2026-02-03 23:28:14,926 - INFO - 🔧 成功导入 faster-whisper。
+2026-02-03 23:28:16,231 - INFO - 🔧 成功导入 MediaPipe。
+2026-02-03 23:28:20,006 - INFO - 🔧 成功导入 EasyOCR。
+2026-02-03 23:28:20,365 - ERROR - ❌ 未能导入 MoviePy: No module named 'moviepy.editor'
+2026-02-03 23:28:20,365 - ERROR -    提示: 请运行 'pip install moviepy' 安装。
+2026-02-03 23:28:20,365 - CRITICAL - 💥 MoviePy 是核心依赖，缺失将导致程序无法运行。请安装后再启动。
+2026-02-03 23:28:20,366 - INFO - 🔧 成功导入 OpenCV 和 NumPy。
+2026-02-03 23:28:20,366 - INFO - 🔧 成功导入 DashScope。
+2026-02-03 23:28:24,970 - INFO - 🔧 成功导入 PyTorch 和 Transformers。
+2026-02-03 23:28:24,971 - INFO - 🔧 成功导入 Pillow。
+2026-02-03 23:28:25,220 - INFO - 🔧 成功导入 yt-dlp。
+2026-02-03 23:28:25,220 - INFO - 🔧 成功导入 pynvml (用于GPU检测)。
+2026-02-03 23:28:25,223 - WARNING - ⚠️  gTTS 未安装: No module named 'gTTS'
+2026-02-03 23:28:25,224 - WARNING -    提示: 请运行 'pip install gTTS' 安装。
+2026-02-03 23:28:25,224 - CRITICAL - 💥 严重错误：MoviePy 依赖缺失，程序无法启动。请先安装 MoviePy。

@@ -1,0 +1,12 @@
+faster-whisper
+easyocr
+moviepy
+dashscope
+transformers
+torch
+mediapipe
+pillow
+yt-dlp
+gTTS
+pynvml
+PyQt5

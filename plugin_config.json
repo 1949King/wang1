@@ -1,0 +1,9 @@
+{
+  "plugin_dirs": [
+    "app/plugins",
+    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\core\\..\\plugins",
+    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\plugins",
+    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\modules\\plugins"
+  ],
+  "enabled_plugins": []
+}

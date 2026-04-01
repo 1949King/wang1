@@ -1,0 +1,66 @@
+{
+  "summary": {
+    "total_tests": 14,
+    "passed": 14,
+    "failed": 0,
+    "success_rate": "100.0%"
+  },
+  "results": [
+    {
+      "test_name": "代码完整性: app/modules/lego/modules.py",
+      "path": "app/modules/lego/modules.py",
+      "success": true,
+      "syntax_checks": {
+        "导入语句": true,
+        "类定义": true,
+        "函数定义": true
+      },
+      "content_length": 282061
+    },
+    {
+      "test_name": "代码完整性: app/modules/lego/account_widgets.py",
+      "path": "app/modules/lego/account_widgets.py",
+      "success": true,
+      "syntax_checks": {
+        "导入语句": true,
+        "类定义": true,
+        "函数定义": true
+      },
+      "content_length": 22982
+    },
+    {
+      "test_name": "代码完整性: app/modules/lego/video_editor/timeline_ui.py",
+      "path": "app/modules/lego/video_editor/timeline_ui.py",
+      "success": true,
+      "syntax_checks": {
+        "导入语句": true,
+        "类定义": true,
+        "函数定义": true
+      },
+      "content_length": 9889
+    },
+    {
+      "test_name": "代码完整性: app/modules/lego/video_editor/professional_editor.py",
+      "path": "app/modules/lego/video_editor/professional_editor.py",
+      "success": true,
+      "syntax_checks": {
+        "导入语句": true,
+        "类定义": true,
+        "函数定义": true
+      },
+      "content_length": 11247
+    },
+    {
+      "test_name": "时间轴功能完整性",
+      "success": true,
+      "checks": {
+        "TimelineWidget类": true,
+        "ClipWidget类": true,
+        "播放控制": true,
+        "片段管理": true,
+        "时间刻度": true
+      }
+    }
+  ],
+  "timestamp": "2026-04-01 20:54:05"
+}

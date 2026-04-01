@@ -1,0 +1,12 @@
+{
+  "name": "小红书种草模板",
+  "description": "适合小红书种草内容",
+  "aspect_ratio": "1:1",
+  "resolution": "1080x1080",
+  "duration": 60,
+  "effects": [
+    "soft_light",
+    "text_overlay"
+  ],
+  "music": "relaxing"
+}
