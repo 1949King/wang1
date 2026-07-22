@@ -4,7 +4,6 @@
 包含快捷键设置、主题设置、字体大小调节等功能
 """
 
-import os
 import json
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
@@ -13,10 +12,17 @@ from PyQt6.QtWidgets import (
     QScrollArea, QFrame, QGridLayout, QComboBox, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QFormLayout, QCheckBox, QMessageBox, QDialog, QDialogButtonBox,
-    QKeySequenceEdit, QColorDialog, QSlider, QTabWidget, QLineEdit
+    QKeySequenceEdit, QColorDialog, QLineEdit, QListWidget, QListWidgetItem,
+    QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings
-from PyQt6.QtGui import QFont, QColor, QKeySequence
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QThread, QPoint, QPointF
+from PyQt6.QtGui import QFont, QColor, QKeySequence, QPainter, QImage, QPen, QBrush, QConicalGradient, QRadialGradient
+import math
+import re
+import webbrowser
+
+from .module_registry import get_registry, ModuleTier, reload_registry
+from .base_module import BaseModule
 
 
 class ModernLineEdit(QLineEdit):
@@ -27,22 +33,7 @@ class ModernLineEdit(QLineEdit):
         self.setPlaceholderText(placeholder)
         self.setEchoMode(echo_mode)
         self.setMinimumHeight(44)
-        self.setStyleSheet("""
-            QLineEdit {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                border: 2px solid #333333;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border-color: #1e6bde;
-            }
-            QLineEdit::placeholder {
-                color: #666666;
-            }
-        """)
+        # 样式由全局 QSS (theme_manager.py) 统一管理，此处不写死颜色
 
 
 @dataclass
@@ -66,23 +57,171 @@ class ShortcutEditor(QKeySequenceEdit):
         if shortcut:
             self.setKeySequence(QKeySequence(shortcut))
         self.setMinimumWidth(150)
-        self.setStyleSheet("""
-            QKeySequenceEdit {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 6px 10px;
-            }
-            QKeySequenceEdit:focus {
-                border-color: #1e6bde;
-            }
-        """)
+        # 样式由全局 QSS 统一管理
 
 
-class SettingsModule(QWidget):
+class ColorWheel(QWidget):
+    """自定义调色轮盘 - 大圆形 HSV 色环
+    
+    用法:
+        wheel = ColorWheel()
+        wheel.color_changed.connect(lambda hex_color: print(hex_color))
+        wheel.set_theme("dark")  # 或 "light"
+    """
+    color_changed = pyqtSignal(str)  # 发射十六进制颜色字符串 "#rrggbb"
+
+    def __init__(self, initial_color: str = "#ffffff", size: int = 200, parent=None):
+        super().__init__(parent)
+        self._color = QColor(initial_color)
+        self._wheel_size = size
+        self._indicator_radius = 8
+        self._theme = "dark"  # 默认深色主题
+        self._border_color = QColor("#444444")
+        self._indicator_outer = QColor("#ffffff")
+        self._indicator_inner = QColor("#000000")
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self._render_wheel()
+        # 根据初始颜色计算指示器位置
+        self._update_indicator_from_color()
+
+    def set_theme(self, theme: str):
+        """设置主题，深色主题用白色边框，浅色主题用深色边框"""
+        self._theme = theme
+        if theme == "light":
+            self._border_color = QColor("#888888")
+            self._indicator_outer = QColor("#333333")
+            self._indicator_inner = QColor("#666666")
+        else:
+            self._border_color = QColor("#444444")
+            self._indicator_outer = QColor("#ffffff")
+            self._indicator_inner = QColor("#000000")
+        self.update()
+
+    def _render_wheel(self):
+        """预渲染色轮图像"""
+        s = self._wheel_size
+        self._wheel_img = QImage(s, s, QImage.Format.Format_ARGB32)
+        self._wheel_img.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(self._wheel_img)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = s / 2
+        radius = s / 2 - 2
+        
+        # 使用锥形渐变绘制色相环
+        gradient = QConicalGradient(QPointF(center, center), -90)
+        for i in range(360):
+            hue_color = QColor()
+            hue_color.setHsv(i, 255, 255)
+            gradient.setColorAt(i / 360.0, hue_color)
+        
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(center, center), radius, radius)
+        
+        # 中心覆盖白色到透明渐变，形成饱和度效果
+        # 使用叠加模式，使中心白色渐变与底层色相混合
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
+        
+        # 创建径向渐变：中心白色（高饱和度遮挡）到边缘透明
+        sat_gradient = QRadialGradient(QPointF(center, center), radius)
+        sat_gradient.setColorAt(0, QColor(255, 255, 255, 255))  # 中心白色
+        sat_gradient.setColorAt(1, QColor(255, 255, 255, 0))    # 边缘透明
+        
+        painter.setBrush(QBrush(sat_gradient))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(center, center), radius, radius)
+        
+        painter.end()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # 背景圆盘
+        painter.drawImage(0, 0, self._wheel_img)
+        
+        # 边框（主题感知）
+        center = self._wheel_size / 2
+        radius = self._wheel_size / 2 - 2
+        pen = QPen(self._border_color, 2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(center, center), radius, radius)
+        
+        # 当前选中指示器（外圈+颜色圆点，主题感知）
+        h, s, v, _ = self._color.getHsv()
+        angle_rad = math.radians(h)  # HSV hue: 0=red, goes clockwise
+        dist = radius * s / 255.0
+        ix = center + dist * math.cos(angle_rad)
+        iy = center - dist * math.sin(angle_rad)
+        
+        # 外圈（主题感知）
+        painter.setPen(QPen(self._indicator_outer, 2.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(ix, iy), self._indicator_radius, self._indicator_radius)
+        # 内圈（主题感知）
+        painter.setPen(QPen(self._indicator_inner, 1.5))
+        painter.drawEllipse(QPointF(ix, iy), self._indicator_radius + 1, self._indicator_radius + 1)
+        # 当前颜色填充
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(self._color))
+        painter.drawEllipse(QPointF(ix, iy), self._indicator_radius - 1, self._indicator_radius - 1)
+        
+        painter.end()
+
+    def mousePressEvent(self, event):
+        self._pick(event.position().toPoint())
+
+    def mouseMoveEvent(self, event):
+        self._pick(event.position().toPoint())
+
+    def _pick(self, pos: QPoint):
+        center = self._wheel_size / 2
+        dx = pos.x() - center
+        dy = center - pos.y()  # Y轴翻转
+        radius = self._wheel_size / 2 - 2
+        dist = math.sqrt(dx * dx + dy * dy)
+        
+        if dist <= radius:
+            # 计算色相 (角度)
+            angle = math.degrees(math.atan2(dy, dx))
+            if angle < 0:
+                angle += 360
+            hue = int(angle)
+            
+            # 计算饱和度 (距离中心的距离)
+            saturation = min(255, int(dist / radius * 255))
+            value = 255  # 保持亮度最大
+            
+            self._color.setHsv(hue, saturation, value)
+            self._update_indicator_from_color()
+            self.update()
+            self.color_changed.emit(self._color.name())
+
+    def _update_indicator_from_color(self):
+        """根据当前颜色更新指示器位置（由 setColor 调用的辅助方法）"""
+        pass  # 位置在 paintEvent 中动态计算
+
+    def set_color(self, hex_color: str):
+        """外部设置颜色"""
+        c = QColor(hex_color)
+        if c.isValid():
+            self._color = c
+            self.update()
+            
+    def get_color(self) -> str:
+        return self._color.name()
+
+
+class SettingsModule(BaseModule):
     """设置模块"""
     
+    module_id = "settings"
+    module_name = "设置"
+    module_icon = "⚙️"
     settings_changed = pyqtSignal(str, object)
     
     DEFAULT_SHORTCUTS = [
@@ -117,21 +256,22 @@ class SettingsModule(QWidget):
     FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
     
     def __init__(self):
-        super().__init__()
         self._settings = QSettings("拾光剪影", "Settings")
         self._shortcuts: Dict[str, ShortcutItem] = {}
         self._shortcut_editors: Dict[str, ShortcutEditor] = {}
-        self._init_ui()
+        self._module_toggle_widgets: Dict[str, QCheckBox] = {}  # 功能开关映射
+        super().__init__()  # BaseModule.__init__() → 设置 EventBus 等 + 调用 _setup_ui()
         self._load_settings()
     
-    def _init_ui(self):
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        header = QFrame()
-        header.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333333;")
-        header_layout = QHBoxLayout(header)
+        # ── 顶部标题栏 ──
+        self._header = QFrame()
+        self._header.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333333;")
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(20, 15, 20, 15)
         
         title = QLabel("⚙️ 设置")
@@ -140,105 +280,135 @@ class SettingsModule(QWidget):
         
         header_layout.addStretch()
         
-        layout.addWidget(header)
+        layout.addWidget(self._header)
         
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background-color: #0a0a0a;
-            }
-            QTabBar::tab {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                border: none;
-                padding: 12px 24px;
-                font-size: 14px;
-            }
-            QTabBar::tab:selected {
-                color: #1e6bde;
-                background-color: #0a0a0a;
-                border-bottom: 2px solid #1e6bde;
-            }
-            QTabBar::tab:hover:!selected {
-                color: #ffffff;
-            }
-        """)
+        # ── 主体：左侧竖向导航 + 右侧内容区 ──
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
         
-        scroll1 = QScrollArea()
-        scroll1.setWidgetResizable(True)
-        scroll1.setWidget(self._create_shortcut_tab())
-        self._tabs.addTab(scroll1, "⌨️ 快捷键")
+        # --- 左侧导航栏 ---
+        self._sidebar = QFrame()
+        self._sidebar.setObjectName("sideBar")
+        self._sidebar.setFixedWidth(200)
+        self._sidebar.setStyleSheet("QFrame { background-color: #0d0d0d; border-right: 1px solid #1a1a1a; }")
+        sidebar_layout = QVBoxLayout(self._sidebar)
+        sidebar_layout.setContentsMargins(8, 10, 8, 10)
+        sidebar_layout.setSpacing(2)
         
-        scroll2 = QScrollArea()
-        scroll2.setWidgetResizable(True)
-        scroll2.setWidget(self._create_theme_tab())
-        self._tabs.addTab(scroll2, "🎨 主题")
+        self._sidebar_title = QLabel("  璁剧疆鍒嗙被")
+        self._sidebar_title.setObjectName("hintLabel")
+        self._sidebar_title.setStyleSheet("color: #666666; font-size: 11px; font-weight: bold; padding: 6px 4px;")
+        sidebar_layout.addWidget(self._sidebar_title)
         
-        scroll3 = QScrollArea()
-        scroll3.setWidgetResizable(True)
-        scroll3.setWidget(self._create_font_tab())
-        self._tabs.addTab(scroll3, "🔤 字体")
+        # 导航项定义：(图标, 名称, key, 创建方法)
+        self._nav_categories = [
+            ("⌨️", "快捷键", "shortcut", self._create_shortcut_tab),
+            ("🎨", "外观", "appearance", self._create_appearance_tab),
+            ("⚙️", "常规", "general", self._create_general_tab),
+            ("👤", "账号", "account", self._create_account_tab),
+            ("📧", "邮箱设置", "email", self._create_email_tab),
+            ("🗑️", "缓存", "cache", self._create_cache_tab),
+            ("🌐", "语言", "language", self._create_language_tab),
+            ("🧩", "功能开关", "modules", self._create_module_toggle_tab),
+            ("ℹ️", "关于", "about", self._create_about_tab),
+        ]
         
-        scroll4 = QScrollArea()
-        scroll4.setWidgetResizable(True)
-        scroll4.setWidget(self._create_general_tab())
-        self._tabs.addTab(scroll4, "⚙️ 常规")
+        self._nav_buttons: Dict[str, QPushButton] = {}
+        self._page_indices: Dict[str, int] = {}
         
-        scroll5 = QScrollArea()
-        scroll5.setWidgetResizable(True)
-        scroll5.setWidget(self._create_account_tab())
-        self._tabs.addTab(scroll5, "👤 账号")
+        for i, (icon, name, key, _) in enumerate(self._nav_categories):
+            btn = QPushButton(f"  {icon}  {name}")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #888888;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 12px;
+                    font-size: 13px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background: #1a1a1a;
+                    color: #cccccc;
+                }
+                QPushButton[active="true"] {
+                    background: #1a2a4a;
+                    color: #3b82f6;
+                    font-weight: bold;
+                    border-left: 3px solid #3b82f6;
+                }
+            """)
+            btn.clicked.connect(lambda checked, k=key: self._switch_settings_page(k))
+            sidebar_layout.addWidget(btn)
+            self._nav_buttons[key] = btn
+            self._page_indices[key] = i
         
-        scroll6 = QScrollArea()
-        scroll6.setWidgetResizable(True)
-        scroll6.setWidget(self._create_email_tab())
-        self._tabs.addTab(scroll6, "📧 邮箱设置")
+        sidebar_layout.addStretch()
         
-        layout.addWidget(self._tabs)
+        # --- 右侧内容区（堆叠式页面切换） ---
+        self._content_stack = QStackedWidget()
+        self._content_stack.setStyleSheet("QStackedWidget { background-color: #0a0a0a; }")
         
-        bottom_bar = QFrame()
-        bottom_bar.setStyleSheet("background-color: #1a1a1a; border-top: 1px solid #333333;")
-        bottom_layout = QHBoxLayout(bottom_bar)
+        for _, _, key, create_fn in self._nav_categories:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("QScrollArea { background-color: #0a0a0a; border: none; }")
+            scroll.setWidget(create_fn())
+            self._content_stack.addWidget(scroll)
+        
+        body.addWidget(self._sidebar)
+        body.addWidget(self._content_stack, 1)
+        layout.addLayout(body, 1)
+        
+        self._update_nav_button_theme(self._is_light_theme())
+
+        # 默认选中第一个
+        self._switch_settings_page("shortcut")
+        
+        # ── 底部操作栏 ──
+        self._bottom_bar = QFrame()
+        self._bottom_bar.setStyleSheet("background-color: #1a1a1a; border-top: 1px solid #333333;")
+        bottom_layout = QHBoxLayout(self._bottom_bar)
         bottom_layout.setContentsMargins(20, 10, 20, 10)
         
         reset_btn = QPushButton("恢复默认")
+        reset_btn.setObjectName("resetBtn")
         reset_btn.clicked.connect(self._reset_all)
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 8px 20px;
-            }
-            QPushButton:hover {
-                background-color: #2a2a2a;
-                color: #ffffff;
-            }
-        """)
         bottom_layout.addWidget(reset_btn)
+
+        import_btn = QPushButton("📥 导入设置")
+        import_btn.setObjectName("resetBtn")
+        import_btn.clicked.connect(self._import_settings)
+        bottom_layout.addWidget(import_btn)
+
+        export_btn = QPushButton("📤 导出设置")
+        export_btn.setObjectName("resetBtn")
+        export_btn.clicked.connect(self._export_settings)
+        bottom_layout.addWidget(export_btn)
         
         bottom_layout.addStretch()
         
         save_btn = QPushButton("保存设置")
+        save_btn.setObjectName("primaryBtn")
         save_btn.clicked.connect(self._save_settings)
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 24px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1a5bc4;
-            }
-        """)
         bottom_layout.addWidget(save_btn)
         
-        layout.addWidget(bottom_bar)
+        layout.addWidget(self._bottom_bar)
+    
+    def _switch_settings_page(self, key: str):
+        """切换到指定的设置分类页面"""
+        # 更新导航按钮高亮状态
+        for k, btn in self._nav_buttons.items():
+            btn.setProperty("active", "true" if k == key else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+        
+        # 切换内容堆栈
+        if key in self._page_indices:
+            self._content_stack.setCurrentIndex(self._page_indices[key])
     
     def _create_shortcut_tab(self) -> QWidget:
         """创建快捷键设置标签页"""
@@ -248,7 +418,7 @@ class SettingsModule(QWidget):
         layout.setSpacing(15)
         
         desc = QLabel("双击快捷键区域可以修改快捷键，按 Esc 取消修改")
-        desc.setStyleSheet("color: #ffffff; font-size: 13px;")
+        desc
         layout.addWidget(desc)
         
         self._shortcut_table = QTableWidget()
@@ -261,28 +431,7 @@ class SettingsModule(QWidget):
         self._shortcut_table.setColumnWidth(1, 180)
         self._shortcut_table.setColumnWidth(2, 120)
         self._shortcut_table.setColumnWidth(3, 100)
-        self._shortcut_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                gridline-color: #333333;
-                border: 1px solid #333333;
-                border-radius: 8px;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-            QTableWidget::item:selected {
-                background-color: #1e6bde;
-            }
-            QHeaderView::section {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                padding: 10px;
-                border: none;
-                border-bottom: 1px solid #333333;
-            }
-        """)
+        # 表格样式由全局 QSS 统一管理
         
         self._shortcut_table.setRowCount(len(self.DEFAULT_SHORTCUTS))
         
@@ -304,7 +453,6 @@ class SettingsModule(QWidget):
             
             default_item = QTableWidgetItem(item.default_shortcut)
             default_item.setFlags(default_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            default_item.setForeground(QColor("#ffffff"))
             self._shortcut_table.setItem(i, 2, default_item)
             
             reset_btn = QPushButton("重置")
@@ -325,30 +473,38 @@ class SettingsModule(QWidget):
         
         return widget
     
-    def _create_theme_tab(self) -> QWidget:
-        """创建主题设置标签页"""
+    def _create_appearance_tab(self) -> QWidget:
+        """外观设置标签页：合并主题 + 字体 于同一页面"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        
+        layout.setSpacing(24)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # ═══════════════════════════════════════════════════════
+        # 一、主题设置
+        # ═══════════════════════════════════════════════════════
         theme_group = QGroupBox("主题设置")
-        theme_group.setStyleSheet("color: #ffffff;")
         theme_layout = QFormLayout(theme_group)
-        
+
         self._theme_combo = QComboBox()
         self._theme_combo.addItems(self.THEMES.values())
         self._theme_combo.setCurrentIndex(0)
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         self._theme_combo.setMinimumWidth(200)
-        self._theme_combo.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
         theme_layout.addRow("主题:", self._theme_combo)
-        
+
+        self._theme_status_label = QLabel("")
+        self._theme_status_label.setObjectName("hintLabel")
+        theme_layout.addRow("当前生效:", self._theme_status_label)
+
         layout.addWidget(theme_group)
-        
+
         color_group = QGroupBox("自定义颜色")
-        color_group.setStyleSheet("color: #ffffff;")
         color_layout = QGridLayout(color_group)
-        
+        color_layout.setHorizontalSpacing(24)
+        color_layout.setVerticalSpacing(16)
+
         colors = [
             ("主色调", "primary", "#1e6bde"),
             ("背景色", "background", "#0a0a0a"),
@@ -359,55 +515,79 @@ class SettingsModule(QWidget):
             ("成功颜色", "success", "#22c55e"),
             ("错误颜色", "error", "#ef4444"),
         ]
-        
+
         self._color_buttons: Dict[str, QPushButton] = {}
-        
+        self._color_labels: Dict[str, QLabel] = {}
+
+        is_light = self._is_light_theme()
+
         for i, (name, key, default) in enumerate(colors):
             row = i // 2
             col = i % 2
-            
+
             color_widget = QWidget()
             color_h_layout = QHBoxLayout(color_widget)
             color_h_layout.setContentsMargins(0, 0, 0, 0)
-            
+            color_h_layout.setSpacing(8)
+
             label = QLabel(name)
-            label.setMinimumWidth(80)
-            label.setStyleSheet("color: #ffffff;")
+            label.setMinimumWidth(70)
+            label.setObjectName(f"colorLabel_{key}")
             color_h_layout.addWidget(label)
-            
+
             color_btn = QPushButton()
-            color_btn.setFixedSize(60, 30)
-            color_btn.setStyleSheet(f"background-color: {default}; border: 1px solid #333333; border-radius: 4px;")
+            color_btn.setFixedSize(56, 28)
+            color_btn.setObjectName(f"colorSwatch_{key}")
+            color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            color_btn.setToolTip(f"点击修改 {name}")
             color_btn.clicked.connect(lambda checked, k=key, b=color_btn: self._pick_color(k, b))
             color_h_layout.addWidget(color_btn)
-            
+
+            value_label = QLabel(default)
+            value_label.setObjectName(f"colorValue_{key}")
+            value_label.setFont(QFont("Consolas", 10))
+            value_label.setMinimumWidth(70)
+            color_h_layout.addWidget(value_label)
+            color_h_layout.addStretch()
+
             self._color_buttons[key] = color_btn
+            self._color_labels[key] = value_label
+            self._update_swatch_style(color_btn, default, is_light)
             color_layout.addWidget(color_widget, row, col)
-        
+
+        self._update_color_labels(is_light)
         layout.addWidget(color_group)
-        
-        layout.addStretch()
-        
-        return widget
-    
-    def _create_font_tab(self) -> QWidget:
-        """创建字体设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        
-        font_group = QGroupBox("字体设置")
-        font_group.setStyleSheet("color: #ffffff;")
+
+        # ═══════════════════════════════════════════════════════
+        # 二、分隔线
+        # ═══════════════════════════════════════════════════════
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("QFrame { color: #333333; }")
+        layout.addWidget(sep)
+
+        # ═══════════════════════════════════════════════════════
+        # 三、字体设置
+        # ═══════════════════════════════════════════════════════
+        font_section = QLabel("字体设置")
+        font_section.setStyleSheet("font-size: 15px; font-weight: bold; color: #cccccc; padding: 4px 0;")
+        layout.addWidget(font_section)
+
+        # 上部：设置 + 调色轮盘 左右分栏
+        top_row = QHBoxLayout()
+        top_row.setSpacing(24)
+
+        # 左侧：字体参数设置
+        font_group = QGroupBox("字体参数")
         font_layout = QFormLayout(font_group)
-        
+        font_layout.setSpacing(14)
+
         self._font_size_combo = QComboBox()
         self._font_size_combo.addItems([str(s) for s in self.FONT_SIZES])
         self._font_size_combo.setCurrentIndex(4)
-        self._font_size_combo.setMinimumWidth(100)
-        self._font_size_combo.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._font_size_combo.setMinimumWidth(160)
         font_layout.addRow("字体大小:", self._font_size_combo)
-        
+
         self._font_family_combo = QComboBox()
         self._font_family_combo.addItems([
             "Microsoft YaHei",
@@ -418,27 +598,54 @@ class SettingsModule(QWidget):
             "Arial",
             "Helvetica"
         ])
-        self._font_family_combo.setMinimumWidth(200)
-        self._font_family_combo.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._font_family_combo.setMinimumWidth(160)
         font_layout.addRow("字体:", self._font_family_combo)
-        
-        layout.addWidget(font_group)
-        
+
+        self._font_bold_check = QCheckBox("粗体")
+        self._font_bold_check.toggled.connect(self._update_preview)
+        font_layout.addRow("字体样式:", self._font_bold_check)
+
+        top_row.addWidget(font_group)
+
+        # 右侧：调色轮盘
+        color_group = QGroupBox("文字颜色")
+        color_layout = QVBoxLayout(color_group)
+        color_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._color_wheel = ColorWheel(size=180)
+        self._color_wheel.color_changed.connect(self._on_wheel_color_changed)
+        color_layout.addWidget(self._color_wheel, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # 颜色值显示
+        self._font_color_label = QLabel("#ffffff")
+        self._font_color_label.setStyleSheet("""
+            color: #cccccc; font-size: 14px; font-family: monospace;
+            padding: 8px 16px; background-color: #1a1a1a;
+            border: 1px solid #333333; border-radius: 6px;
+        """)
+        self._font_color_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        color_layout.addWidget(self._font_color_label)
+
+        top_row.addWidget(color_group)
+        top_row.addStretch()
+        layout.addLayout(top_row)
+
+        # 下部：预览
         preview_group = QGroupBox("预览")
-        preview_group.setStyleSheet("color: #ffffff;")
         preview_layout = QVBoxLayout(preview_group)
-        
+
         self._preview_label = QLabel("这是一段预览文字\nThe quick brown fox jumps over the lazy dog")
-        self._preview_label.setStyleSheet("font-size: 14px; padding: 20px; color: #ffffff;")
         preview_layout.addWidget(self._preview_label)
-        
+
         layout.addWidget(preview_group)
-        
+
         self._font_size_combo.currentIndexChanged.connect(self._update_preview)
         self._font_family_combo.currentIndexChanged.connect(self._update_preview)
-        
+
+        # 初始化颜色状态
+        self._font_color = "#ffffff"
+
         layout.addStretch()
-        
         return widget
     
     def _create_general_tab(self) -> QWidget:
@@ -449,63 +656,63 @@ class SettingsModule(QWidget):
         layout.setSpacing(20)
         
         startup_group = QGroupBox("启动设置")
-        startup_group.setStyleSheet("color: #ffffff;")
+        startup_group
         startup_layout = QFormLayout(startup_group)
         
         self._auto_start_check = QCheckBox("开机自动启动")
-        self._auto_start_check.setStyleSheet("color: #ffffff;")
+        self._auto_start_check
         startup_layout.addRow(self._auto_start_check)
         
         self._auto_login_check = QCheckBox("自动登录")
         self._auto_login_check.setChecked(True)
-        self._auto_login_check.setStyleSheet("color: #ffffff;")
+        self._auto_login_check
         startup_layout.addRow(self._auto_login_check)
         
         self._remember_window_check = QCheckBox("记住窗口大小和位置")
         self._remember_window_check.setChecked(True)
-        self._remember_window_check.setStyleSheet("color: #ffffff;")
+        self._remember_window_check
         startup_layout.addRow(self._remember_window_check)
         
         layout.addWidget(startup_group)
         
         project_group = QGroupBox("项目设置")
-        project_group.setStyleSheet("color: #ffffff;")
+        project_group
         project_layout = QFormLayout(project_group)
         
         self._auto_save_check = QCheckBox("自动保存")
         self._auto_save_check.setChecked(True)
-        self._auto_save_check.setStyleSheet("color: #ffffff;")
+        self._auto_save_check
         project_layout.addRow(self._auto_save_check)
         
         self._auto_save_interval = QSpinBox()
         self._auto_save_interval.setRange(30, 600)
         self._auto_save_interval.setValue(300)
         self._auto_save_interval.setSuffix(" 秒")
-        self._auto_save_interval.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._auto_save_interval
         project_layout.addRow("保存间隔:", self._auto_save_interval)
         
         layout.addWidget(project_group)
         
         performance_group = QGroupBox("性能设置")
-        performance_group.setStyleSheet("color: #ffffff;")
+        performance_group
         performance_layout = QFormLayout(performance_group)
         
         self._max_threads_spin = QSpinBox()
         self._max_threads_spin.setRange(1, 32)
         self._max_threads_spin.setValue(15)
-        self._max_threads_spin.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._max_threads_spin
         performance_layout.addRow("最大线程数:", self._max_threads_spin)
         
         self._gpu_accel_check = QCheckBox("启用 GPU 加速")
         self._gpu_accel_check.setChecked(True)
-        self._gpu_accel_check.setStyleSheet("color: #ffffff;")
+        self._gpu_accel_check
         performance_layout.addRow(self._gpu_accel_check)
         
         self._cache_size_spin = QSpinBox()
         self._cache_size_spin.setRange(100, 10000)
         self._cache_size_spin.setValue(1000)
         self._cache_size_spin.setSuffix(" MB")
-        self._cache_size_spin.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._cache_size_spin
         performance_layout.addRow("缓存大小:", self._cache_size_spin)
         
         layout.addWidget(performance_group)
@@ -554,7 +761,7 @@ class SettingsModule(QWidget):
         device_layout = QVBoxLayout(device_group)
         
         device_info = QLabel(f"每个账号最多可绑定 {3} 台设备")
-        device_info.setStyleSheet("color: #ffffff; font-size: 13px;")
+        device_info
         device_layout.addWidget(device_info)
         
         self._device_table = QTableWidget()
@@ -564,25 +771,7 @@ class SettingsModule(QWidget):
         self._device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._device_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self._device_table.setColumnWidth(2, 80)
-        self._device_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                gridline-color: #333333;
-                border: 1px solid #333333;
-                border-radius: 6px;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-            QHeaderView::section {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                padding: 8px;
-                border: none;
-                border-bottom: 1px solid #333333;
-            }
-        """)
+        # 表格样式由全局 QSS 统一管理
         
         if user and user.devices:
             self._device_table.setRowCount(len(user.devices))
@@ -597,16 +786,7 @@ class SettingsModule(QWidget):
                 
                 if i > 0:
                     unbind_btn = QPushButton("解绑")
-                    unbind_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #ef4444;
-                            border: none;
-                        }
-                        QPushButton:hover {
-                            color: #f87171;
-                        }
-                    """)
+                    unbind_btn.setObjectName("dangerBtn")
                     unbind_btn.clicked.connect(lambda checked, d=device_id: self._unbind_device(d))
                     self._device_table.setCellWidget(i, 2, unbind_btn)
                 else:
@@ -730,25 +910,95 @@ class SettingsModule(QWidget):
     
     def _refresh_account_tab(self):
         """刷新账号标签页"""
-        scroll = self._tabs.widget(4)
-        if scroll:
-            old_widget = scroll.takeWidget()
+        account_index = self._page_indices.get("account", -1)
+        if account_index < 0:
+            return
+        old_scroll = self._content_stack.widget(account_index)
+        if old_scroll:
+            old_widget = old_scroll.takeWidget()
             if old_widget:
                 old_widget.deleteLater()
-            scroll.setWidget(self._create_account_tab())
+            new_scroll = QScrollArea()
+            new_scroll.setWidgetResizable(True)
+            new_scroll.setStyleSheet("QScrollArea { background-color: #0a0a0a; border: none; }")
+            new_scroll.setWidget(self._create_account_tab())
+            self._content_stack.insertWidget(account_index, new_scroll)
+            self._content_stack.removeWidget(old_scroll)
+            old_scroll.deleteLater()
     
+    def _pick_font_color(self):
+        """选择字体颜色（通过QColorDialog）"""
+        current = QColor(self._font_color)
+        color = QColorDialog.getColor(current, self, "选择字体颜色")
+        if color.isValid():
+            self._font_color = color.name()
+            self._font_color_label.setText(self._font_color)
+            self._color_wheel.set_color(self._font_color)
+            self._update_preview()
+
     def _pick_color(self, key: str, button: QPushButton):
         """选择颜色"""
         current_color = button.palette().button().color()
         color = QColorDialog.getColor(current_color, self, "选择颜色")
         if color.isValid():
-            button.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #333333; border-radius: 4px;")
+            self._update_swatch_style(button, color.name(), self._is_light_theme())
+            value_label = self._color_labels.get(key)
+            if value_label:
+                value_label.setText(color.name())
     
     def _update_preview(self):
-        """更新字体预览"""
+        """更新字体预览（自动根据主题调整对比背景）"""
         size = int(self._font_size_combo.currentText())
         family = self._font_family_combo.currentText()
-        self._preview_label.setStyleSheet(f"font-size: {size}px; font-family: '{family}'; padding: 20px;")
+        bold = "bold" if self._font_bold_check.isChecked() else "normal"
+        color = self._font_color
+        is_light = self._is_light_theme()
+        # 使用不会被主题映射替换的颜色作为预览背景
+        # #1e1e1e 和 #333333 不在 _DARK_BG_MAP 中，所以不会被替换
+        preview_bg = "#1e1e1e" if is_light else "#333333"
+        self._preview_label.setStyleSheet(
+            f"font-size: {size}px; font-family: '{family}'; font-weight: {bold}; "
+            f"color: {color}; padding: 20px; background-color: {preview_bg}; "
+            f"border-radius: 8px; min-height: 60px;"
+        )
+    
+    def _is_light_theme(self) -> bool:
+        """根据 ThemeManager 的实际主题判断当前是否为浅色主题。"""
+        try:
+            from .theme_manager import ThemeManager
+            return ThemeManager.instance().current_theme == "light"
+        except Exception:
+            cs = self._content_stack.styleSheet()
+            return bool(cs and ("#f5f5f5" in cs or "#e8e8e8" in cs or "#ffffff" in cs))
+    
+    def _update_swatch_style(self, button: QPushButton, color: str, is_light: bool) -> None:
+        """设置颜色样本按钮样式，边框颜色会随主题自动切换"""
+        border = "#888888" if is_light else "#555555"
+        button.setStyleSheet(
+            f"background-color: {color}; border: 1px solid {border}; border-radius: 4px;"
+        )
+    
+    def _update_color_labels(self, is_light: bool) -> None:
+        """更新颜色值标签的文字颜色，使其在不同主题下都可读"""
+        text_color = "#222222" if is_light else "#aaaaaa"
+        for label in self._color_labels.values():
+            label.setStyleSheet(f"color: {text_color}; font-family: Consolas; font-size: 10px;")
+    
+    def _update_color_swatches(self, is_light: bool) -> None:
+        """更新颜色样本按钮边框与颜色值标签，使其适应明/暗主题"""
+        border = "#888888" if is_light else "#555555"
+        for button in self._color_buttons.values():
+            ss = button.styleSheet()
+            new_ss = re.sub(r"border\s*:\s*1px\s+solid\s+#[0-9a-fA-F]{6};", f"border: 1px solid {border};", ss)
+            if new_ss != ss:
+                button.setStyleSheet(new_ss)
+        self._update_color_labels(is_light)
+    
+    def _on_wheel_color_changed(self, hex_color: str):
+        """调色轮盘颜色变化处理"""
+        self._font_color = hex_color
+        self._font_color_label.setText(hex_color)
+        self._update_preview()
     
     def _reset_shortcut(self, action: str, default: str):
         """重置单个快捷键"""
@@ -759,7 +1009,7 @@ class SettingsModule(QWidget):
         """重置所有设置"""
         reply = QMessageBox.question(
             self, "确认重置",
-            "确定要恢复所有设置为默认值吗？",
+            "确定要恢复所有设置为默认值吗？\n（包括功能开关也会恢复为默认值）",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
@@ -772,14 +1022,102 @@ class SettingsModule(QWidget):
             self._font_size_combo.setCurrentIndex(4)
             self._font_family_combo.setCurrentIndex(0)
             
+            # 重置字体颜色和粗体
+            self._font_color = "#ffffff"
+            self._font_color_label.setText("#ffffff")
+            self._color_wheel.set_color("#ffffff")
+            self._font_bold_check.setChecked(False)
+            self._update_preview()
+
+            # 重置功能开关为默认值
+            registry = get_registry()
+            registry.reset_all()
+            reload_registry()
+            for mid, cb in self._module_toggle_widgets.items():
+                defn = registry.get_definition(mid)
+                if defn is not None:
+                    cb.setChecked(bool(defn.get("default_enabled", False)))
+
             QMessageBox.information(self, "成功", "已恢复默认设置")
+
+    def _export_settings(self):
+        """导出所有设置为 JSON 文件"""
+        import json
+        from PyQt6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出设置", "拾光剪影_设置备份.json", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            data = {}
+            # 导出 QSettings 中的所有键
+            for key in self._settings.allKeys():
+                data[key] = self._settings.value(key)
+
+            # 同时导出功能开关状态
+            registry = get_registry()
+            switches = {}
+            for mid, cb in self._module_toggle_widgets.items():
+                switches[mid] = cb.isChecked()
+            data["_module_switches"] = switches
+
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            QMessageBox.information(self, "导出成功", f"设置已导出到:\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", str(e))
+
+    def _import_settings(self):
+        """从 JSON 文件导入设置"""
+        import json
+        from PyQt6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入设置", "", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            switches = data.pop("_module_switches", {})
+
+            # 写入 QSettings
+            for key, value in data.items():
+                self._settings.setValue(key, value)
+
+            # 恢复功能开关
+            if switches:
+                registry = get_registry()
+                for mid, checked in switches.items():
+                    if mid in self._module_toggle_widgets:
+                        self._module_toggle_widgets[mid].setChecked(checked)
+                        registry.toggle(mid, checked)
+                reload_registry()
+
+            # 重新加载界面
+            self._load_settings()
+            QMessageBox.information(self, "导入成功",
+                f"设置已从备份恢复:\n{path}\n\n提示：部分设置需重启后生效。")
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", f"文件格式错误或损坏:\n{str(e)}")
     
     def _load_settings(self):
         """加载设置"""
         theme = self._settings.value("theme", "dark")
         if theme in self.THEMES:
             index = list(self.THEMES.keys()).index(theme)
+            self._theme_combo.blockSignals(True)
             self._theme_combo.setCurrentIndex(index)
+            self._theme_combo.blockSignals(False)
+            # 启动时同步设置面板自身容器样式（不触发全局事件）
+            self.set_theme(theme)
         
         font_size = self._settings.value("font_size", 14, type=int)
         index = self.FONT_SIZES.index(font_size) if font_size in self.FONT_SIZES else 4
@@ -790,6 +1128,15 @@ class SettingsModule(QWidget):
         if index >= 0:
             self._font_family_combo.setCurrentIndex(index)
         
+        font_color = self._settings.value("font_color", "#ffffff")
+        self._font_color = font_color
+        self._font_color_label.setText(font_color)
+        self._color_wheel.set_color(font_color)
+        
+        font_bold = self._settings.value("font_bold", False, type=bool)
+        self._font_bold_check.setChecked(font_bold)
+        self._update_preview()
+        
         shortcuts = self._settings.value("shortcuts", {})
         if shortcuts:
             for action, shortcut in shortcuts.items():
@@ -797,9 +1144,30 @@ class SettingsModule(QWidget):
                     self._shortcut_editors[action].setKeySequence(QKeySequence(shortcut))
     
     def _save_settings(self):
-        """保存设置"""
+        """
+        保存设置（合并版：通用设置 + SMTP + 功能开关）
+
+        【重要】此前该类中存在两个同名 _save_settings() 方法（Python 类中后定义的
+        方法会覆盖前面的定义），导致功能开关持久化逻辑被静默跳过 —— 这正是
+        "功能开关勾选后重启看不到" 问题的根因。
+
+        现已将两处逻辑合并为单一方法，涵盖以下三大块：
+        ┌─────────────────────────────────────────────────┐
+        │ 1. 通用设置  →  theme / font / shortcuts /...   │
+        │ 2. 功能开关  →  registry.toggle() 双保险写入   │
+        │ 3. SMTP 配置 →  email_verification_service      │
+        └─────────────────────────────────────────────────┘
+
+        数据流：
+          UI 控件 → self._settings (QSettings/注册表)
+                  → registry.toggle() (QSettings + JSON 文件双保险)
+                  → EventBus.MODULE_CONFIG_CHANGED (通知主窗口刷新)
+                  → email_verification_service (SMTP 持久化)
+        """
+        # ── 第1步：保存通用设置到 QSettings（Windows 注册表） ──
         theme_key = list(self.THEMES.keys())[self._theme_combo.currentIndex()]
         self._settings.setValue("theme", theme_key)
+        self.set_theme(theme_key)  # 立即应用主题
         
         font_size = int(self._font_size_combo.currentText())
         self._settings.setValue("font_size", font_size)
@@ -807,9 +1175,52 @@ class SettingsModule(QWidget):
         font_family = self._font_family_combo.currentText()
         self._settings.setValue("font_family", font_family)
         
+        self._settings.setValue("font_color", self._font_color)
+        self._settings.setValue("font_bold", self._font_bold_check.isChecked())
+        
         shortcuts = {}
         for action, editor in self._shortcut_editors.items():
             shortcuts[action] = editor.keySequence().toString()
+
+        # ── 快捷键冲突检测 ──
+        # 构建 快捷键字符串 → 操作列表 的映射，检测同一快捷键被多个操作使用
+        conflict_map: Dict[str, List[str]] = {}
+        for action, ks in shortcuts.items():
+            if not ks.strip():
+                continue  # 空快捷键跳过
+            conflict_map.setdefault(ks, []).append(action)
+
+        conflicts_found = False
+        conflict_lines = []
+        for ks, actions in conflict_map.items():
+            if len(actions) > 1:
+                conflicts_found = True
+                # 获取操作的中文名
+                action_names = []
+                for a in actions:
+                    si = self._shortcuts.get(a)
+                    action_names.append(si.name if si else a)
+                conflict_lines.append(
+                    f"快捷键 \"{ks}\" 被同时分配给了："
+                    + "、".join(action_names)
+                )
+
+        if conflicts_found:
+            # 弹出警告对话框，让用户选择忽略冲突或返回修改
+            reply = QMessageBox.warning(
+                self,
+                "快捷键冲突警告",
+                "检测到以下快捷键冲突：\n\n"
+                + "\n".join(conflict_lines)
+                + "\n\n点击「忽略」继续保存（后覆盖前），\n"
+                + "点击「取消」返回修改。",
+                QMessageBox.StandardButton.Ignore | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                QMessageBox.information(self, "提示", "已取消保存，请修改冲突的快捷键后重试。")
+                return
+
         self._settings.setValue("shortcuts", shortcuts)
         
         self._settings.setValue("auto_login", self._auto_login_check.isChecked())
@@ -817,21 +1228,436 @@ class SettingsModule(QWidget):
         self._settings.setValue("auto_save_interval", self._auto_save_interval.value())
         self._settings.setValue("max_threads", self._max_threads_spin.value())
         self._settings.setValue("gpu_accel", self._gpu_accel_check.isChecked())
-        
+
+        # ── 连接自动保存间隔到 ProjectManager ──
+        try:
+            from core.project_manager import project_manager
+            project_manager.autosave_interval = self._auto_save_interval.value()
+        except Exception:
+            pass
+
+        # ── 第2步：功能开关持久化（双保险：注册表 + JSON 文件） ──
+        # 遍历所有功能开关复选框，调用 registry.toggle() 进行增量比对：
+        #   - 若值 == 默认值 → 从 _overrides 移除（不存脏数据）
+        #   - 若值 ≠ 默认值 → 写入 _overrides 并同步到 QSettings + JSON
+        # toggle() 返回 True 表示该项发生了实际变化
+        registry = get_registry()
+        changed = False
+        for mid, cb in self._module_toggle_widgets.items():
+            if registry.toggle(mid, cb.isChecked()):
+                changed = True
+
+        # ── 第3步：SMTP 邮箱配置保存 ──
+        smtp_saved = False
+        try:
+            from .email_verify import email_verification_service, SMTPConfig
+            host = self._smtp_host_input.text().strip()
+            port = self._smtp_port_spin.value()
+            username = self._smtp_username_input.text().strip()
+            password = self._smtp_password_input.text()
+            sender_name = self._smtp_sender_input.text().strip()
+            use_ssl = self._smtp_ssl_check.isChecked()
+            if host and username and password:
+                config = SMTPConfig(
+                    host=host, port=port, username=username,
+                    password=password,
+                    sender_name=sender_name or "AI短剧编辑器",
+                    use_ssl=use_ssl
+                )
+                email_verification_service.save_config(config)
+                smtp_saved = True
+        except Exception as e:
+            print(f"[Settings] SMTP 保存失败: {e}")
+
+        # ── 第4步：发射 settings_changed 信号，通知外部监听者 ──
         self.settings_changed.emit("all", {
             "theme": theme_key,
             "font_size": font_size,
             "font_family": font_family,
+            "font_color": self._font_color,
+            "font_bold": self._font_bold_check.isChecked(),
             "shortcuts": shortcuts
         })
-        
-        QMessageBox.information(self, "成功", "设置已保存，部分设置需要重启应用生效")
+
+        # ── 第5步：如有功能开关变更，通知主窗口动态刷新导航栏 ──
+        # EventBus 是应用级事件总线（发布-订阅模式），MainWindow 监听
+        # MODULE_CONFIG_CHANGED 事件后调用 apply_module_changes() 实时更新
+        # 左侧导航栏的可见性，无需重启或刷新页面
+        if changed:
+            from .core import EventBus, EventType
+            EventBus.get_instance().emit(EventType.MODULE_CONFIG_CHANGED,
+                                         {"source": "settings_module"})
+
+        # ── 第6步：汇总提示信息 ──
+        parts = ["设置已保存"]
+        if changed:
+            parts.append("导航栏已同步更新")
+        if smtp_saved:
+            parts.append("SMTP 配置已保存")
+        QMessageBox.information(self, "成功", "，".join(parts))
     
     def get_shortcut(self, action: str) -> str:
         """获取快捷键"""
         if action in self._shortcut_editors:
             return self._shortcut_editors[action].keySequence().toString()
         return ""
+
+    def _on_module_toggle_changed(self, module_id: str, checked: bool):
+        """
+        功能开关即时响应：勾选/取消立即持久化 + 刷新导航栏
+
+        与「保存设置」按钮的区别：
+          - 本方法：每个复选框 toggled 信号触发，实时生效，无需用户点保存
+          - 保存按钮：批量遍历所有复选框，统一写入（保留作为兜底）
+
+        执行流程：
+          1. 调用 registry.toggle(module_id, checked)
+             → 将变更写入 QSettings 注册表 + JSON 文件（双保险）
+             → 返回 True 表示实际有变更，False 表示值未变
+          2. 若有变更，通过 EventBus 发射 MODULE_CONFIG_CHANGED 事件
+             → MainWindow.apply_module_changes() 收到事件后动态刷新左侧导航栏
+             → 被关闭的模块立即可见地从导航栏消失，开启的模块立即出现
+
+        为什么需要 instant 标记？
+          - 保存按钮也发射 MODULE_CONFIG_CHANGED 事件，源头为 "settings_module"
+          - 添加 instant=True 帮助 MainWindow 区分是即时响应还是批量保存
+          - 即时响应场景下 MainWindow 可以跳过某些重型检查
+        """
+        registry = get_registry()
+        if registry.toggle(module_id, checked):
+            from .core import EventBus, EventType
+            EventBus.get_instance().emit(EventType.MODULE_CONFIG_CHANGED,
+                                         {"source": "settings_module", "instant": True})
+    
+    # ─────────────── 主题切换系统 ───────────────
+    
+    def set_theme(self, theme_key: str):
+        """切换主题（深色/浅色）- 仅更新设置面板自身 UI
+        
+        重要：不再在 set_theme 内部 emit THEME_CHANGED 事件！
+        因为 main_window 的 _on_theme_changed 会反过来调用所有模块的 set_theme，
+        形成 set_theme → emit → main_window._apply_theme → set_theme 死循环。
+        
+        现在的流程是：
+        1. 用户在设置面板切换主题 → _on_theme_changed(idx) 触发
+        2. _on_theme_changed 直接 emit THEME_CHANGED 事件（一次）
+        3. main_window._on_theme_changed 接收事件 → _apply_theme
+        4. _apply_theme 调用 ThemeManager.apply_theme + 给所有模块 setProperty
+        5. ThemeManager 内置 _applying 标志位防止二次触发
+        """
+        # NOTE: 不要根据 current_theme 提前返回。set_theme 的职责是更新设置面板
+        # 自身的局部样式（header、sidebar、content_stack 等），即使 ThemeManager 已经
+        # 把全局主题应用过，这些局部样式仍然需要更新。
+        
+        from .theme_manager import ThemeManager
+        actual_theme = ThemeManager.resolve_theme(theme_key)
+        is_light = actual_theme == "light"
+        
+        # 整体容器色
+        colors = ThemeManager.COLORS_LIGHT if is_light else ThemeManager.COLORS_DARK
+        bg = colors["bg_main"]
+        sec_bg = colors["bg_secondary"]
+        
+        self._header.setStyleSheet(
+            f"background-color: {sec_bg}; border-bottom: 1px solid {colors['border_light']};"
+        )
+        self._sidebar.setStyleSheet(
+            f"QFrame#sideBar {{ background-color: {sec_bg}; border-right: 1px solid {colors['border_light']}; }}"
+        )
+        if hasattr(self, "_sidebar_title"):
+            self._sidebar_title.setStyleSheet(
+                f"color: {colors['text_disabled']}; font-size: 11px; font-weight: bold; padding: 6px 4px;"
+            )
+        self._content_stack.setStyleSheet(
+            f"QStackedWidget {{ background-color: {bg}; }}"
+        )
+        self._bottom_bar.setStyleSheet(
+            f"background-color: {sec_bg}; border-top: 1px solid {colors['border_light']};"
+        )
+        
+        # 遍历所有页面，智能替换子控件颜色（保留语义色）
+        for idx in range(self._content_stack.count()):
+            scroll_area = self._content_stack.widget(idx)
+            if isinstance(scroll_area, QScrollArea):
+                scroll_area.setStyleSheet(
+                    f"QScrollArea {{ background-color: {bg}; border: none; }}"
+                )
+                inner = scroll_area.widget()
+                if inner:
+                    inner.setStyleSheet(f"background-color: {bg};")
+                    self._force_theme_on_children(inner, is_light)
+        
+        # 更新左侧导航按钮样式
+        self._update_nav_button_theme(is_light)
+        
+        # 刷新字体预览（让预览区域适配当前主题的对比背景）
+        self._update_preview()
+        
+        # 更新底部按钮样式
+        self._update_bottom_button_theme(is_light)
+        
+        # 刷新颜色样本与颜色值标签
+        self._update_color_swatches(is_light)
+        
+        # 给所有子控件设置 theme 属性（让 ThemeManager 的全局 QSS 属性选择器生效）
+        self.setProperty("theme", actual_theme)
+        for child in self.findChildren(QWidget):
+            child.setProperty("theme", actual_theme)
+
+        if hasattr(self, "_theme_status_label"):
+            display = "浅色" if actual_theme == "light" else "深色"
+            suffix = "（自动解析）" if theme_key == "auto" else ""
+            self._theme_status_label.setText(f"{display}{suffix}")
+        
+        # 注意：不再 emit THEME_CHANGED 事件！
+        # 事件由 _on_theme_changed(idx) 在 combo 框变化时统一 emit，避免循环触发
+    
+    # 需要映射的深色背景色（→浅色），只替换这些，保留蓝/橙/绿/红等语义色
+    _DARK_BG_MAP = {
+        "#0a0a0a": "#f5f5f5", "#0d0d0d": "#e8e8e8",
+        "#1a1a1a": "#ffffff",  "#2a2a2a": "#f0f0f0",
+        # 关于页面专用深色背景
+        "#14192d": "#dce4f5", "#1a1030": "#ece0f5",
+        "#141820": "#eef0f4", "#1a1e28": "#e8eaf0",
+        "#1a1e2e": "#e8eaef",
+    }
+    # 深色模式下白色文字 → 浅色模式深色文字
+    _LIGHT_TEXT_MAP = {
+        "#ffffff": "#222222", "#eeeeee": "#333333",
+        "#cccccc": "#555555", "#888888": "#666666",
+        # 关于页面专用浅色文字
+        "#e0e0ff": "#2a2a4a", "#7b8cbf": "#4a5590",
+        "#6c9fff": "#2a5cd0", "#8a8fa0": "#555860",
+        "#c8ccd8": "#3a3e48", "#a0a6b8": "#4a5060",
+        "#404860": "#8888a0", "#ccc": "#555555",
+        "#999": "#777777",
+    }
+    # 深色边框 → 浅色边框
+    _DARK_BORDER_MAP = {
+        "#333333": "#dddddd", "#1a1a1a": "#cccccc",
+        # 关于页面专用深色边框
+        "#2a2a40": "#c8cce0", "#2a2f3a": "#ccd0dc",
+    }
+    # GroupBox标题颜色映射（处理color:#fff等硬编码颜色）
+    _GROUPBOX_COLOR_MAP = {
+        "dark": {
+            "color:#fff": "color:#fff",  # 保持不变
+            "color:#ffffff": "color:#222222",
+            "color:#eeeeee": "color:#333333",
+            "color:#cccccc": "color:#555555",
+            "color:#888888": "color:#666666",
+        },
+        "light": {
+            "color:#fff": "color:#222222",
+            "color:#ffffff": "color:#222222",
+            "color:#eeeeee": "color:#333333",
+            "color:#cccccc": "color:#555555",
+            "color:#888888": "color:#666666",
+        }
+    }
+    
+    def _force_theme_on_children(self, root: QWidget, is_light: bool):
+        """智能递归替换：只换背景/文字/边框色，保留语义颜色(蓝#1e6bde/橙#f59e0b/绿#22c55e/红#ef4444)"""
+        from PyQt6.QtWidgets import QGroupBox
+        children = root.findChildren(QWidget)
+        for w in children:
+            # ColorWheel单独处理主题
+            if isinstance(w, ColorWheel):
+                w.set_theme("light" if is_light else "dark")
+                continue
+            # 预览标签跳过，因为它有自己的颜色处理逻辑
+            if w is self._preview_label:
+                continue
+            # QGroupBox单独处理标题颜色
+            if isinstance(w, QGroupBox):
+                ss = w.styleSheet()
+                if ss:
+                    theme_key = "light" if is_light else "dark"
+                    color_map = self._GROUPBOX_COLOR_MAP[theme_key]
+                    for old, new in color_map.items():
+                        ss = ss.replace(old, new)
+                    w.setStyleSheet(ss)
+                continue
+            if hasattr(w, 'objectName'):
+                name = w.objectName()
+                if name and ("navBtn" in name or "saveBtn" in name or "resetBtn" in name or name.startswith("colorSwatch_")):
+                    continue
+            
+            ss = w.styleSheet()
+            if not ss:
+                continue
+            
+            original = ss
+            if is_light:
+                for dk, lt in self._DARK_BG_MAP.items():
+                    ss = ss.replace(dk, lt)
+                for wt, dt in self._LIGHT_TEXT_MAP.items():
+                    # 使用 (?<![a-zA-Z-]) 确保只匹配独立 `color:` 属性，
+                    # 而不是 background-color / border-color 的一部分
+                    ss = re.sub(r'(?<![a-zA-Z-])color\s*:\s*' + re.escape(wt),
+                               f'color: {dt}', ss)
+                for db, lb in self._DARK_BORDER_MAP.items():
+                    ss = ss.replace(db, lb)
+            else:
+                # 深色恢复
+                for lt, dk in self._DARK_BG_MAP.items():
+                    ss = ss.replace(lt, dk)
+                for dt, wt in self._LIGHT_TEXT_MAP.items():
+                    # 使用 (?<![a-zA-Z-]) 确保只匹配独立 `color:` 属性
+                    ss = re.sub(r'(?<![a-zA-Z-])color\s*:\s*' + re.escape(dt),
+                               f'color: {wt}', ss)
+                for lb, db in self._DARK_BORDER_MAP.items():
+                    ss = ss.replace(lb, db)
+            
+            if ss != original:
+                w.setStyleSheet(ss)
+    
+    def _update_nav_button_theme(self, is_light: bool):
+        """更新左侧导航按钮的明/暗主题样式"""
+        from .theme_manager import ThemeManager
+        colors = ThemeManager.COLORS_LIGHT if is_light else ThemeManager.COLORS_DARK
+        if is_light:
+            nav_ss = """
+                QPushButton {
+                    background: transparent;
+                    color: %(text_secondary)s;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    padding: 10px 12px;
+                    font-size: 13px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background: %(bg_hover)s;
+                    color: %(text_primary)s;
+                    border: 1px solid %(border)s;
+                }
+                QPushButton[active="true"] {
+                    background: %(accent_soft)s;
+                    color: %(accent)s;
+                    font-weight: bold;
+                    border-left: 3px solid %(accent)s;
+                }
+            """ % colors
+        else:
+            nav_ss = """
+                QPushButton {
+                    background: transparent;
+                    color: %(text_secondary)s;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    padding: 10px 12px;
+                    font-size: 13px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background: %(bg_hover)s;
+                    color: %(text_primary)s;
+                    border: 1px solid %(border)s;
+                }
+                QPushButton[active="true"] {
+                    background: %(accent_soft)s;
+                    color: %(accent)s;
+                    font-weight: bold;
+                    border-left: 3px solid %(accent)s;
+                }
+            """ % colors
+        for btn in self._nav_buttons.values():
+            btn.setStyleSheet(nav_ss)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+    
+    def _update_bottom_button_theme(self, is_light: bool):
+        """更新底部重置/保存按钮的明/暗主题样式"""
+        # 遍历底部栏的子控件找到按钮
+        for child in self._bottom_bar.children():
+            if isinstance(child, QPushButton):
+                text = child.text()
+                if "恢复" in text:
+                    if is_light:
+                        child.setStyleSheet("""
+                            QPushButton {
+                                background-color: transparent;
+                                color: #333333;
+                                border: 1px solid #cccccc;
+                                border-radius: 6px;
+                                padding: 8px 20px;
+                            }
+                            QPushButton:hover {
+                                background-color: #e0e0e0;
+                                color: #222222;
+                            }
+                        """)
+                    else:
+                        child.setStyleSheet("""
+                            QPushButton {
+                                background-color: transparent;
+                                color: #ffffff;
+                                border: 1px solid #333333;
+                                border-radius: 6px;
+                                padding: 8px 20px;
+                            }
+                            QPushButton:hover {
+                                background-color: #2a2a2a;
+                                color: #ffffff;
+                            }
+                        """)
+                elif "保存" in text:
+                    # 保存按钮保持蓝色，只调整细微差别
+                    if is_light:
+                        child.setStyleSheet("""
+                            QPushButton {
+                                background-color: #1e6bde;
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                padding: 8px 24px;
+                                font-weight: bold;
+                            }
+                            QPushButton:hover {
+                                background-color: #1a5bc4;
+                            }
+                        """)
+                    else:
+                        child.setStyleSheet("""
+                            QPushButton {
+                                background-color: #1e6bde;
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                padding: 8px 24px;
+                                font-weight: bold;
+                            }
+                            QPushButton:hover {
+                                background-color: #1a5bc4;
+                            }
+                        """)
+    
+    def _on_theme_changed(self, idx: int):
+        """主题下拉框变化时：先 emit 事件让主窗口统一处理，再更新自身"""
+        if idx < 0:
+            return
+        theme_key = list(self.THEMES.keys())[idx]
+        from .theme_manager import ThemeManager
+        actual_theme = ThemeManager.resolve_theme(theme_key)
+        self._settings.setValue("theme", theme_key)
+        self._settings.setValue("resolved_theme", actual_theme)
+        
+        # 1. 发送 THEME_CHANGED 事件，main_window 接收后会：
+        #    - 调用 ThemeManager.apply_theme() 应用全局 QSS
+        #    - 遍历所有模块设置 theme 属性
+        #    - 回调本模块的 set_theme()（由 _applying 标志位防止二次触发）
+        try:
+            from .core import EventBus, EventType
+            EventBus.get_instance().emit(EventType.THEME_CHANGED, 
+                                         {"theme": theme_key, "resolved_theme": actual_theme}, "settings_module")
+        except Exception:
+            pass
+        
+        # 2. 更新设置面板自身 UI
+        self.set_theme(theme_key)
+    
+    # ─────────────── 主题切换系统 END ───────────────
     
     def get_theme(self) -> str:
         """获取主题"""
@@ -845,6 +1671,169 @@ class SettingsModule(QWidget):
         """获取字体"""
         return self._font_family_combo.currentText()
     
+    def _create_module_toggle_tab(self) -> QWidget:
+        """
+        功能开关标签页：按 core/advanced/experimental 三层分组展示
+
+        ┌────────────────────────────────────────────────────┐
+        │ 架构说明：                                          │
+        │                                                    │
+        │  ModuleTier.CORE        → 默认开启，不可关闭（锁）  │
+        │  ModuleTier.ADVANCED    → 默认关闭，可手动开启      │
+        │  ModuleTier.EXPERIMENTAL → 默认关闭，不稳定测试      │
+        │                                                    │
+        │ 即时响应机制：                                       │
+        │   每个可切换的复选框连接 toggled 信号 →               │
+        │   _on_module_toggle_changed() →                    │
+        │   registry.toggle() 持久化 →                       │
+        │   EventBus.MODULE_CONFIG_CHANGED →                 │
+        │   MainWindow 导航栏实时刷新                         │
+        └────────────────────────────────────────────────────┘
+        """
+        registry = get_registry()
+        all_modules = registry.all_modules()
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+
+        # 顶部说明：向用户解释三层模块的含义和即时生效机制
+        intro = QLabel(
+            "控制左侧导航栏中显示的功能模块。\n"
+            "• 核心功能：默认开启，不可关闭\n"
+            "• 高级功能：面向进阶用户，手动开启\n"
+            "• 实验功能：不稳定，仅用于测试\n"
+            "\n勾选/取消即生效，导航栏实时更新。"
+        )
+        intro.setStyleSheet("color: #cccccc; font-size: 13px; padding: 10px;"
+                            "background-color: #1a1a1a; border-radius: 8px;")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        # 按 tier 分组遍历，每个 tier 生成一个 QGroupBox
+        tier_groups = [
+            (ModuleTier.CORE, "🔒 核心功能（默认开启，不可关闭）"),
+            (ModuleTier.ADVANCED, "⚡ 高级功能（手动开启）"),
+            (ModuleTier.EXPERIMENTAL, "🧪 实验功能（不稳定）"),
+        ]
+
+        for tier, title in tier_groups:
+            mods_in_tier = [m for m in all_modules if m["tier"] == tier]
+            if not mods_in_tier:
+                continue
+
+            group = QGroupBox(title)
+            group.setStyleSheet("""
+                QGroupBox {
+                    color: #ffffff;
+                    border: 1px solid #333333;
+                    border-radius: 8px;
+                    margin-top: 12px;
+                    padding: 12px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    padding: 0 8px;
+                    color: #cccccc;
+                }
+            """)
+            group_layout = QVBoxLayout(group)
+            group_layout.setSpacing(8)
+
+            for mod in mods_in_tier:
+                row = QHBoxLayout()
+                row.setSpacing(12)
+
+                name = mod["name"]
+                icon = mod.get("icon", "")
+                desc = mod.get("description", "")
+                module_id = mod["id"]
+                enabled = mod["enabled"]
+                can_toggle = mod.get("can_disable", False)
+
+                label_text = f"{icon} {name}" if icon else name
+                label = QLabel(label_text)
+                label
+                label.setMinimumWidth(140)
+
+                desc_label = QLabel(desc)
+                desc_label.setStyleSheet("color: #888888; font-size: 12px;")
+                desc_label.setWordWrap(True)
+
+                left_col = QVBoxLayout()
+                left_col.setSpacing(2)
+                left_col.addWidget(label)
+                left_col.addWidget(desc_label)
+
+                row.addLayout(left_col, 1)
+
+                # 复选框：核心不可关模块标记为 "必选" 并禁用交互
+                checkbox = QCheckBox("开启" if can_toggle else "必选")
+                checkbox.setChecked(True if (tier == ModuleTier.CORE and not can_toggle) else enabled)
+                if not can_toggle:
+                    # 核心模块不可关，置灰 + 禁用点击
+                    checkbox.setEnabled(False)
+                    checkbox.setStyleSheet("""
+                        QCheckBox { color: #666666; }
+                        QCheckBox::indicator {
+                            width: 18px; height: 18px;
+                            border-radius: 4px;
+                            background-color: #333333;
+                            border: 1px solid #555555;
+                        }
+                        QCheckBox::indicator:checked {
+                            background-color: #1e6bde;
+                            border: 1px solid #1e6bde;
+                        }
+                    """)
+                else:
+                    checkbox.setStyleSheet("""
+                        QCheckBox { color: #ffffff; font-size: 13px; spacing: 8px; }
+                        QCheckBox::indicator {
+                            width: 18px; height: 18px;
+                            border-radius: 4px;
+                            background-color: #1a1a1a;
+                            border: 2px solid #555555;
+                        }
+                        QCheckBox::indicator:checked {
+                            background-color: #1e6bde;
+                            border: 2px solid #1e6bde;
+                        }
+                        QCheckBox::indicator:hover {
+                            border-color: #3b82f6;
+                        }
+                    """)
+
+                # 登记到映射表，后续 _save_settings 和 _reset_all 需要遍历
+                self._module_toggle_widgets[module_id] = checkbox
+                # ✅ 即时响应：勾选/取消立刻写入注册表 + 刷新导航栏
+                # 每个复选框的 toggled 信号连接 _on_module_toggle_changed，
+                # 实现用户在复选框点击瞬间就完成持久化 + UI 刷新，
+                # 无需额外点击「保存设置」按钮
+                checkbox.toggled.connect(
+                    lambda checked, mid=module_id: self._on_module_toggle_changed(mid, checked)
+                )
+                # 实验功能模块添加风险提示 tooltip
+                if tier == ModuleTier.EXPERIMENTAL:
+                    checkbox.setToolTip(
+                        f"⚠️ 实验功能 - {desc}\n"
+                        "该功能仍在开发中，可能存在不稳定或数据不完整的情况。\n"
+                        "开启后如遇问题，请关闭此开关或反馈给开发团队。"
+                    )
+                    desc_label.setToolTip(
+                        f"实验功能说明: {desc}\n"
+                        "此模块尚在测试阶段，开启使用需评估风险。"
+                    )
+                row.addWidget(checkbox)
+
+                group_layout.addLayout(row)
+
+            layout.addWidget(group)
+
+        layout.addStretch()
+        return widget
+
     def _create_email_tab(self) -> QWidget:
         """创建邮箱设置标签页"""
         widget = QWidget()
@@ -855,14 +1844,14 @@ class SettingsModule(QWidget):
         from .email_verify import email_verification_service, SMTP_PRESETS
         
         email_group = QGroupBox("邮箱验证设置")
-        email_group.setStyleSheet("color: #ffffff;")
+        email_group
         email_layout = QFormLayout(email_group)
         
         # 预设选择
         self._smtp_preset_combo = QComboBox()
         self._smtp_preset_combo.addItems(list(SMTP_PRESETS.keys()))
         self._smtp_preset_combo.setMinimumWidth(200)
-        self._smtp_preset_combo.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._smtp_preset_combo
         self._smtp_preset_combo.currentIndexChanged.connect(self._on_smtp_preset_changed)
         email_layout.addRow("邮箱服务商:", self._smtp_preset_combo)
         
@@ -874,7 +1863,7 @@ class SettingsModule(QWidget):
         self._smtp_port_spin = QSpinBox()
         self._smtp_port_spin.setRange(1, 65535)
         self._smtp_port_spin.setValue(465)
-        self._smtp_port_spin.setStyleSheet("color: #ffffff; background-color: #1a1a1a; border: 1px solid #333333;")
+        self._smtp_port_spin
         email_layout.addRow("端口:", self._smtp_port_spin)
         
         # 用户名
@@ -892,7 +1881,7 @@ class SettingsModule(QWidget):
         # SSL选项
         self._smtp_ssl_check = QCheckBox("使用SSL")
         self._smtp_ssl_check.setChecked(True)
-        self._smtp_ssl_check.setStyleSheet("color: #ffffff;")
+        self._smtp_ssl_check
         email_layout.addRow(self._smtp_ssl_check)
         
         layout.addWidget(email_group)
@@ -959,11 +1948,10 @@ class SettingsModule(QWidget):
             self._smtp_status_label.setStyleSheet("color: #22c55e; font-size: 13px;")
     
     def _test_smtp_connection(self):
-        """测试SMTP连接"""
+        """测试SMTP连接（QThread异步，防止UI卡死）"""
         from .email_verify import email_verification_service, SMTPConfig
-        
-        host = self._smtp_host_input.text().strip()
         port = self._smtp_port_spin.value()
+        host = self._smtp_host_input.text().strip()
         username = self._smtp_username_input.text().strip()
         password = self._smtp_password_input.text()
         sender_name = self._smtp_sender_input.text().strip()
@@ -973,1183 +1961,528 @@ class SettingsModule(QWidget):
             QMessageBox.warning(self, "测试失败", "请填写完整的SMTP配置")
             return
         
-        # 保存配置
+        # 禁用测试按钮防止重复点击
+        self._smtp_test_btn.setEnabled(False)
+        self._smtp_test_btn.setText("⏳ 测试中...")
+        self._smtp_status_label.setText("SMTP 配置状态: 正在测试...")
+        self._smtp_status_label.setStyleSheet("color: #ff9800; font-size: 13px;")
+        
+        # 构建配置对象
         config = SMTPConfig(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            sender_name=sender_name or "AI短剧编辑器",
-            use_ssl=use_ssl
+            host=host, port=port, username=username, password=password,
+            sender_name=sender_name or "AI短剧编辑器", use_ssl=use_ssl
         )
         
-        if email_verification_service.save_config(config):
-            QMessageBox.information(self, "测试成功", "SMTP配置保存成功，连接测试通过！")
-            self._smtp_status_label.setText("SMTP 配置状态: 已配置")
-            self._smtp_status_label.setStyleSheet("color: #22c55e; font-size: 13px;")
-        else:
-            QMessageBox.warning(self, "测试失败", "SMTP配置保存失败，请检查配置信息")
+        # QThread 异步测试（5秒超时）
+        class _SMTPTestWorker(QThread):
+            result = pyqtSignal(bool, str)  # (success, message)
+            
+            def __init__(self, config, verification_service):
+                super().__init__()
+                self._config = config
+                self._service = verification_service
+                self._timeout = 5.0  # 5秒超时
+            
+            def run(self):
+                import socket
+                start_time = __import__('time').time()
+                try:
+                    # 先做快速 socket 连通性检查
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(3.0)
+                    sock.connect((self._config.host, self._config.port))
+                    sock.close()
+                    
+                    # 连通性通过后保存配置
+                    ok = self._service.save_config(self._config)
+                    elapsed = __import__('time').time() - start_time
+                    if ok:
+                        self.result.emit(True, f"SMTP配置保存成功（耗时 {elapsed:.1f}秒）")
+                    else:
+                        self.result.emit(False, "SMTP配置保存失败，请检查配置信息")
+                except socket.timeout:
+                    self.result.emit(False, f"连接超时（超过5秒），请检查SMTP服务器地址和端口")
+                except socket.gaierror:
+                    self.result.emit(False, f"无法解析主机名: {self._config.host}")
+                except ConnectionRefusedError:
+                    self.result.emit(False, f"连接被拒绝: {self._config.host}:{self._config.port}")
+                except Exception as e:
+                    self.result.emit(False, f"测试失败: {str(e)}")
+        
+        self._smtp_worker = _SMTPTestWorker(config, email_verification_service)
+        
+        def on_result(success: bool, message: str):
+            self._smtp_test_btn.setEnabled(True)
+            self._smtp_test_btn.setText("🧪 测试连接")
+            if success:
+                QMessageBox.information(self, "测试成功", message)
+                self._smtp_status_label.setText("SMTP 配置状态: 已配置")
+                self._smtp_status_label.setStyleSheet("color: #22c55e; font-size: 13px;")
+            else:
+                QMessageBox.warning(self, "测试失败", message)
+                self._smtp_status_label.setText("SMTP 配置状态: 未配置")
+                self._smtp_status_label.setStyleSheet("color: #ef4444; font-size: 13px;")
+        
+        self._smtp_worker.result.connect(on_result)
+        self._smtp_worker.start()
     
-    def _save_settings(self):
-        """保存设置"""
-        theme_key = list(self.THEMES.keys())[self._theme_combo.currentIndex()]
-        self._settings.setValue("theme", theme_key)
-        
-        font_size = int(self._font_size_combo.currentText())
-        self._settings.setValue("font_size", font_size)
-        
-        font_family = self._font_family_combo.currentText()
-        self._settings.setValue("font_family", font_family)
-        
-        shortcuts = {}
-        for action, editor in self._shortcut_editors.items():
-            shortcuts[action] = editor.keySequence().toString()
-        self._settings.setValue("shortcuts", shortcuts)
-        
-        self._settings.setValue("auto_login", self._auto_login_check.isChecked())
-        self._settings.setValue("auto_save", self._auto_save_check.isChecked())
-        self._settings.setValue("auto_save_interval", self._auto_save_interval.value())
-        self._settings.setValue("max_threads", self._max_threads_spin.value())
-        self._settings.setValue("gpu_accel", self._gpu_accel_check.isChecked())
-        
-        # 保存SMTP配置
-        from .email_verify import email_verification_service, SMTPConfig
-        
-        host = self._smtp_host_input.text().strip()
-        port = self._smtp_port_spin.value()
-        username = self._smtp_username_input.text().strip()
-        password = self._smtp_password_input.text()
-        sender_name = self._smtp_sender_input.text().strip()
-        use_ssl = self._smtp_ssl_check.isChecked()
-        
-        if host and username and password:
-            config = SMTPConfig(
-                host=host,
-                port=port,
-                username=username,
-                password=password,
-                sender_name=sender_name or "AI短剧编辑器",
-                use_ssl=use_ssl
-            )
-            email_verification_service.save_config(config)
-        
-        self.settings_changed.emit("all", {
-            "theme": theme_key,
-            "font_size": font_size,
-            "font_family": font_family,
-            "shortcuts": shortcuts
-        })
-        
-        QMessageBox.information(self, "成功", "设置已保存，部分设置需要重启应用生效")
+    def _create_cache_tab(self) -> QWidget:
+        """缓存管理标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
 
+        title = QLabel("🗑️ 缓存管理")
+        title
+        layout.addWidget(title)
 
-class HelpModule(QWidget):
-    """帮助模块"""
-    
-    def __init__(self):
-        super().__init__()
-        self._init_ui()
-    
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        header = QFrame()
-        header.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333333;")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 15, 20, 15)
-        
-        title = QLabel("❓ 帮助")
-        title.setStyleSheet("font-size: 20px; font-weight: bold;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        api_doc_btn = QPushButton("📚 API文档")
-        api_doc_btn.clicked.connect(self._open_api_documentation)
-        api_doc_btn.setStyleSheet("""
+        desc = QLabel("清理临时文件、渲染缓存和AI模型缓存以释放磁盘空间")
+        desc.setStyleSheet("color: #999; font-size: 13px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        cache_items = [
+            ("📁 渲染缓存", "render_cache", "FFmpeg渲染中间文件"),
+            ("🎬 预览缓存", "preview_cache", "视频预览缩略图"),
+            ("🤖 AI模型缓存", "model_cache", "Whisper/Coqui TTS等模型文件"),
+            ("📝 临时项目文件", "temp_cache", "项目自动备份和临时文件"),
+            ("🔄 全部缓存", "all_cache", "清理以上所有缓存"),
+        ]
+
+        self._cache_labels = {}
+        for icon_text, key, desc_text in cache_items:
+            row = QFrame()
+            row.setStyleSheet("QFrame{background:#1a1a1a;border-radius:8px;padding:12px;}")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(12, 10, 12, 10)
+
+            icon = QLabel(icon_text)
+            icon.setStyleSheet("font-size: 20px;")
+            rl.addWidget(icon)
+
+            info_layout = QVBoxLayout()
+            name_lbl = QLabel(desc_text)
+            name_lbl.setStyleSheet("color: #ccc; font-size: 13px; font-weight: 600;")
+            info_layout.addWidget(name_lbl)
+
+            size_lbl = QLabel("计算中...")
+            size_lbl.setStyleSheet("color: #666; font-size: 11px;")
+            self._cache_labels[key] = size_lbl
+            info_layout.addWidget(size_lbl)
+            rl.addLayout(info_layout, 1)
+
+            clear_btn = QPushButton("清理")
+            clear_btn.setStyleSheet("""
+                QPushButton{background:#c62828;color:#fff;border:none;border-radius:4px;padding:6px 16px;font-size:11px;}
+                QPushButton:hover{background:#b71c1c;}
+            """)
+            clear_btn.clicked.connect(lambda checked, k=key: self._clear_cache(k))
+            rl.addWidget(clear_btn)
+
+            layout.addWidget(row)
+
+        # 估算各缓存大小
+        self._estimate_cache_sizes()
+
+        layout.addStretch()
+        return widget
+
+    def _estimate_cache_sizes(self):
+        """估算各类缓存大小"""
+        import shutil
+        from pathlib import Path
+
+        cache_dirs = {
+            "render_cache": ["render_cache", "temp_ai_editor", "短剧AI剪辑输出"],
+            "preview_cache": ["preview_cache", ".thumb_cache"],
+            "model_cache": ["models", "~/.cache/whisper"],
+            "temp_cache": ["temp", ".backup", "temp_ai_editor"],
+        }
+        base = Path(__file__).parent.parent.parent
+
+        for key, dirs in cache_dirs.items():
+            total = 0
+            for d in dirs:
+                if d.startswith("~"):
+                    p = Path.home() / d[2:]
+                else:
+                    p = base / d
+                if p.exists():
+                    try:
+                        total += sum(f.stat().st_size for f in p.rglob('*') if f.is_file())
+                    except Exception:
+                        pass
+            if total > 0:
+                size_str = self._fmt_size(total)
+                if key in self._cache_labels:
+                    self._cache_labels[key].setText(f"约 {size_str}")
+            else:
+                if key in self._cache_labels:
+                    self._cache_labels[key].setText("无需清理")
+
+        if "all_cache" in self._cache_labels:
+            self._cache_labels["all_cache"].setText("清理所有缓存类型")
+
+    def _fmt_size(self, size):
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
+
+    def _clear_cache(self, key):
+        """清理指定类型缓存"""
+        import shutil
+        from pathlib import Path
+
+        cache_dirs = {
+            "render_cache": ["render_cache", "短剧AI剪辑输出"],
+            "preview_cache": ["preview_cache", ".thumb_cache"],
+            "model_cache": ["models"],
+            "temp_cache": ["temp", ".backup", "temp_ai_editor"],
+        }
+        base = Path(__file__).parent.parent.parent
+        all_keys = list(cache_dirs.keys())
+
+        reply = QMessageBox.question(
+            self, "确认清理",
+            f"确定要清理 {key} 吗？\n缓存文件将被永久删除。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        cleared = 0
+        to_clean = all_keys if key == "all_cache" else [key]
+
+        for k in to_clean:
+            for d in cache_dirs.get(k, []):
+                p = base / d
+                if p.exists():
+                    try:
+                        if p.is_dir():
+                            shutil.rmtree(p)
+                            p.mkdir(parents=True, exist_ok=True)
+                        cleared += 1
+                    except Exception:
+                        pass
+
+        QMessageBox.information(self, "完成", f"已清理 {cleared} 个缓存目录")
+        self._estimate_cache_sizes()
+
+    def _create_language_tab(self) -> QWidget:
+        """语言切换标签页 - 使用下拉框，像正常软件一样"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+
+        title = QLabel("🌐 语言切换")
+        title
+        layout.addWidget(title)
+
+        desc = QLabel("选择界面显示语言，切换后即时生效")
+        desc.setStyleSheet("color: #999; font-size: 13px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        lang_group = QGroupBox("界面语言")
+        lang_group
+        lang_layout = QFormLayout(lang_group)
+        lang_layout.setSpacing(12)
+
+        self._lang_combo = QComboBox()
+        self._lang_combo.setMinimumWidth(280)
+        self._lang_combo.setStyleSheet("""
+            QComboBox {
+                color: #ffffff;
+                background-color: #1a1a1a;
+                border: 2px solid #333333;
+                border-radius: 8px;
+                padding: 12px 16px;
+                font-size: 14px;
+                min-height: 20px;
+            }
+            QComboBox:hover {
+                border-color: #555555;
+            }
+            QComboBox:focus {
+                border-color: #1e6bde;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 36px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #888888;
+                margin-right: 8px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1a1a;
+                color: #ffffff;
+                border: 1px solid #333333;
+                border-radius: 6px;
+                padding: 4px;
+                selection-background-color: #1e3a5f;
+                selection-color: #ffffff;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                padding: 10px 16px;
+                border-radius: 4px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #2a2a2a;
+            }
+        """)
+
+        self._languages = [
+            ("zh_CN", "🇨🇳  简体中文"),
+            ("zh_TW", "🇹🇼  繁體中文"),
+            ("en_US", "🇺🇸  English"),
+            ("ja_JP", "🇯🇵  日本語"),
+            ("ko_KR", "🇰🇷  한국어"),
+        ]
+
+        for code, name in self._languages:
+            self._lang_combo.addItem(name, code)
+
+        # 显示当前语言
+        try:
+            from app.core.i18n import _
+            current_lang = getattr(_, '__self__', None)
+            if hasattr(current_lang, 'locale'):
+                locale = current_lang.locale
+                for i, (code, _) in enumerate(self._languages):
+                    if code == locale:
+                        self._lang_combo.setCurrentIndex(i)
+                        break
+        except Exception:
+            self._lang_combo.setCurrentIndex(0)
+
+        lang_layout.addRow("选择语言:", self._lang_combo)
+
+        layout.addWidget(lang_group)
+
+        # 应用按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        apply_btn = QPushButton("应用语言")
+        apply_btn.clicked.connect(self._apply_language)
+        apply_btn.setStyleSheet("""
             QPushButton {
                 background-color: #1e6bde;
                 color: white;
                 border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
+                border-radius: 8px;
+                padding: 12px 32px;
+                font-size: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #1a5bc4;
             }
         """)
-        header_layout.addWidget(api_doc_btn)
-        
-        layout.addWidget(header)
-        
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background-color: #0a0a0a;
-            }
-            QTabBar::tab {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                border: none;
-                padding: 12px 24px;
-                font-size: 14px;
-            }
-            QTabBar::tab:selected {
-                color: #1e6bde;
-                background-color: #0a0a0a;
-                border-bottom: 2px solid #1e6bde;
-            }
-            QTabBar::tab:hover:!selected {
-                color: #ffffff;
-            }
-        """)
-        
-        scroll1 = QScrollArea()
-        scroll1.setWidgetResizable(True)
-        scroll1.setWidget(self._create_quick_start_tab())
-        self._tabs.addTab(scroll1, "🚀 快速入门")
-        
-        scroll2 = QScrollArea()
-        scroll2.setWidgetResizable(True)
-        scroll2.setWidget(self._create_features_tab())
-        self._tabs.addTab(scroll2, "📖 功能说明")
-        
-        scroll3 = QScrollArea()
-        scroll3.setWidgetResizable(True)
-        scroll3.setWidget(self._create_faq_tab())
-        self._tabs.addTab(scroll3, "❓ 常见问题")
-        
-        scroll4 = QScrollArea()
-        scroll4.setWidgetResizable(True)
-        scroll4.setWidget(self._create_api_resource_tab())
-        self._tabs.addTab(scroll4, "🔗 API资源")
-        
-        scroll5 = QScrollArea()
-        scroll5.setWidgetResizable(True)
-        scroll5.setWidget(self._create_about_tab())
-        self._tabs.addTab(scroll5, "ℹ️ 关于")
-        
-        layout.addWidget(self._tabs)
-    
-    def _create_quick_start_tab(self) -> QWidget:
-        """创建快速入门标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        # 文档标题
-        title_label = QLabel("🚀 快速入门指南")
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333333;")
-        layout.addWidget(title_label)
-        
-        # 简介
-        intro_label = QLabel("本指南将帮助您快速上手AI短剧编辑器，从账号注册到视频发布的完整流程。")
-        intro_label.setStyleSheet("color: #666666; font-size: 14px;")
-        intro_label.setWordWrap(True)
-        layout.addWidget(intro_label)
-        
-        # 可折叠的步骤
-        class CollapsibleSection(QWidget):
-            def __init__(self, title, content, parent=None):
-                super().__init__(parent)
-                self._is_expanded = False
-                self._setup_ui(title, content)
-            
-            def _setup_ui(self, title, content):
-                layout = QVBoxLayout(self)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.setSpacing(0)
-                
-                # 标题栏
-                self._header = QWidget()
-                self._header.setStyleSheet("""
-                    QWidget {
-                        background-color: #ffffff;
-                        border: 1px solid #e8e8e8;
-                        border-radius: 8px;
-                        padding: 12px 16px;
-                    }
-                """)
-                header_layout = QHBoxLayout(self._header)
-                header_layout.setContentsMargins(0, 0, 0, 0)
-                header_layout.setSpacing(10)
-                
-                self._title_label = QLabel(title)
-                self._title_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #333333;")
-                header_layout.addWidget(self._title_label)
-                
-                self._toggle_btn = QPushButton("▼")
-                self._toggle_btn.setStyleSheet("""
-                    QPushButton {
-                        background: transparent;
-                        color: #666666;
-                        border: none;
-                        font-size: 12px;
-                        padding: 0;
-                        min-width: 20px;
-                    }
-                """)
-                self._toggle_btn.clicked.connect(self._toggle)
-                header_layout.addStretch()
-                header_layout.addWidget(self._toggle_btn)
-                
-                # 内容区域
-                self._content = QWidget()
-                self._content.setStyleSheet("""
-                    QWidget {
-                        background-color: #ffffff;
-                        border: 1px solid #e8e8e8;
-                        border-top: none;
-                        border-bottom-left-radius: 8px;
-                        border-bottom-right-radius: 8px;
-                        padding: 16px;
-                    }
-                """)
-                content_layout = QVBoxLayout(self._content)
-                
-                content_label = QLabel(content)
-                content_label.setStyleSheet("color: #666666; font-size: 14px;")
-                content_label.setWordWrap(True)
-                content_layout.addWidget(content_label)
-                
-                layout.addWidget(self._header)
-                layout.addWidget(self._content)
-                
-                self._content.hide()
-            
-            def _toggle(self):
-                self._is_expanded = not self._is_expanded
-                if self._is_expanded:
-                    self._toggle_btn.setText("▲")
-                    self._content.show()
-                else:
-                    self._toggle_btn.setText("▼")
-                    self._content.hide()
-        
-        steps = [
-            (
-                "1️⃣ 登录账号", 
-                "首次使用需要注册账号，支持手机号或QQ邮箱注册。每个账号最多绑定3台设备。\n\n"  
-                "**操作步骤：**\n"  
-                "1. 点击左上角的用户头像或「账号运营」模块\n"  
-                "2. 点击「登录/注册」按钮\n"  
-                "3. 选择注册方式（手机号或邮箱）\n"  
-                "4. 输入验证码并设置密码\n"  
-                "5. 完成注册后自动登录"  
-                "\n**注意事项：**\n"  
-                "- 每个账号最多可绑定3台设备\n"  
-                "- 设备绑定后可在「设置」→「账号」中查看和解绑"
-            ),
-            (
-                "2️⃣ API配置向导", 
-                "通过向导流程快速配置云端API，获取最新接口信息并测试连接。\n\n"  
-                "**操作步骤：**\n"  
-                "1. 点击左侧导航栏的「帮助」模块\n"  
-                "2. 点击顶部的「📚 API文档」按钮查看官方文档\n"  
-                "3. 在「API资源」标签页中找到需要的API服务\n"  
-                "4. 点击「复制地址」按钮复制API接口地址\n"  
-                "5. 点击「跳转文档」按钮查看详细文档\n"  
-                "6. 在「模型管理」→「云端API」中粘贴API地址并填写密钥\n"  
-                "7. 点击「测试连接」验证配置是否成功"  
-                "\n**配置技巧：**\n"  
-                "- 复制地址后直接粘贴到配置框，避免手动输入错误\n"  
-                "- 查看API示例了解正确的调用格式\n"  
-                "- 保存模板以便下次快速配置" 
-            ),
-            (
-                "3️⃣ Ollama 本地模型配置", 
-                "Ollama 是一个开源的本地大模型运行工具，支持多种AI模型在本地运行。\n\n"
-                "**下载安装：**\n"
-                "1. 访问 Ollama 官网：https://ollama.com\n"
-                "2. 根据操作系统下载对应版本：\n"
-                "   - Windows：下载 .exe 安装包\n"
-                "   - macOS：下载 .dmg 安装包\n"
-                "   - Linux：使用命令 curl -fsSL https://ollama.com/install.sh | sh\n"
-                "3. 安装完成后，Ollama 会自动在后台运行\n\n"
-                "**模型拉取：**\n"
-                "1. 打开命令行终端\n"
-                "2. 拉取模型：ollama pull llama3（或其他模型）\n"
-                "3. 查看已安装模型：ollama list\n"
-                "4. 测试模型：ollama run llama3\n\n"
-                "**在软件中配置：**\n"
-                "1. 点击左侧导航栏的「模型管理」\n"
-                "2. 点击「检测 Ollama 服务」按钮\n"
-                "3. 系统会自动识别已安装的模型\n"
-                "4. 选择需要的模型进行使用\n\n"
-                "**推荐模型：**\n"
-                "- llama3：通用对话模型，适合文案生成\n"
-                "- deepseek-coder：代码生成模型\n"
-                "- qwen：中文优化模型\n"
-                "- mistral：轻量级高效模型\n\n"
-                "**注意事项：**\n"
-                "- 本地模型需要足够的内存（建议16GB以上）\n"
-                "- 首次拉取模型需要下载，可能需要较长时间\n"
-                "- 模型文件存储在 ~/.ollama/models 目录"
-            ),
-            (
-                "4️⃣ OpenClaw 自动化配置", 
-                "OpenClaw 是一个强大的自动化工具，支持多平台账号管理和自动化操作。\n\n"
-                "**下载安装：**\n"
-                "1. 访问 OpenClaw 官方仓库或下载页面\n"
-                "2. 下载最新版本的 OpenClaw\n"
-                "3. 解压到本地目录\n"
-                "4. 运行安装脚本或配置环境变量\n\n"
-                "**基础配置：**\n"
-                "1. 在软件中点击「模型管理」→「OpenClaw」标签页\n"
-                "2. 配置 OpenClaw 路径：\n"
-                "   - Windows：C:\\Program Files\\OpenClaw\\openclaw.exe\n"
-                "   - macOS：/usr/local/bin/openclaw\n"
-                "   - Linux：/usr/bin/openclaw\n"
-                "3. 点击「检测服务」验证安装\n"
-                "4. 配置自动化参数\n\n"
-                "**账号绑定：**\n"
-                "1. 在「账号运营」模块中添加平台账号\n"
-                "2. 选择要绑定的平台（抖音、快手、小红书等）\n"
-                "3. 扫码或输入账号信息完成绑定\n"
-                "4. OpenClaw 会自动管理账号状态\n\n"
-                "**自动化任务：**\n"
-                "- 自动发布：定时发布内容到多个平台\n"
-                "- 数据采集：自动采集账号运营数据\n"
-                "- 评论管理：自动回复评论\n"
-                "- 粉丝互动：自动点赞、关注等操作\n\n"
-                "**安全提示：**\n"
-                "- 不要在公共网络环境下使用自动化功能\n"
-                "- 定期更新 OpenClaw 到最新版本\n"
-                "- 遵守各平台的使用规范，避免账号被封"
-            ),
-            (
-                "5️⃣ 云端 API 配置", 
-                "配置云端AI服务API，享受更强大的AI能力，无需本地硬件支持。\n\n"
-                "**支持的平台：**\n"
-                "- DeepSeek：国产大模型，性价比高\n"
-                "- 豆包（字节跳动）：中文优化，适合内容创作\n"
-                "- 智谱AI：通用大模型，功能全面\n"
-                "- 通义千问（阿里）：中文理解能力强\n"
-                "- 文心一言（百度）：知识问答能力强\n\n"
-                "**配置步骤：**\n"
-                "1. 注册对应平台账号\n"
-                "2. 获取 API Key：\n"
-                "   - 登录平台官网\n"
-                "   - 进入开发者中心或API管理页面\n"
-                "   - 创建新的API Key\n"
-                "3. 在软件中配置：\n"
-                "   - 点击「模型管理」→「云端API」\n"
-                "   - 选择对应平台\n"
-                "   - 输入API Key和接口地址\n"
-                "   - 点击「测试连接」验证\n\n"
-                "**API地址格式：**\n"
-                "- DeepSeek：https://api.deepseek.com/v1\n"
-                "- 豆包：https://ark.cn-beijing.volces.com/api/v3\n"
-                "- 智谱：https://open.bigmodel.cn/api/paas/v4\n\n"
-                "**费用说明：**\n"
-                "- DeepSeek：按token计费，新用户有免费额度\n"
-                "- 豆包：按调用次数计费，有免费试用\n"
-                "- 智谱：按token计费，新用户赠送tokens\n\n"
-                "**使用建议：**\n"
-                "- 文案生成：推荐豆包或DeepSeek\n"
-                "- 代码生成：推荐DeepSeek或智谱\n"
-                "- 知识问答：推荐文心一言或智谱"
-            ),
-            (
-                "6️⃣ 导入素材", 
-                "在「素材库」中导入视频、音频、图片等素材文件。\n\n"  
-                "**操作步骤：**\n"  
-                "1. 点击左侧导航栏的「素材库」\n"  
-                "2. 点击「导入本地素材」按钮\n"  
-                "3. 选择要导入的素材文件（支持 MP4、AVI、MOV、MP3、JPG、PNG 等格式）\n"  
-                "4. 素材会自动分类到对应的标签页中"  
-                "\n**素材类型：**\n"  
-                "- 视频素材\n"  
-                "- 音频素材（背景音乐、音效）\n"  
-                "- 图片素材（封面、水印）\n"  
-                "- 字幕素材（SRT 文件）\n"  
-                "- 模板素材（预设效果）" 
-            ),
-            (
-                "7️⃣ 开始剪辑", 
-                "在「剪辑」模块中进行视频剪辑、添加字幕、应用滤镜等操作。\n\n"  
-                "**操作步骤：**\n"  
-                "1. 点击左侧导航栏的「剪辑」\n"  
-                "2. 从素材库中拖拽视频到时间线\n"  
-                "3. 使用工具栏进行剪辑操作：\n"  
-                "   - 剪切（Ctrl+X）\n"  
-                "   - 复制（Ctrl+C）\n"  
-                "   - 粘贴（Ctrl+V）\n"  
-                "   - 切割（Ctrl+B）\n"  
-                "   - 删除（Delete）\n"  
-                "4. 在右侧工具栏中调整视频参数、添加滤镜、转场效果等"  
-                "\n**核心功能：**\n"  
-                "- 时间线编辑\n"  
-                "- 视频调节（亮度、对比度、饱和度）\n"  
-                "- 音频处理（音量、淡入淡出）\n"  
-                "- 字幕添加与编辑\n"  
-                "- 滤镜与转场效果" 
-            ),
-            (
-                "8️⃣ AI 辅助", 
-                "使用「文案生成」模块自动生成标题、描述、脚本等内容。\n\n"  
-                "**操作步骤：**\n"  
-                "1. 点击左侧导航栏的「文案生成」\n"  
-                "2. 输入视频内容描述或关键词\n"  
-                "3. 选择目标平台（抖音、快手、视频号等）\n"  
-                "4. 选择内容风格（爆款、剧情、解说等）\n"  
-                "5. 选择 AI 模型\n"  
-                "6. 点击「生成文案」按钮"  
-                "\n**生成内容：**\n"  
-                "- 吸引人的标题\n"  
-                "- 详细的视频描述\n"  
-                "- 相关话题标签\n"  
-                "- 完整的视频脚本" 
-            ),
-            (
-                "9️⃣ 导出发布", 
-                "完成编辑后导出视频，或使用「账号运营」模块自动发布到各平台。\n\n"  
-                "**导出步骤：**\n"  
-                "1. 在「剪辑」模块中点击「导出」按钮\n"  
-                "2. 选择输出模式（30秒爆款、90秒剧情、8分钟长视频）\n"  
-                "3. 选择分辨率和目标平台\n"  
-                "4. 点击「开始导出」\n"  
-                "\n**发布步骤：**\n"  
-                "1. 点击左侧导航栏的「账号运营」\n"  
-                "2. 在「内容发布」标签页中选择视频文件\n"  
-                "3. 填写标题、描述等信息\n"  
-                "4. 选择要发布的平台\n"  
-                "5. 点击「发布内容」按钮" 
-            ),
-        ]
-        
-        for title, content in steps:
-            section = CollapsibleSection(title, content)
-            layout.addWidget(section)
-        
+        btn_row.addWidget(apply_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        note = QLabel("💡 提示：切换语言后部分界面文字可能需重新打开模块生效")
+        note.setStyleSheet("color: #666; font-size: 11px; padding-top: 10px;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
         layout.addStretch()
-        
         return widget
-    
-    def _create_features_tab(self) -> QWidget:
-        """创建功能说明标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        features = [
-            (
-                "🏠 首页", 
-                "**功能说明：**\n"  
-                "- 快速入口：一键访问各个功能模块\n"  
-                "- 统计仪表盘：显示今日处理视频数、生成文案数等统计数据\n"  
-                "- 最近项目：快速打开最近编辑的项目\n"  
-                "- 模板中心：提供预设的视频模板\n"  
-                "\n**操作指南：**\n"  
-                "- 点击模块图标进入对应功能\n"  
-                "- 查看统计数据了解工作进展\n"  
-                "- 点击最近项目快速恢复编辑"
-            ),
-            (
-                "🎬 剪辑", 
-                "**功能说明：**\n"  
-                "- 视频剪辑：切割、删除、复制、粘贴视频片段\n"  
-                "- 音频剪辑：音量调节、淡入淡出、音频增强\n"  
-                "- 字幕编辑：AI生成字幕、手动添加字幕\n"  
-                "- 特效滤镜：应用各种视频滤镜和转场效果\n"  
-                "- 时间轴：可视化编辑界面\n"  
-                "\n**操作指南：**\n"  
-                "- 拖拽素材到时间线\n"  
-                "- 使用快捷键进行剪辑操作\n"  
-                "- 在右侧面板调整视频参数\n"  
-                "- 预览窗口实时查看效果"
-            ),
-            (
-                "✍️ 文案生成", 
-                "**功能说明：**\n"  
-                "- AI文案：基于视频内容生成吸引人的文案\n"  
-                "- 标题生成：创建爆款标题\n"  
-                "- 脚本生成：自动生成视频脚本\n"  
-                "- 多平台适配：针对不同平台优化内容\n"  
-                "\n**操作指南：**\n"  
-                "- 输入视频内容描述\n"  
-                "- 选择目标平台和风格\n"  
-                "- 点击生成按钮获取AI文案\n"  
-                "- 复制生成的内容到剪贴板"
-            ),
-            (
-                "📋 多任务", 
-                "**功能说明：**\n"  
-                "- 批量处理：同时处理多个视频\n"  
-                "- 任务队列：管理待处理任务\n"  
-                "- 进度监控：实时查看任务进度\n"  
-                "- 错误处理：自动处理和报告错误\n"  
-                "\n**操作指南：**\n"  
-                "- 点击「新建任务」创建新任务\n"  
-                "- 选择任务类型和参数\n"  
-                "- 查看任务列表和进度\n"  
-                "- 暂停或取消正在执行的任务"
-            ),
-            (
-                "🎭 短剧筛选", 
-                "**功能说明：**\n"  
-                "- 剧单管理：浏览和管理短剧资源\n"  
-                "- 热度分析：查看短剧热度数据\n"  
-                "- 佣金统计：显示短剧推广佣金\n"  
-                "- 推荐系统：基于数据推荐优质短剧\n"  
-                "\n**操作指南：**\n"  
-                "- 选择平台和分类筛选短剧\n"  
-                "- 按热度、播放量等排序\n"  
-                "- 搜索特定短剧\n"  
-                "- 查看短剧详情和佣金信息"
-            ),
-            (
-                "👤 账号运营", 
-                "**功能说明：**\n"  
-                "- 多平台管理：管理多个平台账号\n"  
-                "- 矩阵发布：一键发布到多个平台\n"  
-                "- 数据采集：收集账号运营数据\n"  
-                "- 智能回复：自动回复评论\n"  
-                "\n**操作指南：**\n"  
-                "- 绑定各平台账号\n"  
-                "- 配置发布参数\n"  
-                "- 查看账号数据看板\n"  
-                "- 设置智能回复规则"
-            ),
-            (
-                "📁 素材库", 
-                "**功能说明：**\n"  
-                "- 素材分类：按类型组织素材\n"  
-                "- 预览：查看素材内容\n"  
-                "- 搜索：快速找到需要的素材\n"  
-                "- 标签管理：为素材添加标签\n"  
-                "\n**操作指南：**\n"  
-                "- 导入本地素材\n"  
-                "- 浏览在线素材库\n"  
-                "- 使用搜索功能查找素材\n"  
-                "- 拖拽素材到剪辑模块"
-            ),
-            (
-                "🧩 插件商店", 
-                "**功能说明：**\n"  
-                "- 插件/Skill浏览：查看可用的插件\n"  
-                "- 安装：添加新插件\n"  
-                "- 卸载：移除不需要的插件\n"  
-                "- 导入：导入本地插件\n"  
-                "\n**操作指南：**\n"  
-                "- 浏览插件列表\n"  
-                "- 点击安装按钮添加插件\n"  
-                "- 启用或禁用插件\n"  
-                "- 配置插件参数"
-            ),
-            (
-                "📊 性能监控", 
-                "**功能说明：**\n"  
-                "- CPU/内存/GPU监控：实时监控系统资源使用\n"  
-                "- 任务状态：查看当前任务状态\n"  
-                "- 日志查看：查看系统运行日志\n"  
-                "\n**操作指南：**\n"  
-                "- 查看资源使用情况\n"  
-                "- 分析系统性能瓶颈\n"  
-                "- 查看运行日志排查问题\n"  
-                "- 优化系统设置提高性能"
-            ),
-            (
-                "🤖 模型管理", 
-                "**功能说明：**\n"  
-                "- Ollama本地模型：管理本地AI模型\n"  
-                "- 云端API：配置云端AI服务\n"  
-                "- OpenClaw自动化：设置自动化工作流\n"  
-                "\n**操作指南：**\n"  
-                "- 检测和管理Ollama服务\n"  
-                "- 拉取和更新本地模型\n"  
-                "- 配置云端API密钥\n"  
-                "- 测试模型连接状态"
-            ),
-        ]
-        
-        for icon_name, desc in features:
-            feature_frame = QFrame()
-            feature_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #1a1a1a;
-                    border-radius: 6px;
-                    padding: 12px;
-                }
-            """)
-            feature_layout = QHBoxLayout(feature_frame)
-            
-            name_label = QLabel(icon_name)
-            name_label.setStyleSheet("font-size: 14px; font-weight: bold;")
-            name_label.setMinimumWidth(120)
-            feature_layout.addWidget(name_label)
-            
-            desc_label = QLabel(desc)
-            desc_label.setStyleSheet("color: #ffffff; font-size: 13px;")
-            desc_label.setWordWrap(True)
-            feature_layout.addWidget(desc_label)
-            
-            layout.addWidget(feature_frame)
-        
-        layout.addStretch()
-        
-        return widget
-    
-    def _create_faq_tab(self) -> QWidget:
-        """创建常见问题标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        faqs = [
-            (
-                "Q: 如何使用本地大模型？", 
-                "A: **详细步骤：**\n"  
-                "1. 下载并安装 Ollama（官网：https://ollama.com）\n"  
-                "2. 启动 Ollama 服务\n"  
-                "3. 在软件中点击「模型管理」模块\n"  
-                "4. 点击「检测 Ollama 服务」按钮\n"  
-                "5. 在模型列表中选择需要的模型（如 llama3、deepseek-coder 等）\n"  
-                "6. 点击「拉取模型」按钮等待下载完成\n"  
-                "7. 模型下载完成后即可在各模块中使用"  
-                "\n**注意事项：**\n"  
-                "- 本地模型需要足够的磁盘空间\n"  
-                "- 首次使用需要下载模型，可能需要较长时间\n"  
-                "- 大模型对系统配置要求较高，建议至少 16GB 内存"
-            ),
-            (
-                "Q: 如何配置云端 API？", 
-                "A: **详细步骤：**\n"  
-                "1. 注册对应 AI 平台账号（如 DeepSeek、豆包、智谱等）\n"  
-                "2. 在平台获取 API Key\n"  
-                "3. 在软件中点击「模型管理」模块\n"  
-                "4. 切换到「云端 API」标签页\n"  
-                "5. 选择要配置的平台\n"  
-                "6. 输入 API Key\n"  
-                "7. 点击「测试连接」按钮验证配置是否成功"  
-                "\n**推荐平台：**\n"  
-                "- DeepSeek：代码和文案生成能力强\n"  
-                "- 豆包：中文理解能力优秀\n"  
-                "- 智谱：多模态能力出色"
-            ),
-            (
-                "Q: 视频导出失败怎么办？", 
-                "A: **排查步骤：**\n"  
-                "1. 检查 FFmpeg 是否正确安装：\n"  
-                "   - 下载 FFmpeg 并添加到系统环境变量\n"  
-                "   - 或在设置中指定 FFmpeg 路径\n"  
-                "2. 查看错误日志：\n"  
-                "   - 点击「性能监控」模块\n"  
-                "   - 在「运行日志」中查看详细错误信息\n"  
-                "3. 常见问题及解决方案：\n"  
-                "   - 内存不足：关闭其他应用程序\n"  
-                "   - 磁盘空间不足：清理磁盘空间\n"  
-                "   - 视频编码问题：尝试不同的输出格式\n"  
-                "   - 权限问题：以管理员身份运行软件"
-            ),
-            (
-                "Q: 如何添加更多设备？", 
-                "A: **详细步骤：**\n"  
-                "1. 每个账号最多可绑定 3 台设备\n"  
-                "2. 解绑设备流程：\n"  
-                "   - 点击「设置」模块\n"  
-                "   - 切换到「账号」标签页\n"  
-                "   - 在「设备管理」中找到要解绑的设备\n"  
-                "   - 点击「解绑」按钮\n"  
-                "   - 确认解绑操作\n"  
-                "3. 解绑后即可在新设备上登录"  
-                "\n**注意事项：**\n"  
-                "- 解绑设备后，该设备上的账号将被登出\n"  
-                "- 请确保解绑的是不需要的设备"
-            ),
-            (
-                "Q: 插件安装后无法使用？", 
-                "A: **排查步骤：**\n"  
-                "1. 检查插件状态：\n"  
-                "   - 点击「插件中心」模块\n"  
-                "   - 确认插件状态为「已启用」\n"  
-                "2. 检查依赖要求：\n"  
-                "   - 查看插件详情页的依赖说明\n"  
-                "   - 安装缺少的依赖包\n"  
-                "3. 重启软件：\n"  
-                "   - 有些插件需要重启后才能生效\n"  
-                "4. 检查日志：\n"  
-                "   - 查看「性能监控」中的运行日志\n"  
-                "   - 寻找插件相关的错误信息"  
-                "\n**常见问题：**\n"  
-                "- Python 依赖缺失：使用 pip 安装所需包\n"  
-                "- 权限不足：以管理员身份运行软件\n"  
-                "- 版本不兼容：更新插件到最新版本"
-            ),
-            (
-                "Q: 如何自定义快捷键？", 
-                "A: **详细步骤：**\n"  
-                "1. 点击左下角「设置」按钮\n"  
-                "2. 切换到「快捷键」标签页\n"  
-                "3. 找到要修改的操作\n"  
-                "4. 双击「快捷键」列的对应单元格\n"  
-                "5. 按下新的快捷键组合\n"  
-                "6. 按 Enter 确认修改\n"  
-                "7. 点击「保存设置」按钮"  
-                "\n**注意事项：**\n"  
-                "- 避免与系统快捷键冲突\n"  
-                "- 可以使用 Ctrl、Shift、Alt 组合键\n"  
-                "- 按 Esc 取消修改"
-            ),
-            (
-                "Q: 如何提高视频编辑性能？", 
-                "A: **优化建议：**\n"  
-                "1. 硬件优化：\n"  
-                "   - 启用 GPU 加速（设置 → 常规 → 性能设置）\n"  
-                "   - 增加内存（建议 16GB 以上）\n"  
-                "   - 使用 SSD 存储\n"  
-                "2. 软件设置：\n"  
-                "   - 调整缓存大小（设置 → 常规 → 性能设置）\n"  
-                "   - 优化线程数（根据 CPU 核心数调整）\n"  
-                "   - 降低预览质量（编辑时）\n"  
-                "3. 编辑技巧：\n"  
-                "   - 分段编辑长视频\n"  
-                "   - 合理使用代理文件\n"  
-                "   - 及时清理无用素材"
-            ),
-            (
-                "Q: 如何使用 AI 工具进行视频处理？", 
-                "A: **详细步骤：**\n"  
-                "1. 在「剪辑」模块中导入视频\n"  
-                "2. 切换到右侧工具栏的「AI工具」标签页\n"  
-                "3. 选择要使用的 AI 工具：\n"  
-                "   - FunClip：自动剪辑、智能分段、生成字幕\n"  
-                "   - AutoClip：高光识别、多镜头组接\n"  
-                "   - VideoFusion：视频修复、增强\n"  
-                "   - LoRA Edit：创意编辑、物体替换\n"  
-                "4. 点击「开始处理」按钮\n"  
-                "5. 等待处理完成后查看效果"  
-                "\n**注意事项：**\n"  
-                "- AI 处理可能需要较长时间\n"  
-                "- 处理效果取决于原始视频质量\n"  
-                "- 建议在处理前备份原始视频"
-            ),
-        ]
-        
-        for question, answer in faqs:
-            faq_frame = QFrame()
-            faq_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #1a1a1a;
-                    border-radius: 8px;
-                    padding: 15px;
-                }
-            """)
-            faq_layout = QVBoxLayout(faq_frame)
-            
-            q_label = QLabel(question)
-            q_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1e6bde;")
-            faq_layout.addWidget(q_label)
-            
-            a_label = QLabel(answer)
-            a_label.setStyleSheet("color: #ffffff; font-size: 13px;")
-            a_label.setWordWrap(True)
-            faq_layout.addWidget(a_label)
-            
-            layout.addWidget(faq_frame)
-        
-        layout.addStretch()
-        
-        return widget
-    
-    def _open_api_documentation(self):
-        """打开API文档"""
-        import webbrowser
-        webbrowser.open("https://api.shortplayai.com/docs")
-    
-    def _create_api_resource_tab(self) -> QWidget:
-        """创建API资源标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        # API资源汇总标题
-        title = QLabel("API资源汇总")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(title)
-        
-        # API资源列表
-        api_resources = [
-            {
-                "name": "DeepSeek API",
-                "url": "https://api.deepseek.com/v1/chat/completions",
-                "docs": "https://platform.deepseek.com/docs/api",
-                "apply": "https://platform.deepseek.com/account/api-keys",
-                "examples": """curl -X POST https://api.deepseek.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "deepseek-chat", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "豆包 API",
-                "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-                "docs": "https://www.doubao.com/docs/api",
-                "apply": "https://www.doubao.com/console/apikeys",
-                "examples": """curl -X POST https://ark.cn-beijing.volces.com/api/v3/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "ep-20240101123456-abcde", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "OpenAI API",
-                "url": "https://api.openai.com/v1/chat/completions",
-                "docs": "https://platform.openai.com/docs/api-reference/chat",
-                "apply": "https://platform.openai.com/api-keys",
-                "examples": """curl -X POST https://api.openai.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "智谱 AI API",
-                "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-                "docs": "https://bigmodel.cn/docs/api",
-                "apply": "https://bigmodel.cn/usercenter/apikeys",
-                "examples": """curl -X POST https://open.bigmodel.cn/api/paas/v4/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "glm-4", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "通义千问 API",
-                "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-                "docs": "https://help.aliyun.com/zh/dashscope/developer-reference/api-details",
-                "apply": "https://dashscope.console.aliyun.com/apiKey",
-                "examples": """curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "qwen-turbo", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "文心一言 API",
-                "url": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/eb-instant",
-                "docs": "https://cloud.baidu.com/doc/WENXINWORKSHOP/s/alj562vvu",
-                "apply": "https://console.bce.baidu.com/ai/#/ai/wenxinworkshop/overview/resource/getApiKey",
-                "examples": """curl -X POST https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/eb-instant \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "讯飞星火 API",
-                "url": "https://spark-api-open.xf-yun.com/v1/chat/completions",
-                "docs": "https://www.xfyun.cn/doc/spark/Web.html",
-                "apply": "https://console.xfyun.cn/services/cbm",
-                "examples": """curl -X POST https://spark-api-open.xf-yun.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "generalv3.5", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "Kimi API",
-                "url": "https://api.moonshot.cn/v1/chat/completions",
-                "docs": "https://platform.moonshot.cn/docs/api",
-                "apply": "https://platform.moonshot.cn/console/api-keys",
-                "examples": """curl -X POST https://api.moonshot.cn/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "百川 API",
-                "url": "https://api.baichuan-ai.com/v1/chat/completions",
-                "docs": "https://platform.baichuan-ai.com/docs/api",
-                "apply": "https://platform.baichuan-ai.com/console/apikey",
-                "examples": """curl -X POST https://api.baichuan-ai.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "Baichuan4", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "MiniMax API",
-                "url": "https://api.minimax.chat/v1/chat/completions",
-                "docs": "https://api.minimax.chat/docs/chat/completions",
-                "apply": "https://platform.minimax.chat/apikeys",
-                "examples": """curl -X POST https://api.minimax.chat/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "abab6.5-chat", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "Claude API",
-                "url": "https://api.anthropic.com/v1/messages",
-                "docs": "https://docs.anthropic.com/claude/reference/messages_post",
-                "apply": "https://console.anthropic.com/settings/keys",
-                "examples": """curl -X POST https://api.anthropic.com/v1/messages \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "claude-3-5-sonnet-20241022", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "Groq API",
-                "url": "https://api.groq.com/openai/v1/chat/completions",
-                "docs": "https://docs.groq.com/reference/chat-completions",
-                "apply": "https://console.groq.com/keys",
-                "examples": """curl -X POST https://api.groq.com/openai/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "硅基流动 API",
-                "url": "https://api.siliconflow.cn/v1/chat/completions",
-                "docs": "https://cloud.siliconflow.cn/docs/api",
-                "apply": "https://cloud.siliconflow.cn/account/api-keys",
-                "examples": """curl -X POST https://api.siliconflow.cn/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "Qwen/Qwen2.5-72B-Instruct", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "阶跃星辰 API",
-                "url": "https://api.stepfun.com/v1/chat/completions",
-                "docs": "https://platform.stepfun.com/docs/api",
-                "apply": "https://platform.stepfun.com/console/apikeys",
-                "examples": """curl -X POST https://api.stepfun.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "step-1-8k", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            },
-            {
-                "name": "零一万物 API",
-                "url": "https://api.lingyiwanwu.com/v1/chat/completions",
-                "docs": "https://platform.lingyiwanwu.com/docs/api",
-                "apply": "https://platform.lingyiwanwu.com/console/apikeys",
-                "examples": """curl -X POST https://api.lingyiwanwu.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "yi-lightning", "messages": [{"role": "user", "content": "Hello"}]}'""",
-                "errors": """401: Unauthorized - API Key无效\n429: Too Many Requests - 调用频率过高\n500: Internal Server Error - 服务器错误"""
-            }
-        ]
-        
-        for api in api_resources:
-            api_frame = QFrame()
-            api_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #1a1a1a;
-                    border-radius: 8px;
-                    padding: 15px;
-                }
-            """)
-            api_layout = QVBoxLayout(api_frame)
-            
-            # API名称
-            api_name = QLabel(f"📡 {api['name']}")
-            api_name.setStyleSheet("font-size: 16px; font-weight: bold;")
-            api_layout.addWidget(api_name)
-            
-            # API地址
-            url_layout = QHBoxLayout()
-            url_label = QLabel("接口地址:")
-            url_label.setStyleSheet("color: #ffffff; font-size: 14px;")
-            url_label.setMinimumWidth(80)
-            url_layout.addWidget(url_label)
-            
-            url_value = QLabel(api['url'])
-            url_value.setStyleSheet("color: #ffffff; font-size: 14px;")
-            url_value.setWordWrap(True)
-            url_layout.addWidget(url_value)
-            api_layout.addLayout(url_layout)
-            
-            # 操作按钮
-            btn_layout = QHBoxLayout()
-            btn_layout.setSpacing(10)
-            
-            # 跳转文档按钮
-            doc_btn = QPushButton("跳转文档")
-            doc_btn.clicked.connect(lambda checked, url=api['docs']: self._open_api_docs(url))
-            doc_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1e6bde;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                }
-                QPushButton:hover {
-                    background-color: #1a5bc4;
-                }
-            """)
-            btn_layout.addWidget(doc_btn)
-            
-            # 复制地址按钮
-            copy_btn = QPushButton("复制地址")
-            copy_btn.clicked.connect(lambda checked, url=api['url']: self._copy_api_url(url))
-            copy_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #22c55e;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                }
-                QPushButton:hover {
-                    background-color: #16a34a;
-                }
-            """)
-            btn_layout.addWidget(copy_btn)
-            
-            # 查看示例按钮
-            example_btn = QPushButton("查看示例")
-            example_btn.clicked.connect(lambda checked, api=api: self._show_api_example(api))
-            example_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f59e0b;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                }
-                QPushButton:hover {
-                    background-color: #d97706;
-                }
-            """)
-            btn_layout.addWidget(example_btn)
-            
-            btn_layout.addStretch()
-            api_layout.addLayout(btn_layout)
-            
-            layout.addWidget(api_frame)
-        
-        layout.addStretch()
-        
-        return widget
-    
-    def _open_api_docs(self, url):
-        """打开API文档"""
-        import webbrowser
-        webbrowser.open(url)
-    
-    def _copy_api_url(self, url):
-        """复制API地址"""
-        from PyQt6.QtWidgets import QApplication
-        QApplication.clipboard().setText(url)
-        QMessageBox.information(self, "成功", "API地址已复制到剪贴板")
-    
-    def _show_api_example(self, api):
-        """显示API调用示例和错误码"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"API示例 - {api['name']}")
-        dialog.setMinimumWidth(600)
-        dialog.setMinimumHeight(400)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # 调用示例
-        example_group = QGroupBox("调用示例")
-        example_group.setStyleSheet("color: #ffffff;")
-        example_layout = QVBoxLayout(example_group)
-        
-        example_text = QLabel(api['examples'])
-        example_text.setStyleSheet("color: #ffffff; font-family: Consolas, Monaco, monospace; font-size: 12px;")
-        example_text.setWordWrap(True)
-        example_layout.addWidget(example_text)
-        layout.addWidget(example_group)
-        
-        # 常见错误码
-        error_group = QGroupBox("常见错误码")
-        error_group.setStyleSheet("color: #ffffff;")
-        error_layout = QVBoxLayout(error_group)
-        
-        error_text = QLabel(api['errors'])
-        error_text.setStyleSheet("color: #ffffff; font-size: 13px;")
-        error_text.setWordWrap(True)
-        error_layout.addWidget(error_text)
-        layout.addWidget(error_group)
-        
-        # 按钮
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        btn_box.accepted.connect(dialog.accept)
-        layout.addWidget(btn_box)
-        
-        dialog.exec()
-    
+
+    def _apply_language(self):
+        """应用选择的语言"""
+        idx = self._lang_combo.currentIndex()
+        if 0 <= idx < len(self._languages):
+            code = self._languages[idx][0]
+            try:
+                from app.core.i18n import set_locale
+                set_locale(code)
+                QMessageBox.information(self, "语言切换", f"已切换到 {self._languages[idx][1]}\n部分模块可能需要重新进入生效")
+            except Exception as e:
+                QMessageBox.warning(self, "切换失败", f"无法切换语言: {e}")
+
     def _create_about_tab(self) -> QWidget:
-        """创建关于标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        logo = QLabel("🎬 拾光剪影")
-        logo.setStyleSheet("font-size: 28px; font-weight: bold;")
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(logo)
-        
-        version = QLabel("版本: v3.0 Qt6版")
-        version.setStyleSheet("color: #ffffff; font-size: 14px;")
-        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(version)
-        
-        layout.addSpacing(20)
-        
-        info_frame = QFrame()
-        info_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a1a;
-                border-radius: 8px;
-                padding: 20px;
+        """关于拾光剪影：项目信息 + 版本号（精美版）"""
+        try:
+            from app.version import __version__, VERSION_INFO
+        except Exception:
+            __version__ = "4.7.0"
+            VERSION_INFO = {
+                "codename": "未知", "release_date": "未知",
+                "description": "无法加载版本信息"
             }
-        """)
-        info_layout = QVBoxLayout(info_frame)
-        
-        info_items = [
-            ("开发框架", "PyQt6 + Python 3.10+"),
-            ("视频处理", "FFmpeg 6.0+"),
-            ("AI 引擎", "Ollama / DeepSeek / 豆包 / OpenAI / 智谱"),
-            ("自动化", "OpenClaw"),
-            ("数据存储", "SQLite 本地数据库"),
+
+        codename = VERSION_INFO.get('codename', '-')
+        release_date = VERSION_INFO.get('release_date', '-')
+
+        widget = QWidget()
+        widget.setStyleSheet("background: transparent;")
+        out = QVBoxLayout(widget)
+        out.setContentsMargins(40, 36, 40, 28)
+        out.setSpacing(0)
+
+        # ═══════════════════════════════════════════════════════
+        # 1. Logo + 名称 区域
+        # ═══════════════════════════════════════════════════════
+        logo_card = QFrame()
+        logo_card.setFixedHeight(160)
+        logo_card.setStyleSheet(
+            "QFrame#aboutLogo {"
+            "  background: qlineargradient(x1:0 y1:0, x2:1 y2:1,"
+            "    stop:0 #14192d, stop:1 #1a1030);"
+            "  border: 1px solid #2a2a40; border-radius: 16px;"
+            "}"
+        )
+        logo_card.setObjectName("aboutLogo")
+        logo_lo = QVBoxLayout(logo_card)
+        logo_lo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_lo.setSpacing(6)
+
+        # Logo 图标
+        icon_lbl = QLabel("🎬")
+        icon_lbl.setStyleSheet("font-size: 42px; background: transparent; border: none;")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_lo.addWidget(icon_lbl)
+
+        # 标题
+        name_lbl = QLabel("拾光剪影")
+        name_lbl.setStyleSheet(
+            "font-size: 30px; font-weight: bold; color: #e0e0ff;"
+            "background: transparent; border: none;"
+        )
+        name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_lo.addWidget(name_lbl)
+
+        # 副标题
+        tag_lbl = QLabel("AI 短剧智能编辑器")
+        tag_lbl.setStyleSheet(
+            "font-size: 13px; color: #7b8cbf; letter-spacing: 2px;"
+            "background: transparent; border: none;"
+        )
+        tag_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_lo.addWidget(tag_lbl)
+
+        out.addWidget(logo_card)
+        out.addSpacing(24)
+
+        # ═══════════════════════════════════════════════════════
+        # 2. 版本号徽章
+        # ═══════════════════════════════════════════════════════
+        ver_card = QFrame()
+        ver_card.setStyleSheet(
+            "QFrame#aboutVer {"
+            "  background-color: #141820; border: 1px solid #2a2f3a;"
+            "  border-radius: 12px; padding: 4px;"
+            "}"
+        )
+        ver_card.setObjectName("aboutVer")
+        ver_lo = QHBoxLayout(ver_card)
+        ver_lo.setContentsMargins(24, 16, 24, 16)
+        ver_lo.setSpacing(16)
+
+        # 版本号大数字
+        ver_num = QLabel(__version__)
+        ver_num.setStyleSheet(
+            "font-size: 38px; font-weight: 900; color: #6c9fff;"
+            "background: transparent; border: none;"
+        )
+        ver_lo.addWidget(ver_num)
+
+        # 右侧信息
+        right_col = QVBoxLayout()
+        right_col.setSpacing(4)
+
+        label_style = "color: #8a8fa0; font-size: 11px; background: transparent; border: none;"
+        value_style = "color: #c8ccd8; font-size: 12px; background: transparent; border: none;"
+
+        codename_lbl = QLabel(f"代号 — {codename}")
+        codename_lbl.setStyleSheet(value_style)
+        right_col.addWidget(codename_lbl)
+
+        date_lbl = QLabel(f"发布于 — {release_date}")
+        date_lbl.setStyleSheet(label_style)
+        right_col.addWidget(date_lbl)
+
+        ver_lo.addLayout(right_col)
+        ver_lo.addStretch()
+
+        out.addWidget(ver_card)
+        out.addSpacing(20)
+
+        # ═══════════════════════════════════════════════════════
+        # 3. 技术栈标签
+        # ═══════════════════════════════════════════════════════
+        tech_lbl = QLabel("技术栈")
+        tech_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #666;"
+                               "background: transparent; border: none; padding: 0 4px;")
+        out.addWidget(tech_lbl)
+        out.addSpacing(10)
+
+        tech_grid = QGridLayout()
+        tech_grid.setHorizontalSpacing(10)
+        tech_grid.setVerticalSpacing(10)
+
+        tags = [
+            ("🐍", "Python 3.12"),
+            ("🖥️", "PyQt6"),
+            ("🤖", "OpenAI API"),
+            ("🎞️", "MoviePy"),
+            ("⚙️", "FFmpeg"),
+            ("🔀", "librosa"),
+            ("🔢", "NumPy"),
+            ("📁", "Git"),
         ]
-        
-        for name, value in info_items:
-            item_layout = QHBoxLayout()
-            name_label = QLabel(f"{name}:")
-            name_label.setStyleSheet("color: #ffffff;")
-            name_label.setMinimumWidth(100)
-            item_layout.addWidget(name_label)
-            
-            value_label = QLabel(value)
-            value_label.setStyleSheet("color: #ffffff;")
-            item_layout.addWidget(value_label)
-            
-            item_layout.addStretch()
-            info_layout.addLayout(item_layout)
-        
-        layout.addWidget(info_frame)
-        
-        layout.addSpacing(20)
-        
-        copyright_label = QLabel("© 2026 拾光剪影团队")
-        copyright_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(copyright_label)
-        
-        layout.addStretch()
-        
+        for i, (emoji, name) in enumerate(tags):
+            row, col = i // 4, i % 4
+            tag = QFrame()
+            tag.setStyleSheet(
+                "QFrame {"
+                "  background-color: #1a1e28; border: 1px solid #2a2f3a;"
+                "  border-radius: 8px;"
+                "}"
+            )
+            tag_lo = QHBoxLayout(tag)
+            tag_lo.setContentsMargins(12, 8, 12, 8)
+            tag_lo.setSpacing(6)
+
+            em = QLabel(emoji)
+            em.setStyleSheet("font-size: 14px; background: transparent; border: none;")
+            tag_lo.addWidget(em)
+
+            nm = QLabel(name)
+            nm.setStyleSheet("font-size: 12px; color: #a0a6b8; background: transparent; border: none;")
+            tag_lo.addWidget(nm)
+
+            tech_grid.addWidget(tag, row, col)
+
+        out.addLayout(tech_grid)
+        out.addStretch()
+
+        # ═══════════════════════════════════════════════════════
+        # 4. 版权
+        # ═══════════════════════════════════════════════════════
+        copyright_lbl = QLabel("© 2026 拾光剪影 · 保留所有权利")
+        copyright_lbl.setStyleSheet("color: #404860; font-size: 10px; background: transparent;")
+        copyright_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        out.addWidget(copyright_lbl)
+
         return widget
+
+
+
+
+
+
+

@@ -4,7 +4,7 @@ Qt6 主窗口 - 剪映同款标签页布局
 专业级架构：左侧导航 + 标签页切换 + 底部状态栏
 """
 
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional, Type, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -15,35 +15,21 @@ from PyQt6.QtWidgets import (
     QStatusBar, QSizePolicy, QScrollArea, QSpacerItem,
     QTabWidget, QSplitter, QToolBar
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QSettings
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction
 
 from .core import EventBus, EventType, MasterClock, DataBus
+from .auth import auth_service  # 修复 P0-A: 移除 main_window.py 内的伪 User/AuthService,统一从 auth 模块导入
+from .module_registry import get_registry, ModuleTier  # 模块注册表：分级 + 开关
+from .theme_manager import ThemeManager  # 全局主题管理器
+from app.version import __version__
 
 logger = logging.getLogger("AI短剧编辑器.main_window")
 
 
-class User:
-    """用户信息类"""
-    def __init__(self):
-        self.name = "测试用户"
-        self.email = "test@example.com"
-        self.is_vip = True
-        self.vip_expire = 9999999999  # 修改为合理的时间戳
-        self.nickname = "测试用户"
-
-
-class AuthService:
-    """授权服务模拟类"""
-    def __init__(self):
-        self.is_logged_in = True
-        self.current_user = User()
-
-
-auth_service = AuthService()
-
-
 class ModuleState(Enum):
+    NOT_LOADED = "not_loaded"
+    LOADING = "loading"
     LOADED = "loaded"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -63,17 +49,23 @@ class ModuleInfo:
 
 class NavigationButton(QPushButton):
     """导航按钮 - 剪映风格"""
-    
+
     def __init__(self, text: str, icon: str = "", module_id: str = ""):
         super().__init__()
         self.module_id = module_id
         self._is_active = False
         self._is_hovered = False
+        self._theme = "dark"  # 默认深色主题
         
         self.setText(f"  {icon}  {text}" if icon else text)
         self.setMinimumHeight(44)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         
+        self._update_style()
+    
+    def set_theme(self, theme: str):
+        """设置主题"""
+        self._theme = theme
         self._update_style()
     
     def set_active(self, active: bool):
@@ -93,55 +85,126 @@ class NavigationButton(QPushButton):
         super().leaveEvent(event)
     
     def _update_style(self):
-        if self._is_active:
-            self.setStyleSheet("""
-                QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                text-align: left;
-                padding-left: 16px;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: 0 2px 8px rgba(30, 107, 222, 0.4);
-                text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.3);
-            }
-            """)
-        elif self._is_hovered:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a2a2a;
-                    color: #ffffff;
-                    border: 1px solid #3a3a3a;
-                    border-radius: 8px;
-                    text-align: left;
-                    padding-left: 16px;
-                    font-size: 14px;
-                    font-weight: 500;
-                    text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.3);
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #ffffff;
-                    border: 1px solid transparent;
-                    border-radius: 8px;
-                    text-align: left;
-                    padding-left: 16px;
-                    font-size: 14px;
-                    font-weight: 400;
-                    text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.2);
-                }
-                QPushButton:hover {
-                    background-color: #2a2a2a;
-                    color: #ffffff;
-                    border: 1px solid #3a3a3a;
-                    text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.3);
-                }
-            """)
+        palette = {
+            "light": {
+                "text": "#172033",
+                "muted": "#56657a",
+                "surface": "#fcfdff",
+                "hover": "#dde7f4",
+                "active": "#2563eb",
+                "active_hover": "#1d4ed8",
+                "active_text": "#f8fbff",
+                "border": "#d7e0ec",
+            },
+            "dark": {
+                "text": "#edf3ff",
+                "muted": "#aab6cc",
+                "surface": "#101621",
+                "hover": "#1f2b42",
+                "active": "#2f7bff",
+                "active_hover": "#4d8dff",
+                "active_text": "#f8fbff",
+                "border": "#253044",
+            },
+        }["light" if self._theme == "light" else "dark"]
+
+        # 侧栏是高频入口，选中、悬停、默认态必须一眼可分辨。
+        if self._theme == "light":
+            if self._is_active:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: %(active)s;
+                        color: %(active_text)s;
+                        border: 1px solid %(active)s;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 700;
+                    }
+                    QPushButton:hover {
+                        background-color: %(active_hover)s;
+                    }
+                """ % palette)
+            elif self._is_hovered:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: %(hover)s;
+                        color: %(text)s;
+                        border: 1px solid %(border)s;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 500;
+                    }
+                """ % palette)
+            else:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        color: %(muted)s;
+                        border: 1px solid transparent;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 400;
+                    }
+                    QPushButton:hover {
+                        background-color: %(hover)s;
+                        color: %(text)s;
+                        border: 1px solid %(border)s;
+                    }
+                """ % palette)
+        else:  # 深色主题
+            if self._is_active:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: %(active)s;
+                        color: %(active_text)s;
+                        border: 1px solid %(active)s;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 700;
+                    }
+                    QPushButton:hover {
+                        background-color: %(active_hover)s;
+                    }
+                """ % palette)
+            elif self._is_hovered:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: %(hover)s;
+                        color: %(text)s;
+                        border: 1px solid %(border)s;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 500;
+                    }
+                """ % palette)
+            else:
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        color: %(muted)s;
+                        border: 1px solid transparent;
+                        border-radius: 10px;
+                        text-align: left;
+                        padding-left: 16px;
+                        font-size: 14px;
+                        font-weight: 400;
+                    }
+                    QPushButton:hover {
+                        background-color: %(hover)s;
+                        color: %(text)s;
+                        border: 1px solid %(border)s;
+                    }
+                """ % palette)
 
 
 class NavigationBar(QWidget):
@@ -153,13 +216,62 @@ class NavigationBar(QWidget):
         super().__init__()
         self._buttons: Dict[str, NavigationButton] = {}
         self._current_module: Optional[str] = None
+        self._theme = "dark"
         self._setup_ui()
+    
+    def set_theme(self, theme: str):
+        """设置导航栏主题"""
+        # 更新所有导航按钮的主题
+        self._theme = "light" if theme == "light" else "dark"
+        for button in self._buttons.values():
+            button.set_theme(self._theme)
+        
+        # 更新导航栏背景
+        if theme == "light":
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #fcfdff;
+                }
+            """)
+            # 更新logo标签颜色
+            self._logo_label.setStyleSheet("""
+                QLabel {
+                    font-size: 18px;
+                    font-weight: 800;
+                    color: #2563eb;
+                    padding: 10px 0;
+                }
+            """)
+            # 更新版本标签颜色
+            self._version_label.setStyleSheet("color: #56657a; font-size: 12px; padding-left: 2px;")
+            # 更新分隔线颜色
+            self._separator.setStyleSheet("background-color: #e3eaf3; max-height: 1px; margin: 16px 0;")
+        else:
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #101621;
+                }
+            """)
+            # 更新logo标签颜色
+            self._logo_label.setStyleSheet("""
+                QLabel {
+                    font-size: 18px;
+                    font-weight: 800;
+                    color: #edf3ff;
+                    padding: 10px 0;
+                }
+            """)
+            # 更新版本标签颜色
+            self._version_label.setStyleSheet("color: #aab6cc; font-size: 12px; padding-left: 2px;")
+            # 更新分隔线颜色
+            self._separator.setStyleSheet("background-color: #1c2638; max-height: 1px; margin: 16px 0;")
     
     def _setup_ui(self):
         self.setFixedWidth(220)
+        self.setObjectName("sideBar")
         self.setStyleSheet("""
             QWidget {
-                background-color: #2a2a2a;
+                background-color: #101621;
             }
         """)
         
@@ -171,27 +283,27 @@ class NavigationBar(QWidget):
         logo_layout = QVBoxLayout(logo_widget)
         logo_layout.setContentsMargins(0, 0, 0, 0)
         
-        logo_label = QLabel("🎬 拾光剪影")
-        logo_label.setStyleSheet("""
+        self._logo_label = QLabel("🎬 拾光剪影")
+        self._logo_label.setStyleSheet("""
             QLabel {
                 font-size: 18px;
-                font-weight: bold;
-                color: #ffffff;
+                font-weight: 800;
+                color: #edf3ff;
                 padding: 10px 0;
             }
         """)
-        logo_layout.addWidget(logo_label)
+        logo_layout.addWidget(self._logo_label)
         
-        version_label = QLabel("v3.0 Qt6版")
-        version_label.setStyleSheet("color: #ffffff; font-size: 12px; padding-left: 2px;")
-        logo_layout.addWidget(version_label)
+        self._version_label = QLabel(f"v{__version__} Qt6版")
+        self._version_label.setStyleSheet("color: #aab6cc; font-size: 12px; padding-left: 2px;")
+        logo_layout.addWidget(self._version_label)
         
         layout.addWidget(logo_widget)
         
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #444444; max-height: 1px; margin: 16px 0;")
-        layout.addWidget(separator)
+        self._separator = QFrame()
+        self._separator.setFrameShape(QFrame.Shape.HLine)
+        self._separator.setStyleSheet("background-color: #1c2638; max-height: 1px; margin: 16px 0;")
+        layout.addWidget(self._separator)
         
         self._button_container = QWidget()
         self._button_layout = QVBoxLayout(self._button_container)
@@ -202,11 +314,31 @@ class NavigationBar(QWidget):
         layout.addStretch()
     
     def add_module(self, module_id: str, name: str, icon: str = ""):
+        """添加导航按钮（已存在则不重复添加）"""
+        if module_id in self._buttons:
+            return
         button = NavigationButton(name, icon, module_id)
+        button.set_theme(self._theme)
         button.clicked.connect(lambda: self._on_button_clicked(module_id))
         self._buttons[module_id] = button
         self._button_layout.addWidget(button)
-    
+
+    def remove_module(self, module_id: str):
+        """移除导航按钮（运行时开关关闭时调用）"""
+        if module_id not in self._buttons:
+            return
+        btn = self._buttons.pop(module_id)
+        btn.setParent(None)
+        btn.deleteLater()
+        # 如果移除的是当前选中项，则切回 home
+        if self._current_module == module_id:
+            self._current_module = None
+            if "home" in self._buttons:
+                self._on_button_clicked("home")
+
+    def has_module(self, module_id: str) -> bool:
+        return module_id in self._buttons
+
     def _on_button_clicked(self, module_id: str):
         if self._current_module:
             self._buttons[self._current_module].set_active(False)
@@ -253,6 +385,7 @@ class MainWindow(QMainWindow):
             'copywriting': 3,
             'tasks': 4,
             'drama': 5,
+            'characters': 5,
             'account': 6,
             'materials': 7,
             'plugins': 8,
@@ -263,11 +396,33 @@ class MainWindow(QMainWindow):
         }
         
         self._auth_service = auth_service
+        self._settings = QSettings("拾光剪影", "Settings")
         self._setup_ui()
         self._setup_default_modules()
         self._update_auth_status()
         
+        self._apply_initial_theme()
         self._setup_lazy_loading()
+    
+    def _apply_initial_theme(self):
+        """应用初始主题（通过 ThemeManager 统一管理）"""
+        tm = ThemeManager.instance()
+        saved_theme = self._settings.value("theme")
+        if saved_theme:
+            tm.apply_theme(saved_theme, main_window=self)
+        else:
+            # 根据时间自动切换
+            from datetime import datetime
+            hour = datetime.now().hour
+            tm.apply_theme("light" if 6 <= hour < 18 else "dark", main_window=self)
+    
+    def _apply_time_based_theme(self):
+        """根据时间自动应用主题（兼容旧调用）"""
+        from datetime import datetime
+        hour = datetime.now().hour
+        ThemeManager.instance().apply_theme(
+            "light" if 6 <= hour < 18 else "dark", main_window=self
+        )
     
     def _setup_lazy_loading(self):
         """设置延迟加载"""
@@ -337,77 +492,12 @@ class MainWindow(QMainWindow):
         logger.info("延迟加载缓存已清理")
     
     def _setup_ui(self):
-        self.setWindowTitle("拾光剪影 v3.0 - Qt6版")
+        self.setWindowTitle(f"拾光剪影 v{__version__} - AI短剧编辑器")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1a1a1a;
-            }
-            QWidget {
-                color: #ffffff;
-            }
-            QLabel {
-                color: #ffffff;
-            }
-            QPushButton {
-                color: #ffffff;
-            }
-            QScrollBar:vertical {
-                background-color: #2a2a2a;
-                width: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #4a4a4a;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #5a5a5a;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background-color: #2a2a2a;
-                height: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: #4a4a4a;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background-color: #5a5a5a;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0;
-            }
-            QTabWidget::pane {
-                border: none;
-                background-color: #1a1a1a;
-            }
-            QTabBar::tab {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background-color: #3a3a3a;
-                color: #ffffff;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #303030;
-                color: #ffffff;
-            }
-        """)
-        
         central_widget = QWidget()
+        central_widget.setObjectName("contentContainer")
         self.setCentralWidget(central_widget)
         
         main_layout = QVBoxLayout(central_widget)
@@ -423,22 +513,22 @@ class MainWindow(QMainWindow):
         nav_content_layout.addWidget(self._nav_bar)
         
         content_widget = QWidget()
-        content_widget.setStyleSheet("background-color: #1a1a1a;")
+        content_widget.setObjectName("moduleContainer")
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
         # 顶部状态栏 - 显示授权状态
-        self._top_status_bar = QWidget()
+        self._top_status_bar = QFrame()
+        self._top_status_bar.setObjectName("headerBar")
         self._top_status_bar.setFixedHeight(40)
-        self._top_status_bar.setStyleSheet("background-color: #2a2a2a;")
         top_layout = QHBoxLayout(self._top_status_bar)
         top_layout.setContentsMargins(16, 0, 16, 0)
         top_layout.setSpacing(12)
         
         # 左侧状态信息
         self._status_label = QLabel("未登录 / 未授权")
-        self._status_label.setStyleSheet("color: #f59e0b; font-size: 13px; font-weight: 500;")
+        self._status_label.setStyleSheet("color: #fbbf24; font-size: 13px; font-weight: 600;")
         top_layout.addWidget(self._status_label)
         
         top_layout.addStretch()
@@ -446,38 +536,15 @@ class MainWindow(QMainWindow):
         # 右侧操作按钮
 
         self._login_btn = QPushButton("登录")
+        self._login_btn.setObjectName("primaryBtn")
         self._login_btn.setFixedHeight(28)
         self._login_btn.setFixedWidth(80)
-        self._login_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #2575f0;
-            }
-        """)
         self._login_btn.clicked.connect(self._on_login_clicked)
         top_layout.addWidget(self._login_btn)
 
         self._activate_btn = QPushButton("激活")
         self._activate_btn.setFixedHeight(28)
         self._activate_btn.setFixedWidth(80)
-        self._activate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #252525;
-            }
-        """)
         self._activate_btn.clicked.connect(self._on_activate_clicked)
         top_layout.addWidget(self._activate_btn)
         
@@ -488,70 +555,124 @@ class MainWindow(QMainWindow):
         self._tab_widget.setTabsClosable(False)
         self._tab_widget.setMovable(True)
         self._tab_widget.tabBar().hide()
-        self._tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background-color: #0d0d0d;
-            }
-            QTabBar::tab {
-                background-color: #1a1a1a;
-                color: #ffffff;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background-color: #2a2a2a;
-                color: #ffffff;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #252525;
-                color: #ffffff;
-            }
-        """)
         content_layout.addWidget(self._tab_widget)
         
         nav_content_layout.addWidget(content_widget, 1)
         
         main_layout.addLayout(nav_content_layout, 1)
         
+        self._status_bar = QStatusBar()
+        self.setStatusBar(self._status_bar)
+        
         self._setup_event_handlers()
     
     def _setup_event_handlers(self):
         self._event_bus.on(EventType.MODULE_ACTIVATED, self._on_module_activated)
+        # 功能开关变更：动态刷新导航栏
+        self._event_bus.on(EventType.MODULE_CONFIG_CHANGED,
+                           lambda _evt: self.apply_module_changes())
+        # 主题切换：同步更新全局UI
+        self._event_bus.on(EventType.THEME_CHANGED, self._on_theme_changed)
     
     def _setup_default_modules(self):
-        # 导入模块类
-        from .modules import (
-            HomeModule, EditorModule, CopywritingModule,
-            TasksModule, DramaFinderModule, AccountOpsModule,
-            MaterialsModule, PluginsModule, PerformanceModule
+        """从模块注册表读取并注册已启用的模块（核心 + 开启的高级/实验）"""
+        registry = get_registry()
+
+        enabled = registry.enabled_modules()
+        logger.info(
+            "注册表启动：共 %d 个模块定义，当前启用 %d 个，关闭 %d 个",
+            len(registry.all_modules()),
+            len(enabled),
+            len(registry.disabled_modules()),
         )
-        from .model_management import ModelManagementModule
-        from .settings_module import SettingsModule, HelpModule
-        
-        default_modules = [
-            ("home", "首页", "🏠", "首页概览", HomeModule),
-            ("editor", "剪辑", "🎬", "视频剪辑", EditorModule),
-            ("copywriting", "文案生成", "✍️", "AI文案生成", CopywritingModule),
-            ("tasks", "多任务", "📋", "任务管理", TasksModule),
-            ("drama", "短剧筛选", "🎭", "短剧筛选", DramaFinderModule),
-            ("account", "账号运营", "👤", "账号运营", AccountOpsModule),
-            ("materials", "素材库", "📁", "素材管理", MaterialsModule),
-            ("plugins", "插件中心", "🧩", "插件管理", PluginsModule),
-            ("performance", "性能监控", "📊", "性能监控", PerformanceModule),
-            ("models", "模型管理", "🤖", "模型管理", ModelManagementModule),
-            ("settings", "设置", "⚙️", "应用设置", SettingsModule),
-            ("help", "帮助", "❓", "使用帮助", HelpModule),
-        ]
-        
-        for module_id, name, icon, desc, widget_class in default_modules:
+
+        for mod in enabled:
+            module_id = mod["id"]
+            name = mod["name"]
+            icon = mod.get("icon", "")
+            desc = mod.get("description", "")
+            widget_class = self._lazy_import_widget_class(mod)
+            if widget_class is None:
+                # 可选模块（如 character_management_module）导入失败则静默跳过
+                continue
             self.register_module(module_id, name, icon, desc, widget_class)
-        
+
+        # 预加载优先级按注册表顺序自动生成
+        for idx, mod in enumerate(enabled):
+            self._preload_priority[mod["id"]] = idx + 1
+
         self._nav_bar.select_module("home")
-    
+
+    def _lazy_import_widget_class(self, mod_def: dict):
+        """
+        延迟导入：按需 import 模块类，避免启动时一次性加载所有 UI 代码。
+        对 optional=True 的模块，导入失败时静默跳过。
+        """
+        import_module = mod_def.get("import_module")
+        import_class = mod_def.get("import_class")
+        is_optional = mod_def.get("optional", False)
+
+        if not import_module or not import_class:
+            return None
+
+        try:
+            # 相对导入：from .xxx import YYY
+            package = "app.modules.lego" if import_module.startswith(".") else None
+            # 使用 importlib 做相对导入
+            import importlib
+            if package and import_module.startswith("."):
+                module = importlib.import_module(import_module, package=package)
+            else:
+                module = importlib.import_module(import_module)
+            widget_class = getattr(module, import_class, None)
+            return widget_class
+        except Exception as e:
+            if not is_optional:
+                logger.warning("模块 %s (%s) 导入失败: %s", mod_def.get("id"), import_class, e)
+            return None
+
+    def apply_module_changes(self):
+        """
+        运行时刷新导航栏：根据注册表最新开关状态动态增删导航按钮。
+        由设置面板的「功能开关」保存后调用。
+        使用 QTimer 延迟到下一个事件循环，避免阻塞UI
+        """
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._apply_module_changes_impl)
+
+    def _apply_module_changes_impl(self):
+        """实际执行模块变更（延迟到下一个事件循环）"""
+        registry = get_registry()
+        current_enabled = {m["id"] for m in registry.enabled_modules()}
+
+        # 1) 新增：注册表中已启用但导航栏尚未显示
+        for mod in registry.enabled_modules():
+            mid = mod["id"]
+            if not self._nav_bar.has_module(mid):
+                # 懒加载 widget_class（不立即实例化）
+                self.register_module_lazy(
+                    mid, mod["name"], mod.get("icon", ""),
+                    mod.get("description", ""), mod
+                )
+                logger.info("运行时启用模块: %s", mid)
+
+        # 2) 移除：导航栏中显示但注册表已关闭
+        for mid in list(self._modules.keys()):
+            info = self._modules[mid]
+            if mid not in current_enabled:
+                # 从导航栏移除按钮
+                self._nav_bar.remove_module(mid)
+                # 从标签页移除实例
+                if info.instance is not None:
+                    for i in range(self._tab_widget.count()):
+                        if self._tab_widget.tabText(i) == f"{info.icon} {info.name}":
+                            self._tab_widget.removeTab(i)
+                            break
+                    info.instance.deleteLater()
+                    info.instance = None
+                info.state = ModuleState.INACTIVE
+                logger.info("运行时关闭模块: %s", mid)
+
     def register_module(self, module_id: str, name: str, icon: str, description: str,
                        widget_class: Type[QWidget] = None):
         """注册模块"""
@@ -564,282 +685,259 @@ class MainWindow(QMainWindow):
         )
         self._modules[module_id] = info
         self._nav_bar.add_module(module_id, name, icon)
+
+    def register_module_lazy(self, module_id: str, name: str, icon: str, description: str,
+                            mod_def: dict):
+        """懒加载注册模块（不立即导入widget_class，避免阻塞UI）"""
+        # 存储模块定义，但不立即导入 widget_class
+        info = ModuleInfo(
+            id=module_id,
+            name=name,
+            icon=icon,
+            description=description,
+            widget_class=None  # 延迟到首次激活时导入
+        )
+        info._mod_def = mod_def  # 保存模块定义用于延迟加载
+        self._modules[module_id] = info
+        self._nav_bar.add_module(module_id, name, icon)
     
+    def _get_widget_class_lazy(self, module_id: str):
+        """延迟获取 widget_class"""
+        info = self._modules.get(module_id)
+        if not info or info.widget_class:
+            return info.widget_class if info else None
+
+        mod_def = getattr(info, '_mod_def', None)
+        if not mod_def:
+            return None
+
+        widget_class = self._lazy_import_widget_class(mod_def)
+        if widget_class:
+            info.widget_class = widget_class
+        return widget_class
+
     def set_module_widget(self, module_id: str, widget: QWidget):
         """设置模块界面"""
         if module_id not in self._modules:
             return
-        
+
         info = self._modules[module_id]
-        
+
         if info.instance:
             for i in range(self._tab_widget.count()):
                 if self._tab_widget.tabText(i) == f"{info.icon} {info.name}":
                     self._tab_widget.removeTab(i)
                     break
-        
+
         info.instance = widget
+        current_theme = ThemeManager.instance().current_theme
+        widget.setProperty("theme", current_theme)
+        for child in widget.findChildren(QWidget):
+            child.setProperty("theme", current_theme)
         self._tab_widget.addTab(widget, f"{info.icon} {info.name}")
-    
+
     def get_module_widget(self, module_id: str) -> Optional[QWidget]:
         """获取模块界面"""
         if module_id in self._modules:
             return self._modules[module_id].instance
         return None
-    
+
     def _on_module_selected(self, module_id: str):
         """模块选中事件"""
         if module_id not in self._modules:
             return
-        
+
         info = self._modules[module_id]
-        
-        if not info.instance and info.widget_class:
+
+        if info.instance:
+            self._activate_module(module_id, info)
+            return
+
+        if info.widget_class and info.state == ModuleState.INACTIVE:
+            info.state = ModuleState.LOADING
+            self._show_loading_indicator(module_id)
+            self._load_module_with_progress(module_id)
+
+    def _show_loading_indicator(self, module_id: str):
+        """显示加载指示器"""
+        info = self._modules.get(module_id)
+        if not info:
+            return
+
+        loading_widget = QWidget()
+        loading_layout = QVBoxLayout(loading_widget)
+        loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        spinner = QLabel("⏳")
+        spinner.setStyleSheet("font-size: 48px;")
+        loading_layout.addWidget(spinner)
+
+        loading_label = QLabel(f"正在加载 {info.name}...")
+        loading_label.setStyleSheet("color: #ffffff; font-size: 16px;")
+        loading_layout.addWidget(loading_label)
+
+        self.set_module_widget(module_id, loading_widget)
+
+    def _load_module_with_progress(self, module_id: str):
+        """带进度的模块加载"""
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(50, lambda: self._perform_module_load(module_id))
+
+    def _perform_module_load(self, module_id: str):
+        """执行模块加载（在主线程中）"""
+        info = self._modules.get(module_id)
+        if not info:
+            return
+
+        # 如果是懒加载注册的模块，先获取 widget_class
+        if not info.widget_class:
+            widget_class = self._get_widget_class_lazy(module_id)
+            if not widget_class:
+                self._show_module_error(module_id, "无法加载模块类")
+                return
+
+        try:
             widget = info.widget_class()
-            
-            # 如果是设置模块，连接settings_changed信号
+
             if module_id == "settings":
                 widget.settings_changed.connect(self._on_settings_changed)
-            
+
+            info.state = ModuleState.LOADED
+            info.instance = widget
             self.set_module_widget(module_id, widget)
-        
+            self._activate_module(module_id, info)
+        except Exception as e:
+            import traceback
+            logger.error(f"模块 {module_id} 加载失败: {e}")
+            traceback.print_exc()
+            self._show_module_error(module_id, str(e))
+
+    def _show_module_error(self, module_id: str, error_msg: str):
+        """显示模块加载错误"""
+        info = self._modules.get(module_id)
+        if not info:
+            return
+
+        info.state = ModuleState.ERROR
+        error_widget = QWidget()
+        error_layout = QVBoxLayout(error_widget)
+        error_label = QLabel(f"模块 {info.name} 加载失败\n错误信息: {error_msg}")
+        error_label.setStyleSheet("color: #ff4757; padding: 20px;")
+        error_layout.addWidget(error_label)
+        self.set_module_widget(module_id, error_widget)
+
+    def _activate_module(self, module_id: str, info):
+        """激活并显示模块"""
         if info.instance:
             for i in range(self._tab_widget.count()):
                 if self._tab_widget.tabText(i) == f"{info.icon} {info.name}":
                     self._tab_widget.setCurrentIndex(i)
                     break
         
-        info.state = ModuleState.ACTIVE
-        self._event_bus.emit(
-            EventType.MODULE_ACTIVATED,
-            {"module_id": module_id, "module_name": info.name}
-        )
+        if info.state != ModuleState.ERROR:
+            info.state = ModuleState.ACTIVE
+            self._event_bus.emit(
+                EventType.MODULE_ACTIVATED,
+                {"module_id": module_id, "module_name": info.name}
+            )
     
     def _on_settings_changed(self, setting_type, settings):
         """设置更改事件处理"""
         if "theme" in settings:
-            self._apply_theme(settings["theme"])
+            theme = settings["theme"]
+            self._apply_theme(theme)
+            # 持久化主题设置
+            self._settings.setValue("theme", theme)
+        
+        if "font_size" in settings or "font_family" in settings:
+            self._apply_font_settings(settings)
     
+    def _on_theme_changed(self, event):
+        """响应设置模块的主题切换事件，同步全局UI（通过 ThemeManager 统一处理）"""
+        theme = event.data.get("theme", "dark")
+        self._apply_theme(theme)
+
     def _apply_theme(self, theme):
-        """应用主题"""
-        if theme == "light":
-            self._apply_light_theme()
-        else:
-            self._apply_dark_theme()
-    
-    def _apply_dark_theme(self):
-        """应用深色主题"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1a1a1a;
-            }
-            QWidget {
-                color: #ffffff;
-            }
-            QLabel {
-                color: #ffffff;
-            }
-            QPushButton {
-                color: #ffffff;
-            }
-            QScrollBar:vertical {
-                background-color: #2a2a2a;
-                width: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #4a4a4a;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #5a5a5a;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background-color: #2a2a2a;
-                height: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: #4a4a4a;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background-color: #5a5a5a;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0;
-            }
-            QTabWidget::pane {
-                border: none;
-                background-color: #1a1a1a;
-            }
-            QTabBar::tab {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background-color: #3a3a3a;
-                color: #ffffff;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #303030;
-                color: #ffffff;
-            }
-        """)
-        
-        # 更新导航栏样式
+        """
+        应用主题 - 通过 ThemeManager 统一管理
+
+        历史问题修复：
+        1. 卡死 → ThemeManager 内置 _applying 防递归标志位，避免 EventBus 往复触发死循环
+        2. 未生效 → 通过 QApplication.setStyleSheet() 全局应用 QSS，
+                    主窗口 setProperty("theme", ...) 让所有子控件自动级联响应
+        3. 性能 → 不再使用 findChildren + unpolish/polish 暴力遍历
+        """
+        tm = ThemeManager.instance()
+        tm.apply_theme(theme, main_window=self)
+        actual_theme = tm.current_theme
+
+        # 更新导航栏主题（保留模块自身的导航栏样式逻辑）
         if hasattr(self, "_nav_bar"):
-            self._nav_bar.setStyleSheet("""
-                QWidget {
-                    background-color: #2a2a2a;
-                }
-            """)
+            try:
+                self._nav_bar.set_theme(actual_theme)
+            except Exception:
+                pass
+
+        # 给所有已加载模块设置 theme 属性（不调用 set_theme 避免重复触发）
+        for module_id, module_info in self._modules.items():
+            if module_info.instance:
+                try:
+                    module_info.instance.setProperty("theme", actual_theme)
+                    for child in module_info.instance.findChildren(QWidget):
+                        child.setProperty("theme", actual_theme)
+                except Exception:
+                    pass
+
+        # 持久化主题设置
+        self._settings.setValue("theme", theme)
+        self._settings.setValue("resolved_theme", actual_theme)
+
+    def _apply_font_settings(self, settings):
+        """应用字体设置"""
+        font_size = settings.get("font_size", 14)
+        font_family = settings.get("font_family", "Microsoft YaHei")
         
-        # 更新内容区域样式
-        if hasattr(self, "_tab_widget"):
-            self._tab_widget.setStyleSheet("""
-                QTabWidget::pane {
-                    border: none;
-                    background-color: #0d0d0d;
-                }
-                QTabBar::tab {
-                    background-color: #1a1a1a;
-                    color: #ffffff;
-                    padding: 10px 20px;
-                    margin-right: 2px;
-                    border-top-left-radius: 6px;
-                    border-top-right-radius: 6px;
-                    font-size: 13px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #2a2a2a;
-                    color: #ffffff;
-                }
-                QTabBar::tab:hover:!selected {
-                    background-color: #252525;
-                    color: #ffffff;
-                }
-            """)
-    
-    def _apply_light_theme(self):
-        """应用浅色主题"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f5f5f5;
-            }
-            QWidget {
-                color: #333333;
-            }
-            QLabel {
-                color: #333333;
-            }
-            QPushButton {
-                color: #333333;
-            }
-            QScrollBar:vertical {
-                background-color: #e0e0e0;
-                width: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #bdbdbd;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #9e9e9e;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background-color: #e0e0e0;
-                height: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: #bdbdbd;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background-color: #9e9e9e;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0;
-            }
-            QTabWidget::pane {
-                border: none;
-                background-color: #ffffff;
-            }
-            QTabBar::tab {
-                background-color: #e0e0e0;
-                color: #333333;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background-color: #ffffff;
-                color: #333333;
-                border: 1px solid #e0e0e0;
-                border-bottom: none;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #f0f0f0;
-                color: #333333;
-            }
-        """)
+        # 应用字体设置到整个应用
+        font = self.font()
+        font.setFamily(font_family)
+        font.setPointSize(font_size)
+        self.setFont(font)
         
-        # 更新导航栏样式
+        # 应用字体设置到子控件
+        def apply_font_to_widget(widget):
+            widget.setFont(font)
+            for child in widget.children():
+                if hasattr(child, 'setFont'):
+                    apply_font_to_widget(child)
+        
+        # 应用到中央部件
+        apply_font_to_widget(self.centralWidget())
+        
+        # 应用到导航栏
         if hasattr(self, "_nav_bar"):
-            self._nav_bar.setStyleSheet("""
-                QWidget {
-                    background-color: #ffffff;
-                }
-            """)
+            apply_font_to_widget(self._nav_bar)
         
-        # 更新内容区域样式
-        if hasattr(self, "_tab_widget"):
-            self._tab_widget.setStyleSheet("""
-                QTabWidget::pane {
-                    border: none;
-                    background-color: #ffffff;
-                }
-                QTabBar::tab {
-                    background-color: #e0e0e0;
-                    color: #333333;
-                    padding: 10px 20px;
-                    margin-right: 2px;
-                    border-top-left-radius: 6px;
-                    border-top-right-radius: 6px;
-                    font-size: 13px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #ffffff;
-                    color: #333333;
-                    border: 1px solid #e0e0e0;
-                    border-bottom: none;
-                }
-                QTabBar::tab:hover:!selected {
-                    background-color: #f0f0f0;
-                    color: #333333;
-                }
-            """)
+        # 应用到所有模块
+        for module_id, module_info in self._modules.items():
+            if module_info.instance:
+                apply_font_to_widget(module_info.instance)
+    
+    # NOTE: _apply_dark_theme / _apply_light_theme 已被 ThemeManager 取代，不再需要
+    # 主题 QSS 现在统一由 ThemeManager._build_qss() 生成，通过 QApplication 级别应用
     
     def _on_module_activated(self, event):
-        """模块激活事件处理"""
-        target = event.data.get("target")
+        """模块激活事件处理 — 支持携带数据"""
+        target = event.data.get("target") if isinstance(event.data, dict) else event.data
+        payload = event.data.get("data") if isinstance(event.data, dict) else None
         if target:
             self._nav_bar.select_module(target)
+            # 将附带数据传递给目标模块（如文案推送）
+            if payload and hasattr(self, '_modules'):
+                module = self._modules.get(target)
+                if module and hasattr(module, '_on_copywriting_received'):
+                    # 通过事件总线重新发射 COPY_GENERATED，由 EditorModule 统一处理
+                    from .core import EventType
+                    self._event_bus.emit(EventType.COPY_GENERATED, payload)
     
     def switch_to_module(self, module_id: str):
         """切换到指定模块"""
@@ -847,11 +945,19 @@ class MainWindow(QMainWindow):
     
     def show_status(self, message: str, color: str = "#808080"):
         """显示状态消息"""
-        pass
+        self._status_bar.showMessage(message, 3000)  # 3秒后自动消失
+        self._status_bar.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: #2a2a2a;
+                color: {color};
+                font-size: 13px;
+                font-weight: 500;
+            }}
+        """)
     
     def _show_help(self):
         """显示帮助信息"""
-        from .settings_module import HelpModule
+        from .help_module import HelpModule
         if "help" in self._modules and not self._modules["help"].instance:
             self.set_module_widget("help", HelpModule())
         self.switch_to_module("help")
@@ -864,39 +970,28 @@ class MainWindow(QMainWindow):
         self.switch_to_module("settings")
     
     def _on_login_clicked(self):
-        """登录按钮点击事件"""
+        """登录按钮点击事件 - 异步非阻塞方式"""
         from .login_window import LoginWindow
-        login_window = LoginWindow()
-        
-        login_success = [False]
-        
-        def on_login_success():
-            login_success[0] = True
-            login_window.close()
-        
-        login_window.login_success.connect(on_login_success)
+        login_window = LoginWindow(parent=self)
+        login_window.login_success.connect(self._on_login_success)
         login_window.show()
-        
-        from PyQt6.QtWidgets import QApplication
-        app = QApplication.instance()
-        while login_window.isVisible():
-            app.processEvents()
-        
-        if login_success[0]:
-            self._update_auth_status()
+    
+    def _on_login_success(self):
+        """登录成功回调"""
+        self._update_auth_status()
+        self.show_status("登录成功", "#4caf50")
     
     def _on_activate_clicked(self):
-        """激活按钮点击事件"""
+        """激活按钮点击事件 - 异步非阻塞方式"""
         from .login_window import ActivationWindow
-        activation_window = ActivationWindow()
+        activation_window = ActivationWindow(parent=self)
+        activation_window.activation_success.connect(self._on_activation_success)
         activation_window.show()
-        
-        from PyQt6.QtWidgets import QApplication
-        app = QApplication.instance()
-        while activation_window.isVisible():
-            app.processEvents()
-        
+    
+    def _on_activation_success(self):
+        """激活成功回调"""
         self._update_auth_status()
+        self.show_status("激活成功", "#4caf50")
     
     def _update_auth_status(self):
         """更新授权状态"""
@@ -935,5 +1030,19 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     logger.warning(f"清理模块 {module_name} 失败: {e}")
         
+        try:
+            from modules.lego.async_track_renderer import shutdown_async_track_renderer
+            shutdown_async_track_renderer()
+            logger.info("异步轨道渲染系统已关闭")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"关闭异步渲染系统: {e}")
+        
         logger.info("应用关闭完成")
+        for child in self.findChildren(QWidget):
+            try:
+                child.close()
+            except Exception:
+                pass
         event.accept()
