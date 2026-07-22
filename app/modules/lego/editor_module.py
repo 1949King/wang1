@@ -150,7 +150,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QMessageBox, QInputDialog, QTabWidget, QCheckBox, QSlider,
     QTreeWidget, QTreeWidgetItem, QMenu, QToolButton, QApplication, QSizePolicy,
-    QFormLayout, QSpacerItem, QToolTip
+    QFormLayout, QSpacerItem, QToolTip, QStackedLayout
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -400,6 +400,19 @@ class EditorModule(BaseModule):
         
         # 安装额外快捷键
         self._install_additional_shortcuts()
+
+        # P0：定时自动保存（静默）
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(120000)
+        self._autosave_timer.timeout.connect(self._autosave_project)
+        self._autosave_timer.start()
+        self._project_dirty = False
+        self._master_volume = 1.0
+        self._bgm_player = None
+        self._bgm_audio_output = None
+        self._bgm_bound_clip_id = None
+        self._autosave_prompted = False
+        QTimer.singleShot(1200, self._maybe_restore_autosave)
     
     def _ensure_top0_engine(self):
         """通过统一调度器懒加载 TOP0 引擎。"""
@@ -487,7 +500,65 @@ class EditorModule(BaseModule):
         self._preview_manager.timecode_updated.connect(self._on_timecode_updated)
         print("✅ 预览管理器已加载")
         return self._preview_manager
-    
+
+    def _ensure_gl_preview(self):
+        """懒加载 GPU 滤镜预览组件；GL 不可用时返回 None（全程回退 CPU 路径）"""
+        w = getattr(self, '_gl_widget', None)
+        if w is not None:
+            return w if getattr(w, 'gl_ok', False) else None
+        if getattr(self, '_gl_unavailable', False):
+            return None
+        try:
+            # 预检 GL 可用性，避免黑窗
+            from PyQt6.QtGui import QOffscreenSurface, QOpenGLContext
+            surf = QOffscreenSurface()
+            surf.create()
+            ctx = QOpenGLContext()
+            if not ctx.create():
+                self._gl_unavailable = True
+                logger.warning("GL 上下文创建失败，滤镜预览走 CPU 路径")
+                return None
+            from core.gl_filter_widget import GLFilterWidget
+            w = GLFilterWidget(self._preview_frame)
+            pv = self._preview_frame.layout()
+            if isinstance(pv, QStackedLayout):
+                pv.addWidget(w)
+                pv.setCurrentWidget(w)  # 触发 initializeGL
+            w.show()
+            self._gl_widget = w
+            if not w.gl_ok:
+                self._gl_unavailable = True
+                return None
+            # GL 接管滤镜后，PreviewManager 只供原始帧
+            if getattr(self, '_preview_manager', None) is not None:
+                self._preview_manager.set_active_effects(None)
+            print("✅ GPU 滤镜预览已启用")
+            return w
+        except Exception as e:
+            logger.warning(f"GL 预览初始化失败，回退 CPU 预览: {e}")
+            self._gl_unavailable = True
+            self._gl_widget = None
+            return None
+
+    def _show_frame_gl(self, qimg, effects):
+        """GPU 显示路径：字幕叠加后上传纹理，滤镜/缩放由 shader 完成"""
+        gl = getattr(self, '_gl_widget', None)
+        if gl is None or not getattr(gl, 'gl_ok', False):
+            self._on_preview_frame(qimg)
+            return
+        try:
+            qimg = self._overlay_subtitles_on_qimage(qimg)
+        except Exception:
+            pass
+        try:
+            pv_layout = self._preview_frame.layout()
+            if isinstance(pv_layout, QStackedLayout):
+                pv_layout.setCurrentWidget(gl)
+        except Exception:
+            pass
+        gl.show_frame(qimg, effects or {})
+
+
     def _ensure_scheduler(self):
         """懒加载调度器"""
         if self._editor_scheduler is not None:
@@ -585,6 +656,8 @@ class EditorModule(BaseModule):
         
         actions = [
             ("📁 导入", self._import_video),
+            ("📂 打开", self._open_project),
+            ("💾 保存", self._save_project),
             ("✂️ 剪切", self._cut_clip),
             ("📋 复制", self._copy_clip),
             ("📄 粘贴", self._paste_clip),
@@ -742,14 +815,15 @@ class EditorModule(BaseModule):
         self._preview_frame = QFrame()
         self._preview_frame.setStyleSheet("background-color: #000000; border-radius: 8px;")
         self._video_widget.setStyleSheet("background-color: #000000; border-radius: 8px;")
-        pv_layout = QVBoxLayout(self._preview_frame)
+        pv_layout = QStackedLayout(self._preview_frame)
         pv_layout.setContentsMargins(0, 0, 0, 0)
-        pv_layout.addWidget(self._video_widget, 1)
+        self._video_widget.setStyleSheet("background-color: #000000;")
+        pv_layout.addWidget(self._video_widget)
         self._preview_label = QLabel("视频预览区")
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setStyleSheet("color: #333333; font-size: 16px;")
-        pv_layout.addWidget(self._preview_label, 1)
-        self._preview_label.hide()
+        self._preview_label.setStyleSheet("color: #666666; font-size: 16px; background-color: #000000;")
+        pv_layout.addWidget(self._preview_label)
+        pv_layout.setCurrentWidget(self._preview_label)
         body_lo.addWidget(self._preview_frame, 1)
         
         controls = QWidget()
@@ -1738,6 +1812,7 @@ class EditorModule(BaseModule):
         snap_btn = QPushButton("📌 吸附")
         snap_btn.setCheckable(True)
         snap_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:checked{background:#1e6bde;color:#fff;border-color:#1e6bde;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
+        snap_btn.toggled.connect(self._on_snap_toggled)
         title_layout.addWidget(snap_btn)
         
         layout.addWidget(title_bar)
@@ -1750,6 +1825,11 @@ class EditorModule(BaseModule):
         self._timeline_widget.clip_selected.connect(self._on_clip_selected)
         # 补短 P1#8：监听关键帧点击 - 落到具体 keyframe 数据上
         self._timeline_widget.clip_keyframe_clicked.connect(self._on_keyframe_clicked)
+        # 连接拖放导入信号
+        self._timeline_widget.files_dropped.connect(self._on_files_dropped)
+        self._timeline_widget.clip_context_action.connect(self._on_timeline_clip_context)
+        self._timeline_widget.playhead_moved.connect(self._on_timeline_playhead_moved)
+        self._timeline_widget.clip_trim_committed.connect(self._on_clip_trim_committed)
         body_lo.addWidget(self._timeline_widget, 3)
 
         self._edit_agent_panel = self._create_edit_agent_panel()
@@ -1841,7 +1921,7 @@ class EditorModule(BaseModule):
                     [ffmpeg, '-y', '-i', file_path, '-vframes', '1',
                      '-s', '320x240', thumb_path],
                     capture_output=True, text=True, timeout=30,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0
                 )
                 if os.path.exists(thumb_path):
                     pixmap = QPixmap(thumb_path)
@@ -1855,8 +1935,8 @@ class EditorModule(BaseModule):
                         self._import_preview_label.setText("")
                     try:
                         os.remove(thumb_path)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
             else:
                 info = f"📁 {os.path.basename(file_path)}\n\n{os.path.getsize(file_path) // 1024} KB"
                 self._import_preview_label.setText(info)
@@ -1864,20 +1944,104 @@ class EditorModule(BaseModule):
             self._import_preview_label.setText(f"预览失败: {e}")
 
     def _on_preview_frame(self, qimage):
-        """ """
-        if qimage and hasattr(self, '_preview_label'):
+        """预览帧更新：叠字幕后显示（中文走 QPainter）"""
+        if qimage and hasattr(self, '_preview_label') and hasattr(self, '_preview_frame'):
+            try:
+                qimage = self._overlay_subtitles_on_qimage(qimage)
+            except Exception as e:
+                print(f"字幕叠加失败: {e}")
             pixmap = QPixmap.fromImage(qimage)
             if not pixmap.isNull():
+                pv_layout = self._preview_frame.layout()
+                if isinstance(pv_layout, QStackedLayout):
+                    pv_layout.setCurrentWidget(self._preview_label)
                 self._preview_label.setPixmap(
                     pixmap.scaled(self._preview_frame.size(), 
                                   Qt.AspectRatioMode.KeepAspectRatio,
                                   Qt.TransformationMode.SmoothTransformation))
                 self._preview_label.show()
 
+    def _overlay_subtitles_on_qimage(self, qimage):
+        """在预览图上绘制当前时间轴字幕"""
+        try:
+            sm = self._ensure_subtitle_manager()
+        except Exception:
+            return qimage
+        if sm is None:
+            return qimage
+        try:
+            subs = sm.list_subtitles()
+        except Exception:
+            return qimage
+        if not subs:
+            return qimage
+        t = float(getattr(self, "_playhead_position", 0) or 0)
+        active = [
+            s for s in subs
+            if s.get("visible", True)
+            and float(s.get("start_time", 0)) <= t <= float(s.get("end_time", 0))
+        ]
+        if not active:
+            return qimage
+        img = qimage.copy()
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        w, h = img.width(), img.height()
+        for sub in active:
+            text = str(sub.get("text", "") or "")
+            if not text:
+                continue
+            font_size = 28
+            outline = 2
+            text_color = QColor(255, 255, 255)
+            try:
+                style = sm.get_subtitle_style(sub.get("style", "default")) or {}
+                font_size = int(style.get("font_size", 28) or 28)
+                outline = int(style.get("outline", style.get("stroke", 2)) or 2)
+                c = style.get("color") or style.get("font_color") or "#FFFFFF"
+                if isinstance(c, str) and c.startswith("#") and len(c) >= 7:
+                    text_color = QColor(c)
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+            font = QFont("Microsoft YaHei", max(14, int(font_size * h / 1080)))
+            painter.setFont(font)
+            fm = QFontMetrics(font)
+            tw = fm.horizontalAdvance(text)
+            th = fm.height()
+            x = max(8, (w - tw) // 2)
+            y_ratio = 0.85
+            try:
+                y_ratio = float((sub.get("position") or {}).get("y", 0.85))
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+            y = int(h * min(0.95, max(0.1, y_ratio)))
+            pad = 8
+            painter.fillRect(x - pad, y - th - pad // 2, tw + pad * 2, th + pad, QColor(0, 0, 0, 150))
+            # 描边
+            if outline > 0:
+                painter.setPen(QColor(0, 0, 0))
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+                    painter.drawText(x + dx * outline // 2, y + dy * outline // 2, text)
+            painter.setPen(text_color)
+            painter.drawText(x, y, text)
+        painter.end()
+        return img
+
     def _on_timecode_updated(self, tc):
-        """ """
+        """单文件 PM 播放时的时间码；时间线播放模式下由 tick 驱动，此处不抢 playhead"""
         if hasattr(self, '_timecode_label'):
             self._timecode_label.setText(tc)
+        if getattr(self, "_timeline_playing", False):
+            return
+        pm = getattr(self, '_preview_manager', None)
+        if pm and pm.is_playing:
+            t = float(pm.current_time)
+            self._playhead_position = t
+            self._current_time = t
+            if hasattr(self, '_timeline_widget') and self._timeline_widget:
+                self._timeline_widget.set_playhead_position(t)
+            self._update_time_display()
 
 
 
@@ -1897,28 +2061,38 @@ class EditorModule(BaseModule):
             QMessageBox.information(self, "滤镜", "滤镜已应用")
     
     def _load_video(self, file_path):
-        """ """
-        # 更新预览窗口
+        """加载视频 - 使用PreviewManager显示画面，QMediaPlayer仅用于音频播放"""
         self._preview_label.setText(f"加载中... {os.path.basename(file_path)}")
-        self._preview_label.show()
+        pv_layout = self._preview_frame.layout()
+        if isinstance(pv_layout, QStackedLayout):
+            pv_layout.setCurrentWidget(self._preview_label)
         
-        # 使用QMediaPlayer加载视频
+        # 使用QMediaPlayer加载视频（主要用于音频）
         media_content = QUrl.fromLocalFile(file_path)
         self._media_player.setSource(media_content)
         
-        # 连接信号
-        self._media_player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self._media_player.positionChanged.connect(self._on_position_changed)
-        self._media_player.durationChanged.connect(self._on_duration_changed)
+        # 信号只连接一次，避免重复导入后回调叠加
+        if not getattr(self, '_media_signals_connected', False):
+            self._media_player.playbackStateChanged.connect(self._on_playback_state_changed)
+            self._media_player.positionChanged.connect(self._on_position_changed)
+            self._media_player.durationChanged.connect(self._on_duration_changed)
+            self._media_player.mediaStatusChanged.connect(self._on_media_status_changed)
+            self._media_player.errorOccurred.connect(self._on_media_error)
+            self._media_signals_connected = True
         
-        # 在素材库中添加视频
-        # 这里可以添加视频到素材库的逻辑
+        # 使用PreviewManager加载视频用于画面预览
+        try:
+            preview_manager = self._ensure_preview_manager()
+            if preview_manager.open_video(file_path):
+                initial_frame = preview_manager.get_frame_at(0.0)
+                if initial_frame:
+                    self._on_preview_frame(initial_frame)
+                    print(f"PreviewManager成功加载视频: {file_path}")
+        except Exception as e:
+            print(f"PreviewManager加载视频失败: {e}")
+        
         print(f"加载视频: {file_path}")
-        # 将视频添加到时间线
         self._add_clip_to_timeline(file_path)
-        
-        # 隐藏加载提示,显示视频
-        self._preview_label.hide()
     
     
     
@@ -1926,8 +2100,41 @@ class EditorModule(BaseModule):
         """ """
         self._current_clip = clip_data
         print(f"选择片段: {clip_data['id']}")
-        # 选中片段后，预览直接显示该片段对应区间，使工具栏编辑可见
         self._refresh_preview_to_current_clip()
+    
+    def _on_media_status_changed(self, status):
+        """QMediaPlayer媒体状态变化回调"""
+        from PyQt6.QtMultimedia import QMediaPlayer
+        status_map = {
+            QMediaPlayer.MediaStatus.NoMedia: "NoMedia",
+            QMediaPlayer.MediaStatus.LoadingMedia: "LoadingMedia",
+            QMediaPlayer.MediaStatus.LoadedMedia: "LoadedMedia",
+            QMediaPlayer.MediaStatus.StalledMedia: "StalledMedia",
+            QMediaPlayer.MediaStatus.BufferedMedia: "BufferedMedia",
+            QMediaPlayer.MediaStatus.EndOfMedia: "EndOfMedia",
+            QMediaPlayer.MediaStatus.InvalidMedia: "InvalidMedia",
+        }
+        print(f"媒体状态变化: {status_map.get(status, status)}")
+        
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            self._video_duration = self._media_player.duration()
+            if hasattr(self, '_progress_bar'):
+                self._progress_bar.setRange(0, self._video_duration)
+            print(f"视频时长: {self._video_duration}ms")
+    
+    def _on_media_error(self, error, error_string):
+        """QMediaPlayer错误回调"""
+        print(f"媒体播放错误: {error_string}")
+        self._preview_label.setText(f"播放失败: {error_string}")
+        pv_layout = self._preview_frame.layout()
+        if isinstance(pv_layout, QStackedLayout):
+            pv_layout.setCurrentWidget(self._preview_label)
+    
+    def on_deactivated(self):
+        """模块停用回调 - 停止所有媒体播放"""
+        self._media_player.stop()
+        self._audio_output = None
+        logger.info("编辑器模块已停用，媒体播放器已停止")
 
     # ------------------------------------------------------------------
     # 补短 P1#8：关键帧可视化 - 公开便利 API
@@ -1994,39 +2201,112 @@ class EditorModule(BaseModule):
         return widget.get_keyframes()
 
     def _on_keyframe_clicked(self, clip_data, keyframe):
-        """
-        关键帧被点击 - 落到具体 kf 数据上。
-        当前实现：选中 clip + 控制台打印（轻量反馈，不打断用户），
-        后续可在此处弹出"关键帧编辑面板"或调用 keyframe_animation 引擎。
-        """
+        """关键帧点击：选中片段并刷新预览（插值已接入 _collect_preview_effects）。"""
         self._current_clip = clip_data
         try:
             prop = keyframe.get('prop', 'value')
-            t = keyframe.get('time_offset', 0.0)
+            t = float(keyframe.get('time_offset', 0.0) or 0)
             value = keyframe.get('value', 0.0)
-            easing = keyframe.get('easing', 'linear')
-            print(f"[P1#8] 关键帧点击: clip={clip_data.get('id')}, "
-                  f"prop={prop}, t={t:.2f}s, value={value}, easing={easing}")
+            st = float(clip_data.get("start_time", 0) or 0)
+            self._playhead_position = st + t
+            if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                self._timeline_widget.set_playhead_position(self._playhead_position)
+            self._refresh_preview_with_effects()
+            self._notify_edit(f"关键帧 {prop}={value} @ {t:.2f}s")
         except Exception as e:
-            print(f"[P1#8] 关键帧点击处理异常: {e}")
-    
-    
-    
-    def _move_clip(self, clip_id, new_start_time):
-        """ """
+            print(f"关键帧点击处理异常: {e}")
+
+    def set_clip_speed(self, clip_id, speed: float):
+        """设置片段播放速度（预览时钟与导出 setpts）。"""
+        speed = max(0.05, min(8.0, float(speed)))
         for clip in self._clips:
-            if clip['id'] == clip_id:
-                clip['start_time'] = new_start_time
-                print(f"移动片段 {clip_id} 到 {new_start_time}s")
-                break
-    
+            if clip.get("id") != clip_id:
+                continue
+            clip["speed"] = speed
+            self._project_dirty = True
+            self._refresh_preview_with_effects()
+            self._notify_edit(f"片段速度 {speed}x")
+            return True
+        return False
+
+    def add_keyframe_at_playhead(self, prop: str = "opacity", value: float = 1.0):
+        """在播放头位置为当前片段添加关键帧。"""
+        clip = self._current_clip
+        if not clip:
+            self._notify_edit("请先选择片段")
+            return False
+        st = float(clip.get("start_time", 0) or 0)
+        local_t = max(0.0, float(self._playhead_position) - st)
+        kfs = list(clip.get("keyframes") or [])
+        kfs.append({
+            "time_offset": local_t,
+            "value": float(value),
+            "prop": prop,
+            "easing": "linear",
+        })
+        return self.add_keyframes_to_clip(clip.get("id"), kfs)
+        """移动片段开始时间（写入数据 + 时间线定位 + 撤销）。"""
+        for clip in self._clips:
+            if clip.get("id") != clip_id:
+                continue
+            before = {
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "track": int(clip.get("track", 0) or 0),
+                "duration": float(clip.get("duration", 0) or 0),
+                "in_point": float(clip.get("in_point", 0) or 0),
+                "out_point": float(clip.get("out_point", 0) or 0),
+            }
+            clip["start_time"] = max(0.0, float(new_start_time))
+            self._record_action({
+                "type": "edit_clip",
+                "clip_id": clip_id,
+                "before": before,
+                "after": {
+                    "start_time": float(clip["start_time"]),
+                    "track": int(clip.get("track", 0) or 0),
+                    "duration": float(clip.get("duration", 0) or 0),
+                    "in_point": float(clip.get("in_point", 0) or 0),
+                    "out_point": float(clip.get("out_point", 0) or 0),
+                },
+            })
+            self._sync_timeline_widget_state()
+            self._sync_kernel_timeline()
+            self._notify_edit(f"已移动片段到 {clip['start_time']:.2f}s")
+            return True
+        return False
+
     def _resize_clip(self, clip_id, new_duration):
-        """ """
+        """调整片段时长并同步 out_point。"""
         for clip in self._clips:
-            if clip['id'] == clip_id:
-                clip['duration'] = new_duration
-                print(f"调整片段 {clip_id} 长度为 {new_duration}s")
-                break
+            if clip.get("id") != clip_id:
+                continue
+            before = {
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "track": int(clip.get("track", 0) or 0),
+                "duration": float(clip.get("duration", 0) or 0),
+                "in_point": float(clip.get("in_point", 0) or 0),
+                "out_point": float(clip.get("out_point", 0) or 0),
+            }
+            dur = max(0.05, float(new_duration))
+            in_p = float(clip.get("in_point", 0) or 0)
+            clip["duration"] = dur
+            clip["out_point"] = in_p + dur
+            self._record_action({
+                "type": "edit_clip",
+                "clip_id": clip_id,
+                "before": before,
+                "after": {
+                    "start_time": float(clip.get("start_time", 0) or 0),
+                    "track": int(clip.get("track", 0) or 0),
+                    "duration": dur,
+                    "in_point": in_p,
+                    "out_point": in_p + dur,
+                },
+            })
+            self._sync_timeline_widget_state()
+            self._sync_kernel_timeline()
+            return True
+        return False
     
     def _on_ai_clip(self):
         """
@@ -2189,6 +2469,7 @@ class EditorModule(BaseModule):
         self._redo_history.clear()
         if len(self._action_history) > getattr(self, 'MAX_UNDO_DEPTH', 100):
             self._action_history.pop(0)
+        self._project_dirty = True
         self._update_undo_redo_state()
 
     def _timeline_add_clip_widget(self, clip: dict) -> None:
@@ -2209,56 +2490,72 @@ class EditorModule(BaseModule):
             if widget in self._clip_widgets:
                 self._clip_widgets.remove(widget)
         if hasattr(self, '_timeline_widget') and self._timeline_widget is not None:
-            for track in getattr(self._timeline_widget, '_tracks', []):
-                layout = track.get("content_layout")
-                if not layout:
-                    continue
-                for i in reversed(range(layout.count())):
-                    w = layout.itemAt(i).widget()
-                    if w is not None and getattr(w, "clip_data", {}).get("id") == clip_id:
-                        layout.removeWidget(w)
-                        w.deleteLater()
-                        break
+            if hasattr(self._timeline_widget, "remove_clip_widget_by_id"):
+                self._timeline_widget.remove_clip_widget_by_id(clip_id)
+            else:
+                for track in getattr(self._timeline_widget, '_tracks', []):
+                    layout = track.get("content_layout")
+                    if not layout:
+                        continue
+                    for i in reversed(range(layout.count())):
+                        w = layout.itemAt(i).widget()
+                        if w is not None and getattr(w, "clip_data", {}).get("id") == clip_id:
+                            layout.removeWidget(w)
+                            w.deleteLater()
+                            break
+
+    def _apply_clip_fields(self, clip: dict, fields: dict) -> None:
+        if not clip or not fields:
+            return
+        for k, v in fields.items():
+            clip[k] = v
 
     def _apply_action(self, action: dict, mode: str) -> None:
         """执行一次操作或其逆操作。
 
         mode='do'  正向执行（用于重做 / 记录时的实做）
         mode='undo' 反向回滚（用于撤销）
-        返回实做完成后供撤销使用的信息。
         """
         atype = action.get("type")
 
         if atype in ("delete", "redo_delete"):
-            is_delete = (mode == 'do') if atype == "redo_delete" else (mode == 'undo')
+            is_delete = (mode == 'do')
             clip = action["clip"]
+            shifts = action.get("ripple_shifts") or []
             if is_delete:
-                # 删除：移出数据 + 控件
                 self._clips = [c for c in self._clips if c.get("id") != clip.get("id")]
                 self._timeline_remove_clip_widget(clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                     self._current_clip = None
+                for sh in shifts:
+                    for c in self._clips:
+                        if c.get("id") == sh.get("id"):
+                            c["start_time"] = float(sh.get("new", c.get("start_time", 0)))
             else:
-                # 恢复：加回数据 + 控件
                 if clip not in self._clips:
                     self._clips.append(clip)
                 self._timeline_add_clip_widget(clip)
                 self._current_clip = clip
+                for sh in shifts:
+                    for c in self._clips:
+                        if c.get("id") == sh.get("id"):
+                            c["start_time"] = float(sh.get("old", c.get("start_time", 0)))
 
         elif atype in ("split", "redo_split"):
-            is_split = (mode == 'do') if atype == "redo_split" else (mode == 'undo')
+            is_split = (mode == 'do')
             original = action["original_clip"]
             new_clip = action["new_clip"]
             if is_split:
-                # 切分：缩短原片段，追加新片段
-                original["duration"] = action["original_duration"]
-                original["out_point"] = action["original_out_point"]
+                left_dur = float(action["original_duration"]) - float(new_clip.get("duration", 0))
+                if left_dur <= 0.05:
+                    left_dur = float(action["original_duration"]) * 0.5
+                original["duration"] = left_dur
+                original["out_point"] = float(original.get("in_point", 0)) + left_dur
                 if new_clip not in self._clips:
                     self._clips.append(new_clip)
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
             else:
-                # 合并：恢复原片段，删除新片段
                 original["duration"] = action["original_duration"]
                 original["out_point"] = action["original_out_point"]
                 self._clips = [c for c in self._clips if c.get("id") != new_clip.get("id")]
@@ -2266,7 +2563,7 @@ class EditorModule(BaseModule):
                 self._current_clip = original
 
         elif atype in ("paste", "redo_paste"):
-            is_paste = (mode == 'do') if atype == "redo_paste" else (mode == 'undo')
+            is_paste = (mode == 'do')
             new_clip = action["new_clip"]
             if is_paste:
                 if new_clip not in self._clips:
@@ -2278,6 +2575,15 @@ class EditorModule(BaseModule):
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == new_clip.get("id"):
                     self._current_clip = None
+
+        elif atype == "edit_clip":
+            clip_id = action.get("clip_id")
+            fields = action.get("after") if mode == "do" else action.get("before")
+            for c in self._clips:
+                if c.get("id") == clip_id:
+                    self._apply_clip_fields(c, fields or {})
+                    self._current_clip = c
+                    break
 
         # 刷新时间线与预览
         self._sync_timeline_widget_state()
@@ -2291,11 +2597,9 @@ class EditorModule(BaseModule):
             action = self._action_history.pop()
             self._redo_history.append(action)
             self._apply_action(action, mode='undo')
-            self._undo_redo_toast = f"已撤销: {action.get('type')}"
-            print(f"[撤销] {self._undo_redo_toast}")
+            self._notify_edit(f"已撤销: {action.get('type')}")
         else:
-            self._undo_redo_toast = "没有可撤销的操作"
-            print(f"[撤销] {self._undo_redo_toast}")
+            self._notify_edit("没有可撤销的操作")
         self._update_undo_redo_state()
 
     def _redo(self):
@@ -2304,11 +2608,9 @@ class EditorModule(BaseModule):
             action = self._redo_history.pop()
             self._action_history.append(action)
             self._apply_action(action, mode='do')
-            self._undo_redo_toast = f"已重做: {action.get('type')}"
-            print(f"[重做] {self._undo_redo_toast}")
+            self._notify_edit(f"已重做: {action.get('type')}")
         else:
-            self._undo_redo_toast = "没有可重做的操作"
-            print(f"[重做] {self._undo_redo_toast}")
+            self._notify_edit("没有可重做的操作")
         self._update_undo_redo_state()
 
     
@@ -2342,74 +2644,212 @@ class EditorModule(BaseModule):
                 )
     
     def _apply_effect(self, clip_id, effect_name, **params):
-        """ """
+        """应用特效到片段并立即预览。"""
         target_clip = None
         for clip in self._clips:
             if clip['id'] == clip_id:
                 target_clip = clip
                 break
         if not target_clip:
-            QMessageBox.warning(self, "操作失败", "未找到指定的片段")
+            self._notify_edit("未找到指定的片段")
             return
+        # 经 EffectManager 规范化参数
+        try:
+            em = self._ensure_effect_manager()
+            inst = {"name": effect_name, "effect_id": effect_name, "parameters": dict(params)}
+            em.apply_effect(clip_id, inst)
+            params = dict(inst.get("_preview_params") or params)
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         effects = target_clip.get('effects', {})
+        if not isinstance(effects, dict):
+            effects = {}
+        effects.update(params)
         effects[effect_name] = params
         target_clip['effects'] = effects
+        self._current_clip = target_clip
         self._refresh_preview_with_effects()
-        print(f"应用特效 {effect_name} 到片段 {clip_id},参数: {params}")
-        QMessageBox.information(self, "操作成功", f"特效 {effect_name} 已应用到片段 {clip_id}")
-    
+        self._notify_edit(f"特效 {effect_name} 已应用")
+
+    def _apply_effect_to_clip(self, clip: Dict[str, Any], effect_type: str, params: Dict[str, Any]):
+        """对指定片段应用通用效果元数据。"""
+        effects = clip.get("effects") or {}
+        if not isinstance(effects, dict):
+            effects = {}
+        mapped = dict(params or {})
+        try:
+            em = self._ensure_effect_manager()
+            inst = {"name": effect_type, "effect_id": effect_type, "parameters": mapped}
+            em.apply_effect(clip.get("id"), inst)
+            mapped.update(inst.get("_preview_params") or {})
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+        effects[effect_type] = mapped
+        for k in ("blur", "sharpen", "vignette", "brightness", "contrast", "saturation", "opacity", "scale"):
+            if k in mapped:
+                effects[k] = mapped[k]
+        clip["effects"] = effects
+        self._sync_timeline_widget_state()
+        self._refresh_preview_with_effects()
+
     def _add_transition(self, clip_id, transition_name, duration=1.0):
-        """ """
+        """添加转场元数据到片段。"""
         target_clip = None
         for clip in self._clips:
             if clip['id'] == clip_id:
                 target_clip = clip
                 break
         if not target_clip:
-            QMessageBox.warning(self, "操作失败", "未找到指定的片段")
+            self._notify_edit("未找到指定的片段")
             return
         transitions = target_clip.get('transitions', [])
+        if not isinstance(transitions, list):
+            transitions = []
         transitions.append({
             'type': transition_name,
             'duration': duration,
             'time': self._playhead_position
         })
         target_clip['transitions'] = transitions
-        print(f"添加转场 {transition_name} 到片段 {clip_id},时长: {duration}秒")
-        QMessageBox.information(self, "操作成功", f"转场 {transition_name} 已添加到片段 {clip_id}")
+        target_clip['transition'] = transitions[-1]
+        self._notify_edit(f"转场 {transition_name} {duration}s")
 
     def _refresh_preview_with_effects(self):
-        """刷新预览以反映当前效果参数"""
-        try:
-            from app.core.video_processing.gpu_render import get_gpu_renderer
-            gpu = get_gpu_renderer()
-        except (ImportError, ModuleNotFoundError):
-            gpu = None
-        
-        # 确保预览管理器已初始化
+        """刷新预览以反映当前效果参数（所见即所得）"""
         pm = self._ensure_preview_manager() if hasattr(self, '_ensure_preview_manager') else None
-        
-        if self._current_clip and self._video_source:
-            effects = self._current_clip.get('effects', {})
-            color_params = getattr(self, '_color_params', {})
-            filter_name = getattr(self, '_active_filter', None)
-            all_effects = dict(effects)
-            all_effects.update(color_params)
-            if filter_name:
-                all_effects['filter'] = filter_name
-            
-            if gpu and pm:
-                pm.set_active_effects(all_effects)
-                pm.update_preview(self._playhead_position, effects=all_effects)
-            elif pm:
-                pm.set_active_effects(all_effects)
-                pm.update_preview(self._playhead_position, effects=all_effects)
+        if not pm:
+            return
+        clip = self._current_clip
+        effects = self._collect_preview_effects(clip)
+        # 用素材内时间刷新
+        t = float(getattr(self, '_playhead_position', 0) or 0)
+        if clip:
+            st = float(clip.get('start_time', 0) or 0)
+            in_p = float(clip.get('in_point', 0) or 0)
+            source_t = max(0.0, t - st + in_p)
+        else:
+            source_t = t
+        # GPU 路径：取原始帧，滤镜交给 shader（滑杆拖动只换 uniform，秒开）
+        gl = self._ensure_gl_preview()
+        if gl is not None and clip:
+            src = clip.get('path')
+            if src and os.path.exists(src) and getattr(pm, '_video_source', None) != src:
+                pm.open_video(src)
+            qimg = pm.get_frame_at(source_t, effects={})
+            if qimg is not None:
+                self._show_frame_gl(qimg, effects)
+                return
+        pm.set_active_effects(effects)
+        pm.update_preview(source_t, effects=effects)
+
+    def _collect_preview_effects(self, clip=None) -> dict:
+        """汇总当前片段滤镜/调色/关键帧插值，供预览与播放共用。"""
+        clip = clip or self._current_clip
+        effects: dict = {}
+        if clip:
+            raw = clip.get("effects") or {}
+            if isinstance(raw, dict):
+                effects.update(raw)
+            if clip.get("filter"):
+                effects["filter"] = clip.get("filter")
+                effects["filter_intensity"] = float(clip.get("filter_intensity", 0.7) or 0.7)
+            elif getattr(self, "_active_filter_key", ""):
+                effects["filter"] = self._active_filter_key
+                slider = getattr(self, "_filter_intensity_slider", None)
+                effects["filter_intensity"] = (slider.value() / 100.0) if slider else 0.7
+            # 关键帧插值（相对片段本地时间）
+            t = float(getattr(self, "_playhead_position", 0) or 0)
+            st = float(clip.get("start_time", 0) or 0)
+            local_t = max(0.0, t - st)
+            kf_vals = self._interpolate_clip_keyframes(clip, local_t)
+            for k, v in kf_vals.items():
+                if k == "volume":
+                    effects["_volume"] = v
+                else:
+                    effects[k] = v
+            if "opacity" not in effects and clip.get("opacity") is not None:
+                effects["opacity"] = float(clip.get("opacity"))
+            if clip.get("speed"):
+                effects["_speed"] = float(clip.get("speed") or 1.0)
+        cp = getattr(self, "_color_params", None) or {}
+        if cp:
+            nested = effects.get("color_params")
+            if isinstance(nested, dict):
+                merged = dict(nested)
+                merged.update(cp)
+                effects["color_params"] = merged
             else:
-                # 回退：通过 media_player 刷新当前帧
-                current_pos = self._media_player.position()
-                self._media_player.setPosition(current_pos)
+                effects["color_params"] = dict(cp)
+        return effects
 
+    def _interpolate_clip_keyframes(self, clip, local_t: float) -> dict:
+        """线性插值片段关键帧（opacity/volume/scale）。"""
+        kfs = clip.get("keyframes") or []
+        if not isinstance(kfs, list) or not kfs:
+            return {}
+        by_prop = {}
+        for kf in kfs:
+            if not isinstance(kf, dict):
+                continue
+            prop = str(kf.get("prop") or kf.get("property") or "")
+            if not prop:
+                continue
+            by_prop.setdefault(prop, []).append(kf)
+        out = {}
+        for prop, items in by_prop.items():
+            if prop not in ("opacity", "volume", "scale", "scale_x", "scale_y"):
+                continue
+            items = sorted(items, key=lambda x: float(x.get("time_offset", x.get("time", 0)) or 0))
+            times = [float(x.get("time_offset", x.get("time", 0)) or 0) for x in items]
+            vals = [float(x.get("value", 0) or 0) for x in items]
+            if local_t <= times[0]:
+                out[prop if prop != "scale_x" else "scale"] = vals[0]
+                continue
+            if local_t >= times[-1]:
+                out[prop if prop != "scale_x" else "scale"] = vals[-1]
+                continue
+            for i in range(len(times) - 1):
+                if times[i] <= local_t <= times[i + 1]:
+                    span = times[i + 1] - times[i] or 1e-6
+                    a = (local_t - times[i]) / span
+                    v = vals[i] * (1 - a) + vals[i + 1] * a
+                    key = "scale" if prop in ("scale", "scale_x", "scale_y") else prop
+                    out[key] = v
+                    break
+        return out
 
+    def _clips_at_playhead(self, t: float = None):
+        """播放头下所有覆盖片段，按 track 升序（下层在前）。"""
+        if t is None:
+            t = float(getattr(self, "_playhead_position", 0) or 0)
+        hits = []
+        for c in getattr(self, "_clips", []) or []:
+            st = float(c.get("start_time", 0) or 0)
+            dur = float(c.get("duration", 0) or 0)
+            if st <= t < st + dur:
+                hits.append(c)
+        hits.sort(key=lambda c: int(c.get("track", 0) or 0))
+        return hits
+
+    def _clip_at_playhead(self, t: float = None):
+        """按播放头找覆盖中的主视频片段（最高视频轨优先，否则第一段）。"""
+        hits = self._clips_at_playhead(t)
+        if not hits:
+            return self._current_clip
+        # 优先非 audio 类型 / 非音频轨
+        video_hits = []
+        for c in hits:
+            track_i = int(c.get("track", 0) or 0)
+            is_audio = str(c.get("type", "")).lower() == "audio"
+            if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                tracks = getattr(self._timeline_widget, "_tracks", [])
+                if 0 <= track_i < len(tracks) and tracks[track_i].get("type") == "audio":
+                    is_audio = True
+            if not is_audio:
+                video_hits.append(c)
+        if video_hits:
+            return video_hits[-1]  # 上层
+        return hits[-1]
 
     # ─── 字幕面板辅助样式 ───
     @staticmethod
@@ -2552,6 +2992,15 @@ class EditorModule(BaseModule):
             print(f"✅ 素材已添加到时间线: {os.path.basename(file_path)}")
         else:
             print(f"⚠️ 无法添加素材: {file_path}")
+
+    def _on_files_dropped(self, file_paths):
+        """处理时间线拖放导入的文件列表"""
+        for file_path in file_paths:
+            if os.path.exists(file_path):
+                self._add_clip_to_timeline(file_path)
+                print(f"✅ 拖放导入成功: {os.path.basename(file_path)}")
+            else:
+                print(f"⚠️ 无法导入: {file_path}")
 
     # ─── 字幕 CRUD ───
     def _refresh_subtitle_list(self):
@@ -2746,7 +3195,7 @@ class EditorModule(BaseModule):
                     audio_path
                 ]
                 subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=120,
-                              creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                              creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 
                 if not os.path.exists(audio_path):
                     self._emit_ai_fail("音频提取失败")
@@ -2789,8 +3238,8 @@ class EditorModule(BaseModule):
                 # 清理临时音频
                 try:
                     os.remove(audio_path)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.warning("操作异常（已忽略）: %s", _e)
                 
                 # 通过信号通知主线程更新UI
                 self._subtitle_generated_signal.emit(subtitle_count)
@@ -2834,15 +3283,15 @@ class EditorModule(BaseModule):
         """从后台线程安全地发射进度信号"""
         try:
             self.ai_progress_signal.emit(value, message)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
 
     def _emit_ai_fail(self, message):
         """从后台线程安全地发射失败信号"""
         try:
             self.ai_fail_signal.emit(message)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
     
     def _fallback_subtitle_generation(self, audio_path):
         """备选字幕生成方案：基于音频时长生成模拟字幕"""
@@ -2858,7 +3307,7 @@ class EditorModule(BaseModule):
                      '-v', 'error', '-show_entries', 'format=duration',
                      '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
                     capture_output=True, text=True, timeout=30,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0
                 )
                 duration = float(result.stdout.strip()) if result.stdout.strip() else 60.0
             except Exception:
@@ -2990,12 +3439,27 @@ class EditorModule(BaseModule):
         QMessageBox.information(self, "批量删除完成", f"已删除 {len(clip_ids)} 个片段")
 
     # ===== 导出增强 =====
-    def export_project(self, output_path):
-        """导出项目（包含所有片段和设置）"""
+    def export_project(self, output_path, show_message: bool = True):
+        """导出项目（片段 + 字幕 + 音量）"""
+        subs = []
+        try:
+            sm = self._ensure_subtitle_manager()
+            if sm:
+                subs = sm.list_subtitles()
+                styles = getattr(sm, "styles", None) or getattr(sm, "_styles", None) or {}
+                if callable(getattr(sm, "list_styles", None)):
+                    styles = sm.list_styles()
+            else:
+                styles = {}
+        except Exception:
+            styles = {}
         project_data = {
-            "version": "1.0",
+            "version": "1.1",
             "clips": self._clips,
             "timeline_zoom": self._timeline_zoom,
+            "subtitles": subs,
+            "subtitle_styles": styles if isinstance(styles, dict) else {},
+            "master_volume": float(getattr(self, "_master_volume", 1.0) or 1.0),
             "export_time": datetime.now().isoformat()
         }
         
@@ -3003,10 +3467,91 @@ class EditorModule(BaseModule):
             import json
             json.dump(project_data, f, ensure_ascii=False, indent=2)
         
-        QMessageBox.information(self, "导出完成", f"项目已导出到:\n{output_path}")
+        self._project_dirty = False
+        if show_message:
+            QMessageBox.information(self, "保存完成", f"项目已保存到:\n{output_path}")
+
+    def _autosave_project(self):
+        """静默自动保存到 autosave/latest.timeline"""
+        if not getattr(self, "_clips", None):
+            return
+        try:
+            autosave_dir = os.path.join(os.getcwd(), "autosave")
+            os.makedirs(autosave_dir, exist_ok=True)
+            latest = os.path.join(autosave_dir, "latest.timeline")
+            self.export_project(latest, show_message=False)
+            self._notify_edit("已自动保存")
+        except Exception as e:
+            print(f"自动保存失败: {e}")
+
+    def _maybe_restore_autosave(self):
+        """空工程时询问是否恢复自动保存。"""
+        if getattr(self, "_autosave_prompted", False):
+            return
+        self._autosave_prompted = True
+        if getattr(self, "_clips", None):
+            return
+        latest = os.path.join(os.getcwd(), "autosave", "latest.timeline")
+        if not os.path.isfile(latest):
+            return
+        try:
+            reply = QMessageBox.question(
+                self,
+                "恢复自动保存",
+                "发现 autosave/latest.timeline，是否恢复？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.import_project(latest)
+        except Exception as e:
+            print(f"autosave 恢复询问失败: {e}")
+
+    def _on_clip_trim_committed(self, clip_data):
+        """片段拖拽/裁剪松手：同步内核、撤销栈并标记脏"""
+        if not clip_data:
+            return
+        before = None
+        if isinstance(clip_data, dict) and "_edit_before" in clip_data:
+            before = clip_data.pop("_edit_before", None)
+        cid = clip_data.get("id")
+        for i, c in enumerate(self._clips):
+            if c.get("id") == cid:
+                # 合并字段到已有 dict，保持引用
+                c.update({k: v for k, v in clip_data.items() if k != "_edit_before"})
+                clip_data = c
+                self._clips[i] = c
+                break
+        else:
+            self._clips.append(clip_data)
+        self._current_clip = clip_data
+        if before:
+            after = {
+                "start_time": float(clip_data.get("start_time", 0) or 0),
+                "track": int(clip_data.get("track", 0) or 0),
+                "duration": float(clip_data.get("duration", 0) or 0),
+                "in_point": float(clip_data.get("in_point", 0) or 0),
+                "out_point": float(clip_data.get("out_point", 0) or 0),
+            }
+            if any(float(before.get(k, 0) or 0) != float(after.get(k, 0) or 0)
+                   for k in ("start_time", "duration", "in_point", "out_point", "track")):
+                self._record_action({
+                    "type": "edit_clip",
+                    "clip_id": cid,
+                    "before": before,
+                    "after": after,
+                })
+        self._project_dirty = True
+        try:
+            self._sync_kernel_timeline()
+            self._sync_timeline_widget_state()
+            self._refresh_preview_to_current_clip()
+        except Exception as e:
+            print(f"trim commit sync failed: {e}")
+        self._notify_edit("片段已调整")
     
     def import_project(self, project_path):
-        """导入项目"""
+        """导入项目并重建时间线片段控件"""
         if not os.path.exists(project_path):
             QMessageBox.warning(self, "错误", "项目文件不存在")
             return
@@ -3015,9 +3560,78 @@ class EditorModule(BaseModule):
             import json
             project_data = json.load(f)
         
-        self._clips = project_data.get("clips", [])
+        clips = project_data.get("clips", [])
         self._timeline_zoom = project_data.get("timeline_zoom", 100)
-        
+        self._master_volume = float(project_data.get("master_volume", 1.0) or 1.0)
+        try:
+            if getattr(self, "_audio_output", None):
+                self._audio_output.setVolume(self._master_volume)
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+        self._clips = []
+        self._clip_widgets = []
+        self._clip_id_to_widget = {}
+        self._current_clip = None
+
+        # 清空现有轨道上的片段控件
+        if hasattr(self, '_timeline_widget') and self._timeline_widget:
+            if hasattr(self._timeline_widget, "all_clip_widgets"):
+                for w in list(self._timeline_widget.all_clip_widgets()):
+                    cid = w.clip_data.get("id")
+                    self._timeline_widget.remove_clip_widget_by_id(cid)
+            else:
+                for track in getattr(self._timeline_widget, '_tracks', []):
+                    layout = track.get("content_layout")
+                    if not layout:
+                        continue
+                    for i in reversed(range(layout.count())):
+                        w = layout.itemAt(i).widget()
+                        if w is not None and hasattr(w, "clip_data"):
+                            layout.removeWidget(w)
+                            w.deleteLater()
+            self._timeline_widget._clips = []
+
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            self._clips.append(clip)
+            if hasattr(self, '_timeline_widget') and self._timeline_widget:
+                widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
+                if widget is not None:
+                    self._clip_widgets.append(widget)
+                    if clip.get("id"):
+                        self._clip_id_to_widget[clip["id"]] = widget
+            if not self._current_clip:
+                self._current_clip = clip
+
+        # 恢复字幕
+        try:
+            sm = self._ensure_subtitle_manager()
+            subs = project_data.get("subtitles") or []
+            if sm and hasattr(sm, "subtitles"):
+                sm.subtitles = list(subs)
+            styles = project_data.get("subtitle_styles") or {}
+            if sm and styles and hasattr(sm, "styles"):
+                sm.styles = dict(styles)
+        except Exception as e:
+            print(f"导入字幕失败: {e}")
+
+        if self._current_clip and self._current_clip.get("path"):
+            self._video_source = self._current_clip["path"]
+            try:
+                media_content = QUrl.fromLocalFile(self._video_source)
+                self._media_player.setSource(media_content)
+                pm = self._ensure_preview_manager()
+                if pm.open_video(self._video_source):
+                    frame = pm.get_frame_at(float(self._current_clip.get("in_point", 0)))
+                    if frame is not None:
+                        self._on_preview_frame(frame)
+            except Exception as e:
+                print(f"打开工程后预览加载失败: {e}")
+
+        self._sync_kernel_timeline()
+        if hasattr(self, "_timeline_widget") and hasattr(self._timeline_widget, "relayout_clips"):
+            self._timeline_widget.relayout_clips()
         QMessageBox.information(self, "导入完成", f"已导入 {len(self._clips)} 个片段")
     
     # ===== 快捷键增强 =====
@@ -3034,6 +3648,10 @@ class EditorModule(BaseModule):
         # Ctrl+S: 保存项目
         self._save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
         self._save_shortcut.activated.connect(self._save_project)
+
+        # Ctrl+O: 打开项目
+        self._open_shortcut = QShortcut(QKeySequence("Ctrl+O"), self)
+        self._open_shortcut.activated.connect(self._open_project)
         
         # Space: 播放/暂停
         self._play_pause_shortcut = QShortcut(QKeySequence("Space"), self)
@@ -3048,78 +3666,19 @@ class EditorModule(BaseModule):
         self._duplicate_shortcut.activated.connect(self._copy_clip)
     
     def _save_project(self):
-        """保存项目"""
+        """保存项目（仅写工程文件，不触发字幕生成）"""
         path, _ = QFileDialog.getSaveFileName(self, "保存项目", "", "项目文件 (*.timeline)")
-        if path:
-            self.export_project(path)
-        # 进度弹窗
-        progress_dlg = QDialog(self)
-        progress_dlg.setWindowTitle("AI 字幕生成")
-        progress_dlg.setFixedSize(420, 140)
-        progress_dlg.setStyleSheet("QDialog{background:#121212;}")
-        pl = QVBoxLayout(progress_dlg)
-        pl.setContentsMargins(20, 16, 20, 16)
-        status_lbl = QLabel("正在启动语音识别引擎...")
-        status_lbl.setStyleSheet("color:#ccc;font-size:13px;")
-        pl.addWidget(status_lbl)
-        prog = QProgressBar()
-        prog.setStyleSheet("QProgressBar{background:#1a1a1a;border:1px solid #333;border-radius:4px;height:22px;text-align:center;color:#fff;font-size:11px;}QProgressBar::chunk{background:#22c55e;border-radius:3px;}")
-        pl.addWidget(prog)
-        pl.addStretch()
-        progress_dlg.show()
-        QApplication.processEvents()
+        if not path:
+            return
+        if not path.endswith(".timeline"):
+            path += ".timeline"
+        self.export_project(path)
 
-        def _do_gen():
-            try:
-                from core.subtitle_generator import SubtitleGenerator, SubtitleStyle
-                status_lbl.setText("Whisper 语音转写中...")
-                prog.setValue(10)
-                gen = SubtitleGenerator(model_size="base")
-                segments = gen.generate_subtitles(
-                    audio_path=video_path,
-                    language="zh",
-                    correct_typos=True,
-                    apply_style=SubtitleStyle.CLASSIC,
-                    progress_callback=lambda p, msg: (
-                        prog.setValue(p), status_lbl.setText(msg)
-                    )
-                )
-                if segments:
-                    status_lbl.setText(f"写入 {len(segments)} 条字幕...")
-                    prog.setValue(90)
-                    for seg in segments:
-                        self._subtitle_manager.add_subtitle(
-                            text=seg.text,
-                            start_time=seg.start_time,
-                            end_time=seg.end_time)
-                    self._refresh_subtitle_list()
-                prog.setValue(100)
-                status_lbl.setText("✅ 字幕生成完成")
-            except ImportError:
-                # 回退：裸用 whisper
-                try:
-                    status_lbl.setText("回退：裸调 Whisper...")
-                    prog.setValue(15)
-                    import whisper
-                    model = whisper.load_model("base")
-                    prog.setValue(40)
-                    result = model.transcribe(video_path, language="zh")
-                    prog.setValue(80)
-                    segments = result.get("segments", [])
-                    for seg in segments:
-                        if self._subtitle_manager:
-                            self._subtitle_manager.add_subtitle(text=seg.get("text", "").strip(), start_time=seg.get("start", 0), end_time=seg.get("end", 0))
-                    self._refresh_subtitle_list()
-                    prog.setValue(100)
-                    status_lbl.setText(f"✅ 生成 {len(segments)} 条字幕 (Whisper)")
-                except ImportError:
-                    status_lbl.setText("❌ Whisper 未安装: pip install openai-whisper")
-                except Exception as ex:
-                    status_lbl.setText(f"❌ 失败: {ex}")
-            except Exception as e:
-                status_lbl.setText(f"❌ 生成失败: {e}")
-            QTimer.singleShot(1000, progress_dlg.close)
-        threading.Thread(target=_do_gen, daemon=True).start()
+    def _open_project(self):
+        """打开已保存的工程并重建时间线控件"""
+        path, _ = QFileDialog.getOpenFileName(self, "打开项目", "", "项目文件 (*.timeline);;所有文件 (*.*)")
+        if path:
+            self.import_project(path)
 
 
 
@@ -3149,6 +3708,22 @@ class EditorModule(BaseModule):
         """
         clips = [c for c in getattr(self, '_clips', [])
                  if c.get("path") and os.path.exists(c.get("path"))]
+        # 导出主故事线：视频轨；音频轨另行处理（本期仍拼主视频轨）
+        def _is_audio_clip(c):
+            if str(c.get("type", "")).lower() == "audio":
+                return True
+            ti = int(c.get("track", 0) or 0)
+            if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                tracks = getattr(self._timeline_widget, "_tracks", [])
+                if 0 <= ti < len(tracks) and tracks[ti].get("type") == "audio":
+                    return True
+            return False
+        clips = [c for c in clips if not _is_audio_clip(c)]
+        clips = sorted(clips, key=lambda c: (int(c.get("track", 0) or 0), float(c.get("start_time", 0))))
+        # 同时刻多层：只取最低轨作主线（PiP 烘焙留待后续）；同轨按时间排
+        if clips:
+            base_track = min(int(c.get("track", 0) or 0) for c in clips)
+            clips = [c for c in clips if int(c.get("track", 0) or 0) == base_track]
         clips = sorted(clips, key=lambda c: float(c.get("start_time", 0)))
         clips = [c for c in clips
                  if float(c.get("out_point", 0)) - float(c.get("in_point", 0)) > 0.01]
@@ -3205,8 +3780,42 @@ class EditorModule(BaseModule):
                     if apply_video_filter(seg, fseg, vf, ffmpeg_path):
                         tmp_segments.append(fseg)
                         final_seg = fseg
+                # 片段速度
+                speed = float(clip.get("speed", 1.0) or 1.0)
+                if abs(speed - 1.0) > 0.01:
+                    sseg = tempfile.mktemp(suffix=".mp4")
+                    try:
+                        cmd = [
+                            ffmpeg_path, "-y", "-i", final_seg,
+                            "-filter:v", f"setpts={1.0/speed}*PTS",
+                            "-filter:a", f"atempo={max(0.5, min(2.0, speed))}",
+                            "-c:v", "libx264", "-c:a", "aac", sseg,
+                        ]
+                        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                        if r.returncode == 0 and os.path.exists(sseg):
+                            tmp_segments.append(sseg)
+                            final_seg = sseg
+                    except Exception as e:
+                        print(f"变速烘焙失败: {e}")
+                # 音量
+                vol = float(clip.get("volume", 1.0) or 1.0)
+                if abs(vol - 1.0) > 0.01:
+                    vseg = tempfile.mktemp(suffix=".mp4")
+                    try:
+                        cmd = [
+                            ffmpeg_path, "-y", "-i", final_seg,
+                            "-af", f"volume={vol}",
+                            "-c:v", "copy", vseg,
+                        ]
+                        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                        if r.returncode == 0 and os.path.exists(vseg):
+                            tmp_segments.append(vseg)
+                            final_seg = vseg
+                    except Exception as e:
+                        print(f"音量烘焙失败: {e}")
                 filtered_segments.append(final_seg)
-                durations.append(out_p - in_p)
+                seg_dur = (out_p - in_p) / max(0.05, speed)
+                durations.append(seg_dur)
                 # 收集「本段与前一段」之间的转场（取本段记录的入场转场）
                 if len(filtered_segments) >= 2:
                     trans = clip.get("transition") or (clip.get("transitions") or [None])[-1]
@@ -3228,14 +3837,11 @@ class EditorModule(BaseModule):
             for seg in tmp_segments:
                 try:
                     os.remove(seg)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.warning("操作异常（已忽略）: %s", _e)
 
     def _sync_kernel_timeline(self):
-        """将 self._clips 的 in/out 与顺序同步进统一内核时间线，确保底层数据一致。
-
-        修复：此前 split/copy/paste 完全不碰内核时间线，导致底层数据与界面脱节。
-        """
+        """将 self._clips 同步进统一内核，保留真实 start_time / track。"""
         try:
             from app.core.timeline_manager import timeline_manager as real_timeline_manager
         except ImportError:
@@ -3243,28 +3849,98 @@ class EditorModule(BaseModule):
         if not getattr(self, '_current_timeline', None):
             self._current_timeline = real_timeline_manager.create_timeline("默认时间线")
         tl = self._current_timeline
+        # 清空各轨 clips
         for track in tl.get("tracks", []):
-            if track.get("type") == "video":
-                track["clips"] = []
-        ordered = sorted(self._clips, key=lambda c: float(c.get("start_time", 0)))
-        t0 = 0.0
-        for clip in ordered:
+            track["clips"] = []
+        # 确保有足够 video/audio 轨
+        video_tracks = [t for t in tl.get("tracks", []) if t.get("type") == "video"]
+        audio_tracks = [t for t in tl.get("tracks", []) if t.get("type") == "audio"]
+        for clip in self._clips:
+            track_i = int(clip.get("track", 0) or 0)
             clip_info = {
+                "id": clip.get("id"),
                 "name": clip.get("name", os.path.basename(str(clip.get("path", "")))),
                 "path": clip.get("path"),
-                "start_time": t0,
-                "duration": float(clip.get("duration", 0)),
-                "in_point": float(clip.get("in_point", 0)),
-                "out_point": float(clip.get("out_point", 0)),
-                "effects": clip.get("effects", []),
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "duration": float(clip.get("duration", 0) or 0),
+                "in_point": float(clip.get("in_point", 0) or 0),
+                "out_point": float(clip.get("out_point", 0) or 0),
+                "effects": clip.get("effects", {}),
                 "transitions": clip.get("transitions", []),
+                "speed": float(clip.get("speed", 1.0) or 1.0),
+                "volume": float(clip.get("volume", 1.0) or 1.0),
+                "keyframes": clip.get("keyframes") or [],
             }
-            real_timeline_manager.add_clip(tl["id"], "video_1", clip_info)
-            t0 += float(clip.get("duration", 0))
+            ctype = str(clip.get("type", "video") or "video").lower()
+            # 根据时间线 UI 轨类型判断
+            ui_track_type = "video"
+            if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                tracks = getattr(self._timeline_widget, "_tracks", [])
+                if 0 <= track_i < len(tracks):
+                    ui_track_type = tracks[track_i].get("type", "video")
+            if ui_track_type == "audio" or ctype == "audio":
+                if not audio_tracks:
+                    try:
+                        real_timeline_manager.add_track(tl["id"], "audio", "音频")
+                        audio_tracks = [t for t in tl.get("tracks", []) if t.get("type") == "audio"]
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
+                tid = audio_tracks[min(track_i, len(audio_tracks) - 1)]["id"] if audio_tracks else "audio_1"
+            else:
+                if not video_tracks:
+                    tid = "video_1"
+                else:
+                    tid = video_tracks[min(track_i, len(video_tracks) - 1)]["id"]
+            try:
+                real_timeline_manager.add_clip(tl["id"], tid, clip_info)
+            except Exception as e:
+                print(f"同步片段到内核失败: {e}")
         try:
             real_timeline_manager._recalculate_duration(tl)
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+
+    def _burn_subtitles_if_any(self, video_path: str) -> str:
+        """若有字幕则烧录到成片（需 FFmpeg）。"""
+        import shutil
+        try:
+            sm = self._ensure_subtitle_manager()
+            subs = sm.list_subtitles() if sm else []
         except Exception:
-            pass
+            subs = []
+        if not subs or not video_path or not os.path.exists(video_path):
+            return video_path
+        ffmpeg = shutil.which("ffmpeg") or getattr(self, "_get_ffmpeg", lambda: None)()
+        if not ffmpeg:
+            return video_path
+        srt_path = os.path.splitext(video_path)[0] + "_burn.srt"
+        out_path = os.path.splitext(video_path)[0] + "_sub" + os.path.splitext(video_path)[1]
+        try:
+            sm.export_subtitles(srt_path, format="srt")
+            # Windows 路径转义 for subtitles filter
+            esc = srt_path.replace("\\", "/").replace(":", "\\:")
+            cmd = [
+                ffmpeg, "-y", "-i", video_path,
+                "-vf", f"subtitles='{esc}'",
+                "-c:a", "copy",
+                out_path,
+            ]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if r.returncode == 0 and os.path.exists(out_path):
+                try:
+                    os.replace(out_path, video_path)
+                except Exception:
+                    return out_path
+                return video_path
+        except Exception as e:
+            print(f"字幕烧录失败: {e}")
+        finally:
+            try:
+                if os.path.exists(srt_path):
+                    os.remove(srt_path)
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+        return video_path
 
     def _refresh_preview_to_current_clip(self):
         """让预览反映当前选中片段的 in/out 区间，使工具栏编辑在预览中可见。
@@ -3386,6 +4062,31 @@ class EditorModule(BaseModule):
             output_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"
             output_path = os.path.join(output_dir, output_name)
 
+            # 无 FFmpeg 时：未剪辑可直接复制；有剪辑则明确提示
+            import shutil
+            _ff = shutil.which("ffmpeg")
+            if not _ff:
+                if edited_temp_path is None and not self._has_timeline_edits():
+                    try:
+                        shutil.copy2(clip_path, output_path)
+                        QMessageBox.information(
+                            self,
+                            "导出成功",
+                            f"未检测到 FFmpeg，已复制原片到:\n{output_path}\n"
+                            f"安装 FFmpeg 并加入 PATH 后可支持剪辑导出与转码。",
+                        )
+                        return
+                    except Exception as _ce:
+                        QMessageBox.warning(self, "导出失败", f"复制失败: {_ce}")
+                        return
+                QMessageBox.warning(
+                    self,
+                    "导出失败",
+                    "未检测到 FFmpeg，无法导出已剪辑时间线。\n"
+                    "请安装 FFmpeg 并加入系统 PATH 后重试。",
+                )
+                return
+
             render_error = ""
             try:
                 try:
@@ -3404,10 +4105,14 @@ class EditorModule(BaseModule):
                 if edited_temp_path and os.path.exists(edited_temp_path):
                     try:
                         os.remove(edited_temp_path)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
                 success = result.get("success") if isinstance(result, dict) else getattr(result, "success", False)
                 if success:
+                    try:
+                        output_path = self._burn_subtitles_if_any(output_path)
+                    except Exception as _be:
+                        print(f"字幕烧录跳过: {_be}")
                     output_size = result.get("output_size", 0) if isinstance(result, dict) else getattr(result, "output_size", 0)
                     processing_time = result.get("processing_time", 0) if isinstance(result, dict) else getattr(result, "processing_time", 0)
                     QMessageBox.information(
@@ -3512,8 +4217,8 @@ class EditorModule(BaseModule):
         try:
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(300, self._refresh_character_panel)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         return t
 
     @staticmethod
@@ -3521,8 +4226,8 @@ class EditorModule(BaseModule):
         """安全设置 QLabel 文本，防止 C++ 对象已被删除时崩溃"""
         try:
             label.setText(text)
-        except (RuntimeError, AttributeError):
-            pass
+        except (RuntimeError, AttributeError) as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
 
     def _refresh_character_panel(self):
         """刷新角色列表（从 AnalysisCache 读取）"""
@@ -3553,8 +4258,8 @@ class EditorModule(BaseModule):
             self._safe_set_text(self._char_status_label, "尚未导入视频")
             try:
                 self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError):
-                pass
+            except (RuntimeError, AttributeError) as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
             return
 
         try:
@@ -3565,8 +4270,8 @@ class EditorModule(BaseModule):
             self._safe_set_text(self._char_status_label, f"读取缓存异常: {e}")
             try:
                 self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError):
-                pass
+            except (RuntimeError, AttributeError) as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
             return
 
         if drama is None or not getattr(drama, "characters", None):
@@ -3581,8 +4286,8 @@ class EditorModule(BaseModule):
                 empty.setWordWrap(True)
                 self._char_list_layout.addWidget(empty)
                 self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError):
-                pass
+            except (RuntimeError, AttributeError) as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
             return
 
         # 统计每个角色的出场次数（粗略：按 scenes 统计）
@@ -3757,8 +4462,8 @@ class EditorModule(BaseModule):
                     if provider:
                         self._ai_model_label.setText(f"模型: {provider}")
                         self._ai_model_label.setStyleSheet("color:#22c55e;font-size:10px;font-weight:600;")
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         self._ai_gpu_label = QLabel("GPU: --")
         self._ai_gpu_label.setStyleSheet("color:#888;font-size:10px;")
         info_row.addWidget(self._ai_gpu_label)
@@ -3769,8 +4474,8 @@ class EditorModule(BaseModule):
             if gpu.gpu_type.value != "none":
                 self._ai_gpu_label.setText(f"GPU: {gpu.name}")
                 self._ai_gpu_label.setStyleSheet("color:#22c55e;font-size:10px;font-weight:600;")
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         info_row.addStretch()
         st_lo.addLayout(info_row)
         self._ai_task_label = QLabel("任务: 待机中")
@@ -3825,173 +4530,6 @@ class EditorModule(BaseModule):
         o.setContentsMargins(0, 0, 0, 0)
         o.addWidget(s)
         return t
-    
-    def _create_tool_card(self, tool_info) -> QGroupBox:
-        card = QGroupBox(f"{tool_info['icon']} {tool_info['name']}")
-        card.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(15, 10, 15, 15)
-        layout.setSpacing(12)
-        
-        # 描述
-        desc_label = QLabel(tool_info['description'])
-        desc_label.setStyleSheet("color: #808080; font-size: 13px;")
-        layout.addWidget(desc_label)
-        
-        # 功能列表
-        features_frame = QFrame()
-        features_layout = QVBoxLayout(features_frame)
-        features_layout.setSpacing(6)
-        features_layout.setContentsMargins(0, 0, 0, 0)
-        
-        for feature in tool_info['features']:
-            feature_label = QLabel(f"• {feature}")
-            feature_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-            features_layout.addWidget(feature_label)
-        
-        layout.addWidget(features_frame)
-        
-        # 参数设置区域
-        params_group = QGroupBox("参数设置")
-        params_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 12px;
-                font-weight: bold;
-                color: #808080;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 8px;
-                background-color: #2a2a2a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 6px;
-            }
-        """)
-        params_layout = QVBoxLayout(params_group)
-        params_layout.setContentsMargins(10, 5, 10, 10)
-        params_layout.setSpacing(10)
-        
-        # 根据工具类型添加不同的参数设置
-        if tool_info['name'] == "FunClip (阿里达摩院)":
-            # FunClip参数
-            params = video_processor.default_params["funclip"]
-            
-            # BGM类别
-            bgm_layout = QHBoxLayout()
-            bgm_layout.addWidget(QLabel("BGM类别:"))
-            bgm_combo = QComboBox()
-            bgm_combo.addItems(["auto", "激昂电音", "紧张纯音乐", "轻柔轻音乐"])
-            bgm_combo.setCurrentText(params["bgm_category"])
-            bgm_combo.setStyleSheet("background-color: #1a1a1a; color: #ffffff; border: 1px solid #333333; border-radius: 4px; padding: 6px 12px;")
-            bgm_layout.addWidget(bgm_combo)
-            params_layout.addLayout(bgm_layout)
-            
-            # BGM卡点
-            bgm_sync_check = QCheckBox("BGM卡点剪辑")
-            bgm_sync_check.setChecked(params["bgm_sync"])
-            bgm_sync_check.setStyleSheet("color: #e0e0e0;")
-            params_layout.addWidget(bgm_sync_check)
-            
-        elif tool_info['name'] == "AutoClip":
-            # AutoClip参数
-            params = video_processor.default_params["autoclip"]
-            
-            # 时长设置
-            duration_layout = QHBoxLayout()
-            duration_layout.addWidget(QLabel("时长 (秒):"))
-            duration_spin = QSpinBox()
-            duration_spin.setRange(5, 60)
-            duration_spin.setValue(params["duration"])
-            duration_spin.setStyleSheet("background-color: #1a1a1a; color: #ffffff; border: 1px solid #333333; border-radius: 4px; padding: 6px 12px;")
-            duration_layout.addWidget(duration_spin)
-            params_layout.addLayout(duration_layout)
-            
-            # 强制前3秒冲突
-            conflict_check = QCheckBox("前3秒强制识别强冲突画面")
-            conflict_check.setChecked(params["force_front_conflict"])
-            conflict_check.setStyleSheet("color: #e0e0e0;")
-            params_layout.addWidget(conflict_check)
-            
-        elif tool_info['name'] == "VideoFusion":
-            # VideoFusion参数
-            params = video_processor.default_params["videofusion"]
-            
-            # 4K增强
-            enhance_check = QCheckBox("4K高清增强")
-            enhance_check.setChecked(params["enhance_4k"])
-            enhance_check.setStyleSheet("color: #e0e0e0;")
-            params_layout.addWidget(enhance_check)
-            
-            # 动态防抖
-            de_shake_check = QCheckBox("动态防抖")
-            de_shake_check.setChecked(params["de_shake"])
-            de_shake_check.setStyleSheet("color: #e0e0e0;")
-            params_layout.addWidget(de_shake_check)
-            
-        elif tool_info['name'] == "LoRA Edit":
-            # LoRA Edit参数
-            params = video_processor.default_params["lora_edit"]
-            
-            # 版权检测
-            copyright_check = QCheckBox("全维度版权检测")
-            copyright_check.setChecked(params["copyright_check"])
-            copyright_check.setStyleSheet("color: #e0e0e0;")
-            params_layout.addWidget(copyright_check)
-            
-            # 引流贴纸位置
-            watermark_layout = QHBoxLayout()
-            watermark_layout.addWidget(QLabel("引流贴纸位置:"))
-            watermark_combo = QComboBox()
-            watermark_combo.addItems(["bottom_right", "top_left"])
-            watermark_combo.setCurrentText(params["watermark_position"])
-            watermark_combo.setStyleSheet("background-color: #1a1a1a; color: #ffffff; border: 1px solid #333333; border-radius: 4px; padding: 6px 12px;")
-            watermark_layout.addWidget(watermark_combo)
-            params_layout.addLayout(watermark_layout)
-        
-        layout.addWidget(params_group)
-        
-        # 操作按钮
-        btn = QPushButton("开始处理")
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {tool_info['color']};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-                height: 44px;
-                margin-top: 5px;
-            }}
-            QPushButton:hover {{
-                background-color: {tool_info['color']}dd;
-            }}
-        """)
-        btn.clicked.connect(tool_info['callback'])
-        layout.addWidget(btn)
-        
-        return card
     
     def _funclip_process(self):
         """ """
@@ -4048,7 +4586,7 @@ class EditorModule(BaseModule):
                     "-c:v", "libx264", "-preset", "fast",
                     "-an", output_path
                 ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 msg.close()
                 QMessageBox.information(self, "FunClip", f"场景检测完成! 输出: {output_path}")
             except ImportError:
@@ -4120,7 +4658,7 @@ class EditorModule(BaseModule):
                     "-c:v", "libx264", "-preset", "fast",
                     output_path
                 ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 msg.close()
                 QMessageBox.information(self, "AutoClip", f"高光检测完成! 输出: {output_path}")
             except ImportError:
@@ -4163,7 +4701,7 @@ class EditorModule(BaseModule):
                     "-crf", "18", "-c:a", "aac", "-b:a", "192k",
                     output_path
                 ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 msg.close()
                 if result.returncode == 0:
                     QMessageBox.information(self, "VideoFusion", f"画质增强完成! 输出: {output_path}")
@@ -4208,7 +4746,7 @@ class EditorModule(BaseModule):
                     "-crf", "20", "-c:a", "copy",
                     output_path
                 ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 msg.close()
                 if result.returncode == 0:
                     QMessageBox.information(self, "LoRA Edit", f"风格化完成! 输出: {output_path}")
@@ -4287,8 +4825,8 @@ class EditorModule(BaseModule):
             if gpu.gpu_type.value != "none":
                 gpu_name = gpu.name
                 gpu_available = True
-        except (ImportError, OSError):
-            pass
+        except (ImportError, OSError) as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         label_text = f"启用硬件加速 ({gpu_name})" if gpu_name else "启用硬件加速 (NVENC)"
         self._hardware_accel_var = QCheckBox(label_text)
         self._hardware_accel_var.setStyleSheet("color:#888;font-size:10px;")
@@ -4310,927 +4848,453 @@ class EditorModule(BaseModule):
         o.addWidget(s)
         return t
     
-    def _create_adjust_tab(self) -> QWidget:
-        """ """
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-        
-        # 亮度调节
-        brightness_group = QGroupBox("亮度")
-        brightness_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        brightness_layout = QVBoxLayout(brightness_group)
-        
-        # 亮度滑块和值显示
-        brightness_control_layout = QHBoxLayout()
-        self._brightness_slider = QSlider(Qt.Orientation.Horizontal)
-        self._brightness_slider.setRange(-100, 100)
-        self._brightness_slider.setValue(0)
-        self._brightness_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        
-        self._brightness_value = QLabel("0")
-        self._brightness_value.setStyleSheet("color: #1e6bde; font-size: 14px; font-weight: bold; min-width: 30px; text-align: right;")
-        
-        brightness_control_layout.addWidget(self._brightness_slider)
-        brightness_control_layout.addWidget(self._brightness_value)
-        brightness_layout.addLayout(brightness_control_layout)
-        
-        # 连接滑块信号
-        self._brightness_slider.valueChanged.connect(lambda value: self._on_adjustment_changed("brightness", value))
-        layout.addWidget(brightness_group)
-        
-        # 对比度调节
-        contrast_group = QGroupBox("对比度")
-        contrast_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        contrast_layout = QVBoxLayout(contrast_group)
-        
-        # 对比度滑块和值显示
-        contrast_control_layout = QHBoxLayout()
-        self._contrast_slider = QSlider(Qt.Orientation.Horizontal)
-        self._contrast_slider.setRange(-100, 100)
-        self._contrast_slider.setValue(0)
-        self._contrast_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        
-        self._contrast_value = QLabel("0")
-        self._contrast_value.setStyleSheet("color: #1e6bde; font-size: 14px; font-weight: bold; min-width: 30px; text-align: right;")
-        
-        contrast_control_layout.addWidget(self._contrast_slider)
-        contrast_control_layout.addWidget(self._contrast_value)
-        contrast_layout.addLayout(contrast_control_layout)
-        
-        # 连接滑块信号
-        self._contrast_slider.valueChanged.connect(lambda value: self._on_adjustment_changed("contrast", value))
-        layout.addWidget(contrast_group)
-        
-        # 饱和度调节
-        saturation_group = QGroupBox("饱和度")
-        saturation_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        saturation_layout = QVBoxLayout(saturation_group)
-        
-        # 饱和度滑块和值显示
-        saturation_control_layout = QHBoxLayout()
-        self._saturation_slider = QSlider(Qt.Orientation.Horizontal)
-        self._saturation_slider.setRange(-100, 100)
-        self._saturation_slider.setValue(0)
-        self._saturation_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        
-        self._saturation_value = QLabel("0")
-        self._saturation_value.setStyleSheet("color: #1e6bde; font-size: 14px; font-weight: bold; min-width: 30px; text-align: right;")
-        
-        saturation_control_layout.addWidget(self._saturation_slider)
-        saturation_control_layout.addWidget(self._saturation_value)
-        saturation_layout.addLayout(saturation_control_layout)
-        
-        # 连接滑块信号
-        self._saturation_slider.valueChanged.connect(lambda value: self._on_adjustment_changed("saturation", value))
-        layout.addWidget(saturation_group)
-        
-        # 色调调节
-        hue_group = QGroupBox("色调")
-        hue_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        hue_layout = QVBoxLayout(hue_group)
-        
-        # 色调滑块和值显示
-        hue_control_layout = QHBoxLayout()
-        self._hue_slider = QSlider(Qt.Orientation.Horizontal)
-        self._hue_slider.setRange(-180, 180)
-        self._hue_slider.setValue(0)
-        self._hue_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        
-        self._hue_value = QLabel("0")
-        self._hue_value.setStyleSheet("color: #1e6bde; font-size: 14px; font-weight: bold; min-width: 30px; text-align: right;")
-        
-        hue_control_layout.addWidget(self._hue_slider)
-        hue_control_layout.addWidget(self._hue_value)
-        hue_layout.addLayout(hue_control_layout)
-        
-        # 连接滑块信号
-        self._hue_slider.valueChanged.connect(lambda value: self._on_adjustment_changed("hue", value))
-        layout.addWidget(hue_group)
-        
-        # 应用按钮
-        btn_frame = QFrame()
-        btn_layout = QHBoxLayout(btn_frame)
-        
-        apply_btn = QPushButton("🎨 应用调节")
-        apply_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1557b0;
-            }
-        """)
-        apply_btn.clicked.connect(self._apply_video_adjustments)
-        btn_layout.addWidget(apply_btn)
-        
-        reset_btn = QPushButton("🔄 重置")
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #444444;
-            }
-        """)
-        reset_btn.clicked.connect(self._reset_video_adjustments)
-        btn_layout.addWidget(reset_btn)
-        
-        layout.addWidget(btn_frame)
-        layout.addStretch()
-        return tab
-    
-    def _create_filter_tab(self) -> QWidget:
-        """ """
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-        
-        # 滤镜分类
-        filter_group = QGroupBox("滤镜分类")
-        filter_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        filter_layout = QVBoxLayout(filter_group)
-        
-        self._filter_category_var = QComboBox()
-        self._filter_category_var.addItems(["全部", "复古", "清新", "黑白", "暖色调", "冷色调", "电影感"])
-        self._filter_category_var.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 6px 12px;
-                min-width: 200px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: #1e6bde;
-            }
-        """)
-        filter_layout.addWidget(self._filter_category_var)
-        layout.addWidget(filter_group)
-        
-        # 滤镜列表
-        filters = ["自然", "复古", "黑白", "清新", "暖色调", "冷色调", "电影感", "梦幻", "锐利", "柔和"]
-        filter_grid = QGridLayout()
-        
-        for i, filter_name in enumerate(filters):
-            btn = QPushButton(filter_name)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a2a2a;
-                    color: #ffffff;
-                    border: 1px solid #333333;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                }
-                QPushButton:hover {
-                    background-color: #3a3a3a;
-                    border-color: #1e6bde;
-                }
-            """)
-            btn.clicked.connect(lambda checked, f=filter_name: self._apply_filter(f))
-            filter_grid.addWidget(btn, i // 2, i % 2)
-        
-        layout.addLayout(filter_grid)
-        
-        # 强度调节
-        intensity_group = QGroupBox("强度")
-        intensity_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        intensity_layout = QVBoxLayout(intensity_group)
-        
-        self._filter_intensity_slider = QSlider(Qt.Orientation.Horizontal)
-        self._filter_intensity_slider.setRange(0, 100)
-        self._filter_intensity_slider.setValue(50)
-        self._filter_intensity_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        intensity_layout.addWidget(self._filter_intensity_slider)
-        layout.addWidget(intensity_group)
-        
-        layout.addStretch()
-        return tab
-    
-    def _create_transition_tab(self) -> QWidget:
-        """ """
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-        
-        # 转场类型
-        transition_group = QGroupBox("转场类型")
-        transition_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        transition_layout = QVBoxLayout(transition_group)
-        
-        self._transition_type_var = QComboBox()
-        self._transition_type_var.addItems(["淡入淡出", "滑动", "缩放", "模糊", "翻转", "溶解", "擦除"])
-        self._transition_type_var.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 6px 12px;
-                min-width: 200px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: #1e6bde;
-            }
-        """)
-        transition_layout.addWidget(self._transition_type_var)
-        layout.addWidget(transition_group)
-        
-        # 转场时长
-        duration_group = QGroupBox("转场时长")
-        duration_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        duration_layout = QVBoxLayout(duration_group)
-        
-        self._transition_duration_var = QSpinBox()
-        self._transition_duration_var.setRange(100, 3000)
-        self._transition_duration_var.setValue(500)
-        self._transition_duration_var.setSuffix("ms")
-        self._transition_duration_var.setStyleSheet("""
-            QSpinBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 6px 12px;
-                min-width: 100px;
-            }
-        """)
-        duration_layout.addWidget(self._transition_duration_var)
-        layout.addWidget(duration_group)
-        
-        # 应用按钮
-        apply_btn = QPushButton("✨ 应用转场")
-        apply_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1557b0;
-            }
-        """)
-        apply_btn.clicked.connect(self._apply_transition)
-        layout.addWidget(apply_btn)
-        
-        layout.addStretch()
-        return tab
-    
-    def _create_subtitle_tab(self) -> QWidget:
-        """ """
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-        
-        # 字幕样式
-        style_group = QGroupBox("字幕样式")
-        style_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        style_layout = QVBoxLayout(style_group)
-        
-        # 字体
-        font_layout = QHBoxLayout()
-        font_label = QLabel("字体:")
-        font_label.setStyleSheet("color: #ffffff;")
-        font_layout.addWidget(font_label)
-        
-        self._subtitle_font_var = QComboBox()
-        self._subtitle_font_var.addItems(["微软雅黑", "宋体", "黑体", "Arial", "Helvetica"])
-        self._subtitle_font_var.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 150px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: #1e6bde;
-            }
-        """)
-        font_layout.addWidget(self._subtitle_font_var)
-        style_layout.addLayout(font_layout)
-        
-        # 字号
-        size_layout = QHBoxLayout()
-        size_label = QLabel("字号:")
-        size_label.setStyleSheet("color: #ffffff;")
-        size_layout.addWidget(size_label)
-        
-        self._subtitle_size_var = QSpinBox()
-        self._subtitle_size_var.setRange(12, 48)
-        self._subtitle_size_var.setValue(24)
-        self._subtitle_size_var.setStyleSheet("""
-            QSpinBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 80px;
-            }
-        """)
-        size_layout.addWidget(self._subtitle_size_var)
-        style_layout.addLayout(size_layout)
-        
-        # 颜色
-        color_layout = QHBoxLayout()
-        color_label = QLabel("颜色:")
-        color_label.setStyleSheet("color: #ffffff;")
-        color_layout.addWidget(color_label)
-        
-        self._subtitle_color_var = QComboBox()
-        self._subtitle_color_var.addItems(["白色", "黄色", "红色", "蓝色", "绿色", "黑色"])
-        self._subtitle_color_var.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 100px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: #1e6bde;
-            }
-        """)
-        color_layout.addWidget(self._subtitle_color_var)
-        style_layout.addLayout(color_layout)
-        
-        # 位置
-        position_layout = QHBoxLayout()
-        position_label = QLabel("位置:")
-        position_label.setStyleSheet("color: #ffffff;")
-        position_layout.addWidget(position_label)
-        
-        self._subtitle_position_var = QComboBox()
-        self._subtitle_position_var.addItems(["底部居中", "顶部", "底部左侧", "底部右侧"])
-        self._subtitle_position_var.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 120px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                selection-background-color: #1e6bde;
-            }
-        """)
-        position_layout.addWidget(self._subtitle_position_var)
-        style_layout.addLayout(position_layout)
-        
-        layout.addWidget(style_group)
-        
-        # 字幕操作
-        btn_frame = QFrame()
-        btn_layout = QVBoxLayout(btn_frame)
-        
-        ai_subtitle_btn = QPushButton("🤖 AI生成字幕")
-        ai_subtitle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-bottom: 8px;
-            }
-            QPushButton:hover {
-                background-color: #43a047;
-            }
-        """)
-        ai_subtitle_btn.clicked.connect(self._generate_ai_subtitles)
-        btn_layout.addWidget(ai_subtitle_btn)
-        
-        add_subtitle_btn = QPushButton("➕ 添加字幕")
-        add_subtitle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-bottom: 8px;
-            }
-            QPushButton:hover {
-                background-color: #1557b0;
-            }
-        """)
-        add_subtitle_btn.clicked.connect(self._add_subtitle)
-        btn_layout.addWidget(add_subtitle_btn)
-        
-        apply_style_btn = QPushButton("🎨 应用样式")
-        apply_style_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #f57c00;
-            }
-        """)
-        apply_style_btn.clicked.connect(self._apply_subtitle_style)
-        btn_layout.addWidget(apply_style_btn)
-        
-        layout.addWidget(btn_frame)
-        layout.addStretch()
-        return tab
-    
-    def _create_audio_tab(self) -> QWidget:
-        """ """
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-        
-        # 音量控制
-        volume_group = QGroupBox("音量")
-        volume_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        volume_layout = QVBoxLayout(volume_group)
-        
-        self._volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self._volume_slider.setRange(0, 200)
-        self._volume_slider.setValue(100)
-        self._volume_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #333333;
-                height: 6px;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #1e6bde;
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                margin: -5px 0;
-            }
-        """)
-        self._volume_slider.valueChanged.connect(self._adjust_volume)
-        volume_layout.addWidget(self._volume_slider)
-        layout.addWidget(volume_group)
-        
-        # 淡入淡出
-        fade_group = QGroupBox("淡入淡出")
-        fade_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #1a1a1a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-            }
-        """)
-        fade_layout = QVBoxLayout(fade_group)
-        
-        fade_in_layout = QHBoxLayout()
-        fade_in_label = QLabel("淡入 (秒):")
-        fade_in_label.setStyleSheet("color: #ffffff;")
-        fade_in_layout.addWidget(fade_in_label)
-        
-        self._fade_in_var = QDoubleSpinBox()
-        self._fade_in_var.setRange(0, 5)
-        self._fade_in_var.setValue(0.5)
-        self._fade_in_var.setSingleStep(0.1)
-        self._fade_in_var.setStyleSheet("""
-            QDoubleSpinBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 100px;
-            }
-        """)
-        fade_in_layout.addWidget(self._fade_in_var)
-        fade_layout.addLayout(fade_in_layout)
-        
-        fade_out_layout = QHBoxLayout()
-        fade_out_label = QLabel("淡出 (秒):")
-        fade_out_label.setStyleSheet("color: #ffffff;")
-        fade_out_layout.addWidget(fade_out_label)
-        
-        self._fade_out_var = QDoubleSpinBox()
-        self._fade_out_var.setRange(0, 5)
-        self._fade_out_var.setValue(0.5)
-        self._fade_out_var.setSingleStep(0.1)
-        self._fade_out_var.setStyleSheet("""
-            QDoubleSpinBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                min-width: 100px;
-            }
-        """)
-        fade_out_layout.addWidget(self._fade_out_var)
-        fade_layout.addLayout(fade_out_layout)
-        layout.addWidget(fade_group)
-        
-        # 音频操作
-        btn_frame = QFrame()
-        btn_layout = QHBoxLayout(btn_frame)
-        
-        enhance_btn = QPushButton("🔊 增强")
-        enhance_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                margin-right: 8px;
-            }
-            QPushButton:hover {
-                background-color: #43a047;
-            }
-        """)
-        enhance_btn.clicked.connect(self._enhance_audio)
-        btn_layout.addWidget(enhance_btn)
-        
-        denoise_btn = QPushButton("🔇 降噪")
-        denoise_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                margin-right: 8px;
-            }
-            QPushButton:hover {
-                background-color: #f57c00;
-            }
-        """)
-        denoise_btn.clicked.connect(self._denoise_audio)
-        btn_layout.addWidget(denoise_btn)
-        
-        crop_btn = QPushButton("✂️ 截取")
-        crop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e91e63;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c2185b;
-            }
-        """)
-        crop_btn.clicked.connect(self._crop_audio)
-        btn_layout.addWidget(crop_btn)
-        
-        layout.addWidget(btn_frame)
-        
-        # 应用淡入淡出按钮
-        fade_btn = QPushButton("🎵 应用淡入淡出")
-        fade_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1557b0;
-            }
-        """)
-        fade_btn.clicked.connect(self._apply_fade_effects)
-        layout.addWidget(fade_btn)
-        
-        layout.addStretch()
-        return tab
-    
     # 播放控制方法
+    def _notify_edit(self, msg: str) -> None:
+        """轻量反馈：状态栏 + toast，避免每次剪辑都弹模态框"""
+        self._undo_redo_toast = msg
+        print(f"[剪辑] {msg}")
+        try:
+            win = self.window()
+            if win is not None and hasattr(win, "statusBar"):
+                sb = win.statusBar()
+                if sb is not None:
+                    sb.showMessage(msg, 2500)
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+
     def _play_pause(self):
-        """ """
+        """播放/暂停：时间线驱动（跨片段切源），接近剪映预览行为"""
         from PyQt6.QtMultimedia import QMediaPlayer
+
+        src = getattr(self, '_video_source', None)
+        if not src and self._current_clip:
+            src = self._current_clip.get('path')
+        if not src and not self._clips:
+            self._notify_edit("请先导入视频")
+            return
+
+        if getattr(self, "_timeline_playing", False) or (
+            self._media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            and getattr(self, "_timeline_play_timer", None)
+            and self._timeline_play_timer.isActive()
+        ):
+            self._stop_timeline_playback()
+            return
+
+        # 若仅媒体在播（旧路径），先停
         if self._media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._media_player.pause()
-            if hasattr(self, '_preview_manager'):
+            if hasattr(self, '_preview_manager') and self._preview_manager:
                 self._preview_manager.pause_preview()
-        else:
-            self._media_player.play()
-            if hasattr(self, '_preview_manager'):
-                self._preview_manager.play_preview(start_time=self._current_time)
-    
+            if hasattr(self, '_timeline_widget') and self._timeline_widget:
+                self._timeline_widget.pause()
+            if hasattr(self, '_pp_btn'):
+                self._pp_btn.setText("▶")
+            return
+
+        self._start_timeline_playback()
+
+    def _timeline_total_duration(self) -> float:
+        if not self._clips:
+            return float(getattr(self, "_total_duration", 0) or 0)
+        return max(
+            float(c.get("start_time", 0) or 0) + float(c.get("duration", 0) or 0)
+            for c in self._clips
+        )
+
+    def _playback_rate(self) -> float:
+        speed_map = {"0.5x": 0.5, "1x": 1.0, "1.5x": 1.5, "2x": 2.0}
+        text = "1x"
+        if hasattr(self, "_playback_speed_combo"):
+            text = self._playback_speed_combo.currentText()
+        return speed_map.get(text, 1.0)
+
+    def _start_timeline_playback(self):
+        """以时间线时钟驱动预览：自动跨片段切源 + 特效 + 音频跟随"""
+        if hasattr(self, "_preview_manager") and self._preview_manager:
+            try:
+                self._preview_manager.pause_preview()
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+        self._timeline_playing = True
+        self._audio_bound_clip_id = None
+        if not getattr(self, "_timeline_play_timer", None):
+            self._timeline_play_timer = QTimer(self)
+            self._timeline_play_timer.timeout.connect(self._on_timeline_playback_tick)
+        self._timeline_play_timer.start(33)
+        if hasattr(self, "_pp_btn"):
+            self._pp_btn.setText("⏸")
+        # 立即渲染当前帧
+        self._render_timeline_frame(float(getattr(self, "_playhead_position", 0) or 0))
+        self._notify_edit("时间线播放中")
+
+    def _stop_timeline_playback(self):
+        self._timeline_playing = False
+        if getattr(self, "_timeline_play_timer", None):
+            self._timeline_play_timer.stop()
+        try:
+            self._media_player.pause()
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+        try:
+            if getattr(self, "_bgm_player", None):
+                self._bgm_player.pause()
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
+        if hasattr(self, "_preview_manager") and self._preview_manager:
+            try:
+                self._preview_manager.pause_preview()
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+        if hasattr(self, "_timeline_widget") and self._timeline_widget:
+            try:
+                self._timeline_widget.pause()
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+        if hasattr(self, "_pp_btn"):
+            self._pp_btn.setText("▶")
+
+    def _on_timeline_playback_tick(self):
+        if not getattr(self, "_timeline_playing", False):
+            return
+        rate = self._playback_rate()
+        t = float(getattr(self, "_playhead_position", 0) or 0) + 0.033 * rate
+        total = self._timeline_total_duration()
+        if total > 0 and t >= total:
+            self._render_timeline_frame(total)
+            self._stop_timeline_playback()
+            self._notify_edit("播放结束")
+            return
+        self._render_timeline_frame(t)
+
+    def _edge_fade_opacity(self, clip, timeline_t: float) -> float:
+        """根据转场/淡入淡出元数据计算片段边缘透明度"""
+        st = float(clip.get("start_time", 0) or 0)
+        dur = float(clip.get("duration", 0) or 0)
+        if dur <= 0:
+            return 1.0
+        local = timeline_t - st
+        fade_in = fade_out = 0.0
+        transitions = clip.get("transitions") or []
+        if isinstance(transitions, list):
+            for tr in transitions:
+                if not isinstance(tr, dict):
+                    continue
+                typ = str(tr.get("type") or tr.get("name") or tr.get("transition_type") or "")
+                d = float(tr.get("duration", 0.5) or 0.5)
+                if any(k in typ.lower() for k in ("fade", "淡")) or "淡" in typ:
+                    fade_in = max(fade_in, d)
+                    fade_out = max(fade_out, d)
+        # 效果里也可能写了 fade
+        eff = clip.get("effects") or {}
+        if isinstance(eff, dict):
+            if eff.get("fade_in"):
+                fade_in = max(fade_in, float(eff.get("fade_in") or 0))
+            if eff.get("fade_out"):
+                fade_out = max(fade_out, float(eff.get("fade_out") or 0))
+        opacity = 1.0
+        if fade_in > 0 and local < fade_in:
+            opacity = min(opacity, max(0.0, local / fade_in))
+        if fade_out > 0 and local > dur - fade_out:
+            opacity = min(opacity, max(0.0, (dur - local) / fade_out))
+        return opacity
+
+    def _render_timeline_frame(self, timeline_t: float):
+        """按时间线时间渲染一帧（多轨叠层 + 特效 + 转场近似 + 音频/BGM）"""
+        self._playhead_position = float(timeline_t)
+        self._current_time = float(timeline_t)
+        self._update_time_display()
+        if hasattr(self, "_timeline_widget") and self._timeline_widget:
+            self._timeline_widget.set_playhead_position(timeline_t)
+
+        hits = self._clips_at_playhead(timeline_t)
+        video_hits = []
+        audio_hits = []
+        for c in hits:
+            track_i = int(c.get("track", 0) or 0)
+            is_audio = str(c.get("type", "")).lower() == "audio"
+            if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                tracks = getattr(self._timeline_widget, "_tracks", [])
+                if 0 <= track_i < len(tracks) and tracks[track_i].get("type") == "audio":
+                    is_audio = True
+            if is_audio:
+                audio_hits.append(c)
+            else:
+                video_hits.append(c)
+
+        if not video_hits:
+            try:
+                from PyQt6.QtGui import QImage
+                img = QImage(1280, 720, QImage.Format.Format_RGB888)
+                img.fill(0)
+                self._on_preview_frame(img)
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+            try:
+                self._media_player.pause()
+                self._audio_bound_clip_id = None
+            except Exception as _e:
+                logger.warning("操作异常（已忽略）: %s", _e)
+            self._sync_bgm_audio(timeline_t, audio_hits)
+            return
+
+        # 底层 → 上层 合成
+        base_frame = None
+        top_clip = video_hits[-1]
+        self._current_clip = top_clip
+        try:
+            import numpy as np
+            pm = self._ensure_preview_manager()
+            use_gl_single = len(video_hits) == 1 and self._ensure_gl_preview() is not None
+            gl_shown = False
+            for clip in video_hits:
+                src = clip.get("path")
+                if not src or not os.path.exists(src):
+                    continue
+                st = float(clip.get("start_time", 0) or 0)
+                in_p = float(clip.get("in_point", 0) or 0)
+                speed = max(0.05, float(clip.get("speed", 1.0) or 1.0))
+                source_t = max(0.0, (timeline_t - st) * speed + in_p)
+                effects = dict(self._collect_preview_effects(clip) or {})
+                opacity = self._edge_fade_opacity(clip, timeline_t)
+                # 与下一片交叉的 dissolve 近似
+                opacity = min(opacity, self._crossfade_opacity(clip, timeline_t, video_hits))
+                if "opacity" in effects:
+                    try:
+                        opacity = min(opacity, float(effects["opacity"]))
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
+                effects["opacity"] = opacity
+                if effects.get("scale"):
+                    effects["scale"] = float(effects["scale"])
+                if pm._video_source != src:
+                    pm.open_video(src)
+                if use_gl_single:
+                    # GPU 路径：取原始帧直传 shader，跳过 numpy 特效与 CPU 合成
+                    _raw = pm.get_frame_at(source_t, effects={}) if hasattr(pm, "get_frame_at") else None
+                    if _raw is not None:
+                        self._show_frame_gl(_raw, effects)
+                        self._video_source = top_clip.get("path")
+                        gl_shown = True
+                    break
+                frame = pm.get_frame_at(source_t, effects=effects) if hasattr(pm, "get_frame_at") else None
+                if frame is None:
+                    pm.set_active_effects(effects)
+                    pm.update_preview(source_t, effects=effects)
+                    continue
+                # get_frame_at may return QImage
+                arr = self._qimage_or_ndarray_to_bgr(frame)
+                if arr is None:
+                    continue
+                if base_frame is None:
+                    base_frame = arr.astype(np.float32)
+                else:
+                    # 缩放对齐
+                    if arr.shape[:2] != base_frame.shape[:2]:
+                        import cv2
+                        arr = cv2.resize(arr, (base_frame.shape[1], base_frame.shape[0]))
+                    op = float(effects.get("opacity", 1.0) or 1.0)
+                    scale = float(effects.get("scale", 1.0) or 1.0)
+                    overlay = arr.astype(np.float32)
+                    if abs(scale - 1.0) > 0.01:
+                        import cv2
+                        h, w = overlay.shape[:2]
+                        nh, nw = max(1, int(h * scale)), max(1, int(w * scale))
+                        scaled = cv2.resize(overlay, (nw, nh))
+                        canvas = np.zeros_like(overlay)
+                        y0 = max(0, (h - nh) // 2)
+                        x0 = max(0, (w - nw) // 2)
+                        y1, x1 = min(h, y0 + nh), min(w, x0 + nw)
+                        canvas[y0:y1, x0:x1] = scaled[: y1 - y0, : x1 - x0]
+                        overlay = canvas
+                    base_frame = base_frame * (1.0 - op) + overlay * op
+            if base_frame is not None:
+                out = np.clip(base_frame, 0, 255).astype(np.uint8)
+                qimg = self._bgr_to_qimage(out)
+                if qimg is not None:
+                    self._on_preview_frame(qimg)
+                self._video_source = top_clip.get("path")
+            else:
+                # 回退单源 update_preview
+                clip = top_clip
+                src = clip["path"]
+                st = float(clip.get("start_time", 0) or 0)
+                in_p = float(clip.get("in_point", 0) or 0)
+                speed = max(0.05, float(clip.get("speed", 1.0) or 1.0))
+                source_t = max(0.0, (timeline_t - st) * speed + in_p)
+                effects = dict(self._collect_preview_effects(clip) or {})
+                effects["opacity"] = self._edge_fade_opacity(clip, timeline_t)
+                if pm._video_source != src:
+                    pm.open_video(src)
+                pm.set_active_effects(effects)
+                pm.update_preview(source_t, effects=effects)
+                self._video_source = src
+        except Exception as e:
+            print(f"时间线帧渲染失败: {e}")
+
+        # 主视频内嵌音
+        try:
+            clip = top_clip
+            src = clip.get("path")
+            st = float(clip.get("start_time", 0) or 0)
+            in_p = float(clip.get("in_point", 0) or 0)
+            speed = max(0.05, float(clip.get("speed", 1.0) or 1.0))
+            source_t = max(0.0, (timeline_t - st) * speed + in_p)
+            cid = clip.get("id")
+            from PyQt6.QtCore import QUrl
+            from PyQt6.QtMultimedia import QMediaPlayer
+            vol = float(clip.get("volume", 1.0) or 1.0)
+            effects = self._collect_preview_effects(clip)
+            if effects.get("_volume") is not None:
+                vol = float(effects["_volume"])
+            master = float(getattr(self, "_master_volume", 1.0) or 1.0)
+            if getattr(self, "_audio_output", None):
+                self._audio_output.setVolume(max(0.0, min(1.0, vol * master)))
+            clip_changed = getattr(self, "_audio_bound_clip_id", None) != cid
+            if clip_changed:
+                self._media_player.setSource(QUrl.fromLocalFile(src))
+                self._audio_bound_clip_id = cid
+                self._media_player.setPlaybackRate(self._playback_rate() * speed)
+                self._media_player.setPosition(int(source_t * 1000))
+                self._media_player.play()
+            else:
+                self._media_player.setPlaybackRate(self._playback_rate() * speed)
+                pos_s = self._media_player.position() / 1000.0
+                if abs(pos_s - source_t) > 0.35:
+                    self._media_player.setPosition(int(source_t * 1000))
+                if self._media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                    self._media_player.play()
+        except Exception as e:
+            print(f"音频同步失败: {e}")
+
+        self._sync_bgm_audio(timeline_t, audio_hits)
+
+    def _crossfade_opacity(self, clip, timeline_t: float, video_hits) -> float:
+        """邻片重叠区间做 dissolve 近似。"""
+        st = float(clip.get("start_time", 0) or 0)
+        dur = float(clip.get("duration", 0) or 0)
+        end = st + dur
+        fade = 0.0
+        for tr in (clip.get("transitions") or []):
+            if isinstance(tr, dict):
+                typ = str(tr.get("type") or tr.get("name") or "")
+                if any(k in typ.lower() for k in ("fade", "dissolve", "淡", "叠")):
+                    fade = max(fade, float(tr.get("duration", 0.5) or 0.5))
+        if fade <= 0:
+            return 1.0
+        # 片尾淡出
+        if timeline_t > end - fade:
+            return max(0.0, (end - timeline_t) / fade)
+        # 片头：若与前片重叠则淡入
+        if timeline_t < st + fade:
+            return max(0.0, (timeline_t - st) / fade) if timeline_t >= st else 0.0
+        return 1.0
+
+    def _qimage_or_ndarray_to_bgr(self, frame):
+        try:
+            import numpy as np
+            from PyQt6.QtGui import QImage
+            if isinstance(frame, QImage):
+                img = frame.convertToFormat(QImage.Format.Format_RGB888)
+                w, h = img.width(), img.height()
+                ptr = img.bits()
+                ptr.setsize(h * w * 3)
+                arr = np.frombuffer(ptr, np.uint8).reshape((h, w, 3)).copy()
+                return arr[:, :, ::-1]  # RGB->BGR
+            if hasattr(frame, "shape"):
+                return frame
+        except Exception:
+            return None
+        return None
+
+    def _bgr_to_qimage(self, bgr):
+        try:
+            import numpy as np
+            from PyQt6.QtGui import QImage
+            rgb = bgr[:, :, ::-1].copy()
+            h, w, ch = rgb.shape
+            return QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
+        except Exception:
+            return None
+
+    def _ensure_bgm_player(self):
+        if getattr(self, "_bgm_player", None) is not None:
+            return self._bgm_player
+        from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+        self._bgm_player = QMediaPlayer()
+        self._bgm_audio_output = QAudioOutput()
+        self._bgm_player.setAudioOutput(self._bgm_audio_output)
+        return self._bgm_player
+
+    def _sync_bgm_audio(self, timeline_t: float, audio_hits):
+        """独立音频轨 BGM 跟随。"""
+        try:
+            player = self._ensure_bgm_player()
+            if not audio_hits:
+                player.pause()
+                self._bgm_bound_clip_id = None
+                return
+            clip = audio_hits[-1]
+            src = clip.get("path")
+            if not src or not os.path.exists(src):
+                player.pause()
+                return
+            st = float(clip.get("start_time", 0) or 0)
+            in_p = float(clip.get("in_point", 0) or 0)
+            source_t = max(0.0, timeline_t - st + in_p)
+            vol = float(clip.get("volume", 1.0) or 1.0) * float(getattr(self, "_master_volume", 1.0) or 1.0)
+            if self._bgm_audio_output:
+                self._bgm_audio_output.setVolume(max(0.0, min(1.0, vol)))
+            from PyQt6.QtCore import QUrl
+            from PyQt6.QtMultimedia import QMediaPlayer
+            cid = clip.get("id")
+            if getattr(self, "_bgm_bound_clip_id", None) != cid:
+                player.setSource(QUrl.fromLocalFile(src))
+                self._bgm_bound_clip_id = cid
+                player.setPosition(int(source_t * 1000))
+                player.play()
+            else:
+                if abs(player.position() / 1000.0 - source_t) > 0.35:
+                    player.setPosition(int(source_t * 1000))
+                if player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                    player.play()
+        except Exception as e:
+            print(f"BGM 同步失败: {e}")
+
     def _rewind(self):
-        """ """
-        new_position = max(0, self._media_player.position() - 10000)
-        self._media_player.setPosition(new_position)
-        if hasattr(self, '_timeline_widget'):
-            self._timeline_widget.set_playhead_position(new_position / 1000)
-        if hasattr(self, '_preview_manager') and self._video_source:
-            self._playhead_position = new_position / 1000
-            self._preview_manager.update_preview(self._playhead_position,
-                                                  effects=getattr(self, '_color_params', None))
+        """后退 10 秒（以播放头为准，不依赖 QMediaPlayer 时长）"""
+        cur = float(getattr(self, '_playhead_position', 0) or 0)
+        new_t = max(0.0, cur - 10.0)
+        if getattr(self, "_timeline_playing", False):
+            self._render_timeline_frame(new_t)
+        else:
+            self._on_timeline_playhead_moved(new_t)
+        if hasattr(self, '_timeline_widget') and self._timeline_widget:
+            self._timeline_widget.set_playhead_position(new_t)
     
     def _fast_forward(self):
-        """ """
-        new_position = min(self._media_player.duration(), self._media_player.position() + 10000)
-        self._media_player.setPosition(new_position)
-        if hasattr(self, '_timeline_widget'):
-            self._timeline_widget.set_playhead_position(new_position / 1000)
-        if hasattr(self, '_preview_manager') and self._video_source:
-            self._playhead_position = new_position / 1000
-            self._preview_manager.update_preview(self._playhead_position,
-                                                  effects=getattr(self, '_color_params', None))
+        """快进 10 秒（以播放头为准）"""
+        cur = float(getattr(self, '_playhead_position', 0) or 0)
+        dur = self._timeline_total_duration()
+        if dur <= 0 and self._media_player.duration() > 0:
+            dur = self._media_player.duration() / 1000.0
+        if dur <= 0 and hasattr(self, '_preview_manager') and self._preview_manager:
+            dur = float(getattr(self._preview_manager, '_video_duration', 0) or 0)
+        new_t = min(dur, cur + 10.0) if dur > 0 else cur + 10.0
+        if getattr(self, "_timeline_playing", False):
+            self._render_timeline_frame(new_t)
+        else:
+            self._on_timeline_playhead_moved(new_t)
+        if hasattr(self, '_timeline_widget') and self._timeline_widget:
+            self._timeline_widget.set_playhead_position(new_t)
     
     def _on_playback_speed_changed(self, speed_text):
-        """播放倍速切换"""
+        """播放倍速：同步音频与画面预览"""
         speed_map = {"0.5x": 0.5, "1x": 1.0, "1.5x": 1.5, "2x": 2.0}
         rate = speed_map.get(speed_text, 1.0)
         self._media_player.setPlaybackRate(rate)
+        if hasattr(self, '_preview_manager') and self._preview_manager:
+            self._preview_manager.playing_speed = rate
         print(f"播放倍速切换为: {speed_text}")
     
     def _reverse_play(self):
@@ -5339,6 +5403,8 @@ class EditorModule(BaseModule):
         self._is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
         status = "播放" if self._is_playing else "暂停"
         print(f"播放状态: {status}")
+        if hasattr(self, '_pp_btn') and self._pp_btn is not None:
+            self._pp_btn.setText("⏸" if self._is_playing else "▶")
     
     def _on_position_changed(self, position):
         """ """
@@ -5348,14 +5414,92 @@ class EditorModule(BaseModule):
         self._playhead_position = current_time
         self._update_time_display()
         
+        if hasattr(self, '_timeline_widget') and self._timeline_widget:
+            self._timeline_widget.set_playhead_position(current_time)
+        
         # 更新进度条
         if hasattr(self, '_progress_bar') and self._media_player.duration() > 0:
             self._progress_bar.setValue(int((position / self._media_player.duration()) * 100))
+
+    def _on_timeline_playhead_moved(self, position: float):
+        """时间线播放头拖动/跳转：按片段切源 + 应用滤镜（所见即所得）"""
+        self._playhead_position = float(position)
+        self._current_time = float(position)
+        self._update_time_display()
+        clip = self._clip_at_playhead(position)
+        if clip and clip.get("path") and os.path.exists(clip.get("path")):
+            src = clip["path"]
+            self._video_source = src
+            self._current_clip = clip
+            pm = getattr(self, '_preview_manager', None) or self._ensure_preview_manager()
+            if pm._video_source != src:
+                pm.open_video(src)
+            st = float(clip.get("start_time", 0) or 0)
+            in_p = float(clip.get("in_point", 0) or 0)
+            source_t = max(0.0, float(position) - st + in_p)
+            effects = self._collect_preview_effects(clip)
+            pm.set_active_effects(effects)
+            pm.update_preview(source_t, effects=effects)
+            if self._media_player.duration() > 0:
+                self._media_player.setPosition(int(source_t * 1000))
+            return
+        src = getattr(self, '_video_source', None)
+        if not src and self._current_clip:
+            src = self._current_clip.get('path')
+        if src:
+            pm = getattr(self, '_preview_manager', None) or self._ensure_preview_manager()
+            if pm._video_source != src:
+                pm.open_video(src)
+            effects = self._collect_preview_effects(self._current_clip)
+            pm.set_active_effects(effects)
+            pm.update_preview(position, effects=effects)
+        if self._media_player.duration() > 0:
+            self._media_player.setPosition(int(position * 1000))
+
+    def _on_snap_toggled(self, enabled: bool):
+        """吸附开关：写入时间线标志，供后续拖拽对齐使用"""
+        self._snap_enabled = bool(enabled)
+        if hasattr(self, '_timeline_widget') and self._timeline_widget is not None:
+            self._timeline_widget._snap_enabled = bool(enabled)
+
+    def _on_timeline_clip_context(self, action: str, clip_data):
+        """轨道/片段右键菜单动作"""
+        if clip_data:
+            self._current_clip = clip_data
+            self._on_clip_selected(clip_data)
+        if action == "split" and clip_data:
+            result = self._split_clip_at_time(
+                clip_data, float(getattr(self, '_playhead_position', 0))
+            )
+            self._notify_edit(result.get("message", "已分割") if result else "分割失败")
+        elif action == "delete" and clip_data:
+            self._delete_clip_by_id(clip_data.get("id"))
+            self._notify_edit("片段已删除")
+        elif action == "copy" and clip_data:
+            self._copied_clip = dict(clip_data)
+            self._notify_edit("片段已复制")
+        elif action == "duplicate" and clip_data:
+            self._copy_clip_data_to_timeline(clip_data)
+            self._notify_edit("已复制一份到时间线")
+        elif action == "paste":
+            copied = getattr(self, '_copied_clip', None)
+            if copied:
+                self._copy_clip_data_to_timeline(copied)
+                self._notify_edit("片段已粘贴")
+            else:
+                self._notify_edit("剪贴板没有片段")
+        self._update_undo_redo_state()
     
     def _on_progress_slider_moved(self, value):
-        """ """
-        # 这里可以显示预览帧
-        pass
+        """预览进度条拖动：按百分比跳转时间"""
+        duration = float(getattr(self, '_total_duration', 0) or 0)
+        if duration <= 0 and self._media_player.duration() > 0:
+            duration = self._media_player.duration() / 1000.0
+        if duration <= 0:
+            return
+        # 进度条若是 0-100 百分比
+        t = (value / 100.0) * duration if value <= 100 else (value / 1000.0) * duration
+        self._on_timeline_playhead_moved(t)
     
     def _on_progress_slider_released(self):
         """ """
@@ -5400,10 +5544,18 @@ class EditorModule(BaseModule):
         elif adjustment_type == "hue":
             self._hue_value.setText(str(value))
         
-        # 这里可以添加实时预览逻辑
-        # 由于Qt的QMediaPlayer不直接支持实时视频滤镜
-        # 可以使用OpenCV或其他库来实现实时预览
-        print(f"{adjustment_type} 调整为: {value}")
+        # 所见即所得：拖动滑块即时预览（不弹窗）
+        brightness = self._brightness_slider.value()
+        contrast = self._contrast_slider.value()
+        saturation = self._saturation_slider.value()
+        hue = self._hue_slider.value()
+        self._color_params = {
+            "brightness": round(brightness / 100 * 0.3, 3),
+            "contrast": round(1.0 + contrast / 100 * 0.5, 3),
+            "saturation": round(1.0 + saturation / 100 * 0.5, 3),
+            "hue": hue,
+        }
+        self._refresh_preview_with_effects()
     
     def _apply_video_adjustments(self):
         """把亮度/对比度/饱和度/色调调节写入当前片段，导出时烘焙进视频。"""
@@ -5428,9 +5580,9 @@ class EditorModule(BaseModule):
         self._color_params = cp  # 供预览端读取
         self._sync_timeline_widget_state()
         self._refresh_preview_with_effects()
-        QMessageBox.information(
-            self, "视频调节",
-            f"已应用调节（亮度{brightness}, 对比度{contrast}, 饱和度{saturation}, 色调{hue}），导出时生效")
+        self._notify_edit(
+            f"已应用调节（亮度{brightness}, 对比度{contrast}, 饱和度{saturation}, 色调{hue}）"
+        )
     
     def _reset_video_adjustments(self):
         """ """
@@ -5664,13 +5816,21 @@ class EditorModule(BaseModule):
             self._refresh_timeline()
 
     def _adjust_volume(self, volume):
-        """调整音频轨道音量"""
-        vol = volume / 100.0
+        """调整主音量（立即作用于 QAudioOutput + 片段默认音量）。"""
+        vol = max(0.0, min(1.0, float(volume) / 100.0))
+        self._master_volume = vol
+        try:
+            if getattr(self, "_audio_output", None):
+                self._audio_output.setVolume(vol)
+            if getattr(self, "_bgm_audio_output", None):
+                self._bgm_audio_output.setVolume(vol)
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         if hasattr(self, '_audio_manager') and self._audio_manager:
             tracks = self._audio_manager.list_audio_tracks()
             for t in tracks:
                 self._audio_manager.adjust_audio_volume(t['id'], vol)
-        print(f"调整音量到 {volume}%")
+        self._notify_edit(f"音量 {int(vol * 100)}%")
 
     def _apply_fade_effects(self):
         """应用淡入淡出效果（通过 ffmpeg）"""
@@ -5679,9 +5839,11 @@ class EditorModule(BaseModule):
             QMessageBox.warning(self, "提示", "请先在时间线导入音频/视频素材")
             return
         fi, ok1 = QInputDialog.getDouble(self, "淡入淡出", "淡入时长(秒):", 0.5, 0, 10, 1)
-        if not ok1: return
+        if not ok1:
+            return
         fo, ok2 = QInputDialog.getDouble(self, "淡入淡出", "淡出时长(秒):", 0.5, 0, 10, 1)
-        if not ok2: return
+        if not ok2:
+            return
         dst = self._output_path(src, '_fade')
         ffmpeg = self._get_ffmpeg()
         try:
@@ -5694,6 +5856,114 @@ class EditorModule(BaseModule):
             QMessageBox.information(self, "完成", f"淡入 {fi}s, 淡出 {fo}s\n{dst}")
         except Exception as e:
             QMessageBox.warning(self, "失败", f"处理失败: {e}")
+
+    def _delete_clip_by_id(self, clip_id, ripple: bool = True):
+        """按片段 ID 删除；默认波纹：同轨后续片段前移闭合空隙。"""
+        if not clip_id:
+            return False
+        deleted_clip = next((c for c in self._clips if c.get("id") == clip_id), None)
+        if deleted_clip is None:
+            return False
+        track_i = int(deleted_clip.get("track", 0) or 0)
+        st = float(deleted_clip.get("start_time", 0) or 0)
+        dur = float(deleted_clip.get("duration", 0) or 0)
+        end = st + dur
+        ripple_shifts = []
+        self._clips = [clip for clip in self._clips if clip.get("id") != clip_id]
+        self._clip_id_to_widget.pop(clip_id, None)
+        if self._current_clip and self._current_clip.get("id") == clip_id:
+            self._current_clip = None
+
+        if ripple and dur > 0:
+            for c in self._clips:
+                if int(c.get("track", 0) or 0) != track_i:
+                    continue
+                cst = float(c.get("start_time", 0) or 0)
+                if cst >= end - 1e-4:
+                    old = cst
+                    c["start_time"] = max(0.0, cst - dur)
+                    ripple_shifts.append({"id": c.get("id"), "old": old, "new": c["start_time"]})
+
+        if hasattr(self, '_timeline_widget'):
+            self._timeline_widget._clips = [
+                clip for clip in getattr(self._timeline_widget, '_clips', [])
+                if clip.get("id") != clip_id
+            ]
+            if hasattr(self._timeline_widget, "remove_clip_widget_by_id"):
+                self._timeline_widget.remove_clip_widget_by_id(clip_id)
+            else:
+                for track in getattr(self._timeline_widget, '_tracks', []):
+                    layout = track.get("content_layout")
+                    if not layout:
+                        continue
+                    for i in reversed(range(layout.count())):
+                        widget = layout.itemAt(i).widget()
+                        if widget is not None and hasattr(widget, "clip_data"):
+                            if widget.clip_data.get("id") == clip_id:
+                                layout.removeWidget(widget)
+                                widget.deleteLater()
+                                break
+        try:
+            try:
+                from app.core.timeline_manager import timeline_manager as real_timeline_manager
+            except ImportError:
+                from core.timeline_manager import timeline_manager as real_timeline_manager
+            current = real_timeline_manager.get_current_timeline()
+            if current:
+                for track in current.get("tracks", []):
+                    real_timeline_manager.delete_clip(current["id"], track["id"], clip_id)
+        except Exception as e:
+            print(f"删除内核时间线片段失败: {e}")
+        self._record_action({
+            "type": "delete",
+            "clip": deleted_clip,
+            "ripple_shifts": ripple_shifts,
+        })
+        self._sync_kernel_timeline()
+        self._sync_timeline_widget_state()
+        self._refresh_preview_to_current_clip()
+        self._notify_edit("已删除片段" + ("（波纹）" if ripple else ""))
+        return True
+
+    def _sync_timeline_widget_state(self):
+        """同步片段元数据到 ClipWidget，并按 start_time 重新定位。"""
+        if not hasattr(self, '_timeline_widget'):
+            return
+        tw = self._timeline_widget
+        if hasattr(tw, "all_clip_widgets"):
+            for widget in tw.all_clip_widgets():
+                clip_id = widget.clip_data.get("id")
+                for clip in self._clips:
+                    if clip.get("id") == clip_id:
+                        widget.clip_data = clip
+                        # 若轨变更则 reparent
+                        ti = int(clip.get("track", 0) or 0)
+                        if hasattr(tw, "reparent_clip_to_track"):
+                            tw.reparent_clip_to_track(widget, ti)
+                        else:
+                            tw.position_clip_widget(widget)
+                        widget.update()
+                        break
+            if hasattr(tw, "relayout_clips"):
+                tw.relayout_clips()
+        else:
+            for track in getattr(tw, '_tracks', []):
+                layout = track.get("content_layout")
+                if not layout:
+                    continue
+                for i in range(layout.count()):
+                    widget = layout.itemAt(i).widget()
+                    if widget is not None and hasattr(widget, "clip_data"):
+                        clip_id = widget.clip_data.get("id")
+                        for clip in self._clips:
+                            if clip.get("id") == clip_id:
+                                widget.clip_data = clip
+                                duration = float(clip.get("duration", 10))
+                                width = int(duration * 20 * (tw._zoom / 100))
+                                widget.setFixedWidth(max(80, width))
+                                widget.update()
+                                break
+        tw.update()
     
     def _optimize_workflow(self):
         """ """
@@ -5968,7 +6238,7 @@ class EditorModule(BaseModule):
                     '-shortest', dst
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 if result.returncode == 0:
                     self._add_to_clips(dst, 'video')
                     QMessageBox.information(self, "完成", f"画中画合成完成:\n{dst}")
@@ -6022,7 +6292,7 @@ class EditorModule(BaseModule):
                     '-c:a', 'copy', dst
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 if result.returncode == 0:
                     self._add_to_clips(dst, 'video')
                     QMessageBox.information(self, "完成", f"抠像完成:\n{dst}")
@@ -6099,7 +6369,7 @@ class EditorModule(BaseModule):
                         return
 
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 if result.returncode == 0:
                     self._add_to_clips(dst, 'video')
                     QMessageBox.information(self, "完成", f"变速处理完成:\n{dst}")
@@ -6140,15 +6410,15 @@ class EditorModule(BaseModule):
             result = subprocess.run(
                 [ffmpeg, '-i', path],
                 capture_output=True, text=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0
             )
             for line in result.stderr.split('\n'):
                 if 'Duration' in line:
                     parts = line.strip().split('Duration: ')[1].split(',')[0]
                     h, m, s = parts.split(':')
                     return float(h) * 3600 + float(m) * 60 + float(s)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("操作异常（已忽略）: %s", _e)
         return 10.0
 
     # ═══════════════════════════════════════════════════════════════
@@ -6204,7 +6474,7 @@ class EditorModule(BaseModule):
                     '-c:a', 'copy', dst
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
                 if result.returncode == 0:
                     self._add_to_clips(dst, 'video')
                     QMessageBox.information(self, "完成", f"曲线调色完成:\n{dst}")
@@ -6276,7 +6546,7 @@ class EditorModule(BaseModule):
                          '-af', f'asplit[a][b];[a]volume=1[b];[b]ametadata=print:key=lavfi.astats.Overall.RMS_level',
                          '-f', 'null', '-'],
                         capture_output=True, text=True, timeout=60,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0
                     )
                     self._beat_list.addItem(f"⚠ 需要安装 numpy/soundfile 库以启用完整节拍检测")
                     self._beat_list.addItem(f"提示: pip install numpy soundfile")
@@ -6318,7 +6588,7 @@ class EditorModule(BaseModule):
                     '-f', 'null', '-'
                 ]
                 subprocess.run(detect_cmd, capture_output=True, text=True, timeout=120,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                               creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
 
                 # 第2步: 根据跟踪类型应用稳定/变换
                 if os.path.exists(trf_file) and os.path.getsize(trf_file) > 10:
@@ -6335,12 +6605,12 @@ class EditorModule(BaseModule):
                         '-c:a', 'copy', dst
                     ]
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                            creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
 
                     try:
                         os.unlink(trf_file)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
 
                     if result.returncode == 0:
                         self._add_to_clips(dst, 'video')
@@ -6351,8 +6621,8 @@ class EditorModule(BaseModule):
                     QMessageBox.warning(self, "失败", "未能检测到足够的运动数据，请尝试其他视频")
                     try:
                         os.unlink(trf_file)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.warning("操作异常（已忽略）: %s", _e)
             except subprocess.TimeoutExpired:
                 QMessageBox.warning(self, "失败", "处理超时")
             except Exception as e:
@@ -6474,15 +6744,15 @@ class EditorModule(BaseModule):
                     '-c:a', 'copy', dst
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
 
                 # 清理临时文件
                 for tf in temp_files:
                     if tf != src and not (sticker.get("path") == tf for sticker in self._active_stickers):
                         try:
                             os.unlink(tf)
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            logger.warning("操作异常（已忽略）: %s", _e)
 
                 if result.returncode == 0:
                     self._add_to_clips(dst, 'video')
@@ -7010,6 +7280,7 @@ class EditorModule(BaseModule):
         })
         # 同步内核时间线 + 刷新预览，使剪切真正作用到视频
         self._sync_kernel_timeline()
+        self._sync_timeline_widget_state()
         self._refresh_preview_to_current_clip()
         return {"action": "split_clip", "success": True, "message": f"已在 {split_time:.1f}s 切分片段"}
 
@@ -7033,74 +7304,6 @@ class EditorModule(BaseModule):
         # 同步内核时间线 + 刷新预览，使粘贴真正作用到视频
         self._sync_kernel_timeline()
         self._refresh_preview_to_current_clip()
-
-    def _delete_clip_by_id(self, clip_id):
-        """按片段 ID 删除本地数据、时间线控件和内核时间线数据。"""
-        if not clip_id:
-            return False
-        # 记录撤销栈：先取出完整片段对象，供 _undo 恢复
-        deleted_clip = next((c for c in self._clips if c.get("id") == clip_id), None)
-        self._clips = [clip for clip in self._clips if clip.get("id") != clip_id]
-        self._clip_id_to_widget.pop(clip_id, None)
-        if self._current_clip and self._current_clip.get("id") == clip_id:
-            self._current_clip = None
-
-        if hasattr(self, '_timeline_widget'):
-            self._timeline_widget._clips = [
-                clip for clip in getattr(self._timeline_widget, '_clips', [])
-                if clip.get("id") != clip_id
-            ]
-            for track in getattr(self._timeline_widget, '_tracks', []):
-                layout = track.get("content_layout")
-                if not layout:
-                    continue
-                for i in reversed(range(layout.count())):
-                    widget = layout.itemAt(i).widget()
-                    if widget is not None and hasattr(widget, "clip_data"):
-                        if widget.clip_data.get("id") == clip_id:
-                            layout.removeWidget(widget)
-                            widget.deleteLater()
-                            break
-        try:
-            try:
-                from app.core.timeline_manager import timeline_manager as real_timeline_manager
-            except ImportError:
-                from core.timeline_manager import timeline_manager as real_timeline_manager
-            current = real_timeline_manager.get_current_timeline()
-            if current:
-                for track in current.get("tracks", []):
-                    real_timeline_manager.delete_clip(current["id"], track["id"], clip_id)
-        except Exception as e:
-            print(f"删除内核时间线片段失败: {e}")
-        # 记录撤销栈：供 _undo 恢复被删片段
-        if deleted_clip is not None:
-            self._record_action({"type": "delete", "clip": deleted_clip})
-        # 同步内核时间线 + 刷新预览，使删除真正作用到视频
-        self._sync_kernel_timeline()
-        self._refresh_preview_to_current_clip()
-        return True
-
-    def _sync_timeline_widget_state(self):
-        """同步片段元数据到 ClipWidget，并刷新时间线宽度。"""
-        if not hasattr(self, '_timeline_widget'):
-            return
-        for track in getattr(self._timeline_widget, '_tracks', []):
-            layout = track.get("content_layout")
-            if not layout:
-                continue
-            for i in range(layout.count()):
-                widget = layout.itemAt(i).widget()
-                if widget is not None and hasattr(widget, "clip_data"):
-                    clip_id = widget.clip_data.get("id")
-                    for clip in self._clips:
-                        if clip.get("id") == clip_id:
-                            widget.clip_data = clip
-                            duration = float(clip.get("duration", 10))
-                            width = int(duration * 20 * (self._timeline_widget._zoom / 100))
-                            widget.setFixedWidth(max(80, width))
-                            widget.update()
-                            break
-        self._timeline_widget.update()
 
     def _add_clip_to_timeline(self, file_path):
         """将视频素材真实加入内核时间线、本地片段列表和 TimelineWidget。"""
@@ -7203,7 +7406,7 @@ class EditorModule(BaseModule):
         slider = getattr(self, '_filter_intensity_slider', None)
         intensity = (slider.value() / 100.0) if slider is not None else 0.7
         self._apply_filter_to_clip(self._current_clip, filter_name, intensity)
-        QMessageBox.information(self, "滤镜", f"已应用 {filter_name} 滤镜，强度 {intensity:.0%}")
+        self._notify_edit(f"已应用 {filter_name}（强度 {intensity:.0%}）")
 
     def _apply_filter_to_clip(self, clip: Dict[str, Any], filter_name: str, intensity: float):
         """对指定片段应用滤镜元数据。"""
@@ -7215,6 +7418,7 @@ class EditorModule(BaseModule):
         clip["effects"] = effects
         clip["filter"] = filter_name
         clip["filter_intensity"] = effects["filter_intensity"]
+        self._active_filter_key = filter_name
         self._sync_timeline_widget_state()
         self._refresh_preview_with_effects()
 
@@ -7236,7 +7440,7 @@ class EditorModule(BaseModule):
         self._current_clip["effects"] = effects
         self._active_filter_key = ""
         self._refresh_preview_with_effects()
-        QMessageBox.information(self, "滤镜", "已清除滤镜（恢复原片）")
+        self._notify_edit("已清除滤镜")
 
     def _apply_active_filter_with_intensity(self):
         """用当前强度滑块重新应用已选滤镜，使『强度』滑块真正生效。"""
@@ -7246,14 +7450,22 @@ class EditorModule(BaseModule):
             return
         self._apply_filter(key)
 
-    def _apply_effect_to_clip(self, clip: Dict[str, Any], effect_type: str, params: Dict[str, Any]):
-        """对指定片段应用通用效果元数据。"""
-        effects = clip.get("effects") or {}
+    def _on_filter_intensity_live(self, value: int):
+        """滤镜强度拖动即预览"""
+        key = getattr(self, "_active_filter_key", "") or (
+            self._current_clip.get("filter") if self._current_clip else ""
+        )
+        if not key or not self._current_clip:
+            return
+        intens = value / 100.0
+        self._current_clip["filter"] = key
+        self._current_clip["filter_intensity"] = intens
+        effects = self._current_clip.get("effects") or {}
         if not isinstance(effects, dict):
             effects = {}
-        effects[effect_type] = dict(params or {})
-        clip["effects"] = effects
-        self._sync_timeline_widget_state()
+        effects["filter"] = key
+        effects["filter_intensity"] = intens
+        self._current_clip["effects"] = effects
         self._refresh_preview_with_effects()
 
     def _apply_transition(self):
@@ -7264,7 +7476,7 @@ class EditorModule(BaseModule):
         transition_type = self._transition_type_var.currentText() if hasattr(self, '_transition_type_var') else "fade"
         duration_ms = self._transition_duration_var.value() if hasattr(self, '_transition_duration_var') else 500
         self._apply_transition_to_clip(self._current_clip, transition_type, duration_ms / 1000.0)
-        QMessageBox.information(self, "转场", f"已应用 {transition_type} 转场，时长 {duration_ms}ms")
+        self._notify_edit(f"已应用 {transition_type} 转场，时长 {duration_ms}ms")
 
     def _apply_transition_to_clip(self, clip: Dict[str, Any], transition_type: str, duration: float):
         """对指定片段写入转场元数据并尝试同步转场管理器。"""
@@ -7279,10 +7491,6 @@ class EditorModule(BaseModule):
             transitions = []
         transitions.append(transition)
         clip["transitions"] = transitions
-        try:
-            self._add_transition(clip.get("id"), transition_type, transition["duration"])
-        except Exception as e:
-            print(f"同步转场管理器失败: {e}")
         self._sync_timeline_widget_state()
         self._refresh_preview_with_effects()
 
@@ -7292,7 +7500,7 @@ class EditorModule(BaseModule):
             QMessageBox.warning(self, "复制", "请先选择一个片段")
             return
         self._copied_clip = dict(self._current_clip)
-        QMessageBox.information(self, "复制", "片段已复制")
+        self._notify_edit("片段已复制")
 
     def _paste_clip(self):
         """粘贴片段到时间线。"""
@@ -7302,7 +7510,7 @@ class EditorModule(BaseModule):
             return
         self._copy_clip_data_to_timeline(copied)
         self._sync_timeline_widget_state()
-        QMessageBox.information(self, "粘贴", "片段已粘贴到时间线")
+        self._notify_edit("片段已粘贴到时间线")
 
     def _delete_clip(self):
         """删除当前片段。"""
@@ -7311,7 +7519,7 @@ class EditorModule(BaseModule):
             return
         clip_id = self._current_clip.get("id")
         self._delete_clip_by_id(clip_id)
-        QMessageBox.information(self, "删除", "片段已删除")
+        self._notify_edit("片段已删除")
 
     def _cut_clip(self):
         """在播放头位置切分当前片段。"""
@@ -7329,7 +7537,7 @@ class EditorModule(BaseModule):
             return
         result = self._split_clip_at_time(self._current_clip, playhead)
         if result.get("success"):
-            QMessageBox.information(self, "剪切", result.get("message", "片段已剪切"))
+            self._notify_edit(result.get("message", "片段已剪切"))
         else:
             QMessageBox.warning(self, "剪切", result.get("message", "剪切失败"))
 
