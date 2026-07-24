@@ -74,10 +74,36 @@ def detect_gpu_encoder(ffmpeg_path: str = "ffmpeg") -> str:
     return "libx264"
 
 
+def _find_ffmpeg_path() -> str:
+    """查找 FFmpeg 可执行文件路径"""
+    # 优先使用项目内的 FFmpeg
+    # __file__ = app/modules/lego/video_processor.py
+    # 需要向上 4 级到达项目根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    candidates = [
+        os.path.join(project_root, "thirdparty", "ffmpeg", "bin", "ffmpeg.exe"),
+        os.path.join(project_root, "thirdparty", "mlt", "Shotcut", "ffmpeg.exe"),
+    ]
+    
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    
+    # 查找系统 PATH
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        ffmpeg_path = os.path.join(path, "ffmpeg.exe")
+        if os.path.exists(ffmpeg_path):
+            return ffmpeg_path
+    
+    return "ffmpeg"
+
+
 def _find_ffprobe_path() -> str:
     """查找 ffprobe 可执行文件路径"""
     # 优先使用项目内的 ffprobe
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # __file__ = app/modules/lego/video_processor.py
+    # 需要向上 4 级到达项目根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     candidates = [
         os.path.join(project_root, "thirdparty", "ffmpeg", "bin", "ffprobe.exe"),
         os.path.join(project_root, "thirdparty", "mlt", "Shotcut", "ffprobe.exe"),
@@ -786,7 +812,11 @@ def create_video_from_images(
 class VideoProcessor:
     """视频处理器"""
     
-    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
+    def __init__(self, ffmpeg_path: str = None, ffprobe_path: str = None):
+        if ffmpeg_path is None:
+            ffmpeg_path = _find_ffmpeg_path()
+        if ffprobe_path is None:
+            ffprobe_path = _find_ffprobe_path()
         self.ffmpeg_path = ffmpeg_path
         self.ffprobe_path = ffprobe_path
         self.gpu_encoder = detect_gpu_encoder(ffmpeg_path)

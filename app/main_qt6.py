@@ -245,6 +245,14 @@ class DependencyChecker:
     def check_ffmpeg(cls) -> bool:
         """检查 FFmpeg"""
         try:
+            from app.core.ffmpeg_utils import find_ffmpeg
+            ffmpeg_path = find_ffmpeg()
+            if ffmpeg_path and os.path.exists(ffmpeg_path):
+                return True
+        except ImportError:
+            pass
+        
+        try:
             import subprocess
             result = subprocess.run(
                 ["ffmpeg", "-version"],

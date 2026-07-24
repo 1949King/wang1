@@ -2,13 +2,13 @@
   "version": "1.1",
   "clips": [
     {
-      "id": "clip_1784819570",
-      "name": "c3288118cde170fdbb57c461ee2d54f5_1784819568.mp4",
-      "path": "assets\\videos\\c3288118cde170fdbb57c461ee2d54f5_1784819568.mp4",
+      "id": "clip_1784898733",
+      "name": "d7b42fee1ea2e8792219d565bc70a58a_1784898729.mp4",
+      "path": "assets\\videos\\d7b42fee1ea2e8792219d565bc70a58a_1784898729.mp4",
       "start_time": 0.0,
-      "duration": 63.37,
+      "duration": 106.68,
       "in_point": 0,
-      "out_point": 63.37,
+      "out_point": 106.68,
       "track": 0,
       "effects": {},
       "transitions": []
@@ -18,5 +18,5 @@
   "subtitles": [],
   "subtitle_styles": {},
   "master_volume": 1.0,
-  "export_time": "2026-07-24T05:13:58.676374"
+  "export_time": "2026-07-25T03:13:35.445146"
 }
