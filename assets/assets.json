@@ -99,6 +99,17 @@
       "file_size": 9438731,
       "file_extension": ".mp4",
       "metadata": {}
+    },
+    "videos_1784897085_d7b42fee1ea2e8792219d565bc70a58a.mp4": {
+      "id": "videos_1784897085_d7b42fee1ea2e8792219d565bc70a58a.mp4",
+      "name": "d7b42fee1ea2e8792219d565bc70a58a_1784897085",
+      "path": "assets\\videos\\d7b42fee1ea2e8792219d565bc70a58a_1784897085.mp4",
+      "category": "videos",
+      "tags": [],
+      "imported_at": "2026-07-25T02:44:45.623014",
+      "file_size": 11394126,
+      "file_extension": ".mp4",
+      "metadata": {}
     }
   }
 }

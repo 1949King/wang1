@@ -129,17 +129,17 @@ class WaveformGenerator:
     def _generate_internal(self, path: str, num_samples: int,
                            progress_cb=None) -> Optional[WaveformData]:
         """实际生成逻辑"""
-        # 优先使用 PyAV
-        try:
-            return self._generate_pyav(path, num_samples, progress_cb)
-        except Exception as e:
-            logger.debug(f"PyAV 波形生成失败, 尝试回退: {e}")
-
-        # 回退到 FFmpeg (支持所有格式)
+        # 优先使用 FFmpeg (最稳定，支持所有格式)
         try:
             return self._generate_ffmpeg(path, num_samples, progress_cb)
         except Exception as e:
-            logger.debug(f"FFmpeg 波形生成失败: {e}")
+            logger.debug(f"FFmpeg 波形生成失败, 尝试回退: {e}")
+
+        # 其次使用 PyAV
+        try:
+            return self._generate_pyav(path, num_samples, progress_cb)
+        except Exception as e:
+            logger.debug(f"PyAV 波形生成失败: {e}")
 
         # 回退到 wave 库 (仅 WAV)
         if HAS_WAVE and path.lower().endswith('.wav'):
@@ -296,9 +296,11 @@ class WaveformGenerator:
         """使用 FFmpeg 提取音频并降采样（支持所有格式）"""
         import subprocess
         import struct
+        import time
         
         # 查找 FFmpeg 路径
         ffmpeg_path = self._find_ffmpeg_path()
+        logger.debug(f"波形生成 FFmpeg路径: {ffmpeg_path}")
         
         # 提取音频 PCM (单声道, 44100Hz, 16位)
         cmd = [
@@ -308,6 +310,8 @@ class WaveformGenerator:
         ]
         
         result = subprocess.run(cmd, capture_output=True, timeout=60)
+        logger.debug(f"波形生成返回码: {result.returncode}, 输出长度: {len(result.stdout)}")
+        
         if result.returncode != 0 or not result.stdout:
             raise RuntimeError(f"FFmpeg 提取音频失败: {result.stderr.decode('utf-8', errors='ignore')}")
         
@@ -318,8 +322,13 @@ class WaveformGenerator:
         samples = struct.unpack(f"<{num_raw_samples}h", raw_data)
         samples = list(samples)
         
+        logger.debug(f"波形生成原始采样数: {len(samples)}")
+        if samples:
+            logger.debug(f"波形生成原始采样范围: {min(samples)} ~ {max(samples)}")
+        
         # 归一化到 [-1, 1]
         max_val = max(abs(min(samples)), abs(max(samples)), 1)
+        logger.debug(f"波形生成 max_val: {max_val}")
         samples = [s / max_val for s in samples]
         
         # 降采样为 num_samples 个峰值
@@ -331,6 +340,8 @@ class WaveformGenerator:
                 rms = math.sqrt(sum(x * x for x in bucket) / len(bucket))
                 peaks.append(min(1.0, rms))
         peaks = peaks[:num_samples]
+        
+        logger.debug(f"波形生成峰值数: {len(peaks)}, 峰值范围: {min(peaks) if peaks else 0} ~ {max(peaks) if peaks else 0}")
         
         # 填充不足
         while len(peaks) < num_samples:
