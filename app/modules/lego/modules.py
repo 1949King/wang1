@@ -289,8 +289,10 @@ class ThreadPool:
 # 视频处理类
 class VideoProcessor:
     """ """
-    def __init__(self):
-        self.ffmpeg = "ffmpeg.exe"
+    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
+        self.ffmpeg = ffmpeg_path or "ffmpeg.exe"
+        self.ffmpeg_path = ffmpeg_path
+        self.ffprobe_path = ffprobe_path
         self.output_dir = "短剧AI剪辑输出"
         os.makedirs(self.output_dir, exist_ok=True)
         self.thread_pool = ThreadPool()
