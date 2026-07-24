@@ -74,8 +74,33 @@ def detect_gpu_encoder(ffmpeg_path: str = "ffmpeg") -> str:
     return "libx264"
 
 
-def get_video_info(video_path: str, ffprobe_path: str = "ffprobe") -> Optional[VideoInfo]:
+def _find_ffprobe_path() -> str:
+    """查找 ffprobe 可执行文件路径"""
+    # 优先使用项目内的 ffprobe
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    candidates = [
+        os.path.join(project_root, "thirdparty", "ffmpeg", "bin", "ffprobe.exe"),
+        os.path.join(project_root, "thirdparty", "mlt", "Shotcut", "ffprobe.exe"),
+    ]
+    
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    
+    # 查找系统 PATH
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        ffprobe_path = os.path.join(path, "ffprobe.exe")
+        if os.path.exists(ffprobe_path):
+            return ffprobe_path
+    
+    return "ffprobe"
+
+
+def get_video_info(video_path: str, ffprobe_path: str = None) -> Optional[VideoInfo]:
     """获取视频信息"""
+    if ffprobe_path is None:
+        ffprobe_path = _find_ffprobe_path()
+    
     try:
         cmd = [
             ffprobe_path,
