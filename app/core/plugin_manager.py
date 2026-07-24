@@ -2,6 +2,11 @@ import os
 import importlib.util
 import sys
 
+# B3 收敛标记 (2026-05-31):
+# 本文件是 plugin_manager 核心类 (PluginManager 注册中心)
+# 与 plugin_loader.py / plugin_hotloader.py / plugin_marketplace.py
+#     / plugin_sandbox.py / plugin_authentication.py 互补
+
 class PluginManager:
     def __init__(self):
         self.plugins = []

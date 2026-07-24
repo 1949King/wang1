@@ -44,7 +44,7 @@ class PreviewRenderer(QObject, IRenderer):
             return False
     
     def render_frame(self, frame_data: Dict[str, Any]) -> Optional[QImage]:
-        """渲染单帧（支持代理预览）"""
+        """渲染单帧（支持代理预览+帧缓存）"""
         if not self._initialized:
             logger.error("预览渲染器未初始化")
             return None
@@ -55,11 +55,20 @@ class PreviewRenderer(QObject, IRenderer):
             
             if 'image_data' in frame_data:
                 image_data = frame_data['image_data']
+                frame_id = frame_data.get('frame_id') or hash(image_data.tobytes()[:1024])
+                if frame_id in self._preview_cache:
+                    return self._preview_cache[frame_id]
                 
                 if self._proxy_enabled and self._should_use_proxy(width, height):
-                    return self._render_proxy_frame(image_data, width, height)
+                    result = self._render_proxy_frame(image_data, width, height)
                 else:
-                    return self._render_full_frame(image_data, width, height)
+                    result = self._render_full_frame(image_data, width, height)
+                
+                if result and len(self._preview_cache) >= self._max_cache_size:
+                    self._preview_cache.popitem(last=False)
+                if result:
+                    self._preview_cache[frame_id] = result
+                return result
             
             logger.warning(f"无法渲染帧，缺少图像数据: {list(frame_data.keys())}")
             return None
@@ -74,48 +83,17 @@ class PreviewRenderer(QObject, IRenderer):
         return total_pixels > 1920 * 1080  # 超过1080p则使用代理预览
     
     def _render_proxy_frame(self, image_data: np.ndarray, width: int, height: int) -> QImage:
-        """渲染代理预览帧"""
+        """渲染代理预览帧 - NumPy矢量化缩放"""
         try:
-            proxy_width = int(width * self._proxy_scale)
-            proxy_height = int(height * self._proxy_scale)
-            
-            # 使用numpy进行快速缩放
+            step = max(1, int(1.0 / self._proxy_scale))
             if len(image_data.shape) == 3:
-                # RGB图像
-                proxy_image = np.zeros((proxy_height, proxy_width, 3), dtype=np.uint8)
-                
-                for y in range(proxy_height):
-                    for x in range(proxy_width):
-                        src_x = int(x / self._proxy_scale)
-                        src_y = int(y / self._proxy_scale)
-                        
-                        if src_x < width and src_y < height:
-                            proxy_image[y, x] = image_data[src_y, src_x]
-                        else:
-                            proxy_image[y, x] = 128  # 灰色填充
+                proxy = image_data[::step, ::step, :].copy()
             else:
-                # 灰度图像
-                proxy_image = np.zeros((proxy_height, proxy_width), dtype=np.uint8)
-                
-                for y in range(proxy_height):
-                    for x in range(proxy_width):
-                        src_x = int(x / self._proxy_scale)
-                        src_y = int(y / self._proxy_scale)
-                        
-                        if src_x < width and src_y < height:
-                            proxy_image[y, x] = image_data[src_y, src_x]
-                        else:
-                            proxy_image[y, x] = 128  # 灰色填充
-            
-            qimage = QImage(
-                proxy_image.data,
-                proxy_width,
-                proxy_height,
-                QImage.Format.Format_RGB888
-            )
-            
-            return qimage
-            
+                proxy = image_data[::step, ::step].copy()
+            h, w = proxy.shape[:2]
+            channels = 3 if len(proxy.shape) == 3 else 1
+            fmt = QImage.Format.Format_RGB888 if channels == 3 else QImage.Format.Format_Grayscale8
+            return QImage(proxy.data, w, h, w * channels, fmt)
         except Exception as e:
             logger.error(f"代理预览渲染失败: {e}")
             return None

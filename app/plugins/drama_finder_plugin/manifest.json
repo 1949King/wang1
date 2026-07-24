@@ -1,0 +1,23 @@
+{
+    "name": "短剧筛选",
+    "version": "1.0.0",
+    "author": "官方",
+    "description": "智能筛选热门短剧，分析热度与佣金。支持10+平台榜单浏览、多维度筛选、双数据源策略。",
+    "category": "operation",
+    "icon": "🎭",
+    "entry_point": "Plugin",
+    "dependencies": ["drama_crawler"],
+    "compatibility": {
+        "min_version": "4.4.0",
+        "max_version": "5.9.9"
+    },
+    "tags": ["短剧", "筛选", "数据分析", "榜单", "佣金"],
+    "permissions": ["network", "read_video"],
+    "store_info": {
+        "id": "drama-finder",
+        "type": "plugin",
+        "category": "运营工具",
+        "is_free": true,
+        "is_official": true
+    }
+}

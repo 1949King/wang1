@@ -2,6 +2,10 @@
 增强日志系统
 ================
 在现有日志系统基础上添加性能监控、结构化日志和日志分析功能
+
+B4 收敛标记 (2026-05-31): 增强层 (PerformanceMonitor / StructuredLogger)
+调用入口: from core.logging_enhanced import initialize_enhanced_logging
+接线工作待 #C 任务
 """
 
 import logging

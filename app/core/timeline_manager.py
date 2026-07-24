@@ -148,11 +148,13 @@ class TimelineManager:
         
         # 生成片段ID
         clip_id = f"clip_{int(time.time())}"
+        import os as _os
+        clip_name = clip_info.get("name") or _os.path.basename(clip_info.get("path", ""))
         
         # 片段信息
         new_clip = {
             "id": clip_id,
-            "name": clip_info.get("name", os.path.basename(clip_info.get("path", ""))),
+            "name": clip_name,
             "path": clip_info.get("path"),
             "start_time": clip_info.get("start_time", 0),
             "duration": clip_info.get("duration", 10),
@@ -629,6 +631,260 @@ class TimelineManager:
             'audio_tracks': len([t for t in timeline['tracks'] if t['type'] == 'audio']),
             'cache_size': len(self.timeline_cache)
         }
+
+    # --- Ripple 编辑系统 (对标 Shotcut/OpenShot) ---
+
+    def ripple_delete_clip(self, timeline_id: str, track_id: str, clip_id: str) -> bool:
+        """
+        Ripple 删除：删除片段后，后续片段自动向前移动填补空隙
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_id: 片段ID
+
+        Returns:
+            是否删除成功
+        """
+        timeline = self.get_timeline(timeline_id)
+        if not timeline:
+            return False
+
+        track = None
+        for t in timeline["tracks"]:
+            if t["id"] == track_id:
+                track = t
+                break
+        if not track:
+            return False
+
+        clip_to_delete = None
+        for c in track["clips"]:
+            if c["id"] == clip_id:
+                clip_to_delete = c
+                break
+        if not clip_to_delete:
+            return False
+
+        clip_duration = clip_to_delete["duration"]
+        clip_start = clip_to_delete["start_time"]
+
+        # 删除片段
+        track["clips"] = [c for c in track["clips"] if c["id"] != clip_id]
+
+        # Ripple 推移：将后续片段向前移动
+        for c in track["clips"]:
+            if c["start_time"] > clip_start:
+                c["start_time"] -= clip_duration
+                c["start_time"] = max(0, c["start_time"])
+
+        self._recalculate_duration(timeline)
+        timeline["last_modified"] = datetime.now().isoformat()
+        return True
+
+    def insert_clip(self, timeline_id: str, track_id: str, clip_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        插入剪辑：在指定位置插入片段，后续片段自动后移
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_info: 片段信息 (必须包含 start_time 和 duration)
+
+        Returns:
+            新片段信息，失败返回 None
+        """
+        timeline = self.get_timeline(timeline_id)
+        if not timeline:
+            return None
+
+        track = None
+        for t in timeline["tracks"]:
+            if t["id"] == track_id:
+                track = t
+                break
+        if not track:
+            return None
+
+        insert_time = clip_info.get("start_time", 0)
+        clip_duration = clip_info.get("duration", 10)
+
+        # Ripple 推移：将插入点之后的片段后移
+        for c in track["clips"]:
+            if c["start_time"] >= insert_time:
+                c["start_time"] += clip_duration
+
+        # 添加新片段
+        return self.add_clip(timeline_id, track_id, clip_info)
+
+    def overwrite_clip(self, timeline_id: str, track_id: str, clip_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        覆盖剪辑：在指定位置放置片段，覆盖重叠部分
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_info: 片段信息 (必须包含 start_time 和 duration)
+
+        Returns:
+            新片段信息，失败返回 None
+        """
+        timeline = self.get_timeline(timeline_id)
+        if not timeline:
+            return None
+
+        track = None
+        for t in timeline["tracks"]:
+            if t["id"] == track_id:
+                track = t
+                break
+        if not track:
+            return None
+
+        new_start = clip_info.get("start_time", 0)
+        new_duration = clip_info.get("duration", 10)
+        new_end = new_start + new_duration
+
+        # 移除与新片段重叠的片段
+        track["clips"] = [
+            c for c in track["clips"]
+            if c["start_time"] + c["duration"] <= new_start or c["start_time"] >= new_end
+        ]
+
+        # 添加新片段
+        return self.add_clip(timeline_id, track_id, clip_info)
+
+    def lift_clip(self, timeline_id: str, track_id: str, clip_id: str) -> bool:
+        """
+        提升剪辑：删除片段，但保留空隙 (与 ripple_delete 相反)
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_id: 片段ID
+
+        Returns:
+            是否删除成功
+        """
+        return self.delete_clip(timeline_id, track_id, clip_id)
+
+    def ripple_move_clip(self, timeline_id: str, track_id: str, clip_id: str, new_start_time: float) -> bool:
+        """
+        Ripple 移动：移动片段，后续片段自动跟随
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_id: 片段ID
+            new_start_time: 新的开始时间
+
+        Returns:
+            是否移动成功
+        """
+        timeline = self.get_timeline(timeline_id)
+        if not timeline:
+            return False
+
+        track = None
+        clip = None
+        for t in timeline["tracks"]:
+            if t["id"] == track_id:
+                track = t
+                for c in t["clips"]:
+                    if c["id"] == clip_id:
+                        clip = c
+                        break
+                break
+        if not clip:
+            return False
+
+        old_start = clip["start_time"]
+        clip_duration = clip["duration"]
+        delta = new_start_time - old_start
+
+        # 如果向左移动，防止与左侧片段重叠
+        if delta < 0:
+            max_left_end = 0
+            for c in track["clips"]:
+                if c["id"] != clip_id and c["start_time"] + c["duration"] <= old_start:
+                    max_left_end = max(max_left_end, c["start_time"] + c["duration"])
+            if new_start_time < max_left_end:
+                new_start_time = max_left_end
+                delta = new_start_time - old_start
+
+        # 移动片段
+        clip["start_time"] = new_start_time
+
+        # Ripple 推移后续片段
+        for c in track["clips"]:
+            if c["id"] != clip_id:
+                if delta > 0 and c["start_time"] > old_start:
+                    c["start_time"] += delta
+                elif delta < 0 and c["start_time"] > new_start_time + clip_duration:
+                    c["start_time"] += delta
+                c["start_time"] = max(0, c["start_time"])
+
+        self._recalculate_duration(timeline)
+        timeline["last_modified"] = datetime.now().isoformat()
+        return True
+
+    def slip_clip(self, timeline_id: str, track_id: str, clip_id: str, slip_delta: float) -> bool:
+        """
+        Slip 编辑：保持片段时间位置不变，调整素材的入点/出点
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_id: 片段ID
+            slip_delta: 滑移量 (正=向右滑，负=向左滑)
+
+        Returns:
+            是否成功
+        """
+        clip = self.get_clip(timeline_id, clip_id)
+        if not clip:
+            return False
+
+        new_in = clip["in_point"] + slip_delta
+        if new_in < 0:
+            return False
+
+        clip["in_point"] = new_in
+        clip["out_point"] = clip["in_point"] + clip["duration"]
+
+        timeline = self.get_timeline(timeline_id)
+        if timeline:
+            timeline["last_modified"] = datetime.now().isoformat()
+        return True
+
+    def slide_clip(self, timeline_id: str, track_id: str, clip_id: str, slide_delta: float) -> bool:
+        """
+        Slide 编辑：保持素材入点/出点不变，移动片段在时间轴上的位置
+
+        Args:
+            timeline_id: 时间线ID
+            track_id: 轨道ID
+            clip_id: 片段ID
+            slide_delta: 滑动量
+
+        Returns:
+            是否成功
+        """
+        clip = self.get_clip(timeline_id, clip_id)
+        if not clip:
+            return False
+        return self.move_clip(timeline_id, track_id, clip_id,
+                              clip["start_time"] + slide_delta)
+
+    def _recalculate_duration(self, timeline: Dict[str, Any]) -> None:
+        """重新计算时间线总时长"""
+        max_end = 0
+        for track in timeline["tracks"]:
+            for c in track["clips"]:
+                max_end = max(max_end, c["start_time"] + c["duration"])
+        timeline["settings"]["duration"] = max_end
+
+    # --- 结束 Ripple 编辑系统 ---
 
 
 # 全局时间线管理器实例

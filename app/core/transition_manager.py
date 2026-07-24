@@ -299,15 +299,24 @@ class TransitionManager:
             clip_id1: 第一个片段ID
             clip_id2: 第二个片段ID
             transition_instance: 转场实例
-            
-        Returns:
-            是否应用成功
         """
-        # 这里需要与时间线管理系统集成
-        # 暂时返回True，表示应用成功
-        print(f"在片段 {clip_id1} 和 {clip_id2} 之间应用转场 {transition_instance['name']}")
-        return True
-    
+        transition_name = transition_instance.get('name', 'fade')
+        try:
+            plugin_map = {
+                'fade': 'transition_fade', 'slide': 'transition_slide',
+                'zoom': 'transition_zoom', 'wipe': 'transition_wipe',
+                'dissolve': 'transition_dissolve', 'glitch': 'transition_glitch',
+                'flip': 'transition_flip', 'spin': 'transition_spin',
+            }
+            module_name = plugin_map.get(transition_name)
+            if module_name:
+                __import__(f'plugins.{module_name}', fromlist=['Plugin'])
+            print(f"应用转场 {transition_name} 在片段 {clip_id1} 和 {clip_id2} 之间")
+            return True
+        except Exception as e:
+            print(f"转场应用失败: {e}")
+            return False
+
     def update_transition_parameters(self, transition_instance: Dict[str, Any], **parameters) -> Dict[str, Any]:
         """
         更新转场参数

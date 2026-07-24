@@ -220,20 +220,19 @@ class NavigationBar(QWidget):
         self._setup_ui()
     
     def set_theme(self, theme: str):
-        """设置导航栏主题"""
+        """设置导航栏主题 - 通过theme属性让全局QSS自动响应"""
         # 更新所有导航按钮的主题
         self._theme = "light" if theme == "light" else "dark"
         for button in self._buttons.values():
             button.set_theme(self._theme)
         
-        # 更新导航栏背景
+        # 设置theme属性，让全局QSS属性选择器自动响应
+        self.setProperty("theme", self._theme)
+        for child in self.findChildren(QWidget):
+            child.setProperty("theme", self._theme)
+        
+        # 更新logo标签颜色（内联样式，不受全局QSS影响）
         if theme == "light":
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: #fcfdff;
-                }
-            """)
-            # 更新logo标签颜色
             self._logo_label.setStyleSheet("""
                 QLabel {
                     font-size: 18px;
@@ -247,12 +246,6 @@ class NavigationBar(QWidget):
             # 更新分隔线颜色
             self._separator.setStyleSheet("background-color: #e3eaf3; max-height: 1px; margin: 16px 0;")
         else:
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: #101621;
-                }
-            """)
-            # 更新logo标签颜色
             self._logo_label.setStyleSheet("""
                 QLabel {
                     font-size: 18px;
@@ -269,11 +262,8 @@ class NavigationBar(QWidget):
     def _setup_ui(self):
         self.setFixedWidth(220)
         self.setObjectName("sideBar")
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #101621;
-            }
-        """)
+        # 不设置硬编码背景样式，由全局QSS根据theme属性自动应用
+        self.setProperty("theme", self._theme)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 20, 16, 20)

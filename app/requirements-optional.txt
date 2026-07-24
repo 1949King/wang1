@@ -1,0 +1,21 @@
+# AI 短剧编辑器 - 可选依赖 (OPTIONAL)
+# 安装方式: pip install -r requirements-optional.txt
+# 缺失时 main_qt6.py 不会报错,功能降级或不可用
+
+# 计算机视觉
+mediapipe>=0.10.0
+
+# 国产 LLM SDK (阿里 DashScope / 智谱)
+dashscope>=1.14.0
+anthropic>=0.18.0
+zhipuai>=2.0.0
+
+# 文字转语音
+gTTS>=2.5.0
+
+# GPU 监控
+pynvml>=11.5.0
+
+# 爬虫与浏览器自动化
+playwright>=1.40.0
+cryptography>=41.0.0

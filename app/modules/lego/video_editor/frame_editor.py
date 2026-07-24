@@ -6,10 +6,10 @@
 
 from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
-from PyQt6.QtGui import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QSpinBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QSpinBox
 import logging
 
-from ..core.timeline import timeline_core
+from app.core.timeline import timeline_core
 
 logger = logging.getLogger("AI短剧编辑器.frame_editor")
 

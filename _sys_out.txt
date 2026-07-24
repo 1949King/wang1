@@ -1,0 +1,132 @@
+2026-06-13 20:37:44 [[32mINFO[0m] AI短剧编辑器 - 配置文件加载成功: C:\Users\Administrator\Desktop\拾光剪影\app\config.json
+
+============================================================
+🎬 AI短剧编辑器 v3.0 - Qt6版
+   乐高积木式插件系统 + Skill 执行引擎
+============================================================
+
+🔍 检查运行环境...
+⚠️ 未检测到 GPU，将使用 CPU 运行
+
+📁 初始化路径...
+  ✅ temp_dir: ./temp_ai_editor
+  ✅ models_dir: ./models
+  ✅ 素材库_path: ./素材库
+  ✅ output_dir: ./output
+
+🔧 初始化核心组件...
+2026-06-13 20:37:55 [[32mINFO[0m] AI短剧编辑器.scheduler - 轻量内核已启用 (PyAV)
+⚠️ Ollama未安装: pip install ollama
+  ✅ 注册 Skill: 账号数据采集
+  ✅ 注册 Skill: 账号数据分析
+  ✅ 注册 Skill: 内容发布
+  ✅ 注册 Skill: 矩阵发布
+2026-06-13 20:37:55 [[33mWARNING[0m] AI短剧编辑器.secure_store - 升级目标不存在, 跳过: C:\Users\Administrator\Desktop\拾光剪影\app\config\platform_credentials.json
+2026-06-13 20:37:55 [[33mWARNING[0m] AI短剧编辑器.secure_store - 升级目标不存在, 跳过: C:\Users\Administrator\Desktop\拾光剪影\app\data\session.json
+2026-06-13 20:37:55 [[32mINFO[0m] AI短剧编辑器 -   ✅ PII 加密升级 (P0-C)
+  ✅ EventBus - 事件总线
+  ✅ MasterClock - 全局时钟
+  ✅ DataBus - 数据总线
+  ✅ SkillEngine - Skill执行引擎
+  ✅ AuthService - 认证服务
+2026-06-13 20:37:55 [[32mINFO[0m] AI短剧编辑器 -   ✅ SecurityChecker - 路径安全/输入校验
+2026-06-13 20:37:55 [[33mWARNING[0m] AI短剧编辑器 -   ⚠️ PermissionManager 降级: No module named 'app'
+2026-06-13 20:37:55 [[33mWARNING[0m] AI短剧编辑器 -   ⚠️ APMCollector 降级: No module named 'app'
+2026-06-13 20:37:55 [[33mWARNING[0m] AI短剧编辑器 -   ⚠️ AlertManager 降级: No module named 'app'
+2026-06-13 20:37:55 [[32mINFO[0m] AI短剧编辑器 -   ✅ I18n - 国际化 (locale=zh_CN)
+
+🧱 初始化积木系统...
+  ✅ ✂️ 自动剪辑 v1.0.0
+  ✅ 📝 字幕生成 v1.0.0
+  ✅ 🔄 去重优化 v1.0.0
+  ✅ ℹ️ 视频信息 v1.0.0
+  ✅ ✍️ 文案生成 v1.0.0
+✅ 已加载 5 个内置积木
+
+🎯 初始化 Skill 系统...
+  ✅ 注册 Skill: 账号数据采集
+  ✅ 注册 Skill: 账号数据分析
+  ✅ 注册 Skill: 内容发布
+  ✅ 注册 Skill: 矩阵发布
+✅ Skill 系统初始化完成
+
+🖥️ 初始化 Qt6 应用...
+  ✅ Qt6 应用初始化完成
+
+🧩 初始化功能模块...
+2026-06-13 20:37:56 [[32mINFO[0m] AI短剧编辑器.main_window - 注册表启动：共 15 个模块定义，当前启用 4 个，关闭 11 个
+2026-06-13 20:37:56 [[33mWARNING[0m] AI短剧编辑器.main_window - 模块 home (HomeModule) 导入失败: No module named 'app'
+2026-06-13 20:37:56 [[33mWARNING[0m] AI短剧编辑器.main_window - 模块 editor (EditorModule) 导入失败: No module named 'app'
+2026-06-13 20:37:56 [[33mWARNING[0m] AI短剧编辑器.main_window - 模块 settings (SettingsModule) 导入失败: No module named 'app'
+2026-06-13 20:37:56 [[33mWARNING[0m] AI短剧编辑器.main_window - 模块 help (HelpModule) 导入失败: No module named 'app'
+  ✅ 🏠 首页
+🚀 初始化TOP 0级视频处理器...
+🎭 DramaUnderstandingEngine 初始化完成
+   - Whisper模型: base (可用)
+   - Ollama模型: qwen2.5 (不可用)
+   - 视觉分析: (可用)
+   - 本地AI优先: True
+尝试使用本地FFmpeg: C:\Users\Administrator\Desktop\拾光剪影\thirdparty\ffmpeg\bin\ffmpeg.exe
+✓ 找到本地FFmpeg: C:\Users\Administrator\Desktop\拾光剪影\thirdparty\ffmpeg\bin\ffmpeg.exe
+🎬 ProfessionalVideoEngine 初始化完成
+   - FFmpeg: C:\Users\Administrator\Desktop\拾光剪影\thirdparty\ffmpeg\bin\ffmpeg.exe
+   - 最大工作线程: 4
+   - 硬件加速: {'nvidia': True, 'intel': True, 'amd': True}
+✅ TOP 0级处理器初始化完成
+✅ TOP 0级剪辑引擎已加载到剪辑模块
+🚀 爆款优化引擎初始化完成
+   已加载 6 种爆款基因模式
+✅ 爆款优化引擎已加载
+✅ 智能剪辑算法已加载
+✅ 双内核调度器已加载
+✅ 项目管理系统已加载
+✅ 素材管理系统已加载
+✅ 时间线管理系统已加载
+✅ 特效管理系统已加载
+✅ 转场管理系统已加载
+✅ 音频处理系统已加载
+✅ 字幕系统已加载
+✅ 预设系统已加载
+✅ 插件系统已加载
+✅ 预览管理器已加载
+  ✅ 🎬 剪辑
+  ✅ ✍️ 文案生成
+📋 批量任务管理器初始化完成
+   最大工作线程: 2
+   注册处理器: 剪辑
+   注册处理器: AI生成
+   注册处理器: 导出
+   注册处理器: 转码
+✅ 创建队列: 默认队列 (ID: 8aa6944f)
+  ✅ 📋 多任务
+  ✅ 🎭 短剧筛选
+  ✅ 注册 Skill: 账号数据采集
+  ✅ 注册 Skill: 账号数据分析
+  ✅ 注册 Skill: 内容发布
+  ✅ 注册 Skill: 矩阵发布
+  ✅ 👤 账号运营
+  ✅ 📁 素材库
+  ✅ 🧩 插件中心
+  ✅ 📊 性能监控
+  ✅ 🤖 模型管理
+  ✅ ⚙️ 设置
+  ✅ ❓ 帮助
+✅ 已初始化 12 个功能模块
+
+🚀 启动主窗口...
+
+ℹ️ 未登录 - 请点击右上角登录/激活按钮
+
+============================================================
+✅ 启动完成!
+   - 左侧导航栏: 点击切换模块
+   - 标签页: 同一模块内功能切换
+   - 右上角: 登录/激活按钮
+   - 状态栏: 显示执行状态和时间码
+============================================================
+
+2026-06-13 20:38:00 [[32mINFO[0m] AI短剧编辑器 - 应用启动成功
+2026-06-13 20:38:56 [[32mINFO[0m] AI短剧编辑器.main_window - 用户关闭主窗口
+2026-06-13 20:38:56 [[32mINFO[0m] AI短剧编辑器.main_window - 保存项目状态...
+2026-06-13 20:38:56 [[32mINFO[0m] AI短剧编辑器.main_window - 清理资源...
+2026-06-13 20:38:56 [[32mINFO[0m] AI短剧编辑器.main_window - 应用关闭完成

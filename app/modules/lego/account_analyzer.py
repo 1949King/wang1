@@ -64,7 +64,8 @@ class AccountAnalyzer:
                         with open(file_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             all_data.append(data)
-                    except:
+                    except Exception:
+                        pass
                         pass
             
             if not all_data:
@@ -146,7 +147,8 @@ class AccountAnalyzer:
             try:
                 with open(data_file, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except:
+            except Exception:
+                pass
                 return None
         return None
     
@@ -157,7 +159,8 @@ class AccountAnalyzer:
             try:
                 os.remove(data_file)
                 return True
-            except:
+            except Exception:
+                pass
                 return False
         return False
     

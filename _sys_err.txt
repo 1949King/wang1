@@ -1,0 +1,2 @@
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version 2.1 or later
+2026-06-13 20:37:58,108 - AIEditor - INFO - 日志系统初始化完成

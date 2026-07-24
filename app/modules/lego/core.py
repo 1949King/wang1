@@ -14,8 +14,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 import threading
+import logging
+import uuid
 from collections import defaultdict
 import json
+
+_logger = logging.getLogger("lego.core")
 
 
 class EventType(Enum):
@@ -40,6 +44,9 @@ class EventType(Enum):
     
     DRAMA_SELECTED = "drama_selected"
     COPY_GENERATED = "copy_generated"
+    VIDEO_CLIPPED = "video_clipped"
+    WORKFLOW_COMPLETED = "workflow_completed"
+    PUBLISH_RESULT = "publish_result"
     
     TASK_STARTED = "task_started"
     TASK_PROGRESS = "task_progress"
@@ -53,9 +60,13 @@ class EventType(Enum):
     
     MODULE_ACTIVATED = "module_activated"
     MODULE_DEACTIVATED = "module_deactivated"
+    MODULE_CONFIG_CHANGED = "module_config_changed"  # 功能开关变更（设置面板保存后触发）
+    THEME_CHANGED = "theme_changed"  # 主题切换（设置面板主题下拉框变更时触发）
     
     PERFORMANCE_WARNING = "performance_warning"
     ERROR_OCCURRED = "error_occurred"
+    
+    MATERIAL_TO_TIMELINE = "material_to_timeline"  # 素材库 → 时间线拖拽推送
     
     CUSTOM = "custom"
 
@@ -70,7 +81,6 @@ class Event:
     
     def __post_init__(self):
         if not self.id:
-            import uuid
             self.id = str(uuid.uuid4())[:8]
     
     def to_dict(self) -> Dict[str, Any]:
@@ -110,7 +120,7 @@ class EventBus:
         self._once_listeners: Dict[EventType, List[Callable]] = defaultdict(list)
         self._event_history: List[Event] = []
         self._max_history = 100
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # 可重入锁，避免回调中 emit 导致死锁
     
     def on(self, event_type: EventType, callback: Callable[[Event], None]) -> 'EventBus':
         """注册事件监听器"""
@@ -156,13 +166,19 @@ class EventBus:
             try:
                 callback(event)
             except Exception as e:
-                print(f"EventBus callback error: {e}")
+                _logger.error(
+                    f"EventBus callback error for {event_type.value}: {e}",
+                    exc_info=True
+                )
         
         for callback in once_listeners:
             try:
                 callback(event)
             except Exception as e:
-                print(f"EventBus once callback error: {e}")
+                _logger.error(
+                    f"EventBus once callback error for {event_type.value}: {e}",
+                    exc_info=True
+                )
         
         return event
     
@@ -365,7 +381,7 @@ class DataBus:
             return
         self._initialized = True
         self._data: Dict[str, Any] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # 可重入锁，避免嵌套调用死锁
     
     def set(self, key: str, value: Any):
         """设置数据"""
@@ -445,7 +461,7 @@ class TimelineModel:
         """添加轨道"""
         with self._lock:
             track = {
-                "id": str(uuid.uuid4())[:8] if 'uuid' in dir() else str(len(self._tracks)),
+                "id": str(uuid.uuid4())[:8],
                 "type": track_type,
                 "name": name or f"{track_type}_{len(self._tracks)}",
                 "clips": [],
@@ -454,60 +470,74 @@ class TimelineModel:
                 "visible": True
             }
             self._tracks.append(track)
-            self._event_bus.emit(EventType.TRACK_ADDED, {"track": track})
-            return track
+        self._event_bus.emit(EventType.TRACK_ADDED, {"track": track})
+        return track
     
     def remove_track(self, track_id: str) -> bool:
         """移除轨道"""
+        removed = None
         with self._lock:
             for i, track in enumerate(self._tracks):
                 if track["id"] == track_id:
                     removed = self._tracks.pop(i)
-                    self._event_bus.emit(EventType.TRACK_REMOVED, {"track": removed})
-                    return True
-            return False
+                    break
+        if removed:
+            self._event_bus.emit(EventType.TRACK_REMOVED, {"track": removed})
+            return True
+        return False
     
     def get_track(self, track_id: str) -> Optional[Dict[str, Any]]:
         """获取轨道"""
+        with self._lock:
+            for track in self._tracks:
+                if track["id"] == track_id:
+                    return track
+        return None
+    
+    def get_tracks_by_type(self, track_type: str) -> List[Dict[str, Any]]:
+        """按类型获取轨道"""
+        with self._lock:
+            return [t for t in self._tracks if t["type"] == track_type]
+    
+    def add_clip(self, track_id: str, clip: Dict[str, Any]) -> bool:
+        """添加剪辑片段"""
+        with self._lock:
+            track = self._get_track_unsafe(track_id)
+            if not track:
+                return False
+            if "id" not in clip:
+                clip["id"] = str(uuid.uuid4())[:8]
+            track["clips"].append(clip)
+            self._update_duration_unsafe()
+        self._event_bus.emit(EventType.CLIP_ADDED, {"track_id": track_id, "clip": clip})
+        return True
+    
+    def remove_clip(self, track_id: str, clip_id: str) -> bool:
+        """移除剪辑片段"""
+        removed = None
+        with self._lock:
+            track = self._get_track_unsafe(track_id)
+            if not track:
+                return False
+            for i, clip in enumerate(track["clips"]):
+                if clip["id"] == clip_id:
+                    removed = track["clips"].pop(i)
+                    self._update_duration_unsafe()
+                    break
+        if removed:
+            self._event_bus.emit(EventType.CLIP_REMOVED, {"track_id": track_id, "clip": removed})
+            return True
+        return False
+    
+    def _get_track_unsafe(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """内部使用：不加锁的轨道查找（调用方必须持有锁）"""
         for track in self._tracks:
             if track["id"] == track_id:
                 return track
         return None
     
-    def get_tracks_by_type(self, track_type: str) -> List[Dict[str, Any]]:
-        """按类型获取轨道"""
-        return [t for t in self._tracks if t["type"] == track_type]
-    
-    def add_clip(self, track_id: str, clip: Dict[str, Any]) -> bool:
-        """添加剪辑片段"""
-        track = self.get_track(track_id)
-        if not track:
-            return False
-        with self._lock:
-            if "id" not in clip:
-                import uuid
-                clip["id"] = str(uuid.uuid4())[:8]
-            track["clips"].append(clip)
-            self._update_duration()
-            self._event_bus.emit(EventType.CLIP_ADDED, {"track_id": track_id, "clip": clip})
-            return True
-    
-    def remove_clip(self, track_id: str, clip_id: str) -> bool:
-        """移除剪辑片段"""
-        track = self.get_track(track_id)
-        if not track:
-            return False
-        with self._lock:
-            for i, clip in enumerate(track["clips"]):
-                if clip["id"] == clip_id:
-                    removed = track["clips"].pop(i)
-                    self._update_duration()
-                    self._event_bus.emit(EventType.CLIP_REMOVED, {"track_id": track_id, "clip": removed})
-                    return True
-            return False
-    
-    def _update_duration(self):
-        """更新总时长"""
+    def _update_duration_unsafe(self):
+        """内部使用：不加锁的时长更新（调用方必须持有锁）"""
         max_end = 0.0
         for track in self._tracks:
             for clip in track["clips"]:
@@ -518,11 +548,12 @@ class TimelineModel:
     
     def to_dict(self) -> Dict[str, Any]:
         """序列化"""
-        return {
-            "tracks": self._tracks,
-            "duration": self._duration,
-            "fps": self._fps
-        }
+        with self._lock:
+            return {
+                "tracks": list(self._tracks),
+                "duration": self._duration,
+                "fps": self._fps
+            }
     
     def from_dict(self, data: Dict[str, Any]):
         """反序列化"""

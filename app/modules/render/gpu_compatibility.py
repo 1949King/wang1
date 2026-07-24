@@ -215,7 +215,8 @@ class GPUCompatibilityTester:
                             memory_mb = int(memory_str.split(' ')[0])
                         elif 'GB' in memory_str:
                             memory_mb = int(memory_str.split(' ')[0]) * 1024
-                    except:
+                    except Exception:
+                        pass
                         pass
             
             if model:

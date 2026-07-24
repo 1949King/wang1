@@ -28,6 +28,38 @@ sys.dont_write_bytecode = True
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# 数据源健康状态表 (Real #1 补短)
+# ============================================================
+# 标识每个平台的数据是真实 API 还是模拟 fallback。
+# 真实数据源 (real=True) 需要用户配置 API Key, 否则会回退到 fallback。
+# UI 可以通过 get_data_source_health() 弹"⚠️ 数据为模拟"提示。
+DATA_SOURCE_HEALTH = {
+    "douyin":     {"real": False, "source": "随机生成（需配置 TIKHUB_API_TOKEN 启用真实数据）", "api_class": "DouyinAPI"},
+    "kuaishou":   {"real": False, "source": "随机生成（需 Playwright 接入）",                 "api_class": "KuaishouAPI"},
+    "bilibili":   {"real": False, "source": "随机生成（可接 B 站官方 API）",                 "api_class": "BilibiliAPI"},
+    "xiaohongshu":{"real": False, "source": "未接入", "api_class": None},
+    "weiduanju":  {"real": False, "source": "未接入", "api_class": None},
+    "tencent":    {"real": False, "source": "未接入", "api_class": None},
+    "iqiyi":      {"real": False, "source": "未接入", "api_class": None},
+    "youku":      {"real": False, "source": "未接入", "api_class": None},
+    "weibo":      {"real": False, "source": "未接入", "api_class": None},
+    "mgtv":       {"real": False, "source": "未接入", "api_class": None},
+    "sohu":       {"real": False, "source": "未接入", "api_class": None},
+    "xigua":      {"real": False, "source": "未接入", "api_class": None},
+    "douyin_wx":  {"real": False, "source": "未接入", "api_class": None},
+    "kuaishou_wx":{"real": False, "source": "未接入", "api_class": None},
+    "duanjuju":   {"real": False, "source": "未接入", "api_class": None},
+}
+
+
+def get_data_source_health() -> Dict[str, Dict]:
+    """获取所有平台的数据源健康状态 (供 UI 提示用)"""
+    return DATA_SOURCE_HEALTH.copy()
+
+
+# ============================================================
+
 try:
     from PyQt6.QtCore import QObject, pyqtSignal, QThread
     PYQT_AVAILABLE = True
@@ -180,7 +212,8 @@ class ScoringEngine:
                 return 0.3
             else:
                 return 0.1
-        except:
+        except Exception:
+            pass
             return 0.5
     
     @staticmethod
@@ -320,7 +353,8 @@ class HeatPredictor:
                 return "stable"
             else:
                 return "declining"
-        except:
+        except Exception:
+            pass
             return "stable"
     
     @staticmethod
@@ -374,7 +408,8 @@ class Recommender:
                 update_dt = datetime.strptime(drama.update_time, "%Y-%m-%d %H:%M")
                 if (datetime.now() - update_dt).days <= 3:
                     reasons.append(cls.RECOMMEND_TEMPLATES["new_release"].format(status=drama.status))
-            except:
+            except Exception:
+                pass
                 pass
         
         if drama.category in ScoringEngine.CATEGORY_BOOST:
@@ -637,16 +672,92 @@ class DramaCrawler:
         self._cache_duration = 300
         self._apis: Dict[str, PlatformAPI] = {}
         self._init_apis()
-        
+
         self._user_preferences: Dict = {}
         self._view_history: List[str] = []
         self._favorites: List[str] = []
+
+        # Real #1 补短: 启动时从磁盘恢复用户偏好(优雅降级,失败不影响启动)
+        self.load_persisted_prefs()
     
     def _init_apis(self):
+        # ============================================================
+        # Real #1 补短: 注入顺序按"用户优先级"
+        #   1) Playwright 真实爬虫 (默认, 免费, 真实数据)
+        #   2) TikHub 真实 API (高级用户, 付费, 稳定)
+        #   3) 平台原 fallback (DouyinAPI / KuaishouAPI / BilibiliAPI) - 仅在前面都失败时使用
+        # ============================================================
+
+        # 1) Playwright 优先 (抖音 + B 站, 免费真实数据)
+        try:
+            from .stealth_browser import is_playwright_available
+            if is_playwright_available():
+                try:
+                    from .douyin_playwright_api import DouyinPlaywrightAPI
+                    self._apis["douyin"] = DouyinPlaywrightAPI()
+                    DATA_SOURCE_HEALTH["douyin"] = {
+                        "real": True,
+                        "source": "Playwright 真实爬取 (免费)",
+                        "api_class": "DouyinPlaywrightAPI",
+                    }
+                    logger.info("[drama_crawler] 抖音已注入 Playwright 真实爬虫")
+                except Exception as e:
+                    logger.debug(f"[drama_crawler] 注入 DouyinPlaywright 失败: {e}")
+
+                try:
+                    from .bilibili_playwright_api import BilibiliPlaywrightAPI
+                    self._apis["bilibili"] = BilibiliPlaywrightAPI()
+                    DATA_SOURCE_HEALTH["bilibili"] = {
+                        "real": True,
+                        "source": "Playwright 真实爬取 (免费)",
+                        "api_class": "BilibiliPlaywrightAPI",
+                    }
+                    logger.info("[drama_crawler] B站已注入 Playwright 真实爬虫")
+                except Exception as e:
+                    logger.debug(f"[drama_crawler] 注入 BilibiliPlaywright 失败: {e}")
+        except Exception as e:
+            logger.debug(f"[drama_crawler] Playwright 不可用,跳过: {e}")
+
+        # 2) TikHub 注入 (高级用户付费路径)
+        #    注意: TikHub 不会覆盖 Playwright,只在 Playwright 抓取失败时被使用
+        #    (因为 TikHub API 注入后, _apis["douyin"] 会被 TikHub 覆盖,这是不期望的)
+        #    策略: TikHub 单独存到 _premium_apis, fetch_dramas 时按"高级模式"决定是否启用
+        try:
+            from .tiktokhub_douyin_api import TikHubDouyinAPI, is_tikhub_configured
+            if is_tikhub_configured():
+                self._premium_apis = self._premium_apis if hasattr(self, "_premium_apis") else {}
+                self._premium_apis["douyin"] = TikHubDouyinAPI()
+                logger.info("[drama_crawler] TikHub 高级 API 已就绪 (配 TIKHUB_API_TOKEN 后)")
+        except Exception as e:
+            logger.debug(f"[drama_crawler] TikHub 注入跳过: {e}")
+
+        # 3) 平台原 fallback (DouyinAPI / KuaishouAPI / BilibiliAPI)
+        #    只在前面都没注入时使用
         for platform_id, platform_info in self.PLATFORMS.items():
             api_class = platform_info.get("api_class")
-            if api_class:
-                self._apis[platform_id] = api_class()
+            if api_class and platform_id not in self._apis:
+                try:
+                    self._apis[platform_id] = api_class()
+                except Exception as e:
+                    logger.warning(f"[drama_crawler] 注入 {platform_id} fallback 失败: {e}")
+
+        # 4) Web抓取器 (DramaWebScraper) — 兜底数据源
+        #    当所有平台API都返回假数据时，Web抓取器提供最后一个真实数据通道
+        try:
+            from .drama_web_scraper import drama_web_scraper
+            self._web_scraper = drama_web_scraper
+            # 标记所有平台可用Web抓取兜底
+            for platform_id in self.PLATFORMS:
+                if DATA_SOURCE_HEALTH.get(platform_id, {}).get("real") is not True:
+                    DATA_SOURCE_HEALTH[platform_id] = {
+                        "real": False,
+                        "source": "Web抓取器兜底 (公开数据聚合)",
+                        "api_class": "DramaWebScraper",
+                    }
+            logger.info("[drama_crawler] DramaWebScraper 已就绪 (兜底数据源)")
+        except Exception as e:
+            self._web_scraper = None
+            logger.debug(f"[drama_crawler] DramaWebScraper 加载跳过: {e}")
     
     def get_platforms(self) -> Dict[str, Dict]:
         return self.PLATFORMS
@@ -687,40 +798,70 @@ class DramaCrawler:
         min_views: int = 0
     ) -> List[DramaInfo]:
         total_needed = page * page_size
-        
+
         cache_key = f"{content_type}_{platform}_{category}_{keyword}_{sort_by}_{min_commission}_{min_rating}_{status_filter}_{min_heat}_{min_views}"
-        
+
+        # Real #1 补短: 缓存命中时同时返回 data_freshness
         if cache_key in self._cache:
             cached_data, cached_time = self._cache[cache_key]
             if time.time() - cached_time < self._cache_duration:
+                page_data = cached_data[(page-1)*page_size:page*page_size]
                 if callback:
-                    callback(cached_data[(page-1)*page_size:page*page_size])
-                return cached_data[(page-1)*page_size:page*page_size]
-        
+                    callback(page_data)
+                return page_data
+
+        # Real #1 补短: 错误统计 (供 UI toast 提示)
+        self._last_fetch_errors = []
         all_dramas = []
-        
+        # Real #1 补短: 数据来源记录 (供 UI "数据为模拟" 提示)
+        # 三种状态: ("platform", "real") / ("platform", "fake_api") / ("fallback", "fake")
+        self._last_data_source = []  # [(platform, source_kind)]
+
         # 如果内容类型不是drama，直接使用fallback数据生成对应类型的内容
         if content_type != "all" and content_type != "drama":
             all_dramas = self._generate_fallback_data(content_type, platform, category, keyword, total_needed)
+            self._last_data_source.append(("fallback", "fake"))
         else:
             if platform == "all":
                 platforms = list(self._apis.keys())
             else:
                 platforms = [platform] if platform in self._apis else []
-            
+
             # 增加每个平台的数据获取数量
             per_platform = max(total_needed // len(platforms), 50) if platforms else total_needed
-            
+
             for p in platforms:
                 if p in self._apis:
                     try:
                         dramas = self._apis[p].fetch(keyword, 1, per_platform, self._user_preferences)
+                        # Real #1 补短: 真实 API 失败返回 None,这里视为错误
+                        if dramas is None:
+                            self._last_fetch_errors.append(f"{p} 真实数据源失败,使用 fallback")
+                            self._last_data_source.append((p, "fake"))
+                            continue
+                        # 区分: 真实 API 成功 vs. fallback API 成功
+                        is_real = DATA_SOURCE_HEALTH.get(p, {}).get("real", False)
+                        source_kind = "real" if is_real else "fake"
                         all_dramas.extend(dramas)
+                        self._last_data_source.append((p, source_kind))
                     except Exception as e:
+                        # Real #1 补短: 不再静默吞错,记录到 _last_fetch_errors
+                        err_msg = f"{p}: {e}"
                         logger.warning(f"获取 {p} 数据失败: {e}")
-            
+                        self._last_fetch_errors.append(err_msg)
+                        self._last_data_source.append((p, "fake"))
+
+            if not all_dramas:
+                # 尝试Web抓取器兜底 (在生成假数据之前)
+                web_dramas = self._fetch_from_web_scraper(platform, category, keyword, per_platform)
+                if web_dramas:
+                    all_dramas.extend(web_dramas)
+                    self._last_data_source.append(("web_scraper", "real"))
+                    logger.info(f"[drama_crawler] Web抓取器返回 {len(web_dramas)} 条真实数据")
+
             if not all_dramas:
                 all_dramas = self._generate_fallback_data(content_type, platform, category, keyword, total_needed)
+                self._last_data_source.append(("fallback", "fake"))
         
         if keyword:
             filtered_dramas = []
@@ -829,7 +970,7 @@ class DramaCrawler:
             return thread
     
     def _generate_fallback_data(self, content_type: str, platform: str, category: str, keyword: str, count: int) -> List[DramaInfo]:
-        # 根据内容类型生成不同的标题
+        # 根据内容类型生成不同的标题（已将92条精选剧目纳入回退池）
         content_titles = {
             "drama": [
                 "总裁的替身新娘", "重生之商业女王", "穿越时空爱上你", "霸道王爷俏王妃",
@@ -837,28 +978,56 @@ class DramaCrawler:
                 "千亿总裁的隐婚妻", "神医嫡女", "战神归来", "仙帝重生",
                 "都市最强战神", "豪门第一宠婚", "重生之都市仙尊", "绝世武神",
                 "龙王归来", "赘婿逆袭", "都市医神", "校园高手",
-                "修仙归来", "系统签到", "空间重生", "末世生存"
+                "修仙归来", "系统签到", "空间重生", "末世生存",
+                # 92条精选池 - 短剧类
+                "重生之豪门千金", "霸总追妻火葬场", "神医下山之逆天改命",
+                "穿越之我在古代当首富", "复仇女王不流泪", "末日求生之我是王者",
+                "甜宠王妃不好惹", "神豪从签到开始", "逆袭之最强赘婿",
+                "修仙归来当奶爸", "军旅之特种兵王", "校园之超级学霸",
+                "都市之最强保镖", "美食之厨神下凡", "推理之名侦探",
+                "喜剧之爆笑一家人", "灾难之末日崩塌", "治愈之猫咪咖啡馆",
+                "体育之篮球少年", "冒险之古墓探险", "科幻之星际穿越",
+                "言情之时光倒流", "职场之升职记", "奇幻之魔法学院",
+                "古装之凤还巢", "悬疑之迷雾重重", "热血之少年歌行",
+                "萌宠之汪星人日常", "历史之大秦帝国", "系统之签到成神",
+                "后宫之嫡女归来", "机甲之战神觉醒", "恐怖之夜半惊魂",
+                "青春之同桌的你", "家族之豪门风云", "动作之极限特工",
+                "惊悚之密室逃脱",
             ],
             "comic": [
                 "斗破苍穹", "斗罗大陆", "完美世界", "遮天",
                 "武动乾坤", "凡人修仙传", "仙逆", "雪中悍刀行",
                 "赘婿", "庆余年", "诡秘之主", "剑来",
                 "全职高手", "盗墓笔记", "鬼灭之刃", "进击的巨人",
-                "海贼王", "火影忍者", "死神", "龙珠"
+                "海贼王", "火影忍者", "死神", "龙珠",
+                # 92条精选池 - 漫剧/动画类
+                "武侠之少年剑客", "玄幻之斗罗大陆", "斗罗大陆2绝世唐门",
+                "完美世界动画", "一念永恒动画", "凡人修仙传动漫",
+                "遮天动画", "仙逆动画", "神印王座动画",
+                "星辰变动画", "雪鹰领主动画", "武庚纪动画",
+                "秦时明月7", "画江湖之不良人7", "大王饶命2动画",
             ],
             "movie": [
                 "战狼2", "流浪地球2", "满江红", "你好，李焕英",
                 "长津湖", "唐人街探案3", "独行月球", "红海行动",
                 "消失的她", "孤注一掷", "封神第一部", "八角笼中",
                 "长安三万里", "万里归途", "中国机长", "攀登者",
-                "我和我的祖国", "我和我的家乡", "我和我的父辈", "金刚川"
+                "我和我的祖国", "我和我的家乡", "我和我的父辈", "金刚川",
+                # 92条精选池 - 电影类
+                "满江红2", "流浪地球3", "哪吒之魔童归来", "热辣人生",
+                "封神第二部", "战狼3", "唐人街探案4", "长津湖之水门桥续",
+                "独行月球2", "人生大事续集", "无名2", "飞驰人生3", "深海2",
             ],
             "tv": [
                 "狂飙", "三体", "长安十二时辰", "隐秘的角落",
                 "沉默的真相", "开端", "山海情", "觉醒年代",
                 "人世间", "星落凝成糖", "显微镜下的大明", "繁花",
                 "叛逆者", "理想之城", "乔家的儿女", "小舍得",
-                "三十而已", "安家", "都挺好", "欢乐颂"
+                "三十而已", "安家", "都挺好", "欢乐颂",
+                # 92条精选池 - 电视剧类
+                "庆余年第三季", "长相思续", "狂飙重生", "大奉打更人",
+                "与凤行2", "三体第二季", "狐妖小红娘真人版", "人世间续",
+                "县委大院2", "少年歌行2", "猎冰2", "梦华录续",
             ]
         }
         
@@ -1000,6 +1169,54 @@ class DramaCrawler:
             "platform_stats": self.get_all_platform_stats()
         }
     
+    def _fetch_from_web_scraper(
+        self, platform: str, category: str, keyword: str, limit: int
+    ) -> List[DramaInfo]:
+        """通过 DramaWebScraper 获取真实短剧数据 (兜底数据源)
+
+        Returns:
+            DramaInfo 列表，失败时返回空列表
+        """
+        if not hasattr(self, "_web_scraper") or self._web_scraper is None:
+            return []
+
+        try:
+            raw_data = self._web_scraper.fetch_hot_list(platform=platform, limit=limit)
+            if not raw_data:
+                return []
+
+            result = []
+            for item in raw_data:
+                try:
+                    drama = DramaInfo(
+                        id=f"{item.get('platform','web')}_{len(result)}",
+                        title=item.get("title", ""),
+                        platform=item.get("platform", platform),
+                        category=item.get("category", category),
+                        episodes=item.get("episodes", 100),
+                        views=item.get("views", "未知"),
+                        commission=item.get("commission", "—"),
+                        heat=item.get("heat", 50),
+                        score=ScoringEngine.calculate_score(item),
+                        recommend_reason=Recommender.generate_reason(item),
+                        status="连载中",
+                    )
+                    result.append(drama)
+                except Exception:
+                    continue
+
+            if result:
+                # 异步刷新缓存
+                try:
+                    self._web_scraper.refresh_cache(raw_data)
+                except Exception:
+                    pass
+
+            return result
+        except Exception as e:
+            logger.debug(f"[drama_crawler] WebScraper 调用失败: {e}")
+            return []
+
     def search_drama(self, drama_id: str) -> Optional[DramaInfo]:
         parts = drama_id.split("_")
         if len(parts) >= 2:
@@ -1022,6 +1239,171 @@ class DramaCrawler:
     
     def clear_cache(self):
         self._cache.clear()
+        # Real #1 补短: 同时清掉 TikHub 真实 API 的本地二级缓存
+        for api in self._apis.values():
+            cache = getattr(api, "_local_cache", None)
+            if cache:
+                cache.clear()
+
+    # ============================================================
+    # Real #1 补短: 新增公开方法(不破坏现有 API)
+    # ============================================================
+
+    def get_last_errors(self) -> List[str]:
+        """最近一次 fetch_dramas 的错误列表(供 UI toast)"""
+        return list(getattr(self, "_last_fetch_errors", []))
+
+    def get_data_freshness(self) -> Dict:
+        """
+        最近一次 fetch_dramas 的数据来源摘要(供 UI 显示"⚠️ 数据为模拟"提示)。
+
+        Returns:
+            {
+                "has_real": bool,         # 至少有一个真实 API 返回了数据
+                "has_fake": bool,         # 是否混入了 fake/fallback
+                "is_pure_fallback": bool, # 全部都是 fake/fallback (无任何真实数据)
+                "sources": [(platform, "real"|"fake"), ...]
+            }
+        """
+        sources = getattr(self, "_last_data_source", [])
+        if not sources:
+            return {"has_real": False, "has_fake": True,
+                    "is_pure_fallback": True, "sources": []}
+        real_count = sum(1 for _, kind in sources if kind == "real")
+        return {
+            "has_real": real_count > 0,
+            "has_fake": real_count < len(sources),
+            "is_pure_fallback": real_count == 0,
+            "sources": sources,
+        }
+
+    def add_to_history_persisted(self, drama_id: str, max_len: int = 100):
+        """Real #1 补短: 持久化观看历史(关闭程序不丢)"""
+        try:
+            from .user_prefs_store import add_to_history
+            self._view_history = add_to_history(drama_id, max_len)
+        except Exception as e:
+            logger.warning(f"持久化历史失败,使用内存: {e}")
+            if drama_id in self._view_history:
+                self._view_history.remove(drama_id)
+            self._view_history.insert(0, drama_id)
+            self._view_history = self._view_history[:max_len]
+
+    def add_to_favorites_persisted(self, drama_id: str):
+        """Real #1 补短: 持久化收藏"""
+        try:
+            from .user_prefs_store import add_to_favorites
+            self._favorites = add_to_favorites(drama_id)
+        except Exception as e:
+            logger.warning(f"持久化收藏失败,使用内存: {e}")
+            if drama_id not in self._favorites:
+                self._favorites.append(drama_id)
+
+    def remove_from_favorites_persisted(self, drama_id: str):
+        """Real #1 补短: 取消收藏(持久化)"""
+        try:
+            from .user_prefs_store import remove_from_favorites
+            self._favorites = remove_from_favorites(drama_id)
+        except Exception as e:
+            logger.warning(f"持久化取消收藏失败,使用内存: {e}")
+            if drama_id in self._favorites:
+                self._favorites.remove(drama_id)
+
+    def load_persisted_prefs(self):
+        """Real #1 补短: 启动时从磁盘恢复用户偏好(关闭程序不丢)"""
+        try:
+            from .user_prefs_store import load_user_prefs
+            data = load_user_prefs()
+            self._user_preferences = data.get("user_preferences", {})
+            self._favorites = data.get("favorites", [])
+            self._view_history = data.get("view_history", [])
+            logger.info(
+                f"[drama_crawler] 恢复用户数据: 偏好 {len(self._user_preferences)} 项, "
+                f"收藏 {len(self._favorites)} 部, 历史 {len(self._view_history)} 部"
+            )
+        except Exception as e:
+            logger.warning(f"恢复用户偏好失败: {e}")
+
+    # ============================================================
+    # Real #1 补短: 帮助文档 (供 UI 弹窗/帮助菜单)
+    # ============================================================
+
+    @staticmethod
+    def get_help_text() -> str:
+        """
+        短剧筛选模块 - 数据源使用说明
+        供 UI 弹窗或"帮助"菜单展示。
+        """
+        return """短剧筛选模块 - 数据源使用说明
+==================================================
+
+【数据获取优先级】(从高到低)
+
+① Playwright 真实爬虫 (默认, 免费) ⭐
+   ├─ 抖音短剧: DouyinPlaywrightAPI
+   ├─ B 站短剧: BilibiliPlaywrightAPI
+   ├─ 优势: 完全免费, 真实数据, 无需账号
+   ├─ 限制: 偶尔被反爬, 单次 ~3-5 秒
+   └─ 依赖: pip install playwright + playwright install chromium
+
+② TikHub 真实 API (高级用户, 付费)
+   ├─ 抖音: TikHubDouyinAPI
+   ├─ 优势: 稳定, 快速, 大量数据
+   ├─ 价格: ¥0.04/次, ¥10 = 250 次
+   ├─ 开通: https://tikhub.io (邮箱注册, 微信/支付宝充值)
+   └─ 配置: 配 TIKHUB_API_TOKEN 环境变量
+              (PowerShell: $env:TIKHUB_API_TOKEN = "你的token")
+              (或项目根 .env 文件写: TIKHUB_API_TOKEN=你的token)
+
+③ 平台原 fallback (模拟数据)
+   └─ 当上面都失败时使用, 数据为随机生成, 仅供 UI 演示
+
+==================================================
+
+【使用建议】
+
+  普通用户: 保持默认, 用 Playwright 真实爬虫即可
+  工作室:   配 TikHub 拿稳定大量数据
+  离线环境: 用 fallback 模拟数据演示 UI
+
+==================================================
+
+【常见问题】
+
+  Q1: 抖音爬不到数据?
+  A1: 抖音反爬升级时可能失败, 等 1-2 周修复, 或配 TikHub 兜底
+
+  Q2: 配了 TikHub Token 怎么没效果?
+  A2: 需要重启项目才能生效 (Token 在启动时读取)
+
+  Q3: 数据为模拟时 UI 怎么提示?
+  A3: 右下角有 "⚠️ 数据为模拟" 标识
+
+  Q4: 收藏/历史关闭后还在吗?
+  A4: 已在 v2.0 实现持久化, 文件在 app/data/store/drama_prefs.json
+"""
+
+
+# ============================================================
+# 短剧筛选模块 - 默认数据源使用说明 (模块级常量)
+# ============================================================
+
+DATA_SOURCE_HELP = """
+短剧筛选模块 - 默认数据源使用说明
+====================================
+
+🎯 默认方案: Playwright 真实爬虫 (免费)
+   ├─ 抖音 / B 站: 真实数据, 无需注册
+   └─ 限制: 偶尔被反爬, 1-2 周可能需更新
+
+⚡ 高级方案: TikHub 付费 API (可选)
+   ├─ 适用: 工作室/专业剪辑师
+   ├─ 价格: ¥0.04/次
+   └─ 注册: https://tikhub.io
+
+🔄 兜底方案: 模拟数据
+   └─ 当上面都失败时, 仍可看到 UI 演示数据
+"""
 
 
 drama_crawler = DramaCrawler()

@@ -9,22 +9,84 @@ from enum import Enum
 logger = logging.getLogger("AI短剧编辑器.scheduler")
 
 
-def _safe_import(module_path: str, names: List[str]):
+def _resolve_module_path(module_path: str) -> list[str]:
     """
-    统一的安全导入工具，解决 app. 前缀不一致问题。
-    优先尝试 app. 前缀，失败则尝试相对路径。
+    解析模块导入路径，生成可能的导入路径列表。
+    优先尝试带 app. 前缀的路径，然后尝试不带前缀的路径。
+    
+    Args:
+        module_path: 原始模块路径
+        
+    Returns:
+        可能的导入路径列表，按优先级排序
     """
-    try:
-        mod = __import__(module_path, fromlist=names)
-    except ImportError:
-        # 尝试不带 app. 前缀的路径
-        alt_path = module_path
-        if module_path.startswith("app."):
-            alt_path = module_path[4:]
-        else:
-            alt_path = "app." + module_path
-        mod = __import__(alt_path, fromlist=names)
-    return tuple(getattr(mod, name) for name in names)
+    paths = []
+    if module_path.startswith("app."):
+        paths.append(module_path)
+        paths.append(module_path[4:])
+    else:
+        paths.append(f"app.{module_path}")
+        paths.append(module_path)
+    return paths
+
+
+def _safe_import(module_path: str, names: List[str]) -> tuple:
+    """
+    安全导入模块并获取指定属性，具有完善的错误处理和日志记录。
+    
+    Args:
+        module_path: 模块导入路径
+        names: 需要从模块中获取的属性名称列表
+        
+    Returns:
+        包含请求属性的元组
+        
+    Raises:
+        ImportError: 当所有导入路径都失败时抛出，包含详细的错误信息
+    """
+    import_errors = []
+    possible_paths = _resolve_module_path(module_path)
+    
+    for attempt, path in enumerate(possible_paths, 1):
+        try:
+            logger.debug(f"尝试导入模块: {path} (第{attempt}次尝试)")
+            mod = __import__(path, fromlist=names)
+            
+            missing_attrs = []
+            attrs = []
+            for name in names:
+                try:
+                    attr = getattr(mod, name)
+                    attrs.append(attr)
+                    logger.debug(f"成功获取属性: {path}.{name}")
+                except AttributeError:
+                    missing_attrs.append(name)
+                    logger.warning(f"属性不存在: {path}.{name}")
+            
+            if missing_attrs:
+                error_msg = f"模块 {path} 导入成功，但缺少属性: {', '.join(missing_attrs)}"
+                logger.error(error_msg)
+                import_errors.append(error_msg)
+                continue
+            
+            logger.debug(f"成功导入模块和属性: {path} -> {', '.join(names)}")
+            return tuple(attrs)
+            
+        except ImportError as e:
+            error_msg = f"导入模块 {path} 失败: {str(e)}"
+            logger.warning(error_msg)
+            import_errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"导入模块 {path} 时发生意外错误: {str(e)}"
+            logger.error(error_msg)
+            import_errors.append(error_msg)
+    
+    final_error = (
+        f"无法从任何路径导入模块 '{module_path}' 的属性 {names}。"
+        f"尝试的路径: {possible_paths}。错误详情: {'; '.join(import_errors)}"
+    )
+    logger.error(final_error)
+    raise ImportError(final_error)
 
 
 class EditorKernel(Enum):
@@ -76,6 +138,56 @@ class KernelTaskPlan:
         }
 
 
+class PerformanceMetrics:
+    """性能监控指标"""
+    
+    def __init__(self):
+        self.cpu_usage = 0.0
+        self.memory_usage = 0.0
+        self.gpu_usage = 0.0
+        self.frame_rate = 0.0
+        self.render_latency = 0.0
+        self.task_queue_length = 0
+        self._history: List[Dict[str, float]] = []
+        self._max_history = 60
+    
+    def update(self, **kwargs):
+        """更新性能指标"""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+        
+        record = {
+            'cpu_usage': self.cpu_usage,
+            'memory_usage': self.memory_usage,
+            'frame_rate': self.frame_rate,
+            'render_latency': self.render_latency,
+        }
+        self._history.append(record)
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
+    
+    def get_average(self, metric: str) -> float:
+        """获取指标历史平均值"""
+        if not self._history:
+            return 0.0
+        values = [h.get(metric, 0) for h in self._history]
+        return sum(values) / len(values)
+    
+    def to_dict(self) -> Dict[str, float]:
+        """转为字典"""
+        return {
+            'cpu_usage': self.cpu_usage,
+            'memory_usage': self.memory_usage,
+            'gpu_usage': self.gpu_usage,
+            'frame_rate': self.frame_rate,
+            'render_latency': self.render_latency,
+            'task_queue_length': self.task_queue_length,
+            'avg_cpu_usage': self.get_average('cpu_usage'),
+            'avg_frame_rate': self.get_average('frame_rate'),
+        }
+
+
 class EditorScheduler:
     """双内核调度器 (v3 - 精简为二核)"""
     
@@ -97,6 +209,11 @@ class EditorScheduler:
         self._operation_profiles = self._build_operation_profiles()
         self._initialize_kernels()
         self._enable_kernel(EditorKernel.LIGHTWEIGHT)
+        
+        self._performance_metrics = PerformanceMetrics()
+        self._last_switch_time = 0
+        self._switch_cooldown = 5.0
+        self._auto_degrade_enabled = True
         
     def _build_operation_profiles(self) -> Dict[str, Dict[str, Any]]:
         """建立任务画像，集中维护自动内核选择规则。"""
@@ -204,6 +321,10 @@ class EditorScheduler:
         if kernel is None:
             return False
 
+        if not self._check_cooldown() and kernel != self._current_kernel:
+            logger.debug("内核切换冷却中，跳过切换")
+            return False
+
         with self._kernel_lock:
             if kernel not in self._kernels:
                 return False
@@ -214,6 +335,7 @@ class EditorScheduler:
                 self._deactivate_kernel(self._current_kernel)
             self._current_kernel = kernel
             self._selection_mode = KernelSelection(kernel.value)
+            self._update_last_switch()
             logger.info(f"内核切换: {kernel.value}")
             return True
 
@@ -370,10 +492,63 @@ class EditorScheduler:
             tasks = self._task_history[-max(1, limit):]
             return [task.to_dict() for task in reversed(tasks)]
 
+    def _check_cooldown(self) -> bool:
+        """检查内核切换冷却时间"""
+        now = time.time()
+        return (now - self._last_switch_time) >= self._switch_cooldown
+
+    def _update_last_switch(self):
+        """更新最后切换时间"""
+        self._last_switch_time = time.time()
+
+    def update_performance_metrics(self, **kwargs):
+        """更新性能监控指标"""
+        self._performance_metrics.update(**kwargs)
+
+    def get_performance_metrics(self) -> Dict[str, float]:
+        """获取性能监控指标"""
+        return self._performance_metrics.to_dict()
+
+    def should_auto_degrade(self) -> bool:
+        """判断是否需要自动降级到轻量内核"""
+        if not self._auto_degrade_enabled:
+            return False
+        
+        if not self._check_cooldown():
+            return False
+        
+        metrics = self._performance_metrics
+        avg_cpu = metrics.get_average('cpu_usage')
+        avg_fps = metrics.get_average('frame_rate')
+        avg_latency = metrics.get_average('render_latency')
+        
+        if avg_cpu > 85.0:
+            logger.warning(f"CPU使用率过高 ({avg_cpu:.1f}%)，触发自动降级")
+            return True
+        if avg_fps > 0 and avg_fps < 15.0:
+            logger.warning(f"帧率过低 ({avg_fps:.1f}fps)，触发自动降级")
+            return True
+        if avg_latency > 500.0:
+            logger.warning(f"渲染延迟过高 ({avg_latency:.1f}ms)，触发自动降级")
+            return True
+        
+        return False
+
+    def set_auto_degrade_enabled(self, enabled: bool):
+        """设置是否启用自动降级"""
+        self._auto_degrade_enabled = enabled
+        logger.info(f"自动降级: {'启用' if enabled else '禁用'}")
+
     def resolve_kernel(self, operation: str = "preview",
                        params: Optional[Dict[str, Any]] = None) -> EditorKernel:
         """根据任务画像自主选择轻量或专业内核。"""
         operation = self._normalize_operation(operation)
+        
+        if self.should_auto_degrade() and self._current_kernel == EditorKernel.PROFESSIONAL:
+            logger.info("自动降级到轻量内核")
+            self.switch_kernel(EditorKernel.LIGHTWEIGHT)
+            return EditorKernel.LIGHTWEIGHT
+
         if self._selection_mode == KernelSelection.LIGHTWEIGHT:
             self.switch_kernel(EditorKernel.LIGHTWEIGHT)
             return EditorKernel.LIGHTWEIGHT

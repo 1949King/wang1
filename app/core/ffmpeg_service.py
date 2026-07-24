@@ -191,18 +191,22 @@ class FFmpegService(QObject):
         logger.info(f"FFmpeg服务初始化，FFmpeg路径: {self._ffmpeg_path}")
 
     def _find_ffmpeg(self) -> str:
+        """复用统一的 FFmpeg 路径检测工具，避免重复逻辑和路径优先级问题"""
+        try:
+            from .ffmpeg_utils import find_ffmpeg
+            ffmpeg_path = find_ffmpeg()
+            if ffmpeg_path and os.path.exists(ffmpeg_path):
+                return ffmpeg_path
+        except ImportError:
+            pass
+
+        # 回退到原逻辑（优先项目内置，最后才用 Shotcut 的 FFmpeg）
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         project_ffmpeg = os.path.join(
             project_root, "thirdparty", "ffmpeg", "bin", "ffmpeg.exe"
         )
         if os.path.exists(project_ffmpeg):
             return project_ffmpeg
-
-        shotcut_ffmpeg = os.path.join(
-            project_root, "thirdparty", "mlt", "Shotcut", "ffmpeg.exe"
-        )
-        if os.path.exists(shotcut_ffmpeg):
-            return shotcut_ffmpeg
 
         venv_ffmpeg = os.path.join(
             project_root, ".venv312", "Scripts", "ffmpeg.exe"
@@ -218,6 +222,13 @@ class FFmpegService(QObject):
             ffmpeg_path = os.path.join(path, "ffmpeg.exe")
             if os.path.exists(ffmpeg_path):
                 return ffmpeg_path
+
+        # Shotcut 的 FFmpeg 缺少关键编解码器，仅作为最后回退
+        shotcut_ffmpeg = os.path.join(
+            project_root, "thirdparty", "mlt", "Shotcut", "ffmpeg.exe"
+        )
+        if os.path.exists(shotcut_ffmpeg):
+            return shotcut_ffmpeg
 
         return "ffmpeg"
 

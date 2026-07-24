@@ -195,7 +195,8 @@ class WhisperTranscriber:
         try:
             import librosa
             duration = librosa.get_duration(filename=audio_path)
-        except:
+        except Exception:
+            pass
             duration = 60.0  # 默认60秒
         
         segments = []

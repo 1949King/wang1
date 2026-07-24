@@ -51,6 +51,17 @@ class BatchTask:
     error_message: Optional[str] = None
     callback: Optional[Callable] = field(default=None, repr=False)
 
+    # T-1: 任务依赖 — 依赖的任务ID列表，全部COMPLETED后才执行
+    depends_on: List[str] = field(default_factory=list)
+
+    # T-3: 失败重试
+    max_retries: int = 0
+    retry_count: int = 0
+    retry_delay: float = 5.0
+
+    # T-6: 定时调度 — 设定时间后自动入队执行
+    scheduled_at: Optional[datetime] = None
+
 
 @dataclass
 class TaskQueue:
@@ -90,12 +101,19 @@ class BatchTaskManager:
         self.task_history: List[BatchTask] = []
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
-        
+        self._worker_semaphore = threading.Semaphore(max_workers)  # T-0: 并发控制
+
+        # T-6: 定时调度
+        self._scheduled_tasks: Dict[str, BatchTask] = {}
+        self._scheduler_thread: Optional[threading.Thread] = None
+        self._scheduler_running = False
+
         # 任务处理器映射
         self._processors: Dict[str, Callable] = {}
         
         print(f"📋 批量任务管理器初始化完成")
         print(f"   最大工作线程: {max_workers}")
+        print(f"   定时调度器: 待启动")
     
     def register_processor(self, task_type: str, processor: Callable):
         """
@@ -136,7 +154,11 @@ class BatchTaskManager:
     def add_task(self, queue_id: str, name: str, task_type: str,
                 params: Dict[str, Any],
                 priority: TaskPriority = TaskPriority.NORMAL,
-                callback: Optional[Callable] = None) -> str:
+                callback: Optional[Callable] = None,
+                depends_on: List[str] = None,
+                max_retries: int = 0,
+                retry_delay: float = 5.0,
+                scheduled_at: datetime = None) -> str:
         """
         添加任务到队列
         
@@ -147,11 +169,23 @@ class BatchTaskManager:
             params: 任务参数
             priority: 优先级
             callback: 完成回调
+            depends_on: T-1 依赖的任务ID列表
+            max_retries: T-3 最大重试次数
+            retry_delay: T-3 重试间隔(秒)
+            scheduled_at: T-6 定时执行时间
             
         Returns:
             str: 任务ID
         """
         task_id = str(uuid.uuid4())[:8]
+        
+        # T-6: 如果有 scheduled_at 且是未来时间，状态保持 PENDING 但不立即入队
+        now = datetime.now()
+        if scheduled_at and scheduled_at > now:
+            effective_status = TaskStatus.PENDING
+        else:
+            effective_status = TaskStatus.PENDING
+            scheduled_at = None  # 过去的时间视为立即执行
         
         task = BatchTask(
             task_id=task_id,
@@ -159,10 +193,15 @@ class BatchTaskManager:
             task_type=task_type,
             params=params,
             priority=priority,
-            status=TaskStatus.PENDING,
+            status=effective_status,
             progress=0.0,
-            created_at=datetime.now(),
-            callback=callback
+            created_at=now,
+            callback=callback,
+            depends_on=depends_on or [],
+            max_retries=max_retries,
+            retry_count=0,
+            retry_delay=retry_delay,
+            scheduled_at=scheduled_at,
         )
         
         with self._lock:
@@ -170,10 +209,140 @@ class BatchTaskManager:
                 self.task_queues[queue_id].tasks.append(task)
                 self.task_queues[queue_id].total_tasks += 1
                 print(f"➕ 添加任务: {name} (ID: {task_id}) 到队列 {queue_id}")
+                if depends_on:
+                    print(f"   T-1 依赖: {depends_on}")
+                if scheduled_at:
+                    print(f"   T-6 定时: {scheduled_at}")
             else:
                 raise ValueError(f"队列不存在: {queue_id}")
         
+        # T-6: 自动注册到调度器
+        if scheduled_at:
+            self._register_scheduled(task)
+
         return task_id
+
+    # ════════════════════════════════════════════════════════════════
+    # T-1: 任务依赖管理
+    # ════════════════════════════════════════════════════════════════
+
+    def add_dependency(self, task_id: str, depends_on_id: str) -> bool:
+        """添加任务依赖 (T-1)
+        
+        Args:
+            task_id: 当前任务ID
+            depends_on_id: 依赖的任务ID
+        
+        Returns:
+            是否添加成功
+        """
+        with self._lock:
+            for q_id, queue in self.task_queues.items():
+                for task in queue.tasks:
+                    if task.task_id == task_id:
+                        if depends_on_id not in task.depends_on:
+                            task.depends_on.append(depends_on_id)
+                            print(f"🔗 T-1 依赖: {task.name} → {depends_on_id}")
+                        return True
+        return False
+
+    def _check_dependencies_met(self, task: BatchTask) -> bool:
+        """检查任务的所有依赖是否已完成 (T-1)
+        
+        Returns:
+            True 如果所有依赖都已完成
+        """
+        if not task.depends_on:
+            return True
+        
+        with self._lock:
+            for q_id, queue in self.task_queues.items():
+                for t in queue.tasks:
+                    if t.task_id in task.depends_on:
+                        if t.status != TaskStatus.COMPLETED:
+                            return False
+        return True
+
+    # ════════════════════════════════════════════════════════════════
+    # T-6: 定时任务调度
+    # ════════════════════════════════════════════════════════════════
+
+    def schedule_task(self, queue_id: str, name: str, task_type: str,
+                      params: Dict[str, Any],
+                      scheduled_at: datetime,
+                      priority: TaskPriority = TaskPriority.NORMAL,
+                      callback: Optional[Callable] = None,
+                      depends_on: List[str] = None) -> str:
+        """创建定时任务 (T-6)
+        
+        Args:
+            queue_id: 目标队列
+            name: 任务名称
+            task_type: 任务类型
+            params: 任务参数
+            scheduled_at: 执行时间
+            priority: 优先级
+            callback: 完成回调
+            depends_on: 依赖任务
+            
+        Returns:
+            任务ID
+        """
+        return self.add_task(
+            queue_id=queue_id,
+            name=name,
+            task_type=task_type,
+            params=params,
+            priority=priority,
+            callback=callback,
+            depends_on=depends_on,
+            scheduled_at=scheduled_at,
+        )
+
+    def _register_scheduled(self, task: BatchTask):
+        """注册定时任务到后台调度线程"""
+        with self._lock:
+            self._scheduled_tasks[task.task_id] = task
+        
+        # 若调度线程未启动则启动
+        if not self._scheduler_running:
+            self._start_scheduler()
+
+    def _start_scheduler(self):
+        """启动后台定时调度线程 (T-6)"""
+        if self._scheduler_running:
+            return
+        
+        self._scheduler_running = True
+        self._scheduler_thread = threading.Thread(
+            target=self._scheduler_loop,
+            daemon=True,
+            name="scheduler"
+        )
+        self._scheduler_thread.start()
+        print("🕐 T-6 定时调度器已启动")
+
+    def _scheduler_loop(self):
+        """定时调度器主循环 (每秒检查)"""
+        while self._scheduler_running and not self._stop_event.is_set():
+            try:
+                now = datetime.now()
+                due_tasks = []
+                
+                with self._lock:
+                    for task_id, task in list(self._scheduled_tasks.items()):
+                        if task.scheduled_at and task.scheduled_at <= now:
+                            due_tasks.append(task)
+                            del self._scheduled_tasks[task_id]
+                
+                # 到期任务: 清除 scheduled_at 使其变为普通任务
+                for task in due_tasks:
+                    task.scheduled_at = None
+                    print(f"⏰ T-6 到期执行: {task.name} (ID: {task.task_id})")
+            except Exception as e:
+                print(f"⚠️ 调度器错误: {e}")
+            
+            time.sleep(1)
     
     def add_tasks_batch(self, queue_id: str, tasks: List[Dict]) -> List[str]:
         """
@@ -230,7 +399,7 @@ class BatchTaskManager:
         print(f"▶️ 启动队列: {queue_id}")
     
     def _process_queue(self, queue_id: str):
-        """处理队列中的任务"""
+        """处理队列中的任务 (含 T-1 / T-3 / T-6 增强)"""
         while not self._stop_event.is_set():
             with self._lock:
                 if queue_id not in self.task_queues:
@@ -246,11 +415,17 @@ class BatchTaskManager:
                 if queue.status == TaskStatus.CANCELLED:
                     break
                 
-                # 获取下一个待处理任务
-                pending_tasks = [t for t in queue.tasks if t.status == TaskStatus.PENDING]
+                # 获取待处理任务（排除未来定时任务）
+                now = datetime.now()
+                pending_tasks = [
+                    t for t in queue.tasks
+                    if t.status == TaskStatus.PENDING
+                    and (t.scheduled_at is None or t.scheduled_at <= now)
+                ]
                 if not pending_tasks:
                     # 所有任务完成
-                    if all(t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED] for t in queue.tasks):
+                    if all(t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED] 
+                           for t in queue.tasks):
                         queue.status = TaskStatus.COMPLETED
                         print(f"✅ 队列 {queue_id} 处理完成")
                         break
@@ -259,17 +434,33 @@ class BatchTaskManager:
                 
                 # 按优先级排序
                 pending_tasks.sort(key=lambda t: t.priority.value)
-                task = pending_tasks[0]
-                task.status = TaskStatus.RUNNING
-                task.started_at = datetime.now()
+                
+                # T-1: 找到第一个依赖已满足的任务
+                task_to_run = None
+                for task in pending_tasks:
+                    if self._check_dependencies_met(task):
+                        task_to_run = task
+                        break
+
+                if task_to_run is None:
+                    # 所有待处理任务都有未满足的依赖
+                    time.sleep(1)
+                    continue
+
+                task_to_run.status = TaskStatus.RUNNING
+                task_to_run.started_at = datetime.now()
             
-            # 处理任务
+            # 处理任务 (T-3: 重试逻辑)
             try:
-                self._execute_task(task)
+                self._worker_semaphore.acquire()
+                try:
+                    self._execute_task_with_retry(task_to_run)
+                finally:
+                    self._worker_semaphore.release()
             except Exception as e:
-                task.status = TaskStatus.FAILED
-                task.error_message = str(e)
-                print(f"❌ 任务 {task.task_id} 失败: {e}")
+                task_to_run.status = TaskStatus.FAILED
+                task_to_run.error_message = str(e)
+                print(f"❌ 任务 {task_to_run.task_id} 失败: {e}")
             
             # 更新队列统计
             with self._lock:
@@ -277,6 +468,23 @@ class BatchTaskManager:
                     queue = self.task_queues[queue_id]
                     queue.completed_tasks = sum(1 for t in queue.tasks if t.status == TaskStatus.COMPLETED)
                     queue.failed_tasks = sum(1 for t in queue.tasks if t.status == TaskStatus.FAILED)
+    
+    def _execute_task_with_retry(self, task: BatchTask):
+        """执行任务 (支持 T-3 自动重试)"""
+        max_attempts = task.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                self._execute_task(task)
+                return  # 成功
+            except Exception as e:
+                task.retry_count = attempt + 1
+                if attempt < max_attempts - 1:
+                    print(f"🔄 T-3 重试 {task.name} (第{task.retry_count}次, {task.retry_delay}s后)")
+                    time.sleep(task.retry_delay)
+                    task.status = TaskStatus.RUNNING  # 重置状态准备重试
+                else:
+                    raise  # 所有重试失败
     
     def _execute_task(self, task: BatchTask):
         """执行单个任务"""

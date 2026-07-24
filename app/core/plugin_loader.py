@@ -1,6 +1,8 @@
 """
 插件热加载机制
 支持特效、转场、滤镜等组件的动态加载/卸载
+
+B3 收敛标记 (2026-05-31): 动态热加载, 与 plugin_hotloader.py 互补
 """
 
 import os
@@ -10,12 +12,15 @@ import importlib.util
 import json
 import hashlib
 import threading
+import logging
 from typing import Dict, List, Optional, Type, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime
+
+logger = logging.getLogger("plugin_loader")
 
 
 class PluginType(Enum):
@@ -167,6 +172,25 @@ class IFilterPlugin(IPlugin):
     @abstractmethod
     def get_filter_params(self) -> Dict[str, Any]:
         """获取滤镜参数"""
+        pass
+
+
+class IDockablePlugin(IPlugin):
+    """可停靠插件接口（参考 Inline-AI-Video-Editor 的 dockable widget 扩展机制）"""
+    
+    @abstractmethod
+    def create_dock_widget(self, parent=None) -> Any:
+        """创建可停靠的UI部件"""
+        pass
+    
+    @abstractmethod
+    def get_dock_config(self) -> Dict[str, Any]:
+        """获取停靠配置"""
+        pass
+    
+    @abstractmethod
+    def on_dock_closed(self):
+        """停靠窗口关闭时调用"""
         pass
 
 
@@ -356,7 +380,7 @@ class PluginLoader:
                         return info
         
         except Exception as e:
-            print(f"发现插件失败 {file_path}: {e}")
+            logger.warning(f"发现插件失败 {file_path}: {e}", exc_info=True)
         
         return None
     
@@ -387,7 +411,7 @@ class PluginLoader:
                         return info
         
         except Exception as e:
-            print(f"发现插件包失败 {package_path}: {e}")
+            logger.warning(f"发现插件包失败 {package_path}: {e}", exc_info=True)
         
         return None
     
@@ -423,7 +447,7 @@ class PluginLoader:
             
             except Exception as e:
                 self._plugin_states[plugin_id] = PluginState.ERROR
-                print(f"加载插件失败 {plugin_id}: {e}")
+                logger.error(f"加载插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def _load_module(self, file_path: str) -> Optional[Any]:
@@ -447,7 +471,7 @@ class PluginLoader:
             return module
         
         except Exception as e:
-            print(f"加载模块失败 {file_path}: {e}")
+            logger.error(f"加载模块失败 {file_path}: {e}", exc_info=True)
             return None
     
     def unload_plugin(self, plugin_id: str) -> bool:
@@ -475,7 +499,7 @@ class PluginLoader:
                 return True
             
             except Exception as e:
-                print(f"卸载插件失败 {plugin_id}: {e}")
+                logger.error(f"卸载插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def reload_plugin(self, plugin_id: str) -> bool:
@@ -510,7 +534,7 @@ class PluginLoader:
             
             except Exception as e:
                 self._plugin_states[plugin_id] = PluginState.ERROR
-                print(f"重新加载插件失败 {plugin_id}: {e}")
+                logger.error(f"重新加载插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def initialize_plugin(self, plugin_id: str) -> bool:
@@ -534,7 +558,7 @@ class PluginLoader:
             
             except Exception as e:
                 self._plugin_states[plugin_id] = PluginState.ERROR
-                print(f"初始化插件失败 {plugin_id}: {e}")
+                logger.error(f"初始化插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def enable_plugin(self, plugin_id: str) -> bool:
@@ -548,7 +572,7 @@ class PluginLoader:
                 plugin.on_enable()
                 return True
             except Exception as e:
-                print(f"启用插件失败 {plugin_id}: {e}")
+                logger.error(f"启用插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def disable_plugin(self, plugin_id: str) -> bool:
@@ -562,7 +586,7 @@ class PluginLoader:
                 plugin.on_disable()
                 return True
             except Exception as e:
-                print(f"禁用插件失败 {plugin_id}: {e}")
+                logger.error(f"禁用插件失败 {plugin_id}: {e}", exc_info=True)
                 return False
     
     def get_plugin(self, plugin_id: str) -> Optional[IPlugin]:
@@ -651,6 +675,34 @@ class PluginLoader:
         
         return stats
 
+    def get_dockable_plugins(self) -> List[str]:
+        """获取所有可停靠插件的ID列表"""
+        dockable_ids = []
+        for plugin_id, plugin in self._plugins.items():
+            if isinstance(plugin, IDockablePlugin):
+                dockable_ids.append(plugin_id)
+        return dockable_ids
+
+    def create_dock_widget(self, plugin_id: str, parent=None) -> Any:
+        """创建插件的可停靠部件"""
+        plugin = self._plugins.get(plugin_id)
+        if isinstance(plugin, IDockablePlugin):
+            return plugin.create_dock_widget(parent)
+        return None
+
+    def get_dock_config(self, plugin_id: str) -> Dict[str, Any]:
+        """获取插件的停靠配置"""
+        plugin = self._plugins.get(plugin_id)
+        if isinstance(plugin, IDockablePlugin):
+            return plugin.get_dock_config()
+        return {}
+
+    def notify_dock_closed(self, plugin_id: str):
+        """通知插件停靠窗口已关闭"""
+        plugin = self._plugins.get(plugin_id)
+        if isinstance(plugin, IDockablePlugin):
+            plugin.on_dock_closed()
+
 
 class PluginHotLoader:
     """插件热加载器（支持监控文件变化自动重载）"""
@@ -717,7 +769,7 @@ class PluginHotLoader:
                 self._check_file_changes()
                 self._check_directory_changes()
             except Exception as e:
-                print(f"监控插件变化失败: {e}")
+                logger.warning(f"监控插件变化失败: {e}", exc_info=True)
             
             self._stop_event.wait(interval)
     
@@ -736,7 +788,7 @@ class PluginHotLoader:
             
             if plugin_id in self._file_hashes:
                 if current_hash != self._file_hashes[plugin_id]:
-                    print(f"检测到插件变化: {plugin_id}")
+                    logger.info(f"检测到插件变化: {plugin_id}")
                     # 重新加载插件
                     if self._loader.reload_plugin(plugin_id):
                         # 重新初始化插件
@@ -755,7 +807,7 @@ class PluginHotLoader:
             
             if plugin_dir in self._dir_hashes:
                 if current_hash != self._dir_hashes[plugin_dir]:
-                    print(f"检测到插件目录变化: {plugin_dir}")
+                    logger.info(f"检测到插件目录变化: {plugin_dir}")
                     # 发现新插件
                     self._discover_new_plugins(plugin_dir)
             
@@ -785,7 +837,7 @@ class PluginHotLoader:
                         seen_ids.add(info.id)
             
             if discovered:
-                print(f"发现 {len(discovered)} 个新插件")
+                logger.info(f"发现 {len(discovered)} 个新插件")
                 # 注册新插件
                 for info in discovered:
                     self._loader._plugin_infos[info.id] = info
@@ -795,7 +847,7 @@ class PluginHotLoader:
                     self._loader.load_plugin(info.id)
                     self._loader.initialize_plugin(info.id)
         except Exception as e:
-            print(f"发现新插件失败: {e}")
+            logger.warning(f"发现新插件失败: {e}", exc_info=True)
     
     def _discover_plugin_from_file(self, file_path: str) -> Optional[PluginInfo]:
         """从文件发现插件"""
@@ -819,7 +871,7 @@ class PluginHotLoader:
                     if validator.validate_plugin_info(info):
                         return info
         except Exception as e:
-            print(f"发现插件失败 {file_path}: {e}")
+            logger.warning(f"发现插件失败 {file_path}: {e}", exc_info=True)
         return None
     
     def _discover_plugin_from_package(self, package_path: str) -> Optional[PluginInfo]:
@@ -849,7 +901,7 @@ class PluginHotLoader:
                     if validator.validate_plugin_info(info):
                         return info
         except Exception as e:
-            print(f"发现插件包失败 {package_path}: {e}")
+            logger.warning(f"发现插件包失败 {package_path}: {e}", exc_info=True)
         return None
     
     def _calculate_file_hash(self, file_path: str) -> str:
@@ -1017,7 +1069,7 @@ class PluginRegistry:
             
             return True
         except Exception as e:
-            print(f"导出注册表失败: {e}")
+            logger.error(f"导出注册表失败: {e}", exc_info=True)
             return False
     
     def import_registry(self, file_path: str) -> bool:
@@ -1049,5 +1101,5 @@ class PluginRegistry:
             
             return True
         except Exception as e:
-            print(f"导入注册表失败: {e}")
+            logger.error(f"导入注册表失败: {e}", exc_info=True)
             return False

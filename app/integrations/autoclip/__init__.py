@@ -290,89 +290,228 @@ class AutoClipIntegration:
             }
     
     def _detect_highlights(self, video, duration_threshold, intensity_threshold, max_highlights):
-        """检测高光片段
-        
-        Args:
-            video: 视频对象
-            duration_threshold: 片段最小时长
-            intensity_threshold: 高光强度阈值
-            max_highlights: 最大高光片段数
-        
-        Returns:
-            高光片段列表
+        """检测高光片段 - 多维特征融合的智能高光检测算法
+
+        检测维度:
+          1. 视觉运动分析 (帧差法) — 动作场景/打斗/追逐
+          2. 音频能量分析 (RMS) — 高能时刻/欢呼/爆炸
+          3. 场景切换检测 (直方图差) — 转场密集 = 节奏快
+          4. 面部/人物检测 — 有人物特写的片段更重要
+          5. 综合加权评分 — 多维度融合排序
         """
-        import moviepy.editor as mp
         import numpy as np
-        
-        # 简化的高光检测算法
-        # 实际项目中可以使用更复杂的算法，如音频能量分析、视觉变化分析等
-        
+        try:
+            import cv2
+            CV2_AVAILABLE = True
+        except ImportError:
+            CV2_AVAILABLE = False
+
         video_duration = video.duration
-        highlights = []
-        
-        # 均匀分割视频，检测每个片段的 "强度"
-        segment_duration = 2.0  # 每个分析片段的时长
-        num_segments = int(video_duration / segment_duration)
-        
-        # 分析每个片段
+        seg_samples = min(50, max(10, int(video_duration)))
+        seg_dur = max(1.0, video_duration / seg_samples)
+
+        # ── 初始化多维评分矩阵 ──
+        scores = {
+            "motion": np.zeros(seg_samples),
+            "audio": np.zeros(seg_samples),
+            "scene_change": np.zeros(seg_samples),
+            "face": np.zeros(seg_samples),
+            "composite": np.zeros(seg_samples),
+        }
+
+        # ── 维度1: 视觉运动分析 ──
+        if CV2_AVAILABLE and hasattr(video, 'filename') and video.filename:
+            cap = cv2.VideoCapture(video.filename)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                window_frames = max(1, int(seg_dur * fps))
+
+                prev_seg_last_frame = None
+                for i in range(seg_samples):
+                    frame_idx = int(i * seg_dur * fps)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    motion_sum = 0.0
+                    prev_frame = None
+                    sample_count = 0
+                    hist_diffs = []
+                    seg_first_frame = None
+
+                    for j in range(0, window_frames, 3):
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        gray_small = cv2.resize(gray, (160, 90))
+
+                        # 运动检测
+                        if prev_frame is not None:
+                            diff = np.mean(np.abs(
+                                gray_small.astype(float) - prev_frame.astype(float)
+                            ))
+                            motion_sum += diff
+                            sample_count += 1
+                        prev_frame = gray_small
+
+                        # 保存第一帧用于场景切换检测
+                        if seg_first_frame is None:
+                            seg_first_frame = gray_small
+
+                    # 场景切换检测: 段间直方图差异
+                    if prev_seg_last_frame is not None and seg_first_frame is not None:
+                        hist_diff = np.mean(np.abs(
+                            seg_first_frame.astype(float) - prev_seg_last_frame.astype(float)
+                        ))
+                        scores["scene_change"][i] = min(1.0, hist_diff / 128.0)
+
+                    prev_seg_last_frame = prev_frame
+
+                    scores["motion"][i] = motion_sum / max(1, sample_count) / 255.0
+
+                cap.release()
+
+        # ── 维度2: 音频能量分析 ──
+        try:
+            audio = video.audio
+            if audio is not None:
+                audio_array = audio.to_soundarray()
+                if len(audio_array.shape) > 1:
+                    audio_array = audio_array.mean(axis=1)
+                audio_sr = audio.fps
+
+                for i in range(seg_samples):
+                    seg_start_sample = int(i * seg_dur * audio_sr)
+                    seg_end_sample = int((i + 1) * seg_dur * audio_sr)
+                    seg_audio = audio_array[
+                        seg_start_sample : min(seg_end_sample, len(audio_array))
+                    ]
+                    if len(seg_audio) > 0:
+                        # 综合: 峰值能量 + 变化率
+                        rms = np.sqrt(np.mean(seg_audio ** 2))
+                        peak = np.max(np.abs(seg_audio))
+                        # 音频动态范围指示"精彩程度"
+                        dynamic_range = np.std(seg_audio) if len(seg_audio) > 1 else 0
+                        scores["audio"][i] = min(1.0, (rms * 0.5 + peak * 0.3 + dynamic_range * 0.2) * 3)
+        except Exception:
+            pass
+
+        # ── 维度3: 面部检测 (有人物特写 → 高权重) ──
+        if CV2_AVAILABLE and hasattr(video, 'filename') and video.filename:
+            try:
+                face_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                )
+                cap2 = cv2.VideoCapture(video.filename)
+                if cap2.isOpened() and not face_cascade.empty():
+                    fps2 = cap2.get(cv2.CAP_PROP_FPS) or 30.0
+                    for i in range(seg_samples):
+                        mid_frame_idx = int((i + 0.5) * seg_dur * fps2)
+                        cap2.set(cv2.CAP_PROP_POS_FRAMES, mid_frame_idx)
+                        ret, frame = cap2.read()
+                        if ret:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            faces = face_cascade.detectMultiScale(
+                                gray, scaleFactor=1.1, minNeighbors=5,
+                                minSize=(60, 60)
+                            )
+                            if len(faces) > 0:
+                                # 人脸面积占比 → 特写程度
+                                h, w = gray.shape
+                                best_face = max(faces, key=lambda r: r[2] * r[3])
+                                face_area_ratio = (best_face[2] * best_face[3]) / (h * w)
+                                scores["face"][i] = min(1.0, face_area_ratio * 20)
+                    cap2.release()
+            except Exception:
+                pass
+
+        # ── 归一化各维度 ──
+        for key in ["motion", "audio", "scene_change", "face"]:
+            max_val = np.max(scores[key])
+            if max_val > 0:
+                scores[key] = scores[key] / max_val
+
+        # ── 维度4: 综合加权评分 ──
+        # 权重: 运动40% + 音频25% + 场景切换15% + 面部检测20%
+        weights = {"motion": 0.40, "audio": 0.25, "scene_change": 0.15, "face": 0.20}
+        scores["composite"] = sum(
+            scores[key] * weights[key]
+            for key in weights
+        )
+
+        # ── 双标准筛选 (峰值 + 多样性) ──
         segments = []
-        for i in range(num_segments):
-            start = i * segment_duration
-            end = min((i + 1) * segment_duration, video_duration)
-            
-            # 计算片段 "强度" (简化版，实际项目中可以使用更复杂的算法)
-            intensity = np.random.random()  # 随机生成强度值，实际项目中应该计算真实强度
-            
+        for i in range(seg_samples):
+            seg_start = i * seg_dur
+            seg_end = min((i + 1) * seg_dur, video_duration)
             segments.append({
-                "start": start,
-                "end": end,
-                "intensity": intensity
+                "start": seg_start,
+                "end": seg_end,
+                "intensity": round(float(scores["composite"][i]), 3),
+                "motion": round(float(scores["motion"][i]), 3),
+                "audio": round(float(scores["audio"][i]), 3),
+                "faces": round(float(scores["face"][i]), 3),
             })
-        
-        # 按强度排序，选择前N个片段
+
+        # 按综合评分排序
         segments.sort(key=lambda x: x["intensity"], reverse=True)
-        selected_segments = segments[:max_highlights]
-        
-        # 按时间顺序排序
-        selected_segments.sort(key=lambda x: x["start"])
-        
-        # 转换为高光片段格式
-        for segment in selected_segments:
-            if segment["intensity"] >= intensity_threshold:
-                highlights.append({
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "intensity": segment["intensity"]
-                })
-        
-        return highlights
-    
+
+        # 多样性选择: 避免相邻片段全部入选
+        selected = []
+        occupied_ranges = []  # 已选片段的时间区间
+
+        for seg in segments:
+            if len(selected) >= max_highlights:
+                break
+            if seg["intensity"] < intensity_threshold * 0.3:
+                continue
+
+            # 检查是否与已选片段时间重叠
+            overlap = False
+            for start_e, end_e in occupied_ranges:
+                if seg["start"] < end_e and seg["end"] > start_e:
+                    # 重叠超过50%则跳过
+                    overlap_dur = min(seg["end"], end_e) - max(seg["start"], start_e)
+                    if overlap_dur > 0 and overlap_dur / seg_dur > 0.5:
+                        overlap = True
+                        break
+            if not overlap:
+                selected.append(seg)
+                occupied_ranges.append((seg["start"], seg["end"]))
+
+        # 按时间排序
+        selected.sort(key=lambda x: x["start"])
+
+        return selected
+
     def _parse_platform_link(self, url):
-        """解析平台链接，获取视频下载地址
-        
-        Args:
-            url: 平台链接
-        
-        Returns:
-            视频文件路径
-        """
-        import tempfile
-        import os
-        import requests
-        from bs4 import BeautifulSoup
-        
-        # 简化版平台链接解析
-        # 实际项目中应该使用更复杂的解析逻辑，如使用youtube-dl等库
-        
-        # 这里只是返回一个临时文件路径，实际项目中应该下载视频
-        temp_video_path = tempfile.mktemp(suffix=".mp4")
-        
-        # 模拟下载视频
-        # 实际项目中应该使用真实的视频下载逻辑
-        print(f"解析平台链接: {url}")
-        print(f"模拟下载视频到: {temp_video_path}")
-        
-        return temp_video_path
+        """解析平台链接 - 尝试下载视频"""
+        temp_video_path = os.path.join("短剧AI剪辑输出", "downloaded_video.mp4")
+        os.makedirs(os.path.dirname(temp_video_path), exist_ok=True)
+        try:
+            result = subprocess.run([
+                "yt-dlp", "-f", "best", "-o", temp_video_path, url,
+                "--no-playlist", "--max-filesize", "500M"
+            ], capture_output=True, text=True, timeout=120,
+               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            if result.returncode == 0 and os.path.exists(temp_video_path):
+                print(f"视频下载成功: {temp_video_path}")
+                return temp_video_path
+        except Exception as e:
+            print(f"yt-dlp下载失败: {e}")
+        try:
+            import requests
+            resp = requests.get(url, stream=True, timeout=30, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            if resp.status_code == 200 and 'video' in resp.headers.get('Content-Type', ''):
+                with open(temp_video_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"视频直链下载成功: {temp_video_path}")
+                return temp_video_path
+        except Exception as e:
+            print(f"HTTP下载失败: {e}")
+        print(f"无法解析平台链接: {url}")
+        return url
 
 # 创建AutoClip实例
 autoclip_integration = AutoClipIntegration()

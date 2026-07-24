@@ -1,17 +1,30 @@
 @echo off
 chcp 65001 >nul
-echo 正在启动AI短剧编辑器...
-echo 请稍候，正在加载依赖...
-
 cd /d "%~dp0"
 
-if exist "venv\Scripts\python.exe" (
-    "venv\Scripts\python.exe" "app\ai_short_drama_editor.py"
-) else (
-    python "app\ai_short_drama_editor.py"
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+set PATH=%CD%\.venv312\Scripts;%PATH%
+
+:: Check system Python first (has PyQt6)
+python -c "import PyQt6" 2>nul
+if %errorlevel% equ 0 (
+    echo Starting with system Python...
+    python -m app.main_qt6
+    pause
+    exit /b
 )
 
-if %errorlevel% neq 0 (
-    echo 启动失败，请检查依赖是否安装正确
-    pause
+:: Fallback to venv
+if exist ".venv312\Scripts\python.exe" (
+    ".venv312\Scripts\python.exe" -c "import PyQt6" 2>nul
+    if %errorlevel% equ 0 (
+        echo Starting with venv Python...
+        ".venv312\Scripts\python.exe" -m app.main_qt6
+        pause
+        exit /b
+    )
 )
+
+echo ERROR: PyQt6 not found. Run: pip install PyQt6
+pause

@@ -2,6 +2,11 @@
 高级缓存系统 v2.0
 ================
 LRU/LFU策略 + 内存/磁盘双级缓存 + 异步支持
+
+B2 收敛标记 (2026-05-31):
+本文件包含真核心实现 (LRUCache / LFUCache / DiskCache / HybridCache / @cached)
+SSOT 推荐位置: app/modules/utils/cache_system.py
+本文件保留以兼容旧 import 路径, 新代码请从 app.modules.utils.cache_system 导入
 """
 
 import os
@@ -120,7 +125,8 @@ class LRUCache(Generic[T]):
     def _estimate_size(self, value: Any) -> int:
         try:
             return len(pickle.dumps(value))
-        except:
+        except Exception:
+            pass
             return 0
     
     def stats(self) -> Dict[str, Any]:
@@ -211,7 +217,8 @@ class LFUCache(Generic[T]):
     def _estimate_size(self, value: Any) -> int:
         try:
             return len(pickle.dumps(value))
-        except:
+        except Exception:
+            pass
             return 0
     
     def stats(self) -> Dict[str, Any]:
@@ -245,7 +252,8 @@ class DiskCache:
             try:
                 with open(index_path, 'r', encoding='utf-8') as f:
                     self._index = json.load(f)
-            except:
+            except Exception:
+                pass
                 self._index = {}
     
     def _save_index(self):
@@ -356,7 +364,8 @@ class DiskCache:
                 try:
                     if path.exists():
                         path.unlink()
-                except:
+                except Exception:
+                    pass
                     pass
             self._index.clear()
             self._save_index()

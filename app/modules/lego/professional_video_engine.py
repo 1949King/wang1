@@ -28,9 +28,11 @@ class VideoCodec(Enum):
     H264 = "libx264"
     H264_NVENC = "h264_nvenc"  # NVIDIA硬件加速
     H264_QSV = "h264_qsv"      # Intel QuickSync
+    H264_AMF = "h264_amf"      # AMD AMF
     H265 = "libx265"
     H265_NVENC = "hevc_nvenc"  # NVIDIA HEVC
     H265_QSV = "hevc_qsv"      # Intel HEVC
+    H265_AMF = "hevc_amf"      # AMD HEVC
     VP9 = "libvpx-vp9"
     AV1 = "libaom-av1"
 
@@ -158,7 +160,7 @@ class FFmpegUtils:
                    progress_callback: Optional[Callable] = None,
                    duration: float = 0) -> Tuple[bool, str]:
         """
-        运行FFmpeg命令
+        运行FFmpeg命令（非阻塞读取，避免界面卡住）
         
         Args:
             cmd: 命令列表
@@ -175,35 +177,50 @@ class FFmpegUtils:
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
                 encoding='utf-8',
-                errors='ignore'
+                errors='ignore',
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             
             stderr_output = []
+            last_progress = 0.0
             
-            # 实时读取输出
+            import select
             while True:
-                output = process.stderr.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                    
-                if output:
-                    stderr_output.append(output)
-                    
-                    # 解析进度
-                    if progress_callback and duration > 0:
-                        time_match = __import__('re').search(r'time=(\d+):(\d+):(\d+\.\d+)', output)
-                        if time_match:
-                            hours = int(time_match.group(1))
-                            minutes = int(time_match.group(2))
-                            seconds = float(time_match.group(3))
-                            current_time = hours * 3600 + minutes * 60 + seconds
-                            progress = min(100, (current_time / duration) * 100)
-                            progress_callback(progress)
+                try:
+                    ready, _, _ = select.select([process.stderr], [], [], 0.5)
+                    if ready:
+                        output = process.stderr.readline()
+                        if output == '' and process.poll() is not None:
+                            break
+                        if output:
+                            stderr_output.append(output)
+                            if progress_callback and duration > 0:
+                                time_match = __import__('re').search(r'time=(\d+):(\d+):(\d+\.\d+)', output)
+                                if time_match:
+                                    hours = int(time_match.group(1))
+                                    minutes = int(time_match.group(2))
+                                    seconds = float(time_match.group(3))
+                                    current_time = hours * 3600 + minutes * 60 + seconds
+                                    progress = min(100, (current_time / duration) * 100)
+                                    if progress > last_progress + 0.5:
+                                        last_progress = progress
+                                        progress_callback(progress)
+                    else:
+                        if process.poll() is not None:
+                            break
+                except select.error:
+                    if process.poll() is not None:
+                        break
+                    continue
+            
+            remaining = process.stderr.read()
+            if remaining:
+                stderr_output.append(remaining)
             
             return_code = process.poll()
             
             if return_code != 0:
-                error_msg = ''.join(stderr_output[-10:])  # 最后10行错误信息
+                error_msg = ''.join(stderr_output[-10:])
                 return False, f"FFmpeg错误 (代码 {return_code}): {error_msg}"
             
             return True, ""
@@ -371,33 +388,57 @@ class ProfessionalVideoEngine:
         print(f"   - 硬件加速: {self.hardware_support}")
     
     def _detect_hardware_support(self) -> Dict[str, bool]:
-        """检测硬件加速支持"""
-        support = {
-            "nvidia": False,
-            "intel": False,
-            "amd": False
-        }
+        """检测硬件加速支持 — 统一入口 GPUDetector + FFmpeg 编码器"""
+        support = {"nvidia": False, "intel": False, "amd": False}
         
+        # 优先使用统一 GPUDetector
         try:
-            # 检查NVIDIA
+            from app.core.gpu_acceleration import get_gpu_detector
+            gpu = get_gpu_detector().detect_gpu()
+            if gpu.gpu_type.value == "nvidia":
+                support["nvidia"] = True
+            elif gpu.gpu_type.value == "amd":
+                support["amd"] = True
+            elif gpu.gpu_type.value == "intel":
+                support["intel"] = True
+        except Exception:
+            pass
+        
+        # 补充 FFmpeg 编码器确认
+        try:
             result = subprocess.run(
                 [self.ffmpeg_path, "-encoders"],
-                capture_output=True,
-                text=True
+                capture_output=True, text=True, timeout=10
             )
             output = result.stdout
-            
             if "h264_nvenc" in output:
                 support["nvidia"] = True
             if "h264_qsv" in output:
                 support["intel"] = True
             if "h264_amf" in output:
                 support["amd"] = True
-                
-        except Exception as e:
-            print(f"检测硬件加速失败: {e}")
+        except Exception:
+            pass
         
         return support
+    
+    def auto_select_codec(self, prefer_quality: bool = False) -> VideoCodec:
+        """
+        根据硬件自动选择最优编码器
+        
+        Args:
+            prefer_quality: 是否优先画质（H265优先）
+        
+        Returns:
+            最优的VideoCodec
+        """
+        if self.hardware_support.get("nvidia"):
+            return VideoCodec.H265_NVENC if prefer_quality else VideoCodec.H264_NVENC
+        elif self.hardware_support.get("intel"):
+            return VideoCodec.H265_QSV if prefer_quality else VideoCodec.H264_QSV
+        elif self.hardware_support.get("amd"):
+            return VideoCodec.H265_AMF if prefer_quality else VideoCodec.H264_AMF
+        return VideoCodec.H264
     
     def get_optimal_settings(self, target_platform: str = "抖音") -> ExportSettings:
         """
@@ -410,11 +451,12 @@ class ProfessionalVideoEngine:
             ExportSettings: 最优设置
         """
         # 平台预设
+        auto_codec = self.auto_select_codec()
         presets = {
             "抖音": ExportSettings(
                 resolution=(1080, 1920),
                 fps=30.0,
-                video_codec=VideoCodec.H264_NVENC if self.hardware_support["nvidia"] else VideoCodec.H264,
+                video_codec=auto_codec,
                 video_bitrate="4M",
                 preset="fast",
                 crf=23
@@ -422,7 +464,7 @@ class ProfessionalVideoEngine:
             "快手": ExportSettings(
                 resolution=(1080, 1920),
                 fps=30.0,
-                video_codec=VideoCodec.H264_NVENC if self.hardware_support["nvidia"] else VideoCodec.H264,
+                video_codec=auto_codec,
                 video_bitrate="5M",
                 preset="medium",
                 crf=21
@@ -430,7 +472,7 @@ class ProfessionalVideoEngine:
             "小红书": ExportSettings(
                 resolution=(1080, 1440),
                 fps=30.0,
-                video_codec=VideoCodec.H264_NVENC if self.hardware_support["nvidia"] else VideoCodec.H264,
+                video_codec=auto_codec,
                 video_bitrate="6M",
                 preset="slow",
                 crf=18
@@ -438,7 +480,7 @@ class ProfessionalVideoEngine:
             "B站": ExportSettings(
                 resolution=(1920, 1080),
                 fps=60.0,
-                video_codec=VideoCodec.H264_NVENC if self.hardware_support["nvidia"] else VideoCodec.H264,
+                video_codec=auto_codec,
                 video_bitrate="8M",
                 preset="slow",
                 crf=18
@@ -581,7 +623,6 @@ class ProfessionalVideoEngine:
         print(f"   编码器: {settings.video_codec.value}")
         
         try:
-            # 获取视频信息
             video_info = FFmpegUtils.get_video_info(video_path)
             if not video_info:
                 return TaskResult(
@@ -593,7 +634,6 @@ class ProfessionalVideoEngine:
                     output_info=None
                 )
             
-            # 构建命令
             cmd = [
                 self.ffmpeg_path,
                 "-ss", str(start_time),
@@ -601,34 +641,46 @@ class ProfessionalVideoEngine:
                 "-t", str(end_time - start_time),
             ]
             
-            # 视频编码设置
             cmd.extend([
                 "-c:v", settings.video_codec.value,
                 "-b:v", settings.video_bitrate,
                 "-r", str(settings.fps),
                 "-pix_fmt", settings.pix_fmt,
-                "-preset", settings.preset,
             ])
             
-            # CRF设置（仅软件编码）
-            if settings.video_codec in [VideoCodec.H264, VideoCodec.H265]:
-                cmd.extend(["-crf", str(settings.crf)])
+            if "nvenc" in settings.video_codec.value:
+                cmd.extend([
+                    "-preset", settings.preset,
+                    "-rc", "cbr",
+                    "-gpu", "0",
+                ])
+            elif "qsv" in settings.video_codec.value:
+                cmd.extend([
+                    "-preset", settings.preset,
+                    "-init_qpP", "24",
+                ])
+            elif "amf" in settings.video_codec.value:
+                cmd.extend([
+                    "-preset", settings.preset,
+                ])
+            else:
+                cmd.extend([
+                    "-preset", settings.preset,
+                ])
+                if settings.video_codec in [VideoCodec.H264, VideoCodec.H265]:
+                    cmd.extend(["-crf", str(settings.crf)])
             
-            # 分辨率设置
             cmd.extend([
                 "-vf", f"scale={settings.resolution[0]}:{settings.resolution[1]}:force_original_aspect_ratio=decrease,pad={settings.resolution[0]}:{settings.resolution[1]}:(ow-iw)/2:(oh-ih)/2"
             ])
             
-            # 音频编码设置
             cmd.extend([
                 "-c:a", settings.audio_codec.value,
                 "-b:a", settings.audio_bitrate,
             ])
             
-            # 额外参数
             cmd.extend(settings.extra_args)
             
-            # 输出文件
             cmd.extend(["-y", output_path])
             
             # 执行命令
@@ -714,7 +766,6 @@ class ProfessionalVideoEngine:
                 if info:
                     total_duration += info.duration
             
-            # 构建命令
             cmd = [
                 self.ffmpeg_path,
                 "-f", "concat",
@@ -722,12 +773,32 @@ class ProfessionalVideoEngine:
                 "-i", concat_file,
                 "-c:v", settings.video_codec.value,
                 "-b:v", settings.video_bitrate,
+            ]
+            
+            if "nvenc" in settings.video_codec.value:
+                cmd.extend([
+                    "-preset", settings.preset,
+                    "-rc", "cbr",
+                    "-gpu", "0",
+                ])
+            elif "qsv" in settings.video_codec.value:
+                cmd.extend([
+                    "-preset", settings.preset,
+                    "-init_qpP", "24",
+                ])
+            else:
+                cmd.extend([
+                    "-preset", settings.preset,
+                ])
+                if settings.video_codec in [VideoCodec.H264, VideoCodec.H265]:
+                    cmd.extend(["-crf", str(settings.crf)])
+            
+            cmd.extend([
                 "-c:a", settings.audio_codec.value,
                 "-b:a", settings.audio_bitrate,
-                "-preset", settings.preset,
                 "-y",
                 output_path
-            ]
+            ])
             
             # 执行命令
             success, error = FFmpegUtils.run_command(

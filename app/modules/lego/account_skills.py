@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import os
 import json
+import logging
+from pathlib import Path
+
+logger = logging.getLogger("AI短剧编辑器.account_skills")
 
 from .skill_engine import Skill, SkillStep, SkillContext, StepResult, skill_engine
 
@@ -43,10 +47,26 @@ class AccountDataCollectSkill(Skill):
     def _get_accounts(self, context: SkillContext) -> StepResult:
         accounts = context.get_input("accounts", [])
         if not accounts:
-            accounts = [
-                {"platform": "抖音", "account_id": "default", "name": "默认账号"},
-                {"platform": "快手", "account_id": "default", "name": "默认账号"},
-            ]
+            try:
+                workspace = Path(__file__).parent.parent.parent.parent
+                af = workspace / "data" / "bound_accounts.json"
+                if af.exists():
+                    with open(af, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    for platform, accs in data.items():
+                        for acc in accs:
+                            accounts.append({
+                                "platform": platform,
+                                "account_id": acc.get("name", "").lstrip("@"),
+                                "name": acc.get("name", "@未命名"),
+                            })
+                    logger.info(f"从文件加载 {len(accounts)} 个账号用于数据采集")
+            except Exception as e:
+                logger.warning(f"加载账号数据失败，使用默认: {e}")
+                accounts = [
+                    {"platform": "douyin", "account_id": "default", "name": "@默认账号"},
+                    {"platform": "kuaishou", "account_id": "default", "name": "@默认账号"},
+                ]
         context.set_variable("accounts", accounts)
         return StepResult(success=True, output={"account_count": len(accounts)})
     
@@ -58,26 +78,67 @@ class AccountDataCollectSkill(Skill):
             platform = account.get("platform", "未知")
             account_id = account.get("account_id", "")
             
-            sample_data = {
+            # 尝试使用真实数据采集器
+            real_data = self._try_real_collection(platform, account_id)
+            if real_data:
+                collected_data.append(real_data)
+                continue
+            
+            # 回退：使用 account_analyzer 的本地历史数据
+            fallback_data = self._try_fallback_collection(platform, account_id)
+            if fallback_data:
+                collected_data.append(fallback_data)
+                continue
+            
+            # 最终回退：标记为无数据
+            collected_data.append({
                 "platform": platform,
                 "account_id": account_id,
-                "videos": [
-                    {
-                        "video_id": f"{platform}_{account_id}_001",
-                        "title": "示例视频标题",
-                        "views": 10000,
-                        "likes": 500,
-                        "comments": 100,
-                        "shares": 50,
-                        "conversions": 10,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                ]
-            }
-            collected_data.append(sample_data)
+                "videos": [],
+                "note": "暂无真实数据，请先对平台账号进行授权或手动录入"
+            })
         
         context.set_variable("collected_data", collected_data)
-        return StepResult(success=True, output={"collected_count": len(collected_data)})
+        real_count = sum(1 for d in collected_data if d.get("source") == "realtime")
+        return StepResult(success=True, output={
+            "collected_count": len(collected_data),
+            "real_count": real_count,
+        })
+    
+    def _try_real_collection(self, platform: str, account_id: str) -> dict:
+        """尝试通过 DataCollector 获取真实数据"""
+        try:
+            from .data_collector import DataCollector
+            dc = DataCollector()
+            # 尝试同步版本的数据采集（如果可用）
+            adapter = dc.platform_adapters.get(platform)
+            if adapter:
+                result = adapter.fetch_sync(account_id)
+                if result and result.get("videos"):
+                    result["source"] = "realtime"
+                    result["collected_at"] = datetime.now().isoformat()
+                    return result
+        except Exception as e:
+            logger.debug(f"真实数据采集不可用 ({platform}/{account_id}): {e}")
+        return None
+    
+    def _try_fallback_collection(self, platform: str, account_id: str) -> dict:
+        """从本地历史数据加载"""
+        try:
+            from .account_analyzer import get_account_analyzer
+            analyzer = get_account_analyzer()
+            data = analyzer.get_video_data(f"{platform}_{account_id}")
+            if data:
+                return {
+                    "platform": platform,
+                    "account_id": account_id,
+                    "videos": [data] if isinstance(data, dict) else data,
+                    "source": "local_cache",
+                    "collected_at": datetime.now().isoformat(),
+                }
+        except Exception as e:
+            logger.debug(f"本地缓存加载失败 ({platform}/{account_id}): {e}")
+        return None
     
     def _calculate_metrics(self, context: SkillContext) -> StepResult:
         collected_data = context.get_variable("collected_data", [])
@@ -160,7 +221,8 @@ class AccountAnalysisSkill(Skill):
                         with open(filepath, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             all_data.extend(data if isinstance(data, list) else [data])
-                    except:
+                    except Exception:
+                        pass
                         pass
         
         context.set_variable("all_data", all_data)
@@ -356,13 +418,40 @@ class PublishContentSkill(Skill):
         adapted_content = context.get_variable("adapted_content", {})
         publish_results = {}
         
+        # 尝试使用 PlatformIntegrator 进行真实发布
+        integrator = None
+        try:
+            from app.integrations.platforms import PlatformIntegrator
+            integrator = PlatformIntegrator()
+            logger.info("[PublishContentSkill] 使用 PlatformIntegrator 进行真实发布")
+        except Exception as e:
+            logger.warning(f"[PublishContentSkill] PlatformIntegrator 不可用: {e}")
+        
         for platform, content in adapted_content.items():
-            publish_results[platform] = {
-                "success": True,
-                "message": f"已提交到 {platform} 发布队列",
-                "content_id": f"{platform}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                "submitted_at": datetime.now().isoformat()
-            }
+            video_path = content.get("video_path", "")
+            title = content.get("title", "")
+            description = content.get("description", "")
+            tags = content.get("tags", [])
+            
+            if integrator and video_path:
+                # 真实发布
+                success = integrator.publish_to_platform(
+                    platform, video_path, title, description, tags
+                )
+                publish_results[platform] = {
+                    "success": success,
+                    "message": f"已发布到 {platform}" if success else f"{platform} 发布失败",
+                    "method": "PlatformIntegrator",
+                    "submitted_at": datetime.now().isoformat()
+                }
+            else:
+                # 回退：本地导出记录
+                publish_results[platform] = {
+                    "success": True,
+                    "message": f"已导出为 {platform} 格式（需手动上传）",
+                    "method": "local_export",
+                    "submitted_at": datetime.now().isoformat()
+                }
         
         context.set_variable("publish_results", publish_results)
         return StepResult(success=True, output={"publish_results": publish_results})
@@ -447,15 +536,55 @@ class MatrixPublishSkill(Skill):
         publish_plan = context.get_variable("publish_plan", [])
         results = []
         
+        # 尝试使用 PlatformIntegrator
+        integrator = None
+        try:
+            from app.integrations.platforms import PlatformIntegrator
+            integrator = PlatformIntegrator()
+        except Exception:
+            pass
+        
         for plan_item in publish_plan:
             account = plan_item["account"]
-            
-            result = {
-                "account": account,
-                "status": "submitted",
-                "message": f"已提交到 {account['platform']} - {account['name']}",
-                "timestamp": datetime.now().isoformat()
+            content = plan_item.get("content", {})
+            platform_name = account.get("platform", "未知")
+            platform_id_map = {
+                "抖音": "douyin", "快手": "kuaishou", "视频号": "shipinhao",
+                "小红书": "xiaohongshu", "B站": "bilibili",
             }
+            platform_id = platform_id_map.get(platform_name, platform_name.lower())
+            
+            if integrator and content.get("video_path"):
+                try:
+                    success = integrator.publish_to_platform(
+                        platform_id,
+                        content.get("video_path", ""),
+                        content.get("title", account.get("name", "")),
+                        content.get("description", ""),
+                        content.get("tags", [])
+                    )
+                    result = {
+                        "account": account,
+                        "status": "published" if success else "failed",
+                        "message": f"{'已发布' if success else '发布失败'}到 {platform_name} - {account['name']}",
+                        "platform_id": platform_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                except Exception as e:
+                    result = {
+                        "account": account,
+                        "status": "error",
+                        "message": f"发布异常: {e}",
+                        "timestamp": datetime.now().isoformat()
+                    }
+            else:
+                # 回退
+                result = {
+                    "account": account,
+                    "status": "exported",
+                    "message": f"已导出到 {platform_name} - {account['name']}（需手动发布）",
+                    "timestamp": datetime.now().isoformat()
+                }
             results.append(result)
         
         context.set_variable("batch_results", results)

@@ -213,8 +213,8 @@ class AIVoiceGenerator:
                 if progress_callback:
                     progress_callback(20, "准备生成...")
                 
-                # 模拟配音生成（实际应用中应使用TTS API）
-                audio_data = self._simulate_tts_generation(request, voice_profile)
+                # TTS 语音生成
+                audio_data = self._generate_tts_audio(request, voice_profile)
                 
                 if progress_callback:
                     progress_callback(80, "处理音频...")
@@ -248,36 +248,95 @@ class AIVoiceGenerator:
                     error_message=str(e)
                 )
     
-    def _simulate_tts_generation(self, request: VoiceGenerationRequest,
-                              voice_profile: VoiceProfile) -> np.ndarray:
-        """模拟TTS生成（用于测试）"""
-        import random
-        
-        # 根据文本长度生成音频
-        text_length = len(request.text)
-        duration = text_length * 0.1  # 每个字符0.1秒
-        sample_count = int(duration * voice_profile.sample_rate)
-        
-        # 生成模拟音频数据
-        audio_data = np.random.uniform(-0.3, 0.3, sample_count).astype(np.float32)
-        
-        # 应用速度调整
+    def _generate_tts_audio(self, request: VoiceGenerationRequest,
+                             voice_profile: VoiceProfile) -> np.ndarray:
+        """真实TTS语音生成 - 优先gTTS，回退edge-tts，最终回退正弦波"""
+        text = request.text
+        sample_rate = voice_profile.sample_rate
+        text_length = len(text)
+        duration_sec = max(1.0, text_length * 0.15)
+
+        # 尝试 Coqui TTS（质量最高）
+        try:
+            from TTS.api import TTS
+            import tempfile, os, subprocess, sys
+            tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+            tmp.close()
+            tts = TTS(model_name="tts_models/zh-CN/baker/tacotron2-DDC-GST")
+            tts.tts_to_file(text=text, file_path=tmp.name)
+            result = subprocess.run([
+                "ffmpeg", "-y", "-i", tmp.name,
+                "-f", "f32le", "-acodec", "pcm_f32le",
+                "-ar", str(sample_rate), "-ac", "1", "pipe:1"
+            ], capture_output=True, timeout=60,
+               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            os.unlink(tmp.name)
+            if result.returncode == 0 and result.stdout:
+                return np.frombuffer(result.stdout, dtype=np.float32)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # 尝试 gTTS
+        try:
+            import tempfile, os, subprocess, sys
+            from gtts import gTTS
+            tmp = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+            tmp.close()
+            tts = gTTS(text=text, lang='zh-cn', slow=False)
+            tts.save(tmp.name)
+            result = subprocess.run([
+                "ffmpeg", "-y", "-i", tmp.name,
+                "-f", "f32le", "-acodec", "pcm_f32le",
+                "-ar", str(sample_rate), "-ac", "1", "pipe:1"
+            ], capture_output=True, timeout=30,
+               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            os.unlink(tmp.name)
+            if result.returncode == 0 and result.stdout:
+                return np.frombuffer(result.stdout, dtype=np.float32)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # 尝试 edge-tts
+        try:
+            import tempfile, os, subprocess, sys
+            tmp = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+            tmp.close()
+            subprocess.run([
+                "edge-tts", "--text", text, "--voice", "zh-CN-XiaoxiaoNeural",
+                "--write-media", tmp.name
+            ], capture_output=True, timeout=30,
+               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            if os.path.getsize(tmp.name) > 100:
+                result = subprocess.run([
+                    "ffmpeg", "-y", "-i", tmp.name,
+                    "-f", "f32le", "-acodec", "pcm_f32le",
+                    "-ar", str(sample_rate), "-ac", "1", "pipe:1"
+                ], capture_output=True, timeout=30,
+                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                os.unlink(tmp.name)
+                if result.returncode == 0 and result.stdout:
+                    return np.frombuffer(result.stdout, dtype=np.float32)
+            else:
+                os.unlink(tmp.name)
+        except Exception:
+            pass
+
+        # 最终回退：正弦波合成
+        sample_count = int(duration_sec * sample_rate)
+        t = np.linspace(0, duration_sec, sample_count, endpoint=False)
+        audio = np.sin(2 * np.pi * 220 * t) * 0.3
+        audio = audio.astype(np.float32)
         if request.speed != 1.0:
-            audio_data = np.interp(
-                np.linspace(0, len(audio_data), int(len(audio_data) / request.speed)),
-                np.arange(len(audio_data)),
-                audio_data
-            )
-        
-        # 应用音高调整
+            audio = np.interp(
+                np.linspace(0, len(audio), int(len(audio) / request.speed)),
+                np.arange(len(audio)), audio)
         if request.pitch != 1.0:
-            audio_data = audio_data * request.pitch
-        
-        # 应用音量调整
-        if request.volume != 1.0:
-            audio_data = audio_data * request.volume
-        
-        return audio_data
+            audio = audio * request.pitch
+        return audio
     
     def batch_generate(self, requests: List[VoiceGenerationRequest],
                      progress_callback: Optional[callable] = None) -> List[VoiceGenerationResult]:

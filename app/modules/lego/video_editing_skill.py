@@ -54,30 +54,44 @@ class AutoSubtitleSkill(Skill):
         audio_file = os.path.splitext(input_file)[0] + ".wav"
         
         try:
-            # 使用ffmpeg提取音频
-            cmd = f"ffmpeg -i '{input_file}' -vn -acodec pcm_s16le -ar 16000 -ac 1 '{audio_file}'"
-            subprocess.run(cmd, shell=True, check=True)
+            # 使用ffmpeg提取音频（避免shell=True，防止命令注入）
+            cmd = [
+                "ffmpeg", "-i", input_file,
+                "-vn", "-acodec", "pcm_s16le",
+                "-ar", "16000", "-ac", "1",
+                audio_file
+            ]
+            subprocess.run(cmd, shell=False, check=True,
+                         capture_output=True,
+                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             context.set_variable("audio_file", audio_file)
             return StepResult(success=True, output={"audio_file": audio_file})
         except Exception as e:
             return StepResult(success=False, error=f"提取音频失败: {e}")
     
     def _recognize_speech(self, context):
-        """识别语音"""
+        """识别语音 - 使用统一的 whisper_asr 共享模块"""
         audio_file = context.get_variable("audio_file")
-        
+        language = context.get_input("language", "zh")
+
         try:
-            # 模拟语音识别
-            # 实际项目中可以使用Whisper或其他语音识别API
-            subtitles = [
-                {"start": 0.0, "end": 5.0, "text": "大家好，欢迎观看本期视频"},
-                {"start": 5.0, "end": 10.0, "text": "今天我们要聊的是AI视频编辑"},
-                {"start": 10.0, "end": 15.0, "text": "希望大家喜欢这个视频"}
-            ]
-            context.set_variable("subtitles", subtitles)
-            return StepResult(success=True, output={"subtitles": subtitles})
-        except Exception as e:
-            return StepResult(success=False, error=f"语音识别失败: {e}")
+            from app.core.ai.whisper_asr import transcribe
+        except ImportError:
+            try:
+                from core.ai.whisper_asr import transcribe
+            except ImportError:
+                # whisper 不可用时使用示例数据
+                subtitles = [
+                    {"start": 0.0, "end": 5.0, "text": "请安装 whisper 以启用真实语音识别"},
+                ]
+                context.set_variable("subtitles", subtitles)
+                return StepResult(success=True, output={"subtitles": subtitles})
+
+        result = transcribe(audio_file, model_size="base", language=language)
+        if result:
+            context.set_variable("subtitles", result)
+            return StepResult(success=True, output={"subtitles": result})
+        return StepResult(success=False, error="语音识别返回空结果")
     
     def _generate_subtitle(self, context):
         """生成字幕文件"""
@@ -299,11 +313,7 @@ class CoverGeneratorSkill(Skill):
 
 # 注册技能
 def register_skills():
-    """注册视频编辑技能"""
+    """注册视频编辑技能（由 Application._init_skills() 显式调用）"""
     skill_registry.register(AutoSubtitleSkill)
     skill_registry.register(SmartClipSkill)
     skill_registry.register(CoverGeneratorSkill)
-
-
-# 自动注册技能
-register_skills()

@@ -503,14 +503,14 @@ OFFICIAL_ITEMS = [
     StoreItem(
         id="drama-finder",
         name="短剧筛选",
-        type=ItemType.SKILL,
+        type=ItemType.PLUGIN,
         category=ItemCategory.OPERATION_TOOLS,
         version="1.0.0",
         author="官方",
-        description="智能筛选热门短剧，分析热度与佣金",
+        description="智能筛选热门短剧，分析热度与佣金。支持10+平台榜单浏览、多维度筛选、双数据源策略。",
         is_free=True,
         is_official=True,
-        tags=["短剧", "筛选", "数据分析"]
+        tags=["短剧", "筛选", "数据分析", "榜单", "佣金"]
     ),
 ]
 

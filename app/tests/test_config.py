@@ -1,90 +1,79 @@
 """
-配置管理模块测试
+配置管理模块测试 (pytest 风格)
+
+运行: pytest app/tests/test_config.py -v
 """
 
-import unittest
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from core.test_base import TestBase
-from core.config_manager import ConfigManager, SecureStorage, config
+import pytest
+from core.config_manager import ConfigManager, SecureStorage
 
 
-class TestConfigManager(TestBase):
+class TestConfigManager:
     """配置管理器测试"""
     
-    def setUp(self):
-        super().setUp()
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        # 重置单例以避免测试间污染
+        ConfigManager._instance = None
         self.config = ConfigManager()
     
     def test_singleton(self):
         config1 = ConfigManager()
         config2 = ConfigManager()
-        self.assertIs(config1, config2)
+        assert config1 is config2
     
     def test_api_config(self):
-        self.assertIsInstance(self.config.api, object)
-        self.assertTrue(hasattr(self.config.api, 'deepseek_api_key'))
+        assert hasattr(self.config, 'api')
+        assert hasattr(self.config.api, 'deepseek_api_key')
     
     def test_path_config(self):
-        self.assertIsInstance(self.config.paths, object)
-        self.assertTrue(hasattr(self.config.paths, 'output_path'))
+        assert hasattr(self.config, 'paths')
+        assert hasattr(self.config.paths, 'output_path')
     
     def test_processing_config(self):
-        self.assertIsInstance(self.config.processing, object)
-        self.assertGreater(self.config.processing.cpu_threads, 0)
+        assert hasattr(self.config, 'processing')
+        assert self.config.processing.cpu_threads > 0
     
     def test_get_api_key(self):
         key = self.config.get_api_key('deepseek')
-        self.assertIsInstance(key, str)
+        assert isinstance(key, str)
     
     def test_validate(self):
         errors = self.config.validate()
-        self.assertIsInstance(errors, list)
+        assert isinstance(errors, list)
     
     def test_to_dict(self):
         data = self.config.to_dict()
-        self.assertIsInstance(data, dict)
-        self.assertIn('api', data)
-        self.assertIn('paths', data)
+        assert isinstance(data, dict)
+        assert 'api' in data
+        assert 'paths' in data
 
 
-class TestSecureStorage(TestBase):
+class TestSecureStorage:
     """安全存储测试"""
     
-    def setUp(self):
-        super().setUp()
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        # 重置单例
+        SecureStorage._instance = None
         self.storage = SecureStorage()
     
     def test_singleton(self):
         storage1 = SecureStorage()
         storage2 = SecureStorage()
-        self.assertIs(storage1, storage2)
+        assert storage1 is storage2
     
     def test_set_and_get(self):
-        test_key = "test_api_key_123"
-        test_value = "sk-test-secret-key"
-        
-        self.storage.set(test_key, test_value)
-        retrieved = self.storage.get(test_key)
-        
-        self.assertEqual(retrieved, test_value)
+        self.storage.set("test_api_key_123", "sk-test-secret-key")
+        retrieved = self.storage.get("test_api_key_123")
+        assert retrieved == "sk-test-secret-key"
     
     def test_get_nonexistent(self):
         result = self.storage.get("nonexistent_key_xyz", "default_value")
-        self.assertEqual(result, "default_value")
+        assert result == "default_value"
     
     def test_delete(self):
-        test_key = "test_delete_key"
-        self.storage.set(test_key, "value")
-        
-        self.storage.delete(test_key)
-        result = self.storage.get(test_key)
-        
-        self.assertEqual(result, "")
-
-
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
+        self.storage.set("test_delete_key", "value")
+        self.storage.delete("test_delete_key")
+        result = self.storage.get("test_delete_key")
+        assert result == ""

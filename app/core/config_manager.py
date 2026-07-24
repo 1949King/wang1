@@ -166,7 +166,8 @@ class SecureStorage:
                     uuid_line = [l.strip() for l in result.stdout.split('\n') if l.strip() and l.strip() != 'UUID']
                     if uuid_line:
                         components.append(uuid_line[0])
-        except:
+        except Exception:
+            pass
             pass
         
         return hashlib.sha256('|'.join(components).encode()).hexdigest()[:32]

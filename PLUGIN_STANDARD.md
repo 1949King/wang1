@@ -370,7 +370,29 @@ __all__ = ["VideoProcessingPlugin", "PLUGIN_INFO"]
 3. 克隆AI短剧编辑器代码库
 4. 创建插件目录结构
 
-### 8.2 测试工具
+### 8.2 已安装官方插件列表
+
+| 插件名称 | 分类 | 路径 | 说明 |
+|---------|------|------|------|
+| **AI特效制作** 🎨 | ai_function | `app/plugins/ai_effects_plugin/` | 风格迁移/背景替换/超分辨率/智能美颜/物体移除 (5大模块, 4316行) |
+| 短剧筛选 | operation | `app/plugins/drama_finder_plugin/` | 多平台热门短剧筛选与数据分析 |
+| 高亮特效 | effect | `app/plugins/effect_highlight.py` | 带货场景高亮特效 |
+| 柔光特效 | effect | `app/plugins/effect_soft_light.py` | 情感类柔光效果 |
+| 暗调特效 | effect | `app/plugins/effect_dark_tone.py` | 悬疑类暗调效果 |
+| 金光特效 | effect | `app/plugins/effect_gold_rush.py` | 逆袭类金光效果 |
+| 动作特效 | effect | `app/plugins/effect_action.py` | 动作类视觉增强 |
+| 喜剧特效 | effect | `app/plugins/effect_comedy.py` | 喜剧类趣味效果 |
+| 恐怖特效 | effect | `app/plugins/effect_horror.py` | 恐怖类氛围渲染 |
+| 渐变转场 | transition | `app/plugins/transition_fade.py` | 淡入淡出转场 |
+| 滑动转场 | transition | `app/plugins/transition_slide.py` | 方向滑动转场 |
+| 缩放转场 | transition | `app/plugins/transition_zoom.py` | 焦点缩放转场 |
+| 溶解转场 | transition | `app/plugins/transition_dissolve.py` | 像素溶解转场 |
+| 擦除转场 | transition | `app/plugins/transition_wipe.py` | 方向擦除转场 |
+| 故障风转场 | transition | `app/plugins/transition_glitch.py` | 数字故障风格 |
+| 翻转转场 | transition | `app/plugins/transition_flip.py` | 3D翻转效果 |
+| 旋转转场 | transition | `app/plugins/transition_spin.py` | 旋转过渡效果 |
+
+### 8.3 测试工具
 
 1. 使用`plugin_test.py`测试插件
 2. 运行`python plugin_test.py your_plugin.py`
@@ -412,6 +434,6 @@ __all__ = ["VideoProcessingPlugin", "PLUGIN_INFO"]
 
 ---
 
-**版本**: 1.0.0
-**更新日期**: 2026-03-24
-**适用版本**: AI短剧编辑器 v3.0+
+**版本**: 1.0.1
+**更新日期**: 2026-07-12
+**适用版本**: AI短剧编辑器 v4.4.0+

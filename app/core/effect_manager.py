@@ -258,18 +258,29 @@ class EffectManager:
     
     def apply_effect(self, clip_id: str, effect_instance: Dict[str, Any]) -> bool:
         """
-        应用特效到片段
-        
-        Args:
-            clip_id: 片段ID
-            effect_instance: 特效实例
-            
-        Returns:
-            是否应用成功
+        应用特效到片段：写入 preview 可用参数，供 Editor 同步。
         """
-        # 这里需要与时间线管理系统集成
-        # 暂时返回True，表示应用成功
-        print(f"应用特效 {effect_instance['name']} 到片段 {clip_id}")
+        if not hasattr(self, "_applied_effects"):
+            self._applied_effects = {}
+        params = dict(effect_instance.get("parameters") or {})
+        name = str(effect_instance.get("name") or effect_instance.get("effect_id") or "effect")
+        # 映射常见参数到 PreviewManager 键
+        preview = {}
+        for k in ("blur", "sharpen", "vignette", "brightness", "contrast",
+                  "saturation", "hue", "opacity", "scale"):
+            if k in params:
+                preview[k] = params[k]
+        # 名称启发式
+        low = name.lower()
+        if "blur" in low or "模糊" in name:
+            preview.setdefault("blur", float(params.get("intensity", params.get("radius", 3)) or 3))
+        if "sharp" in low or "锐化" in name:
+            preview.setdefault("sharpen", float(params.get("intensity", 1) or 1))
+        if "vignette" in low or "暗角" in name:
+            preview.setdefault("vignette", float(params.get("intensity", 0.5) or 0.5))
+        effect_instance["_preview_params"] = preview
+        self._applied_effects.setdefault(str(clip_id), []).append(effect_instance)
+        print(f"应用特效 {name} 到片段 {clip_id}: {preview}")
         return True
     
     def update_effect_parameters(self, effect_instance: Dict[str, Any], **parameters) -> Dict[str, Any]:

@@ -1,8 +1,1 @@
-{
-  "视频信息": {
-    "status": "已启用"
-  },
-  "去重优化": {
-    "status": "已启用"
-  }
-}
+{"视频信息": {"status": "已启用"}, "去重优化": {"status": "已启用"}, "AI特效制作": {"status": "已启用", "last_used": null, "default_effect": "style_transfer", "default_params": {"style_name": "cyberpunk", "style_strength": 0.8, "preserve_color": true, "gpu_enabled": true, "cache_dir": "./cache/ai_effects"}, "model_cache": {}, "recent_effects": []}}

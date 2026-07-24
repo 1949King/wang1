@@ -10,14 +10,14 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.9.1"
+__version__ = "4.9.2"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 9,
-    "patch": 1,
-    "codename": "剪辑导出可用性修复（续）",
+    "patch": 2,
+    "codename": "贴纸预览与滤镜播放优化",
     "release_date": "2026-07-12",
     "description": (
         "V4.9.1: 剪辑导出可用性修复（续）— "

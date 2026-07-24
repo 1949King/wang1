@@ -1,0 +1,12 @@
+file 'assets\videos\d7b42fee1ea2e8792219d565bc70a58a_1783949803.mp4'
+inpoint 36.0
+outpoint 39.0
+file 'assets\videos\d7b42fee1ea2e8792219d565bc70a58a_1783949803.mp4'
+inpoint 69.0
+outpoint 72.0
+file 'assets\videos\d7b42fee1ea2e8792219d565bc70a58a_1783949803.mp4'
+inpoint 91.0
+outpoint 95.0
+file 'assets\videos\d7b42fee1ea2e8792219d565bc70a58a_1783949803.mp4'
+inpoint 104.0
+outpoint 106.56

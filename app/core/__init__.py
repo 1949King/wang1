@@ -54,6 +54,21 @@ except ImportError:
     async_to_sync = None
     http_client = None
 
+from .ai_engine import (
+    AIEngine,
+    AISession,
+    AICallRecord,
+    ProviderStats,
+    ai_engine,
+)
+
+from .llm_editor import (
+    LLMEditor,
+    EditCommand,
+    ParseResult,
+    llm_editor,
+)
+
 from .test_base import (
     TestBase,
     AsyncTestBase,
@@ -104,6 +119,17 @@ __all__ = [
     "http_client",
     "ASYNC_CLIENT_AVAILABLE",
     
+    # AI 引擎
+    "AIEngine",
+    "AISession",
+    "AICallRecord",
+    "ProviderStats",
+    "ai_engine",
+    "LLMEditor",
+    "EditCommand",
+    "ParseResult",
+    "llm_editor",
+
     # 测试框架
     "TestBase",
     "AsyncTestBase",

@@ -1,0 +1,173 @@
+# GitHub Actions CI for AI 短剧编辑器
+# C2 标记 (2026-05-31): 3 job (unit / integration / e2e)
+# 触发: push / pull_request 到 main/master 分支
+# 运行: .github/workflows/ci.yml
+
+name: AI 短剧编辑器 CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'app/**'
+      - 'pytest.ini'
+      - 'conftest.py'
+      - 'app/requirements*.txt'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  PYTHON_VERSION: "3.12"
+  QT_QPA_PLATFORM: offscreen
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  # ============== Job 1: 单元测试 (毫秒级, 无 GUI) ==============
+  unit-tests:
+    name: 单元测试 (Unit Tests)
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 安装依赖 (必需)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: 运行 3 大总线单元测试
+        run: |
+          cd app
+          python -m pytest tests/test_buses.py -v --tb=short
+        shell: pwsh
+
+      - name: 运行 verify 脚本
+        run: |
+          cd app
+          python -m pytest temp/verify_playwright_crawler.py -v --tb=short -x
+        shell: pwsh
+        continue-on-error: true  # verify 脚本可能因环境差异失败, 不阻塞
+
+      - name: 上传测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/logs/pytest_*.txt
+          if-no-files-found: ignore
+
+  # ============== Job 2: 集成测试 (秒级, Qt offscreen) ==============
+  integration-tests:
+    name: 集成测试 (Integration / Qt offscreen)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    needs: unit-tests  # 依赖单元测试先过
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 安装依赖 (必需 + 可选)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install -r app/requirements-optional.txt
+          pip install pytest playwright
+          playwright install chromium
+
+      - name: 启动 Qt6 验证 (集成)
+        run: |
+          cd app
+          python -c "import sys; sys.path.insert(0, '.'); from PyQt6.QtCore import QT_VERSION_STR; print('Qt6:', QT_VERSION_STR)"
+        shell: pwsh
+
+      - name: 启动主程序 5 秒验证导入
+        run: |
+          $p = Start-Process -FilePath "python" -ArgumentList "-u","app/main_qt6.py" -PassThru -NoNewWindow -RedirectStandardOutput "app/logs/ci_run.log" -RedirectStandardError "app/logs/ci_err.log"
+          Start-Sleep -Seconds 10
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (Test-Path "app/logs/ci_err.log") {
+            $errContent = Get-Content "app/logs/ci_err.log" -Raw
+            if ($errContent -match "Traceback|Error.*ModuleNotFoundError") {
+              Write-Host "❌ 启动报错:" -ForegroundColor Red
+              Write-Host $errContent
+              exit 1
+            }
+          }
+          Write-Host "✅ Qt6 启动无致命错误"
+        shell: pwsh
+
+      - name: 上传启动日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-startup-log
+          path: |
+            app/logs/ci_run.log
+            app/logs/ci_err.log
+          if-no-files-found: ignore
+
+  # ============== Job 3: 打包验证 (PyInstaller smoke test) ==============
+  build-smoke:
+    name: 打包验证 (PyInstaller Smoke)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: unit-tests
+    continue-on-error: true  # 打包首次跑通前不算阻塞
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 安装 PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install pyinstaller
+
+      - name: 打包 (PyInstaller)
+        run: |
+          cd app
+          pyinstaller ai_video_editor_local.spec --noconfirm --log-level WARN
+        shell: pwsh
+
+      - name: 验证可执行文件存在
+        run: |
+          if (-not (Test-Path "app/dist/AI短剧编辑器/AI短剧编辑器.exe")) {
+            Write-Host "❌ 打包失败: 可执行文件未生成" -ForegroundColor Red
+            exit 1
+          }
+          $size = (Get-Item "app/dist/AI短剧编辑器/AI短剧编辑器.exe").Length
+          Write-Host "✅ 打包成功: $size bytes"
+        shell: pwsh
+
+      - name: 上传打包产物
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-drama-editor-windows
+          path: app/dist/
+          retention-days: 7

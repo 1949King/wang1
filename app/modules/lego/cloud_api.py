@@ -1,1179 +1,61 @@
 """
 云端 API 模块 (CloudAPI)
 ========================
-支持多种云端大模型 API
-DeepSeek / 豆包 / OpenAI / 智谱 AI / 通义千问 / 文心一言 / 讯飞星火 / Kimi / 百川 / MiniMax / Claude / Groq / SiliconFlow
+云端大模型 API 服务管理（单例模式）。
+
+支持提供商: DeepSeek / 豆包 / OpenAI / 智谱 AI / 通义千问 / 文心一言 /
+             讯飞星火 / Kimi / 百川 / MiniMax / Claude / Groq /
+             SiliconFlow / 阶跃星辰 / 零一万物 / Ollama
+
+提供者实现: cloud_providers/providers.py
+基类定义:   cloud_providers/base.py
 """
 
 import json
-import time
+import os
 import threading
-import requests
-from typing import Optional, Dict, List, Any, Generator, Callable
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
 import logging
+from typing import Any, cast
+
+from .cloud_providers.base import APIConfig, BaseCloudProvider
+from .cloud_providers.registry import default_registry
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class APIConfig:
-    """API 配置"""
-    provider: str = "deepseek"
-    api_key: str = ""
-    base_url: str = ""
-    model: str = ""
-    max_tokens: int = 4096
-    temperature: float = 0.7
-
-
-class BaseCloudProvider(ABC):
-    """云端 API 基类"""
-    
-    def __init__(self, api_key: str, base_url: str = ""):
-        self.api_key = api_key
-        self.base_url = base_url or self.default_base_url
-    
-    @property
-    @abstractmethod
-    def default_base_url(self) -> str:
-        pass
-    
-    @property
-    @abstractmethod
-    def default_model(self) -> str:
-        pass
-    
-    @abstractmethod
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        pass
-
-
-class DeepSeekProvider(BaseCloudProvider):
-    """DeepSeek API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.deepseek.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "deepseek-chat"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"DeepSeek API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class DoubaoProvider(BaseCloudProvider):
-    """豆包 API (字节跳动)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://ark.cn-beijing.volces.com/api/v3"
-    
-    @property
-    def default_model(self) -> str:
-        return "doubao-pro-4k"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"豆包 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class OpenAIProvider(BaseCloudProvider):
-    """OpenAI API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.openai.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "gpt-4o-mini"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"OpenAI API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class ZhipuProvider(BaseCloudProvider):
-    """智谱 AI API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://open.bigmodel.cn/api/paas/v4"
-    
-    @property
-    def default_model(self) -> str:
-        return "glm-4"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"智谱 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class QwenProvider(BaseCloudProvider):
-    """通义千问 API (阿里云)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "qwen-turbo"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"通义千问 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class WenxinProvider(BaseCloudProvider):
-    """文心一言 API (百度)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat"
-    
-    @property
-    def default_model(self) -> str:
-        return "ernie-4.0-8k"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "messages": messages,
-            "stream": stream,
-            "max_output_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/{model}?access_token={self.api_key}",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        try:
-                            chunk = json.loads(line)
-                            content = chunk.get("result", "")
-                            if content:
-                                yield content
-                        except:
-                            pass
-            else:
-                data = response.json()
-                content = data.get("result", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"文心一言 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class SparkProvider(BaseCloudProvider):
-    """讯飞星火 API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://spark-api-open.xf-yun.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "generalv3.5"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"讯飞星火 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class KimiProvider(BaseCloudProvider):
-    """Kimi API (Moonshot)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.moonshot.cn/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "moonshot-v1-8k"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"Kimi API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class BaichuanProvider(BaseCloudProvider):
-    """百川 API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.baichuan-ai.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "Baichuan4"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"百川 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class MiniMaxProvider(BaseCloudProvider):
-    """MiniMax API"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.minimax.chat/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "abab6.5s-chat"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"MiniMax API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class ClaudeProvider(BaseCloudProvider):
-    """Claude API (Anthropic)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.anthropic.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "claude-3-5-sonnet-20241022"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json"
-        }
-        
-        system_message = ""
-        chat_messages = []
-        for msg in messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                chat_messages.append(msg)
-        
-        payload = {
-            "model": model,
-            "messages": chat_messages,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-        }
-        
-        if system_message:
-            payload["system"] = system_message
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/messages",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            try:
-                                chunk = json.loads(data)
-                                if chunk.get("type") == "content_block_delta":
-                                    content = chunk.get("delta", {}).get("text", "")
-                                    if content:
-                                        yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content_blocks = data.get("content", [])
-                content = "".join([b.get("text", "") for b in content_blocks if b.get("type") == "text"])
-                yield content
-                
-        except Exception as e:
-            logger.error(f"Claude API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class GroqProvider(BaseCloudProvider):
-    """Groq API (极速推理)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.groq.com/openai/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "llama-3.3-70b-versatile"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"Groq API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class SiliconFlowProvider(BaseCloudProvider):
-    """SiliconFlow API (硅基流动)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.siliconflow.cn/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "Qwen/Qwen2.5-72B-Instruct"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"SiliconFlow API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class StepfunProvider(BaseCloudProvider):
-    """阶跃星辰 API (Step)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.stepfun.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "step-1-8k"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"阶跃星辰 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
-class YiProvider(BaseCloudProvider):
-    """零一万物 API (Yi)"""
-    
-    @property
-    def default_base_url(self) -> str:
-        return "https://api.lingyiwanwu.com/v1"
-    
-    @property
-    def default_model(self) -> str:
-        return "yi-lightning"
-    
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        
-        model = model or self.default_model
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "temperature": kwargs.get("temperature", 0.7)
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=stream,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                yield f"API 错误: {response.status_code} - {response.text}"
-                return
-            
-            if stream:
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except:
-                                pass
-            else:
-                data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                yield content
-                
-        except Exception as e:
-            logger.error(f"零一万物 API 调用失败: {e}")
-            yield f"错误: {str(e)}"
-
-
 class CloudAPIService:
-    """云端 API 服务"""
-    
-    _instance: Optional['CloudAPIService'] = None
-    _lock = threading.Lock()
-    
-    PROVIDERS = {
-        "deepseek": DeepSeekProvider,
-        "doubao": DoubaoProvider,
-        "openai": OpenAIProvider,
-        "zhipu": ZhipuProvider,
-        "qwen": QwenProvider,
-        "wenxin": WenxinProvider,
-        "spark": SparkProvider,
-        "kimi": KimiProvider,
-        "baichuan": BaichuanProvider,
-        "minimax": MiniMaxProvider,
-        "claude": ClaudeProvider,
-        "groq": GroqProvider,
-        "siliconflow": SiliconFlowProvider,
-        "stepfun": StepfunProvider,
-        "yi": YiProvider,
-        "ollama": "local"  # 本地 Ollama 模型
-    }
-    
+    """云端 API 服务（单例）"""
+
+    _instance: "CloudAPIService | None" = None
+    _lock: threading.Lock = threading.Lock()
+
+    _OLLAMA_SENTINEL: str = "local"
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized: bool = True
+        # 懒加载注册表：provider 类推迟到首次使用时才 import（见 cloud_providers/registry.py）
+        self._registry = default_registry
+        self._configs: dict[str, APIConfig] = {}
+        self._providers: dict[str, BaseCloudProvider] = {}
+        self._load_configs()
+
+        self._ollama_client: Any | None = None
+        try:
+            from .ollama_client import ollama_client
+            self._ollama_client = ollama_client
+        except ImportError:
+            logger.warning("Ollama 客户端未找到")
+
+    @property
+    def PROVIDERS(self) -> dict[str, object]:
+        """向后兼容：返回 name -> 已解析类 的字典（首次访问才 import 各 provider）。
+
+        新代码请直接用 self._registry（names()/resolve()），避免触发 import。
+        """
+        return {name: self._registry.resolve(name) for name in self._registry.names()}
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -1181,163 +63,143 @@ class CloudAPIService:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
-        self._initialized = True
-        
-        self._configs: Dict[str, APIConfig] = {}
-        self._providers: Dict[str, BaseCloudProvider] = {}
+        self._initialized: bool = True
+        self._configs: dict[str, APIConfig] = {}
+        self._providers: dict[str, BaseCloudProvider] = {}
         self._load_configs()
-        
-        # 尝试导入 Ollama 客户端
-        self._ollama_client = None
+
+        self._ollama_client: Any | None = None
         try:
             from .ollama_client import ollama_client
             self._ollama_client = ollama_client
         except ImportError:
             logger.warning("Ollama 客户端未找到")
-    
+
+    def _get_secure_storage(self):
+        try:
+            from app.core.config_manager import SecureStorage
+            return SecureStorage()
+        except ImportError:
+            return None
+
     def _load_configs(self):
-        """加载 API 配置"""
-        import os
-        import json
-        
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "data", "api_configs.json"
         )
-        
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
+                secure = self._get_secure_storage()
                 for provider, config_data in data.items():
+                    api_key = config_data.get("api_key", "")
+                    if api_key == "encrypted" and secure:
+                        api_key = secure.get(f"api_key:{provider}", "")
                     self._configs[provider] = APIConfig(
                         provider=provider,
-                        api_key=config_data.get("api_key", ""),
+                        api_key=api_key,
                         base_url=config_data.get("base_url", ""),
-                        model=config_data.get("model", "")
+                        model=config_data.get("model", ""),
+                        max_tokens=config_data.get("max_tokens", 4096),
+                        temperature=config_data.get("temperature", 0.7),
+                        top_p=config_data.get("top_p", 0.9),
                     )
             except Exception as e:
                 logger.warning(f"加载 API 配置失败: {e}")
-    
+
     def save_configs(self):
-        """保存 API 配置"""
-        import os
-        import json
-        
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "data", "api_configs.json"
         )
-        
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        
+        secure = self._get_secure_storage()
         data = {}
         for provider, config in self._configs.items():
+            if secure and config.api_key:
+                secure.set(f"api_key:{provider}", config.api_key)
+                api_key_marker = "encrypted"
+            else:
+                api_key_marker = config.api_key
             data[provider] = {
-                "api_key": config.api_key,
+                "api_key": api_key_marker,
                 "base_url": config.base_url,
-                "model": config.model
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "temperature": config.temperature,
+                "top_p": config.top_p,
             }
-        
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    def set_config(self, provider: str, api_key: str, base_url: str = "", model: str = ""):
-        """设置 API 配置"""
+
+    def set_config(self, provider: str, api_key: str, base_url: str = "", model: str = "",
+                   max_tokens: int = 4096, temperature: float = 0.7, top_p: float = 0.9):
         self._configs[provider] = APIConfig(
-            provider=provider,
-            api_key=api_key,
-            base_url=base_url,
-            model=model
+            provider=provider, api_key=api_key, base_url=base_url, model=model,
+            max_tokens=max_tokens, temperature=temperature, top_p=top_p,
         )
-        
         if provider in self._providers:
             del self._providers[provider]
-        
         self.save_configs()
-    
-    def get_config(self, provider: str) -> Optional[APIConfig]:
-        """获取 API 配置"""
+
+    def get_config(self, provider: str) -> APIConfig | None:
         return self._configs.get(provider)
-    
-    def get_provider(self, provider: str) -> Optional[BaseCloudProvider]:
-        """获取 API 提供者实例"""
-        if provider not in self.PROVIDERS:
+
+    def get_provider(self, provider: str) -> BaseCloudProvider | None:
+        if provider not in self._registry.names():
             return None
-        
         if provider in self._providers:
             return self._providers[provider]
-        
         config = self._configs.get(provider)
         if not config or not config.api_key:
             return None
-        
-        provider_class = self.PROVIDERS[provider]
-        self._providers[provider] = provider_class(
-            api_key=config.api_key,
-            base_url=config.base_url
+        provider_cls = cast(type[BaseCloudProvider], self._registry.resolve(provider))
+        self._providers[provider] = provider_cls(
+            api_key=config.api_key, base_url=config.base_url
         )
-        
         return self._providers[provider]
-    
-    def chat(
-        self,
-        provider: str,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        stream: bool = False,
-        **kwargs
-    ) -> Generator[str, None, None]:
-        """调用聊天 API"""
-        # 处理 Ollama 本地模型
+
+    def chat(self, provider: str, messages: list[dict[str, str]], model: str | None = None,
+             stream: bool = False, **kwargs: object):
+        # Ollama 本地模型
         if provider == "ollama":
             if not self._ollama_client:
                 yield "错误: Ollama 客户端未初始化"
                 return
-            
             if not self._ollama_client.is_available():
                 yield "错误: Ollama 服务不可用，请确保 Ollama 已安装并运行"
                 return
-            
-            # 使用默认模型或用户指定的模型
             if not model:
                 models = self._ollama_client.list_models()
                 if not models:
                     yield "错误: 未检测到 Ollama 模型，请先下载模型"
                     return
                 model = models[0].name
-            
             yield from self._ollama_client.chat(model, messages, stream, **kwargs)
             return
-        
-        # 处理云端 API
+
+        # 云端 API
         provider_instance = self.get_provider(provider)
-        
         if not provider_instance:
             yield f"错误: {provider} API 未配置"
             return
-        
         config = self._configs.get(provider)
         model = model or (config.model if config else None)
-        
         yield from provider_instance.chat(messages, model, stream, **kwargs)
-    
+
     def is_configured(self, provider: str) -> bool:
-        """检查是否已配置"""
         if provider == "ollama":
             return self._ollama_client is not None and self._ollama_client.is_available()
-        
         config = self._configs.get(provider)
         return config is not None and bool(config.api_key)
-    
-    def list_providers(self) -> List[str]:
-        """列出所有支持的提供者"""
-        return list(self.PROVIDERS.keys())
+
+    def list_providers(self) -> list[str]:
+        return self._registry.names()
 
 
 cloud_api_service = CloudAPIService()

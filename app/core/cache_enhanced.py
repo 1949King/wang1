@@ -2,6 +2,11 @@
 缓存安全增强模块
 ================
 为现有缓存系统添加安全清理机制和监控功能
+
+B2 收敛标记 (2026-05-31):
+本文件是 cache 监控/清理增强 (CacheMonitorMetrics / CacheMonitor / SafeCacheCleaner)
+与 core/cache_system.py 和 core/cache_strategy_optimization.py 功能不重叠
+保留但标记为扩展层, 监控告警接入主程序待 #C 任务
 """
 
 import os

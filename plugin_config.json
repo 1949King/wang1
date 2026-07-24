@@ -1,9 +1,1 @@
-{
-  "plugin_dirs": [
-    "app/plugins",
-    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\core\\..\\plugins",
-    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\plugins",
-    "D:\\本地磁盘(当前分区)(C)\\Users\\Administrator\\Desktop\\AI短剧编辑器2\\app\\modules\\plugins"
-  ],
-  "enabled_plugins": []
-}
+{"plugin_dirs": ["app/plugins", "app/modules/plugins"], "enabled_plugins": ["ai_effects_plugin"], "plugin_registry": {"ai_effects_plugin": {"name": "AI特效制作", "version": "1.0.0", "category": "ai_function", "path": "app/plugins/ai_effects_plugin", "status": "active", "description": "基于深度学习的智能视频/图像特效处理系统，支持风格迁移、背景替换、超分辨率、智能美颜、物体移除5大功能"}}}

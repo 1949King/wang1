@@ -25,7 +25,8 @@ class PerformanceMonitor:
             # 记录CPU使用情况
             cpu_usage = psutil.cpu_percent(interval=0.1)
             self.cpu_usage_history.append(cpu_usage)
-        except:
+        except Exception:
+            pass
             pass
     
     def get_stats(self):

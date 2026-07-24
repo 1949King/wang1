@@ -506,3 +506,72 @@ class AudioProcessor:
     def clear_beats(self):
         """清除节拍点"""
         self._beat_detector.clear_beats()
+
+    def denoise(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
+        """专业降噪 - 优先使用noisereduce频谱减法，回退到SciPy滤波"""
+        try:
+            import noisereduce as nr
+            return nr.reduce_noise(y=audio, sr=sample_rate, stationary=True, prop_decrease=0.85)
+        except ImportError:
+            try:
+                from scipy.signal import butter, sosfilt
+                sos = butter(8, 80, btype='high', fs=sample_rate, output='sos')
+                return sosfilt(sos, audio)
+            except ImportError:
+                return audio
+
+    def compressor(self, audio: np.ndarray, sample_rate: int,
+                   threshold_db: float = -20, ratio: float = 4.0,
+                   attack_ms: float = 5, release_ms: float = 50,
+                   makeup_db: float = 0) -> np.ndarray:
+        """音量压缩器"""
+        try:
+            from pedalboard import Compressor
+            c = Compressor(threshold_db=threshold_db, ratio=ratio)
+            return c(audio, sample_rate)
+        except ImportError:
+            return audio
+
+    def eq_equalizer(self, audio: np.ndarray, sample_rate: int,
+                     gains_db: list = None) -> np.ndarray:
+        """10段图形均衡器 - 使用pedalboard或scipy"""
+        if gains_db is None:
+            bands = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+            gains_db = [0] * 10
+        try:
+            from scipy.signal import butter, sosfilt
+            output = np.zeros_like(audio)
+            for i, (freq, gain) in enumerate(zip(
+                    [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+                    gains_db)):
+                if gain == 0:
+                    continue
+                bw = freq * 0.5 if i < 9 else freq * 0.3
+                low = max(20, freq - bw) / (sample_rate / 2)
+                high = min(freq + bw, sample_rate / 2 - 1) / (sample_rate / 2)
+                sos = butter(4, [low, high], btype='band', output='sos')
+                output += sosfilt(sos, audio) * (10 ** (gain / 20) - 1)
+            return audio + output
+        except ImportError:
+            return audio
+
+    def loudness_normalize(self, audio: np.ndarray, sample_rate: int,
+                           target_lufs: float = -16.0) -> np.ndarray:
+        """LUFS响度归一化"""
+        try:
+            import pyloudnorm as pyln
+            meter = pyln.Meter(sample_rate)
+            current_lufs = meter.integrated_loudness(audio)
+            return pyln.normalize.loudness(audio, current_lufs, target_lufs)
+        except ImportError:
+            peak = max(abs(audio))
+            return audio / max(peak, 1e-10) * 0.9 if peak > 0 else audio
+
+    def add_reverb(self, audio: np.ndarray, sample_rate: int,
+                   room_size: float = 0.5) -> np.ndarray:
+        """混响效果"""
+        try:
+            from pedalboard import Reverb
+            return Reverb(room_size=room_size)(audio, sample_rate)
+        except ImportError:
+            return audio

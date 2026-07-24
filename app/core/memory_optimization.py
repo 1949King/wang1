@@ -281,7 +281,8 @@ class MemoryPool:
                 # 使用pickle估算
                 import pickle
                 return len(pickle.dumps(data))
-        except:
+        except Exception:
+            pass
             return 0
     
     def clear(self):

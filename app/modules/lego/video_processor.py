@@ -28,6 +28,7 @@ class ExportSettings:
     fps: int = 30
     audio_codec: str = "aac"
     audio_bitrate: str = "192k"
+    preset: str = "fast"  # ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
 
 
 @dataclass
@@ -182,6 +183,7 @@ def merge_videos(
             "-i", list_file,
             "-c:v", settings.encoder,
             "-b:v", settings.bitrate,
+            "-preset", settings.preset,
             "-c:a", settings.audio_codec,
             "-b:a", settings.audio_bitrate,
             "-y",
@@ -497,11 +499,12 @@ def trim_video(
     try:
         cmd = [
             ffmpeg_path,
-            "-i", video_path,
             "-ss", str(start_time),
+            "-i", video_path,
             "-to", str(end_time),
             "-c:v", settings.encoder,
             "-b:v", settings.bitrate,
+            "-preset", settings.preset,
             "-c:a", settings.audio_codec,
             "-b:a", settings.audio_bitrate,
             "-y",
@@ -762,6 +765,7 @@ class VideoProcessor:
         self.ffmpeg_path = ffmpeg_path
         self.ffprobe_path = ffprobe_path
         self.gpu_encoder = detect_gpu_encoder(ffmpeg_path)
+        logger.info(f"视频处理器初始化: GPU编码器={self.gpu_encoder}, FFmpeg={ffmpeg_path}")
     
     def get_info(self, video_path: str) -> Optional[VideoInfo]:
         """获取视频信息"""
@@ -782,6 +786,10 @@ class VideoProcessor:
           stabilize, sharpen, saturation, denoise, logo_removal
         """
         settings = settings or ExportSettings()
+        if self.gpu_encoder != "libx264" and settings.encoder == "libx264":
+            settings = settings.__class__(**settings.__dict__)
+            settings.encoder = self.gpu_encoder
+            logger.info(f"自动切换到GPU编码器: {self.gpu_encoder}")
         current_path = video_path
         temp_files = []
         

@@ -12,7 +12,7 @@ import time
 import random
 import string
 import secrets
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -602,29 +602,74 @@ class ValidationResult:
 
 
 class PasswordHasher:
-    """密码哈希器"""
+    """密码哈希器（bcrypt优先，自动兼容旧格式）"""
     
     @staticmethod
     def hash(password: str) -> str:
-        """哈希密码"""
-        salt = secrets.token_hex(16)
-        hashed = hashlib.sha256((password + salt).encode()).hexdigest()
-        return f"{salt}:{hashed}"
+        """哈希密码（bcrypt，成本因子12）"""
+        try:
+            import bcrypt
+            return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+        except ImportError:
+            # 降级：bcrypt不可用时使用SHA256+盐
+            salt = secrets.token_hex(16)
+            hashed = hashlib.sha256((password + salt).encode()).hexdigest()
+            return f"sha256${salt}${hashed}"
     
     @staticmethod
     def verify(password: str, hashed: str) -> bool:
-        """验证密码"""
+        """验证密码，支持bcrypt和旧版SHA256格式"""
+        if not hashed:
+            return False
+        
         try:
-            salt, hash_value = hashed.split(':', 1)
-            computed_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-            return computed_hash == hash_value
-        except:
+            import bcrypt
+            
+            # bcrypt格式
+            if hashed.startswith("$2"):
+                try:
+                    return bcrypt.checkpw(password.encode(), hashed.encode())
+                except Exception as e:
+                    logger.warning(f"bcrypt 密码验证异常: {e}")
+                    return False
+            
+            # SHA256+盐格式
+            if hashed.startswith("sha256$"):
+                try:
+                    _, salt, hash_value = hashed.split("$", 2)
+                    computed = hashlib.sha256((password + salt).encode()).hexdigest()
+                    return computed == hash_value
+                except Exception as e:
+                    logger.warning(f"SHA256+盐 密码验证异常: {e}")
+                    return False
+            
+            # 旧版 salt:hash 格式
+            if ':' in hashed and not hashed.startswith("$"):
+                salt, hash_value = hashed.split(':', 1)
+                computed_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+                return computed_hash == hash_value
+                
+        except ImportError:
+            # bcrypt不可用时回退旧逻辑
+            pass
+        
+        # 纯SHA256（无盐，极度不安全）
+        try:
+            return hashlib.sha256(password.encode()).hexdigest() == hashed
+        except Exception as e:
+            logger.warning(f"纯SHA256密码验证异常: {e}")
             return False
     
     @staticmethod
     def needs_rehash(hashed: str) -> bool:
-        """检查是否需要重新哈希"""
-        return not hashed or ':' not in hashed
+        """检查是否需要升级到bcrypt"""
+        if not hashed:
+            return True
+        try:
+            import bcrypt
+            return not hashed.startswith("$2")
+        except ImportError:
+            return False  # bcrypt不可用，无需升级
 
 
 class InputValidator:
@@ -804,7 +849,8 @@ class SecureToken:
             timestamp_str, _ = token.split('.', 1)
             timestamp = int(timestamp_str)
             return (time.time() - timestamp) < max_age
-        except:
+        except Exception:
+            pass
             return False
 
 
@@ -826,7 +872,8 @@ class DataSanitizer:
             if len(username) > 3:
                 return f"{username[:3]}***@{domain}"
             return f"{username}***@{domain}"
-        except:
+        except Exception:
+            pass
             return email
     
     @staticmethod

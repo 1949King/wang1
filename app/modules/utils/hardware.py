@@ -1,5 +1,8 @@
 import platform
 import subprocess
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ===================== 硬件检测与自动适配 =====================
 def detect_hardware():
@@ -44,7 +47,7 @@ def detect_hardware():
             "cache_size": cache_size
         }
     except Exception as e:
-        print(f"硬件检测失败: {e}")
+        logger.warning(f"硬件检测失败: {e}")
         # 返回默认值
         return {
             "cpu_count": 4,
@@ -55,42 +58,45 @@ def detect_hardware():
             "cache_size": 512
         }
 
-# ===================== GPU 编码器自动检测 =====================
-def detect_gpu_encoder(ffmpeg_executable="ffmpeg.exe"):
-    try:
-        res = subprocess.run(
-            f"{ffmpeg_executable} -encoders | findstr h264_nvenc",
-            shell=True,
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        if res.returncode == 0:
-            return "h264_nvenc"
-    except Exception as e:
-        print(f"检测NVIDIA GPU失败: {e}")
 
+# ===================== GPU 编码器自动检测 =====================
+def _check_gpu_encoder(ffmpeg_executable, encoder_name):
+    """安全检测GPU编码器（用两个进程pipe连接，避免shell=True命令注入）"""
     try:
-        res = subprocess.run(
-            f"{ffmpeg_executable} -encoders | findstr h264_amf",
-            shell=True,
-            capture_output=True,
+        p1 = subprocess.Popen(
+            [ffmpeg_executable, "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        if res.returncode == 0:
-            return "h264_amf"
+        p2 = subprocess.Popen(
+            ["findstr", encoder_name],
+            stdin=p1.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        p1.stdout.close()
+        p2.communicate()
+        return p2.returncode == 0
     except Exception as e:
-        print(f"检测AMD GPU失败: {e}")
+        logger.debug(f"检测{encoder_name}失败: {e}")
+        return False
+
+
+def detect_gpu_encoder(ffmpeg_executable="ffmpeg.exe"):
+    """检测系统可用的GPU编码器"""
+    # 验证可执行文件名安全性
+    if not ffmpeg_executable or not ffmpeg_executable.replace('.', '').replace('_', '').replace('-', '').isalnum():
+        ffmpeg_executable = "ffmpeg.exe"
     
-    try:
-        res = subprocess.run(
-            f"{ffmpeg_executable} -encoders | findstr h264_qsv",
-            shell=True,
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        if res.returncode == 0:
-            return "h264_qsv"
-    except Exception as e:
-        print(f"检测Intel GPU失败: {e}")
-        
+    if _check_gpu_encoder(ffmpeg_executable, "h264_nvenc"):
+        return "h264_nvenc"
+    
+    if _check_gpu_encoder(ffmpeg_executable, "h264_amf"):
+        return "h264_amf"
+    
+    if _check_gpu_encoder(ffmpeg_executable, "h264_qsv"):
+        return "h264_qsv"
+    
     return "libx264"

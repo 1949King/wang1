@@ -215,25 +215,16 @@ class SoftRenderer(QObject, IRenderer):
             return image
     
     def _apply_contrast(self, image: QImage, contrast: float) -> QImage:
-        """应用对比度效果"""
+        """应用对比度效果 - 修复uint32→float32类型转换"""
         try:
-            import numpy as np
-            
-            width = image.width()
-            height = image.height()
-            
+            width, height = image.width(), image.height()
             ptr = image.bits()
-            ptr = ptr.astype(np.uint32)
-            
-            arr = np.frombuffer(ptr, np.uint32).reshape((height, width))
-            
+            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))[:, :, :3]
             arr = arr.astype(np.float32)
-            arr = (arr - 128) * contrast + 128
+            arr = (arr - 128.0) * contrast + 128.0
             arr = np.clip(arr, 0, 255).astype(np.uint8)
-            
-            result = QImage(arr.data, width, height, QImage.Format.Format_RGB888)
-            return result
-            
+            qimg = QImage(arr.data, width, height, width * 3, QImage.Format.Format_RGB888)
+            return qimg.copy()
         except Exception as e:
             logger.error(f"应用对比度失败: {e}")
             return image
@@ -264,35 +255,16 @@ class SoftRenderer(QObject, IRenderer):
             return image
     
     def _apply_hue(self, image: QImage, hue: int) -> QImage:
-        """应用色调效果"""
+        """应用色调效果 - cv2 HSV矢量化"""
         try:
-            import numpy as np
-            from PyQt6.QtGui import QColor
-            
-            width = image.width()
-            height = image.height()
-            
+            width, height = image.width(), image.height()
             ptr = image.bits()
-            ptr = ptr.astype(np.uint32)
-            
-            arr = np.frombuffer(ptr, np.uint32).reshape((height, width, 4))
-            
-            rgb = arr[:, :, :3].astype(np.float32)
-            
-            hsv = QColor.fromRgbF(rgb[0]/255, rgb[1]/255, rgb[2]/255).getHsv()
-            
-            new_hsv = (hsv[0] + hue) % 360, hsv[1], hsv[2]
-            new_color = QColor.fromHsv(new_hsv[0], new_hsv[1], new_hsv[2])
-            
-            for y in range(height):
-                for x in range(width):
-                    pixel = QColor(image.pixel(x, y))
-                    new_pixel = pixel
-                    new_pixel.setHsv(new_hsv[0], new_hsv[1], new_hsv[2])
-                    image.setPixel(x, y, new_pixel.rgb())
-            
-            return image
-            
+            rgb = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))[:, :, :3]
+            hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+            hsv[:, :, 0] = (hsv[:, :, 0].astype(np.int32) + hue) % 180
+            result = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+            qimg = QImage(result.data, width, height, width * 3, QImage.Format.Format_RGB888)
+            return qimg.copy()
         except Exception as e:
             logger.error(f"应用色调失败: {e}")
             return image

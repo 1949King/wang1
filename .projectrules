@@ -1,0 +1,177 @@
+# AI编程助手规则文件
+# ====================
+# 本文件定义AI编程助手在本项目中的行为约束和开发规范。
+# 所有AI工具（包括本IDE的AI助手）必须遵守这些规则。
+
+## 一、项目架构分层
+
+### 1. UI层（低风险）
+- 目录: app/ui/, app/modules/lego/video_editor/, app/modules/lego/widgets/
+- 职责: 界面渲染、用户交互、控件绑定
+- 允许操作: 读取、修改、创建
+- 禁止操作: 直接调用引擎层模块
+
+### 2. 核心层（中风险）
+- 目录: app/core/, app/modules/lego/core.py
+- 职责: 业务逻辑、状态管理、接口定义
+- 允许操作: 读取、修改、创建
+- 注意: 修改前需确认不破坏接口兼容性
+
+### 3. 引擎层（高风险）
+- 目录: app/core/video_processing/, thirdparty/ffmpeg/, thirdparty/mlt/
+- 文件: app/core/gpu_acceleration.py, app/core/render_manager.py
+- 职责: FFmpeg调用、硬件加速、媒体编解码
+- 允许操作: **仅读取**
+- 禁止操作: 修改、创建、删除
+- 原因: 修改引擎层可能破坏媒体管线，需经过架构审查
+
+### 4. 调试层（低风险）
+- 目录: app/core/debug/, scripts/
+- 职责: 调试工具、日志分析、性能监控
+- 允许操作: 读取、修改、创建
+
+## 二、黑白名单
+
+### 黑名单（绝对禁止修改）
+- thirdparty/ffmpeg/bin/
+- thirdparty/mlt/Shotcut/
+- app/core/video_processing/mlt_engine_cpp.py
+- app/core/video_processing/cpp_engine.py
+- app/core/video_processing/pyav_engine.py
+- app/core/gpu_acceleration.py
+
+### 白名单（允许自由修改）
+- app/ui/
+- app/core/debug/
+- scripts/
+- tests/
+- app/modules/lego/video_editor/
+
+## 三、依赖关系约束
+
+### 允许的依赖方向
+1. UI层 → 核心层 ✓ （UI可以调用核心层接口）
+2. 核心层 → 引擎层 ✓ （核心层可以调用引擎层）
+
+### 禁止的依赖方向
+1. UI层 → 引擎层 ✗ （禁止直接调用，必须通过核心层中转）
+2. 引擎层 → UI层 ✗ （禁止反向依赖）
+3. 调试层 → UI层 ✗ （调试工具不应依赖UI）
+
+## 四、修改规范
+
+### 4.1 修改前必须确认
+- 确认修改范围不会影响引擎层
+- 确认修改不会破坏现有接口兼容性
+- 确认修改不会引入循环依赖
+
+### 4.2 代码风格要求
+- 类名: 大驼峰（PascalCase）
+- 方法/函数名: 下划线命名（snake_case）
+- 变量名: 语义化清晰，见名知意
+- 常量: 全大写加下划线（CONSTANT_NAME）
+- 导入顺序: 标准库 → 第三方库 → 本地模块
+- 注释: 类、核心方法必须添加功能说明，关键逻辑补充行内注释
+
+### 4.3 异常处理要求
+- 禁止裸 `except: pass`
+- 异常必须记录日志或给用户清晰提示
+- 必填项校验、格式校验、防重复点击全覆盖
+
+### 4.4 PyQt6专项规则
+- 弹窗必须绑定父窗口: `QDialog(self)`、`QMessageBox(self)`
+- UI更新必须在主线程，后台线程通过信号槽更新
+- 按钮点击必须防重复触发
+- 用户可见错误必须用界面提示
+
+## 五、FFmpeg相关开发规范
+
+### 5.1 命令构建规范
+- 使用 app.core.debug.ffmpeg_debugger.FFmpegCommandBuilder 构建命令
+- 命令构建后必须调用 validate_command() 验证
+- 硬件编码器选择必须通过 GPUDetector 检测后决定
+
+### 5.2 滤镜链开发规范
+- 使用 app.core.debug.filter_validator.FilterParameterGenerator 生成滤镜
+- 复杂滤镜链必须通过 validate_filter_chain() 验证
+- 禁止使用与硬件加速不兼容的滤镜组合
+- 滤镜参数必须在有效范围内
+
+### 5.3 错误处理规范
+- 使用 FFmpegErrorParser.parse_av_error() 解析错误码
+- 使用 FFmpegErrorParser.parse_log_line() 解析日志
+- 硬件编码失败时必须自动回退到软件编码
+
+## 六、禁止操作清单
+
+1. ✗ 禁止修改引擎层代码（除非经过架构审查）
+2. ✗ 禁止删除原有代码和注释
+3. ✗ 禁止私自调整目录结构
+4. ✗ 禁止在UI层直接调用FFmpeg命令
+5. ✗ 禁止编写无注释代码
+6. ✗ 禁止使用裸 `print()` 作为长期日志
+7. ✗ 禁止在窗口中随意定义全局状态
+8. ✗ 禁止弹窗不绑定父窗口
+
+## 七、开发流程
+
+### 7.1 新增功能流程
+1. 分析需求，确认修改范围
+2. 定位最小修改点
+3. 编写代码（遵循规范）
+4. 运行测试脚本验证
+5. 确认不破坏现有功能
+
+### 7.2 调试流程
+1. 使用 FFmpegDebugger 捕获日志
+2. 使用 FFmpegErrorParser 分析错误
+3. 使用 FilterValidationPipeline 验证滤镜
+4. 使用 ArchitectureGuard 检查架构合规
+
+### 7.3 提交前检查
+1. 运行 scripts/arch_guard.py 扫描变更
+2. 运行 app/test_simple_detection.py 验证核心功能
+3. 确认无违规修改
+4. 确认代码风格符合规范
+
+## 八、调试工具使用指南
+
+### 8.1 FFmpeg调试器
+```python
+from app.core.debug.ffmpeg_debugger import ffmpeg_debugger
+
+# 解析错误码
+error_info = ffmpeg_debugger.error_parser.parse_av_error(-2)
+
+# 分析日志
+log_analysis = ffmpeg_debugger.analyze_logs(log_lines)
+
+# 验证命令
+cmd_validation = ffmpeg_debugger.validate_command(command_list)
+```
+
+### 8.2 滤镜验证流水线
+```python
+from app.core.debug.filter_validator import filter_pipeline
+
+# 验证单个滤镜
+result = filter_pipeline.validate_single_filter(input_file, "scale", width=1920, height=1080)
+
+# 验证滤镜链
+result = filter_pipeline.validate_filter_chain(input_file, ["scale", "crop", "eq"])
+
+# 迭代参数测试
+results = filter_pipeline.iterate_parameters(input_file, "eq", "contrast", [0.5, 1.0, 1.5, 2.0])
+```
+
+### 8.3 架构守护
+```bash
+# 扫描目录
+python scripts/arch_guard.py --scan app/modules/lego/video_editor/
+
+# 检查单个文件
+python scripts/arch_guard.py --file app/core/debug/ffmpeg_debugger.py
+
+# 检查导入依赖
+python scripts/arch_guard.py --file app/modules/lego/video_editor/multi_track_editor.py --check-imports
+```

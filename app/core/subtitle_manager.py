@@ -1,3 +1,7 @@
+import os
+import re
+import numpy as np
+
 class SubtitleManager:
     def __init__(self):
         self.subtitles = []
@@ -148,22 +152,101 @@ class SubtitleManager:
             created_subtitles.append(subtitle)
         return created_subtitles
     
+    def add_subtitle(self, text, start_time, end_time, style="default"):
+        """添加字幕（EditorModule使用的别名）"""
+        return self.create_subtitle(text, start_time, end_time, style)
+
     def import_subtitles(self, file_path, format="srt"):
-        """导入字幕文件"""
-        # 这里应该实现实际的字幕文件导入逻辑
-        # 暂时返回模拟数据
-        imported_subtitles = []
-        # 模拟导入SRT格式字幕
-        if format == "srt":
-            # 示例SRT格式解析
-            pass
-        return imported_subtitles
-    
+        """导入字幕文件 - 支持SRT/VTT格式"""
+        imported = []
+        if not os.path.exists(file_path):
+            return imported
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if format == "srt":
+                imported = self._parse_srt(content)
+            elif format == "vtt":
+                imported = self._parse_vtt(content)
+            for sub in imported:
+                self.subtitles.append(sub)
+        except Exception as e:
+            print(f"导入字幕失败: {e}")
+        return imported
+
+    def _parse_srt(self, content):
+        subs = []
+        blocks = re.split(r'\n\s*\n', content.strip())
+        for block in blocks:
+            lines = block.strip().split('\n')
+            if len(lines) < 2:
+                continue
+            idx = lines[0].strip()
+            times = lines[1].strip()
+            text = '\n'.join(lines[2:])
+            match = re.match(r'(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)', times)
+            if match:
+                sh, sm, ss, sms = map(int, match.groups()[:4])
+                eh, em, es, ems = map(int, match.groups()[4:])
+                start = sh * 3600 + sm * 60 + ss + sms / 1000.0
+                end = eh * 3600 + em * 60 + es + ems / 1000.0
+                sub = self.create_subtitle(text, start, end)
+                subs.append(sub)
+        return subs
+
+    def _parse_vtt(self, content):
+        content = re.sub(r'^\s*WEBVTT.*?\n\n', '', content, flags=re.S)
+        return self._parse_srt(content)
+
     def export_subtitles(self, file_path, format="srt"):
-        """导出字幕文件"""
-        # 这里应该实现实际的字幕文件导出逻辑
-        # 暂时返回成功
-        return True
+        """导出字幕为SRT文件"""
+        try:
+            sorted_subs = sorted(self.subtitles, key=lambda s: s["start_time"])
+            with open(file_path, "w", encoding="utf-8") as f:
+                for i, sub in enumerate(sorted_subs, 1):
+                    st = self._sec_to_srt(sub["start_time"])
+                    et = self._sec_to_srt(sub["end_time"])
+                    f.write(f"{i}\n{st} --> {et}\n{sub['text']}\n\n")
+            return True
+        except Exception as e:
+            print(f"导出字幕失败: {e}")
+            return False
+
+    def _sec_to_srt(self, sec):
+        h = int(sec // 3600)
+        m = int((sec % 3600) // 60)
+        s = int(sec % 60)
+        ms = int((sec % 1) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    def render_to_frame(self, frame: np.ndarray, time_sec: float) -> np.ndarray:
+        """将当前时间的字幕渲染叠加到帧上"""
+        result = frame.copy()
+        try:
+            import cv2
+            CV2_AVAILABLE = True
+        except ImportError:
+            CV2_AVAILABLE = False
+        active = [s for s in self.subtitles
+                  if s.get("visible", True) and s["start_time"] <= time_sec <= s["end_time"]]
+        for sub in active:
+            style = self.get_subtitle_style(sub.get("style", "default"))
+            text = sub["text"]
+            h, w = result.shape[:2]
+            font = cv2.FONT_HERSHEY_SIMPLEX if CV2_AVAILABLE else None
+            font_scale = style["font_size"] / 30.0 if CV2_AVAILABLE else 1.0
+            thickness = max(1, int(style["font_size"] / 15))
+            if CV2_AVAILABLE:
+                (tw, th), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+                x = int((w - tw) / 2)
+                y = int(h * sub["position"]["y"])
+                overlay = result.copy()
+                cv2.rectangle(overlay, (x - 10, y - th - 10), (x + tw + 10, y + 10),
+                              (0, 0, 0), -1)
+                result = cv2.addWeighted(overlay, 0.6, result, 0.4, 0)
+                cv2.putText(result, text, (x, y), font, font_scale,
+                            (255, 255, 255), thickness, cv2.LINE_AA)
+        return result
     
     def sync_subtitles(self, time_offset):
         """同步字幕时间"""

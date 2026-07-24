@@ -44,8 +44,8 @@ class StepResult:
 
 @dataclass
 class SkillStep:
-    id: str
-    name: str
+    id: str = ""
+    name: str = ""
     description: str = ""
     handler: Optional[Callable] = None
     condition: Optional[Callable[[Dict], bool]] = None
@@ -127,9 +127,12 @@ class Skill(ABC):
     def steps(self) -> List[SkillStep]:
         return self._steps
     
-    def add_step(self, step: SkillStep) -> 'Skill':
-        """添加步骤"""
-        self._steps.append(step)
+    def add_step(self, step: SkillStep = None, **kwargs) -> 'Skill':
+        """添加步骤，支持传入 SkillStep 对象或关键字参数"""
+        if step is not None:
+            self._steps.append(step)
+        elif kwargs:
+            self._steps.append(SkillStep(**kwargs))
         return self
     
     def step(self, name: str, handler: Callable = None, 
@@ -468,28 +471,49 @@ class SkillEngine:
         skill = self._registry.create_instance(skill_id)
         if not skill:
             return {"success": False, "error": f"Skill '{skill_id}' 不存在"}
-        
+
         if progress_callback:
             skill.set_progress_callback(progress_callback)
-        
+
+        # 修复 C3: 拆 sync/async, 异步模式 finally 不删 _running_skills
+        # (否则线程刚启动就被清理, pause/cancel/get_state 找不到)
+        if async_mode:
+            return self._execute_skill_async(skill, inputs)
+        else:
+            return self._execute_skill_sync(skill, inputs)
+
+    def _execute_skill_sync(self, skill: Skill, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """同步执行 (修复 C3: finally 在 execute 后清理, 不会有竞态)"""
         with self._lock:
             self._running_skills[skill.skill_id] = skill
-        
         try:
-            if async_mode:
-                thread = threading.Thread(
-                    target=self._execute_in_thread,
-                    args=(skill, inputs)
-                )
-                thread.daemon = True
-                thread.start()
-                return {"success": True, "message": "Skill 已在后台启动", "skill_id": skill.skill_id}
-            else:
-                return skill.execute(inputs)
+            return skill.execute(inputs)
         finally:
             with self._lock:
                 if skill.skill_id in self._running_skills:
                     del self._running_skills[skill.skill_id]
+
+    def _execute_skill_async(self, skill: Skill, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """异步执行 (修复 C3: 线程内 execute 完成后才清理 _running_skills)"""
+        # 注册到 _running_skills, 异步线程不主动删除, 由 _async_done 回调清理
+        with self._lock:
+            self._running_skills[skill.skill_id] = skill
+
+        def _async_done(result):
+            """异步线程完成后的清理回调 (修复 C3)"""
+            with self._lock:
+                if skill.skill_id in self._running_skills:
+                    del self._running_skills[skill.skill_id]
+
+        def _run():
+            try:
+                skill.execute(inputs)
+            finally:
+                _async_done(None)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        return {"success": True, "message": "Skill 已在后台启动", "skill_id": skill.skill_id}
     
     def _execute_in_thread(self, skill: Skill, inputs: Dict[str, Any]):
         """在线程中执行 Skill"""

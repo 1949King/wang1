@@ -1,6 +1,16 @@
 """
 插件管理器
 整合插件加载、热加载、注册等功能
+
+B3 收敛标记 (2026-05-31):
+本文件是插件子系统入口 (PluginManager 核心类)
+相关职责文件:
+  - plugin_loader.py         → 静态加载
+  - plugin_hotloader.py      → 动态加载
+  - plugin_marketplace.py    → 市场浏览/安装
+  - plugin_sandbox.py        → 安全沙箱
+  - plugin_authentication.py → 签名认证
+5 个文件职责不重叠, 不需要合并, 仅作"系统级归档"以供后续 C1 接线参考
 """
 
 import os

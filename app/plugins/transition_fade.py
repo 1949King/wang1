@@ -6,7 +6,7 @@
 import numpy as np
 from typing import Dict, Any
 
-from app.core.plugin_loader import (
+from core.plugin_loader import (
     ITransitionPlugin, PluginInfo, PluginType, PluginCategory
 )
 

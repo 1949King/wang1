@@ -8,6 +8,8 @@
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import uuid
 import threading
 import time
@@ -241,6 +243,90 @@ class FlowOrchestrator:
         
         return result
     
+    def _level_groups(self, execution_order: List[str]) -> List[List[str]]:
+        """
+        将拓扑排序后的节点按 BFS 层级分组。
+        同层级节点之间无依赖关系，可以并行执行。
+        
+        返回: [[level0_node_ids], [level1_node_ids], ...]
+        """
+        node_levels: Dict[str, int] = {}
+        
+        # 起始节点 level=0
+        start_nodes = self.get_start_nodes()
+        q = deque()
+        for nid in start_nodes:
+            node_levels[nid] = 0
+            q.append(nid)
+        
+        # BFS 计算层级
+        while q:
+            nid = q.popleft()
+            for next_id in self._adjacency.get(nid, []):
+                new_level = node_levels[nid] + 1
+                if next_id not in node_levels or node_levels[next_id] < new_level:
+                    node_levels[next_id] = new_level
+                    q.append(next_id)
+        
+        # 按层级分组（保持拓扑序内的相对顺序）
+        groups: Dict[int, List[str]] = {}
+        for nid in execution_order:
+            level = node_levels.get(nid, 0)
+            if level not in groups:
+                groups[level] = []
+            groups[level].append(nid)
+        
+        return [groups[lvl] for lvl in sorted(groups.keys())]
+    
+    def _execute_single_node(
+        self, node_id: str, node: FlowNode,
+        node_results: Dict[str, BlockResult]
+    ) -> BlockResult:
+        """
+        执行单个 BLOCK 节点（线程安全）。
+        
+        Args:
+            node_id: 节点ID
+            node: 流程节点
+            node_results: 共享结果字典（写时加锁）
+        """
+        prev_nodes = self.get_prev_nodes(node_id)
+        node_inputs = {}
+        
+        # 从上游节点收集输入（读取共享字典需要加锁）
+        with self._lock:
+            for prev_id in prev_nodes:
+                if prev_id in node_results:
+                    prev_outputs = node_results[prev_id].outputs
+                    for conn in self._connections.values():
+                        if conn.source_id == prev_id and conn.target_id == node_id:
+                            if conn.output_key in prev_outputs:
+                                node_inputs[conn.input_key] = prev_outputs[conn.output_key]
+        
+        # 注入节点自身配置
+        for key, value in node.config.items():
+            if key not in node_inputs:
+                node_inputs[key] = value
+        
+        # 执行
+        self._event_bus.emit(
+            EventType.BLOCK_STARTED,
+            {"node_id": node_id, "block_name": node.block_name}
+        )
+        
+        result = node.block_instance.run(node_inputs)
+        
+        # 写入结果（加锁保护共享字典）
+        with self._lock:
+            node_results[node_id] = result
+        
+        self._event_bus.emit(
+            EventType.BLOCK_COMPLETED if result.success else EventType.BLOCK_FAILED,
+            {"node_id": node_id, "result": result.to_dict() if hasattr(result, 'to_dict') else {}}
+        )
+        
+        return result
+    
     def execute(self, initial_data: Dict[str, Any] = None) -> FlowResult:
         """
         执行整个流程
@@ -254,9 +340,11 @@ class FlowOrchestrator:
         
         try:
             execution_order = self._topological_sort()
+            level_groups = self._level_groups(execution_order)
             total_nodes = len(execution_order)
+            executed_count = 0
             
-            for i, node_id in enumerate(execution_order):
+            for group_idx, node_ids in enumerate(level_groups):
                 if self._state == FlowState.PAUSED:
                     while self._state == FlowState.PAUSED:
                         time.sleep(0.1)
@@ -264,62 +352,95 @@ class FlowOrchestrator:
                 if self._state != FlowState.RUNNING:
                     break
                 
-                node = self._nodes.get(node_id)
-                if not node:
-                    continue
+                # ── 分离 BLOCK 节点和非 BLOCK 节点 ──
+                block_nodes: List[tuple] = []  # (node_id, FlowNode)
+                special_nodes: List[tuple] = []  # (node_id, FlowNode) - START/END
                 
-                self._current_node = node_id
-                progress = (i + 1) / total_nodes if total_nodes > 0 else 1.0
-                self._report_progress(progress, f"执行节点: {node.block_name or node_id}")
+                for nid in node_ids:
+                    node = self._nodes.get(nid)
+                    if not node:
+                        continue
+                    if node.node_type == NodeType.BLOCK and node.block_instance:
+                        block_nodes.append((nid, node))
+                    else:
+                        special_nodes.append((nid, node))
                 
-                self._event_bus.emit(
-                    EventType.BLOCK_STARTED,
-                    {"node_id": node_id, "block_name": node.block_name}
-                )
+                # ── 处理 START/END 等特殊节点（串行，设置上下文）──
+                for nid, node in special_nodes:
+                    executed_count += 1
+                    self._current_node = nid
+                    progress = executed_count / total_nodes if total_nodes > 0 else 1.0
+                    self._report_progress(progress, f"执行节点: {node.block_name or nid}")
+                    
+                    if node.node_type == NodeType.START:
+                        node_results[nid] = BlockResult(success=True, outputs=self._data_context)
+                    elif node.node_type == NodeType.END:
+                        prev_nodes = self.get_prev_nodes(nid)
+                        final_outputs = {}
+                        for prev_id in prev_nodes:
+                            if prev_id in node_results:
+                                final_outputs.update(node_results[prev_id].outputs)
+                        node_results[nid] = BlockResult(success=True, outputs=final_outputs)
                 
-                if node.node_type == NodeType.BLOCK and node.block_instance:
-                    prev_nodes = self.get_prev_nodes(node_id)
-                    node_inputs = {}
-                    
-                    for prev_id in prev_nodes:
-                        if prev_id in node_results:
-                            prev_outputs = node_results[prev_id].outputs
-                            for conn in self._connections.values():
-                                if conn.source_id == prev_id and conn.target_id == node_id:
-                                    if conn.output_key in prev_outputs:
-                                        node_inputs[conn.input_key] = prev_outputs[conn.output_key]
-                    
-                    for key, value in node.config.items():
-                        if key not in node_inputs:
-                            node_inputs[key] = value
-                    
-                    result = node.block_instance.run(node_inputs)
-                    node_results[node_id] = result
-                    
-                    self._event_bus.emit(
-                        EventType.BLOCK_COMPLETED if result.success else EventType.BLOCK_FAILED,
-                        {"node_id": node_id, "result": result.to_dict() if hasattr(result, 'to_dict') else {}}
+                # ── 并行执行同层级 BLOCK 节点 ──
+                if block_nodes:
+                    parallel_count = len(block_nodes)
+                    self._report_progress(
+                        executed_count / total_nodes if total_nodes > 0 else 1.0,
+                        f"并行执行 {parallel_count} 个节点..."
                     )
                     
-                    if not result.success:
-                        self._state = FlowState.ERROR
-                        return FlowResult(
-                            success=False,
-                            error=f"节点 {node_id} 执行失败: {result.error}",
-                            execution_time=time.time() - start_time,
-                            node_results=node_results
+                    # 单节点直接执行，避免线程池开销
+                    if parallel_count == 1:
+                        nid, node = block_nodes[0]
+                        self._current_node = nid
+                        result = self._execute_single_node(nid, node, node_results)
+                        executed_count += 1
+                        if not result.success:
+                            self._state = FlowState.ERROR
+                            return FlowResult(
+                                success=False,
+                                error=f"节点 {nid} 执行失败: {result.error}",
+                                execution_time=time.time() - start_time,
+                                node_results=node_results
+                            )
+                    else:
+                        with ThreadPoolExecutor(max_workers=min(parallel_count, 8)) as executor:
+                            futures = {
+                                executor.submit(self._execute_single_node, nid, node, node_results): nid
+                                for nid, node in block_nodes
+                            }
+                            for future in as_completed(futures):
+                                nid = futures[future]
+                                executed_count += 1
+                                try:
+                                    result = future.result()
+                                    if not result.success:
+                                        self._state = FlowState.ERROR
+                                        # 取消尚未完成的 futures
+                                        for f in futures:
+                                            f.cancel()
+                                        return FlowResult(
+                                            success=False,
+                                            error=f"节点 {nid} 执行失败: {result.error}",
+                                            execution_time=time.time() - start_time,
+                                            node_results=node_results
+                                        )
+                                except Exception as exc:
+                                    self._state = FlowState.ERROR
+                                    for f in futures:
+                                        f.cancel()
+                                    return FlowResult(
+                                        success=False,
+                                        error=f"节点 {nid} 执行异常: {exc}",
+                                        execution_time=time.time() - start_time,
+                                        node_results=node_results
+                                    )
+                        
+                        self._report_progress(
+                            executed_count / total_nodes if total_nodes > 0 else 1.0,
+                            f"完成并行执行 {parallel_count} 个节点"
                         )
-                
-                elif node.node_type == NodeType.START:
-                    node_results[node_id] = BlockResult(success=True, outputs=self._data_context)
-                
-                elif node.node_type == NodeType.END:
-                    prev_nodes = self.get_prev_nodes(node_id)
-                    final_outputs = {}
-                    for prev_id in prev_nodes:
-                        if prev_id in node_results:
-                            final_outputs.update(node_results[prev_id].outputs)
-                    node_results[node_id] = BlockResult(success=True, outputs=final_outputs)
             
             end_nodes = self.get_end_nodes()
             final_outputs = {}

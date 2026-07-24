@@ -7,14 +7,14 @@ AI功能整合模块
 
 from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
-from PyQt6.QtGui import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit, QProgressBar, QComboBox, QSlider, QTabWidget
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit, QProgressBar, QComboBox, QSlider, QTabWidget
 import logging
 import json
 import time
 
-from ..core.timeline import timeline_core
-from ..core.project_manager import project_manager
-from ..core.asset_manager import asset_manager
+from app.core.timeline import timeline_core
+from app.core.project_manager import project_manager
+from app.core.asset_manager import asset_manager
 
 logger = logging.getLogger("AI短剧编辑器.ai_integration")
 
@@ -313,77 +313,151 @@ class AIEditor(QWidget):
         logger.info("AI分析已停止")
     
     def _run_analysis(self) -> Dict[str, Any]:
-        """运行AI分析（模拟）"""
+        """运行AI分析 (v2.0: 真实引擎调用)"""
         try:
-            import time
-            import random
-            
             timeline = timeline_core.get_current_timeline()
             if not timeline:
                 return {
                     'success': False,
                     'error': '没有当前时间线'
                 }
-            
-            clips = timeline.get('tracks', [])
-            for track in clips:
+
+            # 收集时间线中的所有视频片段
+            clips = []
+            for track in timeline.get('tracks', []):
                 clips.extend(track.get('clips', []))
-            
             if not clips:
                 return {
                     'success': False,
                     'error': '没有可分析的片段'
                 }
-            
-            self._log_display.append("正在分析视频内容...")
-            time.sleep(1)
-            
-            total_clips = len(clips)
-            analyzed_clips = 0
-            
-            for i in range(min(10, total_clips)):
-                clip = clips[i] if i < len(clips) else clips[0]
-                
-                self._log_display.append(f"分析片段 {i+1}/{total_clips}: {clip.get('id', 'unknown')}")
-                self.progress_bar.setValue(int((i+1) / total_clips * 100))
-                
-                # 模拟分析结果
-                content_quality = random.randint(60, 100)
-                engagement_score = random.randint(50, 100)
-                viral_potential = random.randint(40, 100)
-                trend_score = random.randint(30, 100)
-                
-                analyzed_clips += 1
-                time.sleep(0.5)
-            
-            # 计算综合分数
-            avg_quality = sum(random.randint(60, 100) for _ in range(analyzed_clips)) / analyzed_clips
-            avg_engagement = sum(random.randint(50, 100) for _ in range(analyzed_clips)) / analyzed_clips
-            avg_viral = sum(random.randint(40, 100) for _ in range(analyzed_clips)) / analyzed_clips
-            avg_trend = sum(random.randint(30, 100) for _ in range(analyzed_clips)) / analyzed_clips
-            
-            viral_score = (avg_quality * 0.3 + avg_engagement * 0.4 + avg_viral * 0.3) * 100
-            
-            result = {
+
+            self._log_display.append("🤖 正在初始化AI分析引擎...")
+            logger.info("AI分析开始")
+
+            # ===== 真实引擎分析 =====
+            results = {
                 'success': True,
-                'analyzed_clips': analyzed_clips,
-                'total_clips': total_clips,
-                'avg_quality': avg_quality,
-                'avg_engagement': avg_engagement,
-                'avg_viral': avg_viral,
-                'viral_score': viral_score,
-                'recommendations': [
-                    '内容质量较高，建议保持',
-                    '用户参与度中等，可增加互动元素',
-                    '趋势分析良好，符合当前热点',
-                    f"爆款潜力: {'高' if viral_score > 70 else '中等' if viral_score > 50 else '一般'}"
-                ]
+                'analyzed_clips': 0,
+                'total_clips': len(clips),
+                'highlights': [],
+                'viral_score': 0,
+                'recommendations': [],
             }
-            
-            self.clip_generated.emit('analysis_complete', result)
-            self.analysis_completed.emit(result)
-            logger.info(f"AI分析完成: 爆款指数 {viral_score:.1f}")
-            
+
+            analyzed_count = 0
+            all_viral_scores = []
+
+            for i, clip in enumerate(clips[:min(5, len(clips))]):
+                # 获取片段对应的文件路径
+                file_path = clip.get('file', clip.get('path', clip.get('id', '')))
+                if not file_path or not os.path.exists(file_path):
+                    # 尝试从asset_manager获取
+                    asset_id = clip.get('asset_id', '')
+                    if asset_id:
+                        try:
+                            asset = asset_manager.get_asset(asset_id)
+                            if asset:
+                                file_path = asset.get('path', '')
+                        except Exception:
+                            pass
+
+                if not file_path or not os.path.exists(file_path):
+                    self._log_display.append(
+                        f"   ⚠️ 片段 {i+1}: 找不到源文件，跳过"
+                    )
+                    continue
+
+                self._log_display.append(f"   分析片段 {i+1}/{len(clips)}: {os.path.basename(file_path)[:30]}...")
+                self.progress_bar.setValue(int((i + 1) / len(clips) * 50))
+                QApplication.processEvents()
+
+                try:
+                    # 调用剧集理解引擎
+                    from ..drama_understanding_engine import DramaUnderstandingEngine
+                    engine = DramaUnderstandingEngine(
+                        whisper_model="base",
+                        ollama_model="qwen2.5",
+                        use_local_ai=True,
+                    )
+                    drama = engine.analyze_video(file_path)
+
+                    # ABCD融合高光提取
+                    highlights = engine.extract_highlights(
+                        drama, target_duration=60.0, genre=drama.genre
+                    )
+                    for h in highlights:
+                        results['highlights'].append({
+                            'start_time': h.start_time,
+                            'end_time': h.end_time,
+                            'title': h.suggested_title,
+                            'score': h.score,
+                            'type': h.clip_type,
+                            'reasons': h.reasons,
+                        })
+
+                    # 病毒基因检测
+                    try:
+                        from app.core.ai.viral_detector import ViralDetector
+                        if drama.dialogues:
+                            srt_lines = []
+                            for d in drama.dialogues:
+                                srt_lines.append(
+                                    f"{d.start_time:.1f} --> {d.end_time:.1f}\n{d.text}"
+                                )
+                            srt_text = "\n\n".join(srt_lines)
+                            detector = ViralDetector(llm_enhance=True)
+                            viral_result = detector.analyze(
+                                srt_text=srt_text,
+                                total_duration=drama.total_duration,
+                                top_k=3,
+                            )
+                            if isinstance(viral_result, dict):
+                                score = viral_result.get('composite_score', 0)
+                                all_viral_scores.append(score)
+                    except Exception as viral_err:
+                        logger.warning(f"病毒检测异常: {viral_err}")
+
+                    analyzed_count += 1
+
+                except Exception as clip_err:
+                    self._log_display.append(f"   ⚠️ 片段分析异常: {str(clip_err)[:60]}")
+                    logger.warning(f"片段分析异常: {clip_err}")
+
+            # 汇总分数
+            results['analyzed_clips'] = analyzed_count
+            if all_viral_scores:
+                results['viral_score'] = sum(all_viral_scores) / len(all_viral_scores)
+            else:
+                results['viral_score'] = 50  # 默认中等分数
+
+            # 生成推荐建议
+            recommendations = []
+            if results['viral_score'] > 70:
+                recommendations.append('内容爆款潜力高，建议优先发布')
+            elif results['viral_score'] > 50:
+                recommendations.append('内容质量中等，可优化开场3秒钩子')
+            else:
+                recommendations.append('建议重新编排，增强冲突/情感元素')
+
+            highlight_count = len(results['highlights'])
+            if highlight_count > 0:
+                top_h = sorted(results['highlights'], key=lambda x: x['score'], reverse=True)[:3]
+                titles = [h['title'] for h in top_h if h.get('title')]
+                if titles:
+                    recommendations.append(f'推荐高光: {"、".join(titles)}')
+            else:
+                recommendations.append('未检测到明显高光片段，建议补充冲突素材')
+
+            results['recommendations'] = recommendations
+
+            self.progress_bar.setValue(100)
+
+            # 发送信号
+            self.clip_generated.emit('analysis_complete', results)
+            self.analysis_completed.emit(results)
+            logger.info(f"AI分析完成: 爆款指数 {results['viral_score']:.1f}")
+
         except Exception as e:
             error_result = {
                 'success': False,
@@ -405,10 +479,16 @@ class AIEditor(QWidget):
         
         if result.get('success'):
             self._log_display.append(f"✅ AI分析完成！")
-            self._log_display.append(f"分析片段数: {result.get('analyzed_clips', 0)}")
-            self._log_display.append(f"平均质量: {result.get('avg_quality', 0):.1f}")
-            self._log_display.append(f"平均参与度: {result.get('avg_engagement', 0):.1f}")
-            self._log_display.append(f"爆款潜力: {result.get('viral_score', 0):.1f}")
+            self._log_display.append(f"分析片段数: {result.get('analyzed_clips', 0)}/{result.get('total_clips', 0)}")
+            
+            highlights = result.get('highlights', [])
+            self._log_display.append(f"检测高光片段: {len(highlights)}个")
+            for h in highlights[:3]:
+                title = h.get('title', '无标题')
+                score = h.get('score', 0)
+                self._log_display.append(f"  ⭐ {title} (得分: {score:.1f})")
+            
+            self._log_display.append(f"爆款指数: {result.get('viral_score', 0):.0f}")
             
             recommendations = result.get('recommendations', [])
             for rec in recommendations:

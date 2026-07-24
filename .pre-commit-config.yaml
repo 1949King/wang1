@@ -1,0 +1,22 @@
+# ============================================================
+# 拾光剪影 · 提交前本地卡点 (pre-commit)
+# 作用：开发者 git commit 时自动拦截重复定义/未用导入/语法错等，
+#       把问题消灭在本地，而不是等到 CI 或 Review 才被发现。
+# 使用：
+#   1) pip install pre-commit
+#   2) pre-commit install   （每个仓库只需一次）
+#   3) 之后每次 commit 自动跑；首次会下载 ruff，稍慢。
+# 详见 docs/CODE_REVIEW_STANDARD.md
+# ============================================================
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        # 自动修复可修项（如未用导入）；修不了会标红阻断提交
+        args: [--fix]
+        # 只查自研核心目录，速度快、噪声少；如需全量去掉 files 即可
+        files: ^(app/modules/lego|app/core|ai_tools)/
+      - id: ruff-format
+        files: ^(app/modules/lego|app/core|ai_tools)/

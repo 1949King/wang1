@@ -51,7 +51,8 @@ class Response:
             return self.data
         try:
             return json.loads(self.data) if isinstance(self.data, str) else None
-        except:
+        except Exception:
+            pass
             return None
     
     def text(self) -> str:

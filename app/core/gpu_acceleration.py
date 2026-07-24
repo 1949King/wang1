@@ -215,7 +215,8 @@ class GPUDetector:
                 return int(float(memory_str.replace('KB', '').strip()) / 1024)
             else:
                 return int(memory_str)
-        except:
+        except Exception:
+            pass
             return 0
     
     def _merge_gpu_info(self, *infos: Optional[Dict[str, Any]]) -> GPUInfo:
@@ -528,6 +529,14 @@ class AutoGPURenderer:
         self._gpu_detector = GPUDetector()
         self._gpu_renderer = GPURenderer(self._gpu_detector)
         self._initialized = False
+        import atexit
+        atexit.register(self.shutdown)
+        import weakref
+        self._finalizer = weakref.finalize(self, self.shutdown)
+    
+    def __del__(self):
+        """析构时自动清理资源"""
+        self.shutdown()
     
     def initialize(self) -> bool:
         """初始化自动渲染器"""

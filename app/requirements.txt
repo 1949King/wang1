@@ -1,12 +1,17 @@
-faster-whisper
-easyocr
-moviepy
-dashscope
-transformers
-torch
-mediapipe
-pillow
-yt-dlp
-gTTS
-pynvml
-PyQt5
+# AI 短剧编辑器 - 依赖清单 (SSOT: app/main_qt6.py DependencyChecker)
+# 修复 P0-B: requirements.txt 与代码栈错位 (原文件写 PyQt5)
+# 安装方式: pip install -r requirements.txt
+# 可选依赖: pip install -r requirements-optional.txt
+
+# ============== 必需依赖 (REQUIRED) ==============
+PyQt6>=6.6.0
+PyQt6-Qt6>=6.6.0
+PyQt6-sip>=13.6.0
+moviepy>=1.0.3
+opencv-python-headless>=4.8.0
+torch>=2.0.0
+transformers>=4.30.0
+faster-whisper>=1.0.0
+easyocr>=1.7.0
+Pillow>=10.0.0
+numpy>=1.24.0

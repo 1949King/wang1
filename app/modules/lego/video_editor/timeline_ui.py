@@ -12,7 +12,7 @@ from PyQt6.QtGui import QColor, QFont
 import logging
 import math
 
-from ..core.timeline import timeline_core
+from app.core.timeline import timeline_core
 
 logger = logging.getLogger("AI短剧编辑器.timeline_ui")
 

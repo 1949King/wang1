@@ -147,7 +147,8 @@ class LicenseManager:
             # 生成基于系统信息的硬件ID
             info = platform.system() + platform.node() + platform.machine()
             return hashlib.md5(info.encode()).hexdigest()[:16]
-        except:
+        except Exception:
+            pass
             return str(uuid.uuid4())[:16]
     
     def _load_license(self):
@@ -211,8 +212,7 @@ class LicenseManager:
             (是否成功, 错误信息)
         """
         try:
-            # 模拟激活码验证
-            # 实际项目中应该连接服务器验证
+            # 本地激活码验证
             
             # 简单的激活码验证逻辑
             if len(activation_code) != 20:

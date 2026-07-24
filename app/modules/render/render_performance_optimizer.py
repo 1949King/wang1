@@ -17,6 +17,12 @@ import platform
 
 from app.modules.utils.logger import logger
 
+try:
+    from modules.lego.render.gpu_render import get_gpu_renderer
+    GPU_RENDER_AVAILABLE = True
+except ImportError:
+    GPU_RENDER_AVAILABLE = False
+
 class OptimizationStrategy(Enum):
     """优化策略"""
     SPEED = "speed"          # 速度优先
@@ -118,7 +124,8 @@ class RenderPerformanceOptimizer:
         self._platform = platform.system().lower()
         
         # 优先使用本地FFmpeg
-        self._ffmpeg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'thirdparty', 'ffmpeg', 'bin', 'ffmpeg.exe')
+        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        self._ffmpeg_path = os.path.join(base, 'thirdparty', 'ffmpeg', 'bin', 'ffmpeg.exe')
         if not os.path.exists(self._ffmpeg_path):
             # 回退到系统PATH中的FFmpeg
             self._ffmpeg_path = 'ffmpeg'
@@ -437,8 +444,19 @@ class RenderPerformanceOptimizer:
                 cached_results.append(cached)
                 logger.debug(f"使用缓存: {cache_key}")
         
-        # 执行渲染（这里简化，实际应该调用渲染器）
-        # TODO: 集成实际的渲染器
+        if GPU_RENDER_AVAILABLE:
+            gpu_renderer = get_gpu_renderer()
+            results = []
+            for frame_data in task.frame_data_list:
+                frame_array = frame_data.get('data')
+                if frame_array is not None:
+                    effects_config = frame_data.get('effects_config', {})
+                    result = gpu_renderer.render_frame(frame_array, effects_config)
+                    results.append(result)
+            task.results = results
+        else:
+            task.results = []
+        
         render_time = time.time() - start_time
         
         task.status = "completed"
@@ -552,7 +570,7 @@ class RenderPerformanceOptimizer:
                         'codec': stream.get('codec_name', 'unknown'),
                         'width': int(stream.get('width', 0)),
                         'height': int(stream.get('height', 0)),
-                        'fps': eval(stream.get('r_frame_rate', '0/1')) if stream.get('r_frame_rate') else 0
+                        'fps': (lambda s: (lambda parts: int(parts[0]) / int(parts[1]) if len(parts) == 2 and int(parts[1]) != 0 else 0.0)(s.split('/')))((stream.get('r_frame_rate') or '0/1'))
                     })
                 elif stream.get('codec_type') == 'audio':
                     format_info['streams'].append({

@@ -93,13 +93,19 @@ class LoginWidget(QWidget):
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
         
-        # 模拟登录验证
-        if username == "admin" and password == "123456":
-            QMessageBox.information(self, "成功", "登录成功！")
-            if self.on_login_success:
-                self.on_login_success()
-        else:
-            QMessageBox.warning(self, "错误", "用户名或密码错误")
+        try:
+            from app.modules.lego.auth import AuthService
+            auth = AuthService()
+            result = auth.authenticate(username, password)
+            if result.get("success"):
+                QMessageBox.information(self, "成功", "登录成功！")
+                if self.on_login_success:
+                    self.on_login_success()
+            else:
+                QMessageBox.warning(self, "错误", result.get("message", "用户名或密码错误"))
+        except ImportError:
+            # 认证模块不可用时的安全回退
+            QMessageBox.warning(self, "错误", "认证服务暂不可用，请联系管理员")
     
     def _show_license_dialog(self):
         """显示授权管理对话框"""

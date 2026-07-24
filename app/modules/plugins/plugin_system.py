@@ -2,7 +2,10 @@ import os
 import importlib.util
 import subprocess
 import glob
+import logging
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
 
 # 避免循环导入，稍后动态加载
 FullVideoEditorPlugin = None
@@ -85,7 +88,8 @@ def plugin_get_video_info(video_path, ffmpeg_executable):
             # 至少返回文件大小
             size_mb = round(os.path.getsize(video_path) / (1024*1024), 2)
             return f"未知 | {size_mb}MB"
-        except:
+        except Exception:
+            pass
             return "未知"
 
 @register_plugin("视频剪辑", "视频处理")
@@ -169,54 +173,65 @@ class PluginManager:
                 print(f"加载插件失败: {e}")
     
     def install_plugin(self, plugin_name, plugin_code):
-        """安装新插件"""
+        """安装新插件（通过安全沙箱执行）"""
+        plugin_file = os.path.join(self.plugins_dir, f"{plugin_name}.py")
+        
         try:
-            plugin_file = os.path.join(self.plugins_dir, f"{plugin_name}.py")
+            # 1. 安全扫描：检测危险代码模式
+            from .plugin_sandbox import validate_plugin_code, create_sandbox_globals
+            is_safe, error_msg = validate_plugin_code(plugin_code)
+            if not is_safe:
+                logger.warning(f"插件 '{plugin_name}' 安全扫描未通过: {error_msg}")
+                return False
+            
+            # 2. 写入文件
             with open(plugin_file, "w", encoding="utf-8") as f:
                 f.write(plugin_code)
             
-            # 执行插件代码以注册
+            # 3. 读取代码
             with open(plugin_file, "r", encoding="utf-8") as f:
                 plugin_code = f.read()
             
-            # 安全执行插件代码
+            # 4. 在受限沙箱中执行插件代码
             local_vars = {}
-            # 确保全局变量可用
-            exec_globals = globals().copy()
-            # 添加必要的全局变量
-            exec_globals['plugins'] = plugins
-            exec_globals['plugin_versions'] = plugin_versions
-            exec_globals['plugin_categories'] = plugin_categories
-            exec_globals['plugin_configs'] = plugin_configs
-            exec_globals['register_plugin'] = register_plugin
-            exec_globals['BasePlugin'] = BasePlugin
+            sandbox_globals = create_sandbox_globals({
+                'plugins': plugins,
+                'plugin_versions': plugin_versions,
+                'plugin_categories': plugin_categories,
+                'plugin_configs': plugin_configs,
+                'register_plugin': register_plugin,
+                'BasePlugin': BasePlugin,
+            })
             
-            exec(plugin_code, exec_globals, local_vars)
+            try:
+                exec(plugin_code, sandbox_globals, local_vars)
+            except Exception as exec_err:
+                logger.error(f"插件 '{plugin_name}' 执行失败: {exec_err}")
+                if os.path.exists(plugin_file):
+                    os.remove(plugin_file)
+                return False
             
-            # 检查插件是否成功注册
+            # 5. 检查插件是否成功注册
             plugin_registered = False
             for name in local_vars:
                 if callable(local_vars[name]) and name == plugin_name:
                     plugin_registered = True
                     break
             
-            # 也检查全局plugins字典
             if plugin_name in plugins:
                 plugin_registered = True
             
             if plugin_registered:
                 self.installed_plugins[plugin_name] = plugin_file
-                print(f"插件 '{plugin_name}' 安装成功")
+                logger.info(f"插件 '{plugin_name}' 安装成功")
                 return True
             else:
-                print(f"插件 '{plugin_name}' 注册失败，未在全局plugins字典中找到")
-                # 清理文件
+                logger.warning(f"插件 '{plugin_name}' 注册失败，未在全局plugins字典中找到")
                 if os.path.exists(plugin_file):
                     os.remove(plugin_file)
                 return False
         except Exception as e:
-            print(f"安装插件失败: {e}")
-            # 清理文件
+            logger.error(f"安装插件 '{plugin_name}' 失败: {e}")
             if os.path.exists(plugin_file):
                 os.remove(plugin_file)
             return False

@@ -17,11 +17,20 @@ import json
 import time
 import secrets
 import re
+import logging
 from typing import Optional, Dict, Any, Tuple, List
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import threading
+
+try:
+    import bcrypt
+    _HAS_BCRYPT = True
+except ImportError:
+    _HAS_BCRYPT = False
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -104,7 +113,7 @@ class DeviceFingerprint:
                 )
                 if result.returncode == 0:
                     components.append(result.stdout.strip())
-        except:
+        except Exception:
             pass
         
         fingerprint = "|".join(components)
@@ -139,13 +148,34 @@ class AuthDatabase:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
+        
+        # 注册退出时关闭连接
+        import atexit
+        atexit.register(self.close)
     
     def _get_conn(self) -> sqlite3.Connection:
         """获取数据库连接"""
         if self._conn is None:
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
+    
+    def close(self):
+        """关闭数据库连接"""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, *args):
+        self.close()
     
     def _init_db(self):
         """初始化数据库表"""
@@ -278,7 +308,8 @@ class AuthDatabase:
                   int(user.is_vip), user.vip_expire, user.id))
             conn.commit()
             return True
-        except:
+        except Exception as e:
+            logger.error(f"更新用户失败: {e}")
             return False
     
     def add_device(self, user_id: str, device_id: str, device_name: str) -> bool:
@@ -392,6 +423,8 @@ class AuthService:
     _lock = threading.Lock()
     
     MAX_DEVICES = 3
+    MAX_LOGIN_ATTEMPTS = 5          # 最大失败次数
+    LOGIN_LOCKOUT_SECONDS = 900     # 锁定时长（15分钟）
     
     def __new__(cls):
         if cls._instance is None:
@@ -409,6 +442,9 @@ class AuthService:
         self._device_fp = DeviceFingerprint()
         self._current_user: Optional[User] = None
         self._session_id: Optional[str] = None
+        # 登录失败计数器 {identifier: (attempt_count, first_fail_time)}
+        self._login_failures: Dict[str, Tuple[int, float]] = {}
+        self._failures_lock = threading.Lock()
     
     @property
     def current_user(self) -> Optional[User]:
@@ -419,8 +455,52 @@ class AuthService:
         return self._current_user is not None
     
     def _hash_password(self, password: str) -> str:
-        """密码哈希"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        """密码哈希（bcrypt，自动兼容旧SHA256哈希的验证和升级）"""
+        if _HAS_BCRYPT:
+            return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+        # 降级：bcrypt不可用时使用SHA256+盐（仅用于开发环境）
+        logger.warning("bcrypt不可用，降级为SHA256+盐（不安全，请安装bcrypt）")
+        salt = secrets.token_hex(16)
+        h = hashlib.sha256((password + salt).encode()).hexdigest()
+        return f"sha256${salt}${h}"
+    
+    def _verify_password(self, password: str, stored_hash: str) -> Tuple[bool, Optional[str]]:
+        """验证密码，返回(是否匹配, 需升级的新哈希或None)
+        
+        支持三种哈希格式：
+        - bcrypt: $2b$... (bcrypt)
+        - sha256$salt$hash (SHA256+盐)
+        - 纯hex (旧版无盐SHA256，不安全)
+        """
+        if _HAS_BCRYPT and stored_hash.startswith("$2"):
+            # bcrypt格式
+            try:
+                ok = bcrypt.checkpw(password.encode(), stored_hash.encode())
+                return ok, None
+            except Exception:
+                return False, None
+        
+        if stored_hash.startswith("sha256$"):
+            # SHA256+盐格式
+            try:
+                _, salt, h = stored_hash.split("$", 2)
+                computed = hashlib.sha256((password + salt).encode()).hexdigest()
+                ok = h == computed
+                # 如果bcrypt可用，返回升级后的哈希
+                if ok and _HAS_BCRYPT:
+                    return True, self._hash_password(password)
+                return ok, None
+            except Exception:
+                return False, None
+        
+        # 旧版：纯SHA256无盐（向后兼容）
+        legacy = hashlib.sha256(password.encode()).hexdigest()
+        ok = legacy == stored_hash
+        if ok and _HAS_BCRYPT:
+            # 自动升级旧哈希
+            logger.info("检测到旧版SHA256密码哈希，自动升级为bcrypt")
+            return True, self._hash_password(password)
+        return ok, None
     
     def _validate_phone(self, phone: str) -> bool:
         """验证手机号格式"""
@@ -446,7 +526,7 @@ class AuthService:
         if self._db.create_verification_code(phone, code, 'phone'):
             # 这里应该调用实际的短信发送服务
             # 暂时模拟发送成功
-            print(f"短信验证码已发送到 {phone}: {code}")
+            logger.info(f"验证码已生成: {phone[:3]}****{phone[-4:]}, 有效期300秒")
             return True, "验证码已发送"
         return False, "发送失败"
     
@@ -511,17 +591,67 @@ class AuthService:
             return True, "注册成功"
         return False, "注册失败"
     
+    def _check_login_lockout(self, identifier: str) -> Tuple[bool, str]:
+        """检查登录锁定状态，返回(是否被锁定, 提示信息)"""
+        with self._failures_lock:
+            if identifier in self._login_failures:
+                count, first_time = self._login_failures[identifier]
+                elapsed = time.time() - first_time
+                if count >= self.MAX_LOGIN_ATTEMPTS and elapsed < self.LOGIN_LOCKOUT_SECONDS:
+                    remaining = int((self.LOGIN_LOCKOUT_SECONDS - elapsed) / 60) + 1
+                    return True, f"登录失败次数过多，请{remaining}分钟后再试"
+                # 锁定期已过，重置
+                if elapsed >= self.LOGIN_LOCKOUT_SECONDS:
+                    del self._login_failures[identifier]
+        return False, ""
+    
+    def _record_login_failure(self, identifier: str):
+        """记录登录失败"""
+        with self._failures_lock:
+            now = time.time()
+            if identifier in self._login_failures:
+                count, first_time = self._login_failures[identifier]
+                if now - first_time > self.LOGIN_LOCKOUT_SECONDS:
+                    self._login_failures[identifier] = (1, now)
+                else:
+                    self._login_failures[identifier] = (count + 1, first_time)
+            else:
+                self._login_failures[identifier] = (1, now)
+            count = self._login_failures[identifier][0]
+            if count >= self.MAX_LOGIN_ATTEMPTS:
+                logger.warning(f"账号 {identifier} 登录失败{count}次，已锁定")
+
+    def _clear_login_failures(self, identifier: str):
+        """登录成功后清除失败记录"""
+        with self._failures_lock:
+            self._login_failures.pop(identifier, None)
+
     def login_with_phone(self, phone: str, password: str) -> Tuple[bool, str]:
         """手机号登录"""
         if not self._validate_phone(phone):
             return False, "手机号格式不正确"
         
+        # 检查登录锁定
+        locked, msg = self._check_login_lockout(phone)
+        if locked:
+            return False, msg
+        
         user = self._db.get_user_by_phone(phone)
         if not user:
+            self._record_login_failure(phone)
             return False, "用户不存在"
         
-        if user.password_hash != self._hash_password(password):
+        ok, new_hash = self._verify_password(password, user.password_hash)
+        if not ok:
+            self._record_login_failure(phone)
             return False, "密码错误"
+        
+        self._clear_login_failures(phone)
+        
+        # 自动升级旧格式哈希
+        if new_hash:
+            user.password_hash = new_hash
+            self._db.update_user(user)
         
         return self._do_login(user)
     
@@ -530,12 +660,27 @@ class AuthService:
         if not self._validate_email(email):
             return False, "请使用QQ邮箱登录"
         
+        # 检查登录锁定
+        locked, msg = self._check_login_lockout(email)
+        if locked:
+            return False, msg
+        
         user = self._db.get_user_by_email(email)
         if not user:
+            self._record_login_failure(email)
             return False, "用户不存在"
         
-        if user.password_hash != self._hash_password(password):
+        ok, new_hash = self._verify_password(password, user.password_hash)
+        if not ok:
+            self._record_login_failure(email)
             return False, "密码错误"
+        
+        self._clear_login_failures(email)
+        
+        # 自动升级旧格式哈希
+        if new_hash:
+            user.password_hash = new_hash
+            self._db.update_user(user)
         
         return self._do_login(user)
     
@@ -594,14 +739,24 @@ class AuthService:
         """移除设备"""
         if not self._current_user:
             return False, "未登录"
-        
+
         current_device = self._device_fp.generate()
         if device_id == current_device:
             return False, "不能移除当前设备"
-        
+
         if self._db.remove_device(self._current_user.id, device_id):
             return True, "设备已移除"
         return False, "移除失败"
+
+    def unbind_device(self, device_id: str) -> bool:
+        """解绑设备（供设置模块调用，返回 bool）
+
+        与 remove_device 的区别：
+        - remove_device 返回 Tuple[bool, str]，用于需要详细提示的场景
+        - unbind_device 仅返回 bool，便于 UI 层直接判断
+        """
+        ok, _ = self.remove_device(device_id)
+        return ok
     
     def try_auto_login(self) -> bool:
         """尝试自动登录"""
@@ -627,25 +782,38 @@ class AuthService:
             self._session_id = session_id
             self._current_user = user
             return True
-        except:
+        except Exception as e:
+            logger.warning(f"自动登录失败: {e}")
             return False
     
     def save_session(self):
-        """保存会话到文件"""
+        """保存会话到文件（加密存储）"""
         if not self._session_id:
             return
         
         session_file = Path(__file__).parent.parent.parent / "data" / "session.json"
         session_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(session_file, 'w') as f:
-            json.dump({'session_id': self._session_id}, f)
+        try:
+            from ....app.core.secure_store import SecureStore
+            store = SecureStore()
+            store.save('session', {'session_id': self._session_id})
+        except Exception:
+            # 降级：直接写JSON
+            with open(session_file, 'w') as f:
+                json.dump({'session_id': self._session_id}, f)
     
     def clear_session(self):
         """清除会话文件"""
         session_file = Path(__file__).parent.parent.parent / "data" / "session.json"
         if session_file.exists():
             session_file.unlink()
+        try:
+            from ....app.core.secure_store import SecureStore
+            store = SecureStore()
+            store.delete('session')
+        except Exception:
+            pass
 
 
 auth_service = AuthService()

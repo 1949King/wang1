@@ -123,8 +123,8 @@ class LoginWidget(QWidget):
     
     login_success = pyqtSignal()
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self._auth = AuthService()
         self._init_ui()
     
@@ -699,8 +699,8 @@ class LoginWindow(QWidget):
     
     login_success = pyqtSignal()
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
         self._auth = AuthService()
         self._init_ui()
     
@@ -855,8 +855,8 @@ class ActivationWindow(QWidget):
     
     activation_success = pyqtSignal()
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
         self._auth = AuthService()
         self._init_ui()
     
@@ -923,16 +923,24 @@ class ActivationWindow(QWidget):
             QMessageBox.warning(self, "激活失败", "激活码格式不正确，请输入16位激活码")
             return
         
-        # 这里应该调用实际的激活逻辑
-        # 暂时模拟激活成功
+        # 调用真实激活逻辑
         self._activate_btn.setText("激活中...")
         self._activate_btn.setEnabled(False)
+        QApplication.processEvents()
         
-        # 模拟激活过程
-        import time
-        time.sleep(1)
-        
-        # 模拟激活成功
-        QMessageBox.information(self, "激活成功", "授权激活成功！")
-        self.activation_success.emit()
-        self.close()
+        try:
+            from .license_manager import LicenseManager
+            lm = LicenseManager()
+            success, msg = lm.verify_activation_code(code)
+            if success:
+                QMessageBox.information(self, "激活成功", msg or "授权激活成功！")
+                self.activation_success.emit()
+                self.close()
+            else:
+                self._activate_btn.setText("激活")
+                self._activate_btn.setEnabled(True)
+                QMessageBox.warning(self, "激活失败", msg or "激活码无效")
+        except Exception as e:
+            self._activate_btn.setText("激活")
+            self._activate_btn.setEnabled(True)
+            QMessageBox.warning(self, "激活失败", f"验证出错: {e}")

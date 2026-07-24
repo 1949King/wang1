@@ -1,5 +1,12 @@
 # 拾光剪影 — 变更日志
 
+## V4.9.2 (2026-07-13) — 贴纸预览与滤镜播放优化
+
+### 🐞 修复
+
+- **贴纸渲染后视频不更新** (`editor_module.py`): 贴纸渲染成功后仅调用 `_add_to_clips` 将结果加入素材列表，但未加载到 `QMediaPlayer`，用户看不到任何变化。现在渲染完成后自动将结果视频加载到播放器并切回 `QMediaPlayer` 预览，用户立即看到贴纸效果。
+- **切换滤镜后播放卡顿** (`editor_module.py`): 滤镜激活时 `_refresh_preview_with_effects` 将预览切到 `PreviewManager`（OpenCV CPU 逐帧解码 + numpy 效果），1080p/720p 视频无法实时渲染导致严重卡顿。改为**分策略预览**：暂停/拖拽时用 `PreviewManager` 精确渲染滤镜效果，播放时切回 `QMediaPlayer` 硬件加速流畅播放。`_play_pause`、`_rewind`、`_fast_forward`、进度条拖拽释放均已联动此策略。
+
 ## V4.9.1 (2026-07-12) — 剪辑导出可用性修复（续）
 
 ### 🐞 修复（致命后端崩溃）

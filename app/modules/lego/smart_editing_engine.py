@@ -164,9 +164,57 @@ class SmartEditingEngine:
     def __init__(self):
         """初始化引擎"""
         self.video_engine = ProfessionalVideoEngine()
+        # 角色偏好缓存：{角色名: {"keep": bool, "weight": float, "note": str}}
+        # 通过 self.load_character_prefs(video_path) 从缓存读取
+        self._character_prefs: Dict[str, Dict] = {}
         print("🎬 智能剪辑引擎初始化完成")
-        print(f"   已加载 {len(self.SUBTITLE_STYLES)} 种字幕样式")
-        print(f"   已加载 {len(self.EMOTION_TRANSITION_MAP)} 种情绪转场规则")
+        print(f"   已加载 {len(SmartEditingEngine.SUBTITLE_STYLES)} 种字幕样式")
+        print(f"   已加载 {len(SmartEditingEngine.EMOTION_TRANSITION_MAP)} 种情绪转场规则")
+    
+    def load_character_prefs(self, video_path: str) -> Dict[str, Dict]:
+        """
+        从视频级缓存读取角色偏好。
+        
+        返回：{角色名: {"keep": bool, "weight": float, "note": str}}
+        如果该视频没有缓存或未设置偏好，返回空 dict。
+        """
+        if not video_path:
+            self._character_prefs = {}
+            return {}
+        try:
+            from .character_cache import AnalysisCache
+            cache = AnalysisCache()
+            prefs_objs = cache.get_character_prefs(video_path)
+            # 转换为 plain dict
+            prefs = {}
+            for name, p in prefs_objs.items():
+                prefs[name] = {
+                    "keep": bool(getattr(p, "keep", True)),
+                    "weight": float(getattr(p, "weight", 1.0)),
+                    "note": str(getattr(p, "note", "")),
+                }
+            self._character_prefs = prefs
+            if prefs:
+                print(f"   📋 已加载 {len(prefs)} 个角色偏好")
+            return prefs
+        except Exception as e:
+            print(f"   ⚠️ 读取角色偏好失败: {e}")
+            self._character_prefs = {}
+            return {}
+    
+    def set_character_pref(self, video_path: str, name: str,
+                           keep: bool = True, weight: float = 1.0) -> bool:
+        """设置单个角色偏好并写回缓存"""
+        try:
+            from .character_cache import AnalysisCache
+            cache = AnalysisCache()
+            ok = cache.set_character_pref(video_path, name, keep=keep, weight=weight)
+            if ok:
+                self.load_character_prefs(video_path)
+            return ok
+        except Exception as e:
+            print(f"   ⚠️ 设置角色偏好失败: {e}")
+            return False
     
     def smart_shot_reordering(self, drama: DramaStructure, 
                              target_duration: float = 60.0) -> EditingSequence:
@@ -215,22 +263,48 @@ class SmartEditingEngine:
         return sequence
     
     def _extract_shots(self, drama: DramaStructure) -> List[Shot]:
-        """从剧情结构中提取镜头"""
+        """从剧情结构中提取镜头（带角色偏好权重调整）"""
         shots = []
-        
         for scene in drama.scenes:
+            base_importance = self._calculate_importance(scene, drama.plot_points)
+            # 角色偏好调整：用户标记的角色会影响该镜头的重要性
+            adjustment = self._score_from_character_prefs(scene.characters)
             shot = Shot(
                 start_time=scene.start_time,
                 end_time=scene.end_time,
                 shot_type=self._classify_shot_type(scene),
-                characters=scene.characters,
+                characters=list(scene.characters) if scene.characters else [],
                 emotional_tone=scene.emotional_tone,
-                importance=self._calculate_importance(scene, drama.plot_points),
+                importance=max(0.0, min(1.0, base_importance + adjustment)),
                 visual_features={}
             )
             shots.append(shot)
-        
         return shots
+
+    def _score_from_character_prefs(self, scene_characters) -> float:
+        """
+        根据角色偏好计算镜头重要性调整值。
+        - 被标记「忽略」的角色出现 → 下调 importance 0.25
+        - 被标记「优先保留」（weight > 1） → 上调 importance (weight-1)*0.2
+        返回值在 [-0.5, +0.5] 之间
+        """
+        if not self._character_prefs or not scene_characters:
+            return 0.0
+        adjustment = 0.0
+        for name in scene_characters:
+            pref = self._character_prefs.get(str(name))
+            if pref is None:
+                continue
+            if not pref.get("keep", True):
+                # 忽略角色：大幅下调
+                adjustment -= 0.25
+            else:
+                w = float(pref.get("weight", 1.0))
+                if w > 1.0:
+                    adjustment += (w - 1.0) * 0.2
+                elif w < 1.0:
+                    adjustment -= (1.0 - w) * 0.15
+        return max(-0.5, min(0.5, adjustment))
     
     def _classify_shot_type(self, scene) -> str:
         """分类镜头类型"""
@@ -298,7 +372,7 @@ class SmartEditingEngine:
         return selected_shots
     
     def _select_transitions(self, shots: List[Shot]) -> List[TransitionType]:
-        """为镜头选择转场效果"""
+        """为镜头选择转场效果 (v1.0 backup, see v2.0 vector methods)"""
         transitions = []
         
         for i in range(len(shots) - 1):
@@ -324,7 +398,143 @@ class SmartEditingEngine:
             transitions.append(TransitionType.CUT)
         
         return transitions
+
+    def _select_transitions_v2(
+        self,
+        shots: List[Shot],
+        emotion_vectors: Optional[List[np.ndarray]] = None,
+        emotion_journey: Optional[List[Dict]] = None,
+    ) -> List[TransitionType]:
+        """
+        为镜头选择转场效果 (v2.0: 向量+情绪历程驱动)
+
+        优先使用8维情绪向量和历程信息，回退到旧枚举方式。
+        """
+        transitions = []
+        shot_count = len(shots)
+
+        for i in range(shot_count - 1):
+            # 尝试获取当前镜头对应的情绪向量
+            from_vec = None
+            to_vec = None
+            if emotion_vectors and len(emotion_vectors) > i:
+                from_vec = emotion_vectors[i]
+            if emotion_vectors and len(emotion_vectors) > i + 1:
+                to_vec = emotion_vectors[i + 1]
+
+            # 查找情绪历程中的对应转折点
+            journey_point = None
+            if emotion_journey and from_vec is not None and to_vec is not None:
+                # 按时间近似匹配历程转折点
+                from_time = shots[i].start_time
+                for jp in emotion_journey:
+                    jp_time = jp.get("time", 0)
+                    if abs(jp_time - from_time) < 3.0:
+                        journey_point = jp
+                        break
+
+            if from_vec is not None and to_vec is not None:
+                # v2.0: 向量+历程自适应选择
+                transition = self._select_transition_adaptive(
+                    from_vec, to_vec, journey_point
+                )
+            else:
+                # 回退到旧枚举方式
+                current = shots[i]
+                nxt = shots[i + 1]
+                if current.emotional_tone != nxt.emotional_tone:
+                    transition = TransitionType.FADE
+                else:
+                    emotion_transitions = self.EMOTION_TRANSITION_MAP.get(
+                        current.emotional_tone, [TransitionType.CUT]
+                    )
+                    transition = emotion_transitions[0]
+
+            transitions.append(transition)
+
+        if shots:
+            transitions.append(TransitionType.CUT)
+
+        return transitions
     
+    def _select_transition_by_vector(
+        self, from_vec: np.ndarray, to_vec: np.ndarray
+    ) -> TransitionType:
+        """
+        基于8维情绪向量余弦距离选择转场 (v2.0)
+
+        替代旧的 EmotionalTone 枚举硬编码映射，
+        通过向量空间中的情绪变化幅度决定转场类型。
+        """
+        # 计算余弦距离 (0=完全相同, 2=完全相反)
+        dot = np.dot(from_vec, to_vec)
+        norm = np.linalg.norm(from_vec) * np.linalg.norm(to_vec) + 1e-8
+        cos_dist = 1.0 - (dot / norm)
+
+        if cos_dist > 0.8:
+            # 情绪剧变 → 闪白强调
+            return TransitionType.FLASH
+        elif cos_dist > 0.5:
+            # 情绪较大变化 → 故障/擦除
+            return TransitionType.GLITCH
+        elif cos_dist > 0.3:
+            # 情绪中等变化 → 淡入淡出
+            return TransitionType.FADE
+        elif cos_dist > 0.15:
+            # 情绪轻微变化 → 溶解
+            return TransitionType.DISSOLVE
+        else:
+            # 情绪平滑 → 硬切
+            return TransitionType.CUT
+
+    def _select_transition_adaptive(
+        self,
+        from_vec: np.ndarray,
+        to_vec: np.ndarray,
+        journey_point: Optional[Dict] = None,
+    ) -> TransitionType:
+        """
+        综合情绪向量+情绪历程转折点的自适应转场选择 (v2.0)
+
+        Args:
+            from_vec: 前一镜头的8维情绪向量
+            to_vec: 后一镜头的8维情绪向量
+            journey_point: 情绪历程中的对应点 (含 phase, transition_type, editing_value)
+
+        Returns:
+            最佳转场类型
+        """
+        # 基础：向量余弦距离
+        base_transition = self._select_transition_by_vector(from_vec, to_vec)
+
+        if journey_point is None:
+            return base_transition
+
+        # 情绪历程增强
+        transition_type = journey_point.get("transition_type", "")
+        editing_value = journey_point.get("editing_value", 0.5)
+        phase = journey_point.get("phase", "")
+
+        # 根据历程转折类型调整
+        if transition_type == "reversal":
+            # 情绪反转 → 强制使用强调转场
+            return TransitionType.FLASH
+        elif transition_type == "escalation":
+            # 情绪升级 → 加速转场
+            if editing_value > 0.7:
+                return TransitionType.FLASH
+            return TransitionType.CUT
+        elif phase == "peak":
+            # 情绪高潮 → 放大效果
+            if editing_value > 0.6:
+                return TransitionType.ZOOM
+            return TransitionType.FLASH
+        elif phase == "release":
+            # 情绪释放 → 柔和转场
+            return TransitionType.DISSOLVE
+
+        return base_transition
+
     def _analyze_pacing(self, shots: List[Shot]) -> str:
         """分析剪辑节奏"""
         if not shots:
@@ -379,10 +589,26 @@ class SmartEditingEngine:
         return output_path
     
     def _analyze_music_beats(self, audio_path: str) -> List[float]:
-        """分析音乐节拍"""
-        # 这里简化处理，实际应该使用librosa等库分析
-        # 返回模拟的节拍点
-        return [i * 0.5 for i in range(120)]  # 每0.5秒一个节拍
+        """分析音乐节拍（v2.0: librosa真实分析）"""
+        try:
+            import librosa
+            y, sr = librosa.load(audio_path, sr=22050, duration=120)
+            if len(y) == 0:
+                return [i * 0.5 for i in range(120)]
+            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+            if beat_frames is None or len(beat_frames) == 0:
+                tempo = tempo if isinstance(tempo, (int, float)) else 120.0
+                beat_frames = librosa.onset.onset_detect(
+                    y=y, sr=sr, units='frames'
+                )
+            beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+            return beat_times.tolist()
+        except ImportError:
+            # librosa 不可用时回退到默认节拍
+            return [i * 0.5 for i in range(120)]
+        except Exception as e:
+            print(f"[SmartEditing] 节拍分析异常: {e}")
+            return [i * 0.5 for i in range(120)]
     
     def _select_beats_by_pattern(self, beats: List[float], 
                                 pattern: BeatPattern) -> List[float]:
@@ -501,39 +727,63 @@ class SmartEditingEngine:
     
     def generate_editing_report(self, sequence: EditingSequence) -> Dict[str, Any]:
         """
-        生成剪辑报告
-        
+        生成剪辑报告 (v2.0: 含情绪旅程分析)
+
         分析剪辑序列的质量和特点
         """
         report = {
             "total_shots": len(sequence.shots),
             "total_duration": sequence.total_duration,
             "pacing": sequence.pacing,
-            "avg_shot_duration": sequence.total_duration / len(sequence.shots) if sequence.shots else 0,
+            "avg_shot_duration": (
+                sequence.total_duration / len(sequence.shots)
+                if sequence.shots else 0
+            ),
             "transition_distribution": {},
             "emotion_flow": [],
             "suggestions": []
         }
-        
+
         # 统计转场分布
         for transition in sequence.transitions:
             name = transition.value
-            report["transition_distribution"][name] = report["transition_distribution"].get(name, 0) + 1
-        
-        # 记录情绪流
+            report["transition_distribution"][name] = (
+                report["transition_distribution"].get(name, 0) + 1
+            )
+
+        # 记录情绪流（v2.0: 含情绪向量维度）
         for shot in sequence.shots:
-            report["emotion_flow"].append({
+            entry = {
                 "time": shot.start_time,
                 "emotion": shot.emotional_tone.value
-            })
-        
+            }
+            # 如果有视觉特征中的向量信息
+            if "emotion_vector" in shot.visual_features:
+                vec = shot.visual_features["emotion_vector"]
+                if isinstance(vec, np.ndarray):
+                    # 找出最强的两个情绪维度
+                    top_indices = np.argsort(vec)[-2:][::-1]
+                    EMOTION_DIMS = ["开心", "悲伤", "愤怒", "紧张", "浪漫", "悬疑", "激动", "温馨"]
+                    entry["dominant_emotions"] = [
+                        EMOTION_DIMS[i] for i in top_indices
+                        if i < len(EMOTION_DIMS)
+                    ]
+            report["emotion_flow"].append(entry)
+
         # 生成建议
         if report["avg_shot_duration"] > 8:
             report["suggestions"].append("镜头平均时长较长，建议加快节奏")
-        
+
         if len(sequence.shots) < 5:
             report["suggestions"].append("镜头数量较少，建议增加场景切换")
-        
+
+        # v2.0: 转场多样性建议
+        unique_transitions = len(report["transition_distribution"])
+        if unique_transitions < 3 and len(sequence.shots) > 5:
+            report["suggestions"].append(
+                f"转场种类单一（仅{unique_transitions}种），建议增加转场多样性"
+            )
+
         return report
 
 

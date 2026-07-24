@@ -1,0 +1,1 @@
+SIGNAL_sub=True;SIGNAL_prog=True;SIGNAL_fail=True;METHOD_on_sub=True;METHOD_on_fail=True;METHOD_emit_prog=True

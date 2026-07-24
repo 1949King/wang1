@@ -7,8 +7,14 @@
 """
 
 import random
+import json
+import os as _os
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger("AI短剧编辑器.account_widgets")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -304,6 +310,42 @@ class BarChart(QWidget):
             painter.drawText(100 + bar_width + 10, y + item_height // 2 + 5, str(value))
 
 
+def _load_accounts_from_file() -> Optional[List[tuple]]:
+    """从 data/bound_accounts.json 加载账号列表，失败返回 None"""
+    try:
+        workspace = Path(__file__).parent.parent.parent.parent
+        af = workspace / "data" / "bound_accounts.json"
+        if not af.exists():
+            return None
+        with open(af, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # 转换为 (platform, name, fans_num, status) 元组列表
+        result = []
+        for platform, accounts in data.items():
+            for acc in accounts:
+                name = acc.get("name", "@未命名")
+                fans_str = acc.get("fans", "0")
+                status = acc.get("status", "正常")
+                # 粉丝数转换: "12.5万粉" → 125000
+                fans_num = 0
+                try:
+                    s = fans_str.replace("万粉", "").replace("粉", "").replace(",", "")
+                    if "万" in fans_str:
+                        fans_num = int(float(s.replace("万", "")) * 10000)
+                    elif "k" in fans_str.lower():
+                        fans_num = int(float(s.lower().replace("k", "")) * 1000)
+                    else:
+                        fans_num = int(float(s))
+                except (ValueError, TypeError):
+                    fans_num = 0
+                result.append((platform, name, fans_num, status))
+        logger.info(f"从文件加载 {len(result)} 个账号")
+        return result if result else None
+    except Exception as e:
+        logger.warning(f"加载账号文件失败: {e}")
+        return None
+
+
 def create_enhanced_accounts_tab() -> QWidget:
     """创建增强版账号管理标签页"""
     def _add_account():
@@ -396,11 +438,19 @@ def create_enhanced_accounts_tab() -> QWidget:
     stats_layout = QHBoxLayout()
     stats_layout.setSpacing(15)
     
+    # 从实际数据计算统计摘要
+    active_count = sum(1 for _, _, _, status in sample_accounts if status == "正常")
+    total_fans = sum(fans for _, _, fans, _ in sample_accounts)
+    if total_fans >= 10000:
+        fans_display = f"{total_fans // 10000}万" if total_fans % 10000 == 0 else f"{total_fans / 10000:.1f}万"
+    else:
+        fans_display = str(total_fans)
+    
     stat_cards = [
-        ("总账号", "30", "📊", "#1e6bde"),
-        ("活跃账号", "28", "✅", "#22c55e"),
-        ("今日发布", "86", "📤", "#f59e0b"),
-        ("总粉丝", "2156万", "👥", "#ec4899"),
+        ("总账号", str(len(sample_accounts)), "📊", "#1e6bde"),
+        ("活跃账号", str(active_count), "✅", "#22c55e"),
+        ("总平台", str(len(set(p for p, *_ in sample_accounts))), "📤", "#f59e0b"),
+        ("总粉丝", fans_display, "👥", "#ec4899"),
     ]
     
     for title, value, icon, color in stat_cards:
@@ -452,7 +502,8 @@ def create_enhanced_accounts_tab() -> QWidget:
     accounts_layout = QGridLayout(accounts_widget)
     accounts_layout.setSpacing(15)
     
-    sample_accounts = [
+    # 优先从 bound_accounts.json 加载，失败时使用示例数据
+    sample_accounts = _load_accounts_from_file() or [
         ("douyin", "短剧剪辑师", 125000, "正常"),
         ("douyin", "短剧达人号", 89000, "正常"),
         ("douyin", "影视剪辑王", 256000, "正常"),

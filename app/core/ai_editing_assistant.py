@@ -3,6 +3,7 @@ AI智能剪辑建议系统
 提供智能剪辑建议、特效推荐、转场推荐等功能
 """
 
+import os
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -118,11 +119,60 @@ class SceneAnalyzer:
         self._scenes: List[SceneAnalysis] = []
         self._lock = RLock()
     
-    def analyze_scenes(self, video_frames: List[np.ndarray],
+    def analyze_scenes(self, video_frames: List[np.ndarray] = None,
+                     video_path: str = None,
                      progress_callback: Optional[callable] = None) -> List[SceneAnalysis]:
-        """分析视频场景"""
-        if progress_callback:
-            progress_callback(0, "开始分析场景...")
+        """分析视频场景 - 优先PySceneDetect，回退帧差法"""
+        if video_path and os.path.exists(video_path):
+            result = self._detect_with_pyscene(video_path, progress_callback)
+            if result:
+                return result
+        if video_frames:
+            return self._detect_with_framediff(video_frames, progress_callback)
+        return []
+
+    def _detect_with_pyscene(self, video_path: str, 
+                              progress_callback: Optional[callable] = None) -> List[SceneAnalysis]:
+        """使用PySceneDetect进行专业场景检测"""
+        try:
+            from scenedetect import open_video, SceneManager
+            from scenedetect.detectors import ContentDetector, AdaptiveDetector
+            if progress_callback:
+                progress_callback(10, "PySceneDetect 自适应检测...")
+            video = open_video(video_path)
+            sm = SceneManager()
+            sm.add_detector(ContentDetector(threshold=27))
+            sm.add_detector(AdaptiveDetector(adaptive_threshold=3.0))
+            sm.detect_scenes(video)
+            scenes = sm.get_scene_list()
+            if progress_callback:
+                progress_callback(50, f"检测到 {len(scenes)} 个场景...")
+            results = []
+            for i, (start, end) in enumerate(scenes):
+                s = start.get_seconds()
+                e = end.get_seconds()
+                results.append(SceneAnalysis(
+                    start_time=s, end_time=e,
+                    scene_type=SceneType.TRANSITION if (e - s) < 2.0 else SceneType.ACTION,
+                    emotion="neutral", confidence=0.8,
+                    description=f"场景 {i+1}: {s:.1f}s - {e:.1f}s",
+                    suggested_actions=["keep" if (e - s) > 1.0 else "cut"]
+                ))
+                if progress_callback:
+                    pct = 50 + int(50 * (i + 1) / max(len(scenes), 1))
+                    progress_callback(pct, f"场景 {i+1}/{len(scenes)}")
+            if progress_callback:
+                progress_callback(100, "场景检测完成")
+            return results
+        except ImportError:
+            return []
+        except Exception as e:
+            print(f"PySceneDetect失败: {e}")
+            return []
+
+    def _detect_with_framediff(self, video_frames: List[np.ndarray],
+                                progress_callback: Optional[callable] = None) -> List[SceneAnalysis]:
+        """帧差法场景检测（降级方案）"""
         
         with self._lock:
             try:

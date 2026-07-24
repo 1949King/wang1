@@ -6,10 +6,10 @@
 
 from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QLabel, QSlider, QSpinBox, QComboBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QLabel, QSlider, QSpinBox, QComboBox
 import logging
 
-from ..core.timeline import timeline_core
+from app.core.timeline import timeline_core
 
 logger = logging.getLogger("AI短剧编辑器.professional_editor")
 
@@ -104,7 +104,7 @@ class EffectEditor(QWidget):
 class SubtitleEditor(QWidget):
     """字幕编辑器"""
     
-    subtitle_added = pyqtSignal(str, Dict[str, Any])
+    subtitle_added = pyqtSignal(str, dict)
     subtitle_removed = pyqtSignal(str)
     
     def __init__(self):
@@ -199,8 +199,8 @@ class SubtitleEditor(QWidget):
 class MaterialEditor(QWidget):
     """素材编辑器"""
     
-    material_selected = pyqtSignal(str, Dict[str, Any])
-    material_imported = pyqtSignal(str, Dict[str, Any])
+    material_selected = pyqtSignal(str, dict)
+    material_imported = pyqtSignal(str, dict)
     
     def __init__(self):
         super().__init__()

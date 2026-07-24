@@ -1,8 +1,8 @@
 """
 测试模块包
 =========
+B5 标记 (2026-05-31): 原先 3 个 import 触发了模块加载时的副作用, 现改为空
+pytest 会通过 testpaths 自动发现 tests/test_*.py
 """
+# 留空 - 避免循环导入
 
-from .test_config import *
-from .test_security import *
-from .test_cache import *

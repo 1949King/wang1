@@ -8,10 +8,13 @@ import json
 import time
 import hashlib
 import uuid
+import logging
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import webbrowser
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
@@ -442,9 +445,9 @@ class LicenseDialog(QDialog):
             QMessageBox.warning(self, "错误", "请填写完整信息")
             return
         
-        print(f"激活码: {activation_code}")
-        print(f"用户名: {user_name}")
-        print(f"邮箱: {email}")
+        logger.info(f"尝试验证激活码: {activation_code[:4]}****")
+        logger.info(f"用户名: {user_name}")
+        logger.info(f"邮箱: {email[:3]}****@****")
         
         success, message = self.license_manager.validate_activation_code(
             activation_code, user_name, email

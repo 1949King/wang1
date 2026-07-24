@@ -1540,23 +1540,16 @@ class ClipWidget(QFrame):
                 bar_count = max(4, self.width() // 6)
                 bar_width = max(2, (self.width() - 4) // bar_count - 2)
                 
-                # 尝试获取真实波形数据
-                peaks = None
+                # 异步生成波形（首次需要）
                 if not hasattr(self, '_waveform_peaks') or self._waveform_peaks is None:
-                    try:
-                        from app.core.waveform_generator import waveform_generator
-                        data = waveform_generator.generate(clip_path, num_samples=bar_count)
-                        if data and data.peaks:
-                            self._waveform_peaks = data.peaks
-                        else:
-                            self._waveform_peaks = []
-                    except Exception:
-                        self._waveform_peaks = []
-                
-                if self._waveform_peaks and len(self._waveform_peaks) >= bar_count:
-                    peaks = self._waveform_peaks
+                    self._schedule_waveform_generation(bar_count)
+                    # 使用随机波形作为临时显示
+                    import random
+                    random.seed(hash(clip_path) % 10000)
+                    peaks = [random.random() for _ in range(bar_count)]
+                    random.seed()
                 else:
-                    peaks = None
+                    peaks = self._waveform_peaks
                 
                 if peaks:
                     for i in range(bar_count):
@@ -1878,6 +1871,45 @@ class ClipWidget(QFrame):
         """缩略图生成完成回调"""
         self._thumbnail_cache = thumbnails
         self._thumbnails_generated = True
+        self.update()
+    
+    def _schedule_waveform_generation(self, num_samples):
+        """调度异步波形生成"""
+        clip_path = self.clip_data.get('path', '')
+        if not clip_path or not os.path.exists(clip_path):
+            return
+        
+        # 使用线程池异步生成波形
+        from PyQt6.QtCore import QThread, pyqtSignal
+        
+        class WaveformWorker(QThread):
+            waveform_ready = pyqtSignal(list)
+            
+            def __init__(self, clip_path, num_samples):
+                super().__init__()
+                self._clip_path = clip_path
+                self._num_samples = num_samples
+            
+            def run(self):
+                try:
+                    from app.core.waveform_generator import waveform_generator
+                    data = waveform_generator.generate(self._clip_path, num_samples=self._num_samples)
+                    if data and data.peaks:
+                        self.waveform_ready.emit(data.peaks)
+                    else:
+                        self.waveform_ready.emit([])
+                except Exception as e:
+                    logger.error(f"波形生成失败: {e}")
+                    self.waveform_ready.emit([])
+        
+        self._waveform_worker = WaveformWorker(clip_path, num_samples)
+        self._waveform_worker.waveform_ready.connect(self._on_waveform_ready)
+        self._waveform_worker.finished.connect(self._waveform_worker.deleteLater)
+        self._waveform_worker.start()
+    
+    def _on_waveform_ready(self, peaks):
+        """波形生成完成回调"""
+        self._waveform_peaks = peaks
         self.update()
 
 

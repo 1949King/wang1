@@ -22,8 +22,9 @@ def setup_exception_handler():
                 f.write("堆栈跟踪:\n")
                 traceback.print_tb(exc_traceback, file=f)
                 f.write("\n" + "="*80 + "\n")
-        except:
-            pass
+        except Exception as e:
+            # 日志写入失败时至少打印到 stderr，避免异常信息完全丢失
+            print(f"[CRASH] 全局异常处理器写入日志失败: {e}", file=sys.stderr)
         
         # 打印错误信息
         print(f"\n未捕获的异常: {exc_type.__name__}: {exc_value}")
