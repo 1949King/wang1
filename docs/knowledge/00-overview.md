@@ -36,7 +36,7 @@ C3 短剧跳转：**M1 已修**（`target=extensions`）；仍缺选题自动导
 | ①敢动 | 清死代码 / 吞异常改日志 | 已完成（2026-07-22） |
 | ②不卡 | 预览/播放流畅（墙钟+顺序解码+音画同步） | **完成一轮**；A2 scrub 降载 ✅；滤镜长片仍可能卡 |
 | ③完整 | 接线 core：波形/关键帧/LUT/速度/多轨 | **大半完成**；速度斜坡仍弱；叠轨 KF 连续化 ✅ |
-| ④可维护 | 拆分 `editor_module` 上帝类 | **进行中**（A1✅）；宿主仍约 **10.8k 行** |
+| ④可维护 | 拆分 `editor_module` 上帝类 | **进行中**（A1✅）；宿主实测 **13,321 行**（2026-08-11 AST 复核，此前"10.8k"已过时）；量化分析+分期方案见 [`10-editor-module-split-plan.md`](10-editor-module-split-plan.md) |
 | 顶层 | AI 闭环接线 | **部分完成**（C1–C3）；自动导入/粗剪后置 |
 
 已抽出（剪辑相关）：`clip_transform` · `editor_export` · `editor_burn` · `editor_subtitle_panel` · `text_frame_map` · `edit_commands` · `filler_silence_detect`。

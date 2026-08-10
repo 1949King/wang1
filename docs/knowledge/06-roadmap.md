@@ -19,7 +19,7 @@
 ①清创 ✅ → ②不卡（完成一轮 + A2）→ ③接线 core（大半）→ ④拆上帝类（**进行中，A1✅**）→ 顶层 AI 闭环（**C1–C3 部分完成**）
 
 **涨分队列**：继续拆 `editor_module`（AI/属性页）→ 修 C3 `plugins→extensions` → A3/A4。  
-已抽：`clip_transform` · `editor_export` · `editor_burn` · `editor_subtitle_panel` · `text_frame_map` · `edit_commands` · `filler_silence_detect`。宿主仍约 **10.8k 行**（2026-08 复核）。
+已抽：`clip_transform` · `editor_export` · `editor_burn` · `editor_subtitle_panel` · `text_frame_map` · `edit_commands` · `filler_silence_detect`。宿主实测 **13,321 行**（2026-08-11 AST 复核）；分期拆分方案见 [`10-editor-module-split-plan.md`](10-editor-module-split-plan.md)。
 
 已锁能力：[`08-frozen-zones.md`](08-frozen-zones.md)。
 

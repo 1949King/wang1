@@ -33,7 +33,7 @@ Application (main_qt6.Application)
 ## 剪辑副路径（抽出模块）
 
 ```
-EditorModule（宿主 ~10.8k）
+EditorModule（宿主实测 13,321 行，2026-08-11 复核；量化拆分方案见 [`10-editor-module-split-plan.md`](10-editor-module-split-plan.md)）
   ├── clip_transform / editor_export / editor_burn     # 变换·导出·烧录
   ├── editor_subtitle_panel                            # 字幕 UI + AI + 去水词
   │     └── text_frame_map → edit_commands / filler_silence_detect
@@ -86,7 +86,7 @@ graph TB
         MW["main_window.py<br/>主窗口调度"]
         REG["module_registry.py<br/>模块注册表"]
         subgraph EDITOR["编辑器核心（Mixin 拆分）"]
-            EM["editor_module.py<br/>EditorModule<br/>≈10424 行"]
+            EM["editor_module.py<br/>EditorModule<br/>实测 13321 行（2026-08-11）"]
             AIM["ai_agent_panel.py<br/>AiAgentPanelMixin<br/>6 AI 方法"]
             EXM["editor_export_panel.py<br/>EditorExportPanelMixin<br/>8 导出方法"]
         end
@@ -168,9 +168,9 @@ EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin)
         _build_edited_video / _export_video
 ```
 
-| 维度 | 拆分前 | 拆分后 |
-|------|--------|--------|
-| EditorModule 行数 | ≈10760 | **10424**（-336） |
+| 维度 | 拆分前（历史记录） | 拆分后（历史记录） | 实测现状（2026-08-11） |
+|------|--------|--------|--------|
+| EditorModule 行数 | ≈10760 | 10424（-336） | **13321**（此后新功能持续加入，净增约 2900 行；分期拆分方案见 [`10-editor-module-split-plan.md`](10-editor-module-split-plan.md)） |
 | AI 方法位置 | 内嵌 | AiAgentPanelMixin |
 | 导出方法位置 | 内嵌 | EditorExportPanelMixin |
 | 循环导入风险 | 无 | 已规避（show_clear_messagebox 延迟导入） |

@@ -18,6 +18,7 @@
 | [07-coding-rules.md](07-coding-rules.md) | 编码约定与最小入侵原则 |
 | [08-frozen-zones.md](08-frozen-zones.md) | **已修好功能冻结区**（禁改清单） |
 | [09-tool-registry-design.md](09-tool-registry-design.md) | Agent 能力表面收敛设计提案（4 套→1 套，分阶段） |
+| [10-editor-module-split-plan.md](10-editor-module-split-plan.md) | `editor_module.py` 量化分析 + 拆分方案（13,321 行现状与分期提取计划） |
 | [sources/MANIFEST.md](sources/MANIFEST.md) | 全库 Markdown 源清单（自动生成） |
 | [catalog.json](catalog.json) | 机器可读目录（自动生成） |
 

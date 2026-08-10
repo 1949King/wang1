@@ -66,8 +66,9 @@
 | 项 | 说明 |
 |----|------|
 | 模块 | `characters` 导航改为「AI 画布」，默认启用；主界面镶嵌 infinite-canvas |
-| 运行时 | `app/core/canvas_runtime.py` 拉起 `vendor/infinite-canvas/web`（`npm run dev` :3000） |
+| 运行时 | `app/core/canvas_runtime.py`：优先已有端口 → **`dist/` 静态秒开 :3001** → 否则 Vite :3000；进入模块自动预热 |
 | 桥接 | `app/core/canvas_bridge.py` :18765 — `/ingest`、`/inject.js`、「发送到剪辑」 |
+| 慢启动 | 白屏「正在启动…」多为冷启动 Vite；跑 `scripts/setup_infinite_canvas.ps1`（含 `npm run build`）后应秒开 |
 | 角色库 | `CharacterStore` 保留；侧栏编辑 + `generated_assets` 挂载 |
 | 入轨 | `MATERIAL_TO_TIMELINE`；静图经 ffmpeg 转 3s still.mp4 |
 | 插帧 | 可选 `enable_interpolation` → `PreviewManager.set_interpolation_enabled`（线性补帧，非 RIFE） |
@@ -764,7 +765,7 @@
 - 导出 nvenc 正常，预览加速 ≠ 成片加速（预期）
 - 速度斜坡曲线仍走「导出成片」；固定倍率已写入片段 `speed` ✅
 - 叠轨带 transform 关键帧：优先 **连续 overlay 表达式**；失败回退分段静态
-- `editor_module.py` 仍大（约 **10.8k**）；已抽 [`clip_transform`](app/modules/lego/clip_transform.py) · [`editor_export`](app/modules/lego/editor_export.py) · [`editor_burn`](app/modules/lego/editor_burn.py) · [`editor_subtitle_panel`](app/modules/lego/editor_subtitle_panel.py) + B0–B2 core
+- `editor_module.py` 仍大（实测 **13,321 行**，见 [`10-editor-module-split-plan.md`](10-editor-module-split-plan.md)）；已抽 [`clip_transform`](app/modules/lego/clip_transform.py) · [`editor_export`](app/modules/lego/editor_export.py) · [`editor_burn`](app/modules/lego/editor_burn.py) · [`editor_subtitle_panel`](app/modules/lego/editor_subtitle_panel.py) + B0–B2 core
 - 7 阶段闭环：**C1/C2 ✅**；**C3 半通**（见上）；自动导入选题 / 一键粗剪仍缺
 - `extensions` 实验级却默认开（与「首屏只 CORE」不完全一致）
 - 冻结区见 [`08-frozen-zones.md`](08-frozen-zones.md)
