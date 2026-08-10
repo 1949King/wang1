@@ -327,9 +327,16 @@ class AccountCapabilityHandlers:
             return CapabilityResult(req.request_id, False, error=str(e))
 
     def publish(self, req: CapabilityRequest) -> CapabilityResult:
-        """发布作品"""
+        """发布作品
+
+        真实注册的发布类 Skill 是 `publish_content`（单条内容发布）和
+        `matrix_publish`（批量矩阵发布），历史遗留默认值 `account_publish`
+        在 account_skills.py 中从未存在，任何未显式传 skill_id 的调用都必
+        然 100% 失败。默认改为单条发布；批量场景需显式传
+        `params={"skill_id": "matrix_publish", ...}`。
+        """
         from app.modules.lego.skill_engine import skill_engine
-        skill_id = req.params.get("skill_id", "account_publish")
+        skill_id = req.params.get("skill_id", "publish_content")
         result = skill_engine.execute_skill(skill_id, inputs=req.params.get("inputs", {}))
         return CapabilityResult(req.request_id, bool(result.get("success")),
                                 output=result, error=result.get("error"))
