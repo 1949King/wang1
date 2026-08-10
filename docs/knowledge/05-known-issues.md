@@ -1,5 +1,21 @@
 # 05 — 已知问题与近期修复
 
+## 已完善（2026-08-11 · 技术债务清理第一批：死代码路径）
+
+对 2026-08-11 项目整体评估中列出的技术债务，本轮先做风险最低的一项：删除已确认零外部引用的死代码。
+
+| 文件/目录 | 引用核查方式 | 结论 |
+|---|---|---|
+| `app/modules/render/`（8 文件） | 全仓库 grep `from app.modules.render` / `import app.modules.render` | 仅 `app/core/performance_benchmark.py` 一处内部引用（该文件本身也是死代码） |
+| `app/modules/lego/render/`（6 文件） | 全仓库 grep `lego.render` | 仅被上条 `render_performance_optimizer.py` 交叉引用，无外部业务方 |
+| `app/core/performance_benchmark.py` | 全仓库 grep `performance_benchmark` / `PerformanceBenchmark` | 零外部引用（无任何模块调用 `get_performance_benchmark`） |
+| `app/core/app_state.py`（`AppState`） | 全仓库 grep `app_state` / `AppState`（不区分大小写） | 零外部引用，与文档记录一致 |
+| `app/modules/lego/ai_clip_flow.py.fixbak` | 文件名后缀即非源码 | 遗留备份文件，直接删除 |
+
+删除后验收：`compileall app/core app/modules` 通过；`.venv312` 实际环境下 `import editor_module` / `main_window` / `preview_manager` 全部成功；`python scripts/frozen_zone_guard.py` 确认无 drift（53 locks intact，这些路径均不在冻结区清单内）。
+
+涉及：见 [`02-architecture.md`](02-architecture.md)「渲染栈注意」章节。
+
 ## 已完善（2026-08-11 · A4 第二刀：scrub = 时间线合成）
 
 | 项 | 说明 |

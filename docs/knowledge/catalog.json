@@ -1,6 +1,6 @@
 {
   "project": "拾光剪影",
-  "generated_at": "2026-08-11T02:52:21+14:00",
+  "generated_at": "2026-08-11T03:34:22+14:00",
   "knowledge_index": "docs/knowledge/INDEX.md",
   "core_docs": [
     "docs/knowledge/00-overview.md",
@@ -639,10 +639,10 @@
     },
     {
       "path": "docs/knowledge/00-overview.md",
-      "size_kb": 3.5,
+      "size_kb": 3.7,
       "title": "00 — 产品概览与北极星",
       "category": "knowledge",
-      "lines": 77
+      "lines": 79
     },
     {
       "path": "docs/knowledge/01-glossary.md",
@@ -653,14 +653,14 @@
     },
     {
       "path": "docs/knowledge/02-architecture.md",
-      "size_kb": 25.6,
+      "size_kb": 26.3,
       "title": "02 — 架构",
       "category": "knowledge",
-      "lines": 658
+      "lines": 659
     },
     {
       "path": "docs/knowledge/03-editor-pipeline.md",
-      "size_kb": 4.2,
+      "size_kb": 4.3,
       "title": "03 — 剪辑活路径（Editor Pipeline）",
       "category": "knowledge",
       "lines": 93
@@ -674,14 +674,14 @@
     },
     {
       "path": "docs/knowledge/05-known-issues.md",
-      "size_kb": 81.0,
+      "size_kb": 83.7,
       "title": "05 — 已知问题与近期修复",
       "category": "knowledge",
-      "lines": 920
+      "lines": 959
     },
     {
       "path": "docs/knowledge/06-roadmap.md",
-      "size_kb": 9.4,
+      "size_kb": 9.5,
       "title": "06 — 路线图",
       "category": "knowledge",
       "lines": 150
@@ -709,10 +709,10 @@
     },
     {
       "path": "docs/knowledge/sources/MANIFEST.md",
-      "size_kb": 29.6,
+      "size_kb": 51.5,
       "title": "源文档清单（MANIFEST）",
       "category": "knowledge",
-      "lines": 235
+      "lines": 334
     },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",

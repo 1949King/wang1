@@ -2,7 +2,7 @@
 
 > 由 `scripts/sync_knowledge.py` 自动生成。勿手改表格（会被覆盖）。
 >
-> 上次同步：`2026-08-11T02:52:21+14:00` · 共 **285** 个 Markdown
+> 上次同步：`2026-08-11T03:34:22+14:00` · 共 **285** 个 Markdown
 
 知识库入口：[INDEX.md](../INDEX.md)
 
@@ -10,17 +10,17 @@
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
-| [docs/knowledge/00-overview.md](../00-overview.md) | 3.5 | 00 — 产品概览与北极星 |
+| [docs/knowledge/00-overview.md](../00-overview.md) | 3.7 | 00 — 产品概览与北极星 |
 | [docs/knowledge/01-glossary.md](../01-glossary.md) | 2.5 | 01 — 术语表（Glossary） |
-| [docs/knowledge/02-architecture.md](../02-architecture.md) | 25.6 | 02 — 架构 |
-| [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 4.2 | 03 — 剪辑活路径（Editor Pipeline） |
+| [docs/knowledge/02-architecture.md](../02-architecture.md) | 26.3 | 02 — 架构 |
+| [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 4.3 | 03 — 剪辑活路径（Editor Pipeline） |
 | [docs/knowledge/04-module-map.md](../04-module-map.md) | 2.7 | 04 — 模块地图 |
-| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 81.0 | 05 — 已知问题与近期修复 |
-| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 9.4 | 06 — 路线图 |
+| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 83.7 | 05 — 已知问题与近期修复 |
+| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 9.5 | 06 — 路线图 |
 | [docs/knowledge/07-coding-rules.md](../07-coding-rules.md) | 1.3 | 07 — 编码规则 |
 | [docs/knowledge/08-frozen-zones.md](../08-frozen-zones.md) | 1.7 | 08 — 冻结区（已修好功能锁死） |
 | [docs/knowledge/INDEX.md](../INDEX.md) | 3.3 | 快速入口 |
-| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 29.6 | 源文档清单（MANIFEST） |
+| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 51.5 | 源文档清单（MANIFEST） |
 
 ## 根目录方案/报告（37）
 

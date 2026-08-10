@@ -44,11 +44,12 @@ EditorModule（宿主 ~10.8k）
 
 ## 渲染栈注意
 
-存在多份 `RenderManager` / FFmpeg 查找逻辑：
-
 - **活导出**: `app/core/render_manager.py`（经 scheduler）+ `editor_export` 拼片/叠轨
-- `ExportRenderer`（`modules/render` 与 `lego/render`）：**2026-08 复核仍无业务引用**，勿当真相源
-- `AppState`：**仍无外部引用**，勿当真相源（真相源 = `EditorModule._clips`）
+- 真相源 = `EditorModule._clips`
+
+**已清理（2026-08-11 死代码批）**：确认零外部引用后删除，非拆分/重构，未改任何活路径行为：
+`app/modules/render/`（`ExportRenderer`/`RenderManager`/`proxy_preview`/`soft_render`/`preview_render`/`gpu_render`/`gpu_compatibility`/`render_performance_optimizer`，共 8 文件）· `app/modules/lego/render/`（同名 `ExportRenderer` 等，共 6 文件）· `app/core/performance_benchmark.py`（唯一调用方是自身模块内函数，零外部引用；其内部曾 `from app.modules.render.proxy_preview import ...`，随上述 render 包一并删除）· `app/core/app_state.py`（`AppState`，全仓库零外部引用）· `app/modules/lego/ai_clip_flow.py.fixbak`（遗留备份文件）。
+删前逐一 grep 确认无 `import`/`from ... import` 外部引用；删后 `compileall app/core app/modules` 通过、`editor_module`/`main_window`/`preview_manager` 实际 import 验证通过、`frozen_zone_guard.py` 无 drift。
 
 ## 插件 / 拓展三层
 
