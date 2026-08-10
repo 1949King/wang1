@@ -18,7 +18,7 @@
     "symbol:app/modules/lego/editor_module.py:_is_linked_video_audio_clip": "d5a594ae3af08cc8",
     "symbol:app/core/preview_manager.py:get_frame_at": "9596dd6f2008da24",
     "marker:app/modules/lego/editor_module.py:playback-av:init-media": "1d6d92dd036a88f3",
-    "marker:app/modules/lego/editor_module.py:playback-av:main-audio": "0ea975501c005306",
+    "marker:app/modules/lego/editor_module.py:playback-av:main-audio": "1a211286d8e575c4",
     "symbol:app/modules/lego/editor_module.py:cleanup": "e106af6665066738",
     "symbol:app/modules/lego/editor_module.py:_shutdown_media": "a493057dfc78d4e5",
     "symbol:app/modules/lego/main_window.py:_stop_all_media_on_exit": "9c155431a7ce0688",

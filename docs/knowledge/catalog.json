@@ -1,6 +1,6 @@
 {
   "project": "拾光剪影",
-  "generated_at": "2026-08-04T04:06:34+14:00",
+  "generated_at": "2026-08-11T02:52:21+14:00",
   "knowledge_index": "docs/knowledge/INDEX.md",
   "core_docs": [
     "docs/knowledge/00-overview.md",
@@ -541,10 +541,10 @@
     },
     {
       "path": "docs/P0_CAPCUT_ALIGN.md",
-      "size_kb": 1.9,
+      "size_kb": 2.1,
       "title": "拾光剪影 vs 剪映：差距与分期验收",
       "category": "docs",
-      "lines": 40
+      "lines": 43
     },
     {
       "path": "docs/help/copywriting.md",
@@ -639,10 +639,10 @@
     },
     {
       "path": "docs/knowledge/00-overview.md",
-      "size_kb": 3.4,
+      "size_kb": 3.5,
       "title": "00 — 产品概览与北极星",
       "category": "knowledge",
-      "lines": 75
+      "lines": 77
     },
     {
       "path": "docs/knowledge/01-glossary.md",
@@ -653,38 +653,38 @@
     },
     {
       "path": "docs/knowledge/02-architecture.md",
-      "size_kb": 2.5,
+      "size_kb": 25.6,
       "title": "02 — 架构",
       "category": "knowledge",
-      "lines": 68
+      "lines": 658
     },
     {
       "path": "docs/knowledge/03-editor-pipeline.md",
-      "size_kb": 2.9,
+      "size_kb": 4.2,
       "title": "03 — 剪辑活路径（Editor Pipeline）",
       "category": "knowledge",
-      "lines": 80
+      "lines": 93
     },
     {
       "path": "docs/knowledge/04-module-map.md",
-      "size_kb": 2.5,
+      "size_kb": 2.7,
       "title": "04 — 模块地图",
       "category": "knowledge",
-      "lines": 60
+      "lines": 61
     },
     {
       "path": "docs/knowledge/05-known-issues.md",
-      "size_kb": 21.8,
+      "size_kb": 81.0,
       "title": "05 — 已知问题与近期修复",
       "category": "knowledge",
-      "lines": 378
+      "lines": 920
     },
     {
       "path": "docs/knowledge/06-roadmap.md",
-      "size_kb": 5.7,
+      "size_kb": 9.4,
       "title": "06 — 路线图",
       "category": "knowledge",
-      "lines": 98
+      "lines": 150
     },
     {
       "path": "docs/knowledge/07-coding-rules.md",
@@ -702,10 +702,10 @@
     },
     {
       "path": "docs/knowledge/INDEX.md",
-      "size_kb": 2.5,
-      "title": "拾光剪影 — 项目知识库",
+      "size_kb": 3.3,
+      "title": "快速入口",
       "category": "knowledge",
-      "lines": 75
+      "lines": 91
     },
     {
       "path": "docs/knowledge/sources/MANIFEST.md",
@@ -734,6 +734,699 @@
       "title": "逐行读代码 · 剪辑模块小白讲解（配合 byox 学习地图）",
       "category": "other",
       "lines": 135
+    },
+    {
+      "path": "vendor/README.md",
+      "size_kb": 0.3,
+      "title": "infinite-canvas（MIT）— 由 scripts/setup_infinite_canvas.ps1 克隆",
+      "category": "other",
+      "lines": 7
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md",
+      "size_kb": 4.4,
+      "title": "Design Thinking",
+      "category": "other",
+      "lines": 43
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md",
+      "size_kb": 109.4,
+      "title": "React Best Practices",
+      "category": "other",
+      "lines": 3811
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md",
+      "size_kb": 3.4,
+      "title": "React Best Practices",
+      "category": "other",
+      "lines": 124
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md",
+      "size_kb": 7.2,
+      "title": "Vercel React Best Practices",
+      "category": "other",
+      "lines": 150
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md",
+      "size_kb": 1.6,
+      "title": "Sections",
+      "category": "other",
+      "lines": 47
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md",
+      "size_kb": 0.6,
+      "title": "Rule Title Here",
+      "category": "other",
+      "lines": 29
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md",
+      "size_kb": 1.8,
+      "title": "Do Not Put Effect Events in Dependency Arrays",
+      "category": "other",
+      "lines": 57
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md",
+      "size_kb": 1.5,
+      "title": "Store Event Handlers in Refs",
+      "category": "other",
+      "lines": 56
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md",
+      "size_kb": 1.0,
+      "title": "Initialize App Once, Not Per Mount",
+      "category": "other",
+      "lines": 43
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md",
+      "size_kb": 1.1,
+      "title": "useEffectEvent for Stable Callback Refs",
+      "category": "other",
+      "lines": 40
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md",
+      "size_kb": 1.1,
+      "title": "Prevent Waterfall Chains in API Routes",
+      "category": "other",
+      "lines": 39
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md",
+      "size_kb": 1.2,
+      "title": "Check Cheap Conditions Before Async Flags",
+      "category": "other",
+      "lines": 38
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md",
+      "size_kb": 2.2,
+      "title": "Defer Await Until Needed",
+      "category": "other",
+      "lines": 83
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md",
+      "size_kb": 1.3,
+      "title": "Dependency-Based Parallelization",
+      "category": "other",
+      "lines": 52
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md",
+      "size_kb": 0.7,
+      "title": "Promise.all() for Independent Operations",
+      "category": "other",
+      "lines": 29
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md",
+      "size_kb": 2.5,
+      "title": "Strategic Suspense Boundaries",
+      "category": "other",
+      "lines": 100
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md",
+      "size_kb": 2.4,
+      "title": "Prefer Statically Analyzable Paths",
+      "category": "other",
+      "lines": 64
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md",
+      "size_kb": 2.8,
+      "title": "Avoid Barrel File Imports",
+      "category": "other",
+      "lines": 61
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md",
+      "size_kb": 1.0,
+      "title": "Conditional Module Loading",
+      "category": "other",
+      "lines": 32
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md",
+      "size_kb": 0.9,
+      "title": "Defer Non-Critical Third-Party Libraries",
+      "category": "other",
+      "lines": 50
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md",
+      "size_kb": 0.8,
+      "title": "Dynamic Imports for Heavy Components",
+      "category": "other",
+      "lines": 36
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md",
+      "size_kb": 1.2,
+      "title": "Preload Based on User Intent",
+      "category": "other",
+      "lines": 51
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md",
+      "size_kb": 2.0,
+      "title": "Deduplicate Global Event Listeners",
+      "category": "other",
+      "lines": 75
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md",
+      "size_kb": 2.0,
+      "title": "Version and Minimize localStorage Data",
+      "category": "other",
+      "lines": 72
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md",
+      "size_kb": 1.7,
+      "title": "Use Passive Event Listeners for Scrolling Performance",
+      "category": "other",
+      "lines": 49
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md",
+      "size_kb": 1.2,
+      "title": "Use SWR for Automatic Deduplication",
+      "category": "other",
+      "lines": 57
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md",
+      "size_kb": 3.3,
+      "title": "Avoid Layout Thrashing",
+      "category": "other",
+      "lines": 108
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md",
+      "size_kb": 2.0,
+      "title": "Cache Repeated Function Calls",
+      "category": "other",
+      "lines": 81
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md",
+      "size_kb": 0.5,
+      "title": "Cache Property Access in Loops",
+      "category": "other",
+      "lines": 29
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md",
+      "size_kb": 1.7,
+      "title": "Cache Storage API Calls",
+      "category": "other",
+      "lines": 71
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md",
+      "size_kb": 0.8,
+      "title": "Combine Multiple Array Iterations",
+      "category": "other",
+      "lines": 33
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md",
+      "size_kb": 1.2,
+      "title": "Early Return from Functions",
+      "category": "other",
+      "lines": 51
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md",
+      "size_kb": 1.4,
+      "title": "Use flatMap to Map and Filter in One Pass",
+      "category": "other",
+      "lines": 61
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md",
+      "size_kb": 1.0,
+      "title": "Hoist RegExp Creation",
+      "category": "other",
+      "lines": 46
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md",
+      "size_kb": 0.9,
+      "title": "Build Index Maps for Repeated Lookups",
+      "category": "other",
+      "lines": 38
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md",
+      "size_kb": 1.8,
+      "title": "Early Length Check for Array Comparisons",
+      "category": "other",
+      "lines": 50
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md",
+      "size_kb": 2.3,
+      "title": "Use Loop for Min/Max Instead of Sort",
+      "category": "other",
+      "lines": 83
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md",
+      "size_kb": 2.7,
+      "title": "Defer Non-Critical Work with requestIdleCallback",
+      "category": "other",
+      "lines": 106
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md",
+      "size_kb": 0.5,
+      "title": "Use Set/Map for O(1) Lookups",
+      "category": "other",
+      "lines": 25
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md",
+      "size_kb": 1.8,
+      "title": "Use toSorted() Instead of sort() for Immutability",
+      "category": "other",
+      "lines": 58
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md",
+      "size_kb": 0.6,
+      "title": "Use Activity Component for Show/Hide",
+      "category": "other",
+      "lines": 27
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md",
+      "size_kb": 1.2,
+      "title": "Animate SVG Wrapper Instead of SVG Element",
+      "category": "other",
+      "lines": 48
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md",
+      "size_kb": 1.0,
+      "title": "Use Explicit Conditional Rendering",
+      "category": "other",
+      "lines": 41
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md",
+      "size_kb": 0.8,
+      "title": "CSS content-visibility for Long Lists",
+      "category": "other",
+      "lines": 39
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md",
+      "size_kb": 1.1,
+      "title": "Hoist Static JSX Elements",
+      "category": "other",
+      "lines": 47
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md",
+      "size_kb": 2.3,
+      "title": "Prevent Hydration Mismatch Without Flickering",
+      "category": "other",
+      "lines": 83
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md",
+      "size_kb": 0.9,
+      "title": "Suppress Expected Hydration Mismatches",
+      "category": "other",
+      "lines": 31
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md",
+      "size_kb": 2.6,
+      "title": "Use React DOM Resource Hints",
+      "category": "other",
+      "lines": 86
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md",
+      "size_kb": 1.9,
+      "title": "Use defer or async on Script Tags",
+      "category": "other",
+      "lines": 69
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md",
+      "size_kb": 0.6,
+      "title": "Optimize SVG Precision",
+      "category": "other",
+      "lines": 29
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md",
+      "size_kb": 2.1,
+      "title": "Use useTransition Over Manual Loading States",
+      "category": "other",
+      "lines": 76
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md",
+      "size_kb": 1.0,
+      "title": "Defer State Reads to Usage Point",
+      "category": "other",
+      "lines": 40
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md",
+      "size_kb": 0.8,
+      "title": "Narrow Effect Dependencies",
+      "category": "other",
+      "lines": 46
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md",
+      "size_kb": 1.2,
+      "title": "Calculate Derived State During Rendering",
+      "category": "other",
+      "lines": 41
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md",
+      "size_kb": 0.7,
+      "title": "Subscribe to Derived State",
+      "category": "other",
+      "lines": 30
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md",
+      "size_kb": 3.0,
+      "title": "Use Functional setState Updates",
+      "category": "other",
+      "lines": 75
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md",
+      "size_kb": 2.0,
+      "title": "Use Lazy State Initialization",
+      "category": "other",
+      "lines": 59
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md",
+      "size_kb": 1.2,
+      "title": "Extract Default Non-primitive Parameter Value from Memoized Component to Constant",
+      "category": "other",
+      "lines": 39
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md",
+      "size_kb": 1.2,
+      "title": "Extract to Memoized Components",
+      "category": "other",
+      "lines": 45
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md",
+      "size_kb": 1.3,
+      "title": "Put Interaction Logic in Event Handlers",
+      "category": "other",
+      "lines": 46
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md",
+      "size_kb": 2.2,
+      "title": "Don't Define Components Inside Components",
+      "category": "other",
+      "lines": 83
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md",
+      "size_kb": 1.0,
+      "title": "Do not wrap a simple expression with a primitive result type in useMemo",
+      "category": "other",
+      "lines": 36
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md",
+      "size_kb": 1.9,
+      "title": "Split Combined Hook Computations",
+      "category": "other",
+      "lines": 65
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md",
+      "size_kb": 1.1,
+      "title": "Use Transitions for Non-Urgent Updates",
+      "category": "other",
+      "lines": 41
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md",
+      "size_kb": 1.9,
+      "title": "Use useDeferredValue for Expensive Derived Renders",
+      "category": "other",
+      "lines": 60
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md",
+      "size_kb": 1.8,
+      "title": "Use useRef for Transient Values",
+      "category": "other",
+      "lines": 74
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md",
+      "size_kb": 2.0,
+      "title": "Use after() for Non-Blocking Operations",
+      "category": "other",
+      "lines": 74
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md",
+      "size_kb": 2.7,
+      "title": "Authenticate Server Actions Like API Routes",
+      "category": "other",
+      "lines": 97
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md",
+      "size_kb": 1.4,
+      "title": "Cross-Request LRU Caching",
+      "category": "other",
+      "lines": 42
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md",
+      "size_kb": 2.2,
+      "title": "Per-Request Deduplication with React.cache()",
+      "category": "other",
+      "lines": 77
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md",
+      "size_kb": 2.1,
+      "title": "Avoid Duplicate Serialization in RSC Props",
+      "category": "other",
+      "lines": 66
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md",
+      "size_kb": 4.5,
+      "title": "Hoist Static I/O to Module Level",
+      "category": "other",
+      "lines": 150
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md",
+      "size_kb": 1.8,
+      "title": "Avoid Shared Module State for Request Data",
+      "category": "other",
+      "lines": 51
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md",
+      "size_kb": 1.6,
+      "title": "Parallel Data Fetching with Component Composition",
+      "category": "other",
+      "lines": 84
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md",
+      "size_kb": 1.0,
+      "title": "Parallel Nested Data Fetching",
+      "category": "other",
+      "lines": 35
+    },
+    {
+      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md",
+      "size_kb": 1.0,
+      "title": "Minimize Serialization at RSC Boundaries",
+      "category": "other",
+      "lines": 39
+    },
+    {
+      "path": "vendor/infinite-canvas/AGENTS.md",
+      "size_kb": 9.4,
+      "title": "AGENTS.md",
+      "category": "other",
+      "lines": 89
+    },
+    {
+      "path": "vendor/infinite-canvas/CHANGELOG.md",
+      "size_kb": 18.9,
+      "title": "CHANGELOG",
+      "category": "other",
+      "lines": 310
+    },
+    {
+      "path": "vendor/infinite-canvas/README.md",
+      "size_kb": 9.0,
+      "title": "赞助商",
+      "category": "other",
+      "lines": 148
+    },
+    {
+      "path": "vendor/infinite-canvas/SECURITY.md",
+      "size_kb": 3.4,
+      "title": "Security Policy",
+      "category": "other",
+      "lines": 81
+    },
+    {
+      "path": "vendor/infinite-canvas/canvas-agent/README.md",
+      "size_kb": 6.3,
+      "title": "Infinite Canvas Agent",
+      "category": "other",
+      "lines": 158
+    },
+    {
+      "path": "vendor/infinite-canvas/canvas-agent/agent-instructions.md",
+      "size_kb": 2.1,
+      "title": "Infinite Canvas Agent",
+      "category": "other",
+      "lines": 14
+    },
+    {
+      "path": "vendor/infinite-canvas/canvas-agent/codex-server.md",
+      "size_kb": 93.9,
+      "title": "Codex App Server",
+      "category": "other",
+      "lines": 2175
+    },
+    {
+      "path": "vendor/infinite-canvas/docs/README.md",
+      "size_kb": 1.5,
+      "title": "docs",
+      "category": "other",
+      "lines": 53
+    },
+    {
+      "path": "vendor/infinite-canvas/docs/index.md",
+      "size_kb": 1.3,
+      "title": "Infinite Canvas Documentation Index",
+      "category": "other",
+      "lines": 42
+    },
+    {
+      "path": "vendor/infinite-canvas/docs/index.zh-CN.md",
+      "size_kb": 1.3,
+      "title": "无限画布文档索引",
+      "category": "other",
+      "lines": 45
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/README.md",
+      "size_kb": 8.0,
+      "title": "Infinite Canvas 画布节点插件",
+      "category": "other",
+      "lines": 164
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/html/README.md",
+      "size_kb": 0.5,
+      "title": "HTML 节点插件",
+      "category": "other",
+      "lines": 18
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/markdown/README.md",
+      "size_kb": 0.8,
+      "title": "Markdown 节点插件",
+      "category": "other",
+      "lines": 24
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/panorama/README.md",
+      "size_kb": 0.6,
+      "title": "3D 全景节点插件",
+      "category": "other",
+      "lines": 18
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/registry/README.md",
+      "size_kb": 1.9,
+      "title": "官方插件注册表(集中构建 + 远程发布)",
+      "category": "other",
+      "lines": 40
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/sdk/README.md",
+      "size_kb": 2.8,
+      "title": "@infinite-canvas/plugin-sdk",
+      "category": "other",
+      "lines": 78
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/sticky-note/README.md",
+      "size_kb": 0.5,
+      "title": "便利贴节点插件",
+      "category": "other",
+      "lines": 18
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/svg/README.md",
+      "size_kb": 0.5,
+      "title": "SVG 节点插件",
+      "category": "other",
+      "lines": 18
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/canvas/template/README.md",
+      "size_kb": 1.0,
+      "title": "插件模板(TypeScript + SDK)",
+      "category": "other",
+      "lines": 26
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/infinite-canvas/README.md",
+      "size_kb": 0.7,
+      "title": "Infinite Canvas Codex Plugin",
+      "category": "other",
+      "lines": 32
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md",
+      "size_kb": 1.8,
+      "title": "Infinite Canvas",
+      "category": "other",
+      "lines": 28
+    },
+    {
+      "path": "vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md",
+      "size_kb": 1.6,
+      "title": "Open Infinite Canvas",
+      "category": "other",
+      "lines": 59
     },
     {
       "path": "AGENTS.md",
@@ -1329,7 +2022,7 @@
     "claude": 15,
     "docs": 17,
     "knowledge": 11,
-    "other": 3,
+    "other": 102,
     "root": 37,
     "trae": 42,
     "workbuddy": 5

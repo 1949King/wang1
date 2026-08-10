@@ -1,0 +1,37 @@
+---
+description: 已修好功能的冻结区 — 未解冻禁止改动
+alwaysApply: true
+---
+
+# 冻结区（FROZEN）
+
+清单与哈希：[`docs/knowledge/frozen_zones.json`](docs/knowledge/frozen_zones.json) · [`docs/knowledge/frozen_zones.hashes.json`](docs/knowledge/frozen_zones.hashes.json)
+
+## 硬规则
+
+1. **未获用户明确「解冻 \<zone-id\>」之前，禁止修改冻结符号 / 整文件 / `FROZEN:*` 标记块。**
+2. 即使修相邻 bug，也绕开冻结区；需要动冻结区时先停下来问用户。
+3. 改完解冻区后必须：`python scripts/frozen_zone_guard.py --update`，再请用户确认重新上锁。
+4. 日常改动前可跑：`python scripts/frozen_zone_guard.py`（exit 1 = 有人动了锁）。
+
+## 当前锁定
+
+| zone-id | 内容 |
+|---------|------|
+| `playback-av` | 时间线播放音画（墙钟、只出声、播放头不被片内时钟抢、纠偏约 280ms） |
+| `exit-media` | 关窗强制停声（cleanup / `_stop_all_media_on_exit`） |
+| `clip-transform` | 归一化变换模型整文件 |
+| `transform-bake` | 连续/分段变换 bake |
+| `canvas-transform` | 画布缩放/旋转/平移交互 |
+| `drama-finder-ui` | 短剧筛选卡片预览 UI + 打开/嵌入链路 |
+| `plugin-store-catalog` | 商店仅真实 17 插件目录 |
+
+## 源码标记
+
+```python
+# >>> FROZEN:<marker-id> BEGIN
+...
+# <<< FROZEN:<marker-id> END
+```
+
+看到上述标记 = 只读，除非用户已解冻对应 zone。

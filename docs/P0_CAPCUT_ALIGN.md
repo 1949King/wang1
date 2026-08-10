@@ -24,13 +24,19 @@
 
 ### 第 2 期 — 所见即所得
 - 字幕进工程 + 导出烧录、转场双帧近似、音量打通预览、autosave 恢复询问
+- **进度（2026-07-25）**：字幕 styles 存取、dirty/autosave、音量 UI→预览/导出、转场控件接线、ASS 样式烧录（位置/字体/色/描边/底）与预览对齐；ASS 入出场动画不做
 
 ### 第 3 期 — 多轨
 - 跨轨落点、双层合成预览、BGM 轨、内核保留 `start_time`/`track`
+- **进度（2026-07-25）**：上层轨归一化叠轨预览≈导出；预览画布拖拽改位置；旋转/锚点进合成
 
 ### 第 4 期 — 深工具
-- 片段 `speed`、opacity/volume/scale 关键帧、EffectManager 写入预览参数
+- 片段 `speed`、opacity/volume/scale/x/y/rotation 关键帧、EffectManager 写入预览参数
+- **进度（2026-07-25）**：关键帧 UI + 预览插值；导出优先连续表达式 bake（失败回退分段）；画布 Alt/角落拖旋转 + 边角缩放；`clip_transform.py`；GPU LUT 2D 图集
 
 ## 明确不做
 
-重写时间线架构 / GPU 流式 / 完整转场库 / ASS 动画 / HSL·LUT / Desktop 栈迁入。
+重写时间线架构 / GPU 流式 / 完整转场库 / ASS 动画 / Desktop 栈迁入。  
+不做剪映素材商店包 / OFX / AE 预设兼容。
+
+**自研路径（已接）**：`.cube`/`.3dl` 导入 UI + `lut_loader`；转场走 `ITransitionPlugin` / `app/plugins/transition_*.py`（非商店格式）。

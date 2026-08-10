@@ -10,7 +10,7 @@
 
 | zone-id | 标题 |
 |---------|------|
-| `playback-av` | 时间线播放 · 音画同步 |
+| `playback-av` | 时间线播放 · 音画同步（2026-08-07 解冻接 speed_ramp 后已重锁） |
 | `exit-media` | 关程序停声 · 防幽灵音频 |
 | `clip-transform` | 归一化变换模型 |
 | `transform-bake` | 变换关键帧导出 bake |

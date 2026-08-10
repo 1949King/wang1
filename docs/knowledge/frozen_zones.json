@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated": "2026-07-25",
+  "updated": "2026-08-07",
   "policy": "未获用户明确「解冻 <zone-id>」授权前，禁止修改下列保护区。修 bug 也须先解冻再改，并重新跑 python scripts/frozen_zone_guard.py --update。",
   "zones": [
     {
       "id": "playback-av",
       "title": "时间线播放 · 音画同步",
-      "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms",
+      "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms；2026-08-07 解冻后允许 speed_ramp 映射 source_t/rate",
       "invariants": [
         "QMediaPlayer 不 setVideoOutput（画面只走 PreviewManager/OpenCV）",
         "播放主时钟是 QElapsedTimer 墙钟，禁止恢复 playhead += 固定步长",
@@ -14,7 +14,8 @@
         "on_deactivated 不得把 _audio_output 置 None",
         "联动音频片不得被 BGM 播放器双开",
         "播放中预览质量为 low；tick 约 33ms；顺序 grab 追赶",
-        "主音/BGM 纠偏阈值不宜压回 ~80ms（易可闻卡顿）"
+        "主音/BGM 纠偏阈值不宜压回 ~80ms（易可闻卡顿）",
+        "有 speed_ramp 时 source_t/瞬时 rate 走 speed_ramping 映射，否则常数 speed"
       ],
       "symbols": [
         {"file": "app/modules/lego/editor_module.py", "name": "_ensure_media_audio_output"},

@@ -1,0 +1,26 @@
+---
+description: 拾光剪影项目知识库 — 编码前必读活路径与约束
+alwaysApply: true
+---
+
+# 拾光剪影 Agent 规则
+
+动手改代码前，先读知识库（单一事实来源）：
+
+1. [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
+2. 涉及剪辑时再读 [`docs/knowledge/03-editor-pipeline.md`](docs/knowledge/03-editor-pipeline.md) 与 [`05-known-issues.md`](docs/knowledge/05-known-issues.md)
+3. 术语以 [`docs/knowledge/01-glossary.md`](docs/knowledge/01-glossary.md) / 根目录 [`CONTEXT.md`](CONTEXT.md) 为准
+
+## 硬约束
+
+- 真相源：`EditorModule._clips`；活路径：`editor_module` + `timeline_widget` + `preview_manager`
+- 最小入侵；不重写时间线架构；P0「明确不做」勿擅自开干
+- 轨索引用 `find_track_index_by_type`，禁止写死 `track == 1`
+- 播放用墙钟 + 顺序解码；勿恢复 `+= 0.033` 主时钟
+- 模块间优先 EventBus；对话框必须有 parent
+- **冻结区**：见 [`docs/knowledge/08-frozen-zones.md`](docs/knowledge/08-frozen-zones.md)；未解冻勿改；校验 `python scripts/frozen_zone_guard.py`
+
+## 同步
+
+全库 Markdown 编目：`python scripts/sync_knowledge.py`  
+架构/问题变更时同步更新 `docs/knowledge/0x-*.md`，不要只改聊天记录。

@@ -2,7 +2,7 @@
 
 > 由 `scripts/sync_knowledge.py` 自动生成。勿手改表格（会被覆盖）。
 >
-> 上次同步：`2026-08-04T04:06:34+14:00` · 共 **186** 个 Markdown
+> 上次同步：`2026-08-11T02:52:21+14:00` · 共 **285** 个 Markdown
 
 知识库入口：[INDEX.md](../INDEX.md)
 
@@ -10,16 +10,16 @@
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
-| [docs/knowledge/00-overview.md](../00-overview.md) | 3.4 | 00 — 产品概览与北极星 |
+| [docs/knowledge/00-overview.md](../00-overview.md) | 3.5 | 00 — 产品概览与北极星 |
 | [docs/knowledge/01-glossary.md](../01-glossary.md) | 2.5 | 01 — 术语表（Glossary） |
-| [docs/knowledge/02-architecture.md](../02-architecture.md) | 2.5 | 02 — 架构 |
-| [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 2.9 | 03 — 剪辑活路径（Editor Pipeline） |
-| [docs/knowledge/04-module-map.md](../04-module-map.md) | 2.5 | 04 — 模块地图 |
-| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 21.8 | 05 — 已知问题与近期修复 |
-| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 5.7 | 06 — 路线图 |
+| [docs/knowledge/02-architecture.md](../02-architecture.md) | 25.6 | 02 — 架构 |
+| [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 4.2 | 03 — 剪辑活路径（Editor Pipeline） |
+| [docs/knowledge/04-module-map.md](../04-module-map.md) | 2.7 | 04 — 模块地图 |
+| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 81.0 | 05 — 已知问题与近期修复 |
+| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 9.4 | 06 — 路线图 |
 | [docs/knowledge/07-coding-rules.md](../07-coding-rules.md) | 1.3 | 07 — 编码规则 |
 | [docs/knowledge/08-frozen-zones.md](../08-frozen-zones.md) | 1.7 | 08 — 冻结区（已修好功能锁死） |
-| [docs/knowledge/INDEX.md](../INDEX.md) | 2.5 | 拾光剪影 — 项目知识库 |
+| [docs/knowledge/INDEX.md](../INDEX.md) | 3.3 | 快速入口 |
 | [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 29.6 | 源文档清单（MANIFEST） |
 
 ## 根目录方案/报告（37）
@@ -71,7 +71,7 @@
 | [docs/API文档.md](../../docs/API文档.md) | 23.3 | ShortPlayAI Engine V1.0 API文档 |
 | [docs/CHANGELOG.md](../../docs/CHANGELOG.md) | 13.3 | 拾光剪影 — 变更日志 |
 | [docs/CODE_REVIEW_STANDARD.md](../../docs/CODE_REVIEW_STANDARD.md) | 9.7 | 拾光剪影 · 代码审查标准与流程（Code Review Standard & Process） |
-| [docs/P0_CAPCUT_ALIGN.md](../../docs/P0_CAPCUT_ALIGN.md) | 1.9 | 拾光剪影 vs 剪映：差距与分期验收 |
+| [docs/P0_CAPCUT_ALIGN.md](../../docs/P0_CAPCUT_ALIGN.md) | 2.1 | 拾光剪影 vs 剪映：差距与分期验收 |
 | [docs/help/copywriting.md](../../docs/help/copywriting.md) | 1.1 | ✍️ 文案生成 |
 | [docs/help/editor.md](../../docs/help/editor.md) | 1.5 | 剪辑功能 |
 | [docs/help/faq.md](../../docs/help/faq.md) | 3.8 | ❓ 常见问题 (FAQ) |
@@ -224,11 +224,110 @@
 | [.trae/skills/superpowers/SKILL.md](../../.trae/skills/superpowers/SKILL.md) | 3.2 | Superpowers — HTML5 2D/3D 游戏引擎 |
 | [.trae/skills/sweep-ai/SKILL.md](../../.trae/skills/sweep-ai/SKILL.md) | 1.8 | Sweep AI - JetBrains IDE 智能编程助手 |
 
-## 其他（3）
+## 其他（102）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md) | 1.5 | 代码审查清单（拾光剪影） |
 | [byox_visualizer/README_raw.md](../../byox_visualizer/README_raw.md) | 45.6 | Build your own &lt;insert-technology-here&gt; |
 | [byox_visualizer/代码讲解_剪辑模块.md](../../byox_visualizer/代码讲解_剪辑模块.md) | 6.2 | 逐行读代码 · 剪辑模块小白讲解（配合 byox 学习地图） |
+| [vendor/README.md](../../vendor/README.md) | 0.3 | infinite-canvas（MIT）— 由 scripts/setup_infinite_canvas.ps1 克隆 |
+| [vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md](../../vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md) | 4.4 | Design Thinking |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md) | 109.4 | React Best Practices |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md) | 3.4 | React Best Practices |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md) | 7.2 | Vercel React Best Practices |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md) | 1.6 | Sections |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md) | 0.6 | Rule Title Here |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md) | 1.8 | Do Not Put Effect Events in Dependency Arrays |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md) | 1.5 | Store Event Handlers in Refs |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md) | 1.0 | Initialize App Once, Not Per Mount |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md) | 1.1 | useEffectEvent for Stable Callback Refs |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md) | 1.1 | Prevent Waterfall Chains in API Routes |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md) | 1.2 | Check Cheap Conditions Before Async Flags |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md) | 2.2 | Defer Await Until Needed |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md) | 1.3 | Dependency-Based Parallelization |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md) | 0.7 | Promise.all() for Independent Operations |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md) | 2.5 | Strategic Suspense Boundaries |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md) | 2.4 | Prefer Statically Analyzable Paths |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md) | 2.8 | Avoid Barrel File Imports |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md) | 1.0 | Conditional Module Loading |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md) | 0.9 | Defer Non-Critical Third-Party Libraries |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md) | 0.8 | Dynamic Imports for Heavy Components |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md) | 1.2 | Preload Based on User Intent |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md) | 2.0 | Deduplicate Global Event Listeners |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md) | 2.0 | Version and Minimize localStorage Data |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md) | 1.7 | Use Passive Event Listeners for Scrolling Performance |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md) | 1.2 | Use SWR for Automatic Deduplication |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md) | 3.3 | Avoid Layout Thrashing |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md) | 2.0 | Cache Repeated Function Calls |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md) | 0.5 | Cache Property Access in Loops |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md) | 1.7 | Cache Storage API Calls |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md) | 0.8 | Combine Multiple Array Iterations |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md) | 1.2 | Early Return from Functions |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md) | 1.4 | Use flatMap to Map and Filter in One Pass |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md) | 1.0 | Hoist RegExp Creation |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md) | 0.9 | Build Index Maps for Repeated Lookups |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md) | 1.8 | Early Length Check for Array Comparisons |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md) | 2.3 | Use Loop for Min/Max Instead of Sort |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md) | 2.7 | Defer Non-Critical Work with requestIdleCallback |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md) | 0.5 | Use Set/Map for O(1) Lookups |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md) | 1.8 | Use toSorted() Instead of sort() for Immutability |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md) | 0.6 | Use Activity Component for Show/Hide |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md) | 1.2 | Animate SVG Wrapper Instead of SVG Element |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md) | 1.0 | Use Explicit Conditional Rendering |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md) | 0.8 | CSS content-visibility for Long Lists |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md) | 1.1 | Hoist Static JSX Elements |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md) | 2.3 | Prevent Hydration Mismatch Without Flickering |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md) | 0.9 | Suppress Expected Hydration Mismatches |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md) | 2.6 | Use React DOM Resource Hints |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md) | 1.9 | Use defer or async on Script Tags |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md) | 0.6 | Optimize SVG Precision |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md) | 2.1 | Use useTransition Over Manual Loading States |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md) | 1.0 | Defer State Reads to Usage Point |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md) | 0.8 | Narrow Effect Dependencies |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md) | 1.2 | Calculate Derived State During Rendering |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md) | 0.7 | Subscribe to Derived State |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md) | 3.0 | Use Functional setState Updates |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md) | 2.0 | Use Lazy State Initialization |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md) | 1.2 | Extract Default Non-primitive Parameter Value from Memoized Component to Constant |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md) | 1.2 | Extract to Memoized Components |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md) | 1.3 | Put Interaction Logic in Event Handlers |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md) | 2.2 | Don't Define Components Inside Components |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md) | 1.0 | Do not wrap a simple expression with a primitive result type in useMemo |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md) | 1.9 | Split Combined Hook Computations |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md) | 1.1 | Use Transitions for Non-Urgent Updates |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md) | 1.9 | Use useDeferredValue for Expensive Derived Renders |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md) | 1.8 | Use useRef for Transient Values |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md) | 2.0 | Use after() for Non-Blocking Operations |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md) | 2.7 | Authenticate Server Actions Like API Routes |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md) | 1.4 | Cross-Request LRU Caching |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md) | 2.2 | Per-Request Deduplication with React.cache() |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md) | 2.1 | Avoid Duplicate Serialization in RSC Props |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md) | 4.5 | Hoist Static I/O to Module Level |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md) | 1.8 | Avoid Shared Module State for Request Data |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md) | 1.6 | Parallel Data Fetching with Component Composition |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md) | 1.0 | Parallel Nested Data Fetching |
+| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md) | 1.0 | Minimize Serialization at RSC Boundaries |
+| [vendor/infinite-canvas/AGENTS.md](../../vendor/infinite-canvas/AGENTS.md) | 9.4 | AGENTS.md |
+| [vendor/infinite-canvas/CHANGELOG.md](../../vendor/infinite-canvas/CHANGELOG.md) | 18.9 | CHANGELOG |
+| [vendor/infinite-canvas/README.md](../../vendor/infinite-canvas/README.md) | 9.0 | 赞助商 |
+| [vendor/infinite-canvas/SECURITY.md](../../vendor/infinite-canvas/SECURITY.md) | 3.4 | Security Policy |
+| [vendor/infinite-canvas/canvas-agent/README.md](../../vendor/infinite-canvas/canvas-agent/README.md) | 6.3 | Infinite Canvas Agent |
+| [vendor/infinite-canvas/canvas-agent/agent-instructions.md](../../vendor/infinite-canvas/canvas-agent/agent-instructions.md) | 2.1 | Infinite Canvas Agent |
+| [vendor/infinite-canvas/canvas-agent/codex-server.md](../../vendor/infinite-canvas/canvas-agent/codex-server.md) | 93.9 | Codex App Server |
+| [vendor/infinite-canvas/docs/README.md](../../vendor/infinite-canvas/docs/README.md) | 1.5 | docs |
+| [vendor/infinite-canvas/docs/index.md](../../vendor/infinite-canvas/docs/index.md) | 1.3 | Infinite Canvas Documentation Index |
+| [vendor/infinite-canvas/docs/index.zh-CN.md](../../vendor/infinite-canvas/docs/index.zh-CN.md) | 1.3 | 无限画布文档索引 |
+| [vendor/infinite-canvas/plugins/canvas/README.md](../../vendor/infinite-canvas/plugins/canvas/README.md) | 8.0 | Infinite Canvas 画布节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/html/README.md](../../vendor/infinite-canvas/plugins/canvas/html/README.md) | 0.5 | HTML 节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/markdown/README.md](../../vendor/infinite-canvas/plugins/canvas/markdown/README.md) | 0.8 | Markdown 节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/panorama/README.md](../../vendor/infinite-canvas/plugins/canvas/panorama/README.md) | 0.6 | 3D 全景节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/registry/README.md](../../vendor/infinite-canvas/plugins/canvas/registry/README.md) | 1.9 | 官方插件注册表(集中构建 + 远程发布) |
+| [vendor/infinite-canvas/plugins/canvas/sdk/README.md](../../vendor/infinite-canvas/plugins/canvas/sdk/README.md) | 2.8 | @infinite-canvas/plugin-sdk |
+| [vendor/infinite-canvas/plugins/canvas/sticky-note/README.md](../../vendor/infinite-canvas/plugins/canvas/sticky-note/README.md) | 0.5 | 便利贴节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/svg/README.md](../../vendor/infinite-canvas/plugins/canvas/svg/README.md) | 0.5 | SVG 节点插件 |
+| [vendor/infinite-canvas/plugins/canvas/template/README.md](../../vendor/infinite-canvas/plugins/canvas/template/README.md) | 1.0 | 插件模板(TypeScript + SDK) |
+| [vendor/infinite-canvas/plugins/infinite-canvas/README.md](../../vendor/infinite-canvas/plugins/infinite-canvas/README.md) | 0.7 | Infinite Canvas Codex Plugin |
+| [vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md) | 1.8 | Infinite Canvas |
+| [vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md) | 1.6 | Open Infinite Canvas |
 

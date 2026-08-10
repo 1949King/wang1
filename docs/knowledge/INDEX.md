@@ -1,4 +1,4 @@
-# 拾光剪影 — 项目知识库
+﻿# 拾光剪影 — 项目知识库
 
 > 人和 Agent 共用的单一事实来源（Single Source of Truth）。  
 > 更新约定：改架构/活路径/已知问题后，先改本库，再改代码。  
@@ -56,9 +56,18 @@ app/modules/lego/clip_transform.py
 app/modules/lego/editor_export.py
 app/modules/lego/editor_burn.py
 app/modules/lego/editor_subtitle_panel.py
+app/modules/lego/editor_color_panel.py
+app/modules/lego/editor_props_panel.py
+app/modules/lego/editor_audio_panel.py
+app/modules/lego/editor_ai_panel.py
+app/modules/lego/ai_agent_panel.py
+app/modules/lego/editor_preview_ux.py
+app/modules/lego/editor_ux_commands.py
+app/core/proxy_media.py
 app/core/text_frame_map.py
 app/core/edit_commands.py
 app/core/filler_silence_detect.py
+app/core/transition_plugin_registry.py
 ```
 
 **拓展 / 闭环（按需）**
@@ -66,9 +75,16 @@ app/core/filler_silence_detect.py
 ```
 app/modules/lego/extensions_module.py
 app/modules/lego/account_ops_module.py
+app/modules/lego/drama_send_to_editor.py
+app/modules/lego/character_management_module.py
+app/core/canvas_bridge.py
+app/core/canvas_runtime.py
 app/plugins/drama_finder_plugin/
+vendor/infinite-canvas/   # scripts/setup_infinite_canvas.ps1
 ```
 
-**明确不做**：重写时间线架构、GPU 流式预览大改、完整转场库、Desktop 栈迁入（见 `docs/P0_CAPCUT_ALIGN.md`）。
+**明确不做**：重写时间线架构、GPU 流式预览大改、完整转场库、剪映商店包兼容、Desktop 栈迁入（见 `docs/P0_CAPCUT_ALIGN.md`）。
 
-知识库最近全量对照代码复核：**2026-08-04**。
+自研拓展：`.cube` LUT 导入 · `transition_plugin_registry`（`ITransitionPlugin`）。
+
+知识库最近全量对照代码复核：**2026-08-08**。

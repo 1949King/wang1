@@ -46,10 +46,15 @@ _import_video / _load_video
        → _sync_bgm_audio（跳过联动音频片，避免双开）
 ```
 
-播放中：`preview_quality=medium`，预览缩放 `FastTransformation`；停止后恢复原质量。  
+用户预览档：`EditorModule._user_preview_quality`（默认 `medium`=1/2）；UI 下拉 + Ctrl+1/2/3。  
+播放/scrub 中强制 `low`（1/4），停止/松手后恢复**用户档**（非「播放前偶然值」）。  
 降采样按片源**长边**限制分辨率，**保持宽高比**（禁止硬拉 16:9）。
 
-**Scrub 降载（A2）**：播放中 `playhead_moved` early-return；scrub 50ms 合并 + `_preview_fast`；松手后恢复质量。
+**代理预览**：`proxy_media.ProxyMediaManager`；导入后异步生成；`_ensure_preview_source_open` → `_maybe_proxy_preview_path`；片段 `proxy_path` 仅预览，`path` 导出真相源。缓存目录：`editor.proxy_cache_dir` / `SHIGUANG_PROXY_CACHE`。
+
+**Scrub 降载（A2+M2+A4）**：播放中 `playhead_moved` early-return；scrub 80ms 合并 + busy-drop；跨 clip `open_video(for_scrub=True)`；**scrub 走 `_render_timeline_frame` 合成**（转场/叠轨 WYSIWYG），拖动 stub 主音/BGM；跳过字幕/贴纸叠层；松手后恢复质量 + 音频 seek。未改冻结 `get_frame_at` / main-audio 块。
+
+**工具栏指令**：`editor_ux_commands.dispatch_editor_action` 与快捷键共用。折叠轨 `sleep_media_workers`；拖片 `set_clip_interaction_active`。
 
 ## 字幕 / AI 体力活（B0–B2）
 
@@ -59,7 +64,7 @@ AI/导入字幕 → SubtitleManager / text_frame_map 帧绑定
   → 「一键去水词」→ filler_silence_detect → 批量 B1
 ```
 
-限制：默认主视频轨；去水词后字幕列表未必自动重对齐时间轴；混合句内填充词默认不删。
+限制：默认主视频轨；去水词弹出勾选列表确认后执行（M5）；完成后可确认「重对齐字幕时间轴」（M3）；混合句内填充词默认不删。
 
 ## 导出
 
@@ -73,6 +78,14 @@ UI 导出
 ```
 
 改导出优先动 `editor_export` / `editor_burn`，保持宿主薄委托。
+
+**工程画幅 SSOT**：`EditorModule._sequence_format`（`app/core/sequence_format.py`）为比例/分辨率/fit 真相源。预览三路统一落到画幅后再显示：
+
+- CPU：`_fit_qimage_to_sequence` → 字幕/贴纸/手柄 → `_present_preview_frame`（再 contain 进控件）
+- GL：`_show_frame_gl` 先 letterbox 再上传纹理（滤镜预览与导出同画幅）
+- 多轨：`_place_bgr_on_sequence_canvas` 底图 + 叠层归一化坐标用 sequence 宽高
+
+默认漫剧 `9:16`·`1080×1920`·`contain`；旧工程无 `sequence`/`resolution` 时按首个视频片像素推断。
 
 ## 暂停/跳转
 

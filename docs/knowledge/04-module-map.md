@@ -17,7 +17,7 @@
 
 ### ADVANCED（默认关）
 
-copywriting · tasks · materials · models · characters …
+copywriting · tasks · materials · models · **characters（AI 画布）** …
 
 ### EXPERIMENTAL
 
@@ -38,10 +38,11 @@ account（默认关）· **extensions（拓展中心，默认开）** · perform
 | 档 | 模块 | 备注 |
 |----|------|------|
 | 可用 | settings · help · performance | 监控依赖 psutil / nvidia-smi |
-| 半通 | copywriting · tasks · models · characters · ai_clip_flow · extensions | 需 Provider / 重依赖；拓展中心默认开 |
+| 半通 | copywriting · tasks · models · ai_clip_flow · extensions | 需 Provider / 重依赖；拓展中心默认开 |
+| **AI 画布** | characters（原角色管理） | 镶嵌 [infinite-canvas](https://github.com/basketikun/infinite-canvas)；`canvas_bridge` 回流剪辑；角色库侧栏挂资产；需 Node + `setup_infinite_canvas.ps1` + PyQt6-WebEngine |
 | 易误导 | materials（在线） | 仍随机造卡 / MOCK 下载 |
 | 插件 | 短剧筛选 drama_finder_plugin | 真榜单依赖 Playwright/TikHub；默认静态缓存 |
-| 闭环 | account + viral | **C1/C2 ✅**；**C3 剪辑跳转 ✅**；**C3 短剧跳转 ⚠️**（仍 `target=plugins`，与 registry 不一致）；自动选题导入 ❌ |
+| 闭环 | account + viral | **C1/C2 ✅**；**C3 跳转 ✅（M1）**；**选题进时间线 ✅（M6）** |
 
 冷启动导航（无覆盖）：home · editor · settings · help · **extensions**。
 
