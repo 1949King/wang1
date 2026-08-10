@@ -60,6 +60,11 @@ downloads/
 # infinite-canvas vendor (clone via scripts/setup_infinite_canvas.ps1)
 vendor/infinite-canvas/
 
+# Externally-cloned skill repos (nested git repos, not vendored in-tree)
+app/skills/external/seedance2-skill/
+app/skills/external/video-use/
+app/skills/external/videocut-skills/
+
 # Local dev virtualenv (Windows, python 3.12)
 .venv312/
 
@@ -77,4 +82,8 @@ _verify/*.txt
 # Runtime-generated data (agent memory, drama pipeline scratch output)
 /data/agent_memory.jsonl
 /短剧AI剪辑输出/
+
+# Proxy/preview media caches (regenerated on demand)
+app/cache/
+assets/cache/
 
