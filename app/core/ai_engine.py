@@ -157,20 +157,9 @@ class AIEngine:
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
+        if getattr(self, "_initialized", False):
             return
         self._initialized = True
-
-    @classmethod
-    def get_instance(cls) -> 'AIEngine':
-        """返回全局单例（与模块级 `ai_engine` 是同一对象）。
-
-        供仍在用 `AIEngine.get_instance()` 旧写法的调用方使用；
-        新代码优先 `from app.core.ai_engine import ai_engine`。
-        """
-        if cls._instance is None:
-            cls()
-        return cls._instance
 
         # ── 客户端引用（延迟加载） ──
         self._cloud_api = None
@@ -194,7 +183,7 @@ class AIEngine:
 
         # ── 默认配置 ──
         self._default_providers = [
-            "deepseek", "doubao", "zhipu", "qwen", "openai"
+            "deepseek", "doubao", "zhipu", "qwen", "openai", "siliconflow",
         ]
 
         # ── 定价 ──
@@ -202,14 +191,54 @@ class AIEngine:
 
         logger.info("[AIEngine] 引擎初始化完成")
 
+    @classmethod
+    def get_instance(cls) -> 'AIEngine':
+        """返回全局单例（与模块级 `ai_engine` 是同一对象）。
+
+        供仍在用 `AIEngine.get_instance()` 旧写法的调用方使用；
+        新代码优先 `from app.core.ai_engine import ai_engine`。
+        """
+        if cls._instance is None:
+            cls()
+        return cls._instance
+
     # ────────────────────────────────────────────────────────────────
     # 延迟加载
     # ────────────────────────────────────────────────────────────────
 
     def _ensure_clients(self):
         """延迟加载 AI 客户端（首次调用时初始化）"""
-        if self._clients_loaded:
+        if getattr(self, "_clients_loaded", False):
             return
+        # 旧单例若曾错误初始化，补齐缺失属性
+        if not hasattr(self, "_cloud_api"):
+            self._cloud_api = None
+        if not hasattr(self, "_ollama_client"):
+            self._ollama_client = None
+        if not hasattr(self, "_stats"):
+            self._stats = {}
+        if not hasattr(self, "_call_history"):
+            self._call_history = []
+        if not hasattr(self, "_cache"):
+            self._cache = OrderedDict()
+        if not hasattr(self, "_circuit_open"):
+            self._circuit_open = {}
+        if not hasattr(self, "_default_providers"):
+            self._default_providers = [
+                "deepseek", "doubao", "zhipu", "qwen", "openai", "siliconflow",
+            ]
+        if not hasattr(self, "_pricing"):
+            self._pricing = dict(_DEFAULT_PRICING)
+        if not hasattr(self, "_max_cache_size"):
+            self._max_cache_size = 100
+        if not hasattr(self, "_default_cache_ttl"):
+            self._default_cache_ttl = 300
+        if not hasattr(self, "_circuit_breaker_threshold"):
+            self._circuit_breaker_threshold = 5
+        if not hasattr(self, "_circuit_breaker_timeout"):
+            self._circuit_breaker_timeout = 60
+        if not hasattr(self, "_max_history"):
+            self._max_history = 500
 
         try:
             from app.modules.lego.cloud_api import cloud_api_service

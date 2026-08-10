@@ -1,5 +1,20 @@
 # 05 — 已知问题与近期修复
 
+## 已修复（2026-08-11 · AIEngine.__init__ 被 get_instance() 腰斩，_clients_loaded 从未设置）
+
+**现象**：文案生成等所有走 `ai_engine.chat_with_fallback()`/`chat()` 的功能点击即弹「LLM 不可用：ai_engine: 'AIEngineEnhanced' object has no attribute '_clients_loaded'」。
+
+**根因**：`app/core/ai_engine.py` 的历史某次编辑把新增的 `get_instance()` classmethod **误粘贴在 `AIEngine.__init__` 方法体中间**（`self._initialized = True` 之后、`self._cloud_api = None` 之前）。由于 `get_instance` 与其后 `return cls._instance` 之后的那些语句缩进层级相同，Python 并不报语法错误，而是把 `self._cloud_api = None` 起到 `logger.info(...)` 结束的一大段代码全部解析成 `get_instance()` 里 `return` 之后的**不可达死代码**——效果是 `AIEngine.__init__` 实际只执行了 `self._initialized = True` 就结束，`_cloud_api`/`_ollama_client`/`_clients_loaded`/`_stats`/`_cache`/`_circuit_open`/`_default_providers`/`_pricing` 全部从未被设置。`_ensure_clients()` 里原来是裸 `if self._clients_loaded:` 直接属性访问，一旦被调用立刻 `AttributeError` 崩溃到 UI。
+
+**修复**（本次核实后提交，此前已在工作区修好但未提交）：
+- `get_instance()` 移回 `__init__` 方法体**之后**，不再腰斩 `__init__`。
+- `__init__`/`_ensure_clients` 里的直接属性访问改为 `getattr(self, "_xxx", default)`，即使今后再出现类似结构性错误也不会崩溃，只会静默走默认值。
+- `_ensure_clients()` 新增"旧单例若曾错误初始化，补齐缺失属性"防御块，兼容进程内已存在的、由旧代码错误构造的单例对象。
+
+**验证**：`.venv312` 下实测 `ai_engine._ensure_clients()` 与 `ai_engine.chat_with_fallback(...)` 完整跑通，`_clients_loaded` 正确存在且为 `True`，真实拿到一次云端 provider 回复；`py_compile` 通过。
+
+**用户侧**：若重启前仍复现此报错，是因为正在运行的进程内存里还是旧对象（Python 不会自动重载已导入模块），**重启程序**即可加载已修复的代码。
+
 ## 已完善（2026-08-11 · 技术债务清理第一批：死代码路径）
 
 对 2026-08-11 项目整体评估中列出的技术债务，本轮先做风险最低的一项：删除已确认零外部引用的死代码。
@@ -67,14 +82,18 @@
 |----|------|
 | 模块 | `characters` 导航改为「AI 画布」，默认启用；主界面镶嵌 infinite-canvas |
 | 运行时 | `app/core/canvas_runtime.py`：优先已有端口 → **`dist/` 静态秒开 :3001** → 否则 Vite :3000；进入模块自动预热 |
-| 桥接 | `app/core/canvas_bridge.py` :18765 — `/ingest`、`/inject.js`、「发送到剪辑」 |
+| 桥接 | `app/core/canvas_bridge.py` :18765 — `/ingest`、`/inject.js`、「发送到剪辑」、`/host/*` 模型同步、`/editor_outbox` 剪辑→画布 |
+| Agent | `app/core/canvas_agent_runtime.py`：进入画布自动预热 + 注入；工具栏「连接 Agent」→ :17371 |
+| 模型池 | `GET /host/ai-config-patch` → `shiguang-*`；专用 **`shiguang-aigc`**；**模型管理**广场卡片合并 AIGC 下拉 +「🎨 AIGC」目录页 |
+| 双向 | 画布→剪辑：`MATERIAL_TO_TIMELINE`；剪辑→画布：AI 页「发送选中片段到画布」→ `TIMELINE_TO_CANVAS` / outbox |
 | 慢启动 | 白屏「正在启动…」多为冷启动 Vite；跑 `scripts/setup_infinite_canvas.ps1`（含 `npm run build`）后应秒开 |
-| 角色库 | `CharacterStore` 保留；侧栏编辑 + `generated_assets` 挂载 |
+| 角色库 | `CharacterStore` 保留；侧栏编辑 + `generated_assets` 挂载；工具栏偏好同步到 bridge prefs |
 | 入轨 | `MATERIAL_TO_TIMELINE`；静图经 ffmpeg 转 3s still.mp4 |
 | 插帧 | 可选 `enable_interpolation` → `PreviewManager.set_interpolation_enabled`（线性补帧，非 RIFE） |
 | 安装 | `scripts/setup_infinite_canvas.ps1`；WebEngine 需 `PyQt6-WebEngine==6.10.0`（对齐 PyQt6 6.10） |
+| 端口 | 画布 `:3001`/`:3000` · 桥 `:18765` · Agent `:17371` |
 
-涉及：`character_management_module.py` · `canvas_bridge.py` · `canvas_runtime.py` · `module_registry.py` · `editor_module.py`
+涉及：`character_management_module.py` · `canvas_bridge.py` · `canvas_runtime.py` · `canvas_agent_runtime.py` · `module_registry.py` · `editor_module.py` · `editor_ai_panel.py`
 
 ## 已完善（2026-08-11 第四轮：AI 剪辑功能 + 剪辑体验专项）
 
@@ -839,6 +858,7 @@
 | viral / account_analyzer | 中 | **C2 已接线**：账号运营「爆款优化建议」；仍不吃平台真播放 API |
 | C3 短剧跳转 | 高 | **2026-08 开放**：仍 `target=plugins`，registry 无此 id（见上文「C3 短剧支路断裂」） |
 | TTS 类名不一致 | — | **已修**：`VoiceGenerator` 别名 + `generate_audio`；AIEngine TTS 适配器可初始化 |
+| `AIEngine.__init__` 误放进 `get_instance` return 后 | Agent 报 `_clients_loaded` 缺失、模型调用全失败 | **已修**：初始化体移回 `__init__`；`_ensure_clients` 容错补属性 |
 | 「AI 插帧」名不副实 | — | **已修**：文案改为线性补帧；默认仍关闭 |
 
 相对可信：settings · help · performance（监控）· copywriting（配好 Provider；失败不再静默假 AI）· materials **本地**导入 · 短剧筛选（插件中心启用后）。
