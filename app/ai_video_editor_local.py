@@ -869,7 +869,9 @@ if __name__ == "__main__":
                 print("视频模式用法: python ai_video_editor_local.py video \"视频文件路径.mp4\" \"输出文件路径.mp4\" [--lip-sync]")
         elif mode == "manage-models":
             # 直接调用模型管理器
-            os.system(f"python model_manager.py {' '.join(sys.argv[2:])}")
+            # 安全修复 VG011: 禁用 os.system + f-string 拼接（命令注入风险），
+            # 改用 subprocess.run 列表参数，shell=False 防止参数注入
+            subprocess.run([sys.executable, "model_manager.py"] + sys.argv[2:])
         else:
             print("未知模式，请使用 'theme', 'video', 或 'manage-models'。")
     else:

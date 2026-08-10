@@ -8,7 +8,10 @@ B2 回滚标记 (2026-05-31):
 SSOT: 推荐使用本文件的 CacheManager, 与 asset_manager 保持一致
 """
 import os
+import logging
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class CacheManager:
@@ -56,8 +59,8 @@ class CacheManager:
                     fp = os.path.join(dirpath, f)
                     if os.path.exists(fp):
                         total += os.path.getsize(fp)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[CacheManager] 获取缓存大小失败: {e}")
         return total
 
     def has_cache(self, asset_id: str) -> bool:

@@ -51,8 +51,8 @@ class Response:
             return self.data
         try:
             return json.loads(self.data) if isinstance(self.data, str) else None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AsyncClient] JSON解析失败: {e}")
             return None
     
     def text(self) -> str:

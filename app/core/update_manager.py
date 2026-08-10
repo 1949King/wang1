@@ -178,8 +178,8 @@ class UpdateManager:
             if info and info.has_update and self._on_update_available:
                 try:
                     self._on_update_available(info)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[UpdateManager] 更新通知回调失败: {e}")
             return info
         except Exception as e:
             logger.error(f"检查更新失败: {e}")

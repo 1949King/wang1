@@ -13,8 +13,11 @@ import time
 import uuid
 import threading
 import json
+import logging
 
 from .core import EventBus, EventType, DataBus
+
+logger = logging.getLogger(__name__)
 
 
 class SkillState(Enum):
@@ -246,7 +249,7 @@ class Skill(ABC):
             for attempt in range(step.retry_count + 1):
                 try:
                     if step.handler:
-                        result = step.handler(self._context)
+                        result = self._run_handler_with_timeout(step)
                     else:
                         result = StepResult(success=True)
                     
@@ -317,6 +320,45 @@ class Skill(ABC):
             "state": self._state.value
         }
     
+    def _run_handler_with_timeout(self, step: 'SkillStep') -> StepResult:
+        """带超时保护地执行单个步骤 handler。
+
+        修复：SkillStep.timeout 字段此前只在 dataclass 里存了值，
+        execute() 从来没有读取过它——handler 卡死（比如网络请求/子进程
+        hang 住）会让整个 Skill 无限期挂起，用户只能看到进度条不动，
+        没有任何反馈。这里用后台线程 + join(timeout) 做"软超时"：
+        超时后把该步骤标记为失败并让流程继续往下走，但由于 Python
+        无法强制杀死线程，未返回的 handler 线程会继续在后台运行到
+        自然结束（不会造成主线程假死，只是资源未必立即释放）。
+        """
+        timeout = step.timeout if step.timeout and step.timeout > 0 else None
+        if timeout is None:
+            try:
+                return step.handler(self._context)
+            except Exception as e:
+                return StepResult(success=False, error=str(e))
+
+        box: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                box["result"] = step.handler(self._context)
+            except Exception as e:
+                box["error"] = str(e)
+
+        t = threading.Thread(target=_run, daemon=True, name=f"skill_step_{step.id}")
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            logger.warning(
+                f"[SkillEngine] 步骤 '{step.name}' 超过 timeout={timeout}s 未返回，"
+                f"标记为失败并继续后续步骤（后台线程未被强制终止，会自然结束）"
+            )
+            return StepResult(success=False, error=f"步骤执行超时（>{timeout}s）")
+        if "error" in box:
+            return StepResult(success=False, error=box["error"])
+        return box.get("result", StepResult(success=True))
+
     def pause(self):
         """暂停执行"""
         self._pause_flag = True
@@ -429,7 +471,18 @@ class SkillRegistry:
                 "skill_version": temp.skill_version
             })
         return result
-    
+
+    def list_all(self) -> List:
+        """列出所有 Skill 实例（兼容拓展中心调用）"""
+        result = []
+        for skill_id, skill_class in self._skills.items():
+            try:
+                temp = skill_class()
+                result.append(temp)
+            except Exception as e:
+                logger.debug("Skill实例化失败，跳过: %s", e)
+        return result
+
     @classmethod
     def get_instance(cls) -> 'SkillRegistry':
         return cls()
@@ -555,31 +608,21 @@ class SkillEngine:
         return self._registry.list_skills()
     
     def get_latest_skills(self) -> Dict[str, Any]:
-        """获取最新的 Skill
-        
-        返回:
-            Dict: 包含最新skill列表和clawhud链接的字典
+        """获取最新的 Skill（当前无远程更新源，仅返回本地已注册 Skill）
+
+        如实说明：此前这里会请求 ``api.example.com``/``clawhud.example.com``
+        ——这两个是 RFC 2606 保留的文档示例域名，必定连不通，之前的代码是把
+        "尝试请求→必然失败→回退本地列表"包装成正常流程，还会在失败分支里
+        照样塞一个不存在的 ``clawhud_link``，一旦被 UI 展示出来就是死链接。
+        当前项目没有接入任何真实的 Skill 远程分发服务，直接如实返回本地
+        Skill 列表，不再假装发起了一次远程请求。
         """
-        try:
-            # 尝试从服务器获取最新的skill
-            # 这里是模拟实现，实际项目中应该调用真实的API
-            import requests
-            response = requests.get("https://api.example.com/skills/latest", timeout=5)
-            latest_skills = response.json()
-            
-            return {
-                "success": True,
-                "skills": latest_skills,
-                "clawhud_link": "https://clawhud.example.com/latest-skills"
-            }
-        except Exception as e:
-            # 如果获取失败，返回本地可用的skill和clawhud链接
-            return {
-                "success": False,
-                "error": str(e),
-                "skills": self.list_available_skills(),
-                "clawhud_link": "https://clawhud.example.com/latest-skills"
-            }
+        return {
+            "success": True,
+            "skills": self.list_available_skills(),
+            "source": "local",
+            "note": "当前未接入远程 Skill 分发服务，以下为本地已注册的 Skill",
+        }
     
     @classmethod
     def get_instance(cls) -> 'SkillEngine':

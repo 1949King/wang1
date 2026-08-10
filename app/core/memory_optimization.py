@@ -281,8 +281,8 @@ class MemoryPool:
                 # 使用pickle估算
                 import pickle
                 return len(pickle.dumps(data))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[MemoryOptimization] 估算内存块大小失败: {e}")
             return 0
     
     def clear(self):

@@ -77,8 +77,8 @@ def _extract_json(text: str) -> Optional[list]:
         data = json.loads(text)
         if isinstance(data, list):
             return data
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        logger.debug(f"[LLMClipper] JSON解析失败: {e}")
     # 尝试找 [...]
     m = re.search(r"\[[\s\S]*?\]", text)
     if m:
@@ -86,8 +86,8 @@ def _extract_json(text: str) -> Optional[list]:
             data = json.loads(m.group())
             if isinstance(data, list):
                 return data
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"[LLMClipper] JSON块解析失败: {e}")
     return None
 
 
@@ -177,6 +177,7 @@ class LLMClipper:
 
     def __init__(self, ollama_model: str = ""):
         self._ollama_model = ollama_model  # 空=自动选择第一个已安装模型
+        self.last_error: str = ""
 
     # ---- Ollama 检测 ----
 
@@ -190,6 +191,22 @@ class LLMClipper:
             return False
 
     @staticmethod
+    def ollama_unavailable_reason() -> str:
+        """Ollama/模型不可用时的用户说明"""
+        try:
+            from app.modules.lego.ollama_client import OllamaClient
+            client = OllamaClient()
+            report = client.diagnose()
+            msg = OllamaClient.format_diagnose_report(report)
+            if report.get("service_running"):
+                models = client.list_models()
+                if not models:
+                    msg += "\n\n服务已运行但未安装模型。请执行: ollama pull qwen2.5:7b"
+            return msg
+        except Exception as e:
+            return f"无法诊断 Ollama: {e}"
+
+    @staticmethod
     def list_ollama_models() -> List[str]:
         """列出已安装的 Ollama 模型名"""
         try:
@@ -201,7 +218,10 @@ class LLMClipper:
 
     def is_available(self) -> bool:
         """LLM 裁剪是否可用（需要 Ollama 运行且有模型）"""
-        return self.is_ollama_available() and len(self.list_ollama_models()) > 0
+        ok = self.is_ollama_available() and len(self.list_ollama_models()) > 0
+        if not ok:
+            self.last_error = self.ollama_unavailable_reason()
+        return ok
 
     # ---- 核心流程 ----
 
@@ -232,10 +252,16 @@ class LLMClipper:
             输出视频路径 或 None
         """
         t0 = time.time()
+        self.last_error = ""
 
         # 1. 验证视频文件
         if not os.path.isfile(video_path):
-            logger.error(f"视频文件不存在: {video_path}")
+            self.last_error = f"视频文件不存在: {video_path}"
+            logger.error(self.last_error)
+            return None
+
+        if not self.is_available():
+            self.last_error = self.last_error or self.ollama_unavailable_reason()
             return None
 
         # 2. 获取字幕/对话文本
@@ -274,14 +300,23 @@ class LLMClipper:
                         f"耗时 {time.time() - t0:.1f}s")
         else:
             # 标准流程：Whisper ASR
+            try:
+                from app.core.ai.whisper_asr import is_available as whisper_ok, unavailable_reason
+            except Exception:
+                whisper_ok = lambda: False
+                unavailable_reason = lambda: "Whisper 不可用"
+            if not whisper_ok():
+                self.last_error = unavailable_reason()
+                return None
             segments = transcribe_whisper(video_path, hotwords=hotwords)
             srt_text = segments_to_srt_text(segments) if segments else ""
             logger.info(f"[LLM] 字幕生成完成，{len(segments or [])} 条，"
                         f"耗时 {time.time() - t0:.1f}s")
 
         if not srt_text:
-            logger.warning("[LLM] 无字幕文本，回退到原视频前15秒")
-            return self._fallback_clip(video_path, output_dir)
+            self.last_error = "语音识别无对白文本，无法做 LLM 裁剪（请换有对白的素材或检查 Whisper）"
+            logger.warning("[LLM] %s", self.last_error)
+            return None
 
         # 3. 构建 prompt
         from app.core.ai.prompt_templates import build_prompt as _build_prompt
@@ -290,7 +325,8 @@ class LLMClipper:
             user_hint=prompt, max_duration=max_duration,
         )
         if not msgs:
-            logger.error(f"模板不存在: {template_key}")
+            self.last_error = f"提示词模板不存在: {template_key}"
+            logger.error(self.last_error)
             return None
 
         # 注入剧情上下文到 user prompt（如果有）
@@ -303,14 +339,21 @@ class LLMClipper:
         # 4. 调用 Ollama
         segments_to_keep = self._call_ollama(msgs)
         if not segments_to_keep:
-            logger.warning("[LLM] LLM 没有返回有效时间段，回退到原视频前15秒")
-            return self._fallback_clip(video_path, output_dir)
+            self.last_error = (
+                self.last_error
+                or "LLM 未返回有效时间段。请检查 Ollama 模型输出，或换更明确的提示词。"
+            )
+            logger.warning("[LLM] %s", self.last_error)
+            return None
 
         logger.info(f"[LLM] Ollama 推理完成，返回 {len(segments_to_keep)} 段，"
                     f"耗时 {time.time() - t0:.1f}s")
 
         # 5. MLT/FFmpeg 切片 + 拼接
         output_path = self._ffmpeg_clip(video_path, segments_to_keep, output_dir)
+        if not output_path or not os.path.isfile(output_path):
+            self.last_error = "切片导出失败（FFmpeg/MLT 未产出文件）"
+            return None
         logger.info(f"[LLM] 智能剪辑完成: {output_path}，总耗时 {time.time() - t0:.1f}s")
         return output_path
 
@@ -327,7 +370,8 @@ class LLMClipper:
         try:
             from app.modules.lego.ollama_client import OllamaClient
         except ImportError:
-            logger.warning("无法导入 OllamaClient")
+            self.last_error = "无法导入 OllamaClient"
+            logger.warning(self.last_error)
             return None
 
         client = OllamaClient()
@@ -337,6 +381,7 @@ class LLMClipper:
         if not model:
             available = self.list_ollama_models()
             if not available:
+                self.last_error = "Ollama 无已安装模型，请执行 ollama pull <模型名>"
                 return None
             model = available[0]
 
@@ -355,9 +400,19 @@ class LLMClipper:
 
             logger.debug(f"[LLM] Ollama 原始响应 ({len(full)} 字符):\n{full[:500]}")
 
+            if not (full or "").strip():
+                self.last_error = f"模型 {model} 返回空内容"
+                return None
+
+            if full.lstrip().startswith("错误:"):
+                self.last_error = f"Ollama 调用失败: {full.strip()}"
+                logger.warning(f"[LLM] {self.last_error}")
+                return None
+
             # 解析 JSON
             segments = _extract_json(full)
             if not segments:
+                self.last_error = f"无法解析模型 {model} 返回的时间段 JSON"
                 logger.warning("[LLM] 无法解析 LLM 响应中的 JSON")
                 return None
 
@@ -377,9 +432,12 @@ class LLMClipper:
                     })
                 except ValueError:
                     continue
+            if not result:
+                self.last_error = "模型返回了 JSON，但没有有效 start/end 时间段"
             return result if result else None
 
         except Exception as e:
+            self.last_error = f"Ollama 调用失败: {e}"
             logger.warning(f"[LLM] Ollama 调用失败: {e}")
             return None
 
@@ -536,12 +594,12 @@ class LLMClipper:
             for tf in temp_files:
                 try:
                     os.remove(tf)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[LLMClipper] 删除临时文件失败 {tf}: {e}")
             try:
                 os.remove(concat_file)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[LLMClipper] 删除合并文件失败 {concat_file}: {e}")
 
         if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
             return out_path

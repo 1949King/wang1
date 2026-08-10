@@ -49,14 +49,14 @@ class ProxyStrategy(Enum):
 
 @dataclass
 class ProxyConfig:
-    """代理生成参数（对齐 Shotcut 默认值）"""
-    target_width: int = 960          # 目标宽度（16:9 → 540p）
-    target_height: int = 540
+    """代理生成参数（对齐 Shotcut 默认值；漫剧竖屏按长边限制，不强制 16:9 pad）"""
+    target_width: int = 960          # 长边上限（横/竖均适用）
+    target_height: int = 960
     video_bitrate: str = "1500k"     # 视频码率
     audio_bitrate: str = "128k"      # 音频码率
     codec: str = "libx264"
     preset: str = "ultrafast"        # 编码速度优先（代理是临时文件）
-    fps: int = 30                    # 输出帧率（不限源）
+    fps: int = 0                     # 0=跟随源帧率
     audio_sample_rate: int = 44100
     # 自动策略阈值：源超过此规格才生成代理
     auto_width_threshold: int = 1280
@@ -94,6 +94,29 @@ class ProxyMediaManager:
         # 任务表：source_path -> {status, proxy_path, error, progress, started_at}
         self._tasks: Dict[str, Dict] = {}
         self._lock = threading.RLock()
+        self.enabled = strategy != ProxyStrategy.DISABLED
+
+    def set_cache_dir(self, cache_dir: str) -> None:
+        """迁移代理缓存根目录（设置页可选 NVMe）。"""
+        if not cache_dir:
+            return
+        path = os.path.normpath(os.path.abspath(cache_dir))
+        os.makedirs(path, exist_ok=True)
+        with self._lock:
+            self.cache_dir = path
+        logger.info("[proxy] 缓存目录: %s", path)
+
+    def set_strategy(self, strategy: ProxyStrategy) -> None:
+        self.strategy = strategy
+        self.enabled = strategy != ProxyStrategy.DISABLED
+
+    def resolve_for_preview(self, source_path: str) -> str:
+        """预览用路径：已有代理则返回代理，否则返回源。"""
+        if not source_path or not self.enabled:
+            return source_path
+        if self.has_proxy(source_path):
+            return self.get_proxy_path(source_path)
+        return source_path
 
     # ---------- 判定 ----------
 
@@ -196,18 +219,22 @@ class ProxyMediaManager:
 
         logger.info(f"[proxy] 开始生成: {os.path.basename(source_path)} -> {proxy_path}")
         try:
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
+                # Windows 默认 gbk 读 ffmpeg 日志易 UnicodeDecodeError；用字节再解码
+                creationflags=creationflags,
             )
-            # 简单进度：ffmpeg 输出含 time=00:00:XX
-            for line in proc.stderr:
-                if on_progress and "time=" in line:
-                    # 极简进度：只能拿当前时间戳，无法拿总时长
-                    # 真实实现需要先 analyze 拿 duration
-                    on_progress(0.5)
+            err_chunks: List[bytes] = []
+            if proc.stderr is not None:
+                for raw in proc.stderr:
+                    err_chunks.append(raw)
+                    if on_progress and b"time=" in raw:
+                        on_progress(0.5)
             rc = proc.wait()
             if rc == 0 and os.path.isfile(proxy_path) and os.path.getsize(proxy_path) > 0:
                 with self._lock:
@@ -215,7 +242,7 @@ class ProxyMediaManager:
                     self._tasks[key]["progress"] = 1.0
                 logger.info(f"[proxy] 生成成功: {proxy_path} ({os.path.getsize(proxy_path)} bytes)")
                 return True
-            err = proc.stderr.read() if proc.stderr else ""
+            err = b"".join(err_chunks).decode("utf-8", errors="replace")
             with self._lock:
                 self._tasks[key]["status"] = _TASK_STATUS_FAILED
                 self._tasks[key]["error"] = (err or "")[-300:]
@@ -236,33 +263,67 @@ class ProxyMediaManager:
             if on_done:
                 try:
                     on_done(ok, self.get_proxy_path(source_path))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ProxyMedia] 代理生成回调失败: {e}")
         t = threading.Thread(target=_worker, daemon=True, name=f"proxy-{os.path.basename(source_path)}")
         t.start()
         return t
 
     # ---------- 内部 ----------
 
+    def _find_ffmpeg(self) -> str:
+        """优先项目内 ffmpeg，否则 PATH。"""
+        try:
+            from app.core.ffmpeg_utils import find_ffmpeg
+            p = find_ffmpeg()
+            if p:
+                return str(p)
+        except Exception:
+            pass
+        return "ffmpeg"
+
     def _build_ffmpeg_cmd(self, source_path: str, proxy_path: str) -> List[str]:
-        """构造 ffmpeg 转码命令"""
+        """构造 ffmpeg 转码命令：长边限制，保持片源宽高比（漫剧 9:16 友好）。"""
         cfg = self.config
-        vf = f"scale=w={cfg.target_width}:h={cfg.target_height}:force_original_aspect_ratio=decrease,pad={cfg.target_width}:{cfg.target_height}:(ow-iw)/2:(oh-ih)/2"
+        long_edge = max(int(cfg.target_width or 960), int(cfg.target_height or 960))
+        # 长边压到 long_edge，短边按比例（-2 保证偶数边）
+        vf = (
+            f"scale='if(gt(iw,ih),min({long_edge},iw),-2)'"
+            f":'if(gt(ih,iw),min({long_edge},ih),-2)'"
+        )
         cmd = [
-            "ffmpeg", "-y",
+            self._find_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
             "-i", source_path,
+        ]
+        if int(cfg.fps or 0) > 0:
+            cmd += ["-r", str(int(cfg.fps))]
+        cmd += [
             "-vf", vf,
-            "-r", str(cfg.fps),
             "-c:v", cfg.codec,
             "-preset", cfg.preset,
             "-b:v", cfg.video_bitrate,
             "-c:a", "aac",
             "-b:a", cfg.audio_bitrate,
             "-ar", str(cfg.audio_sample_rate),
-            "-movflags", "+faststart",  # 流式播放友好
+            "-movflags", "+faststart",
             proxy_path,
         ]
         return cmd
+
+    def clear_idle_cache(self, max_age_days: float = 14.0) -> int:
+        """删除闲置超过 max_age_days 的代理文件。"""
+        import time as _time
+        cutoff = _time.time() - max(1.0, float(max_age_days)) * 86400.0
+        deleted = 0
+        for item in self.list_cached():
+            if float(item.get("mtime", 0) or 0) >= cutoff:
+                continue
+            try:
+                os.remove(item["path"])
+                deleted += 1
+            except OSError as e:
+                logger.debug("[ProxyMedia] 清理闲置代理失败: %s", e)
+        return deleted
 
     # ---------- 缓存管理 ----------
 
@@ -299,8 +360,8 @@ class ProxyMediaManager:
             try:
                 os.remove(item["path"])
                 count += 1
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"[ProxyMedia] 删除缓存文件失败: {e}")
         return count
 
     def clear_cache_lru(self, keep_mb: float = 1024.0) -> int:
@@ -318,8 +379,8 @@ class ProxyMediaManager:
                 os.remove(item["path"])
                 total_mb -= item["size_bytes"] / (1024 * 1024)
                 deleted += 1
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"[ProxyMedia] LRU清理缓存失败: {e}")
         return deleted
 
 

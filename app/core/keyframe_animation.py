@@ -530,8 +530,8 @@ class AnimatableProperties:
             all_values = self.get_all_values(time_sec)
             try:
                 return self._link_expressions[prop_name](all_values)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[KeyframeAnimation] 链接表达式求值失败: {e}")
 
         channel = self._channels.get(prop_name)
         if channel:

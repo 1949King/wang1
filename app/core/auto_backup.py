@@ -155,8 +155,8 @@ class AutoBackupManager(QObject if False else object):
             if self._on_backup_callback:
                 try:
                     self._on_backup_callback(backup_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[AutoBackup] 备份回调执行失败: {e}")
             return True
         except Exception as e:
             logger.error(f"自动备份失败: {e}")
@@ -175,8 +175,8 @@ class AutoBackupManager(QObject if False else object):
             for _, path in files[self._max_versions:]:
                 try:
                     os.remove(path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(f"[AutoBackup] 删除旧备份失败 {path}: {e}")
         except Exception as e:
             logger.warning(f"清理旧备份失败: {e}")
 
@@ -211,8 +211,8 @@ class AutoBackupManager(QObject if False else object):
                         "size": stat.st_size,
                         "age_seconds": time.time() - stat.st_mtime,
                     })
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"[AutoBackup] 列出备份目录失败: {e}")
         results.sort(key=lambda r: r["age_seconds"])
         return results
 

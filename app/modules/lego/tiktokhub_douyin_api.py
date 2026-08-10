@@ -73,8 +73,8 @@ def _get_tikhub_token() -> str:
                     for line in f:
                         if line.strip().startswith("TIKHUB_API_TOKEN"):
                             return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("读取TIKHUB_API_TOKEN失败: %s", e)
     return ""
 
 

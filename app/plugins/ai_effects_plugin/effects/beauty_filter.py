@@ -4,6 +4,7 @@
 支持磨皮、美白、瘦脸、大眼等多种美颜效果
 """
 
+import os
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, Tuple

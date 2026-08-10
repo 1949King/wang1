@@ -103,8 +103,8 @@ class BrowserAutomation:
         for page in self._pages.values():
             try:
                 page.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Automation] 关闭页面失败: {e}")
         if self._context:
             self._context.close()
         if self._browser:
@@ -167,8 +167,8 @@ class BrowserAutomation:
                 data["platform"] = platform
                 data["timestamp"] = time.time()
                 data["url"] = cfg.analytics_url
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Automation] 采集数据失败: {e}")
 
             screenshot_path = os.path.join(
                 self._profiles_dir, f"{platform}_analytics_{int(time.time())}.png"
@@ -267,13 +267,13 @@ class BrowserAutomation:
                                 "title": text[:100],
                                 "timestamp": time.time()
                             })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Automation] 提取搜索结果失败: {e}")
 
                 try:
                     page.goto("about:blank")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Automation] 跳转空白页失败: {e}")
 
             logger.info(f"爬取完成，共 {len(results)} 条数据")
             return results

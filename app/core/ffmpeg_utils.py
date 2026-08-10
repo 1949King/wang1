@@ -241,8 +241,8 @@ def probe_video_duration(filepath: str) -> float:
             )
             if r.returncode == 0 and r.stdout.strip():
                 return float(r.stdout.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[FFmpegUtils] ffprobe获取时长失败: {e}")
 
     # ffmpeg 兜底
     ffmpeg = find_ffmpeg()
@@ -258,7 +258,7 @@ def probe_video_duration(filepath: str) -> float:
             if m:
                 h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
                 return h * 3600 + mi * 60 + s
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[FFmpegUtils] ffmpeg获取时长兜底失败: {e}")
 
     return 0.0

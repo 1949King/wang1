@@ -93,11 +93,14 @@ class LocalAssetManager:
     _instance: Optional['LocalAssetManager'] = None
     
     ASSET_TYPES = {
-        "video": {"extensions": [".mp4", ".mov", ".avi", ".wmv", ".mkv"], "name": "视频"},
-        "audio": {"extensions": [".mp3", ".wav", ".aac", ".flac", ".ogg"], "name": "音频"},
-        "image": {"extensions": [".jpg", ".jpeg", ".png", ".gif", ".svg"], "name": "图片"},
-        "subtitle": {"extensions": [".srt", ".ass", ".vtt"], "name": "字幕"},
-        "template": {"extensions": [".json", ".prproj", ".aep"], "name": "模板"}
+        "video": {"extensions": [".mp4", ".mov", ".avi", ".wmv", ".mkv", ".webm", ".flv"], "name": "视频"},
+        "audio": {"extensions": [".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a"], "name": "音频"},
+        "image": {"extensions": [".jpg", ".jpeg", ".png", ".gif", ".svg", ".bmp", ".webp"], "name": "图片"},
+        "subtitle": {"extensions": [".srt", ".ass", ".vtt", ".sbv"], "name": "字幕"},
+        "template": {"extensions": [".json", ".prproj", ".aep", ".fcpxml"], "name": "模板"},
+        "effect": {"extensions": [".json"], "name": "特效"},
+        "transition": {"extensions": [".json"], "name": "转场"},
+        "sticker": {"extensions": [".png", ".gif", ".webp", ".svg"], "name": "贴纸"}
     }
     
     def __new__(cls):
@@ -253,23 +256,23 @@ class LocalAssetManager:
                     metadata["duration"] = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
                     metadata["resolution"] = f"{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}"
                     cap.release()
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"[LocalAssetManager] cv2不可用: {e}")
         elif asset_type == "audio":
             try:
                 import librosa
                 duration = librosa.get_duration(filename=file_path)
                 metadata["duration"] = duration
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"[LocalAssetManager] librosa不可用: {e}")
         elif asset_type == "image":
             try:
                 from PIL import Image
                 with Image.open(file_path) as img:
                     width, height = img.size
                     metadata["resolution"] = f"{width}x{height}"
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"[LocalAssetManager] PIL不可用: {e}")
         
         return metadata
     

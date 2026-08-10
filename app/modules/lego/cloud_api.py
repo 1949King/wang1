@@ -31,7 +31,17 @@ class CloudAPIService:
 
     _OLLAMA_SENTINEL: str = "local"
 
+    def __new__(cls):
+        """单例模式实现"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
+        """初始化（仅首次调用时执行）"""
         if self._initialized:
             return
         self._initialized: bool = True
@@ -55,29 +65,6 @@ class CloudAPIService:
         新代码请直接用 self._registry（names()/resolve()），避免触发 import。
         """
         return {name: self._registry.resolve(name) for name in self._registry.names()}
-
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self):
-        if self._initialized:
-            return
-        self._initialized: bool = True
-        self._configs: dict[str, APIConfig] = {}
-        self._providers: dict[str, BaseCloudProvider] = {}
-        self._load_configs()
-
-        self._ollama_client: Any | None = None
-        try:
-            from .ollama_client import ollama_client
-            self._ollama_client = ollama_client
-        except ImportError:
-            logger.warning("Ollama 客户端未找到")
 
     def _get_secure_storage(self):
         try:

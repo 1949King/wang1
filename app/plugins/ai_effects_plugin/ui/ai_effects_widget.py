@@ -40,7 +40,14 @@ class EffectProcessorThread(QThread):
             
             # 执行实际的特效处理
             result = self.plugin.apply_effect(self.frame_data, self.params)
-            
+
+            # 修复：main.apply_effect 内部会吞掉异常并原样返回输入帧当"处理完成"，
+            # 这里读取 _last_error 区分真失败 vs 真成功，避免假成功提示
+            last_error = getattr(self.plugin, "_last_error", "") or ""
+            if last_error:
+                self.error_occurred.emit(last_error)
+                return
+
             self.progress_updated.emit(100)
             self.processing_complete.emit(result)
             
@@ -471,7 +478,7 @@ class AIEffectsWidget(QWidget):
         self.btn_soft.setToolTip("柔和梦幻的美颜效果")
         
         self.btn_glamour = QPushButton("精致妆容")
-        self.btn_glamourToolTip("明显的美妆效果")
+        self.btn_glamour.setToolTip("明显的美妆效果")
         
         self.btn_korean = QPushButton("韩式偶像")
         self.btn_korean.setToolTip("韩流明星风格")
@@ -628,6 +635,24 @@ class AIEffectsWidget(QWidget):
         # 操作按钮
         self.reset_btn.clicked.connect(self._reset_params)
         self.apply_btn.clicked.connect(self._apply_effect)
+        # 修复：此前创建了控件但从未 connect，点击「应用预设」完全无响应（死按钮）
+        self.preset_btn.clicked.connect(self._apply_global_preset)
+
+    def _apply_global_preset(self):
+        """顶部「应用预设」按钮：目前只有美颜标签页有真正的预设方案，
+        其它特效类型没有预设数据源——与其假装应用了什么，不如如实提示。"""
+        idx = self.tab_widget.currentIndex()
+        tab_names = ['style_transfer', 'background_replace',
+                     'super_resolution', 'beauty_filter', 'object_removal']
+        effect_type = tab_names[idx] if 0 <= idx < len(tab_names) else ''
+        if effect_type == 'beauty_filter':
+            self._apply_beauty_preset('natural')
+            QMessageBox.information(self, "预设已应用", "已应用「自然清新」美颜预设，可在下方按钮切换其它风格")
+        else:
+            QMessageBox.information(
+                self, "暂无预设",
+                "当前特效类型暂未提供快捷预设，请手动调节参数后点击「应用效果」"
+            )
     
     @pyqtSlot(int)
     def _on_tab_changed(self, index: int):
@@ -666,7 +691,9 @@ class AIEffectsWidget(QWidget):
     
     def _apply_beauty_preset(self, preset_name: str):
         """应用美颜预设"""
-        from .effects.beauty_filter import SkinRetouchingPreset
+        # 修复：本文件在 ui/ 子包下，`.effects` 会被解析成不存在的 ui.effects，
+        # 点击预设按钮必定 ImportError；正确路径是上一级包下的 effects.beauty_filter
+        from ..effects.beauty_filter import SkinRetouchingPreset
         
         preset = SkinRetouchingPreset.get_preset(preset_name)
         if not preset:

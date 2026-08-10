@@ -296,7 +296,8 @@ class TasksModule(BaseModule):
         """初始化底层任务管理器 — 注册真实处理器"""
         try:
             from .batch_task_manager import BatchTaskManager, TaskStatus, TaskPriority
-            self._batch_mgr = BatchTaskManager(max_workers=2)
+            # 改用跨模块共享单例：性能监控/首页统计都要读同一份真实任务队列状态
+            self._batch_mgr = BatchTaskManager.get_instance(max_workers=2)
             self._batch_mgr.register_processor("剪辑", self._clip_processor)
             self._batch_mgr.register_processor("AI生成", self._ai_gen_processor)
             self._batch_mgr.register_processor("导出", self._export_processor)
@@ -600,14 +601,15 @@ class TasksModule(BaseModule):
         menu.exec(self.sender().mapToGlobal(self.sender().rect().bottomLeft()))
 
     def _new_from_template(self, name: str, task_type: str):
-        """从模板创建任务 — 使用模板名称和类型填充"""
-        from datetime import datetime
-        self._tasks.append({
-            "name": name, "type": task_type,
-            "status": "等待中", "progress": 0,
-            "time": datetime.now().strftime("%H:%M"),
-        })
-        self._refresh_table()
+        """从模板创建任务 — 使用模板名称和类型填充
+
+        修复：此前直接往 self._tasks append 一条没有 queue_id/batch_task_id 的记录，
+        既不进底层 BatchTaskManager 队列，也没有任何回调会推动它前进——任务会
+        永远停在"等待中"，暂停/取消也是死操作（_toggle_pause_task/_cancel_task
+        都是 `if queue_id:` 才生效）。改为复用 _add_task_to_queue，和手动新建任务
+        走同一条真正入队的路径。
+        """
+        self._add_task_to_queue(name, task_type)
 
     # ── 任务详情与日志 ──
 

@@ -1,4 +1,8 @@
 # AutoClip 集成模块
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AutoClipIntegration:
     """AutoClip集成类，提供高光识别和批量处理功能"""
@@ -391,8 +395,8 @@ class AutoClipIntegration:
                         # 音频动态范围指示"精彩程度"
                         dynamic_range = np.std(seg_audio) if len(seg_audio) > 1 else 0
                         scores["audio"][i] = min(1.0, (rms * 0.5 + peak * 0.3 + dynamic_range * 0.2) * 3)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"音频能量分析失败，跳过音频维度评分: {e}")
 
         # ── 维度3: 面部检测 (有人物特写 → 高权重) ──
         if CV2_AVAILABLE and hasattr(video, 'filename') and video.filename:
@@ -420,8 +424,8 @@ class AutoClipIntegration:
                                 face_area_ratio = (best_face[2] * best_face[3]) / (h * w)
                                 scores["face"][i] = min(1.0, face_area_ratio * 20)
                     cap2.release()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"面部检测失败，跳过面部维度评分: {e}")
 
         # ── 归一化各维度 ──
         for key in ["motion", "audio", "scene_change", "face"]:

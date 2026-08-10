@@ -113,8 +113,8 @@ class DeviceFingerprint:
                 )
                 if result.returncode == 0:
                     components.append(result.stdout.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"获取磁盘序列号失败: {e}")
         
         fingerprint = "|".join(components)
         self._device_id = hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
@@ -167,8 +167,8 @@ class AuthDatabase:
         if self._conn is not None:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"关闭数据库连接失败: {e}")
             self._conn = None
     
     def __enter__(self):
@@ -812,8 +812,8 @@ class AuthService:
             from ....app.core.secure_store import SecureStore
             store = SecureStore()
             store.delete('session')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"删除SecureStore会话失败: {e}")
 
 
 auth_service = AuthService()

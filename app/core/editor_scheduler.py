@@ -829,8 +829,8 @@ class EditorScheduler:
                     else:
                         try:
                             result.output_size = sz
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[EditorScheduler] 设置输出大小失败: {e}")
             except Exception as _se:
                 logger.warning("套用导出设置失败（保留原渲染结果）: %s", _se)
             return result

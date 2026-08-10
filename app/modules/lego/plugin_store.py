@@ -302,21 +302,15 @@ class PluginStore:
                 
                 os.remove(temp_file)
             else:
-                target_dir = self._plugins_dir if item.type == ItemType.PLUGIN else self._skills_dir
-                install_dir = os.path.join(target_dir, item.id)
-                os.makedirs(install_dir, exist_ok=True)
-                
-                metadata = {
-                    "id": item.id,
-                    "name": item.name,
-                    "version": item.version,
-                    "author": item.author,
-                    "description": item.description,
-                    "installed_at": datetime.now().isoformat()
-                }
-                
-                with open(os.path.join(install_dir, "metadata.json"), 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, ensure_ascii=False, indent=2)
+                # 修复：此前没有 download_url 时，只建一个空目录 + 写个
+                # metadata.json 占位文件，就标记 is_installed=True 并返回
+                # "安装成功"——目录里根本没有任何真实插件/技能代码，用户装完
+                # 打开会发现什么都用不了。官方内置商品走 init_official_items
+                # 直接解析到 app/plugins 下的真实路径，不会经过这条分支；
+                # 会走到这里的都是没有真实安装包的商品，如实报告失败。
+                if progress_callback:
+                    progress_callback(0, "安装失败：无可下载的安装包")
+                return False, "该商品暂无可下载的安装包，无法完成安装"
             
             if progress_callback:
                 progress_callback(90, "完成安装...")
@@ -451,76 +445,221 @@ class PluginStore:
         return True
 
 
+# >>> FROZEN:plugin-store-catalog:official BEGIN
+# 历史上架但仓库中不存在的虚构条目（清理用）
+FAKE_OFFICIAL_IDS = {
+    "auto-clip",
+    "subtitle-gen",
+    "drama-remix",
+    "matrix-publish",
+    # plugins_module.STORE_PLUGINS 旧硬编码名对应的猜测 id
+    "batch-export-pro",
+    "ai-tts",
+    "smart-watermark",
+    "dynamic-subtitle",
+    "bgm-match",
+    "video-enhance",
+    "data-dashboard-pro",
+    "ai-script",
+    "green-screen",
+    "subtitle-proof",
+    "audio-denoise",
+    "keyframe-anim",
+}
+
+# 仅收录 app/plugins 下真实存在、可被 PluginManager 加载的插件
+# local_path 相对项目根；is_installed=True 表示已随安装包内置
 OFFICIAL_ITEMS = [
-    StoreItem(
-        id="auto-clip",
-        name="智能剪辑",
-        type=ItemType.PLUGIN,
-        category=ItemCategory.VIDEO_PROCESSING,
-        version="1.0.0",
-        author="官方",
-        description="AI 驱动的智能剪辑插件，自动识别精彩片段",
-        is_free=True,
-        is_official=True,
-        tags=["AI", "剪辑", "自动化"]
-    ),
-    StoreItem(
-        id="subtitle-gen",
-        name="字幕生成",
-        type=ItemType.SKILL,
-        category=ItemCategory.SUBTITLE_TOOLS,
-        version="1.0.0",
-        author="官方",
-        description="自动生成视频字幕，支持多语言",
-        is_free=True,
-        is_official=True,
-        tags=["字幕", "AI", "多语言"]
-    ),
-    StoreItem(
-        id="drama-remix",
-        name="短剧二创",
-        type=ItemType.SKILL,
-        category=ItemCategory.VIDEO_PROCESSING,
-        version="1.0.0",
-        author="官方",
-        description="短剧漫剧二创剪辑，自动生成二创内容",
-        is_free=True,
-        is_official=True,
-        tags=["短剧", "二创", "漫剧"]
-    ),
-    StoreItem(
-        id="matrix-publish",
-        name="矩阵发布",
-        type=ItemType.SKILL,
-        category=ItemCategory.OPERATION_TOOLS,
-        version="1.0.0",
-        author="官方",
-        description="多平台矩阵发布，一键分发到多个账号",
-        is_free=True,
-        is_official=True,
-        tags=["运营", "发布", "矩阵"]
-    ),
     StoreItem(
         id="drama-finder",
         name="短剧筛选",
         type=ItemType.PLUGIN,
         category=ItemCategory.OPERATION_TOOLS,
-        version="1.0.0",
+        version="1.1.1",
         author="官方",
-        description="智能筛选热门短剧，分析热度与佣金。支持10+平台榜单浏览、多维度筛选、双数据源策略。",
+        description="多平台热门短剧筛选：封面卡片墙 + 详情预览；静态缓存优先，可选 Playwright 真爬。",
+        icon="🎭",
         is_free=True,
         is_official=True,
-        tags=["短剧", "筛选", "数据分析", "榜单", "佣金"]
+        is_installed=True,
+        local_path="app/plugins/drama_finder_plugin",
+        tags=["短剧", "筛选", "榜单", "佣金", "可视化"],
+    ),
+    StoreItem(
+        id="ai-effects-plugin",
+        name="AI特效制作",
+        type=ItemType.PLUGIN,
+        category=ItemCategory.AI_TOOLS,
+        version="1.0.0",
+        author="拾光剪影官方",
+        description="深度学习特效：风格迁移、背景替换、超分、美颜、物体移除（需 torch/opencv）。",
+        icon="🎨",
+        is_free=True,
+        is_official=True,
+        is_installed=True,
+        local_path="app/plugins/ai_effects_plugin",
+        tags=["AI", "特效", "风格迁移", "超分辨率"],
+    ),
+    # —— 风格特效（单文件）——
+    StoreItem(
+        id="effect-action", name="动作特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="动作场景动感特效，增强视觉冲击力。",
+        icon="💥", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_action.py", tags=["特效", "动作"],
+    ),
+    StoreItem(
+        id="effect-comedy", name="喜剧特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="喜剧风格色彩与氛围特效。",
+        icon="😄", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_comedy.py", tags=["特效", "喜剧"],
+    ),
+    StoreItem(
+        id="effect-dark-tone", name="暗调特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="暗调冷色氛围特效。",
+        icon="🌑", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_dark_tone.py", tags=["特效", "暗调"],
+    ),
+    StoreItem(
+        id="effect-gold-rush", name="金光特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="金色光泽高光特效。",
+        icon="✨", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_gold_rush.py", tags=["特效", "金光"],
+    ),
+    StoreItem(
+        id="effect-highlight", name="高亮特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="画面高光增强特效。",
+        icon="💡", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_highlight.py", tags=["特效", "高亮"],
+    ),
+    StoreItem(
+        id="effect-horror", name="恐怖特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="恐怖片冷调压抑氛围特效。",
+        icon="👻", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_horror.py", tags=["特效", "恐怖"],
+    ),
+    StoreItem(
+        id="effect-soft-light", name="柔光特效", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="柔光梦幻氛围特效。",
+        icon="🌸", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/effect_soft_light.py", tags=["特效", "柔光"],
+    ),
+    # —— 转场 ——
+    StoreItem(
+        id="transition-fade", name="淡入淡出", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="经典淡入淡出转场。",
+        icon="🌅", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_fade.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-slide", name="滑动转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="画面滑动过渡转场。",
+        icon="↔️", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_slide.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-dissolve", name="溶解转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="帧间溶解过渡转场。",
+        icon="🌫️", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_dissolve.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-flip", name="翻转转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="画面翻转过渡转场。",
+        icon="🔄", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_flip.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-glitch", name="故障转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="故障抖动风格转场。",
+        icon="📺", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_glitch.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-spin", name="旋转转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="旋转过渡转场。",
+        icon="🌀", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_spin.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-wipe", name="擦除转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="擦除过渡转场。",
+        icon="🧹", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_wipe.py", tags=["转场"],
+    ),
+    StoreItem(
+        id="transition-zoom", name="缩放转场", type=ItemType.PLUGIN,
+        category=ItemCategory.EFFECT_TOOLS, version="1.0.0", author="官方",
+        description="从中心放大/缩小过渡转场。",
+        icon="🔍", is_free=True, is_official=True, is_installed=True,
+        local_path="app/plugins/transition_zoom.py", tags=["转场"],
     ),
 ]
 
 
+def _resolve_plugin_path(rel: str) -> str:
+    """解析插件路径。
+
+    __file__ = app/modules/lego/plugin_store.py → 上三级为 app/。
+    rel 形如 app/plugins/xxx 或 plugins/xxx。
+    """
+    app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    project_root = os.path.dirname(app_dir)
+    rel = (rel or "").replace("\\", "/").lstrip("./")
+    if rel.startswith("app/"):
+        return os.path.normpath(os.path.join(project_root, rel))
+    return os.path.normpath(os.path.join(app_dir, rel))
+
+
 def init_official_items(store):
-    """初始化官方商品"""
+    """用磁盘真实插件覆盖官方目录，剔除虚构上架项。"""
+    # 1) 清除虚构官方条目
+    for fid in FAKE_OFFICIAL_IDS:
+        store._items.pop(fid, None)
+        store._installed_items.pop(fid, None)
+
+    # 2) 按本地路径是否存在写入/更新真实插件
     for item in OFFICIAL_ITEMS:
-        if item.id not in store._items:
-            store._items[item.id] = item
+        abs_path = _resolve_plugin_path(item.local_path) if item.local_path else ""
+        exists = bool(abs_path and os.path.exists(abs_path))
+        if not exists:
+            logger.warning("商店目录跳过（文件不存在）: %s -> %s", item.id, item.local_path)
+            continue
+        item.is_installed = True
+        item.local_path = abs_path
+        store._items[item.id] = item
+        store._installed_items[item.id] = item
+
+    # 3) 清理：官方标记但既无 local_path 又不在 OFFICIAL_ITEMS 的残留
+    official_ids = {i.id for i in OFFICIAL_ITEMS}
+    stale = [
+        iid for iid, it in list(store._items.items())
+        if it.is_official and iid not in official_ids and not (it.local_path and os.path.exists(it.local_path))
+    ]
+    for iid in stale:
+        store._items.pop(iid, None)
+        store._installed_items.pop(iid, None)
+
     store._save_local_items()
+    store._save_installed_items()
+    logger.info(
+        "插件商店已同步真实目录: %d 项（内置已安装）",
+        sum(1 for i in store._items.values() if i.is_official),
+    )
+# <<< FROZEN:plugin-store-catalog:official END
 
 
 plugin_store = PluginStore()

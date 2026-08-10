@@ -54,8 +54,8 @@ def detect_apis(dll_path):
         if os.path.isdir(d):
             try:
                 os.add_dll_directory(d)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTAPI] 添加DLL目录失败 {d}: {e}")
     
     api_categories = {
         "factory": [

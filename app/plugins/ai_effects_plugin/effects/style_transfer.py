@@ -4,10 +4,14 @@
 支持多种预设艺术风格：梵高、莫奈、毕加索、赛博朋克、动漫等
 """
 
+import logging
+
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, Tuple
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 class StyleTransferEffect:
@@ -148,9 +152,9 @@ class StyleTransferEffect:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
-                pass
-            
+            except Exception as e:
+                logger.debug(f"清理GPU缓存时失败: {e}")
+
             print("[风格迁移] 模型已卸载")
     
     def apply(self, frame_data: Any, 
@@ -206,8 +210,8 @@ class StyleTransferEffect:
                 )
                 if result is not None:
                     return result
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"神经网络风格迁移失败，回退传统算法: {e}")
 
         # 传统算法回退
         h, w = image.shape[:2]

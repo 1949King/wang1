@@ -3,12 +3,16 @@
 情感场景的柔光特效
 """
 
+import logging
+
 import numpy as np
 from typing import Dict, Any
 
 from core.plugin_loader import (
     IEffectPlugin, PluginInfo, PluginType, PluginCategory
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Plugin(IEffectPlugin):
@@ -90,8 +94,8 @@ class Plugin(IEffectPlugin):
                 soft_layer[:, :, 0] = gaussian_filter(soft_layer[:, :, 0], sigma=blur)
                 soft_layer[:, :, 1] = gaussian_filter(soft_layer[:, :, 1], sigma=blur)
                 soft_layer[:, :, 2] = gaussian_filter(soft_layer[:, :, 2], sigma=blur)
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"scipy未安装，跳过高斯柔光处理: {e}")
         
         result = frame.astype(np.float32) * (1 - intensity) + soft_layer * intensity
         result = np.clip(result, 0, 255).astype(np.uint8)

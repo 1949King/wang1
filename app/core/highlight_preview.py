@@ -71,7 +71,7 @@ class HighlightSegment:
 
 @dataclass
 class InterpolationMarker:
-    """AI插帧节点标记"""
+    """线性补帧节点标记（非神经网络）"""
     id: str
     time: float
     interpolation_type: InterpolationType = InterpolationType.SMOOTH
@@ -207,8 +207,8 @@ class HighlightDetectorThread(QThread):
                             color="#ffd700",
                         ))
                     cap.release()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[HighlightPreview] 高光检测失败: {e}")
         
         if not highlights:
             highlights.append(HighlightSegment(
@@ -276,7 +276,7 @@ class HighlightPreviewManager(QObject):
         self.highlights_updated.emit([])
 
     def add_interpolation_marker(self, marker: InterpolationMarker):
-        """添加AI插帧节点标记"""
+        """添加线性补帧节点标记"""
         with self._lock:
             existing = [m for m in self._interpolation_markers if abs(m.time - marker.time) < 0.05]
             if not existing:

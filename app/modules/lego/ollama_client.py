@@ -290,6 +290,30 @@ class OllamaClient:
 
         return report
 
+    @staticmethod
+    def format_diagnose_report(report: Dict[str, Any]) -> str:
+        """把 diagnose() 结果格式化为给用户看的中文说明。"""
+        if not report:
+            return "无法诊断 Ollama 状态"
+        lines = [f"地址: {report.get('base_url', '')}"]
+        if not report.get("installed"):
+            lines.append("状态: 未安装")
+        elif report.get("service_running"):
+            lines.append("状态: 服务运行中")
+        else:
+            lines.append("状态: 已安装但服务未运行")
+        err = (report.get("error") or "").strip()
+        if err:
+            lines.append(f"错误: {err}")
+        sug = (report.get("suggestion") or "").strip()
+        if sug:
+            lines.append(f"建议:\n{sug}")
+        return "\n".join(lines)
+
+    def diagnose_user_message(self) -> str:
+        """强制诊断并返回用户可读文案。"""
+        return self.format_diagnose_report(self.diagnose())
+
     def start_service(self) -> bool:
         """启动 Ollama 服务进程（智能启动：先检测是否已在运行）。
 
@@ -420,10 +444,13 @@ class OllamaClient:
             return []
         
         try:
-            response = requests.get(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.get(
                 f"{self.base_url}/api/tags",
                 timeout=10
             )
+            session.close()
             
             if response.status_code != 200:
                 return []
@@ -449,7 +476,9 @@ class OllamaClient:
     def pull_model(self, model_name: str, progress_callback: Optional[Callable[[str], None]] = None) -> bool:
         """拉取模型"""
         try:
-            response = requests.post(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.post(
                 f"{self.base_url}/api/pull",
                 json={"name": model_name},
                 stream=True,
@@ -530,11 +559,14 @@ class OllamaClient:
     def delete_model(self, model_name: str) -> bool:
         """删除模型"""
         try:
-            response = requests.delete(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.delete(
                 f"{self.base_url}/api/delete",
                 json={"name": model_name},
                 timeout=30
             )
+            session.close()
             
             if response.status_code == 200:
                 self._models = []
@@ -581,18 +613,34 @@ class OllamaClient:
             payload["format"] = format
         
         try:
-            response = requests.post(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
                 stream=True,
                 timeout=self._config.timeout
             )
-            
+
+            if response.status_code != 200:
+                err_body = ""
+                try:
+                    err_body = response.json().get("error", "") or response.text[:300]
+                except Exception:
+                    err_body = response.text[:300]
+                logger.error(f"Ollama /api/generate 返回 {response.status_code}: {err_body}")
+                yield f"错误: Ollama 返回 {response.status_code}: {err_body or '未知错误'}"
+                return
+
             full_response = ""
             
             for line in response.iter_lines():
                 if line:
                     data = json.loads(line)
+                    if data.get("error"):
+                        logger.error(f"Ollama /api/generate 错误: {data.get('error')}")
+                        yield f"错误: {data.get('error')}"
+                        return
                     token = data.get("response", "")
                     full_response += token
                     
@@ -625,18 +673,34 @@ class OllamaClient:
             payload["options"] = options
         
         try:
-            response = requests.post(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.post(
                 f"{self.base_url}/api/chat",
                 json=payload,
                 stream=True,
                 timeout=self._config.timeout
             )
-            
+
+            if response.status_code != 200:
+                err_body = ""
+                try:
+                    err_body = response.json().get("error", "") or response.text[:300]
+                except Exception:
+                    err_body = response.text[:300]
+                logger.error(f"Ollama /api/chat 返回 {response.status_code}: {err_body}")
+                yield f"错误: Ollama 返回 {response.status_code}: {err_body or '未知错误'}"
+                return
+
             full_response = ""
             
             for line in response.iter_lines():
                 if line:
                     data = json.loads(line)
+                    if data.get("error"):
+                        logger.error(f"Ollama /api/chat 错误: {data.get('error')}")
+                        yield f"错误: {data.get('error')}"
+                        return
                     message = data.get("message", {})
                     content = message.get("content", "")
                     full_response += content
@@ -654,7 +718,9 @@ class OllamaClient:
     def embeddings(self, model: str, prompt: str) -> Optional[List[float]]:
         """获取文本嵌入向量"""
         try:
-            response = requests.post(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.post(
                 f"{self.base_url}/api/embeddings",
                 json={
                     "model": model,
@@ -662,6 +728,7 @@ class OllamaClient:
                 },
                 timeout=60
             )
+            session.close()
             
             if response.status_code == 200:
                 data = response.json()
@@ -676,11 +743,14 @@ class OllamaClient:
     def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
         """获取模型详细信息"""
         try:
-            response = requests.post(
+            session = requests.Session()
+            session.trust_env = False  # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.post(
                 f"{self.base_url}/api/show",
                 json={"name": model_name},
                 timeout=30
             )
+            session.close()
             
             if response.status_code == 200:
                 return response.json()

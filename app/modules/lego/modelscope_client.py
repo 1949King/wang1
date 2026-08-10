@@ -184,8 +184,8 @@ class ModelScopeClient:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     return ModelScopeConfig(download_dir=data.get("download_dir", ""))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("加载ModelScope配置失败，使用默认配置: %s", e)
         return ModelScopeConfig()
 
     def save_config(self, download_dir: str = "") -> None:

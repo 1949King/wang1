@@ -261,8 +261,8 @@ class I18n:
                         self._translations[locale].update(data)
                     except Exception as e:
                         logger.warning(f"加载翻译文件 {fname} 失败: {e}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[I18N] 加载翻译目录失败: {e}")
 
     def set_locale(self, locale: str) -> bool:
         """切换语言"""

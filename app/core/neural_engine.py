@@ -124,8 +124,8 @@ class NeuralEngine:
             self._backend = InferenceBackend.OPENCV_DNN
             logger.info(f"后端: OpenCV DNN (cpu)")
             return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[NeuralEngine] OpenCV DNN后端不可用: {e}")
 
         logger.warning("无可用的神经网络推理后端")
 
@@ -334,8 +334,8 @@ class NeuralEngine:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug(f"[NeuralEngine] torch不可用: {e}")
         logger.info("所有模型已卸载")
 
 

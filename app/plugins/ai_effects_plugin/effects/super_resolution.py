@@ -4,9 +4,13 @@
 支持2x/3x/4倍放大，同时可进行降噪处理
 """
 
+import logging
+
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, Literal
+
+logger = logging.getLogger(__name__)
 
 
 class SuperResolutionEffect:
@@ -62,22 +66,27 @@ class SuperResolutionEffect:
         print(f"[超分辨率] 初始化完成，GPU: {'启用' if gpu_enabled else '禁用'}")
     
     def load_model(self) -> bool:
-        """加载SR模型"""
+        """加载SR模型
+
+        如实说明：这里并没有加载任何深度学习权重文件，`_models` 里存的只是
+        占位字符串；实际放大处理（见 apply_* 方法）用的是 OpenCV 经典插值
+        （bicubic/lanczos），不是神经网络超分。此前打印"SR模型就绪"容易让人
+        误以为已加载真实模型——这里改为如实标注为"经典插值模式"。
+        """
         try:
             import torch
-            
+
             self._device = torch.device('cuda' if self.gpu_enabled and torch.cuda.is_available() else 'cpu')
             print(f"[超分辨率] 使用设备: {self._device}")
-            
-            # 模拟加载不同倍数的模型
+
             for scale in [2, 3, 4]:
-                self._models[scale] = f"model_{scale}x"
-            
-            print("[超分辨率] ✅ SR模型就绪（演示模式）")
+                self._models[scale] = f"interp_{scale}x"
+
+            print("[超分辨率] ⚠️ 未接入神经网络模型，使用 OpenCV 经典插值（非深度学习超分）")
             return True
-            
+
         except Exception as e:
-            print(f"[超分辨率] ❌ 模型加载失败: {e}")
+            print(f"[超分辨率] ❌ 初始化失败: {e}")
             return False
     
     def unload_model(self) -> None:
@@ -88,9 +97,9 @@ class SuperResolutionEffect:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        except:
-            pass
-        
+        except Exception as e:
+            logger.debug(f"清理GPU缓存时失败: {e}")
+
         print("[超分辨率] 所有模型已卸载")
     
     def enhance(self, 
@@ -191,8 +200,8 @@ class SuperResolutionEffect:
             result = self._neural_sr.upscale(image)
             if result is not None:
                 return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"神经网络超分辨率失败，回退传统算法: {e}")
 
         h, w = image.shape[:2]
         

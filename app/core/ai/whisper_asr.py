@@ -33,6 +33,14 @@ _MODEL_CACHE: Dict[str, object] = {}  # keyed by model_size
 _MODEL_LOCK = threading.Lock()
 
 
+def _ensure_hf_mirror():
+    """国内网络拉模型易超时：未设置时默认走 hf-mirror。"""
+    if os.environ.get("HF_ENDPOINT") or os.environ.get("HUGGINGFACE_HUB_CACHE_DISABLE_MIRROR"):
+        return
+    # 用户已显式设置则尊重；否则用镜像降低 ConnectTimeout
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+
 def _detect_backend() -> Optional[str]:
     """检测可用的 Whisper 后端，优先 faster-whisper"""
     global _WHISPER_TYPE
@@ -44,8 +52,8 @@ def _detect_backend() -> Optional[str]:
         _WHISPER_TYPE = "faster_whisper"
         logger.info("Whisper 后端: faster-whisper")
         return _WHISPER_TYPE
-    except ImportError:
-        pass
+    except ImportError as e:
+        logger.debug(f"[WhisperASR] faster_whisper 不可用: {e}")
 
     try:
         import whisper  # noqa: F401
@@ -60,6 +68,20 @@ def _detect_backend() -> Optional[str]:
 def is_available() -> bool:
     """Whisper 是否可用"""
     return _detect_backend() is not None
+
+
+def unavailable_reason() -> str:
+    """不可用时的安装说明（给 UI 弹窗用）"""
+    if is_available():
+        return ""
+    return (
+        "未安装语音识别组件（faster-whisper 或 openai-whisper）。\n\n"
+        "请在项目虚拟环境执行其一：\n"
+        "  .\\.venv312\\Scripts\\python.exe -m pip install faster-whisper\n"
+        "  或运行 .\\scripts\\setup_deps.ps1\n\n"
+        "模型下载默认走 hf-mirror；装好后重新点击「AI字幕」。\n"
+        "假字幕占位已禁用，不会生成「字幕片段 N」无关文本。"
+    )
 
 
 def get_backend() -> Optional[str]:
@@ -80,6 +102,7 @@ def _load_model(model_size: str = "base") -> Optional[object]:
         if cache_key in _MODEL_CACHE:
             return _MODEL_CACHE[cache_key]
 
+        _ensure_hf_mirror()
         try:
             if backend == "faster_whisper":
                 import faster_whisper
@@ -97,6 +120,26 @@ def _load_model(model_size: str = "base") -> Optional[object]:
             return model
         except Exception as e:
             logger.warning(f"加载 Whisper 模型失败 [{model_size}]: {e}")
+            # 镜像失败时再试官方源一次
+            if os.environ.get("HF_ENDPOINT") == "https://hf-mirror.com":
+                try:
+                    os.environ.pop("HF_ENDPOINT", None)
+                    if backend == "faster_whisper":
+                        import faster_whisper
+                        compute_type = (
+                            "int8" if model_size in ("tiny", "base", "small") else "float16"
+                        )
+                        model = faster_whisper.WhisperModel(
+                            model_size, device="cpu", compute_type=compute_type
+                        )
+                    else:
+                        import whisper
+                        model = whisper.load_model(model_size)
+                    _MODEL_CACHE[cache_key] = model
+                    logger.info(f"Whisper 模型已加载(官方源): {model_size}")
+                    return model
+                except Exception as e2:
+                    logger.warning(f"官方源加载也失败 [{model_size}]: {e2}")
             return None
 
 

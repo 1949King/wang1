@@ -34,6 +34,9 @@
 import os
 import json
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -259,8 +262,8 @@ class AnalysisCache:
                 try:
                     os.remove(os.path.join(root, name))
                     count += 1
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(f"删除缓存文件失败: {e}")
         return count
 
     # ─── 内部实现 ─────────────────────────
@@ -298,8 +301,8 @@ class AnalysisCache:
             if os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(f"清理临时文件失败: {e}")
             raise
 
     # ─── DramaStructure 序列化 ─────────────────

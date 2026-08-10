@@ -141,8 +141,8 @@ class SuperResolutionEngine:
         try:
             import cv2
             result = cv2.cvtColor(result, cv2.COLOR_RGB2BGR)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[SuperResolution] 颜色空间转换失败: {e}")
 
         return result
 

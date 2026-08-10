@@ -8,6 +8,9 @@ from typing import Dict, Any, List
 import os
 import subprocess
 import random
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .base_block import (
     LegoBlock, BlockInput, BlockOutput, BlockMeta, 
@@ -174,8 +177,8 @@ class AutoClipBlock(LegoBlock):
                     highlights = [(max(0, s - clip_duration / 4), min(s + clip_duration, duration))
                                   for s, _, _ in top]
                     return highlights
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"精彩片段检测失败，使用均匀分布回退: {e}")
 
         highlights = []
         start = 0
@@ -196,8 +199,8 @@ class AutoClipBlock(LegoBlock):
                 capture_output=True, text=True
             )
             return float(result.stdout.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"获取视频时长失败: {e}")
             return 60.0
     
     def _clip_video(self, input_path: str, output_path: str, 
@@ -215,8 +218,9 @@ class AutoClipBlock(LegoBlock):
             ]
             subprocess.run(cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             return os.path.exists(output_path)
-        except Exception:
-            pass
+        except Exception as e:
+            # 剪辑失败时记录调试日志，返回 False 由上层处理回退
+            logger.debug(f"剪辑视频失败 ({input_path} -> {output_path}): {e}")
             return False
 
 
@@ -496,8 +500,9 @@ class DeduplicateBlock(LegoBlock):
             
             subprocess.run(cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             return os.path.exists(output_path)
-        except Exception:
-            pass
+        except Exception as e:
+            # 去重处理失败时记录调试日志，返回 False 由上层处理回退
+            logger.debug(f"应用去重滤镜失败 ({input_path} -> {output_path}): {e}")
             return False
 
 

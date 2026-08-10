@@ -67,8 +67,8 @@ class PyAVVideoEngine:
                 try:
                     av.Codec(name, "w")
                     supported.append(name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[PyAVEngine] 检测编码器 {name} 失败: {e}")
             self._available_encoders = supported
             hw = [e for e in supported if e != "libx264"]
             self._gpu_encoder = hw[0] if hw else "libx264"

@@ -9,11 +9,14 @@ import json
 import time
 import threading
 import queue
+import logging
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
@@ -88,6 +91,22 @@ class BatchTaskManager:
     5. 批量操作 - 批量添加、批量处理
     """
     
+    _instance: Optional["BatchTaskManager"] = None
+
+    @classmethod
+    def get_instance(cls, max_workers: int = 4) -> "BatchTaskManager":
+        """获取跨模块共享的单例。
+
+        修复：此前 tasks_module.py 每次都 `BatchTaskManager(max_workers=2)` 各建一份
+        实例，performance_module.py / modules.py(首页) 又都尝试用
+        `BatchTaskManager.get_instance()`（此前根本不存在这个方法）去读"全局"任务
+        状态——`hasattr` 检查为 False，永远读不到真实数据，只能显示"就绪"占位值。
+        现在提供真正的单例，三处都读同一份数据。
+        """
+        if cls._instance is None:
+            cls._instance = cls(max_workers=max_workers)
+        return cls._instance
+
     def __init__(self, max_workers: int = 4):
         """
         初始化管理器
@@ -111,9 +130,9 @@ class BatchTaskManager:
         # 任务处理器映射
         self._processors: Dict[str, Callable] = {}
         
-        print(f"📋 批量任务管理器初始化完成")
-        print(f"   最大工作线程: {max_workers}")
-        print(f"   定时调度器: 待启动")
+        logger.info(f"📋 批量任务管理器初始化完成")
+        logger.info(f"   最大工作线程: {max_workers}")
+        logger.info(f"   定时调度器: 待启动")
     
     def register_processor(self, task_type: str, processor: Callable):
         """
@@ -124,7 +143,7 @@ class BatchTaskManager:
             processor: 处理函数
         """
         self._processors[task_type] = processor
-        print(f"   注册处理器: {task_type}")
+        logger.info(f"   注册处理器: {task_type}")
     
     def create_queue(self, name: str) -> str:
         """
@@ -148,7 +167,7 @@ class BatchTaskManager:
         with self._lock:
             self.task_queues[queue_id] = task_queue
         
-        print(f"✅ 创建队列: {name} (ID: {queue_id})")
+        logger.info(f"✅ 创建队列: {name} (ID: {queue_id})")
         return queue_id
     
     def add_task(self, queue_id: str, name: str, task_type: str,
@@ -208,11 +227,11 @@ class BatchTaskManager:
             if queue_id in self.task_queues:
                 self.task_queues[queue_id].tasks.append(task)
                 self.task_queues[queue_id].total_tasks += 1
-                print(f"➕ 添加任务: {name} (ID: {task_id}) 到队列 {queue_id}")
+                logger.info(f"➕ 添加任务: {name} (ID: {task_id}) 到队列 {queue_id}")
                 if depends_on:
-                    print(f"   T-1 依赖: {depends_on}")
+                    logger.info(f"   T-1 依赖: {depends_on}")
                 if scheduled_at:
-                    print(f"   T-6 定时: {scheduled_at}")
+                    logger.info(f"   T-6 定时: {scheduled_at}")
             else:
                 raise ValueError(f"队列不存在: {queue_id}")
         
@@ -242,8 +261,8 @@ class BatchTaskManager:
                     if task.task_id == task_id:
                         if depends_on_id not in task.depends_on:
                             task.depends_on.append(depends_on_id)
-                            print(f"🔗 T-1 依赖: {task.name} → {depends_on_id}")
-                        return True
+                        logger.info(f"🔗 T-1 依赖: {task.name} → {depends_on_id}")
+                    return True
         return False
 
     def _check_dependencies_met(self, task: BatchTask) -> bool:
@@ -320,7 +339,7 @@ class BatchTaskManager:
             name="scheduler"
         )
         self._scheduler_thread.start()
-        print("🕐 T-6 定时调度器已启动")
+        logger.info("🕐 T-6 定时调度器已启动")
 
     def _scheduler_loop(self):
         """定时调度器主循环 (每秒检查)"""
@@ -338,9 +357,9 @@ class BatchTaskManager:
                 # 到期任务: 清除 scheduled_at 使其变为普通任务
                 for task in due_tasks:
                     task.scheduled_at = None
-                    print(f"⏰ T-6 到期执行: {task.name} (ID: {task.task_id})")
+                    logger.info(f"⏰ T-6 到期执行: {task.name} (ID: {task.task_id})")
             except Exception as e:
-                print(f"⚠️ 调度器错误: {e}")
+                logger.warning(f"⚠️ 调度器错误: {e}")
             
             time.sleep(1)
     
@@ -382,7 +401,7 @@ class BatchTaskManager:
             
             queue = self.task_queues[queue_id]
             if queue.status == TaskStatus.RUNNING:
-                print(f"⚠️ 队列 {queue_id} 已在运行中")
+                logger.warning(f"⚠️ 队列 {queue_id} 已在运行中")
                 return
             
             queue.status = TaskStatus.RUNNING
@@ -396,7 +415,7 @@ class BatchTaskManager:
         thread.start()
         
         self.active_tasks[queue_id] = thread
-        print(f"▶️ 启动队列: {queue_id}")
+        logger.info(f"▶️ 启动队列: {queue_id}")
     
     def _process_queue(self, queue_id: str):
         """处理队列中的任务 (含 T-1 / T-3 / T-6 增强)"""
@@ -427,7 +446,7 @@ class BatchTaskManager:
                     if all(t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED] 
                            for t in queue.tasks):
                         queue.status = TaskStatus.COMPLETED
-                        print(f"✅ 队列 {queue_id} 处理完成")
+                        logger.info(f"✅ 队列 {queue_id} 处理完成")
                         break
                     time.sleep(0.5)
                     continue
@@ -460,7 +479,7 @@ class BatchTaskManager:
             except Exception as e:
                 task_to_run.status = TaskStatus.FAILED
                 task_to_run.error_message = str(e)
-                print(f"❌ 任务 {task_to_run.task_id} 失败: {e}")
+                logger.error(f"❌ 任务 {task_to_run.task_id} 失败: {e}")
             
             # 更新队列统计
             with self._lock:
@@ -480,7 +499,7 @@ class BatchTaskManager:
             except Exception as e:
                 task.retry_count = attempt + 1
                 if attempt < max_attempts - 1:
-                    print(f"🔄 T-3 重试 {task.name} (第{task.retry_count}次, {task.retry_delay}s后)")
+                    logger.info(f"🔄 T-3 重试 {task.name} (第{task.retry_count}次, {task.retry_delay}s后)")
                     time.sleep(task.retry_delay)
                     task.status = TaskStatus.RUNNING  # 重置状态准备重试
                 else:
@@ -488,7 +507,7 @@ class BatchTaskManager:
     
     def _execute_task(self, task: BatchTask):
         """执行单个任务"""
-        print(f"🚀 执行任务: {task.name} (ID: {task.task_id})")
+        logger.info(f"🚀 执行任务: {task.name} (ID: {task.task_id})")
         
         # 获取处理器
         processor = self._processors.get(task.task_type)
@@ -503,6 +522,16 @@ class BatchTaskManager:
         
         try:
             result = processor(task.params, progress_callback)
+
+            # 修复：此前只要 processor 不抛异常就一律标 COMPLETED，
+            # 但 tasks_module.py 里几个处理器（剪辑/AI生成/导出/转码）在缺视频
+            # 等前置条件不满足时会如实返回 {"status": "pending"/"error", ...}
+            # 而不是抛异常——导致"未处理"的任务在 UI 上也显示"已完成 100%"。
+            # 这里显式识别这类返回值，转为失败，而不是把它们当成功处理。
+            if isinstance(result, dict) and result.get("status") in ("pending", "error"):
+                reason = result.get("note") or result.get("error") or "任务未满足执行条件"
+                raise RuntimeError(reason)
+
             task.result = result
             task.status = TaskStatus.COMPLETED
             task.progress = 100.0
@@ -512,12 +541,12 @@ class BatchTaskManager:
             if task.callback:
                 task.callback(task)
             
-            print(f"✅ 任务完成: {task.name}")
+            logger.info(f"✅ 任务完成: {task.name}")
             
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error_message = str(e)
-            print(f"❌ 任务失败: {task.name} - {e}")
+            logger.error(f"❌ 任务失败: {task.name} - {e}")
             raise
     
     def pause_queue(self, queue_id: str):
@@ -525,14 +554,14 @@ class BatchTaskManager:
         with self._lock:
             if queue_id in self.task_queues:
                 self.task_queues[queue_id].status = TaskStatus.PAUSED
-                print(f"⏸️ 暂停队列: {queue_id}")
+                logger.info(f"⏸️ 暂停队列: {queue_id}")
     
     def resume_queue(self, queue_id: str):
         """恢复队列"""
         with self._lock:
             if queue_id in self.task_queues:
                 self.task_queues[queue_id].status = TaskStatus.RUNNING
-                print(f"▶️ 恢复队列: {queue_id}")
+                logger.info(f"▶️ 恢复队列: {queue_id}")
     
     def cancel_queue(self, queue_id: str):
         """取消队列"""
@@ -546,7 +575,7 @@ class BatchTaskManager:
                     if task.status == TaskStatus.PENDING:
                         task.status = TaskStatus.CANCELLED
                 
-                print(f"⏹️ 取消队列: {queue_id}")
+                logger.info(f"⏹️ 取消队列: {queue_id}")
     
     def get_queue_status(self, queue_id: str) -> Dict[str, Any]:
         """获取队列状态"""
@@ -591,7 +620,7 @@ class BatchTaskManager:
                 # 添加到历史
                 self.task_history.extend(completed)
                 
-                print(f"🧹 清理队列 {queue_id}: 移除 {len(completed)} 个已完成任务")
+                logger.info(f"🧹 清理队列 {queue_id}: 移除 {len(completed)} 个已完成任务")
     
     def export_queue_report(self, queue_id: str, output_path: str):
         """导出队列报告"""
@@ -609,18 +638,18 @@ class BatchTaskManager:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
         
-        print(f"📊 报告已导出: {output_path}")
+        logger.info(f"📊 报告已导出: {output_path}")
     
     def shutdown(self):
         """关闭管理器"""
-        print("🛑 关闭批量任务管理器...")
+        logger.info("🛑 关闭批量任务管理器...")
         self._stop_event.set()
         
         # 等待所有线程结束
         for thread in self.active_tasks.values():
             thread.join(timeout=5)
         
-        print("✅ 批量任务管理器已关闭")
+        logger.info("✅ 批量任务管理器已关闭")
 
 
 # 使用示例

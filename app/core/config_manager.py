@@ -166,9 +166,8 @@ class SecureStorage:
                     uuid_line = [l.strip() for l in result.stdout.split('\n') if l.strip() and l.strip() != 'UUID']
                     if uuid_line:
                         components.append(uuid_line[0])
-        except Exception:
-            pass
-            pass
+        except Exception as e:
+            logger.debug(f"[ConfigManager] 获取机器UUID失败 (Windows): {e}")
         
         return hashlib.sha256('|'.join(components).encode()).hexdigest()[:32]
     
@@ -333,8 +332,8 @@ class ConfigManager:
                     if isinstance(current, int):
                         try:
                             setattr(obj, attr, int(value))
-                        except ValueError:
-                            pass
+                        except ValueError as e:
+                            logger.debug(f"[ConfigManager] 设置环境变量 {env_key} 失败: {e}")
                     else:
                         setattr(obj, attr, value)
         

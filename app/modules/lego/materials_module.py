@@ -181,10 +181,12 @@ class MaterialsModule(BaseModule):
         
         # ── 本地素材标签页 ──
         self._local_tabs: dict = {}
+        self._local_tab_index: dict = {}  # type_key -> 内层子标签页索引（供标签筛选按钮跳转）
         local_panel = QWidget()
         local_layout = QVBoxLayout(local_panel)
         local_layout.setContentsMargins(0, 10, 0, 0)
         local_tabs = QTabWidget()
+        self._local_type_tabs = local_tabs
         local_tabs.setStyleSheet("""
             QTabWidget::pane { border: none; background-color: #161616; }
             QTabBar::tab {
@@ -254,6 +256,7 @@ class MaterialsModule(BaseModule):
             list_widget.itemDoubleClicked.connect(self._on_local_item_double_clicked)
             tab_layout.addWidget(list_widget, 1)
             
+            self._local_tab_index[type_key] = local_tabs.count()
             local_tabs.addTab(tab_widget, label)
             self._local_tabs[type_key] = list_widget
         
@@ -393,22 +396,29 @@ class MaterialsModule(BaseModule):
         menu.exec(list_widget.mapToGlobal(pos))
 
     def _apply_tag_filter(self, tag: str):
-        """按素材标签筛选显示 — 切换标签页或显示全部"""
+        """按素材标签筛选显示 — 切换到对应类型的本地素材子标签页
+
+        修复：此前只切到外层"📁 本地素材"这一个大标签页（本来就常驻显示），
+        完全没有跳到内层按类型(video/audio/...)分的子标签页，点击"音频"
+        "图片"等任何标签，界面都没有变化，形同摆设。
+        """
         self._material_active_tag = tag
         for t, btn in self._material_tag_btns.items():
             btn.setChecked(t == tag)
-        # 如果非"全部"，尝试切换到对应标签页
+        # 如果非"全部"，跳到对应类型的子标签页
         if tag != "全部":
             tag_map = {"视频": "video", "音频": "audio", "图片": "image",
                        "字幕": "subtitle", "模板": "template", "特效": "effect",
                        "转场": "transition", "贴纸": "sticker"}
             type_key = tag_map.get(tag)
-            if type_key and hasattr(self, '_local_tabs'):
+            if type_key and hasattr(self, '_local_type_tabs'):
                 for i in range(self._tabs.count()):
                     if self._tabs.tabText(i).startswith("📁"):
                         self._tabs.setCurrentIndex(i)
                         break
-            # 高亮对应标签页中的内容
+                sub_idx = self._local_tab_index.get(type_key)
+                if sub_idx is not None:
+                    self._local_type_tabs.setCurrentIndex(sub_idx)
             self._refresh_local_tabs()
 
     def _add_to_timeline(self, file_path: str):
@@ -481,15 +491,28 @@ class MaterialsModule(BaseModule):
         
         if self._local_asset_mgr:
             imported = 0
+            failed = 0
             for f in files:
                 try:
-                    self._local_asset_mgr.import_asset(f)
-                    imported += 1
+                    # 修复：import_asset() 失败时返回 None（不抛异常），此前不检查
+                    # 返回值就 imported += 1，失败文件也被算作"导入成功"
+                    result = self._local_asset_mgr.import_asset(f)
+                    if result is not None:
+                        imported += 1
+                    else:
+                        failed += 1
+                        logger.warning(f"导入素材失败 ({os.path.basename(f)}): 不支持的类型或文件不存在")
                 except Exception as e:
+                    failed += 1
                     logger.warning(f"导入素材失败 ({os.path.basename(f)}): {e}")
             if imported > 0:
-                QMessageBox.information(self, "导入成功", f"已导入 {imported} 个素材到本地库")
+                msg = f"已导入 {imported} 个素材到本地库"
+                if failed:
+                    msg += f"（另有 {failed} 个失败）"
+                QMessageBox.information(self, "导入成功", msg)
                 self._refresh_local_tabs()
+            elif failed:
+                QMessageBox.warning(self, "导入失败", f"选中的 {failed} 个文件全部导入失败，详见日志")
         else:
             # 无管理器时直接显示文件路径
             for type_key, list_widget in self._local_tabs.items():
@@ -507,20 +530,34 @@ class MaterialsModule(BaseModule):
         
         _, exts = self._local_type_names[type_key]
         imported = 0
+        failed = 0
         for root, _, files in os.walk(folder):
             for f in files:
                 if any(f.lower().endswith(f".{e}") for e in exts):
                     full_path = os.path.join(root, f)
                     try:
                         if self._local_asset_mgr:
-                            self._local_asset_mgr.import_asset(full_path)
-                        imported += 1
+                            # 修复：import_asset() 失败时返回 None（不抛异常），此前不检查
+                            # 返回值就 imported += 1，导致失败的文件也被计入"成功导入"
+                            result = self._local_asset_mgr.import_asset(full_path)
+                            if result is not None:
+                                imported += 1
+                            else:
+                                failed += 1
+                        else:
+                            imported += 1
                     except Exception as e:
+                        failed += 1
                         logger.debug(f"导入素材失败 ({f}): {e}")
-        
+
         if imported > 0:
-            QMessageBox.information(self, "文件夹导入", f"从文件夹中导入了 {imported} 个素材")
+            msg = f"从文件夹中导入了 {imported} 个素材"
+            if failed:
+                msg += f"（另有 {failed} 个导入失败，详见日志）"
+            QMessageBox.information(self, "文件夹导入", msg)
             self._refresh_local_tabs()
+        elif failed:
+            QMessageBox.warning(self, "导入失败", f"找到 {failed} 个匹配文件，但全部导入失败，详见日志")
         else:
             QMessageBox.information(self, "提示", "所选文件夹中没有找到匹配类型的素材文件")
 

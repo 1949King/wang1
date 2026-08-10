@@ -1,18 +1,14 @@
 """
-AI补偿式插帧引擎
-================
-负责基于前后文内容的AI插帧，实现无缝播放体验
+线性补帧引擎（非神经网络）
+==========================
+基于前后帧做场景变化检测与线性混合插值，改善预览观感。
 
-核心功能：
-1. 场景变化检测 - 判断是否需要插帧补偿
-2. 运动估计 - 分析帧间运动信息
-3. 上下文感知插帧 - 根据前后帧内容生成中间帧
-4. 标记插帧节点 - 在时间轴上标记AI插帧位置
+说明（诚实预期）：
+- 不是深度学习插帧（无 RIFE / DAIN 等模型）
+- 实现为帧差检测 + 线性混合（alpha blend）
+- 默认可关闭；开启后可在时间轴标记补帧位置
 
-设计原则：
-- 无感化：插帧过程对用户透明，不打断播放
-- 可追踪：时间轴上有明确的插帧节点标记
-- 高质量：基于AI生成自然的中间帧
+历史命名含「AI」仅为兼容；UI/日志应使用「线性补帧」。
 """
 
 from typing import Dict, Any, List, Optional, Tuple
@@ -28,7 +24,7 @@ logger = logging.getLogger("AI短剧编辑器.ai_interpolation")
 
 
 class InterpolationMode(Enum):
-    """插帧模式"""
+    """补帧模式"""
     DISABLED = "disabled"
     AUTO = "auto"
     ALWAYS = "always"
@@ -57,7 +53,7 @@ class FrameAnalysisResult:
 
 @dataclass
 class InterpolationResult:
-    """插帧结果"""
+    """补帧结果"""
     success: bool
     inserted_frames: List[np.ndarray] = field(default_factory=list)
     source_frame_indices: Tuple[int, int] = (0, 0)
@@ -176,7 +172,7 @@ class SceneChangeDetector:
 
 
 class ContextAwareInterpolator:
-    """上下文感知插帧器"""
+    """线性混合补帧器（非神经网络）"""
     
     def __init__(self):
         self._scene_detector = SceneChangeDetector()
@@ -186,15 +182,15 @@ class ContextAwareInterpolator:
         self._markers = []
     
     def set_mode(self, mode: InterpolationMode):
-        """设置插帧模式"""
+        """设置补帧模式"""
         self._mode = mode
     
     def enable(self, enabled: bool):
-        """启用/禁用插帧"""
+        """启用/禁用补帧"""
         self._interpolation_enabled = enabled
     
     def process_frame(self, frame: np.ndarray, frame_time: float) -> List[np.ndarray]:
-        """处理帧，返回需要插入的中间帧"""
+        """处理帧，返回需要插入的中间帧（线性混合）"""
         if not self._interpolation_enabled or self._mode == InterpolationMode.DISABLED:
             return []
         
@@ -215,7 +211,7 @@ class ContextAwareInterpolator:
     def _generate_interpolated_frames(self, frame: np.ndarray, frame_time: float, 
                                      count: int = 1, 
                                      diff_type: FrameDifferenceType = None) -> List[np.ndarray]:
-        """生成插值帧"""
+        """生成线性混合中间帧"""
         if self._scene_detector._last_frame is None:
             return []
         
@@ -232,12 +228,12 @@ class ContextAwareInterpolator:
         return frames
     
     def _linear_interpolate(self, frame1: np.ndarray, frame2: np.ndarray, alpha: float) -> np.ndarray:
-        """线性插值"""
+        """线性插值（alpha blend），非光流/神经网络"""
         result = frame1.astype(np.float32) * (1 - alpha) + frame2.astype(np.float32) * alpha
         return result.astype(np.uint8)
     
     def get_markers(self) -> List[Dict]:
-        """获取插帧标记"""
+        """获取补帧标记"""
         return self._markers
     
     def reset(self):
@@ -248,7 +244,7 @@ class ContextAwareInterpolator:
 
 
 class InterpolationWorker(QThread):
-    """插帧工作线程"""
+    """补帧工作线程"""
     
     interpolation_ready = pyqtSignal(float, List[np.ndarray])
     marker_added = pyqtSignal(object)
@@ -293,7 +289,7 @@ class InterpolationWorker(QThread):
                     self.marker_added.emit(marker)
                 
             except Exception as e:
-                logger.error(f"插帧处理失败: {e}", exc_info=True)
+                logger.error(f"线性补帧处理失败: {e}", exc_info=True)
     
     def stop(self):
         """停止线程"""
@@ -301,7 +297,7 @@ class InterpolationWorker(QThread):
 
 
 class AIInterpolationEngine(QObject):
-    """AI插帧引擎"""
+    """线性补帧引擎（历史类名保留 AI 前缀以兼容导入）"""
     
     interpolation_ready = pyqtSignal(float, List[np.ndarray])
     markers_updated = pyqtSignal(List)
@@ -338,17 +334,17 @@ class AIInterpolationEngine(QObject):
         self._worker.add_frame(frame, frame_time)
     
     def set_mode(self, mode: InterpolationMode):
-        """设置插帧模式"""
+        """设置补帧模式"""
         self._mode = mode
         self._interpolator.set_mode(mode)
     
     def enable(self, enabled: bool):
-        """启用/禁用插帧"""
+        """启用/禁用补帧"""
         self._enabled = enabled
         self._interpolator.enable(enabled)
     
     def _on_marker_added(self, marker):
-        """处理插帧标记添加"""
+        """处理补帧标记添加"""
         from app.core.highlight_preview import highlight_preview_manager
         markers = highlight_preview_manager.get_interpolation_markers()
         self.markers_updated.emit(markers)
@@ -366,3 +362,5 @@ except ImportError:
 
 
 ai_interpolation_engine = AIInterpolationEngine()
+# 兼容旧命名：并非神经网络 AI
+linear_frame_blend_engine = ai_interpolation_engine

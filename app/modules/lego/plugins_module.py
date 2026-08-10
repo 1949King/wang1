@@ -50,29 +50,28 @@ class PluginsModule(BaseModule):
         ("opacity", "强度", 0.0, 1.0, 1.0, 100),
     ]
     
+    # 回退列表：仅真实存在于 app/plugins 的插件（与 plugin_store.OFFICIAL_ITEMS 对齐）
     STORE_PLUGINS = [
-        ("✨", "AI特效工坊", "特效工具", "v1.0.0", "免费", "用提示词生成短剧风格特效，并保存为可复用预设"),
-        ("📦", "批量导出Pro", "导出工具", "v2.1.0", "免费", "一键批量导出多格式视频，支持自定义参数"),
-        ("🎙️", "AI语音合成", "AI工具", "v1.5.0", "免费", "TTS文字转语音，30+音色，支持情感调节"),
-        ("🔍", "智能去水印", "视频处理", "v3.0.1", "免费", "AI识别并去除视频水印、字幕、Logo"),
-        ("🎨", "动态字幕模板", "字幕工具", "v2.0.0", "¥9.9", "100+精美动态字幕模板，一键套用"),
-        ("🎵", "BGM智能匹配", "音频工具", "v1.8.0", "免费", "根据视频内容自动匹配背景音乐"),
-        ("✨", "视频画质增强", "视频处理", "v2.2.0", "免费", "AI超分辨率，480p→1080p，细节不丢失"),
-        ("📊", "数据看板Pro", "运营工具", "v1.3.0", "¥19.9", "全平台数据分析，自动生成运营报告"),
-        ("🤖", "AI脚本生成", "AI工具", "v2.0.0", "免费", "输入关键词自动生成短剧脚本和分镜"),
-        ("🎬", "绿幕抠像", "特效工具", "v1.6.0", "免费", "实时绿幕/蓝幕抠像，边缘细腻"),
-        ("📝", "自动字幕校对", "字幕工具", "v1.4.0", "免费", "语音识别+AI校对，准确率98%+"),
-        ("🔊", "音频降噪大师", "音频工具", "v2.1.0", "免费", "深度学习降噪，保留人声去除背景噪音"),
-        ("🎞️", "关键帧动画", "视频处理", "v1.9.0", "免费", "可视化关键帧编辑器，贝塞尔曲线控制"),
+        ("🎭", "短剧筛选", "运营工具", "v1.1.1", "免费", "封面卡片墙+详情预览；静态缓存/可选真爬"),
+        ("🎨", "AI特效制作", "AI工具", "v1.0.0", "免费", "风格迁移/背景替换/超分/美颜（需 torch）"),
+        ("💥", "动作特效", "特效工具", "v1.0.0", "免费", "动作场景动感特效"),
+        ("😄", "喜剧特效", "特效工具", "v1.0.0", "免费", "喜剧风格氛围特效"),
+        ("🌑", "暗调特效", "特效工具", "v1.0.0", "免费", "暗调冷色氛围特效"),
+        ("✨", "金光特效", "特效工具", "v1.0.0", "免费", "金色光泽高光特效"),
+        ("💡", "高亮特效", "特效工具", "v1.0.0", "免费", "画面高光增强"),
+        ("👻", "恐怖特效", "特效工具", "v1.0.0", "免费", "恐怖片氛围特效"),
+        ("🌸", "柔光特效", "特效工具", "v1.0.0", "免费", "柔光梦幻氛围"),
+        ("🌅", "淡入淡出", "特效工具", "v1.0.0", "免费", "经典淡入淡出转场"),
+        ("↔️", "滑动转场", "特效工具", "v1.0.0", "免费", "滑动过渡转场"),
+        ("🌫️", "溶解转场", "特效工具", "v1.0.0", "免费", "溶解过渡转场"),
+        ("🔄", "翻转转场", "特效工具", "v1.0.0", "免费", "翻转过渡转场"),
+        ("📺", "故障转场", "特效工具", "v1.0.0", "免费", "故障抖动转场"),
+        ("🌀", "旋转转场", "特效工具", "v1.0.0", "免费", "旋转过渡转场"),
+        ("🧹", "擦除转场", "特效工具", "v1.0.0", "免费", "擦除过渡转场"),
+        ("🔍", "缩放转场", "特效工具", "v1.0.0", "免费", "缩放过渡转场"),
     ]
-    INSTALLED = [
-        ("✂️", "自动剪辑", "v1.0.0", "视频处理", True, "AI智能剪辑，自动识别高光片段"),
-        ("📝", "字幕生成", "v1.0.0", "AI工具", True, "语音转字幕，支持多语言翻译"),
-        ("🔄", "去重优化", "v1.0.0", "视频处理", True, "md5+AI双重去重，防止被判搬运"),
-        ("ℹ️", "视频信息", "v1.0.0", "工具", False, "查看视频编码/分辨率/帧率等详细信息"),
-        ("✍️", "文案生成", "v1.0.0", "AI工具", True, "AI生成爆款标题和文案"),
-        ("📊", "数据分析", "v1.0.0", "运营", True, "播放量/互动率/完播率分析"),
-    ]
+    # PluginManager 为空时的兜底展示（勿再写虚构「已安装」）
+    INSTALLED = []
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -88,6 +87,14 @@ class PluginsModule(BaseModule):
         title.setStyleSheet("font-size:18px;font-weight:bold;color:#fff;")
         top_row.addWidget(title)
         top_row.addStretch()
+        drama_btn = QPushButton("🎭 短剧筛选")
+        drama_btn.setStyleSheet(
+            "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:6px;"
+            "padding:7px 14px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#6d28d9;}"
+        )
+        drama_btn.clicked.connect(self._open_drama_finder_tab)
+        top_row.addWidget(drama_btn)
         ai_effect_btn = QPushButton("✨ AI特效工坊")
         ai_effect_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
         ai_effect_btn.clicked.connect(self._open_ai_effect_tab)
@@ -115,11 +122,17 @@ class PluginsModule(BaseModule):
         installed_scroll.setWidget(self._installed_container)
         
         self._tabs.addTab(installed_scroll, "📦 已安装")
+        self._drama_tab_index = self._tabs.addTab(self._create_drama_finder_tab(), "🎭 短剧筛选")
         self._ai_effect_tab_index = self._tabs.addTab(self._create_ai_effect_tab(), "✨ AI特效工坊")
-        self._tabs.addTab(self._create_store_tab(), "🛍️ 插件商店")
+        self._store_tab_index = self._tabs.addTab(self._create_store_tab(), "🛍️ 插件商店")
         layout.addWidget(self._tabs, 1)
         
         self._refresh_installed()
+        # 刷新后若有加载失败，在状态栏式提示（避免假「已安装」）
+        if self._plugin_mgr and hasattr(self._plugin_mgr, "get_load_errors"):
+            errs = self._plugin_mgr.get_load_errors()
+            if errs and hasattr(self, "_ai_effects_status_label"):
+                self._refresh_ai_effects_load_status()
     
     def _init_plugin_manager(self):
         """初始化真实的插件管理器 + 插件商店"""
@@ -127,6 +140,9 @@ class PluginsModule(BaseModule):
             from app.core.plugin_manager import PluginManager
             self._plugin_mgr = PluginManager()
             self._plugin_mgr.load_plugins()
+            errs = getattr(self._plugin_mgr, "format_load_errors", lambda: "")()
+            if errs:
+                logger.warning("插件加载失败摘要:\n%s", errs)
         except Exception as e:
             logger.warning(f"插件管理器初始化失败: {e}")
             self._plugin_mgr = None
@@ -154,8 +170,8 @@ class PluginsModule(BaseModule):
             try:
                 for it in self._store.get_items(installed_only=True):
                     store_installed[it.id] = it
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("获取已安装插件列表失败: %s", e)
         
         # 收集 PluginManager 已加载插件
         mgr_names = set()
@@ -164,13 +180,16 @@ class PluginsModule(BaseModule):
                 name = getattr(p, "name", "未知插件")
                 mgr_names.add(name)
                 enabled = getattr(p, "enabled", False)
+                has_ui = self._plugin_offers_widget_ui(p)
                 card = self._plugin_card(
                     "🧩", name,
                     getattr(p, "description", ""),
                     getattr(p, "version", "v1.0.0"),
-                    "已启用" if enabled else "已禁用",
-                    "#4caf50" if enabled else "#555",
-                    lambda checked, n=name: self._toggle_plugin(n),
+                    "打开界面" if (enabled and has_ui) else ("已启用" if enabled else "已禁用"),
+                    "#1e6bde" if (enabled and has_ui) else ("#4caf50" if enabled else "#555"),
+                    (lambda checked, n=name: self._open_plugin_ui(n))
+                    if (enabled and has_ui)
+                    else (lambda checked, n=name: self._toggle_plugin(n)),
                     enabled
                 )
                 self._installed_layout.addWidget(card)
@@ -187,8 +206,16 @@ class PluginsModule(BaseModule):
                 self._installed_layout.addWidget(card)
                 mgr_names.add(it.name)
         
-        # 兜底：若两者都为空，显示硬编码
+        # 兜底：若两者都为空，显示硬编码（并提示可能加载失败）
         if not mgr_names:
+            load_hint = ""
+            if self._plugin_mgr and hasattr(self._plugin_mgr, "format_load_errors"):
+                load_hint = self._plugin_mgr.format_load_errors()
+            if load_hint:
+                tip = QLabel("插件加载失败（非空目录）：\n" + load_hint)
+                tip.setWordWrap(True)
+                tip.setStyleSheet("color:#ef4444;font-size:11px;padding:8px;")
+                self._installed_layout.addWidget(tip)
             for icon, name, ver, cat, enabled, desc in self.INSTALLED:
                 card = self._plugin_card(
                     icon, name, desc, ver,
@@ -261,13 +288,27 @@ class PluginsModule(BaseModule):
             except Exception as e:
                 logger.warning(f"插件安装失败 ({item_id_or_name}): {e}")
         
-        QMessageBox.information(self, "安装", f"正在安装 {item_id_or_name}...\n\n提示：将插件文件放入 plugins/ 或 plugins/external/ 目录后，\n点击\"导入\"按钮或重启应用加载。")
+        # 修复：走到这里说明 PluginStore/PluginManager 两条自动安装路径都
+        # 已经失败或不可用，安装并没有在进行中——此前用 information 弹窗
+        # + "正在安装..."的措辞，容易让人以为还在等待一个后台过程完成。
+        # 改为如实告知安装未自动完成，需要手动放置文件。
+        QMessageBox.warning(self, "无法自动安装", f"未能自动安装 {item_id_or_name}。\n\n请手动将插件文件放入 plugins/ 或 plugins/external/ 目录后，\n点击\"导入\"按钮或重启应用加载。")
     
-    def _uninstall_store_item(self, item_id: str):
-        """卸载已安装的商店插件"""
+    def _uninstall_store_item(self, item_id_or_name: str):
+        """卸载已安装的商店插件（兼容传入真实 item_id 或展示用 name）"""
         if not self._store:
             QMessageBox.warning(self, "卸载失败", "插件商店未就绪")
             return
+        item_id = item_id_or_name
+        try:
+            if self._store.get_item(item_id_or_name) is None:
+                # 调用方可能传入的是展示名（如详情弹窗按钮），按 name 反查 id
+                for it in self._store.get_items():
+                    if getattr(it, "name", None) == item_id_or_name:
+                        item_id = it.id
+                        break
+        except Exception as e:
+            logger.debug(f"卸载前反查插件 id 失败 ({item_id_or_name}): {e}")
         try:
             ok, msg = self._store.uninstall_item(item_id)
             if ok:
@@ -301,7 +342,10 @@ class PluginsModule(BaseModule):
             except Exception as e:
                 QMessageBox.warning(self, "导入失败", str(e))
         else:
-            QMessageBox.information(self, "导入", f"已选择: {os.path.basename(file_path)}\n\n插件引擎未就绪，文件路径已记录。")
+            # 修复：此前声称"文件路径已记录"，但这里没有任何持久化逻辑——
+            # 关闭弹窗后这个路径就彻底丢了，下次插件引擎就绪也不会自动
+            # 处理它。如实告知用户需要手动操作。
+            QMessageBox.warning(self, "导入失败", f"已选择: {os.path.basename(file_path)}\n\n插件引擎未就绪，无法导入。请稍后重试，或手动将文件复制到 plugins/ 目录。")
 
     # ── 插件详情 ──
 
@@ -470,6 +514,17 @@ class PluginsModule(BaseModule):
             install_btn.clicked.connect(lambda: (self._install_store_item(name), dialog.accept()))
             btn_row.addWidget(install_btn)
         else:
+            if self._plugin_has_ui(name):
+                open_btn = QPushButton("打开界面")
+                open_btn.setStyleSheet(
+                    "QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:6px;"
+                    "padding:8px 20px;font-size:12px;font-weight:600;}"
+                    "QPushButton:hover{background:#1557b0;}"
+                )
+                open_btn.clicked.connect(
+                    lambda _=False, n=name: (dialog.accept(), self._open_plugin_ui(n))
+                )
+                btn_row.addWidget(open_btn)
             uninstall_btn = QPushButton("🗑 卸载")
             uninstall_btn.setStyleSheet("QPushButton{background:#f44336;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:12px;font-weight:600;} QPushButton:hover{background:#d32f2f;}")
             uninstall_btn.clicked.connect(lambda: (self._uninstall_store_item(name), dialog.accept()))
@@ -481,6 +536,165 @@ class PluginsModule(BaseModule):
         dlo.addLayout(btn_row)
 
         dialog.exec()
+
+    def _find_plugin_by_name(self, name: str):
+        """按显示名查找已加载插件实例。"""
+        if not self._plugin_mgr:
+            return None
+        plugins = self._plugin_mgr.list_plugins()
+        if not plugins:
+            return None
+        # 兼容异常返回（字符串列表等）
+        if all(isinstance(p, str) for p in plugins):
+            return None
+        for p in plugins:
+            if getattr(p, "name", None) == name:
+                return p
+        return None
+
+    # >>> FROZEN:drama-finder-ui:plugins-host BEGIN
+    def _plugin_offers_widget_ui(self, plugin) -> bool:
+        """是否提供可嵌入的 QWidget 界面。
+
+        排除 AI 特效等：有 apply_effect 且 run() 返回 bool，应走「AI 特效工坊」专用入口。
+        """
+        if plugin is None or not callable(getattr(plugin, "run", None)):
+            return False
+        cfg = {}
+        if callable(getattr(plugin, "get_ui_config", None)):
+            try:
+                cfg = plugin.get_ui_config() or {}
+            except Exception:
+                cfg = {}
+        wc = str(cfg.get("widget_class") or "")
+        # 特效管线插件：通用打开会误调 run()→bool
+        if callable(getattr(plugin, "apply_effect", None)) and wc != "DramaFinderWidget":
+            return False
+        if wc:
+            return True
+        # 旧式 UI 插件：实例上已有 _widget 槽位
+        return hasattr(plugin, "_widget")
+
+    def _plugin_has_ui(self, name: str) -> bool:
+        """已安装且可打开可视化界面。"""
+        return self._plugin_offers_widget_ui(self._find_plugin_by_name(name))
+
+    def _ensure_plugin_initialized(self, plugin) -> None:
+        """PluginManager 加载后未必调用 initialize；打开 UI 前补一次。"""
+        if not callable(getattr(plugin, "initialize", None)):
+            return
+        ctx = getattr(plugin, "_context", None) or {}
+        if not isinstance(ctx, dict):
+            ctx = {}
+        ctx = {**ctx, "parent_widget": self}
+        # 缺 _widget / 未标记 initialized 时必须 initialize（勿默认 True 跳过）
+        need = (not getattr(plugin, "_initialized", False)) or (not hasattr(plugin, "_widget"))
+        if need:
+            plugin.initialize(ctx)
+        else:
+            try:
+                plugin._context = ctx
+            except Exception as e:
+                logger.debug("设置插件上下文失败: %s", e)
+
+    def _create_drama_finder_tab(self) -> QWidget:
+        """插件中心常驻：短剧筛选可视化（卡片 + 预览）。"""
+        from PyQt6.QtCore import QTimer
+        wrap = QWidget()
+        lo = QVBoxLayout(wrap)
+        lo.setContentsMargins(0, 4, 0, 0)
+        tip = QLabel("正在加载短剧筛选界面…")
+        tip.setStyleSheet("color:#888;padding:24px;font-size:12px;")
+        tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lo.addWidget(tip, 1)
+        self._drama_tab_wrap = wrap
+        self._drama_tab_layout = lo
+        self._drama_placeholder = tip
+        self._drama_widget = None
+        QTimer.singleShot(0, self._ensure_drama_finder_widget)
+        return wrap
+
+    def _ensure_drama_finder_widget(self) -> None:
+        """懒加载并嵌入 DramaFinderWidget。"""
+        if getattr(self, "_drama_widget", None) is not None:
+            return
+        lay = getattr(self, "_drama_tab_layout", None)
+        if lay is None:
+            return
+        try:
+            plugin = self._find_plugin_by_name("短剧筛选")
+            if plugin is not None:
+                self._ensure_plugin_initialized(plugin)
+                w = plugin.run()
+            else:
+                from app.plugins.drama_finder_plugin.drama_ui import DramaFinderWidget
+                w = DramaFinderWidget(self)
+            if not isinstance(w, QWidget):
+                raise RuntimeError("短剧筛选未返回界面组件")
+            ph = getattr(self, "_drama_placeholder", None)
+            if ph is not None:
+                lay.removeWidget(ph)
+                ph.deleteLater()
+                self._drama_placeholder = None
+            w.setParent(self._drama_tab_wrap)
+            lay.addWidget(w, 1)
+            self._drama_widget = w
+            w.show()
+        except Exception as e:
+            logger.warning("嵌入短剧筛选界面失败: %s", e)
+            ph = getattr(self, "_drama_placeholder", None)
+            if ph is not None:
+                ph.setText(f"短剧筛选加载失败: {e}")
+                ph.setStyleSheet("color:#ef4444;padding:24px;")
+
+    def _open_drama_finder_tab(self):
+        """切换到短剧筛选可视化标签。"""
+        self._ensure_drama_finder_widget()
+        if hasattr(self, "_tabs") and hasattr(self, "_drama_tab_index"):
+            self._tabs.setCurrentIndex(self._drama_tab_index)
+
+    def _open_plugin_ui(self, name: str):
+        """打开插件可视化界面；短剧筛选优先切到常驻标签页。"""
+        if name == "短剧筛选":
+            self._open_drama_finder_tab()
+            return
+        plugin = self._find_plugin_by_name(name)
+        if plugin is None:
+            QMessageBox.warning(
+                self, "无法打开", f"插件「{name}」未加载，请先在已安装列表中启用。"
+            )
+            return
+        if not self._plugin_offers_widget_ui(plugin):
+            QMessageBox.information(self, name, "该插件没有可视化界面（可能是特效/批处理插件）。")
+            return
+        try:
+            self._ensure_plugin_initialized(plugin)
+            result = plugin.run()
+            if not isinstance(result, QWidget):
+                QMessageBox.information(self, name, "插件已运行（无可视化界面）。")
+                return
+            dlg = QDialog(self)
+            dlg.setWindowTitle(name)
+            dlg.resize(1000, 720)
+            dlg.setStyleSheet("QDialog{background:#121212;}")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(0, 0, 0, 0)
+            result.setParent(dlg)
+            lay.addWidget(result)
+            result.show()
+
+            def _detach(_result=0, w=result):
+                try:
+                    w.setParent(None)
+                    w.hide()
+                except Exception as e:
+                    logger.debug("插件窗口分离失败: %s", e)
+
+            dlg.finished.connect(_detach)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "打开插件界面失败", str(e))
+    # <<< FROZEN:drama-finder-ui:plugins-host END
 
     # ── 插件评分/评价存储 ──
 
@@ -505,8 +719,8 @@ class PluginsModule(BaseModule):
                 self._rating_info_lbl.setText(f"{stars}  {avg:.1f}/5  ({count}人评价)")
             else:
                 self._rating_info_lbl.setText("暂无评分")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("加载插件评分失败: %s", e)
 
     def _restore_plugin_rating(self, plugin_name: str):
         """恢复用户对当前插件的评分（点亮星星）"""
@@ -521,8 +735,8 @@ class PluginsModule(BaseModule):
                     if i < my_rating:
                         btn.setText("★")
                         btn.setStyleSheet("QPushButton{background:transparent;color:#f59e0b;border:none;font-size:18px;}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("恢复插件评分失败: %s", e)
 
     def _set_star_rating(self, plugin_name: str, value: int):
         """用户设置星级评分"""
@@ -571,8 +785,8 @@ class PluginsModule(BaseModule):
                 for review in pdata.get("reviews", [])[-10:]:  # 最近10条
                     stars = "⭐" * int(review.get("rating", 0))
                     self._reviews_list.addItem(f"{stars} {review.get('text', '')}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("加载插件评价失败: %s", e)
 
     def _submit_plugin_review(self, plugin_name: str):
         """提交插件评价"""
@@ -623,8 +837,8 @@ class PluginsModule(BaseModule):
                         store_ver = store_items[name].version
                         if store_ver != installed_ver and self._version_gt(store_ver, installed_ver):
                             updates_available.append((name, installed_ver, store_ver))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("插件更新检测失败: %s", e)
 
         if updates_available:
             msg = "发现以下插件可更新:\n\n"
@@ -634,7 +848,7 @@ class PluginsModule(BaseModule):
             reply = QMessageBox.question(self, "插件更新", msg,
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
-                self._tabs.setCurrentIndex(1)  # 切换到商店标签
+                self._tabs.setCurrentIndex(getattr(self, "_store_tab_index", 3))  # 切换到商店标签
 
     @staticmethod
     def _version_gt(ver_a: str, ver_b: str) -> bool:
@@ -657,6 +871,95 @@ class PluginsModule(BaseModule):
         """打开 AI 特效工坊标签页"""
         if hasattr(self, "_tabs") and hasattr(self, "_ai_effect_tab_index"):
             self._tabs.setCurrentIndex(self._ai_effect_tab_index)
+            self._refresh_ai_effects_load_status()
+
+    def _refresh_ai_effects_load_status(self):
+        """检测 AI 特效插件能否加载，并更新状态条。"""
+        label = getattr(self, "_ai_effects_status_label", None)
+        if label is None:
+            return
+        ok, detail = self._probe_ai_effects_plugin()
+        if ok:
+            label.setText("● 深度学习特效插件：可加载")
+            label.setStyleSheet("color:#22c55e;font-size:11px;font-weight:600;")
+            label.setToolTip(detail)
+        else:
+            label.setText("● 深度学习特效插件：加载失败（点「打开面板」看详情）")
+            label.setStyleSheet("color:#ef4444;font-size:11px;")
+            label.setToolTip(detail)
+        # 同时汇总 PluginManager 其它加载错误
+        if self._plugin_mgr and hasattr(self._plugin_mgr, "format_load_errors"):
+            errs = self._plugin_mgr.format_load_errors()
+            if errs:
+                tip = (label.toolTip() or "") + "\n\n其它插件加载失败:\n" + errs
+                label.setToolTip(tip.strip())
+
+    def _probe_ai_effects_plugin(self):
+        """返回 (ok: bool, detail: str)。只测加载，不重做特效算法。"""
+        try:
+            from app.plugins import ai_effects_plugin as pkg
+            err = getattr(pkg, "PLUGIN_LOAD_ERROR", "") or ""
+            Plugin = getattr(pkg, "Plugin", None)
+            Widget = getattr(pkg, "AIEffectsWidget", None)
+            if err or Plugin is None:
+                return False, err or "Plugin 入口为 None（导入失败）"
+            # 尝试实例化（不强制 initialize，避免立刻下模型）
+            inst = Plugin()
+            name = getattr(inst, "name", "") or "AI特效制作"
+            detail = f"已导入 {name}"
+            if Widget is None:
+                # main 里懒加载 UI
+                try:
+                    from app.plugins.ai_effects_plugin.main import _load_ai_effects_widget
+                    Widget = _load_ai_effects_widget()
+                except Exception as e:
+                    return False, f"插件类可导入，但 UI 失败: {e}"
+            if Widget is None:
+                return False, "AIEffectsWidget 不可用"
+            return True, detail
+        except Exception as e:
+            return False, f"导入失败: {e}"
+
+    def _open_ai_effects_studio(self):
+        """打开真实深度学习特效面板；失败则明文提示。"""
+        ok, detail = self._probe_ai_effects_plugin()
+        if not ok:
+            QMessageBox.warning(
+                self,
+                "AI 特效插件无法加载",
+                f"{detail}\n\n"
+                "常见原因：缺依赖（torch / opencv / Pillow）、插件包导入异常。\n"
+                "本页下方「参数工坊」仍可生成调色预设，不依赖该插件。",
+            )
+            self._refresh_ai_effects_load_status()
+            return
+        try:
+            from app.plugins.ai_effects_plugin.main import Plugin, _load_ai_effects_widget
+            plugin = Plugin()
+            # 轻量 initialize；失败也继续尝试开 UI
+            if not getattr(plugin, "_initialized", False):
+                init_ok = plugin.initialize({})
+                if not init_ok:
+                    partial = getattr(plugin, "_last_error", "") or "initialize 返回 False"
+                    QMessageBox.warning(
+                        self,
+                        "AI 特效初始化未完全成功",
+                        f"{partial}\n\n仍将尝试打开面板；部分特效可能不可用。",
+                    )
+            Widget = _load_ai_effects_widget()
+            dlg = QDialog(self)
+            dlg.setWindowTitle("AI 特效制作")
+            dlg.resize(900, 640)
+            lay = QVBoxLayout(dlg)
+            lay.addWidget(Widget(plugin, dlg))
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "打开 AI 特效面板失败",
+                f"{e}\n\n请查看日志；特效算法本身未改动，仅加载链路。",
+            )
+        self._refresh_ai_effects_load_status()
 
     def _create_ai_effect_tab(self):
         """创建 AI 特效工坊可视化界面"""
@@ -669,17 +972,36 @@ class PluginsModule(BaseModule):
         layout.setContentsMargins(0, 4, 0, 0)
         layout.setSpacing(10)
 
+        # 加载状态 + 打开真实插件面板
+        status_row = QHBoxLayout()
+        self._ai_effects_status_label = QLabel("● 深度学习特效插件：检测中…")
+        self._ai_effects_status_label.setStyleSheet("color:#888;font-size:11px;")
+        self._ai_effects_status_label.setWordWrap(True)
+        status_row.addWidget(self._ai_effects_status_label, 1)
+        open_studio_btn = QPushButton("打开深度学习特效面板")
+        open_studio_btn.setStyleSheet(
+            "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:6px;"
+            "padding:7px 12px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#6d28d9;}"
+        )
+        open_studio_btn.clicked.connect(self._open_ai_effects_studio)
+        status_row.addWidget(open_studio_btn)
+        layout.addLayout(status_row)
+
         hero = QFrame()
         hero.setStyleSheet("QFrame{background:#121212;border:1px solid #1e1e1e;border-radius:12px;}")
         hero_layout = QVBoxLayout(hero)
         hero_layout.setContentsMargins(16, 14, 16, 14)
         hero_layout.setSpacing(8)
 
-        title = QLabel("✨ AI 特效工坊")
+        title = QLabel("✨ AI 特效参数工坊（调色预设）")
         title.setStyleSheet("color:#fff;font-size:18px;font-weight:bold;")
         hero_layout.addWidget(title)
 
-        desc = QLabel("输入短剧风格提示词，AI 会生成一组可调参数；保存后写入现有 effects.json，后续可作为特效预设复用。")
+        desc = QLabel(
+            "下方用于生成调色/滤镜参数并写入 effects.json。"
+            "深度学习特效（超分/美颜等）请点上方「打开深度学习特效面板」。"
+        )
         desc.setWordWrap(True)
         desc.setStyleSheet("color:#888;font-size:12px;line-height:18px;")
         hero_layout.addWidget(desc)
@@ -790,6 +1112,10 @@ class PluginsModule(BaseModule):
 
         scroll.setWidget(container)
         self._update_ai_effect_preview()
+        try:
+            self._refresh_ai_effects_load_status()
+        except Exception as e:
+            logger.warning("AI特效加载状态刷新失败: %s", e)
         return scroll
 
     def _on_ai_effect_slider_changed(self, key: str, value: int):
@@ -1003,7 +1329,7 @@ class PluginsModule(BaseModule):
         btn.clicked.connect(callback)
         cl.addWidget(btn)
         # 点击卡片（非按钮区域）弹出详情
-        card.mousePressEvent = lambda e, n=name, icn=icon, desc=detail, ver=extra, installed=(btn_text in ("已安装","已启用","已禁用")): self._show_plugin_detail(n, icn, desc, ver, installed)
+        card.mousePressEvent = lambda e, n=name, icn=icon, desc=detail, ver=extra, installed=(btn_text in ("已安装", "已启用", "已禁用", "打开界面")): self._show_plugin_detail(n, icn, desc, ver, installed)
         return card
     
     def _create_store_tab(self):

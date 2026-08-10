@@ -190,8 +190,8 @@ class BilibiliUploader(PlatformUploader):
                     tag_input = page.query_selector('input[class*="tag"], [placeholder*="标签"]')
                     if tag_input:
                         tag_input.fill("，".join(tags[:10]))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"B站标签填写失败，跳过标签填写: {e}")
 
             page.close()
             return {
@@ -291,8 +291,8 @@ class PlatformIntegrator:
             try:
                 with open(self._publish_history_file, "r", encoding="utf-8") as f:
                     history = json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"读取发布历史失败，使用空列表继续: {e}")
         entry = {
             "platform": platform, "video": video_path, "title": title,
             "status": status, "time": datetime.now().isoformat()
@@ -470,6 +470,6 @@ class PlatformIntegrator:
                 with open(self._publish_history_file, "r", encoding="utf-8") as f:
                     history = json.load(f)
                 return history[-limit:]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"读取发布历史失败，返回空列表: {e}")
         return []

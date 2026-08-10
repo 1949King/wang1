@@ -2,6 +2,9 @@ import os
 import requests
 import tempfile
 import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z"
 TEMP_DIR = os.path.join(os.environ['TEMP'], 'ffmpeg_dev_install')
@@ -106,8 +109,8 @@ def main():
     # Cleanup
     try:
         shutil.rmtree(TEMP_DIR)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[FFmpegDevInstaller] 清理临时目录失败: {e}")
 
 if __name__ == "__main__":
     main()

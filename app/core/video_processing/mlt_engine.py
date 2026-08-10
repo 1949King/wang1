@@ -108,8 +108,8 @@ class Clip:
                     }
                     if self.duration <= 0:
                         self.duration = probe.duration - self.in_point
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngine] 加载片段元数据失败: {e}")
 
 
 @dataclass
@@ -318,8 +318,8 @@ class MLTEngine:
             hw_enc = detect_hardware_encoders(ffmpeg_exe)
             if hw_enc and codec == "libx264":
                 codec = hw_enc.get("h264", codec)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[MLTEngine] 检测硬件编码器失败: {e}")
 
         # 输入文件
         cmd = [ffmpeg_exe]

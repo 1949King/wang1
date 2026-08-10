@@ -215,9 +215,8 @@ class GPUCompatibilityTester:
                             memory_mb = int(memory_str.split(' ')[0])
                         elif 'GB' in memory_str:
                             memory_mb = int(memory_str.split(' ')[0]) * 1024
-                    except Exception:
-                        pass
-                        pass
+                    except Exception as e:
+                        logger.debug(f"解析 GPU 显存大小失败，跳过显存信息: {e}")
             
             if model:
                 return GPUInfo(

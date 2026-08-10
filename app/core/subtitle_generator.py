@@ -112,156 +112,89 @@ class TypoCorrection:
 
 
 class WhisperTranscriber:
-    """Whisper语音转写器"""
+    """Whisper语音转写器 — 统一走 app.core.ai.whisper_asr"""
     
     def __init__(self, model_size: str = "base"):
         self._model_size = model_size
-        self._model = None
         self._lock = RLock()
-        self._load_model()
+        self._model = True  # 占位：可用性由 whisper_asr 判定
     
     def _load_model(self):
-        """加载Whisper模型"""
-        try:
-            import whisper
-            self._model = whisper.load_model(self._model_size)
-            print(f"Whisper模型加载成功: {self._model_size}")
-        except ImportError:
-            print("Whisper未安装，使用模拟转写")
-            self._model = None
-        except Exception as e:
-            print(f"Whisper模型加载失败: {e}")
-            self._model = None
+        """兼容旧调用；实际加载在 whisper_asr._load_model。"""
+        return None
     
     def transcribe_audio(self, audio_path: str,
                         language: str = "zh",
                         progress_callback: Optional[callable] = None) -> List[SubtitleSegment]:
-        """转写音频"""
+        """转写音频为真实字幕片段（无模型时返回空，不再生成假文案）。"""
         if progress_callback:
             progress_callback(0, "开始语音转写...")
         
         with self._lock:
             try:
-                if self._model is not None:
-                    # 使用Whisper转写
+                from app.core.ai.whisper_asr import is_available, transcribe, get_backend
+            except Exception:
+                try:
+                    from core.ai.whisper_asr import is_available, transcribe, get_backend
+                except Exception as e:
+                    print(f"whisper_asr 不可用: {e}")
                     if progress_callback:
-                        progress_callback(20, "加载音频...")
-                    
-                    result = self._model.transcribe(
-                        audio_path,
-                        language=language,
-                        task="transcribe",
-                        word_timestamps=True
-                    )
-                    
-                    if progress_callback:
-                        progress_callback(60, "生成字幕...")
-                    
-                    # 转换为字幕片段
-                    segments = []
-                    for segment in result["segments"]:
-                        subtitle = SubtitleSegment(
-                            id=f"seg_{len(segments)}",
-                            start_time=segment["start"],
-                            end_time=segment["end"],
-                            text=segment["text"].strip(),
-                            confidence=segment.get("avg_logprob", 0.0),
-                            language=language
-                        )
-                        segments.append(subtitle)
-                    
-                    if progress_callback:
-                        progress_callback(100, "转写完成")
-                    
-                    return segments
-                else:
-                    # 模拟转写（用于测试）
-                    if progress_callback:
-                        progress_callback(30, "模拟转写...")
-                    
-                    return self._simulate_transcription(audio_path, progress_callback)
-                    
+                        progress_callback(100, "语音识别模块不可用")
+                    return []
+
+            if not is_available():
+                print("Whisper 未安装（请 pip install faster-whisper）")
+                if progress_callback:
+                    progress_callback(100, "未安装 Whisper")
+                return []
+
+            try:
+                if progress_callback:
+                    progress_callback(15, f"加载模型 ({get_backend()}/{self._model_size})...")
+                raw = transcribe(
+                    audio_path,
+                    model_size=self._model_size,
+                    language=language or "zh",
+                )
+                if progress_callback:
+                    progress_callback(80, "整理字幕片段...")
+                segments: List[SubtitleSegment] = []
+                for i, seg in enumerate(raw or []):
+                    text = (seg.get("text") or "").strip()
+                    if not text:
+                        continue
+                    segments.append(SubtitleSegment(
+                        id=f"seg_{i}",
+                        start_time=float(seg.get("start", 0) or 0),
+                        end_time=float(seg.get("end", 0) or 0),
+                        text=text,
+                        confidence=float(seg.get("avg_logprob", 0.0) or 0.0),
+                        language=language or "zh",
+                    ))
+                if progress_callback:
+                    progress_callback(100, f"转写完成 ({len(segments)} 条)")
+                return segments
             except Exception as e:
                 print(f"语音转写失败: {e}")
+                if progress_callback:
+                    progress_callback(100, f"转写失败: {e}")
                 return []
     
     def _simulate_transcription(self, audio_path: str,
                            progress_callback: Optional[callable] = None) -> List[SubtitleSegment]:
-        """模拟转写（用于测试）"""
-        import os
-        import random
-        
-        # 根据音频时长生成模拟字幕
-        try:
-            import librosa
-            duration = librosa.get_duration(filename=audio_path)
-        except Exception:
-            pass
-            duration = 60.0  # 默认60秒
-        
-        segments = []
-        current_time = 0.0
-        
-        sample_texts = [
-            "这是一段测试字幕",
-            "欢迎使用AI短剧编辑器",
-            "智能字幕生成系统",
-            "支持多种语言识别",
-            "自动检测说话人",
-            "实时字幕显示"
-        ]
-        
-        while current_time < duration:
-            segment_duration = random.uniform(2.0, 5.0)
-            if current_time + segment_duration > duration:
-                segment_duration = duration - current_time
-            
-            text = random.choice(sample_texts)
-            
-            segment = SubtitleSegment(
-                id=f"seg_{len(segments)}",
-                start_time=current_time,
-                end_time=current_time + segment_duration,
-                text=text,
-                confidence=random.uniform(0.8, 0.95),
-                language="zh"
-            )
-            segments.append(segment)
-            
-            current_time += segment_duration
-            
-            if progress_callback:
-                progress = int(30 + 70 * (current_time / duration))
-                progress_callback(progress, f"生成字幕片段 {len(segments)}")
-        
+        """已废弃：禁止输出与画面无关的假字幕。"""
         if progress_callback:
-            progress_callback(100, "模拟转写完成")
-        
-        return segments
+            progress_callback(100, "模拟转写已禁用")
+        return []
 
 
 class TypoCorrector:
     """错别字纠错器"""
     
     def __init__(self):
-        self._corrections: Dict[str, str] = {
-            "的": "得",
-            "得": "的",
-            "在": "再",
-            "再": "在",
-            "吗": "嘛",
-            "嘛": "吗",
-            "吧": "罢",
-            "罢": "吧",
-            "他": "她",
-            "她": "他",
-            "它": "它们",
-            "它们": "它",
-            "这个": "这个",
-            "那个": "那个",
-            "那里": "哪里",
-            "哪里": "那里"
-        }
+        # 默认不自动替换常用字（的/得/在/再…），避免把正确对白改坏。
+        # 仅保留明确同音错词时可由 add_correction 追加。
+        self._corrections: Dict[str, str] = {}
         self._lock = RLock()
     
     def correct_text(self, text: str,
@@ -409,7 +342,7 @@ class SubtitleGenerator:
     
     def generate_subtitles(self, audio_path: str,
                         language: str = "zh",
-                        correct_typos: bool = True,
+                        correct_typos: bool = False,
                         apply_style: Optional[SubtitleStyle] = None,
                         progress_callback: Optional[callable] = None) -> List[SubtitleSegment]:
         """生成字幕"""

@@ -36,11 +36,13 @@ except ImportError:
 @dataclass
 class WaveformData:
     """波形数据"""
-    peaks: List[float]      # 峰值 (0.0 - 1.0), 长度 = num_samples
+    peaks: List[float]      # 峰值 (0.0 - 1.0), 长度 = num_samples（向后兼容，RMS）
     duration: float         # 音频时长 (秒)
     sample_rate: int        # 采样率
     num_samples: int        # 采样点数
     cached_at: float        # 缓存时间戳
+    min_peaks: List[float] = None   # 每桶最小样本值 (-1.0 ~ 0)，负半区着色用
+    max_peaks: List[float] = None   # 每桶最大样本值 (0 ~ 1.0)，正半区着色用
 
 
 class WaveformGenerator:
@@ -86,11 +88,14 @@ class WaveformGenerator:
         if not os.path.exists(audio_path):
             return None
 
-        # 检查缓存
-        cache_key = f"{audio_path}#{num_samples}"
+        # 检查缓存（加 #v2 让旧版本——没有 min_peaks/max_peaks 的缓存自动失效）
+        cache_key = f"{audio_path}#{num_samples}#v2"
         with self._cache_lock:
             if cache_key in self._cache:
-                return self._cache[cache_key][1]
+                cached = self._cache[cache_key][1]
+                # 防御：万一缓存里仍是旧对象（min_peaks=None），也丢掉重算
+                if cached is not None and cached.min_peaks and cached.max_peaks:
+                    return cached
 
         # 生成波形
         try:
@@ -123,39 +128,58 @@ class WaveformGenerator:
         if callback:
             try:
                 callback(data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[WaveformGenerator] 回调执行失败: {e}")
 
     def _generate_internal(self, path: str, num_samples: int,
                            progress_cb=None) -> Optional[WaveformData]:
-        """实际生成逻辑"""
-        # 优先使用 FFmpeg (最稳定，支持所有格式)
+        """实际生成逻辑。全部失败返回 None（不再静默全 0）。"""
+        # 优先使用 PyAV
         try:
-            return self._generate_ffmpeg(path, num_samples, progress_cb)
+            data = self._generate_pyav(path, num_samples, progress_cb)
+            if data and data.peaks and max(data.peaks) > 1e-6:
+                return data
         except Exception as e:
-            logger.debug(f"FFmpeg 波形生成失败, 尝试回退: {e}")
+            logger.debug(f"PyAV 波形生成失败, 尝试回退: {e}")
 
-        # 其次使用 PyAV
+        # 回退到 FFmpeg (支持所有格式)
         try:
-            return self._generate_pyav(path, num_samples, progress_cb)
+            data = self._generate_ffmpeg(path, num_samples, progress_cb)
+            if data and data.peaks and max(data.peaks) > 1e-6:
+                return data
         except Exception as e:
-            logger.debug(f"PyAV 波形生成失败: {e}")
+            logger.debug(f"FFmpeg 波形生成失败: {e}")
 
         # 回退到 wave 库 (仅 WAV)
         if HAS_WAVE and path.lower().endswith('.wav'):
             try:
-                return self._generate_wave(path, num_samples, progress_cb)
+                data = self._generate_wave(path, num_samples, progress_cb)
+                if data and data.peaks and max(data.peaks) > 1e-6:
+                    return data
             except Exception as e:
                 logger.debug(f"wave 库波形生成失败: {e}")
 
-        # 最终回退: 生成零波形
-        return self._generate_silent(num_samples, 0.0)
+        logger.warning(f"波形生成全部失败: {path}")
+        return None
+
+    @staticmethod
+    def _pcm_to_mono(pcm):
+        """将 PyAV frame.to_ndarray() 结果转为 1D 单声道。"""
+        if not hasattr(pcm, "ndim"):
+            return pcm
+        if pcm.ndim == 1:
+            return pcm
+        if pcm.ndim == 2:
+            # (channels, samples) 或 (samples, channels)
+            if pcm.shape[0] <= 8 and pcm.shape[0] < pcm.shape[1]:
+                return pcm.mean(axis=0)
+            return pcm.mean(axis=1)
+        return pcm.reshape(-1)
 
     def _generate_pyav(self, path: str, num_samples: int,
                        progress_cb=None) -> WaveformData:
         """使用 PyAV 提取音频并降采样"""
         import time
-        start = time.time()
 
         try:
             import av
@@ -165,7 +189,6 @@ class WaveformGenerator:
         peaks = []
         duration = 0.0
         sample_rate = 44100
-        total_samples_collected = 0
 
         with av.open(path, mode='r') as container:
             if not container.streams.audio:
@@ -183,12 +206,8 @@ class WaveformGenerator:
             # 收集所有 PCM 样本
             all_pcm = []
             for frame in container.decode(audio_stream):
-                pcm = frame.to_ndarray()
-                # 转为单声道
-                if pcm.ndim > 1:
-                    pcm = pcm.mean(axis=0)
+                pcm = self._pcm_to_mono(frame.to_ndarray())
                 all_pcm.append(pcm)
-                total_samples_collected += len(pcm)
 
                 if progress_cb and duration > 0:
                     current_time = float(frame.pts * frame.time_base) if frame.pts else 0
@@ -200,18 +219,24 @@ class WaveformGenerator:
             if HAS_NUMPY:
                 full = np.concatenate(all_pcm)
                 # 归一化到 [-1, 1]
-                max_val = max(abs(full.max()), abs(full.min()), 1e-6)
+                max_val = max(abs(float(full.max())), abs(float(full.min())), 1e-6)
                 full = full / max_val
 
-                # 分桶, 每桶取 RMS
+                # 分桶, 每桶取 RMS + min + max（负正半区着色用）
                 bucket_size = max(1, len(full) // num_samples)
                 peaks = []
+                min_peaks = []
+                max_peaks = []
                 for i in range(0, len(full), bucket_size):
                     bucket = full[i:i + bucket_size]
                     if len(bucket) > 0:
                         rms = float(np.sqrt(np.mean(bucket ** 2)))
                         peaks.append(min(1.0, rms))
+                        min_peaks.append(float(bucket.min()))  # -1~0
+                        max_peaks.append(float(bucket.max()))  # 0~1
                 peaks = peaks[:num_samples]
+                min_peaks = min_peaks[:num_samples]
+                max_peaks = max_peaks[:num_samples]
             else:
                 # 纯 Python 回退
                 full = []
@@ -221,16 +246,24 @@ class WaveformGenerator:
                 full = [s / max_val for s in full]
                 bucket_size = max(1, len(full) // num_samples)
                 peaks = []
+                min_peaks = []
+                max_peaks = []
                 for i in range(0, len(full), bucket_size):
                     bucket = full[i:i + bucket_size]
                     if bucket:
                         rms = math.sqrt(sum(x * x for x in bucket) / len(bucket))
                         peaks.append(min(1.0, rms))
+                        min_peaks.append(min(bucket))
+                        max_peaks.append(max(bucket))
                 peaks = peaks[:num_samples]
+                min_peaks = min_peaks[:num_samples]
+                max_peaks = max_peaks[:num_samples]
 
             # 填充不足
             while len(peaks) < num_samples:
                 peaks.append(0.0)
+                min_peaks.append(0.0)
+                max_peaks.append(0.0)
 
         return WaveformData(
             peaks=peaks,
@@ -238,6 +271,8 @@ class WaveformGenerator:
             sample_rate=sample_rate,
             num_samples=num_samples,
             cached_at=time.time(),
+            min_peaks=min_peaks,
+            max_peaks=max_peaks,
         )
 
     def _generate_wave(self, path: str, num_samples: int,
@@ -274,14 +309,22 @@ class WaveformGenerator:
 
             bucket_size = max(1, len(samples) // num_samples)
             peaks = []
+            min_peaks = []
+            max_peaks = []
             for i in range(0, len(samples), bucket_size):
                 bucket = samples[i:i + bucket_size]
                 if bucket:
                     rms = math.sqrt(sum(x * x for x in bucket) / len(bucket))
                     peaks.append(min(1.0, rms))
+                    min_peaks.append(min(bucket))
+                    max_peaks.append(max(bucket))
             peaks = peaks[:num_samples]
+            min_peaks = min_peaks[:num_samples]
+            max_peaks = max_peaks[:num_samples]
             while len(peaks) < num_samples:
                 peaks.append(0.0)
+                min_peaks.append(0.0)
+                max_peaks.append(0.0)
 
         return WaveformData(
             peaks=peaks,
@@ -289,6 +332,8 @@ class WaveformGenerator:
             sample_rate=sample_rate,
             num_samples=num_samples,
             cached_at=time.time(),
+            min_peaks=min_peaks,
+            max_peaks=max_peaks,
         )
 
     def _generate_ffmpeg(self, path: str, num_samples: int,
@@ -303,17 +348,27 @@ class WaveformGenerator:
         logger.debug(f"波形生成 FFmpeg路径: {ffmpeg_path}")
         
         # 提取音频 PCM (单声道, 44100Hz, 16位)
+        # 限制提取前60秒，避免长视频内存溢出
         cmd = [
             ffmpeg_path, "-i", path,
             "-ac", "1", "-ar", "44100",
-            "-f", "s16le", "-vcodec", "none", "-"
+            "-t", "60",  # 限制提取时长
+            "-f", "s16le", "-vn", "-"  # -vn 禁用视频，-f s16le 输出原始PCM
         ]
         
-        result = subprocess.run(cmd, capture_output=True, timeout=60)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
         logger.debug(f"波形生成返回码: {result.returncode}, 输出长度: {len(result.stdout)}")
         
         if result.returncode != 0 or not result.stdout:
-            raise RuntimeError(f"FFmpeg 提取音频失败: {result.stderr.decode('utf-8', errors='ignore')}")
+            # 打印错误信息便于调试
+            stderr_msg = result.stderr.decode('utf-8', errors='ignore')[:500]
+            logger.error(f"FFmpeg 提取音频失败: {stderr_msg}")
+            raise RuntimeError(f"FFmpeg 提取音频失败: {stderr_msg}")
         
         # 解析 PCM 数据
         raw_data = result.stdout
@@ -334,39 +389,55 @@ class WaveformGenerator:
         # 降采样为 num_samples 个峰值
         bucket_size = max(1, len(samples) // num_samples)
         peaks = []
+        min_peaks = []
+        max_peaks = []
         for i in range(0, len(samples), bucket_size):
             bucket = samples[i:i + bucket_size]
             if bucket:
                 rms = math.sqrt(sum(x * x for x in bucket) / len(bucket))
                 peaks.append(min(1.0, rms))
+                min_peaks.append(min(bucket))
+                max_peaks.append(max(bucket))
         peaks = peaks[:num_samples]
-        
+        min_peaks = min_peaks[:num_samples]
+        max_peaks = max_peaks[:num_samples]
+
         logger.debug(f"波形生成峰值数: {len(peaks)}, 峰值范围: {min(peaks) if peaks else 0} ~ {max(peaks) if peaks else 0}")
-        
+
         # 填充不足
         while len(peaks) < num_samples:
             peaks.append(0.0)
-        
+            min_peaks.append(0.0)
+            max_peaks.append(0.0)
+
         # 估算时长
         duration = len(samples) / 44100.0
-        
+
         return WaveformData(
             peaks=peaks,
             duration=duration,
             sample_rate=44100,
             num_samples=num_samples,
             cached_at=time.time(),
+            min_peaks=min_peaks,
+            max_peaks=max_peaks,
         )
     
     def _find_ffmpeg_path(self) -> str:
-        """查找 FFmpeg 可执行文件路径"""
+        """查找 FFmpeg 可执行文件路径 - 复用统一的检测工具"""
         import os
+        try:
+            from .ffmpeg_utils import find_ffmpeg
+            ffmpeg_path = find_ffmpeg()
+            if ffmpeg_path and os.path.exists(ffmpeg_path):
+                return ffmpeg_path
+        except ImportError as e:
+            logger.debug(f"[WaveformGenerator] 导入find_ffmpeg失败: {e}")
         
-        # 优先使用项目内的 FFmpeg
+        # 回退到原逻辑
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         candidates = [
             os.path.join(project_root, "thirdparty", "ffmpeg", "bin", "ffmpeg.exe"),
-            os.path.join(project_root, "thirdparty", "mlt", "Shotcut", "ffmpeg.exe"),
         ]
         
         for path in candidates:
@@ -389,6 +460,8 @@ class WaveformGenerator:
             sample_rate=44100,
             num_samples=num_samples,
             cached_at=0,
+            min_peaks=[0.0] * num_samples,
+            max_peaks=[0.0] * num_samples,
         )
 
     def clear_cache(self):

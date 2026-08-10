@@ -198,6 +198,114 @@ PROMPT_TEMPLATES: Dict[str, Dict] = {
             "用简洁文本回复。"
         ),
     },
+
+    # ---------- Agent 全量双向闭环业务流程（新增 6 套） ----------
+
+    # 1. 大纲构思
+    "creative_outline": {
+        "name": "创意大纲生成",
+        "source": "Agent全链路",
+        "system": (
+            "你是拾光剪影的创意总监。根据用户创意简报，生成一个完整的短视频大纲。"
+            "大纲需包含：主题、目标受众、情绪曲线、3-5个关键场景、预期时长。"
+            "只返回 JSON 对象。"
+        ),
+        "user": (
+            "创意简报: {creative_brief}\n"
+            "目标平台: {platform}\n"
+            "目标时长: {target_duration}秒\n\n"
+            "请生成完整大纲，格式：\n"
+            '{{"title":"标题","theme":"主题","audience":"受众",'
+            '"emotion_curve":["情绪1","情绪2"],"scenes":["场景1","场景2"],'
+            '"estimated_duration":{target_duration}}}'
+        ),
+    },
+
+    # 2. 剧本生成
+    "script_from_outline": {
+        "name": "分集剧本生成",
+        "source": "Agent全链路",
+        "system": (
+            "你是拾光剪影的编剧。根据大纲生成完整分集剧本，"
+            "每个场景包含：画面描述、台词、镜头指示、情绪标记。"
+            "只返回 JSON 数组。"
+        ),
+        "user": (
+            "大纲: {outline}\n\n"
+            "请生成剧本，格式：\n"
+            '[{{"scene":1,"visual":"画面描述","dialogue":"台词",'
+            '"shot":"镜头指示","emotion":"情绪"}}]'
+        ),
+    },
+
+    # 3. 关键词提取
+    "keywords_from_script": {
+        "name": "剧情关键词提取",
+        "source": "Agent全链路",
+        "system": (
+            "你是AI视频生成的提示词工程师。从剧本中提取关键词，"
+            "包含：剧情关键词、情绪词、镜头词、风格词。"
+            "只返回 JSON 对象。"
+        ),
+        "user": (
+            "剧本: {script}\n\n"
+            "请提取关键词，格式：\n"
+            '{{"plot":["词1"],"emotion":["词1"],"shot":["词1"],"style":["词1"]}}'
+        ),
+    },
+
+    # 4. AI视频生成提示词
+    "prompt_from_keywords": {
+        "name": "标准化提示词生成",
+        "source": "Agent全链路",
+        "system": (
+            "你是AI视频生成的提示词工程师。根据关键词生成标准化的AI视频生成提示词。"
+            "提示词需包含：画面主体、动作、场景、光线、风格、镜头运动。"
+            "只返回 JSON 数组，每个元素是一个完整的英文提示词。"
+        ),
+        "user": (
+            "关键词: {keywords}\n"
+            "场景数量: {scene_count}\n\n"
+            "请生成 {scene_count} 个标准化提示词。"
+        ),
+    },
+
+    # 5. 后台初检
+    "generation_inspection": {
+        "name": "AI生成画面初检",
+        "source": "Agent全链路",
+        "system": (
+            "你是AI视频质检专家。检查AI生成画面是否存在以下问题："
+            "穿模、手部畸形、肢体错误、动作逻辑混乱、画风崩坏。"
+            "只返回 JSON 对象。"
+        ),
+        "user": (
+            "提示词: {prompt}\n"
+            "画面描述: {visual_description}\n\n"
+            "请检查并返回：\n"
+            '{{"passed":true/false,"issues":["问题1"],"suggestion":"改进建议"}}'
+        ),
+    },
+
+    # 6. 剪辑创意脚本生成
+    "editing_script_from_scores": {
+        "name": "剪辑创意脚本生成",
+        "source": "Agent全链路",
+        "system": (
+            "你是拾光剪影的剪辑总监。根据镜头打分结果，生成最优剪辑创意脚本。"
+            "脚本包含：镜头顺序、转场方案、卡点位置、配乐段落、字幕布局、节奏快慢。"
+            "只返回 JSON 对象。"
+        ),
+        "user": (
+            "镜头打分: {scored_clips}\n"
+            "目标时长: {target_duration}秒\n"
+            "目标平台: {platform}\n\n"
+            "请生成剪辑脚本，格式：\n"
+            '{{"clip_order":["id1","id2"],"transitions":{{"id1":"fade"}},'
+            '"bgm":"配乐风格","pacing":"fast/normal/slow",'
+            '"subtitle_layout":"布局","rationale":"创意说明"}}'
+        ),
+    },
 }
 
 # 方便索引的元数据

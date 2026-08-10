@@ -6,8 +6,11 @@
 
 import os
 import json
+import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AccountAnalyzer:
@@ -64,9 +67,8 @@ class AccountAnalyzer:
                         with open(file_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             all_data.append(data)
-                    except Exception:
-                        pass
-                        pass
+                    except Exception as e:
+                        logger.debug(f"读取数据文件失败: {e}")
             
             if not all_data:
                 return {"error": "无数据"}
@@ -147,8 +149,8 @@ class AccountAnalyzer:
             try:
                 with open(data_file, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"读取视频数据失败: {e}")
                 return None
         return None
     
@@ -159,8 +161,8 @@ class AccountAnalyzer:
             try:
                 os.remove(data_file)
                 return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"删除视频数据失败: {e}")
                 return False
         return False
     

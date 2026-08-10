@@ -310,9 +310,10 @@ class FFmpegTool:
             result = subprocess.run(
                 [probe_path, "-v", "quiet", "-print_format", "json",
                  "-show_format", "-show_streams", path],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, timeout=30,
+                encoding="utf-8", errors="ignore",
             )
-            if result.returncode != 0:
+            if result.returncode != 0 or not result.stdout:
                 return None
             data = json.loads(result.stdout)
             fmt = data.get("format", {})
@@ -364,8 +365,12 @@ class HardwareDetector:
         
         try:
             ffmpeg = FFmpegTool.find_ffmpeg()
-            r = subprocess.run([ffmpeg, "-encoders"], capture_output=True, text=True, timeout=10)
-            out = r.stdout
+            r = subprocess.run(
+                [ffmpeg, "-encoders"],
+                capture_output=True, timeout=10,
+                encoding="utf-8", errors="ignore",
+            )
+            out = r.stdout or ""
             
             for name, enum_val in [
                 ("h264_nvenc", HardwareEncoder.NVIDIA),
@@ -642,8 +647,8 @@ class RenderManager:
             try:
                 self._active_process.kill()
                 self._active_process = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[RenderManager] 终止活动进程失败: {e}")
     
     def _execute_task(self, task: RenderTask) -> RenderResult:
         """执行渲染任务 — 自动选最优后端: C++引擎 → FFmpeg CLI"""
@@ -659,8 +664,8 @@ class RenderManager:
             if task.on_progress:
                 try:
                     task.on_progress(pct, speed, eta)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[RenderManager] 进度回调失败: {e}")
         
         os.makedirs(os.path.dirname(task.output_path) if os.path.dirname(task.output_path) else ".", exist_ok=True)
         
@@ -697,11 +702,12 @@ class RenderManager:
         cfg = task.config
         args = []
         
-        # GPU 加速参数优化（必须放在 -i 之前）
+        # GPU 解码加速：勿使用 hwaccel_output_format=cuda/qsv，
+        # 否则 CPU 的 scale/pad 滤镜会报 Function not implemented。
         if cfg.video_codec in ("h264_nvenc", "hevc_nvenc"):
-            args += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+            args += ["-hwaccel", "cuda"]
         elif cfg.video_codec in ("h264_qsv", "hevc_qsv"):
-            args += ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
+            args += ["-hwaccel", "qsv"]
         elif cfg.video_codec in ("h264_amf", "hevc_amf"):
             args += ["-hwaccel", "d3d11va"]
         
@@ -716,9 +722,20 @@ class RenderManager:
             args += ["-crf", str(cfg.crf)]
         
         if cfg.video_codec in ("h264_nvenc", "hevc_nvenc"):
-            args += ["-rc", "cbr", "-gpu", "0"]
+            # p-series preset 兼容新 NVENC；旧驱动失败时由上层回退
+            args += ["-rc", "vbr", "-gpu", "0"]
+            nvenc_preset = {
+                "ultrafast": "p1", "superfast": "p2", "veryfast": "p3",
+                "faster": "p3", "fast": "p4", "medium": "p5",
+                "slow": "p6", "slower": "p7", "veryslow": "p7",
+            }.get(str(cfg.preset).lower(), "p4")
+            # 覆盖通用 -preset（libx264 的 medium/fast 对 NVENC 无效）
+            for i in range(len(args) - 1):
+                if args[i] == "-preset":
+                    args[i + 1] = nvenc_preset
+                    break
         elif cfg.video_codec in ("h264_qsv", "hevc_qsv"):
-            args += ["-init_qpP", "24"]
+            args += ["-global_quality", "23"]
         
         args += [
             "-vf", f"scale={cfg.width}:{cfg.height}:force_original_aspect_ratio=decrease,"
@@ -726,9 +743,6 @@ class RenderManager:
             "-c:a", cfg.audio_codec, "-b:a", cfg.audio_bitrate,
             "-movflags", "+faststart",
         ]
-        
-        if cfg.video_codec in ("h264_nvenc", "hevc_nvenc"):
-            args += ["-gpu", "0"]
         
         args += cfg.extra_args
         args.append(task.output_path)

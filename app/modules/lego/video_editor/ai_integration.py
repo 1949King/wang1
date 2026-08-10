@@ -359,8 +359,8 @@ class AIEditor(QWidget):
                             asset = asset_manager.get_asset(asset_id)
                             if asset:
                                 file_path = asset.get('path', '')
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("从asset_manager获取资源路径失败: %s", e)
 
                 if not file_path or not os.path.exists(file_path):
                     self._log_display.append(

@@ -11,20 +11,98 @@
 import os
 import json
 import logging
+import threading
 import time
 import urllib.request
+import weakref
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QUrl, QPoint, QMimeData
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QUrl, QPoint, QRect, QMimeData
 from PyQt6.QtGui import (
     QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics,
-    QPolygon, QShortcut, QKeySequence, QDrag
+    QPolygon, QShortcut, QKeySequence, QDrag, QPixmap, QImage,
 )
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QGridLayout, QSlider, QMenu
+    QFrame, QScrollArea, QGridLayout, QSlider, QMenu, QToolTip
+)
+
+from .editor_timeline_tools import (
+    SnapGuideController,
+    RazorGuideController,
+    DropTrackFeedbackController,
+    TimelineSelectionMixin,
+    apply_batch_start_delta,
+    clip_compatible_with_track,
+    compute_load_spans,
+    ids_intersecting_viewport_rect,
+    is_ctrl,
+    is_shift,
+    paint_marquee_overlay,
+    pick_snap as _pick_snap,
+    rect_from_points,
+    snap_edge_candidates as _snap_edge_candidates,
+    CLIP_DRAG_THRESHOLD_PX,
+    MARQUEE_DRAG_THRESHOLD_PX,
 )
 
 logger = logging.getLogger("AI短剧编辑器.timeline_widget")
+
+AUDIO_EXTS = ('.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.wma')
+
+
+class _MediaWorkerGate:
+    """全局限流：胶片条/波形 QThread 并发不超上限，避免批量可见时线程风暴（磁盘/CPU 抖动）。
+
+    owner 用弱引用登记；owner 已销毁的排队项会被跳过或在 cancel_owner 时清掉。
+    """
+
+    def __init__(self, max_concurrent: int = 3):
+        self._max = max_concurrent
+        self._active = 0
+        self._queue = []  # list[tuple[weakref.ref, callable]]
+        self._lock = threading.Lock()
+
+    def request(self, owner, start_fn):
+        with self._lock:
+            if self._active < self._max:
+                self._active += 1
+                do_start = True
+            else:
+                self._queue.append((weakref.ref(owner), start_fn))
+                do_start = False
+        if do_start:
+            self._run_start(start_fn)
+
+    def _run_start(self, start_fn):
+        try:
+            start_fn()
+        except Exception:
+            logger.debug("媒体 worker 启动失败", exc_info=True)
+            self.release()
+
+    def release(self):
+        next_fn = None
+        with self._lock:
+            self._active = max(0, self._active - 1)
+            while self._queue:
+                ref, fn = self._queue.pop(0)
+                if ref() is None:
+                    continue
+                self._active += 1
+                next_fn = fn
+                break
+        if next_fn is not None:
+            self._run_start(next_fn)
+
+    def cancel_owner(self, owner):
+        with self._lock:
+            self._queue = [
+                (ref, fn) for (ref, fn) in self._queue
+                if ref() is not None and ref() is not owner
+            ]
+
+
+_media_worker_gate = _MediaWorkerGate(max_concurrent=3)
 
 
 def _report_timeline_widget_debug(hypothesis_id, location, msg, data=None):
@@ -58,9 +136,136 @@ def _report_timeline_widget_debug(hypothesis_id, location, msg, data=None):
         logger.debug("timeline widget debug report failed", exc_info=True)
     # #endregion
 
+# 时间线精细编辑常量
+_TIMELINE_ZOOM_MIN = 10
+_TIMELINE_ZOOM_MAX = 3000  # 3000% → ~600px/s，30fps 约 20px/帧
+_TIMELINE_BASE_PPS = 20.0  # zoom=100 时的像素/秒
+_TIMELINE_SNAP_PX = 8      # 吸附按像素换算秒，放大后更精细
+_TIMELINE_MIN_CLIP_PX = 6  # 最短可视宽度（勿再用 40，默认缩放下会锁死 ~2s）
+_DEFAULT_FPS = 30.0
+
+
+def _clamp_timeline_zoom(zoom) -> int:
+    try:
+        z = int(round(float(zoom)))
+    except (TypeError, ValueError):
+        z = 100
+    return max(_TIMELINE_ZOOM_MIN, min(_TIMELINE_ZOOM_MAX, z))
+
+
+
+def _timeline_pps(zoom) -> float:
+    return _TIMELINE_BASE_PPS * (float(_clamp_timeline_zoom(zoom)) / 100.0)
+
+
+def _quantize_time(t: float, frame_dur: float) -> float:
+    fd = max(1e-6, float(frame_dur))
+    return max(0.0, round(float(t) / fd) * fd)
+
+
+def _ndarray_bgr_to_pixmap(frame_bgr, target_h: int = 0) -> "QPixmap | None":
+    """OpenCV BGR → QPixmap；可选按高度等比缩小。"""
+    try:
+        import cv2
+        import numpy as np
+        if frame_bgr is None or not hasattr(frame_bgr, "shape"):
+            return None
+        h, w = frame_bgr.shape[:2]
+        if h <= 0 or w <= 0:
+            return None
+        if target_h and target_h > 0 and h != target_h:
+            scale = float(target_h) / float(h)
+            nw = max(2, int(round(w * scale)))
+            nh = max(2, int(target_h))
+            nw -= nw % 2
+            nh -= nh % 2
+            frame_bgr = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+            h, w = frame_bgr.shape[:2]
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        if not rgb.flags["C_CONTIGUOUS"]:
+            rgb = np.ascontiguousarray(rgb)
+        qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+        if qimg.isNull():
+            return None
+        return QPixmap.fromImage(qimg)
+    except Exception as e:
+        logger.debug("BGR→QPixmap 失败: %s", e)
+        return None
+
+
+def _extract_filmstrip_frames(path, timestamps, height, is_interrupted=None):
+    """单次打开视频，按时间戳批量抽帧（剪映式胶片条）。
+
+    优先 OpenCV；失败再逐帧回退 ffmpeg_service.extract_frame。
+    返回 (list[QPixmap], aspect_ratio)。
+    """
+    thumbs = []
+    aspect = 0.0
+    ts_list = [max(0.0, float(t)) for t in (timestamps or [])]
+    if not path or not ts_list:
+        return thumbs, aspect
+    h = max(16, int(height or 96))
+    interrupt = is_interrupted or (lambda: False)
+
+    # ── OpenCV 批量 ──
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+        if cap is not None and cap.isOpened():
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0) or 30.0
+            vw = float(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            vh = float(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            if vw > 0 and vh > 0:
+                aspect = vw / vh
+            # 按时间排序抽，减少乱序 seek 代价；再按原序还原
+            order = sorted(range(len(ts_list)), key=lambda i: ts_list[i])
+            tmp = [None] * len(ts_list)
+            for oi in order:
+                if interrupt():
+                    cap.release()
+                    return [], aspect
+                t = ts_list[oi]
+                frame_idx = int(round(t * fps))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_idx))
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    # msec 再试一次
+                    cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+                    ok, frame = cap.read()
+                if ok and frame is not None:
+                    pm = _ndarray_bgr_to_pixmap(frame, target_h=h)
+                    if pm is not None and not pm.isNull():
+                        tmp[oi] = pm
+                        if aspect <= 0 and pm.height() > 0:
+                            aspect = float(pm.width()) / float(pm.height())
+            cap.release()
+            thumbs = [pm for pm in tmp if pm is not None]
+            if thumbs:
+                return thumbs, aspect
+    except Exception as e:
+        logger.debug("OpenCV 胶片条抽帧失败，回退 ffmpeg: %s", e)
+
+    # ── ffmpeg 批量回退 ──
+    try:
+        from app.core.ffmpeg_service import ffmpeg_service
+        if interrupt():
+            return [], aspect
+        batch = ffmpeg_service.extract_frames_batch(path, ts_list, height=h, width=0)
+        for pm in batch or []:
+            if pm is not None and not pm.isNull():
+                thumbs.append(pm)
+                if aspect <= 0 and pm.height() > 0:
+                    aspect = float(pm.width()) / float(pm.height())
+    except Exception as e:
+        logger.debug("ffmpeg 胶片条回退失败: %s", e)
+    return thumbs, aspect
+
+
+
+
 class TimeRuler(QWidget):
-    """ """
-    
+    """时间标尺"""
+
     clicked = pyqtSignal(float)  # 点击位置（秒）
     
     def __init__(self, parent=None):
@@ -69,20 +274,32 @@ class TimeRuler(QWidget):
         self._total_duration = 60
         self._playhead_pos = 0
         self._left_margin = 100  # 左侧轨道控制区宽度
+        self._load_spans = []  # [(start, end), ...] 高负载红线
+        self._in_point = None
+        self._out_point = None
         self.setFixedHeight(45)
         self.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333333;")
     
     def set_zoom(self, zoom):
-        self._zoom = max(10, min(500, zoom))
+        self._zoom = _clamp_timeline_zoom(zoom)
         self.update()
     
     def set_playhead(self, pos):
         self._playhead_pos = pos
         self.update()
+
+    def set_load_spans(self, spans):
+        self._load_spans = list(spans or [])
+        self.update()
+
+    def set_in_out(self, in_point, out_point):
+        self._in_point = in_point
+        self._out_point = out_point
+        self.update()
     
     def _px_per_second(self):
         """ """
-        return 20 * (self._zoom / 100)
+        return _timeline_pps(self._zoom)
     
     def _time_to_x(self, t):
         """ """
@@ -94,10 +311,13 @@ class TimeRuler(QWidget):
     
     def _format_time_label(self, t):
         """ """
+        if t < 0.001:
+            return "0"
         if t < 1:
-            return f"{int(t * 1000)}ms" if t > 0 else "0"
+            ms = t * 1000
+            return f"{ms:.0f}ms" if ms >= 10 else f"{ms:.1f}ms"
         elif t < 60:
-            return f"{t:g}s"  # 使用 :g 去除多余的小数位
+            return f"{t:g}s"
         else:
             m, s = divmod(int(t), 60)
             return f"{m}:{s:02d}"
@@ -116,18 +336,55 @@ class TimeRuler(QWidget):
         visible_duration = int((width - self._left_margin) / pps) if pps > 0 else 60
         # 总时长取可见时长和 _total_duration 的较大值，确保至少能显示当前内容
         max_t = max(self._total_duration, visible_duration)
+
+        # 入出点区间高亮（半透明蓝）
+        try:
+            tin = self._in_point
+            tout = self._out_point
+            if tin is not None and tout is not None and float(tout) > float(tin):
+                x0 = max(self._left_margin, self._time_to_x(float(tin)))
+                x1 = min(width, self._time_to_x(float(tout)))
+                if x1 > x0:
+                    painter.fillRect(x0, 0, x1 - x0, rect.height(), QColor(30, 107, 222, 40))
+            for t, color in ((tin, QColor("#4fc3f7")), (tout, QColor("#ffb74d"))):
+                if t is None:
+                    continue
+                x = self._time_to_x(float(t))
+                if self._left_margin <= x <= width:
+                    painter.setPen(QPen(color, 2))
+                    painter.drawLine(x, 0, x, rect.height())
+        except Exception:
+            pass
+
+        # 高负载区红线（底边 3px，对标达芬奇「未缓存」提示的轻量版）
+        try:
+            for span in self._load_spans or []:
+                if not span or len(span) < 2:
+                    continue
+                x0 = max(self._left_margin, self._time_to_x(float(span[0])))
+                x1 = min(width, self._time_to_x(float(span[1])))
+                if x1 > x0:
+                    painter.fillRect(x0, rect.height() - 3, x1 - x0, 3, QColor(229, 57, 53, 200))
+        except Exception:
+            pass
         
-        # 根据 pps 自动选择刻度间隔
-        candidates = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60]
+        # 根据 pps 自动选择刻度间隔（含帧级，便于精细剪辑）
+        candidates = [
+            1 / 60, 1 / 30, 1 / 15, 1 / 10, 0.1, 0.2, 0.5,
+            1, 2, 5, 10, 15, 30, 60,
+        ]
         major_step = 1.0
         minor_step = 0.5
         for c in candidates:
             pixel_dist = c * pps
-            if 60 <= pixel_dist <= 200:
+            if 40 <= pixel_dist <= 220:
                 major_step = c
-                minor_step = c / (5.0 if c >= 1 else 2.0)
+                minor_step = c / (5.0 if c >= 0.5 else 2.0)
                 break
-        
+        else:
+            # 极端放大：主刻度至少 1 帧宽
+            major_step = max(1 / 60, 50.0 / max(pps, 1e-6))
+            minor_step = major_step / 2.0
         # 绘制次刻度
         painter.setPen(QColor("#333333"))
         t = 0
@@ -177,30 +434,45 @@ class TimeRuler(QWidget):
             t = self._x_to_time(event.pos().x())
             self.clicked.emit(t)
 
+    def mouseMoveEvent(self, event):
+        """拖动标尺精细 scrub"""
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            t = self._x_to_time(event.pos().x())
+            self.clicked.emit(t)
+
 
 class TimelineMarkerLayer(QWidget):
-    """时间轴标记层 - 叠加显示高光区域和AI插帧节点"""
+    """时间轴标记层 - 叠加显示高光区域和线性补帧节点"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._highlights = []
         self._interpolation_markers = []
+        self._agent_feedback_markers = []   # P1-C: Agent 反馈标记
         self._zoom = 100
         self._total_duration = 600
         self._left_margin = 100
         self._hovered_marker = None
         self._hovered_highlight = None
+        self._hovered_agent_marker = None   # P1-C: hover 的 Agent 标记
         self.setMouseTracking(True)
         self._connect_manager()
 
     def _connect_manager(self):
-        """连接高光预览管理器"""
+        """连接高光预览管理器 + EventBus（P1-C: Agent 反馈标记）"""
         try:
             from app.core.highlight_preview import highlight_preview_manager
             highlight_preview_manager.highlights_updated.connect(self.set_highlights)
             highlight_preview_manager.interpolation_markers_updated.connect(self.set_interpolation_markers)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("连接高光预览管理器失败: %s", e)
+        # P1-C: 连接 EventBus 接收 Agent 反馈标记
+        try:
+            from app.modules.lego.core import EventBus, EventType
+            bus = EventBus.get_instance()
+            bus.subscribe(EventType.AGENT_MARKERS_UPDATED, self._on_agent_markers_updated)
+        except Exception as e:
+            logger.debug("连接 EventBus Agent 标记失败: %s", e)
 
     def set_highlights(self, highlights):
         """设置高光片段列表"""
@@ -208,13 +480,38 @@ class TimelineMarkerLayer(QWidget):
         self.update()
 
     def set_interpolation_markers(self, markers):
-        """设置AI插帧节点列表"""
+        """设置线性补帧节点列表"""
         self._interpolation_markers = markers
         self.update()
 
+    # ── P1-C: Agent 反馈标记 ──
+
+    def set_agent_feedback_markers(self, markers: list):
+        """整体替换 Agent 反馈标记列表（EventBus 回调入口）。"""
+        self._agent_feedback_markers = list(markers or [])
+        self.update()
+
+    def add_agent_feedback_marker(self, marker: dict):
+        """追加单个 Agent 反馈标记。"""
+        self._agent_feedback_markers.append(marker)
+        self.update()
+
+    def clear_agent_feedback_markers(self):
+        """清空所有 Agent 反馈标记。"""
+        self._agent_feedback_markers = []
+        self.update()
+
+    def _on_agent_markers_updated(self, event):
+        """EventBus: AGENT_MARKERS_UPDATED 事件回调。"""
+        try:
+            markers = event.data.get("markers", []) if event else []
+            self.set_agent_feedback_markers(markers)
+        except Exception as e:
+            logger.debug("TimelineMarkerLayer._on_agent_markers_updated 失败: %s", e)
+
     def set_zoom(self, zoom):
         """设置缩放比例"""
-        self._zoom = zoom
+        self._zoom = _clamp_timeline_zoom(zoom)
         self.update()
 
     def set_total_duration(self, duration):
@@ -224,7 +521,7 @@ class TimelineMarkerLayer(QWidget):
 
     def _px_per_second(self):
         """计算每秒钟的像素数"""
-        return 20 * (self._zoom / 100)
+        return _timeline_pps(self._zoom)
 
     def _time_to_x(self, time_sec):
         """时间转X坐标"""
@@ -260,7 +557,7 @@ class TimelineMarkerLayer(QWidget):
             segment_y = 0
             painter.fillRect(start_x, segment_y, end_x - start_x, segment_height, highlight_color)
 
-        # 绘制AI插帧节点
+        # 绘制线性补帧节点
         for marker in self._interpolation_markers:
             x = self._time_to_x(marker.time)
             
@@ -287,6 +584,41 @@ class TimelineMarkerLayer(QWidget):
             ])
             painter.drawPolygon(poly)
 
+        # P1-C: 绘制 Agent 反馈标记（绿色圆点=success / 红色三角=failed）
+        for marker in self._agent_feedback_markers:
+            try:
+                t = float(marker.get("time", 0))
+                x = self._time_to_x(t)
+                if x < self._left_margin or x >= width:
+                    continue
+                status = marker.get("status", "success")
+                is_hovered = self._hovered_agent_marker == marker.get("id")
+                if status == "success":
+                    color = QColor(76, 175, 80) if not is_hovered else QColor(129, 199, 132)
+                    shape = "circle"
+                elif status == "failed":
+                    color = QColor(244, 67, 54) if not is_hovered else QColor(239, 154, 154)
+                    shape = "triangle"
+                else:
+                    color = QColor(255, 193, 7) if not is_hovered else QColor(255, 213, 79)
+                    shape = "circle"
+                painter.setBrush(QBrush(color))
+                pen_width = 1.5 if is_hovered else 1
+                painter.setPen(QPen(QColor(0, 0, 0, 180), pen_width))
+                size = 7 if is_hovered else 5
+                y_center = height // 2
+                if shape == "triangle":
+                    poly = QPolygon([
+                        QPoint(x, y_center - size),
+                        QPoint(x + size, y_center + size),
+                        QPoint(x - size, y_center + size),
+                    ])
+                    painter.drawPolygon(poly)
+                else:
+                    painter.drawEllipse(x - size, y_center - size, size * 2, size * 2)
+            except Exception as _e:
+                logger.debug("绘制 Agent 标记失败: %s", _e)
+
         painter.end()
 
     def mouseMoveEvent(self, event):
@@ -312,7 +644,7 @@ class TimelineMarkerLayer(QWidget):
             marker_x = self._time_to_x(marker.time)
             if abs(x - marker_x) <= 10:
                 self._hovered_marker = marker.id
-                tip = f"<b>AI插帧</b><br/>" \
+                tip = f"<b>线性补帧</b><br/>" \
                       f"时间: {marker.time:.3f}s<br/>" \
                       f"类型: {marker.interpolation_type.value}<br/>" \
                       f"置信度: {marker.confidence:.2f}"
@@ -320,9 +652,31 @@ class TimelineMarkerLayer(QWidget):
                 self.update()
                 return
 
+        # P1-C: Agent 反馈标记 tooltip
+        self._hovered_agent_marker = None
+        for marker in self._agent_feedback_markers:
+            try:
+                marker_x = self._time_to_x(float(marker.get("time", 0)))
+            except (TypeError, ValueError):
+                continue
+            if abs(x - marker_x) <= 10:
+                self._hovered_agent_marker = marker.get("id")
+                action = marker.get("action", "agent_action")
+                status = marker.get("status", "success")
+                msg = marker.get("message", "")
+                color = "🟢" if status == "success" else ("🔴" if status == "failed" else "🟡")
+                tip = f"<b>{color} Agent {action}</b><br/>" \
+                      f"时间: {float(marker.get('time', 0)):.2f}s<br/>" \
+                      f"状态: {status}<br/>" \
+                      f"{msg}"
+                QToolTip.showText(event.globalPosition().toPoint(), tip, self)
+                self.update()
+                return
+
         QToolTip.hideText()
         self._hovered_highlight = None
         self._hovered_marker = None
+        self._hovered_agent_marker = None
         self.update()
 
 
@@ -492,7 +846,7 @@ class TrackControlPanel(QWidget):
 
 
 class TrackViewport(QWidget):
-    """轨道视图区域 - 支持播放头拖动"""
+    """轨道视图区域 - 支持播放头拖动；绘制框选橡胶筋。"""
     
     playhead_dragged = pyqtSignal(float)
     
@@ -501,28 +855,185 @@ class TrackViewport(QWidget):
         self._parent_widget = parent
         self._is_dragging_playhead = False
         self.setMouseTracking(True)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        parent = self._parent_widget
+
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            rect = self.rect()
+            w = rect.width()
+            h = rect.height()
+            # 只按 Qt 要求重绘的脏区算网格线范围：长时间线/高缩放时避免整条循环
+            dirty = event.rect()
+
+            # ── 1. 网格背景线（每秒细线 + 每5秒粗线）──
+            self._paint_grid_background(painter, parent, w, h, dirty)
+
+            # ── 2. 轨道间隙标记灰块（>50ms 的空白）──
+            self._paint_gap_markers(painter, parent, w, h)
+
+            # ── 3. 框选橡胶筋 ──
+            marquee_rect = getattr(parent, "_marquee_rect", None) if parent is not None else None
+            if marquee_rect is not None:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                paint_marquee_overlay(painter, marquee_rect)
+        finally:
+            painter.end()
+
+    def _paint_grid_background(self, painter, parent, w, h, dirty=None):
+        """每秒一条浅灰线，每 5 秒一条稍粗线。
+
+        长时间线/高缩放下整表宽度可达上万像素；只按 Qt 传入的脏区（dirty）
+        算需要画线的时间范围，而不是从 0 循环到 total_dur，避免滚动/框选时
+        每帧都重复画视口外的线。
+        """
+        if parent is None:
+            return
+        pps = getattr(parent, "px_per_sec", None)
+        if pps is None:
+            return
+        try:
+            pps_val = pps() if callable(pps) else float(pps)
+        except Exception:
+            return
+        if pps_val <= 0:
+            return
+        margin = getattr(parent, "_left_margin", 0) or 0
+        total_dur = float(getattr(parent, "_total_duration", 600) or 600)
+        if total_dur <= 0:
+            return
+
+        # 根据 pps 自适应网格间隔：缩小时用 5s，放大用 1s，再放大用 0.5s
+        sec_per_grid = 1.0
+        px_per_grid = pps_val * sec_per_grid
+        if px_per_grid < 30:
+            sec_per_grid = 5.0
+        elif px_per_grid > 300:
+            sec_per_grid = 0.5
+
+        if dirty is not None:
+            x_lo = max(margin, dirty.left())
+            x_hi = min(w, dirty.right() + 1)
+        else:
+            x_lo, x_hi = margin, w
+        if x_hi <= x_lo:
+            return
+        # 起点向下取整对齐网格，终点留 1 格余量，防止边界漏线
+        t_start = max(0.0, ((x_lo - margin) / pps_val))
+        t_end = min(total_dur, ((x_hi - margin) / pps_val) + sec_per_grid)
+
+        # 次网格
+        painter.setPen(QPen(QColor(60, 60, 60, 60), 1, Qt.PenStyle.DotLine))
+        t = (int(t_start / sec_per_grid)) * sec_per_grid
+        while t <= t_end:
+            x = margin + int(t * pps_val)
+            if x_lo <= x <= x_hi:
+                painter.drawLine(x, 0, x, h)
+            t += sec_per_grid
+
+        # 主网格（每 5 秒）
+        if sec_per_grid < 5.0:
+            painter.setPen(QPen(QColor(75, 75, 75, 100), 1))
+            t = (int(t_start / 5.0)) * 5.0
+            while t <= t_end:
+                x = margin + int(t * pps_val)
+                if x_lo <= x <= x_hi:
+                    painter.drawLine(x, 0, x, h)
+                t += 5.0
+
+    def _paint_gap_markers(self, painter, parent, w, h):
+        """相邻 clip 间 >50ms 的间隙 → 灰色半透明块标记。"""
+        if parent is None:
+            return
+        tracks = getattr(parent, "_tracks", None)
+        if not tracks:
+            return
+        pps_fn = getattr(parent, "px_per_sec", None)
+        if pps_fn is None:
+            return
+        try:
+            pps = pps_fn() if callable(pps_fn) else float(pps_fn)
+        except Exception:
+            return
+        margin = getattr(parent, "_left_margin", 0) or 0
+
+        GAP_THRESHOLD = 0.05  # 50ms
+        gap_color = QColor(120, 120, 120, 40)
+
+        for track_idx, track in enumerate(tracks):
+            widgets = list(getattr(parent, "iter_track_clip_widgets", lambda tr: [])(track))
+            if len(widgets) < 2:
+                continue
+            # 按 start_time 排序
+            clips_sorted = sorted(
+                [w.clip_data for w in widgets if hasattr(w, "clip_data")],
+                key=lambda c: float(c.get("start_time", 0) or 0),
+            )
+            for i in range(len(clips_sorted) - 1):
+                cur = clips_sorted[i]
+                nxt = clips_sorted[i + 1]
+                cur_end = float(cur.get("start_time", 0) or 0) + float(cur.get("duration", 0) or 0)
+                nxt_start = float(nxt.get("start_time", 0) or 0)
+                gap = nxt_start - cur_end
+                if gap > GAP_THRESHOLD:
+                    gx_start = margin + int(cur_end * pps)
+                    gx_end = margin + int(nxt_start * pps)
+                    if gx_end < margin or gx_start > w:
+                        continue
+                    gx_start = max(margin, gx_start)
+                    gx_end = min(w, gx_end)
+                    # 轨道 y 偏移：通过 track_idx 估算（轨道高度约等于第一个 clip 的高度）
+                    # 用 widgets[0].height() 近似
+                    try:
+                        row_h = widgets[0].height() if widgets else 38
+                    except Exception:
+                        row_h = 38
+                    gy = track_idx * row_h
+                    painter.fillRect(gx_start, gy, gx_end - gx_start, row_h, gap_color)
     
     def mousePressEvent(self, event):
-        """处理鼠标按下事件 - 检测是否点击播放头"""
+        """播放头拖 / 刀片模式点切。"""
+        parent = self._parent_widget
         if event.button() == Qt.MouseButton.LeftButton:
-            playhead_x = self._parent_widget._track_playhead.x()
+            playhead_x = parent._track_playhead.x()
             if abs(event.pos().x() - playhead_x) <= 5:
                 self._is_dragging_playhead = True
                 event.accept()
-            else:
-                self._is_dragging_playhead = False
-                super().mousePressEvent(event)
-    
+                return
+            self._is_dragging_playhead = False
+            if (
+                getattr(parent, "_razor_mode", False)
+                and hasattr(parent, "_razor_cut_at_global")
+                and parent._razor_cut_at_global(event.globalPosition().toPoint())
+            ):
+                event.accept()
+                return
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
     def mouseMoveEvent(self, event):
-        """处理鼠标移动事件 - 拖动播放头"""
+        """拖动播放头；刀片模式悬停切开线。"""
+        parent = self._parent_widget
         if self._is_dragging_playhead:
-            x = max(100, min(self.width(), event.pos().x()))
-            scale_factor = self._parent_widget._zoom / 100
-            time_pos = (x - 100) / (20 * scale_factor)
+            pps = parent.px_per_sec() if hasattr(parent, "px_per_sec") else _timeline_pps(getattr(parent, "_zoom", 100))
+            margin = 100
+            x = max(margin, min(self.width(), event.pos().x()))
+            time_pos = (x - margin) / max(1e-6, pps)
+            if hasattr(parent, "frame_duration"):
+                time_pos = _quantize_time(time_pos, parent.frame_duration())
             self.playhead_dragged.emit(time_pos)
             event.accept()
-        else:
-            super().mouseMoveEvent(event)
+            return
+        if getattr(parent, "_razor_mode", False) and hasattr(parent, "_update_razor_hover"):
+            try:
+                parent._update_razor_hover(event.globalPosition().toPoint())
+            except Exception:
+                pass
+        super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
         """处理鼠标释放事件"""
@@ -530,8 +1041,8 @@ class TrackViewport(QWidget):
         super().mouseReleaseEvent(event)
 
 
-class TimelineWidget(QWidget):
-    """ """
+class TimelineWidget(TimelineSelectionMixin, QWidget):
+    """时间线主控件：轨道 / 片段 / 吸附 / 多选。"""
 
     clip_selected = pyqtSignal(object)
     playhead_moved = pyqtSignal(float)
@@ -540,6 +1051,8 @@ class TimelineWidget(QWidget):
     files_dropped = pyqtSignal(list)
     clip_context_action = pyqtSignal(str, object)  # action, clip_data
     clip_trim_committed = pyqtSignal(object)  # 松手后规范化的 clip_data
+    razor_cut_at = pyqtSignal(float)  # 刀片工具：在时间线绝对时间切开
+    razor_mode_changed = pyqtSignal(bool)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -560,12 +1073,47 @@ class TimelineWidget(QWidget):
         self._drag_indicator = None
         self._drag_press_global_y = None
         self._snap_enabled = True
-        self._snap_threshold_sec = 0.25
+        self._snap_threshold_px = _TIMELINE_SNAP_PX
+        self._edit_fps = _DEFAULT_FPS
+        self._snap_guide_time = None
+        self._clip_interaction_active = False  # 拖片/trim 中降低后台负载
+        self._active_drag_clip = None
+        self._snap_guide = SnapGuideController(self)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._drop_feedback = DropTrackFeedbackController(self)
+        self._razor_mode = False
+        self._razor_hover_t = None
+        self._razor_guide = RazorGuideController(self)
+        self._init_selection_state()
+        # 框选
+        self._marquee_origin = None  # QPoint in viewport
+        self._marquee_rect = None
+        self._marquee_active = False
+        self._marquee_additive = False
         self.setAcceptDrops(True)
         self._setup_ui()
+        try:
+            self._track_viewport.setMouseTracking(True)
+        except Exception:
+            pass
 
     def px_per_sec(self) -> float:
-        return 20.0 * (float(self._zoom) / 100.0)
+        return _timeline_pps(self._zoom)
+
+    def frame_duration(self) -> float:
+        fps = float(getattr(self, "_edit_fps", _DEFAULT_FPS) or _DEFAULT_FPS)
+        return 1.0 / max(1.0, fps)
+
+    def snap_threshold_sec(self) -> float:
+        """吸附阈值：按像素换算，放大后更精细；Alt 按下时关闭吸附。"""
+        from PyQt6.QtWidgets import QApplication
+        mods = QApplication.keyboardModifiers()
+        if mods & Qt.KeyboardModifier.AltModifier:
+            return 0.0
+        pps = max(1e-6, self.px_per_sec())
+        px = float(getattr(self, "_snap_threshold_px", _TIMELINE_SNAP_PX) or _TIMELINE_SNAP_PX)
+        # 上限 0.25s 避免缩小时吸附过松；下限约半帧
+        return max(self.frame_duration() * 0.5, min(0.25, px / pps))
 
     def iter_track_clip_widgets(self, track):
         container = track.get("clip_container") if isinstance(track, dict) else None
@@ -587,12 +1135,24 @@ class TimelineWidget(QWidget):
         st = float(clip_widget.clip_data.get("start_time", 0) or 0)
         dur = max(0.05, float(clip_widget.clip_data.get("duration", 10) or 10))
         x = max(0, int(st * px))
-        w = max(40, int(dur * px))
+        w = max(_TIMELINE_MIN_CLIP_PX, int(dur * px))
+        # 片段高度 = 轨道行高度，y=0，彻底去掉轨内上下黑边
+        track_h = 48
+        parent = clip_widget.parent()
+        if parent is not None and parent.height() > 0:
+            track_h = int(parent.height())
+        clip_h = max(6, track_h)
         clip_widget.setFixedWidth(w)
-        clip_widget.setFixedHeight(38)
-        clip_widget.move(x, 4)
+        clip_widget.setFixedHeight(clip_h)
+        clip_widget.move(x, 0)
         clip_widget.show()
         clip_widget.raise_()
+        # 缩放/布局后宽度变化 → 胶片条按需重采
+        try:
+            if hasattr(clip_widget, "_request_thumbnail_refresh"):
+                clip_widget._request_thumbnail_refresh()
+        except Exception as e:
+            logger.debug("position 后缩略图刷新跳过: %s", e)
 
     def relayout_clips(self):
         for track in self._tracks:
@@ -612,30 +1172,87 @@ class TimelineWidget(QWidget):
                 return i
         return 0
 
-    def snap_start_time(self, clip_data, proposed_start: float, exclude_id=None) -> float:
-        """吸附到播放头与同轨其它片缘。"""
+    def set_snap_guide(self, t):
+        """拖拽/trim 吸附命中时显示竖直指示线；t=None 立即清除。"""
+        self._snap_guide_time = None if t is None else float(t)
+        guide = getattr(self, "_snap_guide", None)
+        if guide is not None:
+            guide.set_guide(self._snap_guide_time)
+
+    def clear_snap_guide(self, fade: bool = True):
+        guide = getattr(self, "_snap_guide", None)
+        if guide is not None:
+            guide.clear_guide(fade=fade)
+        if not fade:
+            self._snap_guide_time = None
+        elif getattr(self, "_snap_guide_time", None) is not None:
+            # 淡出结束后 controller 会清；此处同步属性
+            pass
+
+    def snap_start_time(
+        self, clip_data, proposed_start: float, exclude_id=None, track_i=None
+    ) -> float:
+        """吸附到播放头与同轨其它片缘；红线画在实际对齐边。"""
         if not getattr(self, "_snap_enabled", False):
+            self.set_snap_guide(None)
             return max(0.0, proposed_start)
-        thr = float(getattr(self, "_snap_threshold_sec", 0.25) or 0.25)
-        candidates = [0.0, float(getattr(self, "_playhead_pos", 0) or 0)]
-        track_i = int(clip_data.get("track", 0) or 0)
+        thr = self.snap_threshold_sec()
+        if thr <= 0:
+            self.set_snap_guide(None)
+            return max(0.0, proposed_start)
+        ti = int(track_i) if track_i is not None else int(clip_data.get("track", 0) or 0)
         dur = float(clip_data.get("duration", 0) or 0)
+        exclude = {exclude_id} if exclude_id is not None else set()
+        cands = _snap_edge_candidates(self, proposed_start, dur, ti, exclude)
+        best, guide = _pick_snap(proposed_start, cands, thr)
+        self.set_snap_guide(guide)
+        return max(0.0, best)
+
+    def snap_time(self, proposed: float, exclude_id=None, track_i=None) -> float:
+        """吸附任意时间点（片头/片尾/播放头），用于 trim 边缘；命中时更新吸附红线。"""
+        if not getattr(self, "_snap_enabled", False):
+            self.set_snap_guide(None)
+            return max(0.0, proposed)
+        thr = self.snap_threshold_sec()
+        if thr <= 0:
+            self.set_snap_guide(None)
+            return max(0.0, proposed)
+        # trim：对齐点即红线位置
+        cands = [(0.0, 0.0), (float(getattr(self, "_playhead_pos", 0) or 0),
+                              float(getattr(self, "_playhead_pos", 0) or 0))]
         for c in self._clips:
             if exclude_id and c.get("id") == exclude_id:
                 continue
-            if int(c.get("track", 0) or 0) != track_i:
+            if track_i is not None and int(c.get("track", 0) or 0) != int(track_i):
                 continue
             st = float(c.get("start_time", 0) or 0)
             cd = float(c.get("duration", 0) or 0)
-            candidates.extend([st, st + cd, st - dur, st + cd - dur])
-        best = proposed_start
-        best_d = thr + 1.0
-        for t in candidates:
-            d = abs(proposed_start - t)
-            if d < best_d and d <= thr:
-                best_d = d
-                best = t
+            cands.append((st, st))
+            cands.append((st + cd, st + cd))
+        best, guide = _pick_snap(proposed, cands, thr)
+        self.set_snap_guide(guide)
         return max(0.0, best)
+
+    def set_drop_track_feedback(self, track_index, compatible: bool = True):
+        fb = getattr(self, "_drop_feedback", None)
+        if fb is not None:
+            fb.set_feedback(track_index, compatible)
+
+    def clear_drop_track_feedback(self):
+        fb = getattr(self, "_drop_feedback", None)
+        if fb is not None:
+            fb.clear()
+
+    def resolve_drop_track(self, global_y: int, clip_data) -> tuple:
+        """
+        指针下轨道落点：返回 (track_index|None, compatible)。
+        同类型才可落；不兼容仍返回索引供红色反馈。
+        """
+        ti = self.track_index_at_global_y(global_y)
+        if ti < 0 or ti >= len(self._tracks):
+            return None, False
+        ok = clip_compatible_with_track(clip_data, self._tracks[ti])
+        return ti, ok
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -647,7 +1264,7 @@ class TimelineWidget(QWidget):
         self._time_ruler.clicked.connect(self.set_playhead_position)
         layout.addWidget(self._time_ruler)
 
-        # === 标记层（高光区域 + AI插帧节点） ===
+        # === 标记层（高光区域 + 线性补帧节点） ===
         self._marker_layer = TimelineMarkerLayer(self)
         self._marker_layer.setFixedHeight(16)
         self._marker_layer.setStyleSheet("background-color: transparent;")
@@ -698,11 +1315,11 @@ class TimelineWidget(QWidget):
 
         self._track_scroll.setWidget(self._track_viewport)
         self._track_scroll.horizontalScrollBar().valueChanged.connect(
-            lambda v: self._time_ruler.update()
+            self._on_timeline_scroll_changed
         )
-        # 垂直滚动时更新控制栏位置
+        # 垂直滚动时更新控制栏位置 + 视口懒加载
         self._track_scroll.verticalScrollBar().valueChanged.connect(
-            lambda v: self._update_ctrl_panel_position()
+            self._on_timeline_scroll_changed
         )
 
         layout.addWidget(self._track_scroll, 1)
@@ -715,6 +1332,76 @@ class TimelineWidget(QWidget):
     def _update_time_ruler(self):
         """ """
         self._time_ruler.set_zoom(self._zoom)
+
+    def _on_timeline_scroll_changed(self, *_args):
+        """滚动：重绘标尺 + 刷新控制栏 + 唤醒视口内缩略图/波形。"""
+        try:
+            self._time_ruler.update()
+        except Exception:
+            pass
+        try:
+            self._update_ctrl_panel_position()
+        except Exception:
+            pass
+        # 合并唤醒，避免滚动刷屏
+        t = getattr(self, "_viewport_wake_timer", None)
+        if t is None:
+            self._viewport_wake_timer = QTimer(self)
+            self._viewport_wake_timer.setSingleShot(True)
+            self._viewport_wake_timer.setInterval(120)
+            self._viewport_wake_timer.timeout.connect(self._wake_visible_clip_media)
+            t = self._viewport_wake_timer
+        t.start()
+
+    def _wake_visible_clip_media(self):
+        for w in self.all_clip_widgets():
+            try:
+                if self.is_clip_widget_visible(w) and hasattr(w, "wake_media_workers"):
+                    # 仅在尚未有缓存时唤醒，避免重复解码
+                    need_thumb = (
+                        not w._is_audio_clip()
+                        and not getattr(w, "_thumbnail_cache", None)
+                    )
+                    need_wave = (
+                        w._is_audio_clip()
+                        and getattr(w, "_waveform_peaks", None) is None
+                        and not getattr(w, "_waveform_failed", False)
+                    )
+                    if need_thumb or need_wave:
+                        w.wake_media_workers()
+            except Exception:
+                continue
+
+    def is_clip_widget_visible(self, clip_widget, margin_px: int = 120) -> bool:
+        """片段是否与滚动视口相交（含预取边距）。"""
+        scroll = getattr(self, "_track_scroll", None)
+        if scroll is None or clip_widget is None:
+            return True
+        try:
+            vp = scroll.viewport()
+            top_left = clip_widget.mapTo(vp, QPoint(0, 0))
+            rect = QRect(top_left, clip_widget.size()).adjusted(
+                -margin_px, -margin_px, margin_px, margin_px
+            )
+            return rect.intersects(vp.rect())
+        except Exception:
+            return True
+
+    def update_in_out_markers(self, in_point, out_point):
+        """序列级 I/O 标记画到标尺。"""
+        try:
+            self._time_ruler.set_in_out(in_point, out_point)
+        except Exception as e:
+            logger.debug("更新 I/O 标记失败: %s", e)
+
+    def refresh_load_spans(self, clips=None):
+        """根据片段特效/转场等刷新标尺红线。"""
+        src = clips if clips is not None else getattr(self, "_clips", None)
+        try:
+            spans = compute_load_spans(src or [])
+            self._time_ruler.set_load_spans(spans)
+        except Exception as e:
+            logger.debug("刷新负载标尺失败: %s", e)
     
     def _add_track(self, name, track_type):
         """ """
@@ -766,8 +1453,9 @@ class TimelineWidget(QWidget):
             lambda pos: self._show_track_menu(track_widget)
         )
         clip_layout = QHBoxLayout(clip_container)
-        clip_layout.setContentsMargins(4, 4, 4, 4)
-        clip_layout.setSpacing(2)
+        # 片段绝对定位铺满行高，边距会制造轨内「黑边」错觉，故为 0
+        clip_layout.setContentsMargins(0, 0, 0, 0)
+        clip_layout.setSpacing(0)
         clip_layout.addStretch()
         track_row.addWidget(clip_container, 1)
         
@@ -788,7 +1476,7 @@ class TimelineWidget(QWidget):
         }
         
         # Left-click: select (short press) / drag reorder (long press + move)
-        # All sub-widgets route to the same drag handlers
+        # identifier / track_widget → 轨重排；clip_container → 框选（不抢轨重排）
         identifier.mousePressEvent = lambda e: self._drag_press(track, e)
         identifier.mouseMoveEvent = lambda e: self._drag_move(track, e)
         identifier.mouseReleaseEvent = lambda e: self._drag_release(track, e)
@@ -797,9 +1485,9 @@ class TimelineWidget(QWidget):
         track_widget.mouseMoveEvent = lambda e: self._drag_move(track, e)
         track_widget.mouseReleaseEvent = lambda e: self._drag_release(track, e)
         
-        clip_container.mousePressEvent = lambda e: self._drag_press(track, e)
-        clip_container.mouseMoveEvent = lambda e: self._drag_move(track, e)
-        clip_container.mouseReleaseEvent = lambda e: self._drag_release(track, e)
+        clip_container.mousePressEvent = lambda e, tr=track: self._marquee_press(tr, e)
+        clip_container.mouseMoveEvent = lambda e, tr=track: self._marquee_move(tr, e)
+        clip_container.mouseReleaseEvent = lambda e, tr=track: self._marquee_release(tr, e)
         
         self._tracks.append(track)
         return track
@@ -1056,6 +1744,7 @@ class TimelineWidget(QWidget):
         dup_act = menu.addAction("📄 复制一份")
         paste_act = menu.addAction("📋 粘贴")
         menu.addSeparator()
+        close_gap_act = menu.addAction("🧲 合缝（消除间隙）")
         delete_act = menu.addAction("🗑 删除")
         seek_act = menu.addAction("⏩ 跳转到片段起点")
         action = menu.exec(global_pos)
@@ -1069,6 +1758,8 @@ class TimelineWidget(QWidget):
             self.clip_context_action.emit("duplicate", clip_data)
         elif action == paste_act:
             self.clip_context_action.emit("paste", clip_data)
+        elif action == close_gap_act:
+            self.clip_context_action.emit("close_gap", clip_data)
         elif action == delete_act:
             self.clip_context_action.emit("delete", clip_data)
         elif action == seek_act:
@@ -1076,18 +1767,26 @@ class TimelineWidget(QWidget):
             self.set_playhead_position(start)
     
     def _on_track_mute(self, track, checked):
-        """ """
+        """轨道静音：视觉半透明。走 clip_container 子控件，避免 content_layout 已销毁。"""
+        if not isinstance(track, dict):
+            return
         track['muted'] = checked
-        opacity = 0.3 if checked else 1.0
-        for i in range(track['content_layout'].count()):
-            widget = track['content_layout'].itemAt(i).widget()
-            if isinstance(widget, ClipWidget):
+        try:
+            widgets = list(self.iter_track_clip_widgets(track))
+        except RuntimeError:
+            return
+        for widget in widgets:
+            if not isinstance(widget, ClipWidget):
+                continue
+            try:
                 widget.setGraphicsEffect(None)
                 if checked:
                     from PyQt6.QtWidgets import QGraphicsOpacityEffect
-                    eff = QGraphicsOpacityEffect()
-                    eff.setOpacity(opacity)
+                    eff = QGraphicsOpacityEffect(widget)
+                    eff.setOpacity(0.3)
                     widget.setGraphicsEffect(eff)
+            except RuntimeError:
+                continue
     
     def _on_track_solo(self, track, checked):
         """ """
@@ -1106,9 +1805,16 @@ class TimelineWidget(QWidget):
         if track is None:
             return
         track['volume'] = volume
+        # 通知外层编辑器立刻刷新听感（若已挂回调）
+        cb = getattr(self, "_track_volume_changed_cb", None)
+        if callable(cb):
+            try:
+                cb(track, volume)
+            except Exception as e:
+                print(f"track volume callback failed: {e}")
 
     def _on_track_collapse(self, track, collapsed):
-        """轨道折叠/展开"""
+        """轨道折叠/展开；折叠时休眠波形/缩略图线程，展开再懒加载。"""
         if track is None:
             return
         track['collapsed'] = collapsed
@@ -1116,13 +1822,75 @@ class TimelineWidget(QWidget):
             track['clip_container'].setVisible(False)
             track['widget'].setFixedHeight(8)
             track['identifier'].setFixedHeight(8)
+            # 休眠：停掉该轨片段后台 worker，避免折叠轨仍占 CPU
+            try:
+                for w in list(self.iter_track_clip_widgets(track)):
+                    if hasattr(w, "sleep_media_workers"):
+                        w.sleep_media_workers()
+            except Exception as e:
+                logger.debug("折叠轨休眠 worker 失败: %s", e)
         else:
             track['clip_container'].setVisible(True)
             track['widget'].setFixedHeight(48)
             track['identifier'].setFixedHeight(48)
+            # 展开：按需重新调度缩略图/波形
+            try:
+                for w in list(self.iter_track_clip_widgets(track)):
+                    if hasattr(w, "wake_media_workers"):
+                        w.wake_media_workers()
+            except Exception as e:
+                logger.debug("展开轨唤醒 worker 失败: %s", e)
         self._update_track_min_width()
         if self._selected_track == track:
             self._update_ctrl_panel_position()
+
+    def set_clip_interaction_active(self, active: bool):
+        """片段拖拽/trim 中：标记交互，降低重绘与后台任务。"""
+        was = bool(getattr(self, "_clip_interaction_active", False))
+        self._clip_interaction_active = bool(active)
+        if active:
+            self._active_drag_clip = None  # 由 ClipWidget 自行登记
+        elif was:
+            # 松手后立刻唤醒视口内胶片条/波形（不必等滚动）
+            try:
+                self._wake_visible_clip_media()
+            except Exception as e:
+                logger.debug("拖拽结束后唤醒媒体失败: %s", e)
+
+    def is_clip_interaction_active(self) -> bool:
+        return bool(getattr(self, "_clip_interaction_active", False))
+
+    def register_active_drag_clip(self, clip_widget):
+        self._active_drag_clip = clip_widget
+
+    def cancel_active_clip_interaction(self) -> bool:
+        """Esc：取消进行中的片段拖拽/trim，还原按下时状态。"""
+        w = getattr(self, "_active_drag_clip", None)
+        if w is not None and hasattr(w, "cancel_edit_drag"):
+            try:
+                if w.cancel_edit_drag():
+                    return True
+            except Exception as e:
+                logger.debug("取消拖拽失败: %s", e)
+        # 回退：扫描正在拖的片
+        for cw in self.all_clip_widgets():
+            if getattr(cw, "_did_edit_drag", False) or (
+                getattr(cw, "_drag_start_pos", None) is not None
+            ):
+                if hasattr(cw, "cancel_edit_drag") and cw.cancel_edit_drag():
+                    return True
+        return False
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            if self.cancel_active_clip_interaction():
+                event.accept()
+                return
+            if self.is_razor_mode():
+                self.set_razor_mode(False)
+                event.accept()
+                return
+        super().keyPressEvent(event)
     
     def _rename_track(self, track):
         """ """
@@ -1138,9 +1906,11 @@ class TimelineWidget(QWidget):
         """Duplicate track with same clips"""
         new_track = self._add_track(track['name'] + " (copy)", track['type'])
         self._update_track_min_width()
-        # Copy clips from original track
-        for i in range(track['content_layout'].count()):
-            widget = track['content_layout'].itemAt(i).widget()
+        try:
+            widgets = list(self.iter_track_clip_widgets(track))
+        except RuntimeError:
+            widgets = []
+        for widget in widgets:
             if isinstance(widget, ClipWidget):
                 clip_data = dict(widget.clip_data)
                 self.add_clip(clip_data, new_track['id'] - 1)
@@ -1153,6 +1923,13 @@ class TimelineWidget(QWidget):
         track = self._add_track(name, track_type)
         self._update_track_min_width()
         return track
+
+    def find_track_index_by_type(self, track_type: str, default: int = 0) -> int:
+        """返回首个指定类型轨道的索引；找不到则回退 default。"""
+        for i, t in enumerate(self._tracks):
+            if t.get("type") == track_type:
+                return i
+        return default
     
     def remove_track(self, track_id):
         """ """
@@ -1171,6 +1948,13 @@ class TimelineWidget(QWidget):
         if track_index < 0 or track_index >= len(self._tracks):
             track_index = 0
 
+        # 在创建 ClipWidget 之前就设置 track 字段，这样 ClipWidget 构造时就能正确识别轨道类型
+        clip_data["track"] = track_index
+        # 同步 type，便于 ClipWidget 不依赖写死的 track==1
+        track_type = self._tracks[track_index].get("type", "video")
+        if "type" not in clip_data or not clip_data.get("type"):
+            clip_data["type"] = track_type
+
         track = self._tracks[track_index]
         container = track["clip_container"]
         clip_widget = ClipWidget(clip_data, container)
@@ -1178,7 +1962,6 @@ class TimelineWidget(QWidget):
         clip_widget.keyframe_clicked.connect(self.clip_keyframe_clicked.emit)
         clip_widget.trim_committed.connect(self.clip_trim_committed.emit)
 
-        clip_data["track"] = track_index
         if clip_data not in self._clips:
             self._clips.append(clip_data)
         self.position_clip_widget(clip_widget)
@@ -1188,6 +1971,13 @@ class TimelineWidget(QWidget):
         for track in self._tracks:
             for w in list(self.iter_track_clip_widgets(track)):
                 if w.clip_data.get("id") == clip_id:
+                    try:
+                        if hasattr(w, "sleep_media_workers"):
+                            w.sleep_media_workers()
+                        elif hasattr(w, "_cleanup_workers"):
+                            w._cleanup_workers()
+                    except Exception as e:
+                        logger.debug("删片前停 worker 失败: %s", e)
                     w.setParent(None)
                     w.deleteLater()
                     self._clips = [c for c in self._clips if c.get("id") != clip_id]
@@ -1202,30 +1992,296 @@ class TimelineWidget(QWidget):
         clip_widget.clip_data["track"] = track_index
         self.position_clip_widget(clip_widget)
     
-    def _on_clip_clicked(self, clip_data):
-        """ """
-        if self._current_clip:
+    def is_razor_mode(self) -> bool:
+        return bool(getattr(self, "_razor_mode", False))
+
+    def _clear_marquee_state(self):
+        """取消框选橡胶筋状态（刀片切换 / 避免与 razor 冲突）。"""
+        self._marquee_origin = None
+        self._marquee_rect = None
+        self._marquee_active = False
+        self._marquee_additive = False
+        grab_w = getattr(self, "_marquee_grab_widget", None)
+        if grab_w is not None:
+            try:
+                grab_w.releaseMouse()
+            except Exception:
+                pass
+            self._marquee_grab_widget = None
+        try:
+            self._apply_selection_visual()
+        except Exception:
+            pass
+        vp = getattr(self, "_track_viewport", None)
+        if vp is not None:
+            vp.update()
+
+    def set_razor_mode(self, enabled: bool):
+        """剪映式刀片工具态：悬停切开线 + 点击切开。"""
+        on = bool(enabled)
+        prev = bool(getattr(self, "_razor_mode", False))
+        self._razor_mode = on
+        if prev != on:
+            self._clear_marquee_state()
+        if not on:
+            self._razor_hover_t = None
+            try:
+                self._razor_guide.set_guide(None)
+            except Exception:
+                pass
+        cur = Qt.CursorShape.CrossCursor if on else Qt.CursorShape.ArrowCursor
+        try:
+            self.setCursor(cur)
+            vp = getattr(self, "_track_viewport", None)
+            if vp is not None:
+                vp.setCursor(cur)
+                vp.setMouseTracking(True)
+            for track in getattr(self, "_tracks", []) or []:
+                cc = track.get("clip_container")
+                if cc is not None:
+                    cc.setCursor(cur)
+                    cc.setMouseTracking(True)
             for w in self.all_clip_widgets():
-                if w.clip_data.get("id") == self._current_clip.get("id"):
-                    w.set_selected(False)
-        self._current_clip = clip_data
-        for w in self.all_clip_widgets():
-            if w.clip_data.get("id") == clip_data.get("id"):
-                w.set_selected(True)
-                break
-        self.clip_selected.emit(clip_data)
+                w.setCursor(cur)
+                w.setMouseTracking(True)
+        except Exception as e:
+            logger.debug("刀片光标设置失败: %s", e)
+        if prev != on:
+            try:
+                self.razor_mode_changed.emit(on)
+            except Exception:
+                pass
+
+    def toggle_razor_mode(self) -> bool:
+        self.set_razor_mode(not self.is_razor_mode())
+        return self.is_razor_mode()
+
+    def time_at_global_pos(self, global_pos) -> float:
+        """全局坐标 → 时间线秒（与片缘 X 对齐）。"""
+        vp = getattr(self, "_track_viewport", None)
+        if vp is None:
+            return 0.0
+        try:
+            from PyQt6.QtCore import QPoint as _QP
+            if not isinstance(global_pos, _QP):
+                global_pos = _QP(int(global_pos.x()), int(global_pos.y()))
+            local = vp.mapFromGlobal(global_pos)
+            # 反解 content_x_for_time：找 clip_container 原点
+            pps = max(1e-6, self.px_per_sec())
+            origin_x = 100
+            for track in getattr(self, "_tracks", []) or []:
+                cc = track.get("clip_container")
+                if cc is None:
+                    continue
+                try:
+                    origin_x = int(cc.mapTo(vp, QPoint(0, 0)).x())
+                    break
+                except Exception:
+                    continue
+            t = (float(local.x()) - float(origin_x)) / pps
+            t = max(0.0, t)
+            return _quantize_time(t, self.frame_duration())
+        except Exception:
+            return 0.0
+
+    def _update_razor_hover(self, global_pos):
+        if not self.is_razor_mode():
+            return
+        t = self.time_at_global_pos(global_pos)
+        self._razor_hover_t = t
+        try:
+            self._razor_guide.set_guide(t)
+        except Exception as e:
+            logger.debug("刀片悬停线失败: %s", e)
+
+    def _razor_cut_at_global(self, global_pos) -> bool:
+        """刀片点击：发信号给 Editor；返回是否已处理。"""
+        if not self.is_razor_mode():
+            return False
+        t = self.time_at_global_pos(global_pos)
+        self._razor_hover_t = t
+        try:
+            self._razor_guide.set_guide(t)
+        except Exception:
+            pass
+        self.razor_cut_at.emit(float(t))
+        return True
+
+    def _marquee_press(self, track, event):
+        """空白处按下：选轨 + 准备框选（Shift 追加）。刀片模式改为切开。"""
+        if event.button() == Qt.MouseButton.RightButton:
+            event.accept()
+            self._show_track_menu(
+                track["widget"],
+                event.globalPosition().toPoint(),
+            )
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.is_razor_mode():
+            event.accept()
+            self._razor_cut_at_global(event.globalPosition().toPoint())
+            return
+        event.accept()
+        self._select_track(track)
+        vp = self._track_viewport
+        origin = vp.mapFromGlobal(event.globalPosition().toPoint())
+        self._marquee_origin = origin
+        self._marquee_rect = QRect(origin, origin)
+        self._marquee_active = False
+        self._marquee_additive = is_shift() or is_ctrl()
+        if not self._marquee_additive:
+            # 点击空白清选并通知 Editor，避免幽灵 Delete
+            self.clear_selection(emit=True)
+        # 跨轨拖框：抓住 viewport，避免移出本轨丢事件
+        try:
+            cc = track.get("clip_container")
+            if cc is not None:
+                cc.grabMouse()
+                self._marquee_grab_widget = cc
+            else:
+                self._marquee_grab_widget = None
+        except Exception:
+            self._marquee_grab_widget = None
+
+    def _marquee_move(self, track, event):
+        if self.is_razor_mode():
+            event.accept()
+            self._update_razor_hover(event.globalPosition().toPoint())
+            return
+        if self._marquee_origin is None:
+            return
+        event.accept()
+        vp = self._track_viewport
+        cur = vp.mapFromGlobal(event.globalPosition().toPoint())
+        rect = rect_from_points(self._marquee_origin, cur)
+        if not self._marquee_active:
+            if (
+                abs(cur.x() - self._marquee_origin.x()) > MARQUEE_DRAG_THRESHOLD_PX
+                or abs(cur.y() - self._marquee_origin.y()) > MARQUEE_DRAG_THRESHOLD_PX
+            ):
+                self._marquee_active = True
+        if self._marquee_active:
+            self._marquee_rect = rect
+            # 拖动中即时高亮将命中的片（追加模式合并已有选区）
+            hits = ids_intersecting_viewport_rect(self, rect)
+            if self._marquee_additive:
+                preview = self.get_selected_ids() | hits
+            else:
+                preview = hits
+            self.preview_selection_ids(preview)
+            vp.update()
+
+    def _marquee_release(self, track, event):
+        if self.is_razor_mode():
+            return
+        if self._marquee_origin is None:
+            return
+        event.accept()
+        vp = self._track_viewport
+        if self._marquee_active and self._marquee_rect is not None:
+            hits = ids_intersecting_viewport_rect(self, self._marquee_rect)
+            if self._marquee_additive:
+                self.add_to_selection(hits, emit=True)
+            else:
+                self.set_selection(hits, emit=True)
+        else:
+            # 未形成框选：还原 press 后的真实选区视觉
+            self._apply_selection_visual()
+        # 纯点击空白（无拖动）已在 press 清选
+        self._marquee_origin = None
+        self._marquee_rect = None
+        self._marquee_active = False
+        self._marquee_additive = False
+        grab_w = getattr(self, "_marquee_grab_widget", None)
+        if grab_w is not None:
+            try:
+                grab_w.releaseMouse()
+            except Exception:
+                pass
+            self._marquee_grab_widget = None
+        vp.update()
+
+    def _on_clip_clicked(self, clip_data):
+        """点选：普通单选 / Ctrl 切换 / Shift 同轨时间重叠范围；保持多选集可批量拖。"""
+        self.handle_clip_click(clip_data)
     
-    def set_zoom(self, zoom):
-        """ """
-        self._zoom = max(10, min(500, zoom))
+    def set_zoom(self, zoom, anchor_time=None, anchor_viewport_x=None):
+        """缩放；可指定锚点时间，使该时刻尽量停在同一视口 X（剪映式）。"""
+        old_pps = max(1e-6, self.px_per_sec())
+        try:
+            bar = self._track_scroll.horizontalScrollBar()
+            old_scroll = int(bar.value())
+        except Exception:
+            bar = None
+            old_scroll = 0
+        if anchor_time is None:
+            anchor_time = float(self._playhead_pos or 0)
+        if anchor_viewport_x is None:
+            anchor_viewport_x = 100  # 轨道内容区起点附近
+        # 缩放前：锚点在内容坐标中的 X
+        old_content_x = 100 + float(anchor_time) * old_pps
+
+        self._zoom = _clamp_timeline_zoom(zoom)
         self._update_time_ruler()
         self._update_track_min_width()
         self._marker_layer.set_zoom(self._zoom)
         self.relayout_clips()
+        # 刷新播放头位置（不二次 emit 跟镜抖动）
+        ph_x = self.playhead_x_for_time(self._playhead_pos)
+        self._track_playhead.move(ph_x, 0)
+        self._track_playhead.setFixedHeight(self._track_viewport.height())
+
+        if bar is not None:
+            new_pps = max(1e-6, self.px_per_sec())
+            new_content_x = 100 + float(anchor_time) * new_pps
+            # 保持锚点相对视口位置：new_scroll + viewport_x ≈ new_content_x
+            new_scroll = int(round(new_content_x - float(anchor_viewport_x)))
+            bar.setValue(max(0, new_scroll))
+
+    def wheelEvent(self, event):
+        """Ctrl+滚轮：以指针下时间为锚缩放；普通滚轮横向轻移。"""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta != 0:
+                z = int(self._zoom)
+                step = 25 if z < 200 else (50 if z < 800 else 100)
+                # 指针相对滚动视口的 X → 锚点时间
+                try:
+                    vp = self._track_scroll.viewport()
+                    local = vp.mapFromGlobal(event.globalPosition().toPoint())
+                    scroll = int(self._track_scroll.horizontalScrollBar().value())
+                    content_x = scroll + local.x()
+                    pps = max(1e-6, self.px_per_sec())
+                    anchor_t = max(0.0, (content_x - 100) / pps)
+                    self.set_zoom(
+                        z + step if delta > 0 else z - step,
+                        anchor_time=anchor_t,
+                        anchor_viewport_x=local.x(),
+                    )
+                except Exception:
+                    self.set_zoom(z + step if delta > 0 else z - step)
+            event.accept()
+            return
+        # Shift+滚轮或触控板水平：平移时间线
+        dx = event.angleDelta().x()
+        dy = event.angleDelta().y()
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            dx = dy
+            dy = 0
+        if abs(dx) > abs(dy) and dx != 0:
+            try:
+                bar = self._track_scroll.horizontalScrollBar()
+                bar.setValue(bar.value() - int(dx))
+                event.accept()
+                return
+            except Exception:
+                pass
+        super().wheelEvent(event)
     
     def _update_track_min_width(self):
         """ """
-        px_per_sec = 20 * (self._zoom / 100)
+        px_per_sec = self.px_per_sec()
         min_width = int(self._total_duration * px_per_sec + 120)
         track_count = max(3, len(self._tracks))
         min_height = track_count * 48 + 20
@@ -1234,18 +2290,55 @@ class TimelineWidget(QWidget):
         self._marker_layer.setMinimumWidth(min_width)
         self._marker_layer.set_total_duration(self._total_duration)
     
-    def set_playhead_position(self, position):
-        """ """
-        self._playhead_pos = position
-        # 更新时间标尺中的播放头
-        self._time_ruler.set_playhead(position)
-        # 更新轨道区域中的播放头（viewport 内）
-        scale_factor = self._zoom / 100
-        playhead_x = 100 + int(position * 20 * scale_factor)
+    def content_x_for_time(self, position: float) -> int:
+        """时间 → 视口 X，与 clip_container 内片缘对齐。"""
+        pps = max(1e-6, self.px_per_sec())
+        vp = getattr(self, "_track_viewport", None)
+        for track in getattr(self, "_tracks", []) or []:
+            cc = track.get("clip_container")
+            if cc is None or vp is None:
+                continue
+            try:
+                origin = cc.mapTo(vp, QPoint(0, 0))
+                return int(origin.x() + float(position) * pps)
+            except Exception:
+                continue
+        return 100 + int(float(position) * pps)
+
+    def playhead_x_for_time(self, position: float) -> int:
+        return self.content_x_for_time(position)
+
+    def ensure_playhead_visible(self, margin_px: int = 48):
+        """播放头靠近视口边缘时横向跟随（剪映式跟镜）。"""
+        try:
+            bar = self._track_scroll.horizontalScrollBar()
+            x = self.playhead_x_for_time(self._playhead_pos)
+            view_w = max(1, self._track_scroll.viewport().width())
+            left = int(bar.value())
+            right = left + view_w
+            if x < left + margin_px:
+                bar.setValue(max(0, x - margin_px))
+            elif x > right - margin_px:
+                bar.setValue(max(0, x - view_w + margin_px))
+        except Exception:
+            pass
+
+    def set_playhead_position(self, position, follow: bool = True):
+        """设置播放头；默认跟镜滚动。"""
+        pos = max(0.0, float(position))
+        try:
+            pos = _quantize_time(pos, self.frame_duration())
+        except Exception:
+            pass
+        self._playhead_pos = pos
+        self._time_ruler.set_playhead(pos)
+        playhead_x = self.playhead_x_for_time(pos)
         self._track_playhead.move(playhead_x, 0)
         self._track_playhead.setFixedHeight(self._track_viewport.height())
         self._track_playhead.setStyleSheet("background-color: #ff4757; width: 2px;")
-        self.playhead_moved.emit(position)
+        if follow and not getattr(self, "_is_playing", False):
+            self.ensure_playhead_visible()
+        self.playhead_moved.emit(pos)
     
     def play(self):
         """ """
@@ -1333,16 +2426,16 @@ class ClipWidget(QFrame):
 
     def __init__(self, clip_data, parent=None):
         super().__init__(parent)
-        _report_timeline_widget_debug(
-            "B",
-            "timeline_widget.ClipWidget.__init__",
-            "clip widget init",
-            {
-                "module_has_os": "os" in globals(),
-                "clip_path": clip_data.get("path") if isinstance(clip_data, dict) else None,
-                "clip_keys": list(clip_data.keys()) if isinstance(clip_data, dict) else None,
-            },
-        )
+        # _report_timeline_widget_debug(  # 禁用调试报告，避免网络超时
+        #     "B",
+        #     "timeline_widget.ClipWidget.__init__",
+        #     "clip widget init",
+        #     {
+        #         "module_has_os": "os" in globals(),
+        #         "clip_path": clip_data.get("path") if isinstance(clip_data, dict) else None,
+        #         "clip_keys": list(clip_data.keys()) if isinstance(clip_data, dict) else None,
+        #     },
+        # )
         self.clip_data = clip_data
         self._is_selected = False
         self._is_resizing = False
@@ -1362,50 +2455,108 @@ class ClipWidget(QFrame):
         self._keyframes = self._coerce_keyframes(clip_data.get('keyframes'))
         self._kf_hit_radius = 7  # 命中半径（px），与绘制点尺寸匹配
 
-        # 缩略图和波形缓存
+        # 缩略图（剪映式胶片条）和波形缓存
         self._thumbnail_cache = []
-        self._waveform_peaks = None
+        self._thumb_key = None  # (path, in, out, n, thumb_h)
+        self._thumb_aspect = 0.0  # 0=未知，绘制/格宽用首帧比例
+        self._thumb_gen_token = 0  # 丢弃过期 worker 结果
+        self._waveform_peaks = None  # None=未就绪, []=失败, list=成功
+        self._waveform_failed = False
+        self._waveform_scheduled = False
         self._thumbnails_generated = False
+        # 胶片条绘制缓存：(thumb_h, cell_w, fast) → {src_idx: QPixmap}
+        self._scaled_thumb_cache = {}
+        self._scaled_thumb_cache_key = None
 
-        self.setFixedHeight(38)
+        # 工作线程引用 - 用于生命周期管理
+        self._thumbnail_worker = None
+        self._waveform_worker = None
+        try:
+            self.destroyed.connect(self._on_clip_widget_destroyed)
+        except Exception:
+            pass
+
+        self._thumb_debounce = QTimer(self)
+        self._thumb_debounce.setSingleShot(True)
+        self._thumb_debounce.setInterval(120)
+        self._thumb_debounce.timeout.connect(self._schedule_thumbnail_generation)
+
+        self.setFixedHeight(48)  # 与 TRACK_H 一致；最终以 position_clip_widget 为准
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        # 异步调度缩略图/波形：先让代理任务抢跑，再采胶片（长片避免与代理/预览抢解码）
+        QTimer.singleShot(450, self._request_thumbnail_refresh)
+        if self._is_audio_clip():
+            QTimer.singleShot(200, lambda: self._schedule_waveform_generation(200))
+        # 音频轨道使用不同的背景色
+        is_audio = self._is_audio_clip()
+        bg_color = "#1a4a3a" if is_audio else "#0d1f3a"
+        hover_color = "#225a4a" if is_audio else "#132a4a"
         
-        # 异步调度缩略图生成
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(100, self._schedule_thumbnail_generation)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #1e6bde;
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
                 border-radius: 3px;
                 border: none;
-            }
-            QFrame:hover {
-                background-color: #2575e0;
-            }
-            QFrame[selected="true"] {
+            }}
+            QFrame:hover {{
+                background-color: {hover_color};
+            }}
+            QFrame[selected="true"] {{
                 border: 1.5px solid #ff4757;
-            }
+            }}
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
 
-        # 片段名称（省略号处理）
-        clip_text = os.path.basename(clip_data.get('path', '未命名'))
-        clip_name = QLabel()
-        clip_name.setStyleSheet("color: #eee; font-size: 10px; background:transparent; border:none;")
-        clip_name.setMaximumWidth(100)
-        clip_name.setText(QFontMetrics(clip_name.font()).elidedText(clip_text, Qt.TextElideMode.ElideRight, 100))
-        layout.addWidget(clip_name)
+        # 音频片不显示文字标签，只显示波形
+        if not is_audio:
+            # 片段名称叠在缩略图上（半透明底，不占纵向空间）
+            clip_text = os.path.basename(clip_data.get('path', '未命名'))
+            clip_name = QLabel()
+            clip_name.setStyleSheet(
+                "color:#fff;font-size:10px;background:rgba(0,0,0,110);"
+                "border:none;border-radius:2px;padding:1px 4px;"
+            )
+            clip_name.setMaximumWidth(120)
+            clip_name.setText(QFontMetrics(clip_name.font()).elidedText(clip_text, Qt.TextElideMode.ElideRight, 120))
+            layout.addWidget(clip_name, 0, Qt.AlignmentFlag.AlignTop)
 
-        layout.addStretch()
+            layout.addStretch()
 
-        # 时长标签
-        dur = clip_data.get('duration', 0)
-        dur_lbl = QLabel(f"{dur:.1f}s" if dur < 60 else f"{int(dur//60)}:{int(dur%60):02d}")
-        dur_lbl.setStyleSheet("color: #bcd4f5; font-size: 9px; background:transparent; border:none;")
-        layout.addWidget(dur_lbl)
+            # 时长标签
+            dur = clip_data.get('duration', 0)
+            dur_lbl = QLabel(f"{dur:.1f}s" if dur < 60 else f"{int(dur//60)}:{int(dur%60):02d}")
+            dur_lbl.setStyleSheet(
+                "color:#e8f0ff;font-size:9px;background:rgba(0,0,0,110);"
+                "border:none;border-radius:2px;padding:1px 4px;"
+            )
+            layout.addWidget(dur_lbl, 0, Qt.AlignmentFlag.AlignTop)
+
+    def _find_timeline(self):
+        """沿父链查找 TimelineWidget。"""
+        w = self.parent()
+        while w is not None:
+            if hasattr(w, "_tracks") and hasattr(w, "find_track_index_by_type"):
+                return w
+            w = w.parent()
+        return None
+
+    def _is_audio_clip(self) -> bool:
+        """按 type / 扩展名 / 所在轨 type 判断是否为音频片（不写死 track==1）。"""
+        if str(self.clip_data.get("type", "")).lower() == "audio":
+            return True
+        path = self.clip_data.get("path", "") or ""
+        if path and any(path.lower().endswith(e) for e in AUDIO_EXTS):
+            return True
+        ti = int(self.clip_data.get("track", 0) or 0)
+        timeline = self._find_timeline()
+        if timeline is not None and 0 <= ti < len(timeline._tracks):
+            if timeline._tracks[ti].get("type") == "audio":
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # 补短 P1#8：关键帧数据接入（最小侵入 - 不影响无关键帧的 clip）
@@ -1503,70 +2654,108 @@ class ClipWidget(QFrame):
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             
-            # 根据文件扩展名判断片段类型
             clip_path = self.clip_data.get('path', '') or self.clip_data.get('name', '')
-            is_audio = clip_path and any(clip_path.lower().endswith(ext) for ext in ('.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.wma'))
+            is_audio = self._is_audio_clip()
             
-            # ── 视频片段缩略图条 ──
-            if not is_audio and self.width() > 60:
-                thumb_height = 8
-                thumb_y = self.height() - thumb_height - 2
-                segments = max(3, self.width() // 12)
-                
-                if self._thumbnail_cache and len(self._thumbnail_cache) >= segments:
+            # ── 视频胶片条：一格一帧（按时间等距映射），铺满轨高 ──
+            if not is_audio and self.width() > 20:
+                thumb_h = max(1, self.height())
+                aspect = float(getattr(self, "_thumb_aspect", 0) or 0) or (16.0 / 9.0)
+                valid = [
+                    pm for pm in (self._thumbnail_cache or [])
+                    if pm is not None and not pm.isNull() and pm.height() > 0
+                ]
+                if valid:
+                    aspect = float(valid[0].width()) / float(valid[0].height())
+                    self._thumb_aspect = aspect
+                cell_w = max(14, int(round(thumb_h * aspect)))
+                segments = max(1, (self.width() + cell_w - 1) // max(1, cell_w))
+                n_cache = len(valid)
+                timeline = self._find_timeline_widget()
+                fast = bool(
+                    timeline is not None and timeline.is_clip_interaction_active()
+                )
+                xform = (
+                    Qt.TransformationMode.FastTransformation
+                    if fast
+                    else Qt.TransformationMode.SmoothTransformation
+                )
+                scale_key = (thumb_h, cell_w, fast, id(valid[0]) if valid else 0)
+                if scale_key != getattr(self, "_scaled_thumb_cache_key", None):
+                    self._scaled_thumb_cache = {}
+                    self._scaled_thumb_cache_key = scale_key
+
+                if valid:
                     for i in range(segments):
-                        x = 2 + i * 12
-                        pixmap = self._thumbnail_cache[i % len(self._thumbnail_cache)]
-                        if pixmap:
-                            scaled_pixmap = pixmap.scaled(10, thumb_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                            painter.drawPixmap(x, thumb_y, scaled_pixmap)
+                        x = i * cell_w
+                        if x >= self.width():
+                            break
+                        # 等距映射到缓存帧，禁止 i%N 循环刷同一帧
+                        if segments <= 1 or n_cache <= 1:
+                            idx = 0
                         else:
-                            colors = [QColor(30, 107, 222, 180), QColor(37, 117, 224, 160), QColor(25, 97, 220, 140)]
-                            painter.fillRect(x, thumb_y, 10, thumb_height, colors[i % 3])
+                            idx = int(round(i * (n_cache - 1) / max(1, segments - 1)))
+                            idx = max(0, min(n_cache - 1, idx))
+                        pixmap = valid[idx]
+                        draw_w = min(cell_w, self.width() - x)
+                        scaled = self._scaled_thumb_cache.get(idx)
+                        if scaled is None or scaled.isNull():
+                            scaled = pixmap.scaledToHeight(thumb_h, xform)
+                            if scaled.width() < draw_w:
+                                scaled = pixmap.scaled(
+                                    draw_w, thumb_h,
+                                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                                    xform,
+                                )
+                            self._scaled_thumb_cache[idx] = scaled
+                        if scaled.width() < draw_w:
+                            painter.drawPixmap(x, 0, scaled)
+                        else:
+                            x_off = max(0, (scaled.width() - draw_w) // 2)
+                            painter.drawPixmap(
+                                x, 0, draw_w, thumb_h,
+                                scaled, x_off, 0, draw_w, thumb_h,
+                            )
                 else:
-                    colors = [
-                        QColor(30, 107, 222, 180),
-                        QColor(37, 117, 224, 160),
-                        QColor(25, 97, 220, 140)
-                    ]
                     for i in range(segments):
-                        x = 2 + i * 12
-                        c = colors[i % 3]
-                        painter.fillRect(x, thumb_y, 10, thumb_height, c)
+                        x = i * cell_w
+                        if x >= self.width():
+                            break
+                        draw_w = min(cell_w, self.width() - x)
+                        shade = 160 + (i % 3) * 20
+                        painter.fillRect(x, 0, draw_w, thumb_h, QColor(30, 90, shade, 220))
             
-            # ── 音频片段波形可视化 ──
+            # ── 音频片段波形可视化（按轨 type / 扩展名，不写死 track==1）──
             if is_audio:
-                wave_height = 14
+                wave_height = 28
                 bar_count = max(4, self.width() // 6)
                 bar_width = max(2, (self.width() - 4) // bar_count - 2)
-                
-                # 异步生成波形（首次需要）
-                if not hasattr(self, '_waveform_peaks') or self._waveform_peaks is None:
-                    self._schedule_waveform_generation(bar_count)
-                    # 使用随机波形作为临时显示
-                    import random
-                    random.seed(hash(clip_path) % 10000)
-                    peaks = [random.random() for _ in range(bar_count)]
-                    random.seed()
+                wave_y = (self.height() - wave_height) // 2
+
+                if self._waveform_peaks is None and not self._waveform_failed:
+                    # 加载中：浅色中线，不刷假随机波形
+                    if not self._waveform_scheduled:
+                        self._schedule_waveform_generation(bar_count)
+                    painter.setPen(QPen(QColor(46, 204, 113, 80), 1))
+                    mid = wave_y + wave_height // 2
+                    painter.drawLine(2, mid, max(3, self.width() - 2), mid)
+                elif self._waveform_failed or not self._waveform_peaks:
+                    # 失败 / 无音轨：明确空态中线
+                    painter.setPen(QPen(QColor(129, 199, 132, 100), 1, Qt.PenStyle.DashLine))
+                    mid = wave_y + wave_height // 2
+                    painter.drawLine(2, mid, max(3, self.width() - 2), mid)
                 else:
                     peaks = self._waveform_peaks
-                
-                if peaks:
+                    peak_max = max(peaks) if peaks else 0.0
+                    # 可视化增益：弱信号放大到可见，全 0 已走失败态
+                    gain = (0.85 / peak_max) if peak_max > 1e-6 else 1.0
                     for i in range(bar_count):
                         x = 2 + i * (bar_width + 2)
-                        peak_val = peaks[i % len(peaks)] if peaks else 0.5
-                        h = max(2, int(peak_val * wave_height))
-                        c = QColor(76, 175, 80, 160 + i * 3 % 90)
-                        painter.fillRect(x, self.height() // 2 - h // 2, bar_width, h, c)
-                else:
-                    import random
-                    random.seed(hash(clip_path) % 10000)
-                    for i in range(bar_count):
-                        x = 2 + i * (bar_width + 2)
-                        h = random.randint(4, wave_height)
-                        c = QColor(76, 175, 80, 160 + i * 3 % 90)
-                        painter.fillRect(x, self.height() // 2 - h // 2, bar_width, h, c)
-                    random.seed()
+                        peak_val = peaks[i % len(peaks)] if peaks else 0.0
+                        peak_val = min(1.0, peak_val * gain)
+                        h = max(4, int(peak_val * wave_height))
+                        c = QColor(46, 204, 113, 200)
+                        painter.fillRect(x, wave_y + (wave_height - h) // 2, bar_width, h, c)
             
             # ── 关键帧绘制 ──
             if not self._keyframes:
@@ -1633,8 +2822,15 @@ class ClipWidget(QFrame):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            timeline = self._find_timeline_widget()
+            if timeline is not None and timeline.is_razor_mode():
+                # 刀片：点片段即在指针时间切开（含联动音画由 Editor 处理）
+                event.accept()
+                timeline._razor_cut_at_global(event.globalPosition().toPoint())
+                return
             self._drag_start_pos = event.pos()
             self._drag_offset = self.pos()
+            self._batch_drag_starts = None
             try:
                 import copy
                 self._edit_before = copy.deepcopy({
@@ -1648,7 +2844,8 @@ class ClipWidget(QFrame):
             except Exception:
                 self._edit_before = None
             # 检查是否点击在边缘(调整大小)
-            if event.pos().x() < 10:
+            edge = max(8, min(18, self.width() // 8))
+            if event.pos().x() < edge:
                 self._is_resizing = True
                 self._resize_direction = 'left'
                 self._resize_snapshot = {
@@ -1658,7 +2855,7 @@ class ClipWidget(QFrame):
                     "start_time": float(self.clip_data.get("start_time", 0) or 0),
                     "direction": "left",
                 }
-            elif event.pos().x() > self.width() - 10:
+            elif event.pos().x() > self.width() - edge:
                 self._is_resizing = True
                 self._resize_direction = 'right'
                 self._resize_snapshot = {
@@ -1679,17 +2876,40 @@ class ClipWidget(QFrame):
                     return
 
                 self._is_resizing = False
-                # 切换选择状态
-                self._is_selected = not self._is_selected
-                self.setProperty('selected', str(self._is_selected).lower())
-                self.style().unpolish(self)
-                self.style().polish(self)
-                # 补短 P1#8：选中态变化需触发 paintEvent 重新画关键帧大小
-                self.update()
+                # 选区由 TimelineWidget 根据修饰键决定，此处只发点击
                 self.clicked.emit(self.clip_data)
+                # 多选批量拖：若本片已在选区且选区>1，记录组内起点
+                self._batch_drag_starts = None
+                timeline = self._find_timeline_widget()
+                if timeline is not None:
+                    ids = timeline.get_selected_ids()
+                    cid = self.clip_data.get("id")
+                    if cid not in ids:
+                        # Ctrl 取消选中：不进入拖拽，避免拖走「已取消」的片
+                        self._drag_start_pos = None
+                        self._drag_offset = None
+                    elif cid in ids and len(ids) > 1:
+                        starts = {}
+                        tracks0 = {}
+                        for c in getattr(timeline, "_clips", []) or []:
+                            if c.get("id") in ids:
+                                starts[c.get("id")] = float(c.get("start_time", 0) or 0)
+                                tracks0[c.get("id")] = int(c.get("track", 0) or 0)
+                        self._batch_drag_starts = starts
+                        self._batch_drag_tracks0 = tracks0
+            if getattr(self, "_is_resizing", False):
+                self._resize_global_x0 = float(event.globalPosition().x())
+                self._resize_width0 = int(self.width())
+                self._resize_x0 = int(self.x())
+                self._batch_drag_starts = None
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        timeline = self._find_timeline_widget()
+        if timeline is not None and timeline.is_razor_mode():
+            timeline._update_razor_hover(event.globalPosition().toPoint())
+            event.accept()
+            return
         # 补短 P1#8：未在拖拽/调整大小时，命中关键帧点 -> 显示 tooltip
         if not self._is_resizing and not (self._drag_start_pos and self._drag_offset):
             kf_hit = self._hit_test_keyframe(event.pos())
@@ -1704,66 +2924,245 @@ class ClipWidget(QFrame):
             return
 
         if self._is_resizing:
-            # 调整大小逻辑
+            # 误触保护：片缘微抖不触发 trim
+            gx0 = float(getattr(self, "_resize_global_x0", event.globalPosition().x()))
+            dx_probe = float(event.globalPosition().x()) - gx0
+            if not self._did_edit_drag and abs(dx_probe) < CLIP_DRAG_THRESHOLD_PX:
+                return
+            # 用全局 dx + 按下时宽/位置，trim 跟手不漂移
             self._did_edit_drag = True
             timeline = self._find_timeline_widget()
-            zoom = getattr(timeline, "_zoom", 100) if timeline else 100
-            scale_factor = zoom / 100
-            delta = event.pos().x() - self._drag_start_pos.x()
+            if timeline is not None:
+                timeline.set_clip_interaction_active(True)
+                timeline.register_active_drag_clip(self)
+                try:
+                    self.grabKeyboard()
+                except Exception:
+                    pass
+            pps = timeline.px_per_sec() if timeline is not None else _timeline_pps(100)
+            fd = timeline.frame_duration() if timeline is not None else (1.0 / 30.0)
+            w0 = int(getattr(self, "_resize_width0", self.width()))
+            x0 = int(getattr(self, "_resize_x0", self.x()))
+            dx = dx_probe
+            snap = getattr(self, "_resize_snapshot", None) or {}
             if self._resize_direction == 'right':
-                new_width = max(40, self.width() + delta)
+                new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(w0 + dx)))
+                end_t = (x0 + new_width) / max(1e-6, pps)
+                if timeline is not None:
+                    end_t = timeline.snap_time(
+                        end_t,
+                        exclude_id=self.clip_data.get("id"),
+                        track_i=int(self.clip_data.get("track", 0) or 0),
+                    )
+                st = float(snap.get("start_time", self.clip_data.get("start_time", 0)) or 0)
+                new_dur = max(fd, end_t - st)
+                new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(new_dur * pps)))
                 self.setFixedWidth(new_width)
-                if 'duration' in self.clip_data:
-                    self.clip_data['duration'] = new_width / (20 * scale_factor)
-                    self.resized.emit(self.clip_data)
+                in_p = float(self.clip_data.get("in_point", snap.get("in_point", 0)) or 0)
+                self.clip_data["duration"] = new_dur
+                self.clip_data["out_point"] = in_p + new_dur
+                self.resized.emit(self.clip_data)
             elif self._resize_direction == 'left':
-                new_width = max(40, self.width() - delta)
-                new_x = self.x() + delta
-                if new_x >= 0:
-                    self.setFixedWidth(new_width)
-                    self.move(new_x, self.y())
-                    if 'start_time' in self.clip_data and 'duration' in self.clip_data:
-                        self.clip_data['start_time'] += delta / (20 * scale_factor)
-                        self.clip_data['duration'] = new_width / (20 * scale_factor)
-                        self.resized.emit(self.clip_data)
+                new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(w0 - dx)))
+                new_x = max(0, int(round(x0 + (w0 - new_width))))
+                st = new_x / max(1e-6, pps)
+                if timeline is not None:
+                    st = timeline.snap_time(
+                        st,
+                        exclude_id=self.clip_data.get("id"),
+                        track_i=int(self.clip_data.get("track", 0) or 0),
+                    )
+                end = float(snap.get("start_time", 0) or 0) + float(snap.get("duration", 0) or 0)
+                new_dur = max(fd, end - st)
+                new_x = max(0, int(round(st * pps)))
+                new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(new_dur * pps)))
+                self.setFixedWidth(new_width)
+                self.move(new_x, 0)
+                dt = float(snap.get("duration", 0) or 0) - new_dur
+                self.clip_data["start_time"] = st
+                self.clip_data["duration"] = new_dur
+                self.clip_data["in_point"] = max(0.0, float(snap.get("in_point", 0) or 0) + dt)
+                self.clip_data["out_point"] = float(self.clip_data["in_point"]) + new_dur
+                self.resized.emit(self.clip_data)
         elif self._drag_start_pos and self._drag_offset:
-            # 拖拽：允许跨轨（Y），X 映射 start_time
+            # 误触保护：短距离移动视为点击，不挪片
+            if not self._did_edit_drag:
+                try:
+                    if (event.pos() - self._drag_start_pos).manhattanLength() < CLIP_DRAG_THRESHOLD_PX:
+                        return
+                except Exception:
+                    pass
+            # 拖拽：允许跨轨（Y），X 映射 start_time；拖动中实时吸附
             self._did_edit_drag = True
             timeline = self._find_timeline_widget()
+            if timeline is not None:
+                timeline.set_clip_interaction_active(True)
+                timeline.register_active_drag_clip(self)
+                try:
+                    self.grabKeyboard()
+                except Exception:
+                    pass
             parent = self.parent()
             new_pos = self.mapToParent(event.pos()) - self._drag_start_pos + self._drag_offset
             if new_pos.x() < 0:
                 new_pos.setX(0)
-            # 跨轨：跟随鼠标全局 Y 落到其它轨道容器
+            batch_starts = getattr(self, "_batch_drag_starts", None)
+            if batch_starts and timeline is not None and len(batch_starts) > 1:
+                # 多选同步平移 + 跨轨（同类型）；吸附参照指针下兼容轨
+                px = max(1e-6, timeline.px_per_sec())
+                proposed = max(0.0, new_pos.x() / px)
+                gy = event.globalPosition().toPoint().y()
+                drop_ti, drop_ok = timeline.resolve_drop_track(gy, self.clip_data)
+                timeline.set_drop_track_feedback(drop_ti, drop_ok)
+                snap_ti = drop_ti if (drop_ok and drop_ti is not None) else int(
+                    self.clip_data.get("track", 0) or 0
+                )
+                apply_batch_start_delta(
+                    timeline,
+                    batch_starts,
+                    self.clip_data.get("id"),
+                    proposed,
+                    exclude_ids=list(batch_starts.keys()),
+                    snap_track_i=snap_ti,
+                )
+                if drop_ok and drop_ti is not None:
+                    for cid in list(batch_starts.keys()):
+                        w = next(
+                            (cw for cw in timeline.all_clip_widgets()
+                             if cw.clip_data.get("id") == cid),
+                            None,
+                        )
+                        if w is None:
+                            continue
+                        cd = w.clip_data
+                        if not clip_compatible_with_track(cd, timeline._tracks[drop_ti]):
+                            continue
+                        if int(cd.get("track", -1) or -1) == drop_ti:
+                            continue
+                        timeline.reparent_clip_to_track(w, drop_ti)
+                        for c in timeline._clips:
+                            if c.get("id") == cid:
+                                c["track"] = drop_ti
+                                break
+                self.moved.emit(self.clip_data)
+                return
             if timeline is not None:
                 gy = event.globalPosition().toPoint().y()
-                ti = timeline.track_index_at_global_y(gy)
-                track = timeline._tracks[ti] if 0 <= ti < len(timeline._tracks) else None
-                if track and parent is not track.get("clip_container"):
-                    self.setParent(track["clip_container"])
-                    self.clip_data["track"] = ti
-                    parent = track["clip_container"]
-                    self.show()
-            self.move(max(0, new_pos.x()), 4)
-            if 'start_time' in self.clip_data and timeline is not None:
-                px = timeline.px_per_sec()
-                self.clip_data['start_time'] = max(0.0, self.x() / px) if px > 0 else 0.0
+                drop_ti, drop_ok = timeline.resolve_drop_track(gy, self.clip_data)
+                timeline.set_drop_track_feedback(drop_ti, drop_ok)
+                if drop_ok and drop_ti is not None:
+                    track = timeline._tracks[drop_ti]
+                    if parent is not track.get("clip_container"):
+                        self.setParent(track["clip_container"])
+                        self.clip_data["track"] = drop_ti
+                        parent = track["clip_container"]
+                        self.show()
+                # 不兼容轨：不 reparent，仍可横向拖；吸附用当前轨
+                px = max(1e-6, timeline.px_per_sec())
+                st = max(0.0, new_pos.x() / px)
+                snap_ti = int(self.clip_data.get("track", 0) or 0)
+                st = timeline.snap_start_time(
+                    self.clip_data,
+                    st,
+                    exclude_id=self.clip_data.get("id"),
+                    track_i=snap_ti,
+                )
+                self.clip_data["start_time"] = st
+                timeline.position_clip_widget(self)
                 self.moved.emit(self.clip_data)
+            else:
+                self.move(max(0, new_pos.x()), 0)
 
     def mouseReleaseEvent(self, event):
         # 松手时按最终宽度规范化 in/out，保证导出与预览一致
         if self._did_edit_drag:
             try:
                 timeline = self._find_timeline_widget()
-                zoom = getattr(timeline, "_zoom", 100) if timeline is not None else 100
-                scale = max(0.01, float(zoom) / 100.0)
-                px = 20.0 * scale
-                dur = max(0.05, self.width() / px)
+                px = timeline.px_per_sec() if timeline is not None else _timeline_pps(100)
+                fd = timeline.frame_duration() if timeline is not None else (1.0 / 30.0)
+                batch_starts = getattr(self, "_batch_drag_starts", None)
+                # ── 多选批量平移提交（一条 undo）──
+                if batch_starts and timeline is not None and len(batch_starts) > 1 and not self._is_resizing:
+                    items = []
+                    tracks0 = getattr(self, "_batch_drag_tracks0", None) or {}
+                    for cid, st0 in batch_starts.items():
+                        clip = next(
+                            (c for c in timeline._clips if c.get("id") == cid),
+                            None,
+                        )
+                        if clip is None:
+                            continue
+                        st = _quantize_time(float(clip.get("start_time", 0) or 0), fd)
+                        clip["start_time"] = st
+                        w = next(
+                            (cw for cw in timeline.all_clip_widgets() if cw.clip_data.get("id") == cid),
+                            None,
+                        )
+                        if w is not None:
+                            w.clip_data["start_time"] = st
+                            timeline.position_clip_widget(w)
+                        before = {
+                            "id": cid,
+                            "start_time": float(st0),
+                            "duration": float(clip.get("duration", 0) or 0),
+                            "in_point": float(clip.get("in_point", 0) or 0),
+                            "out_point": float(clip.get("out_point", 0) or 0),
+                            "track": int(tracks0.get(cid, clip.get("track", 0)) or 0),
+                        }
+                        after = {
+                            "start_time": st,
+                            "track": int(clip.get("track", 0) or 0),
+                            "duration": float(clip.get("duration", 0) or 0),
+                            "in_point": float(clip.get("in_point", 0) or 0),
+                            "out_point": float(clip.get("out_point", 0) or 0),
+                        }
+                        items.append({"clip_id": cid, "before": before, "after": after, "clip": clip})
+                    if timeline is not None:
+                        timeline.clear_snap_guide(fade=True)
+                        timeline.clear_drop_track_feedback()
+                    self.trim_committed.emit({"_batch_move": True, "items": items})
+                    self._batch_drag_starts = None
+                    self._batch_drag_tracks0 = None
+                    self._is_resizing = False
+                    self._resize_direction = None
+                    self._drag_start_pos = None
+                    self._drag_offset = None
+                    self._resize_snapshot = None
+                    self._did_edit_drag = False
+                    self._edit_before = None
+                    if timeline is not None:
+                        timeline.set_clip_interaction_active(False)
+                        timeline._active_drag_clip = None
+                    try:
+                        self.releaseKeyboard()
+                    except Exception:
+                        pass
+                    super().mouseReleaseEvent(event)
+                    return
+
+                dur = max(fd, self.width() / max(1e-6, px))
+                # 帧量化，避免亚帧碎口
+                if timeline is not None:
+                    st0 = float(self.clip_data.get("start_time", 0) or 0)
+                    self.clip_data["start_time"] = _quantize_time(st0, fd)
+                    dur = max(fd, _quantize_time(dur, fd))
                 snap = self._resize_snapshot
                 if snap and snap.get("direction") == "right":
                     in_p = float(self.clip_data.get("in_point", snap.get("in_point", 0)) or 0)
                     self.clip_data["duration"] = dur
                     self.clip_data["out_point"] = in_p + dur
+                    # 片尾吸附
+                    if timeline is not None:
+                        st = float(self.clip_data.get("start_time", 0) or 0)
+                        end = timeline.snap_time(
+                            st + dur,
+                            exclude_id=self.clip_data.get("id"),
+                            track_i=int(self.clip_data.get("track", 0) or 0),
+                        )
+                        new_dur = max(fd, end - st)
+                        self.clip_data["duration"] = new_dur
+                        self.clip_data["out_point"] = in_p + new_dur
+                        timeline.position_clip_widget(self)
                 elif snap and snap.get("direction") == "left":
                     end = float(snap["start_time"]) + float(snap["duration"])
                     self.clip_data["duration"] = dur
@@ -1771,6 +3170,19 @@ class ClipWidget(QFrame):
                     dt = float(snap["duration"]) - dur
                     self.clip_data["in_point"] = max(0.0, float(snap["in_point"]) + dt)
                     self.clip_data["out_point"] = float(self.clip_data["in_point"]) + dur
+                    # 片头吸附
+                    if timeline is not None:
+                        st = timeline.snap_time(
+                            float(self.clip_data.get("start_time", 0) or 0),
+                            exclude_id=self.clip_data.get("id"),
+                            track_i=int(self.clip_data.get("track", 0) or 0),
+                        )
+                        new_dur = max(fd, end - st)
+                        self.clip_data["start_time"] = st
+                        self.clip_data["duration"] = new_dur
+                        self.clip_data["in_point"] = max(0.0, float(snap["in_point"]) + (float(snap["duration"]) - new_dur))
+                        self.clip_data["out_point"] = float(self.clip_data["in_point"]) + new_dur
+                        timeline.position_clip_widget(self)
                 else:
                     # 纯平移：吸附播放头 / 邻片
                     st = float(self.clip_data.get("start_time", 0) or 0)
@@ -1785,9 +3197,28 @@ class ClipWidget(QFrame):
                     payload = dict(self.clip_data)
                     payload["_edit_before"] = self._edit_before
                 self.trim_committed.emit(payload)
+                # trim 改变 in/out → 胶片条内容随源区间移动
+                self._request_thumbnail_refresh()
+                if timeline is not None:
+                    timeline.clear_snap_guide(fade=True)
+                    timeline.clear_drop_track_feedback()
             except Exception as e:
                 print(f"clip trim commit failed: {e}")
+                timeline = self._find_timeline_widget()
+                if timeline is not None:
+                    timeline.clear_snap_guide(fade=False)
+                    timeline.clear_drop_track_feedback()
 
+        timeline = self._find_timeline_widget()
+        if timeline is not None:
+            timeline.clear_drop_track_feedback()
+            timeline.set_clip_interaction_active(False)
+            if getattr(timeline, "_active_drag_clip", None) is self:
+                timeline._active_drag_clip = None
+        try:
+            self.releaseKeyboard()
+        except Exception:
+            pass
         self._is_resizing = False
         self._resize_direction = None
         self._drag_start_pos = None
@@ -1795,7 +3226,84 @@ class ClipWidget(QFrame):
         self._resize_snapshot = None
         self._did_edit_drag = False
         self._edit_before = None
+        self._batch_drag_starts = None
         super().mouseReleaseEvent(event)
+
+    def cancel_edit_drag(self) -> bool:
+        """Esc：放弃本次拖拽/trim，还原按下时的时间与轨。"""
+        if not getattr(self, "_did_edit_drag", False) and getattr(
+            self, "_drag_start_pos", None
+        ) is None:
+            return False
+        timeline = self._find_timeline_widget()
+        before = getattr(self, "_edit_before", None)
+        batch_starts = getattr(self, "_batch_drag_starts", None)
+        tracks0 = getattr(self, "_batch_drag_tracks0", None) or {}
+        try:
+            if batch_starts and timeline is not None and len(batch_starts) > 1:
+                for cid, st0 in batch_starts.items():
+                    clip = next(
+                        (c for c in timeline._clips if c.get("id") == cid), None
+                    )
+                    w = next(
+                        (cw for cw in timeline.all_clip_widgets()
+                         if cw.clip_data.get("id") == cid),
+                        None,
+                    )
+                    if clip is not None:
+                        clip["start_time"] = float(st0)
+                        ti0 = int(tracks0.get(cid, clip.get("track", 0)) or 0)
+                        clip["track"] = ti0
+                    if w is not None:
+                        w.clip_data["start_time"] = float(st0)
+                        ti0 = int(tracks0.get(cid, w.clip_data.get("track", 0)) or 0)
+                        if int(w.clip_data.get("track", -1) or -1) != ti0:
+                            timeline.reparent_clip_to_track(w, ti0)
+                        else:
+                            w.clip_data["track"] = ti0
+                        timeline.position_clip_widget(w)
+            elif before and isinstance(before, dict):
+                for k in ("start_time", "duration", "in_point", "out_point"):
+                    if k in before:
+                        self.clip_data[k] = before[k]
+                ti0 = int(before.get("track", self.clip_data.get("track", 0)) or 0)
+                self.clip_data["track"] = ti0
+                if timeline is not None:
+                    if int(self.clip_data.get("track", -1) or -1) != ti0:
+                        timeline.reparent_clip_to_track(self, ti0)
+                    timeline.position_clip_widget(self)
+        except Exception as e:
+            logger.debug("还原拖拽状态失败: %s", e)
+        if timeline is not None:
+            try:
+                timeline.clear_snap_guide(fade=False)
+                timeline.clear_drop_track_feedback()
+                timeline.set_clip_interaction_active(False)
+                timeline._active_drag_clip = None
+            except Exception:
+                pass
+        try:
+            self.releaseKeyboard()
+        except Exception:
+            pass
+        self._is_resizing = False
+        self._resize_direction = None
+        self._drag_start_pos = None
+        self._drag_offset = None
+        self._resize_snapshot = None
+        self._did_edit_drag = False
+        self._edit_before = None
+        self._batch_drag_starts = None
+        self._batch_drag_tracks0 = None
+        self.update()
+        return True
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            if self.cancel_edit_drag():
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def set_selected(self, selected):
         self._is_selected = selected
@@ -1822,64 +3330,315 @@ class ClipWidget(QFrame):
             f"  easing: {kf.get('easing', 'linear')}"
         )
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._is_audio_clip():
+            self._request_thumbnail_refresh()
+
+    def _source_in_out(self):
+        """片段源时间窗 [in, out)。"""
+        in_p = float(self.clip_data.get("in_point", 0) or 0)
+        out_p = float(self.clip_data.get("out_point", 0) or 0)
+        if out_p <= in_p + 1e-6:
+            out_p = in_p + max(0.05, float(self.clip_data.get("duration", 10) or 10))
+        return in_p, out_p
+
+    def _filmstrip_cell_w(self, thumb_h: int = None) -> int:
+        h = max(8, int(thumb_h if thumb_h is not None else (self.height() or 48)))
+        aspect = float(getattr(self, "_thumb_aspect", 0) or 0) or (16.0 / 9.0)
+        return max(14, int(round(h * aspect)))
+
+    def _desired_thumb_count(self) -> int:
+        cell_w = self._filmstrip_cell_w()
+        w = max(1, int(self.width() or 1))
+        return max(1, min(48, (w + cell_w - 1) // max(1, cell_w)))
+
+    def _current_thumb_key(self):
+        path = self._resolve_clip_media_path()
+        in_p, out_p = self._source_in_out()
+        n = self._desired_thumb_count()
+        thumb_h = max(8, int(self.height() or 48))
+        return (
+            path,
+            round(in_p, 3),
+            round(out_p, 3),
+            int(n),
+            int(thumb_h),
+        )
+
+    def _should_wait_proxy_before_filmstrip(self) -> bool:
+        """长视频在代理未就绪时先等一拍，避免与代理转码/预览抢开同一文件。"""
+        if self._is_audio_clip():
+            return False
+        proxy = str(self.clip_data.get("proxy_path") or "")
+        if proxy and os.path.isfile(proxy):
+            return False
+        if getattr(self, "_filmstrip_proxy_wait_done", False):
+            return False
+        dur = float(self.clip_data.get("duration", 0) or 0)
+        # 短片 / 静图：不等代理
+        if dur > 0 and dur < 12.0:
+            return False
+        ext = os.path.splitext(str(self.clip_data.get("path") or ""))[1].lower()
+        if ext in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"):
+            return False
+        return True
+
+    def _on_filmstrip_proxy_wait_timeout(self):
+        """代理等待结束：无论是否就绪都采一次（有代理则走代理路径）。"""
+        self._filmstrip_proxy_wait_done = True
+        try:
+            self._request_thumbnail_refresh()
+        except Exception as e:
+            logger.debug("代理等待后采胶片失败: %s", e)
+
+    def _request_thumbnail_refresh(self):
+        """合并缩放/布局抖动后重采胶片条。"""
+        if self._is_audio_clip():
+            return
+        if self._parent_track_collapsed():
+            return
+        timeline = self._find_timeline_widget()
+        if timeline is not None and timeline.is_clip_interaction_active():
+            return
+        if timeline is not None and not timeline.is_clip_widget_visible(self):
+            return  # 视口外懒加载，滚动后再采
+        # 代理优先：长片先 defer，等 proxy_path 或超时后再采
+        if self._should_wait_proxy_before_filmstrip():
+            timer = getattr(self, "_filmstrip_proxy_timer", None)
+            if timer is None:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.setInterval(2800)
+                timer.timeout.connect(self._on_filmstrip_proxy_wait_timeout)
+                self._filmstrip_proxy_timer = timer
+            if not timer.isActive():
+                timer.start()
+            return
+        timer = getattr(self, "_thumb_debounce", None)
+        if timer is None:
+            self._schedule_thumbnail_generation()
+            return
+        timer.start()
+
     def _schedule_thumbnail_generation(self):
-        """调度异步缩略图生成"""
-        clip_path = self.clip_data.get('path', '')
+        """按 in/out 均匀采样，异步生成剪映式胶片条。"""
+        if self._is_audio_clip():
+            self._thumbnails_generated = True
+            return
+        if self._parent_track_collapsed():
+            return
+        timeline = self._find_timeline_widget()
+        if timeline is not None and timeline.is_clip_interaction_active():
+            return
+        if timeline is not None and not timeline.is_clip_widget_visible(self):
+            return
+
+        clip_path = self._resolve_clip_media_path()
         if not clip_path or not os.path.exists(clip_path):
             self._thumbnails_generated = True
             return
-        
-        # 检查是否是视频文件
+
         ext = os.path.splitext(clip_path)[1].lower()
-        if ext in ('.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.wma'):
+        if ext in AUDIO_EXTS:
             self._thumbnails_generated = True
             return
-        
-        # 使用线程池异步生成缩略图
-        from PyQt6.QtCore import QThread, pyqtSignal
-        
-        class ThumbnailWorker(QThread):
-            thumbnails_ready = pyqtSignal(list)
-            
-            def __init__(self, clip_path, duration, num_thumbnails):
-                super().__init__()
-                self._clip_path = clip_path
-                self._duration = duration
-                self._num_thumbnails = num_thumbnails
-            
-            def run(self):
-                try:
-                    from app.core.ffmpeg_service import ffmpeg_service
-                    thumbnails = []
-                    for i in range(self._num_thumbnails):
-                        timestamp = (i / self._num_thumbnails) * self._duration
-                        pixmap = ffmpeg_service.extract_frame(self._clip_path, timestamp, width=60, height=36)
-                        thumbnails.append(pixmap)
-                    self.thumbnails_ready.emit(thumbnails)
-                except Exception:
-                    self.thumbnails_ready.emit([])
-        
-        duration = self.clip_data.get('duration', 10.0)
-        num_thumbnails = max(3, self.width() // 12) if self.width() > 60 else 3
-        
-        self._thumbnail_worker = ThumbnailWorker(clip_path, duration, num_thumbnails)
-        self._thumbnail_worker.thumbnails_ready.connect(self._on_thumbnails_ready)
-        self._thumbnail_worker.finished.connect(self._thumbnail_worker.deleteLater)
-        self._thumbnail_worker.start()
-    
-    def _on_thumbnails_ready(self, thumbnails):
-        """缩略图生成完成回调"""
-        self._thumbnail_cache = thumbnails
-        self._thumbnails_generated = True
-        self.update()
-    
-    def _schedule_waveform_generation(self, num_samples):
-        """调度异步波形生成"""
-        clip_path = self.clip_data.get('path', '')
-        if not clip_path or not os.path.exists(clip_path):
+
+        key = self._current_thumb_key()
+        if key == getattr(self, "_thumb_key", None) and self._thumbnail_cache:
+            self._thumbnails_generated = True
             return
-        
-        # 使用线程池异步生成波形
+
+        # 停止旧 worker，避免结果乱序覆盖
+        old = getattr(self, "_thumbnail_worker", None)
+        if old is not None:
+            try:
+                old.thumbnails_ready.disconnect(self._on_thumbnails_ready)
+            except Exception:
+                pass
+            try:
+                if old.isRunning():
+                    old.requestInterruption()
+                    old.quit()
+            except Exception as e:
+                logger.debug("停止旧缩略图线程: %s", e)
+            self._thumbnail_worker = None
+
+        in_p, out_p = self._source_in_out()
+        n = int(key[3])
+        thumb_h = max(48, int(key[4]) * 2)  # 稍高分辨率，绘制再 scaledToHeight
+        span = max(0.05, out_p - in_p)
+        timestamps = [in_p + (i + 0.5) / n * span for i in range(n)]
+
+        self._thumb_gen_token = int(getattr(self, "_thumb_gen_token", 0) or 0) + 1
+        token = self._thumb_gen_token
+        pending_key = key
+
+        from PyQt6.QtCore import QThread, pyqtSignal
+
+        class FilmstripWorker(QThread):
+            thumbnails_ready = pyqtSignal(list, float)  # pixmaps, aspect
+
+            def __init__(self, path, timestamps, height):
+                super().__init__()
+                self._path = path
+                self._timestamps = list(timestamps)
+                self._height = int(height)
+
+            def run(self):
+                thumbs, aspect = _extract_filmstrip_frames(
+                    self._path, self._timestamps, self._height, self.isInterruptionRequested
+                )
+                if self.isInterruptionRequested():
+                    return
+                self.thumbnails_ready.emit(thumbs, aspect)
+
+        # 排队中的旧请求（尚未真正 start）先撤销，避免同一 widget 占多个名额
+        _media_worker_gate.cancel_owner(self)
+
+        worker = FilmstripWorker(clip_path, timestamps, thumb_h)
+        self._thumbnail_worker = worker
+        worker.thumbnails_ready.connect(
+            lambda thumbs, aspect, t=token, k=pending_key: self._on_thumbnails_ready(
+                thumbs, aspect, token=t, key=k
+            )
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(_media_worker_gate.release)
+        _media_worker_gate.request(self, worker.start)
+
+    def _on_thumbnails_ready(self, thumbnails, aspect=0.0, token=None, key=None):
+        """胶片条生成完成；丢弃过期 token。"""
+        if token is not None and token != getattr(self, "_thumb_gen_token", None):
+            return
+        self._thumbnail_cache = list(thumbnails or [])
+        if aspect and aspect > 0.05:
+            self._thumb_aspect = float(aspect)
+        elif self._thumbnail_cache:
+            pm0 = self._thumbnail_cache[0]
+            if pm0 is not None and not pm0.isNull() and pm0.height() > 0:
+                self._thumb_aspect = float(pm0.width()) / float(pm0.height())
+        if key is not None:
+            self._thumb_key = key
+        self._thumbnails_generated = True
+        self._scaled_thumb_cache = {}
+        self._scaled_thumb_cache_key = None
+        self.update()
+
+    def _resolve_clip_media_path(self) -> str:
+        """解析片段媒体路径；胶片条优先代理（导出仍用 clip['path'] 原片）。"""
+        # 预览/胶片条：代理就绪则用代理
+        proxy = str(self.clip_data.get("proxy_path") or "")
+        if proxy and os.path.isfile(proxy):
+            return os.path.normpath(proxy)
+        raw = self.clip_data.get("path", "") or ""
+        if not raw:
+            return ""
+        if os.path.exists(raw):
+            return raw
+        candidates = [
+            os.path.normpath(os.path.join(os.getcwd(), raw)),
+            os.path.normpath(os.path.join(os.getcwd(), "app", raw)),
+        ]
+        # 从本文件位置推工程根
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.abspath(os.path.join(here, "..", "..", ".."))
+            candidates.append(os.path.normpath(os.path.join(project_root, raw)))
+            candidates.append(os.path.normpath(os.path.join(project_root, "app", raw)))
+        except Exception as e:
+            logger.debug("解析片段媒体路径工程根失败: %s", e)
+        for c in candidates:
+            if c and os.path.exists(c):
+                self.clip_data["path"] = c
+                return c
+        return raw
+
+    def _on_clip_widget_destroyed(self, *_args):
+        try:
+            self._cleanup_workers()
+        except Exception:
+            pass
+
+    def _parent_track_collapsed(self) -> bool:
+        """所在轨道是否折叠（折叠轨不调度媒体后台任务）。"""
+        try:
+            timeline = self._find_timeline_widget()
+            if timeline is None:
+                return False
+            ti = int(self.clip_data.get("track", 0) or 0)
+            tracks = getattr(timeline, "_tracks", None) or []
+            if 0 <= ti < len(tracks):
+                return bool(tracks[ti].get("collapsed", False))
+        except Exception:
+            pass
+        return False
+
+    def sleep_media_workers(self):
+        """折叠/休眠：停止缩略图与波形线程。"""
+        try:
+            if getattr(self, "_thumb_debounce", None) is not None:
+                self._thumb_debounce.stop()
+        except Exception:
+            pass
+        try:
+            _media_worker_gate.cancel_owner(self)
+        except Exception:
+            pass
+        try:
+            self._thumb_gen_token = int(getattr(self, "_thumb_gen_token", 0) or 0) + 1
+        except Exception:
+            pass
+        for attr in ("_thumbnail_worker", "_waveform_worker"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            try:
+                if hasattr(w, "requestInterruption"):
+                    w.requestInterruption()
+                if w.isRunning():
+                    w.quit()
+                    w.wait(500)
+            except RuntimeError:
+                pass
+            except Exception as e:
+                logger.debug("停媒体 worker 失败: %s", e)
+            setattr(self, attr, None)
+        self._waveform_scheduled = False
+        self._scaled_thumb_cache = {}
+        self._scaled_thumb_cache_key = None
+
+    def wake_media_workers(self):
+        """展开轨道后重新调度媒体预览。"""
+        if self._parent_track_collapsed():
+            return
+        self._request_thumbnail_refresh()
+        if self._is_audio_clip() and self._waveform_peaks is None and not self._waveform_failed:
+            self._waveform_scheduled = False
+            QTimer.singleShot(80, lambda: self._schedule_waveform_generation(200))
+
+    def _schedule_waveform_generation(self, num_samples):
+        """调度异步波形生成（防重入，仅音频片）。"""
+        if not self._is_audio_clip():
+            return
+        if self._parent_track_collapsed():
+            return
+        timeline = self._find_timeline_widget()
+        if timeline is not None and timeline.is_clip_interaction_active():
+            return
+        if timeline is not None and not timeline.is_clip_widget_visible(self):
+            return
+        if self._waveform_scheduled or self._waveform_peaks is not None or self._waveform_failed:
+            return
+
+        clip_path = self._resolve_clip_media_path()
+        if not clip_path or not os.path.exists(clip_path):
+            self._waveform_failed = True
+            self._waveform_peaks = []
+            self.update()
+            return
+
+        self._waveform_scheduled = True
         from PyQt6.QtCore import QThread, pyqtSignal
         
         class WaveformWorker(QThread):
@@ -1894,22 +3653,62 @@ class ClipWidget(QFrame):
                 try:
                     from app.core.waveform_generator import waveform_generator
                     data = waveform_generator.generate(self._clip_path, num_samples=self._num_samples)
-                    if data and data.peaks:
-                        self.waveform_ready.emit(data.peaks)
+                    if data and data.peaks and max(data.peaks) > 1e-6:
+                        self.waveform_ready.emit(list(data.peaks))
                     else:
                         self.waveform_ready.emit([])
                 except Exception as e:
                     logger.error(f"波形生成失败: {e}")
                     self.waveform_ready.emit([])
         
+        _media_worker_gate.cancel_owner(self)
+
         self._waveform_worker = WaveformWorker(clip_path, num_samples)
         self._waveform_worker.waveform_ready.connect(self._on_waveform_ready)
         self._waveform_worker.finished.connect(self._waveform_worker.deleteLater)
-        self._waveform_worker.start()
+        self._waveform_worker.finished.connect(_media_worker_gate.release)
+        _media_worker_gate.request(self, self._waveform_worker.start)
     
     def _on_waveform_ready(self, peaks):
-        """波形生成完成回调"""
-        self._waveform_peaks = peaks
+        """波形生成完成回调。空列表表示失败/无音轨。"""
+        if peaks and max(peaks) > 1e-6:
+            self._waveform_peaks = peaks
+            self._waveform_failed = False
+        else:
+            self._waveform_peaks = []
+            self._waveform_failed = True
         self.update()
+    
+    def _cleanup_workers(self):
+        """清理所有工作线程 - 在widget销毁前调用"""
+        try:
+            _media_worker_gate.cancel_owner(self)
+        except Exception:
+            pass
+        if hasattr(self, '_thumbnail_worker') and self._thumbnail_worker is not None:
+            try:
+                if self._thumbnail_worker.isRunning():
+                    if hasattr(self._thumbnail_worker, 'requestInterruption'):
+                        self._thumbnail_worker.requestInterruption()
+                    self._thumbnail_worker.quit()
+                    self._thumbnail_worker.wait(2000)
+            except RuntimeError as e:
+                logger.debug("停止缩略图工作线程失败: %s", e)
+            self._thumbnail_worker = None
+        if hasattr(self, '_waveform_worker') and self._waveform_worker is not None:
+            try:
+                if self._waveform_worker.isRunning():
+                    if hasattr(self._waveform_worker, 'requestInterruption'):
+                        self._waveform_worker.requestInterruption()
+                    self._waveform_worker.quit()
+                    self._waveform_worker.wait(2000)
+            except RuntimeError as e:
+                logger.debug("停止波形工作线程失败: %s", e)
+            self._waveform_worker = None
+    
+    def closeEvent(self, event):
+        """Widget关闭事件 - 确保工作线程安全终止"""
+        self._cleanup_workers()
+        super().closeEvent(event)
 
 

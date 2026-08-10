@@ -1,6 +1,9 @@
-import threading 
-import time 
+import threading
+import time
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 cv2 = None
 np = None
@@ -401,8 +404,8 @@ class OptimizedVideoPlayer(QWidget):
                 self._media_player.setPlaybackRate(speed)
             elif self.reader_thread:
                 self.reader_thread.set_speed(speed)
-        except ValueError: 
-            pass 
+        except ValueError as e:
+            logger.debug(f"播放速度解析失败，忽略本次速度切换: {e}")
 
     def on_volume_change(self, value): 
         self.volume = value / 100.0 

@@ -13,9 +13,13 @@ from PyQt6.QtWidgets import (
     QStackedWidget
 )
 import os
+import logging
+import webbrowser
 from app.version import __version__
 
 from .base_module import BaseModule
+
+logger = logging.getLogger("AI短剧编辑器.help")
 
 
 
@@ -303,8 +307,8 @@ class HelpModule(BaseModule):
             img_path = Path(__file__).parent.parent.parent.parent / "docs" / "help" / "images" / source
             if img_path.exists():
                 pixmap = QPixmap(str(img_path))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("加载帮助图片失败 source=%s: %s", source, e)
 
         if pixmap and not pixmap.isNull():
             img_lbl = QLabel()
@@ -337,36 +341,31 @@ class HelpModule(BaseModule):
         if self._load_markdown_topic("video_tutorials"):
             return
         # 回退：手动构建
+        # 如实说明：本软件目前没有自制/官方发布的分镜头视频教程，
+        # 此前这里列出了一批带具体时长（"5分钟""8分钟"...）的条目，
+        # 容易让人误以为是真实存在、可直接播放的官方教程——实际点了
+        # 也只会跳到 B站/YouTube 主页而非对应视频。现在改为如实标注
+        # 「建议学习路径」，并用搜索结果链接（和「新手专区」一致的做法）
+        # 替代虚构的具体教程标题和时长。
         self._title("🎥 视频教程")
-        self._text("以下是拾光剪影各功能模块的视频教程，帮助您快速上手。")
+        self._text("拾光剪影目前没有官方录制的分镜头视频教程；下面是按学习路径整理的搜索关键词，点击可跳转到 B站搜索结果，由社区/第三方内容供参考。")
 
-        self._subtitle("新手入门")
-        self._bullet([
-            "🚀 快速上手 (5分钟) — 从安装到导出第一条视频",
-            "📖 界面总览 (3分钟) — 了解工作台布局和核心区域",
-            "🎬 第一个项目 (8分钟) — 完整剪辑流程演示",
-        ])
+        self._subtitle("新手入门（建议按顺序搜索学习）")
+        self._link_row("B站：AI视频剪辑软件入门", "https://search.bilibili.com/all?keyword=AI视频剪辑软件入门", "了解基本操作")
+        self._link_row("B站：PyQt6桌面软件界面介绍", "https://search.bilibili.com/all?keyword=视频剪辑软件界面介绍", "了解工作台布局")
+        self._link_row("B站：短视频剪辑完整流程", "https://search.bilibili.com/all?keyword=短视频剪辑完整流程", "完整剪辑演示")
 
         self._subtitle("功能详解")
-        self._bullet([
-            "✂️ AI自动剪辑 (10分钟) — AutoClip智能识别高光片段",
-            "🎭 短剧筛选 (12分钟) — 从多平台筛选热门素材",
-            "🤖 模型广场 (6分钟) — 配置AI模型和API Key",
-            "📊 性能优化 (4分钟) — 避免卡顿和内存溢出",
-        ])
+        self._link_row("B站：AI智能识别精彩片段", "https://search.bilibili.com/all?keyword=AI智能识别视频精彩片段", "对应本软件 AutoClip 功能")
+        self._link_row("B站：DeepSeek/豆包 API配置", "https://search.bilibili.com/all?keyword=AI大模型API配置教程", "对应「模型广场」")
+        self._link_row("B站：剪辑软件卡顿优化", "https://search.bilibili.com/all?keyword=视频剪辑软件卡顿优化", "通用性能建议")
 
         self._subtitle("高级技巧")
-        self._bullet([
-            "🔧 多任务批量处理 — 同时导出20+视频的生产力技巧",
-            "🎨 特效与转场 — 自定义过渡效果和滤镜链",
-            "📝 文案生成进阶 — 利用模板批量生成爆款标题",
-        ])
+        self._link_row("B站：批量视频处理技巧", "https://search.bilibili.com/all?keyword=批量视频处理技巧", "多任务场景参考")
+        self._link_row("B站：视频转场特效制作", "https://search.bilibili.com/all?keyword=视频转场特效制作", "特效/转场参考")
+        self._link_row("B站：爆款标题文案技巧", "https://search.bilibili.com/all?keyword=爆款标题文案技巧", "文案生成参考")
 
-        self._subtitle("视频教程来源")
-        self._text("教程视频可通过以下渠道获取：")
-        self._link("📺 B站官方频道", "https://space.bilibili.com/")
-        self._link("🎬 YouTube频道", "https://youtube.com/")
-        self._tip("视频教程持续更新中，建议关注官方频道获取最新内容")
+        self._tip("以上均为第三方内容搜索入口，非本软件官方出品，内容质量和适用版本请自行判断")
 
         self._cl.addStretch()
 
@@ -387,7 +386,7 @@ class HelpModule(BaseModule):
         self._text("第三步：调整好之后 → 点底部「💾开始导出」→ 选择MP4/1080p → 完成！")
         self._subtitle("📺 视频教程推荐（点击跳转浏览器观看）")
         self._link_row("B站：AI短剧编辑器入门", "https://search.bilibili.com/all?keyword=AI视频剪辑入门", "推荐先看")
-        self._link_row("B站：DeepSeek API注册教程", "https://search.bilibili.com/all?keyword=DeepSeek+API注册", "5分钟")
+        self._link_row("B站：DeepSeek API注册教程", "https://search.bilibili.com/all?keyword=DeepSeek+API注册", "第三方内容")
         self._link_row("B站：Ollama本地模型安装", "https://search.bilibili.com/all?keyword=Ollama安装教程", "通用")
         self._link_row("B站：OpenClaw自动化运营", "https://search.bilibili.com/all?keyword=AI自动化运营", "进阶")
         self._link_row("B站：短视频剪辑新手入门", "https://search.bilibili.com/all?keyword=短视频剪辑新手", "零基础")
@@ -498,7 +497,7 @@ class HelpModule(BaseModule):
                       "⏰ 定时节点：设置按分钟/小时/天/周循环触发",
                       "🔔 通知节点：企业微信/钉钉/邮件推送结果"])
         self._subtitle("📺 视频教程（点击跳转浏览器）")
-        self._link_row("B站：OpenClaw自动化工作流", "https://search.bilibili.com/all?keyword=自动化运营", "40分钟")
+        self._link_row("B站：OpenClaw自动化工作流", "https://search.bilibili.com/all?keyword=自动化运营", "第三方内容")
         self._link_row("B站：AI剪辑实战教程", "https://search.bilibili.com/all?keyword=AI剪辑实战", "跟做就会")
         self._tip("新手建议先从简单的「定时+发布」流程开始，熟悉后再添加AI处理节点")
         self._cl.addStretch()
@@ -632,25 +631,18 @@ class HelpModule(BaseModule):
         self._cl.addStretch()
 
     def _drama(self):
-        self._clear(); self._title("🎭 短剧筛选")
-        self._text("内置69条热门短剧/电影/电视剧/漫剧数据，支持多维度筛选排序。")
-        self._subtitle("数据覆盖")
-        self._bullet(["短剧31部：重生/霸总/医术/穿越/复仇/科幻/甜宠等30个分类",
-                      "电影13部：满江红2/流浪地球3/战狼3/唐人街探案4/封神/飞驰人生3等",
-                      "电视剧12部：庆余年3/长相思/狂飙/大奉打更人/与凤行2/三体2等",
-                      "漫剧13部：斗罗大陆2/完美世界/凡人修仙传/一念永恒/秦时明月7等",
-                      "9个平台：抖音/快手/腾讯视频/爱奇艺/优酷/B站/小红书/芒果TV/西瓜视频"])
-        self._subtitle("筛选与排序")
-        self._bullet(["平台筛选：按单个平台过滤",
-                      "类型筛选：全部/短剧/漫剧/电影/电视剧",
-                      "分类筛选：30个分类标签下拉选择",
-                      "排序方式：🔥热度 / 👁播放量 / 💰佣金 / ⭐评分 / 🆕最新",
-                      "搜索：输入剧名关键词即时过滤"])
-        self._subtitle("自动刷新")
-        self._bullet(["数据每5分钟自动刷新一次",
-                      "底部状态栏显示总条数和最后更新时间",
-                      "点击「🔄立即刷新」手动触发更新"])
-        self._tip("当前为演示数据，实际使用时接入各平台API获取实时排行数据")
+        self._clear(); self._title("🎭 短剧筛选（插件）")
+        self._text("短剧筛选已改为**仅插件入口**，不再作为独立导航模块。")
+        self._subtitle("如何打开")
+        self._bullet(["打开「插件中心」→ 启用「🎭 短剧筛选」插件",
+                      "或在插件中心运行该插件以打开筛选面板",
+                      "爬虫引擎已打包在插件内：plugins/drama_finder_plugin/crawler/"])
+        self._subtitle("能力")
+        self._bullet(["多平台榜单：抖音/快手/B站等（Playwright / TikHub / Web 兜底）",
+                      "多维筛选：平台 × 类型 × 分类 × 关键字 × 排序",
+                      "双数据源：真实爬取优先，失败回退静态/模拟并提示",
+                      "约每 5 分钟自动刷新；可查看数据源健康状态"])
+        self._tip("若顶部提示「数据为模拟」，请检查 Playwright/Chromium 或 TikHub Token")
         self._cl.addStretch()
 
     def _account(self):

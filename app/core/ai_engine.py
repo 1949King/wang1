@@ -161,6 +161,17 @@ class AIEngine:
             return
         self._initialized = True
 
+    @classmethod
+    def get_instance(cls) -> 'AIEngine':
+        """返回全局单例（与模块级 `ai_engine` 是同一对象）。
+
+        供仍在用 `AIEngine.get_instance()` 旧写法的调用方使用；
+        新代码优先 `from app.core.ai_engine import ai_engine`。
+        """
+        if cls._instance is None:
+            cls()
+        return cls._instance
+
         # ── 客户端引用（延迟加载） ──
         self._cloud_api = None
         self._ollama_client = None
@@ -201,13 +212,13 @@ class AIEngine:
             return
 
         try:
-            from modules.lego.cloud_api import cloud_api_service
+            from app.modules.lego.cloud_api import cloud_api_service
             self._cloud_api = cloud_api_service
         except ImportError as e:
             logger.warning(f"[AIEngine] CloudAPIService 未找到: {e}")
 
         try:
-            from modules.lego.ollama_client import ollama_client
+            from app.modules.lego.ollama_client import ollama_client
             self._ollama_client = ollama_client
         except ImportError as e:
             logger.warning(f"[AIEngine] OllamaClient 未找到: {e}")
@@ -231,8 +242,8 @@ class AIEngine:
                 try:
                     if self._cloud_api.get_provider(p):
                         available.append(p)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[AIEngine] 获取提供者 {p} 失败: {e}")
 
         # 去重并保持顺序
         seen: set = set()
@@ -917,18 +928,27 @@ class AIEngineEnhanced(AIEngine):
     def _init_default_adapters(self):
         """初始化默认 AI 工具适配器"""
         try:
-            from app.core.voice_generator import VoiceGenerator
+            from app.core.voice_generator import AIVoiceGenerator, VoiceGenerator
+            _TTS = VoiceGenerator if VoiceGenerator is not None else AIVoiceGenerator
+
             class TTSAdapter(SpeechGenerationAdapter):
                 def __init__(self):
-                    self._tts = VoiceGenerator()
+                    self._tts = _TTS()
 
                 def is_available(self) -> bool:
-                    return True
+                    return hasattr(self._tts, "generate_audio")
 
                 def generate(self, text: str, voice: str = "", language: str = "zh",
                             rate: float = 1.0, volume: float = 1.0, **kwargs):
                     output_path = kwargs.get("output_path", "")
-                    result = self._tts.generate_audio(text, output_path=output_path)
+                    result = self._tts.generate_audio(
+                        text,
+                        output_path=output_path,
+                        voice_profile_id=voice,
+                        language=language,
+                        rate=rate,
+                        volume=volume,
+                    )
                     if result.get("success"):
                         yield {"success": True, "audio_path": result.get("audio_path", "")}
                     else:

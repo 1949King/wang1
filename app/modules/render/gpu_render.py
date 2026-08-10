@@ -134,8 +134,8 @@ class GPURenderer:
                             'device_count': len(platforms[0].get_devices())
                         }
                         logger.info(f"检测到OpenCL GPU: {self._gpu_info['platform_name']}")
-                except ImportError:
-                    pass
+                except ImportError as e:
+                    logger.debug(f"pyopencl 导入失败，跳过 OpenCL GPU 检测: {e}")
             
         except Exception as e:
             logger.warning(f"GPU检测失败: {e}")

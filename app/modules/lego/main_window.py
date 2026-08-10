@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QLabel, QPushButton, QFrame,
     QStatusBar, QSizePolicy, QScrollArea, QSpacerItem,
-    QTabWidget, QSplitter, QToolBar
+    QTabWidget, QSplitter, QToolBar, QApplication
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QSettings
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction
@@ -369,12 +369,12 @@ class MainWindow(QMainWindow):
         self._lazy_loaded_modules: Dict[str, bool] = {}
         self._module_loading_queue: List[str] = []
         self._current_loading_module: Optional[str] = None
+        self._pending_module_actions: Dict[str, dict] = {}
         self._preload_priority: Dict[str, int] = {
             'home': 1,
             'editor': 2,
             'copywriting': 3,
             'tasks': 4,
-            'drama': 5,
             'characters': 5,
             'account': 6,
             'materials': 7,
@@ -390,6 +390,16 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_default_modules()
         self._update_auth_status()
+
+        # 修复：窗口几何保存钩子刻意不放进 closeEvent（该方法属于 exit-media
+        # 冻结区，未解冻不能碰），改用 QApplication.aboutToQuit 信号，
+        # 效果等价（真正退出前触发一次）但不触碰冻结符号。
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self._save_window_geometry)
+        except Exception as e:
+            logger.debug(f"绑定窗口几何保存钩子失败: {e}")
         
         self._apply_initial_theme()
         self._setup_lazy_loading()
@@ -415,12 +425,11 @@ class MainWindow(QMainWindow):
         )
     
     def _setup_lazy_loading(self):
-        """设置延迟加载"""
+        """延迟加载：仅标记首页；禁止后台 _on_module_selected（会抢激活并卡主线程）。"""
         self._preload_module("home")
-        self._start_background_loading()
     
     def _preload_module(self, module_id: str):
-        """预加载指定模块"""
+        """预加载指定模块（仅标记，不实例化、不切换）。"""
         if module_id in self._lazy_loaded_modules:
             return
         
@@ -432,32 +441,18 @@ class MainWindow(QMainWindow):
             logger.warning(f"模块 {module_id} 预加载失败: {e}")
     
     def _start_background_loading(self):
-        """启动后台加载"""
-        QTimer.singleShot(100, self._load_next_module)
+        """兼容旧调用：已禁用后台抢激活加载。"""
+        return
     
     def _load_next_module(self):
-        """加载下一个模块"""
-        if self._current_loading_module:
-            return
-        
-        for module_id, priority in sorted(self._preload_priority.items(), key=lambda x: x[1]):
-            if module_id not in self._lazy_loaded_modules and module_id not in self._module_loading_queue:
-                self._module_loading_queue.append(module_id)
-                self._current_loading_module = module_id
-                self._load_module_async(module_id)
-                break
+        """兼容旧调用：已禁用。"""
+        return
     
     def _load_module_async(self, module_id: str):
-        """异步加载模块"""
-        try:
-            if module_id in self._modules and self._modules[module_id].widget_class:
-                QTimer.singleShot(50, lambda: self._on_module_selected(module_id))
-                logger.info(f"异步加载模块: {module_id}")
-        except Exception as e:
-            logger.error(f"异步加载模块失败: {e}")
-            self._current_loading_module = None
-            if module_id in self._module_loading_queue:
-                self._module_loading_queue.remove(module_id)
+        """兼容旧调用：已禁用（勿再走 _on_module_selected）。"""
+        self._current_loading_module = None
+        if module_id in self._module_loading_queue:
+            self._module_loading_queue.remove(module_id)
     
     def get_loading_status(self) -> Dict[str, Any]:
         """获取加载状态"""
@@ -485,6 +480,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"拾光剪影 v{__version__} - AI短剧编辑器")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
+        self._restore_window_geometry()
         
         central_widget = QWidget()
         central_widget.setObjectName("contentContainer")
@@ -830,6 +826,7 @@ class MainWindow(QMainWindow):
                 EventType.MODULE_ACTIVATED,
                 {"module_id": module_id, "module_name": info.name}
             )
+            self._flush_pending_module_action(module_id)
     
     def _on_settings_changed(self, setting_type, settings):
         """设置更改事件处理"""
@@ -865,8 +862,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_nav_bar"):
             try:
                 self._nav_bar.set_theme(actual_theme)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("导航栏主题更新失败: %s", e)
 
         # 给所有已加载模块设置 theme 属性（不调用 set_theme 避免重复触发）
         for module_id, module_info in self._modules.items():
@@ -875,8 +872,8 @@ class MainWindow(QMainWindow):
                     module_info.instance.setProperty("theme", actual_theme)
                     for child in module_info.instance.findChildren(QWidget):
                         child.setProperty("theme", actual_theme)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("模块 %s 主题属性设置失败: %s", module_id, e)
 
         # 持久化主题设置
         self._settings.setValue("theme", theme)
@@ -915,19 +912,98 @@ class MainWindow(QMainWindow):
     # NOTE: _apply_dark_theme / _apply_light_theme 已被 ThemeManager 取代，不再需要
     # 主题 QSS 现在统一由 ThemeManager._build_qss() 生成，通过 QApplication 级别应用
     
+    def _flush_pending_module_action(self, module_id: str) -> None:
+        """交付 MODULE_ACTIVATED 携带的子页跳转 / 工作流提示（模块懒加载完成后调用）。"""
+        pending = self._pending_module_actions.pop(module_id, None)
+        if not pending:
+            return
+
+        widget = self.get_module_widget(module_id)
+        action = pending.get("action")
+        workflow_hint = pending.get("workflow_hint")
+        nav_hint = pending.get("hint")
+
+        # 携带数据交付（如文案模块「推送到剪辑模块」）：此时模块已确定加载
+        # 完成、监听器已注册，emit 才是真正有接收方的
+        data_payload = pending.get("data")
+        if data_payload:
+            self._event_bus.emit(EventType.COPY_GENERATED, data_payload)
+
+        # 修复：首页「最近项目」双击此前只切到编辑器页签，从不真正加载工程——
+        # 这里补上真正的打开逻辑
+        if module_id == "editor" and action == "open_project":
+            project_path = pending.get("project")
+            if widget is not None and project_path and hasattr(widget, "import_project"):
+                try:
+                    widget.import_project(project_path)
+                except Exception as e:
+                    self.show_status(f"打开工程失败: {e}", "#f97316")
+            return
+
+        # M1：短剧筛选宿主为拓展中心；兼容旧 id=plugins
+        if module_id in ("extensions", "plugins") and action == "drama_finder":
+            if widget is not None:
+                if hasattr(widget, "_open_drama_finder"):
+                    widget._open_drama_finder()
+                elif hasattr(widget, "_open_drama_finder_tab"):
+                    widget._open_drama_finder_tab()
+            if nav_hint:
+                self.show_status(nav_hint, "#a78bfa")
+            return
+
+        if module_id == "editor" and workflow_hint and widget:
+            if hasattr(widget, "_on_workflow_hint_received"):
+                widget._on_workflow_hint_received(workflow_hint)
+            elif nav_hint:
+                self.show_status(nav_hint, "#ea580c")
+
     def _on_module_activated(self, event):
-        """模块激活事件处理 — 支持携带数据"""
-        target = event.data.get("target") if isinstance(event.data, dict) else event.data
-        payload = event.data.get("data") if isinstance(event.data, dict) else None
-        if target:
-            self._nav_bar.select_module(target)
-            # 将附带数据传递给目标模块（如文案推送）
-            if payload and hasattr(self, '_modules'):
-                module = self._modules.get(target)
-                if module and hasattr(module, '_on_copywriting_received'):
-                    # 通过事件总线重新发射 COPY_GENERATED，由 EditorModule 统一处理
-                    from .core import EventType
-                    self._event_bus.emit(EventType.COPY_GENERATED, payload)
+        """模块激活事件处理 — 支持携带数据、子页跳转与工作流提示"""
+        data = event.data if isinstance(event.data, dict) else {}
+        target = data.get("target") or event.data
+        payload = data.get("data")
+        action = data.get("action")
+        workflow_hint = data.get("workflow_hint")
+        nav_hint = data.get("hint")
+        project_path = data.get("project")
+
+        if not target:
+            return
+
+        # M1：旧事件 target=plugins → 拓展中心 extensions
+        if target == "plugins":
+            target = "extensions"
+
+        registry = get_registry()
+        if not registry.is_enabled(target):
+            self.show_status(f"模块「{target}」未启用，请在设置 → 功能开关中打开", "#f97316")
+            return
+
+        if target not in self._modules or not self._nav_bar.has_module(target):
+            self.show_status(f"导航中无模块「{target}」", "#f97316")
+            return
+
+        if action or workflow_hint or nav_hint or payload:
+            self._pending_module_actions[target] = {
+                "action": action,
+                "workflow_hint": workflow_hint,
+                "hint": nav_hint,
+                "project": project_path,
+                "data": payload,
+            }
+
+        self._nav_bar.select_module(target)
+
+        # 模块已实例化时 select_module 不会再次走 _activate_module，需立即交付
+        info = self._modules.get(target)
+        if info and info.instance and info.state != ModuleState.ERROR:
+            QTimer.singleShot(0, lambda mid=target: self._flush_pending_module_action(mid))
+        # 修复：此前不管目标模块是否已加载，这里都会立即 emit COPY_GENERATED，
+        # 但如果模块还没加载（懒加载走 QTimer.singleShot(50,...) 异步创建），
+        # 此刻根本没有监听者，payload 会直接丢失且没有任何提示——用户以为
+        # "推送成功"，编辑器里实际什么都没收到。现在统一改为通过
+        # _pending_module_actions → _flush_pending_module_action 交付，
+        # 保证只在模块真正加载完成（监听器已注册）之后才发送。
     
     def switch_to_module(self, module_id: str):
         """切换到指定模块"""
@@ -1004,9 +1080,37 @@ class MainWindow(QMainWindow):
             self._status_label.setText("未登录 / 未授权")
             self._status_label.setStyleSheet("color: #f59e0b; font-size: 13px; font-weight: 500;")
     
+    def _restore_window_geometry(self):
+        """按「记住窗口大小和位置」设置恢复上次退出时的窗口几何信息。
+
+        修复：设置页里的"记住窗口大小和位置"复选框此前只是创建出来摆在
+        UI 上，从未和任何真实的保存/恢复逻辑接线——不管勾不勾都没有任何
+        效果，窗口每次启动都是写死的 1600x1000。
+        """
+        try:
+            if not self._settings.value("remember_window", True, type=bool):
+                return
+            geometry = self._settings.value("window_geometry")
+            if geometry:
+                self.restoreGeometry(geometry)
+        except Exception as e:
+            logger.debug(f"恢复窗口几何信息失败: {e}")
+
+    def _save_window_geometry(self):
+        """退出前按设置保存窗口几何信息（配合 _restore_window_geometry）。"""
+        try:
+            if self._settings.value("remember_window", True, type=bool):
+                self._settings.setValue("window_geometry", self.saveGeometry())
+            else:
+                self._settings.remove("window_geometry")
+        except Exception as e:
+            logger.debug(f"保存窗口几何信息失败: {e}")
+
     def closeEvent(self, event):
         """关闭事件"""
         logger.info("用户关闭主窗口")
+        # 先停一切媒体，再存盘/拆控件，避免 Windows WMF 关窗后仍出声
+        self._stop_all_media_on_exit()
         logger.info("保存项目状态...")
         self._event_bus.emit(EventType.PROJECT_SAVED, {})
         logger.info("清理资源...")
@@ -1016,6 +1120,8 @@ class MainWindow(QMainWindow):
                 try:
                     if hasattr(module_info.instance, 'cleanup'):
                         module_info.instance.cleanup()
+                    elif hasattr(module_info.instance, 'on_deactivated'):
+                        module_info.instance.on_deactivated()
                     logger.debug(f"模块 {module_name} 已清理")
                 except Exception as e:
                     logger.warning(f"清理模块 {module_name} 失败: {e}")
@@ -1024,8 +1130,8 @@ class MainWindow(QMainWindow):
             from modules.lego.async_track_renderer import shutdown_async_track_renderer
             shutdown_async_track_renderer()
             logger.info("异步轨道渲染系统已关闭")
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug("异步轨道渲染模块未启用: %s", e)
         except Exception as e:
             logger.debug(f"关闭异步渲染系统: {e}")
         
@@ -1033,6 +1139,47 @@ class MainWindow(QMainWindow):
         for child in self.findChildren(QWidget):
             try:
                 child.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("子窗口关闭失败: %s", e)
         event.accept()
+
+    # >>> FROZEN:exit-media:main-window BEGIN
+    def _stop_all_media_on_exit(self):
+        """关闭前强制停止所有 QMediaPlayer，防止幽灵音频。"""
+        try:
+            from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PyQt6.QtCore import QUrl
+        except Exception:
+            return
+        # 模块级（剪辑主音/BGM）
+        for module_info in self._modules.values():
+            inst = module_info.instance
+            if not inst:
+                continue
+            try:
+                if hasattr(inst, "cleanup"):
+                    inst.cleanup()
+                elif hasattr(inst, "_shutdown_media"):
+                    inst._shutdown_media(release_source=True)
+                elif hasattr(inst, "on_deactivated"):
+                    inst.on_deactivated()
+            except Exception as e:
+                logger.debug("模块媒体停止失败: %s", e)
+        # 兜底：窗口树内所有播放器
+        try:
+            for player in self.findChildren(QMediaPlayer):
+                try:
+                    ao = player.audioOutput()
+                    if isinstance(ao, QAudioOutput):
+                        ao.setMuted(True)
+                        ao.setVolume(0.0)
+                except Exception as e:
+                    logger.debug("播放器静音失败: %s", e)
+                try:
+                    player.stop()
+                    player.setSource(QUrl())
+                except Exception as e:
+                    logger.debug("播放器停止失败: %s", e)
+        except Exception as e:
+            logger.debug("全局 QMediaPlayer 停止失败: %s", e)
+    # <<< FROZEN:exit-media:main-window END

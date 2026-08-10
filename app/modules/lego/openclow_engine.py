@@ -63,18 +63,16 @@ class OpenClowEngine:
             try:
                 with open(rules_file, "r", encoding="utf-8") as f:
                     self.reply_rules = json.load(f)
-            except Exception:
-                pass
-                pass
+            except Exception as e:
+                logger.debug("加载回复规则失败: %s", e)
         
         accounts_file = os.path.join(self.data_dir, "accounts.json")
         if os.path.exists(accounts_file):
             try:
                 with open(accounts_file, "r", encoding="utf-8") as f:
                     self.accounts = json.load(f)
-            except Exception:
-                pass
-                pass
+            except Exception as e:
+                logger.debug("加载账号数据失败: %s", e)
     
     def _save_accounts(self):
         """保存账号数据"""

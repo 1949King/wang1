@@ -16,6 +16,7 @@ import os
 import json
 import time
 import hashlib
+import logging
 import uuid
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon
+
+logger = logging.getLogger(__name__)
 
 
 class LicenseLevel(Enum):
@@ -147,8 +150,8 @@ class LicenseManager:
             # 生成基于系统信息的硬件ID
             info = platform.system() + platform.node() + platform.machine()
             return hashlib.md5(info.encode()).hexdigest()[:16]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("生成硬件ID失败，回退到UUID: %s", e)
             return str(uuid.uuid4())[:16]
     
     def _load_license(self):
@@ -262,7 +265,11 @@ class LicenseManager:
             # 保存授权
             self._save_license()
             
-            return True, f"激活成功！已升级到 {level.value}"
+            # 如实说明：这里只做本地格式校验（版本前缀 + 本机硬件ID前4位匹配），
+            # 没有任何服务器端验证，理论上只要凑对格式就能激活——不是正式的
+            # 授权鉴权机制。消息里明确标注"本地试用模式"，避免用户误以为
+            # 这是经过后端核验的正式授权。
+            return True, f"激活成功！已升级到 {level.value}（本地试用模式：仅校验激活码格式，未连接服务器验证）"
             
         except Exception as e:
             return False, f"激活失败: {str(e)}"
@@ -388,7 +395,14 @@ class LicenseDialog(QDialog):
         self.buy_button = QPushButton("立即购买")
         self.buy_button.clicked.connect(self._buy)
         buy_layout.addWidget(self.buy_button)
-        
+
+        # 如实说明：PAYMENT_LINKS 目前配置的是 Stripe 测试环境链接（test_ 前缀），
+        # 不是正式收款渠道，点击不会产生真实交易——加一行提示避免用户误以为
+        # 已经完成真实付款
+        test_link_notice = QLabel("⚠️ 当前为测试环境购买链接，暂不支持真实付款")
+        test_link_notice.setStyleSheet("color:#ff9800;font-size:10px;")
+        buy_layout.addWidget(test_link_notice)
+
         buy_layout.addWidget(QLabel("\n价格："))
         buy_layout.addWidget(QLabel("• 个人版: ¥299（终身授权）"))
         buy_layout.addWidget(QLabel("• 专业版: ¥599（终身授权）"))
@@ -407,7 +421,7 @@ class LicenseDialog(QDialog):
         
         if info:
             text = f"""
-当前授权：{info['level']}
+当前授权：{info['level']}（本地试用模式，未接入服务器验证）
 状态：{info['status']}
 用户名：{info['user_name']}
 邮箱：{info['email']}

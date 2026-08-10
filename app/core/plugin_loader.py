@@ -331,7 +331,16 @@ class PluginLoader:
         return False
     
     def discover_plugins(self) -> List[PluginInfo]:
-        """发现插件"""
+        """发现插件
+
+        修复：此前只把发现结果放进局部变量 `discovered` 返回，从不写入
+        `self._plugin_infos`——调用方如果只调 `discover_plugins()` 而不经过
+        热加载器（`PluginHotReloader`，它会手动把结果塞回
+        `self._loader._plugin_infos`），随后裸调 `load_plugin(plugin_id)`
+        必定在 427 行 `self._plugin_infos.get(plugin_id)` 拿到 None、
+        抛 `PluginLoadError: 插件信息不存在`。这里改为发现的同时登记，
+        使 discover_plugins() 单独调用也能配合 load_plugin() 正常工作。
+        """
         discovered = []
         seen_ids = set()
         
@@ -355,6 +364,9 @@ class PluginLoader:
                     if info and info.id not in seen_ids:
                         discovered.append(info)
                         seen_ids.add(info.id)
+        
+        for info in discovered:
+            self._plugin_infos[info.id] = info
         
         return discovered
     
@@ -910,7 +922,8 @@ class PluginHotLoader:
             try:
                 with open(file_path, 'rb') as f:
                     return hashlib.md5(f.read()).hexdigest()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[PluginLoader] 计算文件哈希失败 {file_path}: {e}")
                 return ""
         elif os.path.isdir(file_path):
             hash_obj = hashlib.md5()
@@ -922,10 +935,11 @@ class PluginHotLoader:
                             try:
                                 with open(file_path_full, 'rb') as f:
                                     hash_obj.update(f.read())
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"[PluginLoader] 计算哈希失败 {file_path_full}: {e}")
                 return hash_obj.hexdigest()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[PluginLoader] 计算目录哈希失败 {file_path}: {e}")
                 return ""
         return ""
     

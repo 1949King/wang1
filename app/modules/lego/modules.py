@@ -1555,7 +1555,7 @@ class HomeModule(BaseModule):
             ("🎬", "新建剪辑", "editor", "#1e6bde"),
             ("📝", "AI脚本", "copywriting", "#4caf50"),
             ("📋", "批量处理", "tasks", "#ff9800"),
-            ("🎭", "短剧筛选", "drama", "#9c27b0"),
+            ("🧩", "拓展中心", "extensions", "#9c27b0"),
             ("👤", "账号运营", "account", "#00bcd4"),
             ("📁", "素材管理", "materials", "#795548"),
         ]
@@ -1865,21 +1865,22 @@ class HomeModule(BaseModule):
             workspace = Path(__file__).parent.parent.parent.parent
 
             # 项目统计 — 从 data/projects/ 目录扫描
+            # 修复：编辑器实际保存的工程文件后缀是 .timeline（见 editor_module._save_project），
+            # 之前扫 .json/.proj 永远扫不到任何真实工程，"今日统计"里的项目数恒为 0
             projects_dir = workspace / "data" / "projects"
             project_count = "0"
             if projects_dir.exists():
                 count = len([f for f in projects_dir.iterdir()
-                             if f.is_file() and f.suffix in ('.json', '.proj')])
+                             if f.is_file() and f.suffix in ('.timeline', '.json', '.proj')])
                 project_count = str(count)
 
-            # 任务统计 — 从 batch_task_manager 读取活跃队列数
-            task_count = "0"
-            try:
-                from core.batch_task_manager import batch_task_manager
-                if batch_task_manager and getattr(batch_task_manager, '_queues', None):
-                    task_count = str(len(batch_task_manager._queues))
-            except ImportError:
-                pass
+            # "生成文案"统计
+            # 如实说明：此前这里读的其实是 batch_task_manager 的活跃队列数
+            # （和"生成文案"毫无关系），而且 import 路径和单例都不存在，必定
+            # ImportError 被吞掉，数字恒为 0。copywriting_module 目前也没有落盘
+            # 的生成历史可供统计，这里如实标注「未接入」而不是显示一个文不对题、
+            # 还读不到的假数字。
+            copy_count = "—"
 
             # 发布统计 — 从 publish_log.json 读取
             publish_count = "0"
@@ -1889,8 +1890,8 @@ class HomeModule(BaseModule):
                     with open(pf, 'r', encoding='utf-8') as f:
                         pd_data = json.load(f)
                     publish_count = str(len(pd_data) if isinstance(pd_data, list) else 0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("读取发布统计失败: %s", e)
 
             # 播放统计 — 从 analytics.json 读取
             views_count = "0"
@@ -1904,7 +1905,7 @@ class HomeModule(BaseModule):
                 pass
 
             self._stat_labels.get("videos", QLabel()).setText(project_count)
-            self._stat_labels.get("copy", QLabel()).setText(task_count)
+            self._stat_labels.get("copy", QLabel()).setText(copy_count)
             self._stat_labels.get("publish", QLabel()).setText(publish_count)
             self._stat_labels.get("views", QLabel()).setText(views_count)
         except Exception as e:
@@ -1924,14 +1925,20 @@ class HomeModule(BaseModule):
             if projects_dir.exists():
                 files = []
                 for f in projects_dir.iterdir():
-                    if f.is_file() and f.suffix in ('.json', '.proj'):
+                    # 修复：编辑器实际保存的工程后缀是 .timeline，此前只扫 .json/.proj
+                    # 永远扫不到任何真实工程
+                    if f.is_file() and f.suffix in ('.timeline', '.json', '.proj'):
                         files.append((f, f.stat().st_mtime))
                 files.sort(key=lambda x: x[1], reverse=True)
 
                 from datetime import datetime
                 for f_path, mtime in files[:10]:
                     dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-                    self._recent_list.addItem(f"{f_path.stem}  ({dt})")
+                    item = QListWidgetItem(f"{f_path.stem}  ({dt})")
+                    # 修复：此前双击只能靠文件名反拼 ".json" 重新猜路径，
+                    # 猜错扩展名（真实是 .timeline）就直接找不到文件；改为直接存完整路径
+                    item.setData(Qt.ItemDataRole.UserRole, str(f_path))
+                    self._recent_list.addItem(item)
 
             if self._recent_list.count() == 0:
                 self._recent_list.addItem("（暂无最近项目）")
@@ -1942,27 +1949,35 @@ class HomeModule(BaseModule):
             self._recent_list.addItem(f"（加载失败）")
 
     def _open_recent_project(self, item):
-        """双击打开最近项目 → 导航到编辑器"""
-        from pathlib import Path
+        """双击打开最近项目 → 导航到编辑器并真正加载工程
 
-        text = item.text()
-        if text.startswith("（"):
+        修复两处问题：
+        1. 此前从展示文本反拼 ".json" 猜路径，而真实工程后缀是 .timeline，
+           猜错了直接 exists() 为 False，双击必定无反应。现改为直接读取
+           _refresh_recent_projects 存进 item 的完整路径。
+        2. 此前只 emit 了 MODULE_ACTIVATED 切到编辑器页签，"project" 字段
+           从未被任何监听方消费——工程实际没有被打开。现改用
+           action="open_project"，由 main_window._flush_pending_module_action
+           调用 EditorModule.import_project() 真正加载。
+        """
+        path_str = item.data(Qt.ItemDataRole.UserRole)
+        if not path_str:
             return
-
-        # 提取项目名（去除时间后缀）
-        project_name = text.split("  (")[0] if "  (" in text else text
-        workspace = Path(__file__).parent.parent.parent.parent
-        project_file = workspace / "data" / "projects" / f"{project_name}.json"
+        from pathlib import Path
+        project_file = Path(path_str)
 
         if project_file.exists():
             try:
                 self._event_bus.emit(EventType.MODULE_ACTIVATED, {
                     "target": "editor",
-                    "project": str(project_file)
+                    "action": "open_project",
+                    "project": str(project_file),
                 })
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"打开项目失败: {e}")
+        else:
+            QMessageBox.warning(self, "打开失败", f"工程文件不存在：\n{project_file}")
 
 
 class TimeRuler(QWidget):
@@ -2903,6 +2918,11 @@ class ClipWidget(QFrame):
         self._keyframes = self._coerce_keyframes(clip_data.get('keyframes'))
         self._kf_hit_radius = 7  # 命中半径（px），与绘制点尺寸匹配
 
+        # 音频增强：音量/透明度控制线拖拽状态
+        self._is_dragging_volume = False
+        self._is_dragging_opacity = False
+        self._control_line_hit_radius = 5  # 控制线命中半径（px）
+
         self.setFixedHeight(38)
         self.setStyleSheet("""
             QFrame {
@@ -3018,52 +3038,151 @@ class ClipWidget(QFrame):
 
     def paintEvent(self, event):
         """
-        补短 P1#8：在 QFrame 原样式（stylesheet 背景）之上叠加关键帧菱形点。
-
-        关键设计：
-          1. 先 super().paintEvent() 让 QFrame 走自己的 stylesheet，保持原样
-          2. 再用 QPainter 叠加绘制 - 不修改 QSS、不增加子控件
-          3. 无关键帧时直接走 super().paintEvent，零开销零影响
-          4. 选中态点稍大、描边亮；非选中态点 5x5、描边半透明
+        补短 P1#8 + 音频增强：
+          1. 先 super().paintEvent() 走 QFrame stylesheet 基础色
+          2. 静音 → 叠加半透明灰色覆盖层
+          3. 音频 clip → 绿正红负半区波形绘制（复用 WaveformGenerator）
+          4. 透明度控制线（蓝线）+ 音量控制线（绿线）
+          5. 关键帧菱形点（原有逻辑不变）
         """
         super().paintEvent(event)
-        if not self._keyframes:
-            return
 
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-            # 选中时画一层底部高亮带（提示用户该 clip 有动画）
-            if self._is_selected and self._keyframes:
-                band_color = QColor(0, 0, 0, 60)
-                painter.fillRect(0, self.height() - 7, self.width(), 7, band_color)
+            w = self.width()
+            h = self.height()
 
-            size = 5 if self._is_selected else 4
-            for x, y, color_hex, _kf in self._keyframe_rects():
-                color = QColor(color_hex)
-                # 填充菱形
+            # ── 1. 静音 clip → 整体叠加半透明灰色 ──
+            is_muted = bool(self.clip_data.get("muted", False))
+            if is_muted:
+                painter.fillRect(0, 0, w, h, QColor(80, 80, 80, 130))
+
+            # ── 2. 波形绘制（仅音频 clip 或带音轨的视频 clip）──
+            is_audio = self.clip_data.get("type") == "audio"
+            path = self.clip_data.get("path", "")
+            # 视频 clip 也可能带音轨，简单按路径后缀判断
+            if not is_audio and path:
+                audio_exts = ('.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.wma')
+                is_audio = path.lower().endswith(audio_exts)
+
+            if is_audio and path and w > 40:
+                self._paint_waveform(painter, w, h, path, is_muted)
+
+            # ── 3. 透明度控制线（蓝线，y 由 clip_data.opacity 决定）──
+            opacity = float(self.clip_data.get("opacity", 1.0) or 1.0)
+            opacity = max(0.0, min(1.0, opacity))
+            # 顶部位移：顶部留 4px，底部位移到中线以下
+            # opacity=1.0 → 顶部(y=4), opacity=0.0 → 中线(y=h/2)
+            mid_y = h // 2
+            top_margin = 4
+            op_y = int(top_margin + (mid_y - top_margin) * (1.0 - opacity))
+            painter.setPen(QPen(QColor(80, 170, 255, 180), 1.5))
+            painter.drawLine(2, op_y, w - 2, op_y)
+            # 右侧小手柄
+            painter.setBrush(QColor(80, 170, 255, 220))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRect(w - 5, op_y - 2, 4, 4)
+
+            # ── 4. 音量控制线（绿线，以中线为基准）──
+            volume = float(self.clip_data.get("volume", 1.0) or 1.0)
+            volume = max(0.0, min(2.0, volume))  # 0~2（50%削减 ~ 200%增益）
+            # 音量中线为基准：volume=1.0 → 中线；volume=0 → 底部附近；volume=2 → 顶部附近
+            # 把 0~2 映射到 y 轴：
+            #   volume=0   → y=h-6（底部，无声）
+            #   volume=1.0 → y=h/2（中线，默认）
+            #   volume=2.0 → y=top_margin（满格）
+            bot_margin = h - 6
+            vol_y = int(bot_margin - (bot_margin - top_margin) * (volume / 2.0))
+            painter.setPen(QPen(QColor(80, 220, 120, 200), 1.5))
+            painter.drawLine(2, vol_y, w - 2, vol_y)
+            # 音量区域填充（绿线上方的透明绿色表示增益/音量大小）
+            if volume > 0.01:
+                vol_color = QColor(80, 220, 120, 35)
+                painter.fillRect(2, vol_y, w - 4, bot_margin - vol_y, vol_color)
+
+            # ── 5. 关键帧菱形点（原有逻辑）──
+            if self._keyframes:
+                # 选中时画一层底部高亮带
                 if self._is_selected:
-                    painter.setBrush(QBrush(color))
-                    painter.setPen(QPen(QColor(255, 255, 255), 1.2))
-                else:
-                    # 非选中：半透明 + 深色描边
-                    fill = QColor(color)
-                    fill.setAlpha(200)
-                    painter.setBrush(QBrush(fill))
-                    painter.setPen(QPen(QColor(0, 0, 0, 180), 1))
+                    painter.fillRect(0, h - 7, w, 7, QColor(0, 0, 0, 60))
 
-                # 菱形（4 个顶点） - 用 QPolygon 即可
-                half = size
-                poly = QPolygon([
-                    QPoint(x, y - half),
-                    QPoint(x + half, y),
-                    QPoint(x, y + half),
-                    QPoint(x - half, y),
-                ])
-                painter.drawPolygon(poly)
+                size = 5 if self._is_selected else 4
+                for x, y_kf, color_hex, _kf in self._keyframe_rects():
+                    color = QColor(color_hex)
+                    if self._is_selected:
+                        painter.setBrush(QBrush(color))
+                        painter.setPen(QPen(QColor(255, 255, 255), 1.2))
+                    else:
+                        fill = QColor(color)
+                        fill.setAlpha(200)
+                        painter.setBrush(QBrush(fill))
+                        painter.setPen(QPen(QColor(0, 0, 0, 180), 1))
+                    half = size
+                    poly = QPolygon([
+                        QPoint(x, y_kf - half),
+                        QPoint(x + half, y_kf),
+                        QPoint(x, y_kf + half),
+                        QPoint(x - half, y_kf),
+                    ])
+                    painter.drawPolygon(poly)
         finally:
             painter.end()
+
+    # ------------------------------------------------------------------
+    # 波形绘制（复用 WaveformGenerator）
+    # ------------------------------------------------------------------
+    def _paint_waveform(self, painter, w, h, path, is_muted=False):
+        """绿正红负半区波形绘制（剪映风格）。
+
+        关键：fill_path 闭合点必须与曲线端点同 X 对齐，避免竖线伪影。
+        """
+        try:
+            from app.core.waveform_generator import waveform_generator
+            num_buckets = max(32, min(w, 400))
+            wd = waveform_generator.generate(path, num_buckets)
+        except Exception:
+            return
+        if wd is None or not wd.max_peaks or not wd.min_peaks:
+            return
+
+        mid_y = h // 2
+        peak_half_h = max(2, (h // 2) - 4)  # 每半区最大高度
+
+        # 颜色
+        if is_muted:
+            pos_color = QColor(160, 160, 160, 160)  # 静音灰
+            neg_color = QColor(130, 130, 130, 160)
+        else:
+            pos_color = QColor(70, 200, 100, 180)   # 正半区绿
+            neg_color = QColor(230, 70, 80, 180)    # 负半区红
+
+        n = len(wd.max_peaks)
+        if n == 0:
+            return
+
+        bar_w = max(1, w / n)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        for i in range(n):
+            # 正半区（从中线向上画到 max_peaks 位置）
+            max_val = wd.max_peaks[i]
+            if max_val > 0.01:
+                bar_h = int(max_val * peak_half_h)
+                x = int(i * bar_w) + 1
+                bw = max(1, int(bar_w) - 2)
+                painter.setBrush(pos_color)
+                painter.drawRect(x, mid_y - bar_h, bw, bar_h)
+
+            # 负半区（从中线向下画到 min_peaks 位置）
+            min_val = wd.min_peaks[i]
+            if min_val < -0.01:
+                bar_h = int(-min_val * peak_half_h)
+                x = int(i * bar_w) + 1
+                bw = max(1, int(bar_w) - 2)
+                painter.setBrush(neg_color)
+                painter.drawRect(x, mid_y + 1, bw, bar_h)
 
     def _hit_test_keyframe(self, pos):
         """
@@ -3074,7 +3193,70 @@ class ClipWidget(QFrame):
             if abs(pos.x() - x) + abs(pos.y() - y) <= self._kf_hit_radius:
                 return kf
         return None
-        
+
+    # ------------------------------------------------------------------
+    # 音频增强：控制线 hit-test + y → value 映射
+    # ------------------------------------------------------------------
+    def _hit_test_control_line(self, pos):
+        """返回 "volume" / "opacity" / None，命中最近的控制线。"""
+        h = self.height()
+        mid_y = h // 2
+        top_margin = 4
+        bot_margin = h - 6
+        r = self._control_line_hit_radius
+
+        # 音量控制线 y 位置
+        volume = float(self.clip_data.get("volume", 1.0) or 1.0)
+        volume = max(0.0, min(2.0, volume))
+        vol_y = int(bot_margin - (bot_margin - top_margin) * (volume / 2.0))
+
+        # 透明度控制线 y 位置
+        opacity = float(self.clip_data.get("opacity", 1.0) or 1.0)
+        opacity = max(0.0, min(1.0, opacity))
+        op_y = int(top_margin + (mid_y - top_margin) * (1.0 - opacity))
+
+        dy_v = abs(pos.y() - vol_y)
+        dy_o = abs(pos.y() - op_y)
+
+        if dy_v <= r and dy_o <= r:
+            # 都命中 → 取近的
+            return "volume" if dy_v <= dy_o else "opacity"
+        if dy_v <= r:
+            return "volume"
+        if dy_o <= r:
+            return "opacity"
+        return None
+
+    def _update_volume_from_y(self, y):
+        """鼠标 y 坐标 → clip_data['volume']（0~2）。"""
+        h = self.height()
+        top_margin = 4
+        bot_margin = h - 6
+        # y 越小（顶部）→ 音量越大；y 越大（底部）→ 音量越小
+        if y <= top_margin:
+            vol = 2.0
+        elif y >= bot_margin:
+            vol = 0.0
+        else:
+            vol = 2.0 * (bot_margin - y) / (bot_margin - top_margin)
+        vol = round(max(0.0, min(2.0, vol)), 2)
+        self.clip_data["volume"] = vol
+
+    def _update_opacity_from_y(self, y):
+        """鼠标 y 坐标 → clip_data['opacity']（0~1）。"""
+        h = self.height()
+        mid_y = h // 2
+        top_margin = 4
+        # y 越小（顶部）→ 透明度越高；y 越大（靠近中线）→ 透明度越低
+        if y <= top_margin:
+            op = 1.0
+        elif y >= mid_y:
+            op = 0.0
+        else:
+            op = 1.0 - (y - top_margin) / (mid_y - top_margin)
+        op = round(max(0.0, min(1.0, op)), 2)
+        self.clip_data["opacity"] = op
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.pos()
@@ -3087,12 +3269,27 @@ class ClipWidget(QFrame):
                 self._is_resizing = True
                 self._resize_direction = 'right'
             else:
+                # ── 音频增强：先判断是否命中控制线 ──
+                hit_line = self._hit_test_control_line(event.pos())
+                if hit_line == "volume":
+                    self._is_dragging_volume = True
+                    self._is_resizing = False
+                    self._update_volume_from_y(event.pos().y())
+                    self.update()
+                    super().mousePressEvent(event)
+                    return
+                elif hit_line == "opacity":
+                    self._is_dragging_opacity = True
+                    self._is_resizing = False
+                    self._update_opacity_from_y(event.pos().y())
+                    self.update()
+                    super().mousePressEvent(event)
+                    return
+
                 # 补短 P1#8：若点击命中关键帧点，发 keyframe_clicked 而非切换选中
-                # 这样不打断用户的"先看 clip 再细看关键帧"的操作流
                 kf_hit = self._hit_test_keyframe(event.pos())
                 if kf_hit is not None:
                     self.keyframe_clicked.emit(self.clip_data, kf_hit)
-                    # 不进入选中/拖拽流程，但仍消费事件
                     super().mousePressEvent(event)
                     return
 
@@ -3102,14 +3299,34 @@ class ClipWidget(QFrame):
                 self.setProperty('selected', str(self._is_selected).lower())
                 self.style().unpolish(self)
                 self.style().polish(self)
-                # 补短 P1#8：选中态变化需触发 paintEvent 重新画关键帧大小
                 self.update()
                 self.clicked.emit(self.clip_data)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # ── 音频增强：控制线拖拽优先处理 ──
+        if self._is_dragging_volume:
+            self._update_volume_from_y(event.pos().y())
+            self.update()
+            return
+        if self._is_dragging_opacity:
+            self._update_opacity_from_y(event.pos().y())
+            self.update()
+            return
+
         # 补短 P1#8：未在拖拽/调整大小时，命中关键帧点 -> 显示 tooltip
         if not self._is_resizing and not (self._drag_start_pos and self._drag_offset):
+            # 控制线 cursor 提示
+            hit_line = self._hit_test_control_line(event.pos())
+            if hit_line == "volume":
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                QToolTip.showText(event.globalPosition().toPoint(), "音量控制线（上下拖拽）", self)
+                return
+            elif hit_line == "opacity":
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                QToolTip.showText(event.globalPosition().toPoint(), "透明度控制线（上下拖拽）", self)
+                return
+
             kf_hit = self._hit_test_keyframe(event.pos())
             if kf_hit is not None:
                 tip = self._format_keyframe_tooltip(kf_hit)
@@ -3117,8 +3334,6 @@ class ClipWidget(QFrame):
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
             else:
                 QToolTip.hideText()
-                # 不强制重置 cursor，避免和 track 拖拽的 cursor 冲突
-            # tooltip 处理完直接返回，不影响原有拖拽/调整大小逻辑
             return
 
         if self._is_resizing:
@@ -3162,6 +3377,9 @@ class ClipWidget(QFrame):
         self._resize_direction = None
         self._drag_start_pos = None
         self._drag_offset = None
+        # ── 音频增强：清除控制线拖拽状态 ──
+        self._is_dragging_volume = False
+        self._is_dragging_opacity = False
         super().mouseReleaseEvent(event)
 
     def set_selected(self, selected):
@@ -3210,14 +3428,12 @@ MODULE_CLASSES = [
 
 from .plugins_module import PluginsModule
 from .performance_module import PerformanceModule
-from .drama_finder_module import DramaFinderModule
 from .account_ops_module import AccountOpsModule
 from .model_management import ModelManagementModule
 
 MODULE_CLASSES.extend([
     PluginsModule,
     PerformanceModule,
-    DramaFinderModule,
     AccountOpsModule,
     ModelManagementModule,
 ])

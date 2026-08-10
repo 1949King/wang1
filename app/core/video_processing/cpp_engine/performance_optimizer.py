@@ -128,8 +128,8 @@ class PerformanceOptimizer:
                 gpu_name = gpu.name
                 gpu_memory_total = gpu.memory_mb
                 gpu_memory_used = 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[PerformanceOptimizer] 检测GPU信息失败: {e}")
         
         return SystemResources(
             cpu_count=cpu_count, cpu_usage=cpu_usage,

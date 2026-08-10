@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 
-from core.plugin_loader import (
+from app.core.plugin_loader import (
     IPlugin, PluginInfo, PluginType, PluginCategory
 )
 
@@ -119,392 +119,12 @@ PLATFORM_MAP = {
 }
 
 # ============================================================
-# DramaFinderWidget — 独立 UI 组件
+# DramaFinderWidget — 可视化 UI（卡片墙 + 右侧预览）
 # ============================================================
-
-class DramaFinderWidget(QWidget):
-    """
-    短剧筛选 UI 组件
-    提供完整的多平台短剧筛选交互界面。
-    不再依赖 BaseModule，使用标准 QWidget 作为独立组件。
-    """
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self._dramas = DRAMAS
-        self._setup_ui()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._refresh)
-        self._timer.start(300000)
-        QTimer.singleShot(200, self._refresh)
-
-    def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-
-        # ---- 筛选栏 ----
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-
-        self._platform_combo = QComboBox()
-        self._platform_combo.addItem("全部平台", "all")
-        for pid, name in PLATFORM_MAP.items():
-            self._platform_combo.addItem(name, pid)
-        self._platform_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-            "QComboBox:hover{border-color:#333;}"
-        )
-        self._platform_combo.currentIndexChanged.connect(self._refresh)
-        top_row.addWidget(self._platform_combo)
-
-        self._type_combo = QComboBox()
-        self._type_combo.addItems(["全部", "短剧", "漫剧", "电影", "电视剧"])
-        self._type_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
-        self._type_combo.currentIndexChanged.connect(self._refresh)
-        top_row.addWidget(self._type_combo)
-
-        self._cat_combo = QComboBox()
-        self._cat_combo.addItem("全部", "all")
-        cats = [
-            "重生", "霸总", "医术", "穿越", "复仇", "科幻", "甜宠", "神豪",
-            "逆袭", "修仙", "军旅", "校园", "武侠", "玄幻", "都市", "美食",
-            "推理", "喜剧", "治愈", "古装", "悬疑", "热血", "萌宠", "后宫",
-            "机甲", "系统流", "青春", "家庭", "动作", "惊悚"
-        ]
-        self._cat_combo.addItems(cats)
-        self._cat_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
-        self._cat_combo.currentIndexChanged.connect(self._refresh)
-        top_row.addWidget(self._cat_combo)
-
-        self._sort_combo = QComboBox()
-        self._sort_combo.addItems(["🔥热度", "👁播放", "💰佣金", "⭐评分", "🆕最新"])
-        self._sort_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
-        self._sort_combo.currentIndexChanged.connect(self._refresh)
-        top_row.addWidget(self._sort_combo)
-
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("搜索短剧名称...")
-        self._search_input.setStyleSheet(
-            "QLineEdit{background:#0a0a0a;color:#fff;border:1px solid #222;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
-        self._search_input.returnPressed.connect(self._refresh)
-        top_row.addWidget(self._search_input, 1)
-
-        top_row.addWidget(QLabel("5分钟自动刷新"))
-        layout.addLayout(top_row)
-
-        # ---- 数据源状态条 ----
-        status_row = QHBoxLayout()
-        status_row.setSpacing(8)
-        self._data_status_label = QLabel("")
-        self._data_status_label.setStyleSheet(
-            "color:#ff5252;font-size:11px;font-weight:600;padding:2px 8px;"
-            "background:#1a0a0a;border:1px solid #5a1a1a;border-radius:4px;"
-        )
-        self._data_status_label.setVisible(False)
-        status_row.addWidget(self._data_status_label)
-        status_row.addStretch()
-        help_btn = QPushButton("❓ 数据源帮助")
-        help_btn.setStyleSheet(
-            "QPushButton{background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a;"
-            "border-radius:4px;padding:4px 10px;font-size:10px;}"
-            "QPushButton:hover{background:#222;color:#fff;border-color:#444;}"
-        )
-        help_btn.setToolTip("查看短剧数据源使用说明 (Playwright / TikHub / 模拟)")
-        help_btn.clicked.connect(self._show_data_source_help)
-        status_row.addWidget(help_btn)
-        layout.addLayout(status_row)
-
-        # ---- 表格 ----
-        self._table = QTableWidget()
-        self._table.setColumnCount(8)
-        self._table.setHorizontalHeaderLabels(
-            ["剧名", "平台", "分类", "集数", "播放量", "佣金/万", "热度", "操作"]
-        )
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in range(1, 8):
-            self._table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(1, 80)
-        self._table.setColumnWidth(2, 60)
-        self._table.setColumnWidth(3, 50)
-        self._table.setColumnWidth(4, 90)
-        self._table.setColumnWidth(5, 70)
-        self._table.setColumnWidth(6, 60)
-        self._table.setColumnWidth(7, 100)
-        self._table.setStyleSheet(
-            "QTableWidget{background:#0a0a0a;border:1px solid #1a1a1a;"
-            "border-radius:8px;color:#ccc;gridline-color:#151515;}"
-            "QHeaderView::section{background:#121212;padding:8px;border:none;"
-            "border-bottom:1px solid #1a1a1a;color:#666;font-size:10px;font-weight:600;}"
-            "QTableWidget::item{padding:6px 8px;border-bottom:1px solid #151515;}"
-            "QTableWidget::item:selected{background:#1e3a5f;color:#fff;}"
-        )
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setShowGrid(False)
-        self._table.verticalHeader().setVisible(False)
-        layout.addWidget(self._table, 1)
-
-        # ---- 底部信息栏 ----
-        bot_row = QHBoxLayout()
-        self._info_label = QLabel(
-            f"共 {len(self._dramas)} 条 | 更新于 {datetime.now().strftime('%H:%M:%S')}"
-        )
-        self._info_label.setStyleSheet("color:#555;font-size:10px;")
-        bot_row.addWidget(self._info_label)
-        bot_row.addStretch()
-        refresh_btn = QPushButton("🔄 立即刷新")
-        refresh_btn.setStyleSheet(
-            "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;"
-            "border-radius:4px;padding:5px 12px;font-size:10px;}"
-            "QPushButton:hover{background:#3a3a3a;}"
-        )
-        refresh_btn.clicked.connect(self._refresh)
-        bot_row.addWidget(refresh_btn)
-        layout.addLayout(bot_row)
-
-    # ============================================================
-    # 核心逻辑
-    # ============================================================
-
-    def _refresh(self) -> None:
-        """筛选刷新（静态数据 + 异步爬取真实数据）"""
-        keyword = self._search_input.text().strip().lower()
-        platform = self._platform_combo.currentData()
-        dtype = self._type_combo.currentText()
-        cat_idx = self._cat_combo.currentIndex()
-        category = None if cat_idx == 0 else self._cat_combo.currentText()
-        sort_text = self._sort_combo.currentText()
-
-        sort_map = {
-            "🔥热度": "heat", "👁播放": "views", "💰佣金": "commission",
-            "⭐评分": "rating", "🆕最新": "freshness"
-        }
-        crawler_sort = sort_map.get(sort_text, "score")
-
-        type_map = {
-            "全部": "all", "短剧": "drama", "漫剧": "comic",
-            "电影": "movie", "电视剧": "tv"
-        }
-        content_type = type_map.get(dtype, "all")
-
-        self._populate_from_static(keyword, platform, dtype, category, sort_text)
-        self._fetch_real_data_async(content_type, platform, category, crawler_sort,
-                                    keyword, sort_text)
-
-    def _fetch_real_data_async(self, content_type: str, platform: str, category: str | None,
-                                crawler_sort: str, keyword: str, sort_text: str) -> None:
-        """后台异步获取真实数据"""
-        try:
-            from app.modules.lego.drama_crawler import DramaCrawler
-            crawler = DramaCrawler()
-
-            def on_data_fetched(dramas):
-                if dramas:
-                    self._populate_from_crawler(dramas)
-                self._refresh_data_status()
-
-            def on_error(err_msg):
-                logger.debug(f"[DramaFinderPlugin] 后台爬取失败, 保留静态数据: {err_msg}")
-                self._refresh_data_status()
-
-            crawler.fetch_dramas_async(
-                content_type=content_type,
-                platform=platform,
-                category=category if category else "all",
-                sort_by=crawler_sort,
-                keyword=keyword,
-                page=1,
-                page_size=80,
-                callback=on_data_fetched,
-                error_callback=on_error,
-            )
-        except Exception as e:
-            logger.debug(f"[DramaFinderPlugin] 异步爬取启动失败: {e}")
-            self._refresh_data_status()
-
-    def _populate_from_crawler(self, dramas) -> None:
-        """用 DramaCrawler 返回的真实数据填充表格"""
-        self._table.setRowCount(0)
-        self._table.setRowCount(len(dramas))
-        self._info_label.setText(
-            f"共 {len(dramas)} 条 (真实数据) | 更新于 {datetime.now().strftime('%H:%M:%S')}"
-        )
-        self._info_label.setStyleSheet("color:#4caf50;font-size:10px;")
-        for i, d in enumerate(dramas):
-            name = getattr(d, "title", "")
-            plat_id = getattr(d, "platform", "")
-            cat = getattr(d, "category", "")
-            eps = getattr(d, "episodes", 0)
-            views = getattr(d, "views", 0)
-            comm = getattr(d, "commission", 0)
-            heat = getattr(d, "heat", 0)
-
-            items = [
-                name,
-                PLATFORM_MAP.get(plat_id, plat_id),
-                cat, str(eps),
-                f"{views // 10000}万" if views >= 10000 else str(views),
-                f"¥{int(comm)}",
-                str(heat),
-            ]
-            for j, txt in enumerate(items):
-                item = QTableWidgetItem(txt)
-                if j == 0:
-                    item.setForeground(QColor("#1e6bde"))
-                elif j == 4:
-                    item.setForeground(QColor("#4caf50"))
-                elif j == 5:
-                    item.setForeground(QColor("#ff9800"))
-                self._table.setItem(i, j, item)
-
-            select_btn = QPushButton("选择")
-            select_btn.setStyleSheet(
-                "QPushButton{background:#1e6bde;color:#fff;border:none;"
-                "border-radius:4px;padding:3px 12px;font-size:10px;}"
-                "QPushButton:hover{background:#1557b0;}"
-            )
-            select_btn.clicked.connect(
-                lambda checked, n=name: QMessageBox.information(
-                    self, "选择短剧", f"已选择: {n}"
-                )
-            )
-            self._table.setCellWidget(i, 7, select_btn)
-
-    def _populate_from_static(self, keyword: str, platform: str, dtype: str,
-                               category: str | None, sort_text: str) -> None:
-        """用硬编码静态数据填充表格(降级方案)"""
-        self._table.setRowCount(0)
-        filtered: list[tuple] = []
-        for d in self._dramas:
-            name, plat, cat, eps, views, comm, heat, sub_type, rank = d
-            if keyword and keyword not in name.lower():
-                continue
-            if platform != "all" and plat != platform:
-                continue
-            if dtype != "全部" and sub_type != dtype:
-                continue
-            if category and cat != category:
-                continue
-            random_views = views + random.randint(-views // 6, views // 6)
-            random_heat = heat + random.randint(-4, 4)
-            random_comm = comm + random.randint(-3, 5)
-            filtered.append((
-                name, plat, cat, eps, max(1000, random_views),
-                max(1, random_comm), min(99, max(60, random_heat)),
-                sub_type, rank
-            ))
-
-        sort_key = {"👁播放": 4, "💰佣金": 5, "⭐评分": 6, "🔥热度": 6, "🆕最新": 8}
-        key = sort_key.get(sort_text[:2], 6)
-        if sort_text.startswith("🆕"):
-            filtered.sort(key=lambda x: x[8], reverse=True)
-        else:
-            filtered.sort(key=lambda x: x[key], reverse=True)
-
-        self._table.setRowCount(len(filtered))
-        self._info_label.setText(
-            f"共 {len(filtered)} 条 (模拟数据) | 更新于 {datetime.now().strftime('%H:%M:%S')}"
-        )
-        self._info_label.setStyleSheet("color:#ff9800;font-size:10px;")
-        for i, d in enumerate(filtered):
-            name, plat_id, cat, eps, views, comm, heat, _sub, _rank = d
-            items = [
-                name,
-                PLATFORM_MAP.get(plat_id, plat_id),
-                cat, str(eps),
-                f"{views // 10000}万" if views >= 10000 else str(views),
-                f"¥{comm}",
-                str(heat),
-            ]
-            for j, txt in enumerate(items):
-                item = QTableWidgetItem(txt)
-                if j == 0:
-                    item.setForeground(QColor("#1e6bde"))
-                elif j == 4:
-                    item.setForeground(QColor("#4caf50"))
-                elif j == 5:
-                    item.setForeground(QColor("#ff9800"))
-                self._table.setItem(i, j, item)
-
-            select_btn = QPushButton("选择")
-            select_btn.setStyleSheet(
-                "QPushButton{background:#1e6bde;color:#fff;border:none;"
-                "border-radius:4px;padding:3px 12px;font-size:10px;}"
-                "QPushButton:hover{background:#1557b0;}"
-            )
-            select_btn.clicked.connect(
-                lambda checked, n=name: QMessageBox.information(
-                    self, "选择短剧", f"已选择: {n}"
-                )
-            )
-            self._table.setCellWidget(i, 7, select_btn)
-
-    def _refresh_data_status(self) -> None:
-        """根据数据源健康状态更新顶部状态条"""
-        try:
-            from app.modules.lego.drama_crawler import DramaCrawler
-            crawler = DramaCrawler()
-            has_any_real = False
-            fake_platforms: list[str] = []
-            try:
-                health = crawler.get_data_source_health()
-                for pid, info in health.items():
-                    if info.get("real"):
-                        has_any_real = True
-                        break
-                    if info.get("api_class"):
-                        fake_platforms.append(pid)
-            except Exception:
-                pass
-            if has_any_real:
-                self._data_status_label.setVisible(False)
-            else:
-                self._data_status_label.setText(
-                    f"⚠️ 当前数据为模拟 ({len(fake_platforms)} 个平台未接入真实源)"
-                )
-                self._data_status_label.setVisible(True)
-        except (ImportError, OSError, RuntimeError) as e:
-            logger.debug(f"[DramaFinderPlugin] 刷新数据状态失败: {e}")
-            self._data_status_label.setVisible(False)
-
-    def _show_data_source_help(self) -> None:
-        """弹窗显示数据源帮助"""
-        try:
-            from app.modules.lego.drama_crawler import DramaCrawler
-            help_text = DramaCrawler.get_help_text()
-        except Exception as e:
-            help_text = (
-                "数据源帮助文档加载失败, 请确认:\n"
-                "  1. app/modules/lego/drama_crawler.py 文件存在\n"
-                "  2. DramaCrawler.get_help_text() 方法可访问\n\n"
-                f"原始错误: {e}"
-            )
-        dlg = QMessageBox(self)
-        dlg.setWindowTitle("短剧数据源使用说明")
-        dlg.setIcon(QMessageBox.Icon.Information)
-        dlg.setText(help_text)
-        dlg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        dlg.resize(620, 480)
-        dlg.exec()
-
-    def set_theme(self, theme: str) -> None:
-        """设置主题"""
-        self.setProperty("theme", theme)
-        for child in self.findChildren(QWidget):
-            child.setProperty("theme", theme)
-
+try:
+    from .drama_ui import DramaFinderWidget  # noqa: E402
+except ImportError:
+    from drama_ui import DramaFinderWidget  # type: ignore
 
 # ============================================================
 # Plugin — 插件主类 (符合 IPlugin 接口 + PLUGIN_STANDARD)
@@ -525,9 +145,17 @@ class Plugin(IPlugin):
 
     # ═══ PluginManager 兼容属性 (hasattr 检查) ═══
     name: str = "短剧筛选"
-    version: str = "1.0.0"
+    version: str = "1.1.1"
     description: str = "智能筛选热门短剧，分析热度与佣金。支持10+平台榜单浏览、多维度筛选、双数据源策略。"
     category: str = "运营工具"
+
+    def __init__(self):
+        # >>> FROZEN:drama-finder-ui:plugin-lifecycle BEGIN
+        # PluginManager 只实例化、不调用 initialize；属性须在此就绪，避免 run() AttributeError
+        self._context: dict = {}
+        self._widget: DramaFinderWidget | None = None
+        self._initialized: bool = False
+        # <<< FROZEN:drama-finder-ui:plugin-lifecycle END
 
     # ═══ IPlugin 接口属性 ═══
     @property
@@ -559,19 +187,24 @@ class Plugin(IPlugin):
         """
         try:
             self._context = context or {}
-            self._widget: DramaFinderWidget | None = None
+            if not hasattr(self, "_widget"):
+                self._widget = None
+            self._initialized = True
             logger.info("[DramaFinderPlugin] 初始化完成")
             return True
         except Exception as e:
             logger.error(f"[DramaFinderPlugin] 初始化失败: {e}")
+            self._initialized = False
             return False
 
     def shutdown(self) -> bool:
         """关闭插件，清理资源"""
         try:
-            if self._widget:
-                self._widget.deleteLater()
+            w = getattr(self, "_widget", None)
+            if w is not None:
+                w.deleteLater()
                 self._widget = None
+            self._initialized = False
             logger.info("[DramaFinderPlugin] 已关闭")
             return True
         except Exception as e:
@@ -612,8 +245,9 @@ class Plugin(IPlugin):
 
     def on_disable(self) -> None:
         """插件禁用时调用"""
-        if self._widget:
-            self._widget.setVisible(False)
+        w = getattr(self, "_widget", None)
+        if w is not None:
+            w.setVisible(False)
         logger.info("[DramaFinderPlugin] 已禁用")
 
     def run(self, data=None):
@@ -621,11 +255,16 @@ class Plugin(IPlugin):
         运行插件并返回 UI 组件 (兼容 PLUGIN_STANDARD.md)
         首次调用时创建 DramaFinderWidget，后续返回已创建的实例。
         """
-        if self._widget is None:
-            parent = self._context.get("parent_widget") if self._context else None
+        # >>> FROZEN:drama-finder-ui:run BEGIN
+        if not getattr(self, "_initialized", False):
+            self.initialize(getattr(self, "_context", None) or {})
+        if getattr(self, "_widget", None) is None:
+            ctx = getattr(self, "_context", None) or {}
+            parent = ctx.get("parent_widget")
             self._widget = DramaFinderWidget(parent)
         self._widget.setVisible(True)
         return self._widget
+        # <<< FROZEN:drama-finder-ui:run END
 
     def cleanup(self):
         """清理资源 (兼容 PLUGIN_STANDARD.md 的 cleanup 接口)"""

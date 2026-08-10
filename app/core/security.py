@@ -849,8 +849,8 @@ class SecureToken:
             timestamp_str, _ = token.split('.', 1)
             timestamp = int(timestamp_str)
             return (time.time() - timestamp) < max_age
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Security] 验证会话令牌失败: {e}")
             return False
 
 
@@ -872,8 +872,8 @@ class DataSanitizer:
             if len(username) > 3:
                 return f"{username[:3]}***@{domain}"
             return f"{username}***@{domain}"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Security] 掩码邮箱失败: {e}")
             return email
     
     @staticmethod

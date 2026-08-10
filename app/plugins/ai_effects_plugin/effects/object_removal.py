@@ -4,10 +4,14 @@
 支持自动检测、手动选择、笔刷涂抹等多种移除方式
 """
 
+import logging
+
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, List, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class RemovalMode(Enum):
@@ -106,9 +110,9 @@ class ObjectRemovalEffect:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        except:
-            pass
-        
+        except Exception as e:
+            logger.debug(f"清理GPU缓存时失败: {e}")
+
         print("[物体移除] 模型已卸载")
     
     def remove_object(self,
@@ -426,8 +430,8 @@ class ObjectRemovalEffect:
                 result = self._neural_engine.inpaint(image, mask)
                 if result is not None:
                     return result
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"神经网络修复失败，回退OpenCV算法: {e}")
 
         # OpenCV 传统回退
         

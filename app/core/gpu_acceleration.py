@@ -133,8 +133,8 @@ class GPUDetector:
                         'opencl_available': True,
                         'quicksync_available': False
                     }
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"[GPUAcceleration] PyTorch不可用: {e}")
             
         except Exception as e:
             logger.debug(f"NVIDIA GPU检测失败: {e}")
@@ -215,8 +215,8 @@ class GPUDetector:
                 return int(float(memory_str.replace('KB', '').strip()) / 1024)
             else:
                 return int(memory_str)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[GPUAcceleration] 获取GPU显存失败: {e}")
             return 0
     
     def _merge_gpu_info(self, *infos: Optional[Dict[str, Any]]) -> GPUInfo:

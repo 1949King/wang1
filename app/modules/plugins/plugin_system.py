@@ -88,8 +88,8 @@ def plugin_get_video_info(video_path, ffmpeg_executable):
             # 至少返回文件大小
             size_mb = round(os.path.getsize(video_path) / (1024*1024), 2)
             return f"未知 | {size_mb}MB"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"获取视频文件大小失败，返回未知: {e}")
             return "未知"
 
 @register_plugin("视频剪辑", "视频处理")
@@ -108,11 +108,16 @@ def plugin_video_clip(input_path, output_path, start_time, duration, speed=1.0, 
             "-y",
             output_path
         ]
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             capture_output=True,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
+        # 修复：此前不检查 returncode，ffmpeg 报错也会 return True（假成功）
+        if result.returncode != 0 or not os.path.exists(output_path):
+            stderr = (result.stderr or b"").decode("utf-8", errors="ignore")[-500:]
+            print(f"视频剪辑失败: ffmpeg 返回码 {result.returncode}\n{stderr}")
+            return False
         return True
     except Exception as e:
         print(f"视频剪辑失败: {e}")
@@ -138,7 +143,7 @@ def plugin_video_merge(input_files, output_path, gpu_encoder="libx264", ffmpeg_e
             output_path
         ]
         
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             capture_output=True,
             creationflags=subprocess.CREATE_NO_WINDOW
@@ -148,6 +153,11 @@ def plugin_video_merge(input_files, output_path, gpu_encoder="libx264", ffmpeg_e
         if os.path.exists(list_file):
             os.remove(list_file)
         
+        # 修复：此前不检查 returncode，ffmpeg 报错也会 return True（假成功）
+        if result.returncode != 0 or not os.path.exists(output_path):
+            stderr = (result.stderr or b"").decode("utf-8", errors="ignore")[-500:]
+            print(f"视频合并失败: ffmpeg 返回码 {result.returncode}\n{stderr}")
+            return False
         return True
     except Exception as e:
         print(f"视频合并失败: {e}")

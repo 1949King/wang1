@@ -5,6 +5,8 @@
 """
 
 import json
+import logging
+import os
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
 from PyQt6.QtWidgets import (
@@ -23,6 +25,8 @@ import webbrowser
 
 from .module_registry import get_registry, ModuleTier, reload_registry
 from .base_module import BaseModule
+
+logger = logging.getLogger(__name__)
 
 
 class ModernLineEdit(QLineEdit):
@@ -1108,6 +1112,44 @@ class SettingsModule(BaseModule):
         except Exception as e:
             QMessageBox.warning(self, "导入失败", f"文件格式错误或损坏:\n{str(e)}")
     
+    def _set_windows_autostart(self, enabled: bool) -> bool:
+        """将「开机自动启动」写入 Windows 注册表 Run 键（仅 Windows 生效）。
+
+        修复：此前该开关只是个 UI 摆设，勾选后没有任何系统级效果——用户
+        以为已经设置了开机自启，实际上从没注册过。这里做最小可用的真实
+        实现：写入 HKCU\\...\\Run，取消勾选时删除对应键值。
+        """
+        import sys
+        if sys.platform != "win32":
+            return False
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            app_name = "拾光剪影AI短剧编辑器"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                if enabled:
+                    if getattr(sys, "frozen", False):
+                        cmd = f'"{sys.executable}"'
+                    else:
+                        entry = os.path.abspath(
+                            os.path.join(os.path.dirname(__file__), "..", "..", "..", "main_qt6.py")
+                        )
+                        if not os.path.exists(entry):
+                            entry = os.path.abspath(
+                                os.path.join(os.path.dirname(__file__), "..", "..", "main_qt6.py")
+                            )
+                        cmd = f'"{sys.executable}" "{entry}"'
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
+                else:
+                    try:
+                        winreg.DeleteValue(key, app_name)
+                    except FileNotFoundError:
+                        pass
+            return True
+        except Exception as e:
+            logger.warning(f"设置开机自启动注册表失败: {e}")
+            return False
+
     def _load_settings(self):
         """加载设置"""
         theme = self._settings.value("theme", "dark")
@@ -1142,6 +1184,17 @@ class SettingsModule(BaseModule):
             for action, shortcut in shortcuts.items():
                 if action in self._shortcut_editors:
                     self._shortcut_editors[action].setKeySequence(QKeySequence(shortcut))
+
+        # 修复：常规设置标签页的一批开关此前只保存不加载（或既不保存也不加载），
+        # 每次重启设置页都会回到写死的默认值，用户勾选的状态"看起来"没有生效
+        self._auto_start_check.setChecked(self._settings.value("auto_start", False, type=bool))
+        self._remember_window_check.setChecked(self._settings.value("remember_window", True, type=bool))
+        self._auto_login_check.setChecked(self._settings.value("auto_login", True, type=bool))
+        self._auto_save_check.setChecked(self._settings.value("auto_save", True, type=bool))
+        self._auto_save_interval.setValue(self._settings.value("auto_save_interval", 300, type=int))
+        self._max_threads_spin.setValue(self._settings.value("max_threads", 15, type=int))
+        self._gpu_accel_check.setChecked(self._settings.value("gpu_accel", True, type=bool))
+        self._cache_size_spin.setValue(self._settings.value("cache_size", 1000, type=int))
     
     def _save_settings(self):
         """
@@ -1229,12 +1282,24 @@ class SettingsModule(BaseModule):
         self._settings.setValue("max_threads", self._max_threads_spin.value())
         self._settings.setValue("gpu_accel", self._gpu_accel_check.isChecked())
 
+        # 修复：以下三项此前只创建了控件，_save_settings 里完全没有出现过，
+        # 勾选/调整后无论重启多少次都不会生效——现在补上持久化，
+        # "记住窗口大小和位置" 由 main_window._save_window_geometry 读取，
+        # "缓存大小" 供 cache_system 等读取上限，"开机自动启动" 额外做真实的
+        # 系统级注册（Windows 注册表 Run 键），而不是只存一个没人用的布尔值。
+        self._settings.setValue("remember_window", self._remember_window_check.isChecked())
+        self._settings.setValue("cache_size", self._cache_size_spin.value())
+        auto_start = self._auto_start_check.isChecked()
+        self._settings.setValue("auto_start", auto_start)
+        if not self._set_windows_autostart(auto_start):
+            logger.debug("开机自动启动系统注册未生效（非 Windows 或注册表写入失败）")
+
         # ── 连接自动保存间隔到 ProjectManager ──
         try:
             from core.project_manager import project_manager
             project_manager.autosave_interval = self._auto_save_interval.value()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("自动保存间隔设置失败: %s", e)
 
         # ── 第2步：功能开关持久化（双保险：注册表 + JSON 文件） ──
         # 遍历所有功能开关复选框，调用 registry.toggle() 进行增量比对：
@@ -1649,10 +1714,10 @@ class SettingsModule(BaseModule):
         #    - 回调本模块的 set_theme()（由 _applying 标志位防止二次触发）
         try:
             from .core import EventBus, EventType
-            EventBus.get_instance().emit(EventType.THEME_CHANGED, 
+            EventBus.get_instance().emit(EventType.THEME_CHANGED,
                                          {"theme": theme_key, "resolved_theme": actual_theme}, "settings_module")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("主题变更事件发送失败: %s", e)
         
         # 2. 更新设置面板自身 UI
         self.set_theme(theme_key)
@@ -1889,6 +1954,9 @@ class SettingsModule(BaseModule):
         # 测试按钮
         test_btn = QPushButton("测试连接")
         test_btn.clicked.connect(self._test_smtp_connection)
+        # 修复：_test_smtp_connection 里通过 self._smtp_test_btn 禁用/改文案按钮，
+        # 但此前从未把 test_btn 赋值给该属性，点击测试后必定 AttributeError 崩溃
+        self._smtp_test_btn = test_btn
         test_btn.setStyleSheet("""
             QPushButton {
                 background-color: #1e6bde;
@@ -1985,23 +2053,35 @@ class SettingsModule(BaseModule):
             
             def run(self):
                 import socket
+                import smtplib
+                import ssl
                 start_time = __import__('time').time()
                 try:
-                    # 先做快速 socket 连通性检查
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(3.0)
-                    sock.connect((self._config.host, self._config.port))
-                    sock.close()
-                    
-                    # 连通性通过后保存配置
+                    # 修复真实性问题：此前只做 TCP socket 连通性检查就弹"测试成功"，
+                    # 用户名/密码错误、SSL/TLS 配置错误等真正会导致发信失败的场景
+                    # 完全测不出来。这里改为真正走 smtplib 登录握手（不发送邮件），
+                    # 才能验证账号密码/加密方式是否真的可用。
+                    if self._config.use_ssl:
+                        context = ssl.create_default_context()
+                        with smtplib.SMTP_SSL(self._config.host, self._config.port, timeout=5, context=context) as server:
+                            server.login(self._config.username, self._config.password)
+                    else:
+                        with smtplib.SMTP(self._config.host, self._config.port, timeout=5) as server:
+                            server.starttls()
+                            server.login(self._config.username, self._config.password)
+
                     ok = self._service.save_config(self._config)
                     elapsed = __import__('time').time() - start_time
                     if ok:
-                        self.result.emit(True, f"SMTP配置保存成功（耗时 {elapsed:.1f}秒）")
+                        self.result.emit(True, f"SMTP 登录验证通过并已保存配置（耗时 {elapsed:.1f}秒）")
                     else:
-                        self.result.emit(False, "SMTP配置保存失败，请检查配置信息")
+                        self.result.emit(False, "登录验证通过，但配置保存失败，请检查磁盘权限")
+                except smtplib.SMTPAuthenticationError:
+                    self.result.emit(False, "SMTP 认证失败，请检查用户名和密码（部分服务商需使用「授权码」而非登录密码）")
+                except smtplib.SMTPException as e:
+                    self.result.emit(False, f"SMTP 协议错误: {e}")
                 except socket.timeout:
-                    self.result.emit(False, f"连接超时（超过5秒），请检查SMTP服务器地址和端口")
+                    self.result.emit(False, "连接超时（超过5秒），请检查SMTP服务器地址和端口")
                 except socket.gaierror:
                     self.result.emit(False, f"无法解析主机名: {self._config.host}")
                 except ConnectionRefusedError:
@@ -2095,7 +2175,7 @@ class SettingsModule(BaseModule):
 
         cache_dirs = {
             "render_cache": ["render_cache", "temp_ai_editor", "短剧AI剪辑输出"],
-            "preview_cache": ["preview_cache", ".thumb_cache"],
+            "preview_cache": ["preview_cache", ".thumb_cache", "cache/proxies"],
             "model_cache": ["models", "~/.cache/whisper"],
             "temp_cache": ["temp", ".backup", "temp_ai_editor"],
         }
@@ -2111,8 +2191,8 @@ class SettingsModule(BaseModule):
                 if p.exists():
                     try:
                         total += sum(f.stat().st_size for f in p.rglob('*') if f.is_file())
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("缓存目录大小统计失败: %s", e)
             if total > 0:
                 size_str = self._fmt_size(total)
                 if key in self._cache_labels:
@@ -2139,7 +2219,7 @@ class SettingsModule(BaseModule):
 
         cache_dirs = {
             "render_cache": ["render_cache", "短剧AI剪辑输出"],
-            "preview_cache": ["preview_cache", ".thumb_cache"],
+            "preview_cache": ["preview_cache", ".thumb_cache", "cache/proxies"],
             "model_cache": ["models"],
             "temp_cache": ["temp", ".backup", "temp_ai_editor"],
         }
@@ -2166,8 +2246,8 @@ class SettingsModule(BaseModule):
                             shutil.rmtree(p)
                             p.mkdir(parents=True, exist_ok=True)
                         cleared += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("缓存目录清理失败: %s", e)
 
         QMessageBox.information(self, "完成", f"已清理 {cleared} 个缓存目录")
         self._estimate_cache_sizes()

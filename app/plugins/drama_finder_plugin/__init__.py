@@ -29,14 +29,14 @@ except ImportError:
 # 插件元信息 (符合 PLUGIN_STANDARD.md §1.2)
 PLUGIN_INFO = {
     "name": "短剧筛选",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "author": "官方",
-    "description": "智能筛选热门短剧，分析热度与佣金。支持多平台榜单浏览、多维度筛选、双数据源策略。",
+    "description": "智能筛选热门短剧。静态缓存优先；Playwright 可选启用真爬。仅插件中心入口。",
     "category": "operation",
     "icon": "🎭",
     "entry_point": "Plugin",
-    "dependencies": ["drama_crawler"],
-    "tags": ["短剧", "筛选", "数据分析", "榜单", "佣金"],
+    "dependencies": [],
+    "tags": ["短剧", "筛选", "数据分析", "榜单", "佣金", "爬虫"],
     "compatibility": {
         "min_version": "4.4.0",
         "max_version": "5.9.9"

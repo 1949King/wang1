@@ -434,8 +434,8 @@ class MltFactory:
                 try:
                     plugin_count = len([f for f in os.listdir(repo) if f.endswith(".dll")])
                     logger.info(f"插件目录 DLL 数量: {plugin_count}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[MLTEngineCpp] 统计插件数量失败: {e}")
             else:
                 init_fn(path.encode() if path else None)
                 logger.warning(f"MLT 插件目录无效或未设置: {repo}")
@@ -551,8 +551,8 @@ class MltFactory:
             fn.argtypes = [c_void_p]
             fn.restype = None
             fn(obj)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[MLTEngineCpp] 关闭MLT对象失败: {e}")
 
 
 class MltProperties:
@@ -567,8 +567,8 @@ class MltProperties:
             fn.argtypes = [c_void_p, c_char_p, c_char_p]
             fn.restype = c_int
             fn(ptr, key.encode(), value.encode())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[MLTEngineCpp] 设置属性失败 {key}: {e}")
 
     @staticmethod
     def get(ptr: c_void_p, key: str) -> Optional[str]:
@@ -650,8 +650,8 @@ class MltTrack:
         if self._playlist:
             try:
                 _mlt_call('playlist_close', self._playlist)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngineCpp] 关闭Playlist失败: {e}")
             self._playlist = None
 
 
@@ -1241,8 +1241,8 @@ class MltTimeline:
             from app.core.ffmpeg_utils import detect_hardware_encoders
             hw = detect_hardware_encoders()
             return hw.get("h264", "")
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug(f"[MLTEngineCpp] 导入detect_hardware_encoders失败: {e}")
 
         # 回退：直接 subprocess 检测
         import subprocess
@@ -1348,12 +1348,12 @@ class MltTimeline:
                                 if total > 0:
                                     progress = min(99, pos / total * 100)
                                     progress_cb(progress, f"渲染进度 {progress:.1f}%")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"[MLTEngineCpp] 获取渲染进度失败: {e}")
                         import time
                         time.sleep(0.5)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[MLTEngineCpp] 渲染循环异常: {e}")
 
             # 完成后清理
             _mlt_call('consumer_close', consumer)
@@ -1366,8 +1366,8 @@ class MltTimeline:
             self._add_error(f"render 失败: {_e}")
             try:
                 _mlt_call('playlist_close', playlist)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngineCpp] 渲染失败后关闭playlist失败: {e}")
             return False
 
     def extract_highlights(self, input_path: str, output_dir: str,
@@ -1587,8 +1587,8 @@ class MltTimeline:
         for anim in self._animations.values():
             try:
                 _mlt_call('animation_close', anim)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngineCpp] 清理动画失败: {e}")
         self._animations.clear()
 
         # 清理轨道
@@ -1636,11 +1636,12 @@ def _smoke_test_mlt() -> bool:
         if prod:
             try:
                 MltFactory.close(prod)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngineCpp] Smoke test关闭失败: {e}")
         _mlt_smoke_passed = prof is not None
         return _mlt_smoke_passed
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[MLTEngineCpp] Smoke test异常: {e}")
         _mlt_smoke_passed = False
         return False
 
@@ -1886,8 +1887,8 @@ class CppEngineProxy:
                 inner = getattr(self._cpp, '_engine', None) or self._cpp
                 if hasattr(inner, 'get_last_stats'):
                     return inner.get_last_stats()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MLTEngineCpp] 获取最后统计失败: {e}")
         return None
 
 

@@ -41,10 +41,13 @@ def __getattr__(name: str):
         "AccountOpsModule",
         "CopywritingModule",
         "TasksModule",
-        "DramaFinderModule",
         "PluginsModule",
         "PerformanceModule",
     ):
         from . import modules as _modules
         return getattr(_modules, name)
+    # 拓展中心（升级版插件中心，整合 Skill + MCP）
+    if name == "ExtensionsModule":
+        from .extensions_module import ExtensionsModule
+        return ExtensionsModule
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

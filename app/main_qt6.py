@@ -8,7 +8,7 @@ AI短剧编辑器 - Qt6 主程序入口
 ├── 剪辑模块 (EditorModule) - 轨道、预览、滤镜、字幕
 ├── 文案生成模块 (CopywritingModule) - AI文案、标题、脚本
 ├── 多任务模块 (TasksModule) - 批量处理、任务队列
-├── 短剧筛选模块 (DramaFinderModule) - 剧单、热度、佣金
+├── 短剧筛选（插件 drama_finder_plugin，含 crawler）- 剧单、热度、佣金
 ├── 账号运营模块 (AccountOpsModule) - Skill化运营
 ├── 素材库模块 (MaterialsModule) - 视频、音频、图片管理
 ├── 插件中心模块 (PluginsModule) - 积木管理
@@ -249,8 +249,8 @@ class DependencyChecker:
             ffmpeg_path = find_ffmpeg()
             if ffmpeg_path and os.path.exists(ffmpeg_path):
                 return True
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug(f"find_ffmpeg 导入失败，回退到系统 ffmpeg 检测: {e}")
         
         try:
             import subprocess
@@ -260,8 +260,8 @@ class DependencyChecker:
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             return result.returncode == 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"系统 ffmpeg 检测失败，返回 False: {e}")
             return False
     
     @classmethod
@@ -279,8 +279,8 @@ class DependencyChecker:
                 gpu_info["available"] = True
                 gpu_info["type"] = "Apple Metal"
                 gpu_info["name"] = "Apple GPU"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"GPU 检测失败，按未检测到处理: {e}")
         
         return gpu_info
     
@@ -834,12 +834,22 @@ class Application:
 
 def main():
     """主入口"""
+    # 设置全局异常钩子，捕获未处理的异常
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.critical(f"未处理的异常: {exc_value}", exc_info=(exc_type, exc_value, exc_traceback))
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
+    
+    sys.excepthook = handle_exception
+    
     # 强制 stdout/stderr 使用 UTF-8，避免 GBK emoji 编码错误
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"stdout/stderr 重配置 UTF-8 失败，保持默认编码: {e}")
     
     try:
         app = Application()

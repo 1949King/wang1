@@ -67,8 +67,22 @@ class EventType(Enum):
     ERROR_OCCURRED = "error_occurred"
     
     MATERIAL_TO_TIMELINE = "material_to_timeline"  # 素材库 → 时间线拖拽推送
-    
+
     CUSTOM = "custom"
+
+    # === 统一调用层 & 反馈闭环（新增） ===
+    CAPABILITY_INVOKED = "capability_invoked"            # 调用层开始执行
+    CAPABILITY_COMPLETED = "capability_completed"        # 调用层执行完成
+    AGENT_FEEDBACK_AVAILABLE = "agent_feedback_available"  # 有新反馈可供 Agent 参考
+    AGENT_MARKERS_UPDATED = "agent_markers_updated"        # Agent 反馈标记更新（供 TimelineMarkerLayer 渲染）
+    MEMORY_WRITTEN = "memory_written"                    # 长期记忆写入
+
+    # === Agent 全量双向闭环业务流程（新增） ===
+    PIPELINE_ROUTED = "pipeline_routed"                  # 业务分流完成
+    GENERATION_INSPECTION_FAILED = "generation_inspection_failed"  # AI生成初检失败
+    PREVIEW_VALIDATION_FAILED = "preview_validation_failed"        # 预览校验失败
+    SCORING_COMPLETED = "scoring_completed"              # 五维打分完成
+    EDITING_SCRIPT_GENERATED = "editing_script_generated"  # 剪辑脚本生成
 
 
 @dataclass

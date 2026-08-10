@@ -148,7 +148,7 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "id": "copywriting",
         "name": "文案生成",
         "icon": "✍️",
-        "description": "AI 文案、标题、脚本生成（需要云端或本地 LLM）",
+        "description": "AI 文案/标题/脚本。需在「模型管理」配置 Provider；可选「本地模板（非 AI）」",
         "tier": ModuleTier.ADVANCED,
         "import_module": ".copywriting_module",
         "import_class": "CopywritingModule",
@@ -181,7 +181,7 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "id": "models",
         "name": "模型管理",
         "icon": "🤖",
-        "description": "本地/云端 AI 模型管理与切换",
+        "description": "本地/云端 AI 模型管理与切换（文案/剪辑流水线依赖此处配置）",
         "tier": ModuleTier.ADVANCED,
         "import_module": ".model_management",
         "import_class": "ModelManagementModule",
@@ -190,31 +190,21 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
     },
     {
         "id": "characters",
-        "name": "角色管理",
-        "icon": "👥",
-        "description": "短剧角色库管理（如模块可用）",
+        "name": "AI 画布",
+        "icon": "🎨",
+        "description": "镶嵌 infinite-canvas：角色资产 + 生图/生视频回流剪辑",
         "tier": ModuleTier.ADVANCED,
         "import_module": ".character_management_module",
         "import_class": "CharacterManagementModule",
-        "default_enabled": False,
+        "default_enabled": True,
         "can_disable": True,
-        "optional": True,  # 该模块文件可能不存在，导入失败时静默跳过
+        "optional": True,  # WebEngine / vendor 缺失时仍可导入，界面内提示
     },
 
     # ╔═════════════════════════╗
     # ║ 实验功能 (EXPERIMENTAL) ║ ← 默认关闭，手动开启，不保证稳定
     # ╚═════════════════════════╝
-    {
-        "id": "drama",
-        "name": "短剧筛选",
-        "icon": "🎭",
-        "description": "剧单、热度、佣金筛选（实验性功能）",
-        "tier": ModuleTier.EXPERIMENTAL,
-        "import_module": ".drama_finder_module",
-        "import_class": "DramaFinderModule",
-        "default_enabled": False,
-        "can_disable": True,
-    },
+    # 短剧筛选已改为仅插件入口：app/plugins/drama_finder_plugin（含爬虫引擎）
     {
         "id": "account",
         "name": "账号运营",
@@ -227,15 +217,16 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "can_disable": True,
     },
     {
-        "id": "plugins",
-        "name": "插件中心",
-        "icon": "🧩",
-        "description": "插件/积木加载与管理（实验性）",
+        "id": "extensions",
+        "name": "拓展中心",
+        "icon": "🔌",
+        "description": "Skill 插件 + MCP 服务统一管理（实验性）",
         "tier": ModuleTier.EXPERIMENTAL,
-        "import_module": ".plugins_module",
-        "import_class": "PluginsModule",
+        "import_module": ".extensions_module",
+        "import_class": "ExtensionsModule",
         "default_enabled": True,
         "can_disable": True,
+        "optional": True,
     },
     {
         "id": "performance",
@@ -252,7 +243,7 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "id": "ai_clip_flow",
         "name": "AI 剪辑流水线",
         "icon": "🎞️",
-        "description": "素材导入 → AI分析 → 自动剪辑 → 一键导出全流程编排（实验性）",
+        "description": "素材→分析→自动剪辑编排（实验·半通：需 Ollama/Whisper，默认关）",
         "tier": ModuleTier.EXPERIMENTAL,
         "import_module": ".ai_clip_flow",
         "import_class": "AIClipFlowModule",
@@ -373,6 +364,13 @@ class ModuleRegistry:
                     loaded_from = "merged"
         except Exception as e:
             print(f"[ModuleRegistry] JSON 备份读取失败: {e}")
+
+        # ── 迁移旧模块 ID（plugins → extensions）──
+        # 升级提示：用户之前可能使用旧的 "plugins" 模块 ID
+        # 迁移到新的 "extensions" 模块 ID，保持用户设置不丢失
+        if "plugins" in overrides and "extensions" not in overrides:
+            overrides["extensions"] = overrides.pop("plugins")
+            print("[ModuleRegistry] 已迁移模块设置: plugins → extensions")
 
         self._overrides = overrides
         if overrides:

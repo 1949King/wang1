@@ -114,8 +114,8 @@ class HistoryManager:
         for cb in self._observers:
             try:
                 cb()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[HistoryManager] 通知观察者失败: {e}")
 
     def to_list(self) -> List[Dict]:
         return [{

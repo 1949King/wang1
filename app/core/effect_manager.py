@@ -382,3 +382,8 @@ class EffectManager:
 
 # 全局特效管理器实例
 effect_manager = EffectManager()
+
+
+def get_effect_manager() -> EffectManager:
+    """供 EditorModule 懒加载使用。"""
+    return effect_manager

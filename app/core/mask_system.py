@@ -156,8 +156,8 @@ class Mask:
                 try:
                     dist = distance_transform_edt(mask)
                     mask = np.clip(dist / feather_pixels, 0, 1)
-                except ImportError:
-                    pass
+                except ImportError as e:
+                    logger.debug(f"[MaskSystem] scipy不可用: {e}")
         # 反相
         if inverted:
             mask = 1.0 - mask

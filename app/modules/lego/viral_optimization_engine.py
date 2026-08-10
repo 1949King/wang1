@@ -12,6 +12,9 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Platform(Enum):
@@ -130,6 +133,9 @@ class ViralOptimizationEngine:
     }
     
     # 爆款基因库
+    # 如实说明：下列 success_rate 是基于短剧行业经验总结的启发式估值
+    # （编辑规则库），不是从真实播放数据统计出来的实测成功率，请勿当作
+    # 精确的历史数据指标展示给用户；用途是给同类套路排个大致优先级。
     VIRAL_GENES_LIBRARY = [
         ViralGenes(
             pattern_name="黄金3秒钩子",
@@ -177,8 +183,10 @@ class ViralOptimizationEngine:
     
     def __init__(self):
         """初始化引擎"""
-        print("🚀 爆款优化引擎初始化完成")
-        print(f"   已加载 {len(self.VIRAL_GENES_LIBRARY)} 种爆款基因模式")
+        try:
+            print(f"[ViralOptimizationEngine] ready, genes={len(self.VIRAL_GENES_LIBRARY)}")
+        except Exception as e:
+            logger.debug("ViralOptimizationEngine初始化日志输出失败: %s", e)
     
     def predict_performance(self, features: VideoFeatures, 
                            platform: Platform = Platform.DOUYIN) -> PerformancePrediction:

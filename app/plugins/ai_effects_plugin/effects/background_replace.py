@@ -3,10 +3,14 @@ AI背景替换效果模块
 基于语义分割的智能背景替换，支持多种背景类型
 """
 
+import logging
+
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, Tuple
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 class BackgroundReplaceEffect:
@@ -79,9 +83,9 @@ class BackgroundReplaceEffect:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
-                pass
-            
+            except Exception as e:
+                logger.debug(f"清理GPU缓存时失败: {e}")
+
             print("[背景替换] 模型已卸载")
     
     def replace_background(self, 
@@ -145,8 +149,8 @@ class BackgroundReplaceEffect:
                 mask = self._neural_engine.segment(image)
                 if mask is not None:
                     return mask
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"神经网络前景分割失败，回退传统算法: {e}")
         h, w = image.shape[:2]
         
         try:

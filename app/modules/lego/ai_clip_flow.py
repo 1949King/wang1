@@ -400,12 +400,17 @@ class AIClipFlowModule(QWidget):
         # 音效
         fx_group = QGroupBox("音效增强")
         fx_layout = QVBoxLayout(fx_group)
+        # 修复：这两项此前收进 settings、也在完成摘要里显示"是/否"，
+        # 但流水线里从未真正调用 TTS/音效引擎处理，勾选了也不会有实际效果——
+        # 用橙色+提示标注为未实现，避免误导用户以为已生效
         self._funclip_narration = QCheckBox("AI 旁白解说")
-        self._funclip_narration.setStyleSheet("color: #ffffff;")
+        self._funclip_narration.setStyleSheet("color: #ff9800;")
+        self._funclip_narration.setToolTip("暂未实现：目前仅记录勾选状态，不会真正生成/合成旁白语音")
         fx_layout.addWidget(self._funclip_narration)
         self._funclip_sfx = QCheckBox("智能音效（掌声/笑声/紧张音等）")
         self._funclip_sfx.setChecked(True)
-        self._funclip_sfx.setStyleSheet("color: #ffffff;")
+        self._funclip_sfx.setStyleSheet("color: #ff9800;")
+        self._funclip_sfx.setToolTip("暂未实现：目前仅记录勾选状态，不会真正插入音效")
         fx_layout.addWidget(self._funclip_sfx)
         layout.addWidget(fx_group)
         layout.addStretch()
@@ -437,7 +442,8 @@ class AIClipFlowModule(QWidget):
         enhance_layout.addWidget(self._vf_4k)
         self._vf_skin = QCheckBox("肤色矫正")
         self._vf_skin.setChecked(True)
-        self._vf_skin.setStyleSheet("color: #ffffff;")
+        self._vf_skin.setStyleSheet("color: #ff9800;")
+        self._vf_skin.setToolTip("暂未实现：目前仅记录勾选状态，不会真正调整肤色")
         enhance_layout.addWidget(self._vf_skin)
         self._vf_stabilize = QCheckBox("动态防抖")
         self._vf_stabilize.setChecked(True)
@@ -486,7 +492,8 @@ class AIClipFlowModule(QWidget):
         protect_layout = QVBoxLayout(protect_group)
         self._lora_copyright = QCheckBox("版权检测（自动识别受保护音乐/画面并替换）")
         self._lora_copyright.setChecked(True)
-        self._lora_copyright.setStyleSheet("color: #ffffff;")
+        self._lora_copyright.setStyleSheet("color: #ff9800;")
+        self._lora_copyright.setToolTip("暂未实现：目前不会真正检测/替换受保护素材，仅在摘要里如实标注为未生效")
         protect_layout.addWidget(self._lora_copyright)
         self._lora_face = QCheckBox("明星脸替换（AI 生成相似路人脸代替）")
         self._lora_face.setStyleSheet("color: #ff9800;")
@@ -497,7 +504,8 @@ class AIClipFlowModule(QWidget):
         protect_layout.addWidget(self._lora_logo)
         self._lora_bgm = QCheckBox("BGM 版权替换")
         self._lora_bgm.setChecked(True)
-        self._lora_bgm.setStyleSheet("color: #ffffff;")
+        self._lora_bgm.setStyleSheet("color: #ff9800;")
+        self._lora_bgm.setToolTip("暂未实现：目前不会真正替换 BGM，仅记录勾选状态")
         protect_layout.addWidget(self._lora_bgm)
         layout.addWidget(protect_group)
         
@@ -708,18 +716,18 @@ class AIClipFlowModule(QWidget):
                 if i == 0:
                     current_output = self._step_autoclip(settings, vp, work_dir, base_name, current_output, progress, results)
                 elif i == 1:
-                    current_output = self._step_funclip(settings, vp, work_dir, base_name, current_output, progress, results)
+                    current_output = self._step_funclip(settings, vp, work_dir, base_name, output_base, current_output, progress, results)
                 elif i == 2:
-                    current_output = self._step_videofusion(settings, vp, work_dir, base_name, current_output, progress, results)
+                    current_output = self._step_videofusion(settings, vp, work_dir, base_name, output_base, current_output, progress, results)
                 elif i == 3:
-                    current_output = self._step_lora_edit(settings, vp, work_dir, base_name, current_output, progress, results)
+                    current_output = self._step_lora_edit(settings, vp, work_dir, base_name, output_base, current_output, progress, results)
                 elif i == 4:
                     self._step_cover_title(settings, vp, work_dir, base_name, current_output, progress, results)
 
                 progress.setValue(i + 1)
 
             # ── 最终汇总 ──
-            self._finalize_clip_flow(settings, results, current_output, progress, all_ok, steps)
+            self._finalize_clip_flow(settings, results, base_name, current_output, progress, all_ok, steps)
 
         except Exception as e:
             import traceback
@@ -879,6 +887,10 @@ class AIClipFlowModule(QWidget):
             summary_lines.append(
                 f"   高光片段: {highlight_count}个 → {highlight_preview}"
             )
+            # 如实说明：这一步只做分析和高光识别，并不会把原片剪到这些高光片段——
+            # 后续步骤处理的仍是完整原片。之前的文案容易让人误以为"分析完成"=已出片。
+            if highlight_count > 0:
+                summary_lines.append("   ⚠️ 注意：高光片段仅供参考，本流程暂不会自动剪切到这些片段，后续步骤处理的是完整原片")
             if gene_names:
                 summary_lines.append(
                     f"   病毒基因: {', '.join(gene_names)} (综合分: {viral_score:.0f})"
@@ -903,10 +915,13 @@ class AIClipFlowModule(QWidget):
             except Exception:
                 results["autoclip"] = current_output
             progress.setLabelText(f"⚠️ AutoClip AI分析失败，已回退基础分析\n   {str(e)[:100]}")
+        # 修复：此前函数结尾没有 return，调用方 current_output = self._step_autoclip(...)
+        # 每次都会拿到 None，导致后续步骤全部在处理不存在的文件
+        return current_output
     # Step 2: FunClip — BGM + 音频处理 (v2.0: 消费AI策略)
 
 
-    def _step_funclip(self, settings, vp, work_dir, base_name, current_output, progress, results):
+    def _step_funclip(self, settings, vp, work_dir, base_name, output_base, current_output, progress, results):
         """Step 2: FunClip — 消费AI策略驱动的 BGM 智能混音与字幕生成。"""
         fc = settings["funclip"]
         step_output = output_base + "_funclip.mp4"
@@ -958,16 +973,20 @@ class AIClipFlowModule(QWidget):
                 f"✅ FunClip 完成",
                 f"   BGM: {fc.bgm_type} {'(AI推荐: '+ai_bgm_style+')' if ai_bgm_style and ai_bgm_style != fc.bgm_type else ''} (音量 {fc.bgm_volume:.0%})",
                 f"   字幕样式: {fc.subtitle_style} {'(AI推荐: '+ai_subtitle+')' if ai_subtitle and ai_subtitle != fc.subtitle_style else ''} | 字体: {fc.subtitle_font}",
-                f"   旁白: {'是' if fc.add_narration else '否'} | 音效: {'是' if fc.add_sound_effects else '否'}",
             ]
+            # 旁白/音效目前未实现真实处理，只有勾选时才提示"暂未生效"，避免暗示已完成
+            if fc.add_narration or fc.add_sound_effects:
+                funclip_summary.append("   ⚠️ 旁白/音效：暂未实现真实生成，已勾选项未生效")
             progress.setLabelText("\n".join(funclip_summary))
         except Exception as e:
             progress.setLabelText(f"⚠️ FunClip 部分完成\n   {str(e)[:80]}")
             results["funclip"] = current_output
+        # 修复：此前无 return，current_output 每次都被置为 None
+        return current_output
     # Step 3: VideoFusion — 画质优化
 
 
-    def _step_videofusion(self, settings, vp, work_dir, base_name, current_output, progress, results):
+    def _step_videofusion(self, settings, vp, work_dir, base_name, output_base, current_output, progress, results):
         """Step 3: VideoFusion — 画质增强(超分/防抖/调色/尺寸调整)。"""
         vf = settings["videofusion"]
         step_output = output_base + "_enhanced.mp4"
@@ -1019,10 +1038,12 @@ class AIClipFlowModule(QWidget):
         except Exception as e:
             progress.setLabelText(f"⚠️ VideoFusion 部分完成\n   {str(e)[:80]}")
             results["videofusion"] = current_output
+        # 修复：此前无 return，current_output 每次都被置为 None
+        return current_output
     # Step 4: LoRA Edit — 水印/版权保护
 
 
-    def _step_lora_edit(self, settings, vp, work_dir, base_name, current_output, progress, results):
+    def _step_lora_edit(self, settings, vp, work_dir, base_name, output_base, current_output, progress, results):
         """Step 4: LoRA Edit — 水印/引流贴纸与版权保护。"""
         lr = settings["lora"]
         step_output = output_base + "_lora.mp4"
@@ -1042,8 +1063,13 @@ class AIClipFlowModule(QWidget):
             if lr.logo_blur:
                 operations.append({"type": "logo_removal"})
                 protections.append("Logo遮挡")
+            # 版权检测/BGM替换目前没有真实实现（无检测算法、无替换逻辑），
+            # 之前直接拼进"保护"列表会让用户误以为已生效，这里如实分开提示
+            not_implemented = []
             if lr.copyright_detection:
-                protections.append("版权检测")
+                not_implemented.append("版权检测")
+            if lr.bgm_replacement:
+                not_implemented.append("BGM版权替换")
             if operations:
                 vp.process(
                     current_output, step_output, operations,
@@ -1053,14 +1079,19 @@ class AIClipFlowModule(QWidget):
                 )
                 current_output = step_output
             results["lora"] = current_output
-            progress.setLabelText(
-                f"✅ LoRA Edit 完成\n"
-                f"   保护: {', '.join(protections) if protections else '无'}\n"
-                f"   贴纸位置: {lr.sticker_position} | BGM替换: {'是' if lr.bgm_replacement else '否'}"
-            )
+            summary_lines = [
+                f"✅ LoRA Edit 完成",
+                f"   保护: {', '.join(protections) if protections else '无'}",
+                f"   贴纸位置: {lr.sticker_position}",
+            ]
+            if not_implemented:
+                summary_lines.append(f"   ⚠️ 暂未实现真实处理: {', '.join(not_implemented)}")
+            progress.setLabelText("\n".join(summary_lines))
         except Exception as e:
             progress.setLabelText(f"⚠️ LoRA Edit 部分完成\n   {str(e)[:80]}")
             results["lora"] = current_output
+        # 修复：此前无 return，current_output 每次都被置为 None
+        return current_output
     # Step 5: 封面标题 — AI 生成 (v2.0: 消费剧集分析)
 
 
@@ -1159,7 +1190,7 @@ class AIClipFlowModule(QWidget):
             progress.setLabelText(f"⚠️ 封面标题 部分完成\n   {str(e)[:80]}")
 
 
-    def _finalize_clip_flow(self, settings, results, current_output, progress, all_ok, steps):
+    def _finalize_clip_flow(self, settings, results, base_name, current_output, progress, all_ok, steps):
         """流程结束后的汇总、文件落盘与事件总线广播。"""
         # ── 最终汇总 ──
         if all_ok and not progress.wasCanceled():

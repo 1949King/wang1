@@ -125,8 +125,8 @@ class LRUCache(Generic[T]):
     def _estimate_size(self, value: Any) -> int:
         try:
             return len(pickle.dumps(value))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[CacheSystem] LRUCache._estimate_size 失败: {e}")
             return 0
     
     def stats(self) -> Dict[str, Any]:
@@ -217,8 +217,8 @@ class LFUCache(Generic[T]):
     def _estimate_size(self, value: Any) -> int:
         try:
             return len(pickle.dumps(value))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[CacheSystem] LFUCache._estimate_size 失败: {e}")
             return 0
     
     def stats(self) -> Dict[str, Any]:
@@ -232,6 +232,28 @@ class LFUCache(Generic[T]):
             "misses": self._misses,
             "hit_rate": f"{hit_rate:.2%}",
         }
+
+
+class _SafeUnpickler(pickle.Unpickler):
+    """安全反序列化器 (VG070 修复)
+
+    限制 pickle.load 可加载的类，防止恶意缓存文件执行任意代码。
+    仅允许内置基本类型和常见安全模块；复杂自定义对象会触发异常，
+    被调用方 except 捕获后返回 None（缓存降级为未命中，安全回退）。
+    """
+    # 允许的模块白名单（基本数据类型 + 常见容器/时间/路径）
+    _ALLOWED_MODULES = frozenset({
+        "builtins", "collections", "collections.abc",
+        "datetime", "pathlib", "decimal", "fractions",
+    })
+
+    def find_class(self, module: str, name: str):
+        """仅允许白名单内的模块加载类，其余一律拒绝"""
+        if module in self._ALLOWED_MODULES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"安全限制: 禁止反序列化 {module}.{name}"
+        )
 
 
 class DiskCache:
@@ -252,8 +274,8 @@ class DiskCache:
             try:
                 with open(index_path, 'r', encoding='utf-8') as f:
                     self._index = json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[CacheSystem] 加载缓存索引失败: {e}")
                 self._index = {}
     
     def _save_index(self):
@@ -285,7 +307,8 @@ class DiskCache:
             
             try:
                 with open(path, 'rb') as f:
-                    return pickle.load(f)
+                    # 安全修复 VG070: 用受限反序列化器替代 pickle.load，防止任意代码执行
+                    return _SafeUnpickler(f).load()
             except Exception as e:
                 logger.error(f"读取缓存失败: {e}")
                 return None
@@ -364,9 +387,8 @@ class DiskCache:
                 try:
                     if path.exists():
                         path.unlink()
-                except Exception:
-                    pass
-                    pass
+                except Exception as e:
+                    logger.debug(f"[CacheSystem] 删除缓存文件失败 {path}: {e}")
             self._index.clear()
             self._save_index()
     
@@ -388,7 +410,14 @@ class HybridCache:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls, *args, **kwargs)
+                    # 修复：`object.__new__` 不接受除 cls 外的额外参数——当
+                    # 构造时带了 disk_max_mb 等关键字参数（例如
+                    # `HybridCache(disk_max_mb=...)`）时，原样转发
+                    # *args/**kwargs 给 super().__new__ 会直接 TypeError，
+                    # 导致本模块在 import 阶段崩溃（全局单例 hybrid_cache
+                    # 构造失败 → app/core/__init__ 崩溃 → 应用无法启动）。
+                    # object.__new__ 只需要 cls，不需要业务参数。
+                    cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
     
@@ -588,4 +617,20 @@ def cached(ttl: int = 300, key_prefix: str = "", persist: bool = False):
     return decorator
 
 
-hybrid_cache = HybridCache()
+def _read_configured_disk_cache_mb(default_mb: int = 2048) -> int:
+    """读取设置页「缓存大小」配置的磁盘缓存上限（MB）。
+
+    修复：设置页的"缓存大小"输入框此前只写入 QSettings，从没有任何
+    地方读取过——磁盘缓存实际上限永远是写死的 2048MB，调这个数字
+    毫无效果。这里在构造全局单例前尝试读取用户配置；读取失败（例如
+    QSettings/Qt 尚不可用）时静默回退默认值，不影响缓存系统正常启动。
+    """
+    try:
+        from PyQt6.QtCore import QSettings
+        value = QSettings("拾光剪影", "Settings").value("cache_size", default_mb, type=int)
+        return int(value) if value else default_mb
+    except Exception:
+        return default_mb
+
+
+hybrid_cache = HybridCache(disk_max_mb=_read_configured_disk_cache_mb())

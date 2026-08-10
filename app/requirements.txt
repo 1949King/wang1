@@ -1,7 +1,10 @@
 # AI 短剧编辑器 - 依赖清单 (SSOT: app/main_qt6.py DependencyChecker)
-# 修复 P0-B: requirements.txt 与代码栈错位 (原文件写 PyQt5)
-# 安装方式: pip install -r requirements.txt
-# 可选依赖: pip install -r requirements-optional.txt
+# 安装方式:
+#   1) 推荐: powershell -ExecutionPolicy Bypass -File scripts\setup_deps.ps1
+#   2) 或:   pip install -r app/requirements.txt
+#            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# 可选依赖: pip install -r app/requirements-optional.txt
+# Whisper 模型默认走镜像: set HF_ENDPOINT=https://hf-mirror.com
 
 # ============== 必需依赖 (REQUIRED) ==============
 PyQt6>=6.6.0
@@ -9,9 +12,12 @@ PyQt6-Qt6>=6.6.0
 PyQt6-sip>=13.6.0
 moviepy>=1.0.3
 opencv-python-headless>=4.8.0
-torch>=2.0.0
+# torch / torchvision / torchaudio 请用 CUDA wheel（见上方 cu124 命令），勿用默认 CPU 源覆盖
 transformers>=4.30.0
 faster-whisper>=1.0.0
 easyocr>=1.7.0
 Pillow>=10.0.0
 numpy>=1.24.0
+librosa>=0.10.0
+imageio-ffmpeg>=0.4.0
+onnxruntime>=1.14.0

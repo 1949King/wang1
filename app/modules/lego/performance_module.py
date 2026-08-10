@@ -293,8 +293,8 @@ class PerformanceModule(BaseModule):
                             for bt in queue.tasks:
                                 if bt.status.value in ("running",):
                                     active_count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("获取活跃任务数失败: %s", e)
                 if active_count > 0:
                     tasks = f"{active_count}活跃"
                 else:
@@ -307,8 +307,8 @@ class PerformanceModule(BaseModule):
         cpu, mem, gpu, tasks_val = ("--", "--", "--", "--")
         try:
             cpu, mem, gpu, tasks_val = _poll()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("性能数据采集失败: %s", e)
 
         if "cpu" in self._stat_labels:
             self._stat_labels["cpu"].setText(cpu)
@@ -481,8 +481,8 @@ class PerformanceModule(BaseModule):
             try:
                 from app.core.render_manager import get_render_manager
                 mgr = get_render_manager()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("获取 RenderManager 实例失败: %s", e)
             if mgr is None:
                 return
 
@@ -544,11 +544,11 @@ class PerformanceModule(BaseModule):
                     elif values:
                         parts.append(f"GPU: {values[0]}%")
                 return "\n".join(parts) if parts else "N/A"
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        
+        except FileNotFoundError as e:
+            logger.debug("nvidia-smi 未安装: %s", e)
+        except Exception as e:
+            logger.debug("NVIDIA GPU 查询异常: %s", e)
+
         # ── AMD GPU (rocm-smi) ──
         try:
             result = subprocess.run(
@@ -557,11 +557,11 @@ class PerformanceModule(BaseModule):
             )
             if result.returncode == 0 and "GPU" in result.stdout:
                 return "AMD GPU (已检测)"
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        
+        except FileNotFoundError as e:
+            logger.debug("rocm-smi 未安装: %s", e)
+        except Exception as e:
+            logger.debug("AMD GPU 查询异常: %s", e)
+
         # ── Intel GPU ──
         try:
             result = subprocess.run(
@@ -570,11 +570,11 @@ class PerformanceModule(BaseModule):
             )
             if result.returncode == 0 and result.stdout.strip():
                 return "Intel GPU (已检测)"
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        
+        except FileNotFoundError as e:
+            logger.debug("intel_gpu_top 未安装: %s", e)
+        except Exception as e:
+            logger.debug("Intel GPU 查询异常: %s", e)
+
         return "N/A"
 
     def on_activated(self):

@@ -620,8 +620,8 @@ class LLMEditor:
                 for cb in self._on_executed_callbacks:
                     try:
                         cb(cmd, result)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[LLMEditor] 执行回调失败: {e}")
             except Exception as e:
                 logger.error(f"[LLMEditor] 执行 {cmd.action} 失败: {e}")
                 results.append({
@@ -861,8 +861,14 @@ class LLMEditor:
             time_sec = p.get("time", 0)
             prop = p.get("property", "")
             value = p.get("value", 0)
-            if cid:
-                tm.add_keyframe(timeline_id, cid, time_sec, prop, value)
+            # 修复：此前 cid 解析失败（未找到第 clip_index 个片段）时，
+            # if cid 分支被跳过、tm.add_keyframe 根本没被调用，但下面的
+            # return 语句在 if 块之外、无条件 success=True——用户会看到
+            # "关键帧已添加"，但时间线上什么都没发生。
+            if not cid:
+                return {"action": cmd.action, "success": False,
+                        "message": f"未找到第{clip_index + 1 if isinstance(clip_index, int) else clip_index}个片段，关键帧未添加"}
+            tm.add_keyframe(timeline_id, cid, time_sec, prop, value)
             return {"action": cmd.action, "success": True, "message": f"关键帧已添加: {prop}"}
 
         elif cmd.action == "ripple_delete":
@@ -873,9 +879,16 @@ class LLMEditor:
             return {"action": cmd.action, "success": True, "message": "波纹删除完成"}
 
         elif cmd.action == "undo":
+            # 如实说明：TimelineManager 未提供任何真正的反向操作/快照回滚接口
+            # （见 app/core/timeline_manager.py，无 undo/redo 方法），这里只能
+            # 把最近一批指令从本地历史里弹出——时间线上已经生效的修改
+            # （加片段/删片段/变速等）不会被撤销。此前消息写"已撤销"容易让人
+            # 误以为时间线已经真的回退了。
             if self._command_history:
                 self._command_history.pop()
-                return {"action": cmd.action, "success": True, "message": "已撤销"}
+                return {"action": cmd.action, "success": True,
+                        "message": "已从操作历史中移除最近一条记录（时间线上的实际改动未回滚，"
+                                    "TimelineManager 暂不支持真正撤销）"}
             return {"action": cmd.action, "success": False, "message": "没有可撤销的操作"}
 
         elif cmd.action == "info" or cmd.action == "answer":

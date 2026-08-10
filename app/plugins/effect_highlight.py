@@ -3,12 +3,16 @@
 带货场景的高亮特效
 """
 
+import logging
+
 import numpy as np
 from typing import Dict, Any
 
 from core.plugin_loader import (
     IEffectPlugin, PluginInfo, PluginType, PluginCategory
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Plugin(IEffectPlugin):
@@ -95,8 +99,8 @@ class Plugin(IEffectPlugin):
                 from scipy.ndimage import gaussian_filter
                 glow_layer = gaussian_filter(result, sigma=10)
                 result = result * (1 - glow) + glow_layer * glow
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"scipy未安装，跳过高斯光晕处理: {e}")
         
         result = np.clip(result, 0, 255).astype(np.uint8)
         return result

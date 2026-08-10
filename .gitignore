@@ -87,3 +87,7 @@ _verify/*.txt
 app/cache/
 assets/cache/
 
+# SQLite journal files
+*.db-shm
+*.db-wal
+

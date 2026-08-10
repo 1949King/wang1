@@ -140,10 +140,10 @@ class BilibiliPlaywrightAPI(PlatformAPI):
                                 for item in items:
                                     if isinstance(item, dict):
                                         intercepted_data.append(item)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logger.debug(f"[BilibiliPlaywright] 解析响应体失败: {e}")
+            except Exception as e:
+                logger.debug(f"[BilibiliPlaywright] 响应拦截异常: {e}")
 
         for attempt in range(max_retries + 1):
             try:
@@ -167,8 +167,8 @@ class BilibiliPlaywrightAPI(PlatformAPI):
                 if page:
                     try:
                         page.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[BilibiliPlaywright] 关闭页面失败: {e}")
                     page = None
                 if attempt >= max_retries:
                     return None
@@ -186,8 +186,8 @@ class BilibiliPlaywrightAPI(PlatformAPI):
         if page:
             try:
                 page.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[BilibiliPlaywright] 关闭页面失败: {e}")
 
         return dramas if dramas else None
 

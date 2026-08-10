@@ -6,6 +6,15 @@ import numpy as np
 class Plugin:
     name = "缩放转场"
     version = "1.0.0"
+    description = "从中心放大/缩小过渡"
+    author = "官方"
+
+    def initialize(self, context=None):
+        return True
+
+    def run(self, *args, **kwargs):
+        return True
+
 
     def apply(self, from_frame: np.ndarray, to_frame: np.ndarray, progress: float,
               direction: str = "in") -> np.ndarray:

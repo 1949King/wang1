@@ -209,8 +209,8 @@ class LogManager:
             if log_file.stat().st_mtime < cutoff:
                 try:
                     log_file.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[LogManager] 删除旧日志失败 {log_file}: {e}")
     
     def get_stats(self) -> Dict[str, Any]:
         return {

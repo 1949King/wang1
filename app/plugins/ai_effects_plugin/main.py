@@ -1,9 +1,10 @@
 """
 AI特效制作插件 - 主逻辑模块
 实现IEffectPlugin接口，提供完整的AI特效处理能力
+
+特效子模块懒加载：导入 Plugin 本身不因缺 torch/模型而整包失败。
 """
 
-import numpy as np
 import json
 from typing import Dict, Any, List, Optional, Callable
 from enum import Enum
@@ -19,15 +20,17 @@ except ImportError:
     # 兼容不同导入路径
     from core.plugin_loader import IEffectPlugin, PluginInfo, PluginType, PluginCategory
 
-# 导入UI组件
-from .ui.ai_effects_widget import AIEffectsWidget
+# UI 懒加载（避免顶层 import 拖垮整包）
+AIEffectsWidget = None
 
-# 导入各AI特效模块
-from .effects.style_transfer import StyleTransferEffect
-from .effects.background_replace import BackgroundReplaceEffect
-from .effects.super_resolution import SuperResolutionEffect
-from .effects.beauty_filter import BeautyFilterEffect
-from .effects.object_removal import ObjectRemovalEffect
+
+def _load_ai_effects_widget():
+    global AIEffectsWidget
+    if AIEffectsWidget is not None:
+        return AIEffectsWidget
+    from .ui.ai_effects_widget import AIEffectsWidget as _W
+    AIEffectsWidget = _W
+    return AIEffectsWidget
 
 
 class AIEffectType(Enum):
@@ -74,6 +77,17 @@ class Plugin(IEffectPlugin):
             }
             self._context: Dict[str, Any] = {}
             self._callbacks: Dict[str, Callable] = {}
+            self._last_error: str = ""
+            info = self.plugin_info
+            self.name = info.name
+            self.version = info.version
+            self.description = (info.description or "").split("\n")[0]
+
+    def run(self, **kwargs) -> bool:
+        """PluginManager 兼容入口。"""
+        if not self._initialized:
+            return self.initialize(kwargs.get("context") or self._context or {})
+        return True
     
     @property
     def plugin_info(self) -> PluginInfo:
@@ -110,12 +124,13 @@ class Plugin(IEffectPlugin):
             bool: 初始化是否成功
         """
         try:
-            self._context = context
+            self._context = context or {}
+            self._last_error = ""
             
             # 解析上下文参数
-            models_path = context.get('models_path', './models/ai_effects')
-            gpu_enabled = context.get('gpu_enabled', True)
-            cache_dir = context.get('cache_dir', './cache/ai_effects')
+            models_path = self._context.get('models_path', './models/ai_effects')
+            gpu_enabled = self._context.get('gpu_enabled', True)
+            cache_dir = self._context.get('cache_dir', './cache/ai_effects')
             
             # 确保目录存在
             os.makedirs(models_path, exist_ok=True)
@@ -125,7 +140,7 @@ class Plugin(IEffectPlugin):
             print(f"[AI特效] 模型路径: {models_path}")
             print(f"[AI特效] 缓存路径: {cache_dir}")
             
-            # 初始化所有特效处理器
+            # 初始化所有特效处理器（懒导入）
             self._init_effect_processors(models_path, gpu_enabled, cache_dir)
             
             self._initialized = True
@@ -133,46 +148,39 @@ class Plugin(IEffectPlugin):
             return True
             
         except Exception as e:
+            self._last_error = str(e)
             print(f"[AI特效] ❌ 初始化失败: {str(e)}")
             return False
     
     def _init_effect_processors(self, models_path: str, gpu_enabled: bool, cache_dir: str):
-        """初始化所有特效处理器"""
-        
-        # 风格迁移
-        self._effects[AIEffectType.STYLE_TRANSFER] = StyleTransferEffect(
-            models_path=os.path.join(models_path, 'style_transfer'),
-            gpu_enabled=gpu_enabled,
-            cache_dir=cache_dir
-        )
-        
-        # 背景替换
-        self._effects[AIEffectType.BACKGROUND_REPLACE] = BackgroundReplaceEffect(
-            models_path=os.path.join(models_path, 'background_seg'),
-            gpu_enabled=gpu_enabled,
-            cache_dir=cache_dir
-        )
-        
-        # 超分辨率
-        self._effects[AIEffectType.SUPER_RESOLUTION] = SuperResolutionEffect(
-            models_path=os.path.join(models_path, 'sr'),
-            gpu_enabled=gpu_enabled,
-            cache_dir=cache_dir
-        )
-        
-        # 智能美颜
-        self._effects[AIEffectType.BEAUTY_FILTER] = BeautyFilterEffect(
-            models_path=os.path.join(models_path, 'beauty'),
-            gpu_enabled=gpu_enabled,
-            cache_dir=cache_dir
-        )
-        
-        # 物体移除
-        self._effects[AIEffectType.OBJECT_REMOVAL] = ObjectRemovalEffect(
-            models_path=os.path.join(models_path, 'inpainting'),
-            gpu_enabled=gpu_enabled,
-            cache_dir=cache_dir
-        )
+        """初始化所有特效处理器（逐个尝试，单个失败不阻断其它）"""
+        loaders = [
+            (AIEffectType.STYLE_TRANSFER, "style_transfer", "StyleTransferEffect", "style_transfer"),
+            (AIEffectType.BACKGROUND_REPLACE, "background_replace", "BackgroundReplaceEffect", "background_seg"),
+            (AIEffectType.SUPER_RESOLUTION, "super_resolution", "SuperResolutionEffect", "sr"),
+            (AIEffectType.BEAUTY_FILTER, "beauty_filter", "BeautyFilterEffect", "beauty"),
+            (AIEffectType.OBJECT_REMOVAL, "object_removal", "ObjectRemovalEffect", "inpainting"),
+        ]
+        errors = []
+        for effect_type, mod_name, cls_name, subdir in loaders:
+            try:
+                mod = __import__(
+                    f"app.plugins.ai_effects_plugin.effects.{mod_name}",
+                    fromlist=[cls_name],
+                )
+                cls = getattr(mod, cls_name)
+                self._effects[effect_type] = cls(
+                    models_path=os.path.join(models_path, subdir),
+                    gpu_enabled=gpu_enabled,
+                    cache_dir=cache_dir,
+                )
+            except Exception as e:
+                errors.append(f"{effect_type.value}: {e}")
+                print(f"[AI特效] 特效 {effect_type.value} 加载失败: {e}")
+        if errors and not self._effects:
+            raise RuntimeError("全部特效子模块加载失败: " + "; ".join(errors))
+        if errors:
+            self._last_error = "部分特效不可用: " + "; ".join(errors)
     
     def shutdown(self) -> bool:
         """
@@ -494,13 +502,19 @@ class Plugin(IEffectPlugin):
             
             # 根据特效类型应用处理
             result = self._apply_specific_effect(processor, frame_data, params)
-            
+            self._last_error = ""
+
             return result
             
         except Exception as e:
             print(f"[AI特效] ❌ 应用特效失败: {str(e)}")
             import traceback
             traceback.print_exc()
+            # 修复：此前失败只打印+原样返回输入帧，调用方（UI 线程）拿到"结果"后
+            # 会走完成路径弹"✅ 特效应用完成"，用户根本不知道其实什么都没处理。
+            # 这里记录到 _last_error，UI 侧据此判断是否要提示失败，同时仍返回
+            # frame_data 保证批处理/流水线场景不会因为一帧失败而整体中断。
+            self._last_error = str(e)
             return frame_data
     
     def _apply_specific_effect(self, processor: Any, frame_data: Any, params: Dict[str, Any]) -> Any:

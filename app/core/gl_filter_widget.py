@@ -22,6 +22,8 @@ from PyQt6.QtOpenGL import (
     QOpenGLTexture,
     QOpenGLBuffer,
     QOpenGLVertexArrayObject,
+    QOpenGLVersionFunctionsFactory,
+    QOpenGLVersionProfile,
 )
 
 from modules.utils.logger import logger
@@ -61,6 +63,7 @@ precision mediump float;
 
 varying vec2 v_uv;
 uniform sampler2D u_tex;
+uniform sampler2D u_lut;
 uniform vec2 u_texel;
 uniform int u_filter;
 uniform float u_intensity;
@@ -75,8 +78,26 @@ uniform float u_sharpen;
 uniform float u_blur;
 uniform float u_vignette;
 uniform float u_opacity;
+uniform float u_lut_size;
+uniform float u_lut_intensity;
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+vec3 applyLut2D(vec3 c) {
+    float s = max(u_lut_size, 2.0);
+    float blue = clamp(c.b, 0.0, 1.0) * (s - 1.0);
+    float b0 = floor(blue);
+    float b1 = min(b0 + 1.0, s - 1.0);
+    float bf = blue - b0;
+    float r = clamp(c.r, 0.0, 1.0) * (s - 1.0) + 0.5;
+    float g = clamp(c.g, 0.0, 1.0) * (s - 1.0) + 0.5;
+    float u0 = (b0 * s + r) / (s * s);
+    float u1 = (b1 * s + r) / (s * s);
+    float v = g / s;
+    vec3 s0 = texture2D(u_lut, vec2(u0, v)).rgb;
+    vec3 s1 = texture2D(u_lut, vec2(u1, v)).rgb;
+    return mix(s0, s1, bf);
+}
 
 vec3 gauss3(vec2 uv, vec2 r) {
     vec3 s = texture2D(u_tex, uv + vec2(-r.x, -r.y)).rgb;
@@ -190,6 +211,10 @@ void main() {
     }
 
     col = clamp(col, 0.0, 1.0) * clamp(u_opacity, 0.0, 1.0);
+    if (u_lut_intensity > 0.001 && u_lut_size > 1.5) {
+        vec3 mapped = applyLut2D(col);
+        col = mix(col, mapped, clamp(u_lut_intensity, 0.0, 1.0));
+    }
     gl_FragColor = vec4(col, 1.0);
 }
 """
@@ -197,6 +222,8 @@ void main() {
 
 class GLFilterWidget(QOpenGLWidget):
     """GPU 滤镜预览画布。gl_ok=False 表示初始化失败（调用方回退 CPU 路径）。"""
+
+    supports_lut = True  # 2D 图集 LUT；失败时调用方仍可走 CPU
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -206,11 +233,14 @@ class GLFilterWidget(QOpenGLWidget):
         self._vao: Optional[QOpenGLVertexArrayObject] = None
         self._vbo: Optional[QOpenGLBuffer] = None
         self._tex: Optional[QOpenGLTexture] = None
+        self._lut_tex: Optional[QOpenGLTexture] = None
+        self._lut_key = None
         self._tex_w = 0
         self._tex_h = 0
         self._img: Optional[QImage] = None
         self._frame_dirty = False
         self._uniforms: Dict[str, float] = self._default_uniforms()
+        self._pending_lut = None  # (name, intensity, lut3d|None)
         self.setMinimumSize(320, 180)
 
     @staticmethod
@@ -221,13 +251,28 @@ class GLFilterWidget(QOpenGLWidget):
             "u_exposure": 1.0, "u_gamma": 1.0, "u_hue": 0.0,
             "u_sharpen": 0.0, "u_blur": 0.0, "u_vignette": 0.0,
             "u_opacity": 1.0, "u_scale": 1.0,
+            "u_lut_size": 0.0, "u_lut_intensity": 0.0,
         }
 
     # ---------- GL 生命周期 ----------
 
     def initializeGL(self):
         try:
-            self._funcs = self.context().functions()
+            # PyQt6 已移除 QOpenGLContext.functions()，改用 VersionFunctionsFactory
+            ctx = self.context()
+            funcs = None
+            for major, minor in ((2, 1), (2, 0)):
+                prof = QOpenGLVersionProfile()
+                prof.setVersion(major, minor)
+                funcs = QOpenGLVersionFunctionsFactory.get(prof, ctx)
+                if funcs is not None:
+                    break
+            if funcs is None:
+                raise RuntimeError("无法获取 QOpenGLFunctions_2_x")
+            if hasattr(funcs, "initializeOpenGLFunctions"):
+                if not funcs.initializeOpenGLFunctions():
+                    raise RuntimeError("initializeOpenGLFunctions 失败")
+            self._funcs = funcs
             prog = QOpenGLShaderProgram()
             prog.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex, _VERT_SRC)
             prog.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, _FRAG_SRC)
@@ -266,6 +311,7 @@ class GLFilterWidget(QOpenGLWidget):
         except Exception as e:
             logger.warning(f"GL 滤镜预览初始化失败，回退 CPU: {e}")
             self.gl_ok = False
+            self._funcs = None
 
     # ---------- 公共接口 ----------
 
@@ -283,6 +329,7 @@ class GLFilterWidget(QOpenGLWidget):
 
     def set_effects(self, effects: Dict[str, Any]):
         self._uniforms = self._map_effects(effects)
+        self._lut_dirty = True
         self.update()
 
     # ---------- 效果参数映射（口径对齐 PreviewManager） ----------
@@ -328,7 +375,97 @@ class GLFilterWidget(QOpenGLWidget):
         u["u_opacity"] = max(0.0, min(1.0, _f("opacity", 1.0)))
         sc = _f("scale", 1.0)
         u["u_scale"] = sc if sc > 0 else 1.0
+
+        # LUT：从 color_params / 顶层 lut 字段取名与强度
+        # scrub / 滑杆快路径：跳过 GPU LUT（CPU 侧已有 lut_fast 半分辨率）
+        cp = e.get("color_params") if isinstance(e.get("color_params"), dict) else {}
+        lut_fast = bool(
+            e.get("lut_fast") or e.get("_preview_fast") or cp.get("lut_fast")
+        )
+        lut_name = e.get("lut") or cp.get("lut") or ""
+        lut_i = _f("lut_intensity", 0.0)
+        if lut_i == 0.0 and cp.get("lut_intensity") is not None:
+            try:
+                lut_i = float(cp.get("lut_intensity") or 0)
+            except Exception:
+                lut_i = 0.0
+        if isinstance(lut_i, float) and lut_i > 1.5:
+            lut_i = lut_i / 100.0
+        if lut_fast:
+            self._pending_lut = ("", 0.0)
+            u["u_lut_intensity"] = 0.0
+            u["u_lut_size"] = 0.0
+        else:
+            self._pending_lut = (str(lut_name) if lut_name and lut_name != "无" else "", lut_i)
+            u["u_lut_intensity"] = max(0.0, min(1.0, lut_i)) if self._pending_lut[0] else 0.0
+            # size 在上传后写入
+            u["u_lut_size"] = float(getattr(self, "_lut_size", 0) or 0)
         return u
+
+    def _upload_lut_texture(self):
+        """把 LUT3D 展成 2D 图集并上传（宽=S*S，高=S）。"""
+        pending = getattr(self, "_pending_lut", None)
+        if not pending or not pending[0] or pending[1] <= 0.001:
+            self._uniforms["u_lut_size"] = 0.0
+            self._uniforms["u_lut_intensity"] = 0.0
+            return
+        name, intensity = pending
+        key = (name, round(float(intensity), 3))
+        if key == getattr(self, "_lut_key", None) and self._lut_tex is not None:
+            self._uniforms["u_lut_intensity"] = float(intensity)
+            self._uniforms["u_lut_size"] = float(getattr(self, "_lut_size", 0) or 0)
+            return
+        try:
+            from app.core.lut_loader import lut_loader
+            lut = lut_loader.get_preset(name)
+        except Exception:
+            try:
+                from core.lut_loader import lut_loader
+                lut = lut_loader.get_preset(name)
+            except Exception:
+                lut = None
+        if lut is None or getattr(lut, "data", None) is None:
+            self._uniforms["u_lut_size"] = 0.0
+            return
+        try:
+            import numpy as np
+            from app.modules.lego.clip_transform import lut_to_2d_atlas
+            s = int(lut.size)
+            atlas = lut_to_2d_atlas(lut.data, s)  # float32 HxW x3, H=s W=s*s
+            # → RGBA8888 QImage
+            rgba = np.zeros((s, s * s, 4), dtype=np.uint8)
+            rgb8 = np.clip(atlas * 255.0, 0, 255).astype(np.uint8)
+            rgba[..., :3] = rgb8
+            rgba[..., 3] = 255
+            h, w = rgba.shape[:2]
+            qimg = QImage(rgba.data, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+            if self._lut_tex is not None:
+                self._lut_tex.destroy()
+            self._lut_tex = QOpenGLTexture(QOpenGLTexture.Target.Target2D)
+            self._lut_tex.create()
+            self._lut_tex.setFormat(QOpenGLTexture.TextureFormat.RGBA8_UNorm)
+            self._lut_tex.setSize(w, h)
+            self._lut_tex.allocateStorage()
+            self._lut_tex.setMinMagFilters(
+                QOpenGLTexture.Filter.Linear, QOpenGLTexture.Filter.Linear)
+            self._lut_tex.setWrapMode(QOpenGLTexture.WrapMode.ClampToEdge)
+            ptr = qimg.bits()
+            ptr.setsize(qimg.sizeInBytes())
+            self._lut_tex.setData(
+                QOpenGLTexture.PixelFormat.RGBA,
+                QOpenGLTexture.PixelType.UInt8,
+                ptr.asstring(),
+            )
+            self._lut_size = float(s)
+            self._lut_key = key
+            self._uniforms["u_lut_size"] = float(s)
+            self._uniforms["u_lut_intensity"] = float(intensity)
+            self.supports_lut = True
+        except Exception as e:
+            logger.warning("GPU LUT 上传失败，回退 CPU: %s", e)
+            self.supports_lut = False
+            self._uniforms["u_lut_size"] = 0.0
+            self._uniforms["u_lut_intensity"] = 0.0
 
     # ---------- 绘制 ----------
 
@@ -397,6 +534,10 @@ class GLFilterWidget(QOpenGLWidget):
             self._update_pivot()
             self._upload_texture()
             self._frame_dirty = False
+            self._lut_dirty = True
+        if getattr(self, "_lut_dirty", False):
+            self._upload_lut_texture()
+            self._lut_dirty = False
         if self._tex is None or self._tex_w == 0:
             return
 
@@ -414,14 +555,20 @@ class GLFilterWidget(QOpenGLWidget):
         self._prog.bind()
         self._tex.bind(0)
         self._prog.setUniformValue("u_tex", 0)
+        if self._lut_tex is not None and float(self._uniforms.get("u_lut_size", 0) or 0) > 1.5:
+            self._lut_tex.bind(1)
+            self._prog.setUniformValue("u_lut", 1)
         self._prog.setUniformValue("u_texel", 1.0 / self._tex_w, 1.0 / self._tex_h)
         self._prog.setUniformValue("u_filter", int(self._uniforms["u_filter"]))
         for name in ("u_intensity", "u_pivot", "u_brightness", "u_contrast",
                      "u_saturation", "u_exposure", "u_gamma", "u_hue",
-                     "u_sharpen", "u_blur", "u_vignette", "u_opacity", "u_scale"):
-            self._prog.setUniformValue(name, float(self._uniforms[name]))
+                     "u_sharpen", "u_blur", "u_vignette", "u_opacity", "u_scale",
+                     "u_lut_size", "u_lut_intensity"):
+            self._prog.setUniformValue(name, float(self._uniforms.get(name, 0.0)))
         self._vao.bind()
         f.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
         self._vao.release()
+        if self._lut_tex is not None:
+            self._lut_tex.release()
         self._tex.release()
         self._prog.release()

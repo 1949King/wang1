@@ -499,12 +499,19 @@ class ModelManagementModule(QWidget):
             try:
                 from app.core.ai_engine import ai_engine
                 t0 = time.time()
-                resp = ai_engine.chat(
+                # 修复：ai_engine.chat() 返回的是生成器，此前只创建生成器对象、
+                # 从未迭代它——真正的网络请求根本没有发出，elapsed 测的只是
+                # "创建生成器"的耗时（接近 0），resp 也不是文本而是生成器对象本身。
+                # 必须真正消费生成器才能触发请求并拿到完整响应文本。
+                chunks = ai_engine.chat(
                     provider=self._active_provider,
                     messages=[{"role": "user", "content": "回复：OK"}],
                     max_tokens=5
                 )
+                resp = "".join(chunks)
                 elapsed = time.time() - t0
+                if not resp or resp.startswith("错误") or resp.startswith("Error"):
+                    return None, resp or "无响应内容"
                 return elapsed, resp
             except Exception as e:
                 return None, str(e)

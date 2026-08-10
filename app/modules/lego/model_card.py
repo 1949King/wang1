@@ -608,12 +608,17 @@ class ModelCardWidget(QFrame):
             if not report["installed"]:
                 # Ollama 可执行文件未找到（ollama.exe / ollama 不在 PATH 中）
                 self._status_label.setText("● 未安装")
-                self._status_label.setToolTip(report["suggestion"])
+                sug = report.get("suggestion") or "请安装 Ollama"
+                self._status_label.setToolTip(
+                    ollama_client.format_diagnose_report(report)
+                )
                 self._status_label.setStyleSheet(
                     "font-size: 12px; color: #ef4444; background: transparent;")
                 self._start_ollama_btn.setText("📥 安装 Ollama")
+                self._start_ollama_btn.setToolTip(sug)
                 self._start_ollama_btn.show()
                 self._models_list.clear()
+                self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:60]))
                 return
 
             if not report["service_running"]:
@@ -628,7 +633,9 @@ class ModelCardWidget(QFrame):
                     if report2["service_running"]:
                         # 自动启动成功
                         self._status_label.setText("● 运行中")
-                        self._status_label.setToolTip("Ollama 服务已自动启动")
+                        self._status_label.setToolTip(
+                            ollama_client.format_diagnose_report(report2)
+                        )
                         self._status_label.setStyleSheet(
                             "font-size: 12px; color: #22c55e; background: transparent;")
                         self._start_ollama_btn.hide()
@@ -636,22 +643,30 @@ class ModelCardWidget(QFrame):
                         return
 
                 # ── 第3步：自动启动失败，提供手动操作入口 ──
-                self._status_label.setText("● 未运行")
+                err = report.get("error") or "服务未运行"
+                self._status_label.setText(f"● 未运行 · {err}")
                 self._status_label.setToolTip(
-                    report["suggestion"] or 
-                    f"请确认 Ollama 服务已启动 ({ollama_client.base_url})")
+                    ollama_client.format_diagnose_report(report)
+                )
                 self._status_label.setStyleSheet(
                     "font-size: 12px; color: #ef4444; background: transparent;")
                 self._start_ollama_btn.setText("▶ 启动服务")
                 self._start_ollama_btn.setToolTip(
-                    "点击启动 Ollama 服务\n"
-                    "或手动: 打开 Ollama 桌面应用 / 运行 ollama serve")
+                    report.get("suggestion")
+                    or "点击启动 Ollama 服务\n或手动: 打开 Ollama 桌面应用 / 运行 ollama serve"
+                )
                 self._start_ollama_btn.show()
                 self._models_list.clear()
+                sug = (report.get("suggestion") or "").replace("\n", " ")
+                if sug:
+                    self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:80]))
                 return
 
             # ── 第4步：服务运行中，更新 UI 为正常状态 ──
             self._status_label.setText("● 运行中")
+            self._status_label.setToolTip(
+                ollama_client.format_diagnose_report(report)
+            )
             self._status_label.setStyleSheet(
                 "font-size: 12px; color: #22c55e; background: transparent;")
             self._start_ollama_btn.hide()
@@ -659,7 +674,8 @@ class ModelCardWidget(QFrame):
 
         except (ImportError, ConnectionError, OSError, RuntimeError) as e:
             logger.error(f"Ollama 状态检测异常: {e}")
-            self._status_label.setText("● 检测失败")
+            self._status_label.setText(f"● 检测失败 · {e}")
+            self._status_label.setToolTip(str(e))
             self._status_label.setStyleSheet(
                 "font-size: 12px; color: #f59e0b; background: transparent;")
             self._start_ollama_btn.hide()
@@ -670,12 +686,19 @@ class ModelCardWidget(QFrame):
             from .ollama_client import ollama_client
             models = ollama_client.list_models(force_refresh=True)
             self._models_list.clear()
+            if not models:
+                self._models_list.addItem(
+                    QListWidgetItem("（无模型）请执行: ollama pull qwen2.5:7b")
+                )
+                return
             for model in models:
                 item = QListWidgetItem(f" {model.display_name}")
                 item.setData(Qt.ItemDataRole.UserRole, model.name)
                 self._models_list.addItem(item)
         except (ImportError, ConnectionError, RuntimeError) as e:
             logger.warning(f"刷新模型列表失败: {e}")
+            self._models_list.clear()
+            self._models_list.addItem(QListWidgetItem(f"（刷新失败）{e}"))
     
     def _start_ollama_service(self):
         """

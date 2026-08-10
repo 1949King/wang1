@@ -87,11 +87,13 @@ class FFmpegDecodeThread(QThread):
             duration_str = format_info.get('duration', '0')
             try:
                 metadata['duration'] = float(duration_str)
-            except ValueError:
+            except ValueError as e:
+                logger.debug(f"[FFmpegService] 解析时长失败: {e}")
                 metadata['duration'] = 0
 
             return metadata
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[FFmpegService] 解析元数据失败: {e}")
             return self._parse_error_metadata()
 
     def _parse_error_metadata(self) -> dict:
@@ -197,8 +199,8 @@ class FFmpegService(QObject):
             ffmpeg_path = find_ffmpeg()
             if ffmpeg_path and os.path.exists(ffmpeg_path):
                 return ffmpeg_path
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug(f"[FFmpegService] 导入find_ffmpeg失败: {e}")
 
         # 回退到原逻辑（优先项目内置，最后才用 Shotcut 的 FFmpeg）
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -282,17 +284,36 @@ class FFmpegService(QObject):
         if task_id in self._threads:
             del self._threads[task_id]
 
-    def extract_frame(self, media_path: str, timestamp: float = 0.0, width: int = 60, height: int = 36):
-        """同步提取视频单帧，返回 QPixmap 或 None"""
+    def extract_frame(self, media_path: str, timestamp: float = 0.0, width: int = 0, height: int = 96):
+        """同步提取视频单帧，返回 QPixmap 或 None。
+
+        时间线缩略图：按高度缩放、保持比例，绝不 pad。
+        黑边 pad 会在 Expanding 绘制后仍呈「中间细条」。
+        width<=0 时只约束高度（scale=-2:h）；两者都 >0 时用 increase+crop 铺满目标框。
+        """
         try:
             from PyQt6.QtGui import QPixmap
             from PyQt6.QtCore import QByteArray
-            
+
+            h = max(8, int(height))
+            w = int(width)
+            if w > 0:
+                w = max(8, w)
+                # 偶数尺寸，兼容部分编码器
+                w -= w % 2
+                h -= h % 2
+                vf = (
+                    f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                    f"crop={w}:{h}"
+                )
+            else:
+                h -= h % 2
+                vf = f"scale=-2:{h}"
             cmd = [
                 self._ffmpeg_path, "-ss", str(timestamp),
                 "-i", media_path,
                 "-vframes", "1",
-                "-s", f"{width}x{height}",
+                "-vf", vf,
                 "-f", "image2pipe", "-vcodec", "png", "-"
             ]
             
@@ -301,11 +322,23 @@ class FFmpegService(QObject):
                 byte_array = QByteArray(result.stdout)
                 pixmap = QPixmap()
                 pixmap.loadFromData(byte_array)
-                return pixmap
+                if not pixmap.isNull():
+                    return pixmap
         except Exception as e:
             logger.error(f"帧提取失败: {e}")
         
         return None
+
+    def extract_frames_batch(
+        self, media_path: str, timestamps, height: int = 96, width: int = 0
+    ):
+        """批量抽帧（OpenCV 不可用时的胶片条回退）。返回 list[QPixmap]。"""
+        out = []
+        for t in timestamps or []:
+            pm = self.extract_frame(media_path, float(t), width=width, height=height)
+            if pm is not None and not pm.isNull():
+                out.append(pm)
+        return out
 
 
 ffmpeg_service = FFmpegService()

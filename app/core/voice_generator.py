@@ -206,6 +206,10 @@ class AIVoiceGenerator:
                 if not voice_profile:
                     return VoiceGenerationResult(
                         request_id=str(time.time()),
+                        audio_data=None,
+                        audio_path=None,
+                        duration=0.0,
+                        sample_rate=0,
                         success=False,
                         error_message=f"声线配置不存在: {request.voice_profile_id}"
                     )
@@ -230,6 +234,7 @@ class AIVoiceGenerator:
                 result = VoiceGenerationResult(
                     request_id=str(time.time()),
                     audio_data=audio_data,
+                    audio_path=None,
                     duration=duration,
                     sample_rate=voice_profile.sample_rate,
                     success=True,
@@ -244,6 +249,10 @@ class AIVoiceGenerator:
                 print(f"生成配音失败: {e}")
                 return VoiceGenerationResult(
                     request_id=str(time.time()),
+                    audio_data=None,
+                    audio_path=None,
+                    duration=0.0,
+                    sample_rate=0,
                     success=False,
                     error_message=str(e)
                 )
@@ -273,10 +282,10 @@ class AIVoiceGenerator:
             os.unlink(tmp.name)
             if result.returncode == 0 and result.stdout:
                 return np.frombuffer(result.stdout, dtype=np.float32)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        except ImportError as e:
+            logger.debug(f"[VoiceGenerator] pyttsx3不可用: {e}")
+        except Exception as e:
+            logger.debug(f"[VoiceGenerator] pyttsx3生成音频失败: {e}")
 
         # 尝试 gTTS
         try:
@@ -295,10 +304,10 @@ class AIVoiceGenerator:
             os.unlink(tmp.name)
             if result.returncode == 0 and result.stdout:
                 return np.frombuffer(result.stdout, dtype=np.float32)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        except ImportError as e:
+            logger.debug(f"[VoiceGenerator] gTTS不可用: {e}")
+        except Exception as e:
+            logger.debug(f"[VoiceGenerator] gTTS生成音频失败: {e}")
 
         # 尝试 edge-tts
         try:
@@ -322,8 +331,8 @@ class AIVoiceGenerator:
                     return np.frombuffer(result.stdout, dtype=np.float32)
             else:
                 os.unlink(tmp.name)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[VoiceGenerator] edge-tts生成音频失败: {e}")
 
         # 最终回退：正弦波合成
         sample_count = int(duration_sec * sample_rate)
@@ -378,6 +387,62 @@ class AIVoiceGenerator:
     def get_generation_result(self, request_id: str) -> Optional[VoiceGenerationResult]:
         """获取生成结果"""
         return self._results.get(request_id)
+
+    def generate_audio(self, text: str, output_path: str = "",
+                       voice_profile_id: str = "", **kwargs) -> Dict[str, Any]:
+        """适配 AIEngine TTS：生成并可选写盘。
+
+        Returns:
+            {"success": bool, "audio_path": str, "error": str}
+        """
+        import os
+        import tempfile
+        import wave
+
+        if not (text or "").strip():
+            return {"success": False, "error": "文本为空"}
+
+        profile_id = voice_profile_id or kwargs.get("voice", "")
+        if not profile_id:
+            for p in self._voice_profiles.values():
+                if getattr(p, "is_default", False):
+                    profile_id = p.id
+                    break
+            if not profile_id and self._voice_profiles:
+                profile_id = next(iter(self._voice_profiles))
+
+        request = VoiceGenerationRequest(
+            text=text.strip(),
+            voice_profile_id=profile_id,
+            speed=float(kwargs.get("rate", kwargs.get("speed", 1.0)) or 1.0),
+            volume=float(kwargs.get("volume", 1.0) or 1.0),
+            language=str(kwargs.get("language", "zh") or "zh"),
+        )
+        result = self.generate_voice(request)
+        if not result.success or result.audio_data is None:
+            return {
+                "success": False,
+                "error": result.error_message or "TTS 生成失败",
+            }
+
+        path = (output_path or "").strip()
+        if not path:
+            fd, path = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            pcm = np.asarray(result.audio_data, dtype=np.float32)
+            pcm = np.clip(pcm, -1.0, 1.0)
+            int16 = (pcm * 32767.0).astype(np.int16)
+            with wave.open(path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(int(result.sample_rate or 22050))
+                wf.writeframes(int16.tobytes())
+            return {"success": True, "audio_path": path}
+        except Exception as e:
+            return {"success": False, "error": f"写音频失败: {e}"}
     
     def clear_results(self):
         """清除生成结果"""
@@ -400,6 +465,10 @@ class AIVoiceGenerator:
         except Exception as e:
             print(f"导出声线配置失败: {e}")
             return False
+
+
+# AIEngineEnhanced 等调用方使用 VoiceGenerator 名；保持兼容别名
+VoiceGenerator = AIVoiceGenerator
 
 
 class EffectRecommendationEngine:

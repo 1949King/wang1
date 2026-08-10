@@ -221,9 +221,8 @@ class AccountAnalysisSkill(Skill):
                         with open(filepath, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             all_data.extend(data if isinstance(data, list) else [data])
-                    except Exception:
-                        pass
-                        pass
+                    except Exception as e:
+                        logger.debug(f"加载历史数据文件失败: {e}")
         
         context.set_variable("all_data", all_data)
         return StepResult(success=True, output={"data_count": len(all_data)})
@@ -445,16 +444,22 @@ class PublishContentSkill(Skill):
                     "submitted_at": datetime.now().isoformat()
                 }
             else:
-                # 回退：本地导出记录
+                # 修复：此前这里不管有没有视频路径、不管是否真的执行过任何
+                # 转码/导出操作，一律 success=True + "已导出为 X 格式"——
+                # 而 _adapt_content 只是调整了标题/规格元数据，从未真正生成
+                # 任何平台专属的导出文件。如实标记为未发布，避免用户以为
+                # 已经产出了可上传的文件。
+                reason = "PlatformIntegrator 不可用" if not integrator else "缺少视频文件路径"
                 publish_results[platform] = {
-                    "success": True,
-                    "message": f"已导出为 {platform} 格式（需手动上传）",
-                    "method": "local_export",
+                    "success": False,
+                    "message": f"未能发布到 {platform}：{reason}，内容未真正导出或发布",
+                    "method": "unavailable",
                     "submitted_at": datetime.now().isoformat()
                 }
         
+        any_success = any(r.get("success") for r in publish_results.values())
         context.set_variable("publish_results", publish_results)
-        return StepResult(success=True, output={"publish_results": publish_results})
+        return StepResult(success=any_success, output={"publish_results": publish_results})
     
     def _record_result(self, context: SkillContext) -> StepResult:
         publish_results = context.get_variable("publish_results", {})
@@ -493,17 +498,15 @@ class MatrixPublishSkill(Skill):
     
     def _load_matrix(self, context: SkillContext) -> StepResult:
         matrix_config = context.get_input("matrix_config", {})
-        
-        if not matrix_config:
-            matrix_config = {
-                "accounts": [
-                    {"platform": "抖音", "account_id": "acc_001", "name": "主账号"},
-                    {"platform": "抖音", "account_id": "acc_002", "name": "副账号1"},
-                    {"platform": "快手", "account_id": "acc_003", "name": "快手主号"},
-                ],
-                "publish_strategy": "sequential"
-            }
-        
+
+        if not matrix_config or not matrix_config.get("accounts"):
+            # 修复：此前未提供 matrix_config 时会静默套用 3 个虚构账号
+            # （acc_001「主账号」等），这些账号在真实环境里根本不存在，
+            # 但后续步骤会照常"发布"并汇总出一份看起来完成的报告，
+            # 用户很容易误以为真的对接了自己的账号矩阵。
+            # 改为如实报错，要求调用方显式传入账号矩阵配置。
+            return StepResult(success=False, error="未提供账号矩阵配置（matrix_config.accounts 为空），请先在「账号运营」中配置真实账号")
+
         context.set_variable("matrix_config", matrix_config)
         return StepResult(success=True, output={"account_count": len(matrix_config.get("accounts", []))})
     
@@ -541,8 +544,8 @@ class MatrixPublishSkill(Skill):
         try:
             from app.integrations.platforms import PlatformIntegrator
             integrator = PlatformIntegrator()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"PlatformIntegrator 不可用: {e}")
         
         for plan_item in publish_plan:
             account = plan_item["account"]
@@ -578,11 +581,13 @@ class MatrixPublishSkill(Skill):
                         "timestamp": datetime.now().isoformat()
                     }
             else:
-                # 回退
+                # 修复：此前不管有没有 integrator/视频路径都标 status="exported"，
+                # 暗示已经产出了可用文件，但这一路径没有做任何真实的转码/导出操作。
+                reason = "PlatformIntegrator 不可用" if not integrator else "缺少视频文件路径"
                 result = {
                     "account": account,
-                    "status": "exported",
-                    "message": f"已导出到 {platform_name} - {account['name']}（需手动发布）",
+                    "status": "skipped",
+                    "message": f"未发布到 {platform_name} - {account['name']}：{reason}",
                     "timestamp": datetime.now().isoformat()
                 }
             results.append(result)
@@ -593,10 +598,15 @@ class MatrixPublishSkill(Skill):
     def _summarize_results(self, context: SkillContext) -> StepResult:
         batch_results = context.get_variable("batch_results", [])
         
+        # 修复：_batch_publish 实际写入的状态是 published/error/skipped
+        # （从未写过 "submitted"），此前汇总的 success 计数字段读的是一个
+        # 从不存在的状态值，恒为 0——哪怕全部平台真的发布成功，汇总报告也
+        # 会显示"成功 0 个"。
         summary = {
             "total": len(batch_results),
-            "success": sum(1 for r in batch_results if r["status"] == "submitted"),
-            "failed": sum(1 for r in batch_results if r["status"] == "failed"),
+            "success": sum(1 for r in batch_results if r["status"] == "published"),
+            "failed": sum(1 for r in batch_results if r["status"] in ("failed", "error")),
+            "skipped": sum(1 for r in batch_results if r["status"] == "skipped"),
             "details": batch_results
         }
         

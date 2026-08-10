@@ -487,8 +487,8 @@ class ThemeManager:
                 settings = QSettings(org, app_name)
                 settings.setValue("theme", preference)
                 settings.setValue("resolved_theme", theme)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("持久化主题设置失败: %s", e)
 
         self._current_theme = theme
         self._theme_preference = preference

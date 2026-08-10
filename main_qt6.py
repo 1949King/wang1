@@ -71,6 +71,27 @@ class AIShortDramaEditorApp:
         """显示主窗口"""
         print("创建MainWindow...")
         self.main_window = MainWindow()
+        # 修复：register_skills 之前从未被调用，导致 Skill 工坊列表为空
+        try:
+            from app.modules.lego.video_editing_skill import register_skills
+            register_skills()
+        except Exception as e:
+            print(f"Skill 注册失败（不影响启动）: {e}")
+
+        # 统一调用层 & 长期记忆 & 反馈桥 eager init（best-effort）
+        try:
+            import logging as _logging
+            _log = _logging.getLogger("startup")
+            from app.core.memory_store import MemoryStore
+            from app.core.agent_feedback_bridge import AgentFeedbackBridge
+            from app.core.capability_dispatcher import CapabilityDispatcher
+            MemoryStore.get_instance()
+            AgentFeedbackBridge.get_instance().event_bus  # 触发订阅
+            CapabilityDispatcher.get_instance()  # 首次 invoke 时注册内置 handler
+            _log.info("[startup] 调用层 & 记忆 & 反馈桥 已就绪")
+        except Exception as e:
+            print(f"[startup] 调用层初始化失败（不影响主流程）: {e}")
+
         # 连接主窗口的关闭信号
         self.main_window.destroyed.connect(self._on_main_window_closed)
         self.main_window.show()

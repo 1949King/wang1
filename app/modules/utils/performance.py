@@ -1,5 +1,9 @@
 import time
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class PerformanceMonitor:
     """性能监控类"""
@@ -25,9 +29,8 @@ class PerformanceMonitor:
             # 记录CPU使用情况
             cpu_usage = psutil.cpu_percent(interval=0.1)
             self.cpu_usage_history.append(cpu_usage)
-        except Exception:
-            pass
-            pass
+        except Exception as e:
+            logger.debug(f"性能指标记录失败，跳过本次采样: {e}")
     
     def get_stats(self):
         """获取性能统计信息"""

@@ -9,11 +9,14 @@ AI剧情理解引擎 - TOP 0级核心模块
 import os
 import json
 import asyncio
+import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # 语音分析
 WHISPER_AVAILABLE = False
@@ -36,8 +39,8 @@ def _detect_whisper():
         except (ImportError, OSError) as e:
             try:
                 print(f"[warn] Whisper not loaded: {e}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Whisper print fallback failed: %s", e)
             return False
 
 _detect_whisper()
@@ -506,8 +509,8 @@ class DramaUnderstandingEngine:
         if OLLAMA_AVAILABLE:
             try:
                 return self._llm_emotion_vector(text)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("LLM emotion vector failed, fallback to keyword: %s", e)
         # fallback
         return self._keyword_emotion_vector(text)
 
@@ -904,8 +907,8 @@ class DramaUnderstandingEngine:
         if OLLAMA_AVAILABLE:
             try:
                 return self._llm_classify_scene(text)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("LLM scene classification failed, fallback to keyword: %s", e)
 
         # Fallback: 扩展关键词表（仍比原来好，但只做兜底）
         scene_keywords = {
@@ -1269,8 +1272,8 @@ class DramaUnderstandingEngine:
             raw = "".join(response_parts).strip()
             if raw:
                 return json.loads(raw)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("LLM JSON parse failed, return empty dict: %s", e)
         return {}
     
     def _analyze_pacing(self, drama: DramaStructure) -> Dict:
@@ -1466,8 +1469,8 @@ class DramaUnderstandingEngine:
                         key = round(t, 1)
                         if key in timeline:
                             timeline[key]["D"] = max(timeline[key]["D"], vs_score)
-        except Exception:
-            pass  # D 轴非必需
+        except Exception as e:
+            logger.debug("D axis computation failed: %s", e)
 
         return timeline
 

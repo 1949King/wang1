@@ -6,6 +6,15 @@ import numpy as np
 class Plugin:
     name = "故障转场"
     version = "1.0.0"
+    description = "故障抖动过渡"
+    author = "官方"
+
+    def initialize(self, context=None):
+        return True
+
+    def run(self, *args, **kwargs):
+        return True
+
 
     def apply(self, from_frame: np.ndarray, to_frame: np.ndarray, progress: float) -> np.ndarray:
         h, w = from_frame.shape[:2]

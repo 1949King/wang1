@@ -111,7 +111,8 @@ class CopywritingModule(BaseModule):
         
         options_layout.addWidget(QLabel("模型:"))
         self._model_combo = QComboBox()
-        self._model_combo.addItems(["DeepSeek", "豆包", "本地模板"])
+        # 「本地模板」明确非 AI，避免与云端结果混淆
+        self._model_combo.addItems(["DeepSeek", "豆包", "本地模板（非 AI）"])
         self._model_combo.setStyleSheet(self._combo_style())
         options_layout.addWidget(self._model_combo)
         
@@ -349,8 +350,8 @@ class CopywritingModule(BaseModule):
                     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     duration_sec = total_frames / fps if fps > 0 else 0
                     cap.release()
-            except ImportError:
-                pass
+            except ImportError as e:
+                logger.debug(f"cv2 未安装，跳过视频元数据读取: {e}")
 
             # 构建视频信息字符串
             info_parts = [f"已导入视频: {video_name}", f"大小: {file_size_mb:.1f}MB"]
@@ -432,8 +433,8 @@ class CopywritingModule(BaseModule):
                 if ocr_texts:
                     # 取前3个关键词作为内容提示
                     parts.append("画面包含关键词: " + "、".join(ocr_texts[:3]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"视频内容分析失败: {e}")
 
         # 回退: 基于视频文件名和基础特征生成描述
         description = f"这是一段视频文件「{video_name}」，" + "，".join(parts) + "。"
@@ -441,16 +442,41 @@ class CopywritingModule(BaseModule):
 
         return description
     
-    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """调用当前激活的 AI 模型生成文案，失败时回退到本地模板
+    def _is_local_template_model(self) -> bool:
+        """当前是否显式选择本地模板（非 AI）"""
+        text = self._model_combo.currentText() if hasattr(self, "_model_combo") else ""
+        return "本地模板" in (text or "")
 
-        调用链路:
-          1. 首选: ai_engine.chat_with_fallback()（统一 AI 入口）
-          2. 备选: cloud_api_service.chat()（直连云端模型）
-          3. 回退: _template_generate()（本地智能模板）
+    def _llm_unavailable_message(self) -> str:
+        reason = getattr(self, "_last_llm_error", "") or "未配置可用模型或调用失败"
+        return (
+            f"LLM 不可用：{reason}\n\n"
+            "请到「模型管理」配置 API Key / 激活 Provider，或启动 Ollama。\n"
+            "若只需占位文案，请将「模型」选为「本地模板（非 AI）」。"
+        )
+
+    def _confirm_template_fallback(self) -> bool:
+        """云端失败时征得用户同意再走模板，避免静默假 AI。"""
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "LLM 不可用",
+            self._llm_unavailable_message()
+            + "\n\n是否改用本地模板？（结果非 AI 生成）",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """调用当前激活的 AI 模型生成文案。
+
+        失败返回空字符串，并由 `_last_llm_error` 说明原因。
+        不再在此层静默回退模板（由 UI 征得用户同意）。
         """
         import os, json
-        import traceback as _tb
+
+        self._last_llm_error = ""
 
         # ── 检查是否有激活的 AI 模型 ──
         active_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -465,7 +491,7 @@ class CopywritingModule(BaseModule):
             pass
 
         if not provider_id:
-            # 无激活模型，直接走模板回退
+            self._last_llm_error = "未设置激活 Provider（app/data/active_provider.json）"
             return ""
 
         messages = [
@@ -487,8 +513,11 @@ class CopywritingModule(BaseModule):
             result = "".join(result_parts).strip()
             if result and len(result) > 10:
                 return result
+            if not result:
+                self._last_llm_error = "ai_engine 返回为空"
         except Exception as e:
-            print(f"[Copywriting] ai_engine 调用失败: {e}，回退到 cloud_api_service")
+            self._last_llm_error = f"ai_engine: {e}"
+            logger.warning(f"[Copywriting] ai_engine 调用失败: {e}，回退到 cloud_api_service")
 
         # ── 策略 2: 直连 cloud_api_service ──
         try:
@@ -501,10 +530,11 @@ class CopywritingModule(BaseModule):
             result = "".join(result_parts).strip()
             if result and len(result) > 10:
                 return result
+            self._last_llm_error = self._last_llm_error or "cloud_api 返回为空或过短"
         except Exception as e:
-            print(f"[Copywriting] cloud_api_service 调用失败: {e}")
+            self._last_llm_error = f"cloud_api: {e}"
+            logger.warning(f"[Copywriting] cloud_api_service 调用失败: {e}")
 
-        # ── 所有 AI 路径失败，返回空字符串交由调用方走模板 ──
         return ""
     
     def _parse_llm_response(self, raw: str, content: str) -> dict:
@@ -623,19 +653,29 @@ class CopywritingModule(BaseModule):
         )
         user_prompt = f"视频内容概要：{video_content[:500]}\n平台：{platform}\n风格：{style}"
         
-        raw = self._call_llm(system_prompt, user_prompt)
-        if raw:
-            parsed = self._parse_llm_response(raw, video_content)
-            self._output_tabs.widget(0).setText(parsed["title"] or f"🔥 {video_content[:20]}，必看！")
-            self._output_tabs.widget(1).setText(parsed["description"] or f"关于{video_content[:30]}的精彩内容\n\n#短剧 #热门")
-            self._output_tabs.widget(2).setText(parsed["tags"] or "#短剧 #热门 #推荐")
-            self._output_tabs.widget(3).setText(parsed["script"] or f"[开场]\n{video_content[:50]}...\n[结尾]\n关注不迷路")
-        else:
+        raw = ""
+        if self._is_local_template_model():
             self._template_generate(video_content)
+            source = "template"
+        else:
+            raw = self._call_llm(system_prompt, user_prompt)
+            if raw:
+                parsed = self._parse_llm_response(raw, video_content)
+                self._output_tabs.widget(0).setText(parsed["title"] or f"🔥 {video_content[:20]}，必看！")
+                self._output_tabs.widget(1).setText(parsed["description"] or f"关于{video_content[:30]}的精彩内容\n\n#短剧 #热门")
+                self._output_tabs.widget(2).setText(parsed["tags"] or "#短剧 #热门 #推荐")
+                self._output_tabs.widget(3).setText(parsed["script"] or f"[开场]\n{video_content[:50]}...\n[结尾]\n关注不迷路")
+                source = "llm"
+            elif not self._confirm_template_fallback():
+                return
+            else:
+                self._template_generate(video_content)
+                source = "template"
         
         self._event_bus.emit(EventType.COPY_GENERATED, {
             "title": self._output_tabs.widget(0).toPlainText(),
-            "description": self._output_tabs.widget(1).toPlainText()
+            "description": self._output_tabs.widget(1).toPlainText(),
+            "source": source,
         })
 
         self._save_to_history()
@@ -650,14 +690,15 @@ class CopywritingModule(BaseModule):
         platform = self._platform_combo.currentText()
         style = self._style_combo.currentText()
         
-        # 如果选择了"本地模板"，直接走模板
-        if self._model_combo.currentText() == "本地模板":
+        # 显式选择本地模板才走非 AI 路径
+        if self._is_local_template_model():
             self._template_generate(content)
             self._event_bus.emit(EventType.COPY_GENERATED, {
                 "title": self._output_tabs.widget(0).toPlainText(),
-                "description": self._output_tabs.widget(1).toPlainText()
+                "description": self._output_tabs.widget(1).toPlainText(),
+                "source": "template",
             })
-            self._save_to_history()  # 本地模板也保存历史
+            self._save_to_history()
             return
         
         system_prompt = (
@@ -672,18 +713,23 @@ class CopywritingModule(BaseModule):
         user_prompt = f"用户输入：{content[:500]}\n目标平台：{platform}\n文案风格：{style}"
         
         raw = self._call_llm(system_prompt, user_prompt)
+        source = "llm"
         if raw:
             parsed = self._parse_llm_response(raw, content)
             self._output_tabs.widget(0).setText(parsed["title"] or f"🔥 {content[:20]}，必看！")
             self._output_tabs.widget(1).setText(parsed["description"] or f"关于{content[:30]}的精彩内容\n\n#短剧 #热门")
             self._output_tabs.widget(2).setText(parsed["tags"] or "#短剧 #热门 #推荐")
             self._output_tabs.widget(3).setText(parsed["script"] or f"[开场]\n{content[:50]}...\n[结尾]\n关注不迷路")
+        elif not self._confirm_template_fallback():
+            return
         else:
+            source = "template"
             self._template_generate(content)
         
         self._event_bus.emit(EventType.COPY_GENERATED, {
             "title": self._output_tabs.widget(0).toPlainText(),
-            "description": self._output_tabs.widget(1).toPlainText()
+            "description": self._output_tabs.widget(1).toPlainText(),
+            "source": source,
         })
 
         self._save_to_history()
@@ -792,9 +838,12 @@ class CopywritingModule(BaseModule):
             "style": self._style_combo.currentText(),
         }
 
-        # 通过事件总线推送到剪辑模块
-        self._event_bus.emit(EventType.COPY_GENERATED, push_data)
-        # 同时发送模块切换事件
+        # 修复：此前不管剪辑模块当时是否已加载，都会直接 emit COPY_GENERATED
+        # ——若剪辑模块还没打开过（还没注册监听器），这条 emit 会直接丢失，
+        # 用户却仍看到"推送成功"。根因已在 main_window._on_module_activated /
+        # _flush_pending_module_action 处修复：现在统一只发 MODULE_ACTIVATED，
+        # 由主窗口保证目标模块真正加载完成（监听器已注册）后再交付 payload，
+        # 不再需要这里额外发一次可能落空的直接 emit。
         self._event_bus.emit(EventType.MODULE_ACTIVATED, {
             "target": "editor",
             "data": push_data,
@@ -871,11 +920,7 @@ class CopywritingModule(BaseModule):
                     "source": "llm",
                 }
             else:
-                # 回退模板
-                from copy import deepcopy
-                old_platform = self._platform_combo.currentText()
-                old_style = self._style_combo.currentText()
-                # 临时设置平台/风格然后调用模板
+                # 回退模板，并标明原因（批量接口无弹窗，靠 source/reason 诚实）
                 temp_result = self._template_generate_inplace(content, plat, stl)
                 result = {
                     "input": inp,
@@ -884,6 +929,7 @@ class CopywritingModule(BaseModule):
                     "tags": temp_result.get("tags", ""),
                     "script": temp_result.get("script", ""),
                     "source": "template",
+                    "reason": getattr(self, "_last_llm_error", "") or "llm_unavailable",
                 }
 
             results.append(result)
@@ -1007,11 +1053,15 @@ class CopywritingModule(BaseModule):
             raw = self._call_llm(strategy["system_prompt"], user_prompt)
             if raw:
                 parsed = self._parse_llm_response(raw, content)
+                source = "llm"
+                reason = ""
             else:
-                # 回退模板
+                # 回退模板，标明非 AI
                 parsed = self._template_generate_inplace(
                     content, platform, f"{style}-{strategy['name']}"
                 )
+                source = "template"
+                reason = getattr(self, "_last_llm_error", "") or "llm_unavailable"
 
             # 评分系统 (基于文案质量指标)
             scores = self._score_copywriting(
@@ -1028,7 +1078,8 @@ class CopywritingModule(BaseModule):
                 "description": parsed.get("description", ""),
                 "tags": parsed.get("tags", ""),
                 "script": parsed.get("script", ""),
-                "source": "llm" if raw else "template",
+                "source": source,
+                "reason": reason,
                 "scores": scores,
                 "total_score": sum(scores.values()),
             }

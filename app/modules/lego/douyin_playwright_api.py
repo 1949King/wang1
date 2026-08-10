@@ -167,10 +167,10 @@ class DouyinPlaywrightAPI(PlatformAPI):
                             for item in body["aweme_list"]:
                                 if isinstance(item, dict):
                                     intercepted_data.append(item)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logger.debug(f"[DouyinPlaywright] 解析响应体失败: {e}")
+            except Exception as e:
+                logger.debug(f"[DouyinPlaywright] 响应拦截异常: {e}")
 
         for attempt in range(max_retries + 1):
             try:
@@ -195,8 +195,8 @@ class DouyinPlaywrightAPI(PlatformAPI):
                 if page:
                     try:
                         page.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[DouyinPlaywright] 关闭页面失败: {e}")
                     page = None
                 if attempt >= max_retries:
                     return None
@@ -216,8 +216,8 @@ class DouyinPlaywrightAPI(PlatformAPI):
         if page:
             try:
                 page.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[DouyinPlaywright] 关闭页面失败: {e}")
 
         return dramas if dramas else None
 

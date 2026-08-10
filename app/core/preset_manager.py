@@ -113,7 +113,7 @@ class PresetManager:
             },
             {
                 "id": "export_preset_3",
-                "name": "社交媒体",
+                "name": "Instagram 方形",
                 "type": "export",
                 "category": "video",
                 "parameters": {
@@ -123,6 +123,62 @@ class PresetManager:
                     "codec": "h264",
                     "audio_codec": "aac",
                     "audio_bitrate": "128k"
+                }
+            },
+            {
+                "id": "export_preset_vertical_1080",
+                "name": "抖音/TikTok 竖屏 1080×1920",
+                "type": "export",
+                "category": "video",
+                "parameters": {
+                    "resolution": "1080x1920",
+                    "frame_rate": 30,
+                    "bitrate": "8M",
+                    "codec": "h264",
+                    "audio_codec": "aac",
+                    "audio_bitrate": "128k"
+                }
+            },
+            {
+                "id": "export_preset_vertical_4k",
+                "name": "竖屏 4K 2160×3840",
+                "type": "export",
+                "category": "video",
+                "parameters": {
+                    "resolution": "2160x3840",
+                    "frame_rate": 30,
+                    "bitrate": "20M",
+                    "codec": "h265",
+                    "audio_codec": "aac",
+                    "audio_bitrate": "192k"
+                }
+            },
+            {
+                "id": "export_preset_instagram_45",
+                "name": "Instagram 竖方 1080×1350",
+                "type": "export",
+                "category": "video",
+                "parameters": {
+                    "resolution": "1080x1350",
+                    "frame_rate": 30,
+                    "bitrate": "6M",
+                    "codec": "h264",
+                    "audio_codec": "aac",
+                    "audio_bitrate": "128k"
+                }
+            },
+            {
+                "id": "export_preset_widescreen_2560",
+                "name": "电影超宽 2560×1080",
+                "type": "export",
+                "category": "video",
+                "parameters": {
+                    "resolution": "2560x1080",
+                    "frame_rate": 24,
+                    "bitrate": "12M",
+                    "codec": "h264",
+                    "audio_codec": "aac",
+                    "audio_bitrate": "192k"
                 }
             }
         ])

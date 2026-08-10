@@ -1,23 +1,23 @@
 # 短剧筛选插件
 
-> 分类: 运营工具 | 版本: 1.0.0 | 作者: 官方
+> 分类: 运营工具 | 版本: 1.1.0 | 作者: 官方  
+> **唯一产品入口**：插件中心（已从模块注册表移除独立「短剧筛选」模块）
 
 ---
 
 ## 功能简介
 
-智能筛选热门短剧，分析热度与佣金。支持 **10+ 平台**（抖音/快手/腾讯/爱奇艺/优酷/B站/小红书/芒果/西瓜）的短剧榜单浏览。
+智能筛选热门短剧，分析热度与佣金。支持多平台榜单浏览与多维筛选。
 
 ### 核心能力
 
 | 能力 | 说明 |
 |------|------|
-| 🎯 多平台榜单 | 覆盖 10+ 主流平台的短剧/漫剧/电影/电视剧数据 |
-| 🔍 多维度筛选 | 按平台 × 类型 × 分类 × 关键字 × 排序 组合筛选 |
-| 📊 双数据源 | `DramaCrawler` 真实 API > 120 条静态缓存回退 |
-| ⏱ 自动刷新 | 每 5 分钟自动刷新榜单数据 |
-| 💰 佣金透视 | 展示预估佣金与播放量对比 |
-| 🩺 数据源监控 | 顶部状态条实时显示数据源健康状态 |
+| 🎯 多平台榜单 | 抖音/快手/B站等（Playwright / TikHub / Web 兜底） |
+| 🔍 多维度筛选 | 平台 × 类型 × 分类 × 关键字 × 排序 |
+| 📊 双数据源 | `DramaCrawler` 真实数据 > 静态/模拟回退（有提示） |
+| ⏱ 自动刷新 | 约每 5 分钟刷新 |
+| 🩺 数据源监控 | 顶部状态条显示健康状态 |
 
 ---
 
@@ -25,76 +25,46 @@
 
 ```
 drama_finder_plugin/
-├── __init__.py        # 插件入口 + PLUGIN_INFO 元信息
-├── main.py            # Plugin 类 + DramaFinderWidget UI 组件
-├── manifest.json       # 插件配置文件
-└── README.md          # 本文档
+├── __init__.py
+├── main.py                 # Plugin + DramaFinderWidget
+├── crawler/                # 爬虫引擎（已从 modules/lego 迁入）
+│   ├── __init__.py
+│   ├── drama_crawler.py
+│   └── drama_web_scraper.py
+├── manifest.json
+└── README.md
 ```
+
+Playwright 平台适配仍位于 `app/modules/lego/*_playwright_api.py`，由爬虫懒加载注入。
 
 ---
 
 ## 使用方法
 
-### 方式 1: 在 APP 内启用
+1. 打开 **插件中心**
+2. 启用 / 运行 **🎭 短剧筛选**
+3. 在面板中筛选、刷新榜单
 
-1. 打开 **设置 → 模块管理**
-2. 找到 **🎭 短剧筛选**，勾选启用
-3. 导航栏中出现 [短剧筛选] 入口
-
-### 方式 2: 作为独立插件使用
+兼容导入（旧路径 shim）：
 
 ```python
-from app.plugins.drama_finder_plugin import Plugin, DramaFinderWidget
-
-# 创建插件实例
-plugin = Plugin()
-plugin.initialize({"parent_widget": main_window})
-
-# 获取 UI 组件
-widget = plugin.create_widget()
-layout.addWidget(widget)
-
-# 关闭
-plugin.shutdown()
+from app.modules.lego.drama_crawler import DramaCrawler  # → 转发到插件 crawler
+from app.plugins.drama_finder_plugin.crawler import DramaCrawler  # 推荐
 ```
-
----
-
-## 插件接口
-
-```python
-class Plugin(IPlugin):
-    @property
-    def plugin_info(self) -> PluginInfo: ...
-    def initialize(self, context: dict) -> bool: ...
-    def shutdown(self) -> bool: ...
-    def get_ui_config(self) -> dict: ...
-    def run(self, data=None) -> QWidget: ...
-```
-
----
-
-## 依赖
-
-- **drama_crawler**: `app/modules/lego/drama_crawler.py` — 数据爬虫引擎
-- **PyQt6**: `>= 6.0` — UI 框架
-- **requests**: HTTP 请求库（drama_crawler 依赖）
-
----
-
-## 配置参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `refresh_interval` | int | 300 | 数据自动刷新间隔(秒) |
-| `auto_fetch` | bool | True | 是否自动获取真实数据 |
 
 ---
 
 ## 更新日志
 
+### v1.1.1 (2026-07-25)
+- 无 Playwright 时优先 `app/data/drama_data.json` 静态缓存，不再被随机假 API 抢先
+- WebScraper 缓存路径修正为 `app/data`
+- UI 区分：真实爬取 / 静态缓存 / 模拟数据
+- 验收：`test_drama_crawler_static.py`
+
+### v1.1.0 (2026-07-25)
+- 爬虫引擎打包进插件 `crawler/`
+- 移除导航「短剧筛选」独立模块，仅保留插件入口
+
 ### v1.0.0 (2026-06-28)
-- 🎉 首次发布
-- 从内部模块拆分为独立插件
-- 实现 IPlugin 接口, 支持完整生命周期管理
-- 遵循 PLUGIN_STANDARD.md v1.0.0 规范
+- 首次发布为独立插件

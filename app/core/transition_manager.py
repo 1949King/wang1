@@ -417,3 +417,8 @@ class TransitionManager:
 
 # 全局转场管理器实例
 transition_manager = TransitionManager()
+
+
+def get_transition_manager() -> TransitionManager:
+    """供 EditorModule 懒加载使用。"""
+    return transition_manager

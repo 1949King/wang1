@@ -108,15 +108,15 @@ class LUTLoader:
         self._init = True
         self._cache: Dict[str, LUT3D] = {}
         self._presets: Dict[str, LUT3D] = {}
+        self._user: Dict[str, LUT3D] = {}  # key → LUT（导入的 .cube/.3dl）
         self._init_builtin_presets()
 
     def _init_builtin_presets(self):
-        """初始化内置预设"""
+        """初始化内置预设（与调色页 LUT 下拉中文名映射对齐）。"""
         if not HAS_NUMPY:
             return
-        # Cinema 风格
         cinema = self._build_color_matrix_preset([
-            (1.0, 0.95, 0.85),  # warm
+            (1.0, 0.95, 0.85),
         ], name="Cinema Warm")
         self._presets["cinema_warm"] = cinema
 
@@ -132,11 +132,42 @@ class LUTLoader:
 
         bw = self._build_color_matrix_preset([
             (0.299, 0.587, 0.114),
-        ], name="B&W")
+        ], name="B&W", grayscale=True)
         self._presets["bw"] = bw
 
+        teal = self._build_color_matrix_preset([
+            (0.85, 1.05, 1.15),
+        ], name="Teal Orange")
+        self._presets["teal_orange"] = teal
+
+        jp = self._build_color_matrix_preset([
+            (1.05, 1.02, 1.08),
+        ], name="JP Fresh")
+        self._presets["jp_fresh"] = jp
+
+        cyber = self._build_color_matrix_preset([
+            (1.2, 0.85, 1.25),
+        ], name="Cyberpunk")
+        self._presets["cyberpunk"] = cyber
+
+        waste = self._build_color_matrix_preset([
+            (1.1, 0.95, 0.75),
+        ], name="Wasteland")
+        self._presets["wasteland"] = waste
+
+        candy = self._build_color_matrix_preset([
+            (1.2, 1.1, 1.15),
+        ], name="Candy")
+        self._presets["candy"] = candy
+
+        night = self._build_color_matrix_preset([
+            (0.75, 0.85, 1.2),
+        ], name="Night Blue")
+        self._presets["night_blue"] = night
+
     def _build_color_matrix_preset(self, transforms: List[Tuple[float, float, float]],
-                                    name: str = "preset", size: int = 17) -> LUT3D:
+                                    name: str = "preset", size: int = 17,
+                                    grayscale: bool = False) -> LUT3D:
         """构建简单色彩矩阵预设"""
         if not HAS_NUMPY:
             return LUT3D(name=name, size=size, data=None)
@@ -146,6 +177,11 @@ class LUTLoader:
             for g in range(size):
                 for b in range(size):
                     rf, gf, bf = r / scale, g / scale, b / scale
+                    if grayscale and transforms:
+                        tr, tg, tb = transforms[0]
+                        gray = rf * tr + gf * tg + bf * tb
+                        data[r, g, b, :] = min(1.0, gray)
+                        continue
                     for tr, tg, tb in transforms:
                         nr = rf * tr
                         ng = gf * tg
@@ -262,17 +298,58 @@ class LUTLoader:
         data = np.array(values[:size**3], dtype=np.float32).reshape(size, size, size, 3)
         return LUT3D(name=title, size=size, data=data)
 
+    def register(self, key: str, lut: LUT3D) -> str:
+        """注册用户 LUT（key 通常为绝对路径或自定义 id）。"""
+        key = str(key or "").strip()
+        if not key or lut is None:
+            return ""
+        self._user[key] = lut
+        self._cache[key] = lut
+        return key
+
+    def register_file(self, path: str) -> Optional[LUT3D]:
+        """加载并注册 .cube/.3dl；成功返回 LUT3D（name=文件名）。"""
+        path = os.path.normpath(os.path.abspath(str(path or "")))
+        if not path:
+            return None
+        lut = self.load(path)
+        if lut is None:
+            return None
+        self.register(path, lut)
+        return lut
+
     def get_preset(self, name: str) -> Optional[LUT3D]:
-        """获取内置预设"""
-        return self._presets.get(name)
+        """解析 LUT：内置预设 → 用户注册 → 文件路径 → 缓存。"""
+        if not name or name in ("无", "none", "None"):
+            return None
+        key = str(name).strip()
+        if key in self._presets:
+            return self._presets[key]
+        if key in self._user:
+            return self._user[key]
+        if key in self._cache:
+            return self._cache[key]
+        # 工程里可能存相对/绝对路径
+        if os.path.isfile(key):
+            return self.load(os.path.normpath(os.path.abspath(key)))
+        # Windows 反斜杠 / 相对路径兜底
+        try:
+            alt = os.path.normpath(key)
+            if os.path.isfile(alt):
+                return self.load(os.path.abspath(alt))
+        except Exception:
+            pass
+        return None
 
     def list_presets(self) -> List[str]:
-        """列出所有预设"""
-        return list(self._presets.keys())
+        """列出所有预设（含已注册用户 LUT 的 key）。"""
+        return list(self._presets.keys()) + list(self._user.keys())
 
     def clear_cache(self):
-        """清空缓存"""
+        """清空文件缓存（保留内置与已注册用户 LUT）。"""
         self._cache.clear()
+        for k, lut in self._user.items():
+            self._cache[k] = lut
 
 
 # 全局实例

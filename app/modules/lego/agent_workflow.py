@@ -80,6 +80,12 @@ class ReviewResult:
     viral_probability: float    # 爆款概率
     suggestions: List[Dict[str, Any]] = field(default_factory=list)
     passed: bool = False
+    # 如实标注：预测所用特征里，dialogue_density/emotion_variance/
+    # conflict_intensity/climax_position/visual_attractiveness/audio_quality/
+    # subtitle_quality 目前是固定占位值（未接入真实的对话密度/情绪/画质分析），
+    # 只有 duration/scene_count/hook_quality/has_cliffhanger 来自真实剪辑任务
+    # 数据。overall_score 因此只能算粗略参考，不是精确的内容质量分析结果。
+    uses_placeholder_features: bool = True
 
 
 @dataclass
@@ -483,8 +489,8 @@ class ReviewAgent:
         try:
             from .ollama_client import ollama_client
             self._ollama_client = ollama_client
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Ollama client load failed: {e}")
 
     def review(self, plan: EditPlan, completed_tasks: List[ClipTask],
                progress_cb: Optional[Callable] = None) -> ReviewResult:
@@ -521,6 +527,13 @@ class ReviewAgent:
                 from .viral_optimization_engine import VideoFeatures, Platform as VPlatform
 
                 # 构建视频特征
+                # 如实说明：dialogue_density/emotion_variance/conflict_intensity/
+                # climax_position/visual_attractiveness/audio_quality/
+                # subtitle_quality 目前没有接入真实的内容分析（对话密度统计、
+                # 情绪识别、画质/音质评估等），是固定的中等水平占位值——
+                # 只有 duration/scene_count/hook_quality/has_cliffhanger 是
+                # 从真实剪辑任务数据推导出来的。下方 overall_score 因此只能
+                # 当粗略参考，见 ReviewResult.uses_placeholder_features。
                 total_dur = sum(t.end_time - t.start_time for t in completed_tasks)
                 features = VideoFeatures(
                     duration=total_dur,
@@ -581,7 +594,8 @@ class ReviewAgent:
                 logger.warning(f"ReviewAgent analysis failed: {e}")
 
         if progress_cb:
-            progress_cb(95, f"审核完成: {review.overall_score:.0f}分")
+            score_note = "（部分特征为占位估值，仅供参考）" if review.uses_placeholder_features else ""
+            progress_cb(95, f"审核完成: {review.overall_score:.0f}分{score_note}")
 
         return review
 
@@ -783,9 +797,14 @@ class AgentWorkflow:
                         )
                         if refined_path and os.path.isfile(refined_path):
                             self._state.phase = "done"
+                            # 修复：此前直接断言"评分从 X 提升"，但精修后从未
+                            # 重新调用 review() 对新结果打分——只是假定 LLM
+                            # 精修一定会带来改善，实际上并没有验证。如实说明
+                            # 已生成精修版本、原评分是多少，但不编造"提升"的
+                            # 结论（除非未来真的接入重新评分逻辑）。
                             self._state.message = (
-                                f"迭代优化完成: 评分从 {review.overall_score:.0f} "
-                                f"提升 (第 {self._state.iteration} 次)"
+                                f"第 {self._state.iteration} 次精修已生成新版本"
+                                f"（原评分 {review.overall_score:.0f}，未重新评分，效果建议人工复核）"
                             )
                         else:
                             self._state.phase = "done"
@@ -810,8 +829,8 @@ class AgentWorkflow:
             if self._on_complete:
                 try:
                     self._on_complete(self._state)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"on_complete callback failed: {e}")
 
             return self._state
 
@@ -852,8 +871,8 @@ class AgentWorkflow:
         if self._on_progress:
             try:
                 self._on_progress(percent, message)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"on_progress callback failed: {e}")
 
     def _cancel_state(self) -> WorkflowState:
         """生成取消状态"""
@@ -862,8 +881,8 @@ class AgentWorkflow:
         if self._on_progress:
             try:
                 self._on_progress(0, "已取消")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"on_progress callback on cancel failed: {e}")
         return self._state
 
     def get_status(self) -> Dict[str, Any]:

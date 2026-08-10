@@ -1,21 +1,21 @@
 """
-角色管理模块 (Character Management Module)
-=========================================
+角色 / AI 画布模块
+=================
+原「角色管理」主界面已替换为镶嵌的 infinite-canvas。
 
-与剪辑模块的「角色面板」不同：
-- 剪辑模块的角色面板 = 视频级的临时角色偏好（作用于当前剪辑）
-- 本模块 = 全局的角色库（跨项目复用的角色资产，如短剧人物画像）
+- 主视图：vendor/infinite-canvas（WebEngine）生图/生视频
+- 角色库：CharacterStore 仍持久化；侧栏「角色库」编辑 + 生成资产挂载
+- 回流：canvas_bridge → EventBus MATERIAL_TO_TIMELINE → 剪辑
+- 插帧：可选开启线性补帧（非神经网络）
 
-设计：
-- 角色 = 可复用资产（人物画像 + 代表视频/台词 + 识别信息）
-- 以 JSON 持久化到用户目录 ~/.video_editor_cache/characters/
-- 支持：新增 / 编辑 / 删除 / 导入角色画像 / 从视频提取
+剪辑模块内「角色」页签仍是视频级临时偏好，与本模块互补。
 """
 
 import json
 import os
 import datetime
 import logging
+import threading
 from typing import Dict, List, Optional
 
 logger = logging.getLogger("AI短剧编辑器.characters")
@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QTextEdit, QListWidget,
     QListWidgetItem, QComboBox, QFileDialog, QMessageBox,
     QFrame, QGroupBox, QScrollArea, QInputDialog, QColorDialog,
-    QTabWidget, QProgressBar, QSizePolicy,
+    QTabWidget, QProgressBar, QSizePolicy, QCheckBox,
 )
 
 from .base_module import BaseModule
@@ -119,9 +119,11 @@ class CharacterStore:
         data["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._characters.append(data)
         if not self._save():
-            # 保存失败但内存中已添加，回滚并记录警告
+            # 修复：此前保存失败时虽然正确回滚了内存变更，但依然 return new_id（真值），
+            # 调用方 `_on_save` 只看 `if new_id:` 就判定成功，磁盘写入失败也会弹"保存成功"
             self._characters.pop()
             logger.warning(f"新增角色保存失败，已回滚内存变更: {new_id}")
+            return ""
         return new_id
 
     def update(self, char_id: str, data: Dict) -> bool:
@@ -472,212 +474,372 @@ class CharacterEditorPanel(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# 主模块 UI
+# 主模块 UI —— infinite-canvas 镶嵌（替换原列表式角色管理主界面）
 # ---------------------------------------------------------------------------
 
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtWebEngineCore import QWebEngineScript, QWebEngineProfile
+    WEBENGINE_AVAILABLE = True
+except ImportError:
+    WEBENGINE_AVAILABLE = False
+    QWebEngineView = object  # type: ignore
+    QWebEngineScript = object  # type: ignore
+    QWebEngineProfile = object  # type: ignore
+
+
 class CharacterManagementModule(BaseModule):
-    """角色管理模块：全局角色库，与剪辑模块中的临时角色偏好互补"""
+    """角色 / AI 画布模块：镶嵌 infinite-canvas，生成物回流剪辑。"""
 
     module_id = "characters"
-    module_name = "角色管理"
-    module_icon = "👥"
+    module_name = "AI 画布"
+    module_icon = "🎨"
+
+    def __init__(self):
+        self._store = CharacterStore()
+        self._web = None
+        self._status_label = None
+        self._interp_check = None
+        self._char_combo = None
+        self._library_panel = None
+        self._bridge_started = False
+        super().__init__()
 
     def _setup_ui(self):
-        self._store = CharacterStore()
-
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
 
-        # 顶部标题 + 统计 + 操作
+        # 顶栏
         header = QHBoxLayout()
-        title = QLabel("👥 角色管理")
-        title.setStyleSheet("font-size:20px;font-weight:bold;color:#fff;")
+        title = QLabel(f"{self.module_icon} {self.module_name}")
+        title.setStyleSheet("font-size:18px;font-weight:bold;color:#fff;")
         header.addWidget(title)
 
-        self._count_label = QLabel(self._count_text(0))
-        self._count_label.setStyleSheet("color:#888;font-size:12px;")
-        header.addSpacing(12)
-        header.addWidget(self._count_label)
+        hint = QLabel("无限画布生图/生视频 → 发送到剪辑 · 角色库挂资产")
+        hint.setStyleSheet("color:#888;font-size:11px;margin-left:8px;")
+        header.addWidget(hint)
         header.addStretch()
 
-        add_btn = QPushButton("➕ 新增")
-        add_btn.setStyleSheet(self._btn_style("#1e6bde"))
-        add_btn.clicked.connect(self._on_new)
-        header.addWidget(add_btn)
+        self._char_combo = QComboBox()
+        self._char_combo.setMinimumWidth(140)
+        self._char_combo.setStyleSheet(
+            "QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;padding:4px 8px;border-radius:4px;}"
+        )
+        self._refresh_char_combo()
+        header.addWidget(QLabel("挂到角色:"))
+        header.addWidget(self._char_combo)
 
-        import_btn = QPushButton("📥 导入")
-        import_btn.setStyleSheet(self._btn_style("#2a2a2a"))
-        import_btn.clicked.connect(self._on_import)
-        header.addWidget(import_btn)
+        self._interp_check = QCheckBox("入轨后线性补帧")
+        self._interp_check.setStyleSheet("color:#ccc;")
+        self._interp_check.setToolTip("非神经网络：帧差 + 线性混合（ai_interpolation）")
+        header.addWidget(self._interp_check)
 
-        export_btn = QPushButton("📤 导出")
-        export_btn.setStyleSheet(self._btn_style("#2a2a2a"))
-        export_btn.clicked.connect(self._on_export)
-        header.addWidget(export_btn)
+        start_btn = QPushButton("启动画布")
+        start_btn.setStyleSheet(self._btn_style("#1e6bde"))
+        start_btn.clicked.connect(self._on_start_canvas)
+        header.addWidget(start_btn)
+
+        reload_btn = QPushButton("刷新")
+        reload_btn.setStyleSheet(self._btn_style("#2a2a2a"))
+        reload_btn.clicked.connect(self._on_reload)
+        header.addWidget(reload_btn)
+
+        send_btn = QPushButton("发送文件到剪辑")
+        send_btn.setStyleSheet(self._btn_style("#0d9488"))
+        send_btn.clicked.connect(self._on_send_file)
+        header.addWidget(send_btn)
+
+        lib_btn = QPushButton("角色库")
+        lib_btn.setStyleSheet(self._btn_style("#2a2a2a"))
+        lib_btn.setCheckable(True)
+        lib_btn.toggled.connect(self._toggle_library)
+        header.addWidget(lib_btn)
 
         root.addLayout(header)
 
-        # 主内容：左侧角色列表 + 右侧编辑面板
+        self._status_label = QLabel("准备中…")
+        self._status_label.setStyleSheet("color:#79c0ff;font-size:11px;padding:2px 4px;")
+        root.addWidget(self._status_label)
+
         body = QHBoxLayout()
-        body.setSpacing(10)
+        body.setSpacing(6)
 
-        # -- 左侧 --
-        left = QFrame()
-        left.setStyleSheet("QFrame{background:#121212;border:1px solid #1e1e1e;border-radius:8px;}")
-        left.setFixedWidth(280)
-        ll = QVBoxLayout(left)
-        ll.setContentsMargins(8, 8, 8, 8)
-        ll.setSpacing(6)
-
-        search = QLineEdit()
-        search.setPlaceholderText("🔍 搜索角色名 / 标签")
-        search.setStyleSheet(self._line_style())
-        search.textChanged.connect(self._on_filter)
-        ll.addWidget(search)
-
-        self._list = QListWidget()
-        self._list.setStyleSheet("""
-            QListWidget {
-                background:#121212; color:#eee; border:none; font-size:13px;
-            }
-            QListWidget::item { padding:8px 10px; border-radius:4px; }
-            QListWidget::item:selected { background:#1e6bde; color:#fff; }
-            QListWidget::item:hover { background:#1a1a1a; }
-        """)
-        self._list.currentItemChanged.connect(self._on_select)
-        ll.addWidget(self._list, 1)
-
-        self._empty_label = QLabel("还没有角色，点击右上角「➕ 新增」开始创建")
-        self._empty_label.setStyleSheet("color:#666;font-size:12px;padding:16px;")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setWordWrap(True)
-        ll.addWidget(self._empty_label)
-
-        body.addWidget(left)
-
-        # -- 右侧 --
+        # 可选左侧角色库（默认隐藏）
+        self._library_panel = QFrame()
+        self._library_panel.setVisible(False)
+        self._library_panel.setFixedWidth(320)
+        self._library_panel.setStyleSheet(
+            "QFrame{background:#121212;border:1px solid #1e1e1e;border-radius:8px;}"
+        )
+        ll = QVBoxLayout(self._library_panel)
+        ll.setContentsMargins(6, 6, 6, 6)
+        lib_title = QLabel("角色库（资产挂载）")
+        lib_title.setStyleSheet("color:#eee;font-weight:bold;")
+        ll.addWidget(lib_title)
         self._editor = CharacterEditorPanel(self._store)
-        self._editor.saved.connect(self._refresh_list)
-        body.addWidget(self._editor, 1)
+        self._editor.saved.connect(self._on_library_saved)
+        ll.addWidget(self._editor, 1)
+        # 简易列表
+        self._lib_list = QListWidget()
+        self._lib_list.setMaximumHeight(160)
+        self._lib_list.setStyleSheet(
+            "QListWidget{background:#0d0d0d;color:#eee;border:1px solid #222;}"
+            "QListWidget::item:selected{background:#1e6bde;}"
+        )
+        self._lib_list.currentItemChanged.connect(self._on_lib_select)
+        ll.addWidget(self._lib_list)
+        add_char = QPushButton("新增角色")
+        add_char.clicked.connect(self._on_new_char)
+        ll.addWidget(add_char)
+        body.addWidget(self._library_panel)
+        self._refresh_lib_list()
 
+        # 主画布
+        canvas_wrap = QFrame()
+        canvas_wrap.setStyleSheet("QFrame{background:#0a0a0a;border:1px solid #1e1e1e;border-radius:8px;}")
+        cw = QVBoxLayout(canvas_wrap)
+        cw.setContentsMargins(0, 0, 0, 0)
+
+        if WEBENGINE_AVAILABLE:
+            self._web = QWebEngineView()
+            self._install_inject_script()
+            cw.addWidget(self._web, 1)
+        else:
+            self._web = None
+            err = QLabel(
+                "未安装 PyQt6-WebEngine，无法镶嵌画布。\n"
+                "请执行: .venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0\n"
+                "或点击「启动画布」后用系统浏览器打开 http://127.0.0.1:3000"
+            )
+            err.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            err.setStyleSheet("color:#f87171;padding:24px;")
+            err.setWordWrap(True)
+            cw.addWidget(err, 1)
+
+        body.addWidget(canvas_wrap, 1)
         root.addLayout(body, 1)
 
-        # 底部提示
-        tip = QLabel("💡 提示：这里维护的是全局角色库。剪辑模块中的「角色面板」作用于当前视频的角色偏好。")
-        tip.setStyleSheet("color:#666;font-size:11px;padding:4px;")
+        tip = QLabel(
+            "画布右下角「拾光剪影」面板可直接选文件发送；"
+            "API Key 在画布内右上角配置。插帧为线性补帧，非 RIFE。"
+        )
+        tip.setStyleSheet("color:#666;font-size:11px;")
         tip.setWordWrap(True)
         root.addWidget(tip)
 
-        # 初次加载
-        self._refresh_list()
+        # 延迟启动桥与探测画布
+        QTimer.singleShot(200, self._bootstrap)
 
-    # ------ helpers ------
+    def _btn_style(self, bg: str) -> str:
+        return (
+            f"QPushButton{{background:{bg};color:#fff;border:none;border-radius:6px;"
+            f"padding:7px 12px;font-size:11px;font-weight:bold;}}"
+            f"QPushButton:hover{{opacity:0.9;}}"
+            f"QPushButton:checked{{background:#1e6bde;}}"
+        )
 
-    @staticmethod
-    def _btn_style(bg: str) -> str:
-        return f"""
-            QPushButton {{
-                background:{bg}; color:#fff; border:none; border-radius:6px;
-                padding:7px 16px; font-size:11px; font-weight:bold;
-            }}
-            QPushButton:hover {{ opacity:0.9; }}
-        """
-
-    @staticmethod
-    def _line_style() -> str:
-        return """
-            QLineEdit {
-                background:#1a1a1a; color:#eee; border:1px solid #2a2a2a;
-                border-radius:6px; padding:8px; font-size:12px;
-            }
-            QLineEdit:focus { border:1px solid #1e6bde; }
-        """
-
-    def _count_text(self, n: int) -> str:
-        return f"共 {n} 个角色"
-
-    # ------ 动作 ------
-
-    def _refresh_list(self, keep_current: bool = True):
-        current_id = self._editor._current_id if keep_current and hasattr(self._editor, "_current_id") else None
-        filter_text = ""
-        # 从搜索框读
-        for i in range(self.layout().count()):
-            w = self.layout().itemAt(i)
-            if w and w.widget() and isinstance(w.widget(), QLineEdit):
-                filter_text = w.widget().text().strip().lower()
-                break
-
-        self._list.blockSignals(True)
-        self._list.clear()
-        chars = self._store.all()
-        self._count_label.setText(self._count_text(len(chars)))
-
-        if filter_text:
-            chars = [c for c in chars if
-                     filter_text in (c.get("name") or "").lower() or
-                     filter_text in " ".join(c.get("tags") or []).lower()]
-
-        if not chars:
-            self._empty_label.setVisible(True)
-            self._list.setVisible(False)
+    def _bootstrap(self):
+        self._ensure_bridge()
+        # 若画布已在跑则直接加载；否则提示用户点启动
+        try:
+            from app.core.canvas_runtime import get_canvas_runtime, canvas_url
+        except ImportError:
+            from core.canvas_runtime import get_canvas_runtime, canvas_url  # type: ignore
+        rt = get_canvas_runtime()
+        if rt.is_ready():
+            self._load_canvas(rt.url)
+            self._set_status(f"已连接 {rt.url}")
         else:
-            self._empty_label.setVisible(False)
-            self._list.setVisible(True)
-            for c in chars:
-                name = c.get("name") or "未命名"
-                role = c.get("role_type") or ""
-                tags = c.get("tags") or []
-                tag_text = " · ".join(tags[:3])
-                display = f"{name}"
-                if role:
-                    display += f"  [{role}]"
-                if tag_text:
-                    display += f"\n   #{tag_text}"
-                item = QListWidgetItem(display)
-                item.setData(Qt.ItemDataRole.UserRole, c.get("id"))
-                self._list.addItem(item)
-                if c.get("id") == current_id:
-                    self._list.setCurrentRow(self._list.count() - 1)
-        self._list.blockSignals(False)
+            self._set_status("画布未启动 — 点击「启动画布」（需先 scripts/setup_infinite_canvas.ps1）")
 
-    def _on_filter(self, text: str):
-        self._refresh_list(keep_current=False)
+    def _ensure_bridge(self):
+        if self._bridge_started:
+            return
+        try:
+            from app.core.canvas_bridge import get_canvas_bridge
+        except ImportError:
+            from core.canvas_bridge import get_canvas_bridge  # type: ignore
+        ok = get_canvas_bridge().start()
+        self._bridge_started = ok
+        if ok:
+            logger.info("canvas bridge ready")
 
-    def _on_select(self, current: QListWidgetItem, previous: QListWidgetItem):
+    def _install_inject_script(self):
+        if not WEBENGINE_AVAILABLE or self._web is None:
+            return
+        try:
+            js = """
+            (function(){
+              function load(){
+                if (window.__SHIGUANG_BRIDGE_INJECTED__) return;
+                var s=document.createElement('script');
+                s.src='http://127.0.0.1:18765/inject.js?t='+Date.now();
+                s.onerror=function(){};
+                document.documentElement.appendChild(s);
+              }
+              if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', load);
+              else load();
+              setTimeout(load, 1500);
+            })();
+            """
+            script = QWebEngineScript()
+            script.setName("shiguang-bridge-loader")
+            script.setSourceCode(js)
+            script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+            script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+            script.setRunsOnSubFrames(True)
+            self._web.page().scripts().insert(script)
+        except Exception as e:
+            logger.warning("inject script failed: %s", e)
+
+    def _load_canvas(self, url: str):
+        if self._web is None:
+            import webbrowser
+            webbrowser.open(url)
+            return
+        from PyQt6.QtCore import QUrl
+        self._web.load(QUrl(url))
+
+    def _set_status(self, text: str):
+        if self._status_label is not None:
+            self._status_label.setText(text)
+
+    def _on_start_canvas(self):
+        self._ensure_bridge()
+        self._set_status("正在启动 infinite-canvas…")
+        try:
+            from app.core.canvas_runtime import get_canvas_runtime
+        except ImportError:
+            from core.canvas_runtime import get_canvas_runtime  # type: ignore
+
+        def work():
+            rt = get_canvas_runtime()
+            ok, msg = rt.ensure_started(wait_seconds=60.0)
+            QTimer.singleShot(0, lambda: self._after_start(ok, msg, rt.url if ok else ""))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _after_start(self, ok: bool, msg: str, url: str):
+        self._set_status(msg)
+        if ok and url:
+            self._load_canvas(url)
+        else:
+            QMessageBox.warning(self, "启动画布", msg)
+
+    def _on_reload(self):
+        self._ensure_bridge()
+        try:
+            from app.core.canvas_runtime import get_canvas_runtime
+        except ImportError:
+            from core.canvas_runtime import get_canvas_runtime  # type: ignore
+        rt = get_canvas_runtime()
+        if rt.is_ready():
+            self._load_canvas(rt.url)
+            self._set_status(f"已刷新 {rt.url}")
+        else:
+            self._set_status("画布未运行，请先「启动画布」")
+
+    def _selected_character_id(self) -> str:
+        if self._char_combo is None:
+            return ""
+        return str(self._char_combo.currentData() or "")
+
+    def _selected_character_name(self) -> str:
+        if self._char_combo is None:
+            return ""
+        return self._char_combo.currentText().strip()
+        # skip "(不挂角色)"
+
+    def _on_send_file(self):
+        self._ensure_bridge()
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择画布生成的图片或视频",
+            "",
+            "媒体 (*.png *.jpg *.jpeg *.webp *.bmp *.mp4 *.mov *.mkv *.webm *.avi);;所有文件 (*.*)",
+        )
+        if not path:
+            return
+        try:
+            from app.core.canvas_bridge import ingest_local_file
+        except ImportError:
+            from core.canvas_bridge import ingest_local_file  # type: ignore
+
+        char_id = self._selected_character_id()
+        char_name = self._selected_character_name()
+        if char_name.startswith("("):
+            char_id, char_name = "", ""
+        interp = bool(self._interp_check.isChecked()) if self._interp_check else False
+        res = ingest_local_file(
+            path,
+            title=os.path.basename(path),
+            character_id=char_id,
+            character_name=char_name,
+            send_to_editor=True,
+            enable_interpolation=interp,
+        )
+        if res.get("success"):
+            self._set_status(res.get("message") or "已发送")
+            QMessageBox.information(self, "已发送到剪辑", res.get("message") or "成功")
+            self._refresh_char_combo()
+        else:
+            QMessageBox.warning(self, "发送失败", res.get("message") or "未知错误")
+
+    def _toggle_library(self, on: bool):
+        if self._library_panel is not None:
+            self._library_panel.setVisible(bool(on))
+            if on:
+                self._refresh_lib_list()
+
+    def _refresh_char_combo(self):
+        if self._char_combo is None:
+            return
+        cur = self._char_combo.currentData()
+        self._char_combo.blockSignals(True)
+        self._char_combo.clear()
+        self._char_combo.addItem("(不挂角色)", "")
+        for c in self._store.all():
+            self._char_combo.addItem(c.get("name") or c.get("id") or "未命名", c.get("id"))
+        if cur:
+            idx = self._char_combo.findData(cur)
+            if idx >= 0:
+                self._char_combo.setCurrentIndex(idx)
+        self._char_combo.blockSignals(False)
+
+    def _refresh_lib_list(self):
+        if not hasattr(self, "_lib_list") or self._lib_list is None:
+            return
+        self._lib_list.clear()
+        for c in self._store.all():
+            name = c.get("name") or "未命名"
+            n_assets = len(c.get("generated_assets") or [])
+            item = QListWidgetItem(f"{name}  ({n_assets} 资产)")
+            item.setData(Qt.ItemDataRole.UserRole, c.get("id"))
+            self._lib_list.addItem(item)
+
+    def _on_lib_select(self, current: QListWidgetItem, previous: QListWidgetItem):
         if current is None:
             return
         char_id = current.data(Qt.ItemDataRole.UserRole)
         if char_id:
             self._editor.load_character(char_id)
+            idx = self._char_combo.findData(char_id) if self._char_combo else -1
+            if idx >= 0:
+                self._char_combo.setCurrentIndex(idx)
 
-    def _on_new(self):
+    def _on_new_char(self):
         self._editor.clear()
         self._editor.set_enabled(True)
-        self._name_edit_focus()
-
-    def _name_edit_focus(self):
-        # 让用户立刻开始输入
         self._editor._name_edit.setFocus()
-        self._editor._name_edit.selectAll()
 
-    def _on_import(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择角色库文件", "", "JSON 角色库 (*.json)")
-        if not path:
-            return
-        count = self._store.import_file(path, merge=True)
-        if count > 0:
-            QMessageBox.information(self, "导入成功", f"成功导入 {count} 个角色")
-            self._refresh_list()
-        else:
-            QMessageBox.warning(self, "导入失败", "文件中没有可识别的角色数据")
+    def _on_library_saved(self):
+        self._refresh_lib_list()
+        self._refresh_char_combo()
 
-    def _on_export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "保存角色库", "characters.json", "JSON 角色库 (*.json)")
-        if not path:
-            return
-        if self._store.export(path):
-            QMessageBox.information(self, "导出成功", f"角色库已保存到:\n{path}")
-        else:
-            QMessageBox.warning(self, "导出失败", "写入文件时出错")
+    def on_activated(self):
+        self._bootstrap()
+        self._refresh_char_combo()
+
+    def on_deactivated(self):
+        pass

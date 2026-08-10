@@ -115,7 +115,7 @@ class PerformanceBenchmark(QObject):
                 test_level=self.config.test_level,
                 start_time=time.time(),
                 end_time=0.0,
-                duration=0.0
+                duration=0.0,
                 test_name=test_name
             )
             

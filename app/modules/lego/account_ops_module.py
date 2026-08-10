@@ -6,6 +6,7 @@
 功能:
 - 多平台账号管理（8平台：抖音/快手/视频号/小红书/B站/微博/头条/西瓜）
 - 智能运营建议（LLM 驱动）
+- 爆款优化建议（account_analyzer → viral_optimization_engine）
 - 数据看板（7天趋势图）
 - 矩阵批量发布
 - OAuth 2.0 授权绑定
@@ -20,7 +21,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGroupBox, QLineEdit, QFormLayout,
-    QComboBox, QCheckBox, QDialog, QMessageBox,
+    QComboBox, QCheckBox, QDialog, QMessageBox, QFileDialog,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt
 
@@ -51,10 +53,13 @@ class AccountOpsModule(BaseModule):
         ("xigua", "🍉 西瓜", "#FF4444"),
     ]
 
+    # 修复：此前抖音/快手/视频号预置了虚构的"@主账号 12.5万粉"等账号，
+    # 首次启动时会让用户误以为自己已经绑定了真实账号、且已有真实粉丝数据。
+    # 改为和其余平台一致的空列表，真实状态应通过账号绑定流程获得。
     _DEFAULT_ACCOUNTS = {
-        "douyin": [{"name": "@主账号", "status": "正常", "fans": "12.5万粉"}],
-        "kuaishou": [{"name": "@快手主号", "status": "正常", "fans": "8.3万粉"}],
-        "weixin": [{"name": "@视频号", "status": "正常", "fans": "5.6万粉"}],
+        "douyin": [],
+        "kuaishou": [],
+        "weixin": [],
         "xiaohongshu": [],
         "bilibili": [],
         "weibo": [],
@@ -62,10 +67,26 @@ class AccountOpsModule(BaseModule):
         "xigua": [],
     }
 
+    _INTEGRATOR_PLATFORM_MAP = {
+        "weixin": "shipinhao",
+    }
+
+    _REAL_UPLOADER_TYPES = frozenset({"DouyinUploader", "BilibiliUploader"})
+
+    _VIRAL_PLATFORM_MAP = {
+        "douyin": "DOUYIN",
+        "kuaishou": "KUAISHOU",
+        "xiaohongshu": "XIAOHONGSHU",
+        "bilibili": "BILIBILI",
+        "weixin": "WECHAT",
+    }
+
     def __init__(self):
         register_account_skills()
         self._selected_platform = "douyin"
         self._bound_accounts = self._load_accounts()
+        self._viral_engine = None
+        self._viral_nav_context: dict[str, dict] = {}
         super().__init__()
 
     @classmethod
@@ -197,6 +218,8 @@ class AccountOpsModule(BaseModule):
         cl.addWidget(self._create_accounts_card(pinfo))
         cl.addWidget(self._create_stats_card(pinfo))
         cl.addWidget(self._create_suggestions_card(pinfo))
+        viral_card, drama_nav_btn, editor_nav_btn = self._create_viral_optimization_card(pinfo)
+        cl.addWidget(viral_card)
         cl.addWidget(self._create_publish_card(pinfo))
         cl.addWidget(self._create_matrix_card())
         cl.addWidget(self._create_data_card())
@@ -681,8 +704,8 @@ class AccountOpsModule(BaseModule):
                         diff_days = (today - dt).days
                         if 0 <= diff_days < 7:
                             day_values[diff_days] += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AccountOps] 计算周数据失败: {e}")
 
         try:
             af = workspace / "data" / "analytics.json"
@@ -693,8 +716,8 @@ class AccountOpsModule(BaseModule):
                 for i in range(7):
                     day_key = (today - timedelta(days=i)).strftime("%Y-%m-%d")
                     day_values[i] += daily.get(day_key, 0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AccountOps] 加载分析数据失败: {e}")
 
         return day_values
 
@@ -780,8 +803,8 @@ class AccountOpsModule(BaseModule):
                             tips.append((icon, line))
                     if tips:
                         return tips[:5]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AccountOps] 解析建议失败: {e}")
 
         tips = []
         if acct_count == 0:
@@ -795,9 +818,587 @@ class AccountOpsModule(BaseModule):
             tips.append(("⏰", "粉丝活跃高峰：工作日 12:00-13:00, 20:00-22:00"))
         return tips[:5]
 
+    def _analyzer_data_dir(self) -> Path:
+        return self._workspace_root() / "app" / "运营数据"
+
+    def _get_viral_engine(self):
+        if self._viral_engine is not None:
+            return self._viral_engine
+        try:
+            from .viral_optimization_engine import ViralOptimizationEngine
+            self._viral_engine = ViralOptimizationEngine()
+            return self._viral_engine
+        except Exception as e:
+            logger.warning(f"[AccountOps] ViralOptimizationEngine 不可用: {e}")
+            return None
+
+    def _map_platform_to_viral(self, pid: str, pinfo):
+        from .viral_optimization_engine import Platform
+        enum_name = self._VIRAL_PLATFORM_MAP.get(pid)
+        if enum_name and hasattr(Platform, enum_name):
+            return getattr(Platform, enum_name)
+        return Platform.DOUYIN
+
+    @staticmethod
+    def _sample_video_features():
+        from .viral_optimization_engine import VideoFeatures
+        return VideoFeatures(
+            duration=45.0,
+            scene_count=12,
+            avg_scene_duration=3.75,
+            dialogue_density=0.7,
+            emotion_variance=0.6,
+            conflict_intensity=0.8,
+            hook_quality=65,
+            climax_position=0.75,
+            has_cliffhanger=True,
+            visual_attractiveness=75,
+            audio_quality=80,
+            subtitle_quality=70,
+        )
+
+    @staticmethod
+    def _build_video_features_from_analysis(analysis: dict):
+        from .viral_optimization_engine import VideoFeatures
+
+        avg_like = float(analysis.get("average_like_rate", 0) or 0)
+        avg_comment = float(analysis.get("average_comment_rate", 0) or 0)
+        avg_share = float(analysis.get("average_share_rate", 0) or 0)
+        avg_views = float(analysis.get("average_views", 0) or 0)
+
+        duration = 45.0
+        scene_count = max(3, int(duration / 4))
+        hook_quality = min(100.0, max(15.0, avg_like * 1200))
+        emotion_variance = min(1.0, max(0.2, (avg_comment + avg_share) * 12))
+        conflict_intensity = min(1.0, max(0.3, avg_like * 6))
+        visual_score = min(100.0, max(35.0, 40.0 + avg_views / 2000.0))
+
+        return VideoFeatures(
+            duration=duration,
+            scene_count=scene_count,
+            avg_scene_duration=duration / scene_count,
+            dialogue_density=0.65,
+            emotion_variance=emotion_variance,
+            conflict_intensity=conflict_intensity,
+            hook_quality=hook_quality,
+            climax_position=0.7,
+            has_cliffhanger=avg_comment >= 0.012,
+            visual_attractiveness=visual_score,
+            audio_quality=75.0,
+            subtitle_quality=70.0,
+        )
+
+    def _create_viral_optimization_card(self, pinfo):
+        card = self._card("爆款优化建议", "🔥")
+        card.setStyleSheet(
+            "QGroupBox{font-size:12px;font-weight:600;color:#ccc;border:1px solid #f97316;"
+            "border-radius:10px;margin-top:8px;padding-top:14px;background:#121212;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 6px;}"
+        )
+        lo = card.layout()
+
+        intro = QLabel(
+            "读取 account_analyzer 本地运营数据，经 viral_optimization_engine "
+            "生成完播/互动预测与具体优化项（非 LLM 话术）。"
+        )
+        intro.setStyleSheet("color:#777;font-size:9px;line-height:1.4;")
+        intro.setWordWrap(True)
+        lo.addWidget(intro)
+
+        status_label = QLabel("尚未分析。点击下方按钮生成建议。")
+        status_label.setStyleSheet("color:#888;font-size:10px;")
+        status_label.setWordWrap(True)
+        lo.addWidget(status_label)
+
+        results_label = QLabel("")
+        results_label.setStyleSheet(
+            "color:#ccc;font-size:10px;line-height:1.5;"
+            "background:#0a0a0a;border-radius:6px;padding:8px;"
+        )
+        results_label.setWordWrap(True)
+        results_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        lo.addWidget(results_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        drama_nav_btn = QPushButton("🎭 去短剧筛选选题")
+        drama_nav_btn.setEnabled(False)
+        drama_nav_btn.setToolTip("基于爆款分析，跳转插件中心「短剧筛选」挑下一批题材")
+        drama_nav_btn.setStyleSheet(
+            "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:6px;"
+            "padding:8px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#6d28d9;}"
+            "QPushButton:disabled{background:#2a2a2a;color:#555;}"
+        )
+        drama_nav_btn.clicked.connect(
+            lambda _, p=pinfo[0]: self._navigate_to_drama_finder(p)
+        )
+
+        editor_nav_btn = QPushButton("✂️ 去剪辑（下一轮粗剪）")
+        editor_nav_btn.setEnabled(False)
+        editor_nav_btn.setToolTip("带着优化建议进入剪辑，按建议做下一轮粗剪")
+        editor_nav_btn.setStyleSheet(
+            "QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:6px;"
+            "padding:8px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#1557b0;}"
+            "QPushButton:disabled{background:#2a2a2a;color:#555;}"
+        )
+        editor_nav_btn.clicked.connect(
+            lambda _, p=pinfo[0]: self._navigate_to_editor_rough_cut(p)
+        )
+
+        gen_btn = QPushButton("📊 从运营数据生成")
+        gen_btn.setStyleSheet(
+            "QPushButton{background:#ea580c;color:#fff;border:none;border-radius:6px;"
+            "padding:8px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#c2410c;}"
+        )
+        gen_btn.clicked.connect(
+            lambda _: self._refresh_viral_suggestions(
+                pinfo, status_label, results_label, drama_nav_btn, editor_nav_btn,
+                use_sample=False,
+            )
+        )
+        btn_row.addWidget(gen_btn)
+
+        sample_btn = QPushButton("🧪 样例分析")
+        sample_btn.setToolTip("无本地运营数据时，用内置样例特征演示引擎输出（会明确标注非真实数据）")
+        sample_btn.setStyleSheet(
+            "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #444;"
+            "border-radius:6px;padding:8px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#3a3a3a;color:#fff;}"
+        )
+        sample_btn.clicked.connect(
+            lambda _: self._refresh_viral_suggestions(
+                pinfo, status_label, results_label, drama_nav_btn, editor_nav_btn,
+                use_sample=True,
+            )
+        )
+        btn_row.addWidget(sample_btn)
+        lo.addLayout(btn_row)
+
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(8)
+        nav_row.addWidget(drama_nav_btn)
+        nav_row.addWidget(editor_nav_btn)
+        lo.addLayout(nav_row)
+
+        return card, drama_nav_btn, editor_nav_btn
+
+    def _refresh_viral_suggestions(
+        self, pinfo, status_label, results_label, drama_nav_btn, editor_nav_btn,
+        use_sample=False,
+    ):
+        pid = pinfo[0]
+        platform_name = pinfo[1]
+
+        def _set_nav_enabled(enabled: bool):
+            drama_nav_btn.setEnabled(enabled)
+            editor_nav_btn.setEnabled(enabled)
+
+        engine = self._get_viral_engine()
+        if engine is None:
+            status_label.setText("❌ 爆款优化引擎加载失败，请检查 viral_optimization_engine 依赖（numpy 等）。")
+            results_label.setText("")
+            _set_nav_enabled(False)
+            return
+
+        try:
+            platform = self._map_platform_to_viral(pid, pinfo)
+            unsupported = pid not in self._VIRAL_PLATFORM_MAP
+
+            if use_sample:
+                features = self._sample_video_features()
+                data_source = "内置样例特征（非真实账号数据，仅演示引擎输出格式）"
+            else:
+                from .account_analyzer import get_account_analyzer
+
+                analyzer = get_account_analyzer(str(self._analyzer_data_dir()))
+                analysis = analyzer.analyze_data()
+                if "error" in analysis:
+                    status_label.setText(
+                        f"⚠️ 暂无运营数据（{analysis['error']}）。"
+                        f"数据目录：{self._analyzer_data_dir()}。"
+                        "可先「全平台数据采集」或点「样例分析」查看引擎输出。"
+                    )
+                    results_label.setText("")
+                    _set_nav_enabled(False)
+                    return
+                features = self._build_video_features_from_analysis(analysis)
+                data_source = (
+                    f"本地运营数据（{analysis.get('total_videos', 0)} 条视频，"
+                    f"均赞率 {analysis.get('average_like_rate', 0):.2%}）"
+                )
+
+            prediction = engine.predict_performance(features, platform)
+            suggestions = engine.generate_optimization_suggestions(features, platform)
+
+            platform_note = platform.value
+            if unsupported:
+                platform_note += "（当前平台暂无专属权重，暂按抖音算法估算）"
+
+            status_label.setText(
+                f"✅ 已调用 viral_optimization_engine | 平台：{platform_name} → {platform_note}\n"
+                f"数据来源：{data_source}"
+            )
+
+            lines = ["【表现预测】"]
+            for key, value in prediction.to_dict().items():
+                lines.append(f"  · {key}：{value}")
+
+            rough_cut_lines = []
+            if suggestions:
+                lines.append("")
+                lines.append("【优化建议】")
+                for i, item in enumerate(suggestions[:5], 1):
+                    lines.append(
+                        f"{i}. {item.factor.value}（优先级 {item.priority}，"
+                        f"{item.current_score:.0f}→{item.target_score:.0f}）"
+                    )
+                    first_line = item.suggestion.split("\n", 1)[0].strip()
+                    lines.append(f"   {first_line}")
+                    lines.append(f"   预期改善：{item.expected_improvement}")
+                    rough_cut_lines.append(f"{i}. {item.factor.value}：{first_line}")
+            else:
+                lines.append("")
+                lines.append("当前特征已达标，引擎未给出额外优化项。")
+                rough_cut_lines.append("当前特征已达标，可按数据趋势挑选新题材做粗剪。")
+
+            results_label.setText("\n".join(lines))
+
+            self._viral_nav_context[pid] = {
+                "platform_name": platform_name,
+                "platform_id": pid,
+                "drama_hint": (
+                    f"基于{platform_name}爆款分析，优先筛选完播/互动潜力高的短剧题材。"
+                ),
+                "rough_cut_hint": "\n".join([
+                    f"平台：{platform_name}",
+                    "来源：账号运营 · 爆款优化建议",
+                    "",
+                    "【下一轮粗剪可优先】",
+                    *rough_cut_lines,
+                    "",
+                    "提示：导入素材后可结合 AI 字幕/去水词做第一轮粗剪。",
+                ]),
+            }
+            _set_nav_enabled(True)
+
+        except Exception as e:
+            logger.exception("[AccountOps] 爆款优化分析失败")
+            status_label.setText(f"❌ 分析失败：{e}")
+            results_label.setText("")
+            _set_nav_enabled(False)
+
+    def _ensure_module_enabled(self, module_id: str, display_name: str) -> bool:
+        from .module_registry import get_registry
+
+        if get_registry().is_enabled(module_id):
+            return True
+        QMessageBox.warning(
+            self,
+            "模块未启用",
+            f"请先在「设置 → 功能开关」中启用「{display_name}」模块后再跳转。",
+        )
+        return False
+
+    def _navigate_to_drama_finder(self, platform_id: str):
+        ctx = self._viral_nav_context.get(platform_id)
+        if not ctx:
+            QMessageBox.information(self, "提示", "请先生成爆款优化建议。")
+            return
+        # M1：注册表已迁 plugins → extensions（拓展中心）
+        if not self._ensure_module_enabled("extensions", "拓展中心"):
+            return
+        from .core import EventType
+
+        self._event_bus.emit(
+            EventType.MODULE_ACTIVATED,
+            {
+                "target": "extensions",
+                "action": "drama_finder",
+                "hint": ctx.get("drama_hint", ""),
+            },
+        )
+
+    def _navigate_to_editor_rough_cut(self, platform_id: str):
+        ctx = self._viral_nav_context.get(platform_id)
+        if not ctx:
+            QMessageBox.information(self, "提示", "请先生成爆款优化建议。")
+            return
+        from .core import EventType
+
+        self._event_bus.emit(
+            EventType.MODULE_ACTIVATED,
+            {
+                "target": "editor",
+                "workflow_hint": {
+                    "source": "viral_optimization",
+                    "title": "下一轮粗剪建议",
+                    "platform": ctx.get("platform_name", ""),
+                    "body": ctx.get("rough_cut_hint", ""),
+                },
+            },
+        )
+
+    def _workspace_root(self) -> Path:
+        return Path(__file__).parent.parent.parent.parent
+
+    def _publish_log_path(self) -> Path:
+        return self._workspace_root() / "data" / "publish_log.json"
+
+    def _integrator_platform_id(self, pid: str) -> str:
+        return self._INTEGRATOR_PLATFORM_MAP.get(pid, pid)
+
+    def _get_platform_integrator(self):
+        try:
+            from app.integrations.platforms import PlatformIntegrator
+            return PlatformIntegrator()
+        except Exception as e:
+            logger.warning(f"[AccountOps] PlatformIntegrator 不可用: {e}")
+            return None
+
+    def _real_upload_capable(self, integrator, platform_id: str) -> bool:
+        if not integrator:
+            return False
+        iid = self._integrator_platform_id(platform_id)
+        client = integrator.get_platform_client(iid)
+        if client.get("uploader_type") not in self._REAL_UPLOADER_TYPES:
+            return False
+        return bool(client.get("uploader_available"))
+
+    def _append_publish_log(self, entry: dict) -> tuple:
+        try:
+            pf = self._publish_log_path()
+            pf.parent.mkdir(parents=True, exist_ok=True)
+            logs = []
+            if pf.exists():
+                with open(pf, "r", encoding="utf-8") as f:
+                    logs = json.load(f)
+            if not isinstance(logs, list):
+                logs = []
+            logs.insert(0, entry)
+            with open(pf, "w", encoding="utf-8") as f:
+                json.dump(logs[-500:], f, ensure_ascii=False, indent=2)
+            return True, ""
+        except Exception as e:
+            logger.warning(f"[AccountOps] 写入 publish_log 失败: {e}")
+            return False, str(e)
+
+    def _pick_video_file(self) -> str:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择要发布的视频",
+            "",
+            "视频文件 (*.mp4 *.mov *.mkv *.avi);;所有文件 (*.*)",
+        )
+        return path or ""
+
+    def _browse_video_into(self, video_input: QLineEdit):
+        path = self._pick_video_file()
+        if path:
+            video_input.setText(path)
+
+    def _execute_publish(
+        self,
+        *,
+        platform_id: str,
+        platform_name: str,
+        video_path: str,
+        title: str,
+        description: str = "",
+        tags=None,
+        publish_type: str = "quick",
+        account_name: str = "",
+        duration_label: str = "",
+    ) -> dict:
+        tags = tags or []
+        ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        receipt = {
+            "platform": platform_id,
+            "platform_name": platform_name,
+            "timestamp": ts,
+            "type": publish_type,
+            "title": title,
+            "description": description,
+            "video_path": video_path,
+            "account": account_name,
+            "duration_label": duration_label,
+        }
+
+        if not title.strip():
+            receipt.update(status="failed", message="请填写视频标题")
+            return receipt
+
+        if not video_path or not os.path.isfile(video_path):
+            receipt.update(status="failed", message="请选择有效的视频文件")
+            return receipt
+
+        integrator = self._get_platform_integrator()
+        iid = self._integrator_platform_id(platform_id)
+        real_upload = self._real_upload_capable(integrator, platform_id)
+
+        if not integrator:
+            receipt.update(
+                status="local_queue",
+                receipt_kind="local_queue",
+                message="已写入本地发布队列（未连接平台上传接口，不会自动发到平台）",
+            )
+            ok, err = self._append_publish_log(receipt)
+            if not ok:
+                receipt.update(status="failed", message=f"本地队列写入失败：{err}")
+            return receipt
+
+        try:
+            success = integrator.publish_to_platform(
+                iid,
+                video_path,
+                title.strip(),
+                description.strip(),
+                tags,
+            )
+        except Exception as e:
+            receipt.update(status="failed", message=f"发布异常：{e}")
+            self._append_publish_log(receipt)
+            return receipt
+
+        if not success:
+            receipt.update(
+                status="failed",
+                message="视频转码/导出失败，未提交到平台",
+            )
+            self._append_publish_log(receipt)
+            return receipt
+
+        base_name = os.path.basename(video_path).rsplit(".", 1)[0]
+        export_hint = os.path.join("短剧AI剪辑输出", f"{base_name}_{iid}.mp4")
+
+        if real_upload:
+            receipt.update(
+                status="upload_attempted",
+                receipt_kind="platform_upload",
+                message=(
+                    f"已尝试通过自动化上传到{platform_name}，"
+                    "请在平台创作者后台核对是否出现该作品"
+                ),
+            )
+        else:
+            receipt.update(
+                status="local_export",
+                receipt_kind="local_export",
+                export_path=export_hint,
+                message=(
+                    f"已导出为{platform_name}规格（{export_hint}），"
+                    "需手动上传到平台，并未自动发布"
+                ),
+            )
+
+        ok, err = self._append_publish_log(receipt)
+        if not ok:
+            receipt["status"] = "failed"
+            receipt["message"] = (
+                f"发布已完成但记录失败：{err} · {receipt.get('message', '')}"
+            )
+        return receipt
+
+    def _show_publish_receipt_dialog(self, dialog_title: str, receipts: list):
+        lines = []
+        for receipt in receipts:
+            st = receipt.get("status", "")
+            prefix = "❌" if st == "failed" else "ℹ️"
+            name = receipt.get("platform_name") or receipt.get("platform", "")
+            lines.append(f"{prefix} {name}: {receipt.get('message', '')}")
+            if receipt.get("export_path"):
+                lines.append(f"   导出路径: {receipt['export_path']}")
+
+        body = "\n".join(lines)
+        failed = [r for r in receipts if r.get("status") == "failed"]
+        okish = [r for r in receipts if r.get("status") != "failed"]
+        if failed and not okish:
+            QMessageBox.warning(self, dialog_title, body)
+        elif failed:
+            QMessageBox.warning(
+                self, dialog_title, body + "\n\n部分任务失败，请查看上方明细。"
+            )
+        else:
+            QMessageBox.information(self, dialog_title, body)
+
+    def _quick_publish(
+        self,
+        pid,
+        pinfo,
+        title_input,
+        desc_input,
+        auto_tag,
+        video_input,
+        duration_combo=None,
+    ):
+        platform_name = pinfo[1]
+        title = title_input.text().strip()
+        description = desc_input.text().strip()
+        video_path = video_input.text().strip()
+        # 修复：此前 dur（发布时长下拉）创建后从未被任何调用方读取，
+        # 用户选择"90秒"/"3分钟"完全不生效——现在真正传给 _execute_publish
+        # 并写入发布日志，供后续统计/回顾使用。
+        duration_label = duration_combo.currentText() if duration_combo is not None else ""
+
+        if not video_path:
+            video_path = self._pick_video_file()
+            if video_path:
+                video_input.setText(video_path)
+
+        tags = []
+        if auto_tag.isChecked() and description:
+            tags = [t for t in description.split() if t.startswith("#")]
+
+        accounts = self._bound_accounts.get(pid, [])
+        active = [a for a in accounts if a.get("status") == "正常"]
+        if not active:
+            QMessageBox.warning(
+                self,
+                "快速发布",
+                f"暂无可用的{platform_name}绑定账号。\n\n请先在「账号管理」中绑定账号。",
+            )
+            return
+
+        account_name = active[0].get("name", "")
+        receipt = self._execute_publish(
+            platform_id=pid,
+            platform_name=platform_name,
+            video_path=video_path,
+            title=title,
+            description=description,
+            tags=tags,
+            publish_type="quick",
+            account_name=account_name,
+            duration_label=duration_label,
+        )
+        self._show_publish_receipt_dialog("快速发布", [receipt])
+
     def _create_publish_card(self, pinfo):
         card = self._card("快速发布", "📤")
         lo = card.layout()
+
+        video_row = QHBoxLayout()
+        video_row.setSpacing(8)
+        video_input = QLineEdit()
+        video_input.setPlaceholderText("选择视频文件…")
+        video_input.setReadOnly(True)
+        video_input.setStyleSheet(
+            "QLineEdit{background:#0a0a0a;color:#fff;border:1px solid #222;"
+            "border-radius:6px;padding:6px 10px;font-size:11px;}"
+        )
+        video_row.addWidget(video_input, 1)
+        browse_btn = QPushButton("浏览…")
+        browse_btn.setStyleSheet(
+            "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;"
+            "border-radius:6px;padding:6px 10px;font-size:10px;}"
+            "QPushButton:hover{background:#3a3a3a;color:#fff;}"
+        )
+        browse_btn.clicked.connect(lambda _: self._browse_video_into(video_input))
+        video_row.addWidget(browse_btn)
+        lo.addLayout(video_row)
 
         row1 = QHBoxLayout()
         row1.setSpacing(8)
@@ -837,13 +1438,27 @@ class AccountOpsModule(BaseModule):
             "padding:10px;font-size:13px;font-weight:600;}"
             "QPushButton:hover{background:#1557b0;}"
         )
+        pub_btn.clicked.connect(
+            lambda _: self._quick_publish(
+                pinfo[0], pinfo, title_input, desc, auto_tag, video_input, dur
+            )
+        )
         lo.addWidget(pub_btn)
+
+        hint = QLabel("说明：未接平台 API 时为本地导出/队列，不会假装已发到平台。")
+        hint.setStyleSheet("color:#666;font-size:9px;")
+        hint.setWordWrap(True)
+        lo.addWidget(hint)
         return card
 
     def _create_matrix_card(self):
         card = self._card("🎯 矩阵发布（全平台批量）", "")
         lo = card.layout()
-        desc = QLabel("勾选账号，一键发布到多个平台")
+        desc = QLabel(
+            "将向左侧各平台已绑定的正常账号提交任务；需选择视频。"
+            "未接平台 API 时为本地导出/队列，下方勾选仅为示意尚未接线。"
+        )
+        desc.setWordWrap(True)
         desc.setStyleSheet("color:#666;font-size:10px;padding-bottom:4px;")
         lo.addWidget(desc)
 
@@ -890,7 +1505,8 @@ class AccountOpsModule(BaseModule):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        collect_btn = QPushButton("🔄 全平台数据采集")
+        collect_btn = QPushButton("🔄 汇总本地发布日志")
+        collect_btn.setToolTip("将本地 publish_log.json 的发布记录汇总进 analytics.json；不会联网拉取各平台真实播放/互动数据")
         collect_btn.setStyleSheet(
             "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;"
             "border-radius:6px;padding:8px;font-size:11px;font-weight:600;}"
@@ -905,6 +1521,8 @@ class AccountOpsModule(BaseModule):
             "border-radius:6px;padding:8px;font-size:11px;font-weight:600;}"
             "QPushButton:hover{background:#3a3a3a;color:#fff;}"
         )
+        # 修复：此前创建了按钮但从未 connect，点击「导出报表」完全无响应（死按钮）
+        export_btn.clicked.connect(self._export_report)
         row.addWidget(export_btn)
         lo.addLayout(row)
 
@@ -931,7 +1549,7 @@ class AccountOpsModule(BaseModule):
         return card
 
     def _matrix_publish(self):
-        """矩阵批量发布"""
+        """矩阵批量发布 — 诚实回执，禁止假成功"""
         plat_names = {pid: name for pid, name, _ in self.PLATFORMS}
 
         publishable = []
@@ -939,46 +1557,54 @@ class AccountOpsModule(BaseModule):
             accounts = self._bound_accounts.get(pid, [])
             active_accounts = [a for a in accounts if a.get("status") == "正常"]
             if active_accounts:
-                publishable.append((pid, plat_names.get(pid, pid), len(active_accounts)))
+                publishable.append(
+                    (pid, plat_names.get(pid, pid), active_accounts)
+                )
 
         if not publishable:
             QMessageBox.information(
-                self, "矩阵发布", "暂无可发布的账号。\n\n请先绑定平台账号并导入视频。"
+                self,
+                "矩阵发布",
+                "暂无可发布的账号。\n\n请先在各平台绑定账号（状态为「正常」）。",
             )
             return
 
-        summary_lines = [f"  {name}: {count} 个账号就绪" for pid, name, count in publishable]
+        video_path = self._pick_video_file()
+        if not video_path:
+            return
 
-        try:
-            workspace = Path(__file__).parent.parent.parent.parent
-            pf = workspace / "data" / "publish_log.json"
-            logs = []
-            if pf.exists():
-                with open(pf, 'r', encoding='utf-8') as f:
-                    logs = json.load(f)
-            if not isinstance(logs, list):
-                logs = []
-            for pid, name, _ in publishable:
-                logs.insert(0, {
-                    "platform": pid,
-                    "platform_name": name,
-                    "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                    "status": "published",
-                    "type": "matrix_batch",
-                })
-            with open(pf, 'w', encoding='utf-8') as f:
-                json.dump(logs[-500:], f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-        QMessageBox.information(
-            self, "矩阵发布",
-            f"已提交批量发布任务\n\n" + "\n".join(summary_lines) +
-            f"\n\n共 {sum(c for _, _, c in publishable)} 个账号，请在各大平台后台查看发布进度。"
+        title, ok = QInputDialog.getText(
+            self, "矩阵发布", "视频标题（所有平台共用）："
         )
+        if not ok or not title.strip():
+            QMessageBox.warning(self, "矩阵发布", "请填写视频标题。")
+            return
+
+        receipts = []
+        for pid, name, active_accounts in publishable:
+            account_name = ", ".join(a.get("name", "") for a in active_accounts)
+            receipts.append(
+                self._execute_publish(
+                    platform_id=pid,
+                    platform_name=name,
+                    video_path=video_path,
+                    title=title.strip(),
+                    description="",
+                    publish_type="matrix_batch",
+                    account_name=account_name,
+                )
+            )
+
+        self._show_publish_receipt_dialog("矩阵发布", receipts)
 
     def _collect_data(self):
-        """全平台数据采集"""
+        """汇总本地发布日志到 analytics.json
+
+        如实说明：这里不会联网调用任何平台 API 拉取真实播放量/互动数据，
+        只是把本地 publish_log.json 里已有的发布记录条数汇总进
+        analytics.json。此前按钮叫"全平台数据采集"、完成后弹"全平台数据
+        采集完成"，容易让人误以为真的从抖音/快手等平台拉取了最新数据。
+        """
         workspace = Path(__file__).parent.parent.parent.parent
         updated = False
 
@@ -1010,16 +1636,58 @@ class AccountOpsModule(BaseModule):
 
         if updated:
             QMessageBox.information(
-                self, "数据采集",
-                f"全平台数据采集完成！\n\n采集时间: {self._last_collect_time}\n"
-                "数据已保存至 data/analytics.json"
+                self, "数据汇总",
+                f"本地发布日志汇总完成！\n\n汇总时间: {self._last_collect_time}\n"
+                "数据已保存至 data/analytics.json\n\n"
+                "⚠️ 仅统计本地 publish_log.json 记录数，不联网拉取各平台真实播放/互动数据"
             )
         else:
             QMessageBox.information(
-                self, "数据采集",
-                "暂无新数据可采集。\n\n"
-                "提示：完成发布后 publish_log.json 会自动记录数据，采集功能将从中统计。"
+                self, "数据汇总",
+                "暂无新数据可汇总。\n\n"
+                "提示：完成发布后 publish_log.json 会自动记录数据，汇总功能将从中统计。"
             )
+
+    def _export_report(self):
+        """导出运营报表（账号绑定状态 + 本地汇总统计）为 JSON 文件
+
+        修复：此前按钮从未 connect，点击完全没反应（死按钮）。
+        导出内容如实标注数据来源，不虚构未采集到的指标。
+        """
+        workspace = Path(__file__).parent.parent.parent.parent
+        analytics = {}
+        try:
+            af = workspace / "data" / "analytics.json"
+            if af.exists():
+                with open(af, 'r', encoding='utf-8') as f:
+                    analytics = json.load(f)
+        except Exception as e:
+            logger.warning(f"读取 analytics.json 失败: {e}")
+
+        plat_names = {pid: name for pid, name, _ in self.PLATFORMS}
+        report = {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "note": "accounts 为本地绑定记录，daily_ops 来自本地 publish_log.json 汇总；均非各平台实时官方数据",
+            "accounts": {
+                plat_names.get(pid, pid): accounts
+                for pid, accounts in self._bound_accounts.items() if accounts
+            },
+            "daily_ops": analytics.get("daily_ops", {}),
+            "last_collected": analytics.get("last_collected", "暂无"),
+        }
+
+        default_name = f"运营报表_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path, _ = QFileDialog.getSaveFileName(self, "导出报表", default_name, "JSON 文件 (*.json)")
+        if not path:
+            return
+        if not path.endswith(".json"):
+            path += ".json"
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "导出成功", f"报表已保存至：\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"写入文件失败：{e}")
 
     def _refresh_account_data_status(self):
         """更新数据卡片的时间戳和状态"""
@@ -1032,5 +1700,5 @@ class AccountOpsModule(BaseModule):
                     f"上次采集: {last_time} | 数据正常 | "
                     f"{synced_count}/{len(self.PLATFORMS)}平台已绑定"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AccountOps] 更新状态标签失败: {e}")
