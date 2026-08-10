@@ -2,7 +2,7 @@
 帮助模块 (HelpModule)
 ======================
 从 settings_module.py 中拆分出来的独立帮助模块。
-提供 16 个帮助话题的搜索和浏览功能。
+提供 18 个帮助话题的搜索和浏览功能。
 """
 
 from PyQt6.QtCore import Qt
@@ -87,6 +87,7 @@ class HelpModule(BaseModule):
             ("🧩", "插件中心", self._plugins),
             ("📊", "性能监控", self._perf),
             ("🤖", "模型广场", self._models),
+            ("🎨", "AI画布", self._ai_canvas),
             ("❓", "常见问题", self._faq),
         ]
         self._help_topics = topics  # 保存引用供搜索使用
@@ -745,11 +746,40 @@ class HelpModule(BaseModule):
                       "支持所有兼容OpenAI API格式的平台（ChatGPT/OpenRouter等）",
                       "自定义模型持久化保存到custom_providers.json，重启不丢失",
                       "与内置平台同等待遇：支持激活/配置/测试/切换"])
+        self._subtitle("🎨 AIGC 标签页（生图/生视频/语音模型，非对话模型）")
+        self._text("和「模型广场」是两个不同的东西：模型广场配的是文字对话模型（写文案/分析用），"
+                    "AIGC 页展示的是生图/生视频/语音这类多模态模型目录，两者不能互相替代。")
+        self._bullet(["目录来源：内置 AIGC_MODELS 清单，覆盖硅基流动/OpenAI/通义等 Provider 的生图、生视频、语音模型",
+                      "怎么激活：先回到「模型广场」找到对应 Provider 卡片（如硅基流动）填好 API Key 并保存",
+                      "填完 Key 后 AIGC 页对应条目才会显示可用，下拉框选择具体的 [生图]/[生视频] 型号",
+                      "生效范围：配好后可在「AI画布」模块里生图/生视频，回流到时间线剪辑",
+                      "对话类模型（DeepSeek/GPT 等）无需来这页，直接在模型广场卡片配置即可"])
         self._subtitle("其他标签页")
         self._bullet(["OpenClaw：自动化运营组件配置",
                       "技能管理：Skill接口管理和调用",
                       "💾保存全部：一键保存所有平台的配置"])
         self._tip("激活的模型将应用于所有AI功能：文案生成/短剧筛选/字幕生成等")
+        self._cl.addStretch()
+
+    def _ai_canvas(self):
+        self._clear(); self._title("🎨 AI画布")
+        self._text("左侧导航「AI 画布」模块（原「角色管理」）：把 infinite-canvas 开源画布镶嵌进软件内，"
+                    "在画布上生图/生视频，管理角色资产，并能一键把生成结果送回时间线剪辑。")
+        self._subtitle("首次使用前置条件")
+        self._bullet(["需要 PyQt6-WebEngine：未安装时画布区域会显示红字错误，按提示"
+                      "`.venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0` 装好后完全重启软件",
+                      "需要先跑一次 `scripts/setup_infinite_canvas.ps1` 拉取/构建前端资源",
+                      "有构建产物（dist）时秒开；没有构建产物时会拉起本地 Vite 开发服务器，首次加载稍慢，属正常现象",
+                      "生图/生视频需要先在「模型管理 → AIGC」标签页确认对应 Provider 已填 Key（见「模型广场」章节）"])
+        self._subtitle("界面说明")
+        self._bullet(["主区域：嵌入式画布，生图/生视频、拖拽排版",
+                      "左侧「角色库」（可展开/收起）：新增角色、填写外貌/性格/台词等字段，持久化保存，供生成时挂载参考",
+                      "右下角「拾光剪影」浮动面板：",
+                      "　- 发送到剪辑：把画布上选中的生成结果推送到时间线（EventBus 回流，不是文件复制）",
+                      "　- 同步模型：把模型广场里配置好的 Key 同步给画布内部调用",
+                      "　- 连接 Agent：可选，拉起本地 17371 端口给外部 Agent/Codex 接入（`codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp`）",
+                      "插帧选项是线性插值补帧，不是 RIFE 等神经网络补帧，追求丝滑请用剪辑模块里的专业补帧功能"])
+        self._tip("画布是可选功能：即使不启用，视频剪辑主流程完全不受影响；若长期用不到可以在设置里关闭该模块减少启动开销")
         self._cl.addStretch()
 
     # ── 搜索功能 ──

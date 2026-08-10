@@ -1,5 +1,18 @@
 # 05 — 已知问题与近期修复
 
+## 已完善（2026-08-11 · 帮助中心缺 AI画布 / AIGC 模型内容）
+
+**现象**：`help_module.py` 硬编码 17 个帮助话题，均是较早期就存在的模块；后续新增的 `characters`（"AI 画布"，镶嵌 infinite-canvas，`default_enabled=True` 的常驻模块）和 `model_management.py` 里新增的「🎨 AIGC」标签页（生图/生视频/语音模型目录）上线时都没有回头更新帮助内容，帮助中心里搜"画布"/"AIGC"完全搜不到东西。
+
+**修复**：
+- 新增帮助话题「🎨 AI画布」（`_ai_canvas()`），覆盖：前置依赖（PyQt6-WebEngine + `setup_infinite_canvas.ps1`）、dist 秒开/Vite 首次慢的正常现象、角色库、右下角「发送到剪辑/同步模型/连接 Agent」面板、线性插帧非 RIFE 的诚实说明。
+- 「🤖 模型广场」话题（`_models()`）补一节「🎨 AIGC 标签页」，说明它和模型广场（对话模型）是两码事、怎么先在模型广场填 Key 再回 AIGC 页选生图/生视频型号、配好后在 AI 画布生效。
+- 话题总数从文档字符串里过期的"16"更正为实际"18"。
+
+**验证**：`.venv312` 下实例化 `HelpModule` 直接渲染 `_ai_canvas()`/`_models()` 无异常；`_on_help_search("AI画布")`/`_on_help_search("AIGC")` 均命中新内容（现有搜索机制按 `self._help_topics` 动态提取渲染文本，新增话题自动被搜索覆盖，无需额外接线）。
+
+涉及：`app/modules/lego/help_module.py`。
+
 ## 已修复（2026-08-11 · AIEngine.__init__ 被 get_instance() 腰斩，_clients_loaded 从未设置）
 
 **现象**：文案生成等所有走 `ai_engine.chat_with_fallback()`/`chat()` 的功能点击即弹「LLM 不可用：ai_engine: 'AIEngineEnhanced' object has no attribute '_clients_loaded'」。
@@ -14,6 +27,16 @@
 **验证**：`.venv312` 下实测 `ai_engine._ensure_clients()` 与 `ai_engine.chat_with_fallback(...)` 完整跑通，`_clients_loaded` 正确存在且为 `True`，真实拿到一次云端 provider 回复；`py_compile` 通过。
 
 **用户侧**：若重启前仍复现此报错，是因为正在运行的进程内存里还是旧对象（Python 不会自动重载已导入模块），**重启程序**即可加载已修复的代码。
+
+## 已完善（2026-08-11 · DeepSeek 已配置但 Agent/文案无响应）
+
+| 项 | 说明 |
+|----|------|
+| 根因 | `app/data/active_provider.json` 仍为 `ollama`：只保存 Key 未激活；文案读激活项；Agent 下拉默认 Ollama 在前，本地不可用时把 `错误: …` 当正常结果，解析失败像「没响应」 |
+| 修复 | 保存云端配置后自动激活；文案优先 `chat(active)`；Agent 下拉按激活/已配置排序并标 ★；引擎错误串走 `error_ready`；本机激活已切到 `deepseek`（chat 实测通） |
+| 用法 | 模型管理 → DeepSeek 保存（自动激活）→ Agent 下拉选 ★ DeepSeek → 再试 |
+
+涉及：`model_management.py` · `copywriting_module.py` · `editor_module.py` · `model_config.load/save_active_provider`
 
 ## 已完善（2026-08-11 · 技术债务清理第一批：死代码路径）
 
