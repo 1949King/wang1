@@ -1,5 +1,102 @@
 # 05 — 已知问题与近期修复
 
+## 已完善（2026-08-12 · 删除 App 页 · UI 仅画布/3D）
+
+顶栏只保留「画布 | 3D 导演台」；AppBoard 已删，分镜在节点检视器编辑。
+
+## 已完善（2026-08-12 · UI 简洁化 + 3D 导演台）
+
+| 项 | 说明 |
+|----|------|
+| UI | 顶栏模式切换（画布/App/3D）；侧栏折叠面板；去掉按钮墙 |
+| 3D | `Stage3D.tsx`：人体素模/道具、VRS 工具、导演/机位视角、FOV、截图→镜头节点 |
+| 局限 | 非 LibTV 关节级姿态；无 720° 全景上传；素模级站位构图 |
+
+涉及：`vendor/shiguang-canvas`（`CanvasShell` / `Stage3D` / `three`）
+
+## 已完善（2026-08-12 · 对齐主流画布：@素材 / 变体 / 全量入轨）
+
+| 项 | 说明 |
+|----|------|
+| 对照表 | [`16-aigc-canvas-gap.md`](16-aigc-canvas-gap.md) |
+| @素材/@标题 | 提示词展开；有图则作 img2img 参考 |
+| 上游汇聚 | 连线剧本/提示词写入生成提示 |
+| 变体 | 选中镜头 → 表情/服装/背景×3 |
+| 全部入轨 | 按序 ingest；`duration_sec` → 静图短视频时长 |
+
+## 已完善（2026-08-12 · P2：三视图 / 参考重绘 / 分镜导出）
+
+| 项 | 说明 |
+|----|------|
+| 三视图 | 导演台「角色三视图」铺正/侧/背镜头节点 |
+| 参考重绘 | 有图或首帧时 img2img；完整蒙版局部后置 |
+| 导出 | 分镜 JSON + CSV 下载 |
+
+## 已完善（2026-08-12 · 长期计划 P1：@角色 / 批量 / img2img）
+
+| 项 | 说明 |
+|----|------|
+| 计划 | [`15-long-term-iteration.md`](15-long-term-iteration.md) |
+| @角色 | bridge prefs 带 `character_prompt`；画布展开 + 自动注入 |
+| 批量 | 导演台「批量生成全部镜头」可中断 |
+| img2img | `reference_image` → 优先图生图，失败降级文生图并在状态条说明 |
+
+涉及：`canvas_bridge.py` · `character_management_module.py` · `vendor/shiguang-canvas`
+
+## 已完善（2026-08-12 · 导演台迭代：首尾帧 / 拉片 / App 模式 / 模板）
+
+| 项 | 说明 |
+|----|------|
+| 首尾帧 | 镜头·视频节点可上传首/尾帧；生成提示词附带一致性约束 |
+| 拉片 | `POST /host/storyboard-breakdown`（AIEngine + 启发式）→ `applyStoryboard` 铺节点 |
+| App 模式 | 画布/App 切换；表单编辑分镜 |
+| 模板 | localStorage 工作流模板 |
+| 局限 | 首尾帧尚未 img2img；拉片依赖已激活对话模型 |
+
+涉及：`canvas_bridge.py` · `vendor/shiguang-canvas` · [`14-canvas-strategy.md`](14-canvas-strategy.md)
+
+## 已完善（2026-08-12 · 导演台「生成选中节点」接通 AIGC）
+
+| 项 | 说明 |
+|----|------|
+| API | `POST /host/generate-image`：OpenAI-compatible `/images/generations`（硅基流动 FLUX 等） |
+| UI | 生图模型下拉（`/host/image-models`）；失败占位兜底 |
+| 鉴权 | 画布 URL 带 bridge token；inject 写入 `__SHIGUANG_BRIDGE_TOKEN` |
+
+涉及：`canvas_bridge.py` · `vendor/shiguang-canvas` · `character_management_module.py`
+
+## 已完善（2026-08-12 · 自研拾光导演台画布 MVP，默认替代 infinite-canvas）
+
+| 项 | 说明 |
+|----|------|
+| 前端 | `vendor/shiguang-canvas`：React Flow 节点无限画布（剧本/镜头/提示词/图/视频、九宫格、连线、本地工程） |
+| 宿主 | `canvas_runtime` 默认引擎 `shiguang`（:3010/:3011）；`SHIGUANG_CANVAS_ENGINE=infinite` 回退 |
+| 桥 | 复用 `canvas_bridge`：同步模型池、发送到剪辑、prefs |
+| 文档 | [`14-canvas-strategy.md`](14-canvas-strategy.md) |
+| 局限 | MVP 生图为占位图；角色一致性/真实 AIGC/局部重绘后续迭代 |
+
+## 已完善（2026-08-12 · 帮助中心增加 LibTV / TapNow 外链备选）
+
+| 项 | 说明 |
+|----|------|
+| 话题 | 新增「🌐 外部画布备选」：浏览器直达 LibTV / TapNow；诚实标明非内置、不自动入轨 |
+| AI画布页 | 同页增加外链小节，搜索「LibTV」「TapNow」可命中 |
+
+涉及：`app/modules/lego/help_module.py`
+
+## 已完善（2026-08-12 · OpenTake 对照：Agent 工具面体验，不换壳）
+
+| 项 | 说明 |
+|----|------|
+| 差距文档 | [`11`](11-opentake-gap.md) / [`12`](12-otio-clip-fields.md) / [`13`](13-agent-skill-memory.md) |
+| 白名单+ClipSkills | `agent_action_registry`；L0/L1/L2 提示；MCP 缺口表 |
+| 时间线自省 | gaps/tracks/in·out；SkillEngine.`list_all` |
+| 选模 | `ensure_active_provider_sensible`；`PROVIDER_ACTIVATED`；云端保存自动激活 |
+| 多集记忆 | `MemoryStore.project_context`；Agent 面板剧名/集数/平台 |
+| 画布 | inject 展示激活模型；prefs 同步（仍 infinite-canvas） |
+
+涉及：`agent_action_registry` · `memory_store` · `model_config` · `editor_module` · `canvas_bridge` · `character_management_module` · `model_management`
+
 ## 已完善（2026-08-11 · 帮助中心缺 AI画布 / AIGC 模型内容）
 
 **现象**：`help_module.py` 硬编码 17 个帮助话题，均是较早期就存在的模块；后续新增的 `characters`（"AI 画布"，镶嵌 infinite-canvas，`default_enabled=True` 的常驻模块）和 `model_management.py` 里新增的「🎨 AIGC」标签页（生图/生视频/语音模型目录）上线时都没有回头更新帮助内容，帮助中心里搜"画布"/"AIGC"完全搜不到东西。
