@@ -1,5 +1,15 @@
 # 05 — 已知问题与近期修复
 
+## 已修复（2026-08-12 · AI 画布「预热卡住 / 切换引擎无反应」）
+
+**现象**：进入「AI 画布」状态长期停在「正在预热…」，中间 WebView 一片白；顶栏切换「拾光导演台 / infinite-canvas」两个引擎也像没反应。日志里其实已经出现 `canvas static server on …3011/3001`，说明本机静态服务已起来。
+
+**根因**：`character_management_module.py` 在后台线程（`CanvasWarmup` / 引擎切换 / 手动启动 / Agent）里用 `QTimer.singleShot(0, lambda…)` 试图回主线程更新 UI、调用 `_load_canvas`。QTimer 必须在归属线程调度，从纯 `threading.Thread` 里 `singleShot` 经常**永不触发**——于是服务已监听、状态不更新、WebView 从不 `load(url)`。叠加：画布就绪后还会自动 `warmup` `canvas-agent`（npx，常 30–60s+），即便 UI 回调偶尔成功也会感觉「预热永远不完」。
+
+**修复**：后台改 `pyqtSignal` 跨线程投递；取消进模块自动拉起 Agent（需用时点「连接 Agent」）；WebView `loadFinished` 反馈；切换引擎确认默认「是」并先清空页面提示。
+
+涉及：`app/modules/lego/character_management_module.py`。需重启 Qt6 进程后生效。
+
 ## 已完善（2026-08-12 · 删除 App 页 · UI 仅画布/3D）
 
 顶栏只保留「画布 | 3D 导演台」；AppBoard 已删，分镜在节点检视器编辑。
