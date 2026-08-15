@@ -19,7 +19,7 @@ from typing import Dict, Any
 import threading
 import logging
 
-from .model_config import PROVIDERS
+from .model_config import PROVIDERS, provider_model_choices
 
 logger = logging.getLogger("AI短剧编辑器.model_card")
 
@@ -89,6 +89,15 @@ class ModelCardWidget(QFrame):
                 border-radius: 4px; padding: 2px 8px;
             """)
             layout.addWidget(local_badge)
+
+        if self._provider_info.get("has_aigc") or self._provider_info.get("aigc"):
+            aigc_badge = QLabel("AIGC")
+            aigc_badge.setToolTip("含生图 / 生视频等生成式模型，可同步到 AI 画布")
+            aigc_badge.setStyleSheet("""
+                font-size: 10px; color: #c4b5fd; background-color: #2e1a4a;
+                border-radius: 4px; padding: 2px 8px;
+            """)
+            layout.addWidget(aigc_badge)
         
         self._status_label = QLabel("检测中...")
         self._status_label.setStyleSheet("font-size: 12px; color: #888888; background: transparent;")
@@ -321,6 +330,14 @@ class ModelCardWidget(QFrame):
             QLineEdit:focus { border-color: #1e6bde; }
         """)
         api_form.addRow("Base URL:", self._base_url_input)
+        hint = str(self._provider_info.get("hint") or "").strip()
+        if hint:
+            hint_label = QLabel(hint)
+            hint_label.setWordWrap(True)
+            hint_label.setStyleSheet(
+                "font-size: 11px; color: #94a3b8; background: transparent; padding: 4px 0;"
+            )
+            api_form.addRow("", hint_label)
         layout.addWidget(api_group)
         
         model_group = QGroupBox("模型配置")
@@ -338,8 +355,11 @@ class ModelCardWidget(QFrame):
         model_form.setSpacing(10)
         
         self._model_combo = QComboBox()
-        self._model_combo.addItems(self._provider_info.get("models", []))
         self._model_combo.setEditable(True)
+        for label, value in provider_model_choices(self._provider_id, self._provider_info):
+            self._model_combo.addItem(label, value)
+        if self._model_combo.count() == 0:
+            self._model_combo.addItems(self._provider_info.get("models", []))
         self._model_combo.setStyleSheet("""
             QComboBox {
                 background-color: #1a1a1a; color: white; border: 1px solid #252525;
@@ -352,6 +372,24 @@ class ModelCardWidget(QFrame):
             }
         """)
         model_form.addRow("模型:", self._model_combo)
+
+        # AIGC 清单（只读提示，方便发现生图/生视频）
+        aigc_list = [
+            e for e in (self._provider_info.get("aigc") or [])
+            if (e.get("capability") or "text") != "text"
+        ]
+        if aigc_list:
+            aigc_hint = QLabel(
+                "AIGC： "
+                + " · ".join(
+                    f"{e.get('name')}({ '生图' if e.get('capability')=='image' else '生视频' if e.get('capability')=='video' else e.get('capability') })"
+                    for e in aigc_list[:8]
+                )
+                + (" …" if len(aigc_list) > 8 else "")
+            )
+            aigc_hint.setWordWrap(True)
+            aigc_hint.setStyleSheet("color:#a78bfa;font-size:11px;padding:4px 0;")
+            model_form.addRow("", aigc_hint)
         
         self._max_tokens_spin = QSpinBox()
         self._max_tokens_spin.setRange(100, 32000)
@@ -933,7 +971,7 @@ class ModelCardWidget(QFrame):
                     self.finished.emit(False, str(e))
         
         base_url = self._base_url_input.text()
-        model_name = self._model_combo.currentText()
+        model_name = self._selected_model_name()
         
         self._status_label.setText("测试中...")
         self._status_label.setStyleSheet("font-size: 12px; color: #f59e0b; background: transparent;")
@@ -981,6 +1019,17 @@ class ModelCardWidget(QFrame):
         worker.start()
         self._test_worker = worker
     
+    def _selected_model_name(self) -> str:
+        """下拉可能显示 [生图] xxx，优先取 userData 真实模型名。"""
+        data = self._model_combo.currentData()
+        if isinstance(data, str) and data.strip():
+            return data.strip()
+        text = (self._model_combo.currentText() or "").strip()
+        # 去掉 "[生图] " 这类前缀
+        if text.startswith("[") and "]" in text:
+            text = text.split("]", 1)[-1].strip()
+        return text
+
     def _save_cloud_config(self):
         api_key = self._api_key_input.text()
         if not api_key:
@@ -990,7 +1039,7 @@ class ModelCardWidget(QFrame):
         config = {
             "api_key": api_key,
             "base_url": self._base_url_input.text(),
-            "model_name": self._model_combo.currentText(),
+            "model_name": self._selected_model_name(),
             "max_tokens": self._max_tokens_spin.value(),
             "temperature": self._temp_spin.value(),
             "top_p": self._top_p_spin.value(),

@@ -789,16 +789,21 @@ ollama_client = OllamaClient()
 
 
 RECOMMENDED_MODELS = [
-    {"name": "llama3:8b", "size": "4.7GB", "description": "Meta Llama 3 8B - 通用对话模型"},
-    {"name": "llama3:70b", "size": "40GB", "description": "Meta Llama 3 70B - 高性能模型"},
-    {"name": "qwen2:7b", "size": "4.4GB", "description": "通义千问 2 7B - 中文优化"},
-    {"name": "qwen2:72b", "size": "41GB", "description": "通义千问 2 72B - 高性能中文"},
+    {"name": "llama3.1:8b", "size": "4.7GB", "description": "Meta Llama 3.1 8B - 通用对话（Llama 3 更新版）"},
+    {"name": "llama3.1:70b", "size": "40GB", "description": "Meta Llama 3.1 70B - 高性能通用模型"},
+    {"name": "llama3.2:1b", "size": "1.3GB", "description": "Meta Llama 3.2 1B - 超轻量本地推理"},
+    {"name": "llama3.2:3b", "size": "2.0GB", "description": "Meta Llama 3.2 3B - 轻量本地推理"},
+    {"name": "qwen2.5:7b", "size": "4.4GB", "description": "通义千问 2.5 7B - 中文优化（2024 秋季版）"},
+    {"name": "qwen2.5:72b", "size": "41GB", "description": "通义千问 2.5 72B - 高性能中文"},
+    {"name": "deepseek-v3:latest", "size": "8GB", "description": "DeepSeek V3 开源版 - 中文推理强"},
     {"name": "deepseek-coder:6.7b", "size": "3.8GB", "description": "DeepSeek Coder - 代码生成"},
-    {"name": "deepseek-v2:16b", "size": "9GB", "description": "DeepSeek V2 - 中文优化"},
-    {"name": "gemma2:9b", "size": "5.4GB", "description": "Google Gemma 2 - 多任务"},
-    {"name": "mistral:7b", "size": "4.1GB", "description": "Mistral 7B - 高效推理"},
+    {"name": "gemma3:4b", "size": "2.5GB", "description": "Google Gemma 3 4B - 轻量多任务"},
+    {"name": "gemma3:27b", "size": "16GB", "description": "Google Gemma 3 27B - 高性能多任务"},
+    {"name": "phi3.5:mini", "size": "2.2GB", "description": "Microsoft Phi-3.5 Mini - 小模型强能力"},
+    {"name": "mistral-small3.1:24b", "size": "14GB", "description": "Mistral Small 3.1 - 高效推理"},
     {"name": "codellama:7b", "size": "3.8GB", "description": "Code Llama - 代码生成"},
-    {"name": "phi3:mini", "size": "2.2GB", "description": "Phi-3 Mini - 轻量级"},
+    {"name": "llava:7b", "size": "4.5GB", "description": "LLaVA - 多模态视觉理解"},
+    {"name": "bge-m3:latest", "size": "4.5GB", "description": "BGE-M3 - 中文向量嵌入（RAG 用）"},
 ]
 
 

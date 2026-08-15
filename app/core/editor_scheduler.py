@@ -980,6 +980,11 @@ class EditorScheduler:
         """
         启动 AI 智能剪辑工作流
 
+        链路边界（见 docs/Agent诊断与优化方案.md）：
+        - 本方法是【链路 A：AgentWorkflow】轻量单视频 AI 剪辑专用路径（老 UI 兼容）
+        - 正式全链路为【链路 B：AgentPipelineOrchestrator】（素材分流→打分→脚本→精剪）
+        - 【链路 C：WorkflowManager】负责短剧抓取→剪辑→文案→发布产品流程
+
         Args:
             video_path: 输入视频路径
             platform: 目标平台

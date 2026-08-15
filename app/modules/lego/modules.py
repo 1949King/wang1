@@ -1551,18 +1551,24 @@ class HomeModule(BaseModule):
         quick_layout = QGridLayout(quick_group)
         quick_layout.setSpacing(15)
         
+        # (icon, text, target, color[, action]) — action 可选，交给 MODULE_ACTIVATED
         quick_actions = [
             ("🎬", "新建剪辑", "editor", "#1e6bde"),
+            ("🎨", "AI 画布", "characters", "#6366f1"),
             ("📝", "AI脚本", "copywriting", "#4caf50"),
             ("📋", "批量处理", "tasks", "#ff9800"),
             ("🧩", "拓展中心", "extensions", "#9c27b0"),
-            ("👤", "账号运营", "account", "#00bcd4"),
+            ("👤", "账号运营", "extensions", "#00bcd4", "account_ops"),
             ("📁", "素材管理", "materials", "#795548"),
         ]
         
-        for i, (icon, text, target, color) in enumerate(quick_actions):
+        for i, item in enumerate(quick_actions):
+            icon, text, target, color = item[0], item[1], item[2], item[3]
+            action = item[4] if len(item) > 4 else None
             btn = self._create_action_button(icon, text, color)
-            btn.clicked.connect(lambda checked, t=target: self._navigate_to(t))
+            btn.clicked.connect(
+                lambda checked, t=target, a=action: self._navigate_to(t, a)
+            )
             quick_layout.addWidget(btn, i // 3, i % 3)
         
         layout.addWidget(quick_group)
@@ -1660,8 +1666,11 @@ class HomeModule(BaseModule):
         """)
         return btn
     
-    def _navigate_to(self, module_id: str):
-        self._event_bus.emit(EventType.MODULE_ACTIVATED, {"target": module_id})
+    def _navigate_to(self, module_id: str, action: str | None = None):
+        payload = {"target": module_id}
+        if action:
+            payload["action"] = action
+        self._event_bus.emit(EventType.MODULE_ACTIVATED, payload)
     
     def _show_login_dialog(self):
         """ """

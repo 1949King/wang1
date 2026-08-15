@@ -10,8 +10,8 @@ export type AppRoute =
   | "assets"
   | "settings";
 
+/** 不含 home：左侧品牌「无限画布」已进落地页，避免双入口同名 */
 export const NAV_ITEMS: { id: AppRoute; label: string; icon: string }[] = [
-  { id: "home", label: "无限画布", icon: "◇" },
   { id: "projects", label: "我的画布", icon: "▦" },
   { id: "image", label: "生图工作台", icon: "▣" },
   { id: "video", label: "视频创作台", icon: "▶" },

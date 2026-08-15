@@ -31,7 +31,7 @@
     reg = get_registry()
     for mod in reg.enabled_modules():
         print(mod["name"], mod["tier"])
-    reg.toggle("account", False)   # 关闭账号运营模块
+    # 账号运营已迁插件：app/plugins/account_ops_plugin（拓展中心入口）
 """
 
 from __future__ import annotations
@@ -204,18 +204,8 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
     # ╔═════════════════════════╗
     # ║ 实验功能 (EXPERIMENTAL) ║ ← 默认关闭，手动开启，不保证稳定
     # ╚═════════════════════════╝
-    # 短剧筛选已改为仅插件入口：app/plugins/drama_finder_plugin（含爬虫引擎）
-    {
-        "id": "account",
-        "name": "账号运营",
-        "icon": "👤",
-        "description": "多平台账号矩阵运营、自动发布（实验性）",
-        "tier": ModuleTier.EXPERIMENTAL,
-        "import_module": ".account_ops_module",
-        "import_class": "AccountOpsModule",
-        "default_enabled": False,
-        "can_disable": True,
-    },
+    # 短剧筛选：仅插件 app/plugins/drama_finder_plugin
+    # 账号运营：仅插件 app/plugins/account_ops_plugin（拓展中心打开）
     {
         "id": "extensions",
         "name": "拓展中心",
@@ -371,6 +361,11 @@ class ModuleRegistry:
         if "plugins" in overrides and "extensions" not in overrides:
             overrides["extensions"] = overrides.pop("plugins")
             print("[ModuleRegistry] 已迁移模块设置: plugins → extensions")
+
+        # 账号运营已迁插件，丢弃导航开关残留，避免设置页出现死项
+        if "account" in overrides:
+            overrides.pop("account", None)
+            print("[ModuleRegistry] 已移除废弃模块开关: account（改走拓展中心插件）")
 
         self._overrides = overrides
         if overrides:

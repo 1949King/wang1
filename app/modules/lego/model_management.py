@@ -7,8 +7,6 @@
 子模块:
   model_config.py      — 共享配置/常量
   model_card.py        — 模型卡片组件
-  openclaw_config.py   — OpenClaw 运营配置
-  skill_interface.py   — AI技能管理界面
 '''
 
 from PyQt6.QtWidgets import (
@@ -27,15 +25,18 @@ import json
 import os
 import time
 
-from .model_config import ModelConfig, PROVIDERS, CUSTOM_PROVIDERS_FILE, ACTIVE_PROVIDER_FILE
+from .model_config import (
+    ModelConfig,
+    PROVIDERS,
+    CUSTOM_PROVIDERS_FILE,
+    ACTIVE_PROVIDER_FILE,
+)
 from .model_card import ModelCardWidget
-from .openclaw_config import OpenClawConfigWidget
-from .skill_interface import SkillInterfaceWidget
 
 logger = logging.getLogger("AI短剧编辑器.model_mgmt")
 
 class ModelManagementModule(QWidget):
-    """模型管理模块 - 模型广场 + OpenClaw + 技能管理"""
+    """模型管理模块 - 模型广场"""
 
     module_id: str = "models"
     module_name: str = "模型广场"
@@ -195,10 +196,6 @@ class ModelManagementModule(QWidget):
         scroll.setWidget(container)
 
         self._main_tabs.addTab(scroll, "🤖 模型广场")
-        self._main_tabs.addTab(OpenClawConfigWidget(), " OpenClaw")
-        self._main_tabs.addTab(SkillInterfaceWidget(), "🧩 技能管理")
-        self._main_tabs.addTab(self._create_usage_tab(), "📊 用量统计")
-        self._main_tabs.addTab(self._create_benchmark_tab(), "⏱️ 性能对比")
 
         layout.addWidget(self._main_tabs)
 
@@ -209,325 +206,8 @@ class ModelManagementModule(QWidget):
                 border-top: 1px solid #252525; padding: 6px 12px; font-size: 12px;
             }
         """)
-        self._status_bar.showMessage("就绪 - 点击卡片展开配置，点击圆形按钮激活模型")
+        self._status_bar.showMessage("就绪 - 点击卡片展开配置")
         layout.addWidget(self._status_bar)
-
-    def _create_usage_tab(self) -> QWidget:
-        """AI调用用量统计面板"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-
-        header = QLabel("📊 AI 调用用量统计")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(header)
-
-        desc = QLabel("实时追踪各AI模型的调用次数、Token消耗和费用估算")
-        desc.setStyleSheet("font-size: 13px; color: #808080;")
-        layout.addWidget(desc)
-
-        # 汇总区
-        summary_frame = QFrame()
-        summary_frame.setStyleSheet("background-color: #121212; border: 1px solid #252525; border-radius: 10px; padding: 15px;")
-        summary_layout = QHBoxLayout(summary_frame)
-        summary_layout.setSpacing(30)
-
-        for icon, label in [("🔢", "总调用"), ("✅", "成功"), ("❌", "失败"), ("💎", "Token"), ("💰", "费用¥")]:
-            box = QVBoxLayout()
-            box.setSpacing(4)
-            icon_lbl = QLabel(icon)
-            icon_lbl.setStyleSheet("font-size: 18px; background: transparent;")
-            box.addWidget(icon_lbl)
-            val = QLabel("0")
-            val.setStyleSheet("font-size: 22px; font-weight: bold; color: #ffffff; background: transparent;")
-            val.setObjectName(f"summary_{label}")
-            box.addWidget(val)
-            tag = QLabel(label)
-            tag.setStyleSheet("font-size: 11px; color: #808080; background: transparent;")
-            box.addWidget(tag)
-            summary_layout.addLayout(box)
-
-        summary_layout.addStretch()
-        layout.addWidget(summary_frame)
-
-        # Provider 统计表格
-        self._usage_table = QTableWidget()
-        self._usage_table.setColumnCount(7)
-        self._usage_table.setHorizontalHeaderLabels(["Provider", "调用次数", "成功率", "失败", "Token数", "费用(¥)", "状态"])
-        self._usage_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, 7):
-            self._usage_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
-        self._usage_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1a1a1a; border: 1px solid #333333; border-radius: 8px;
-                color: #ffffff; gridline-color: #2a2a2a;
-            }
-            QTableWidget::item { padding: 8px; }
-            QTableWidget::item:selected { background-color: #1e6bde; }
-            QHeaderView::section {
-                background-color: #2a2a2a; color: white; padding: 10px; border: none;
-                font-weight: bold;
-            }
-        """)
-        layout.addWidget(self._usage_table, 1)
-
-        # 操作按钮
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        refresh_btn = QPushButton("🔄 刷新统计")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde; color: white; border: none;
-                border-radius: 6px; padding: 8px 20px; font-size: 13px;
-            }
-            QPushButton:hover { background-color: #2a7bef; }
-        """)
-        refresh_btn.clicked.connect(self._refresh_usage)
-        btn_row.addWidget(refresh_btn)
-
-        reset_btn = QPushButton("🗑️ 重置统计")
-        reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333; color: #ffffff; border: none;
-                border-radius: 6px; padding: 8px 20px; font-size: 13px;
-            }
-            QPushButton:hover { background-color: #ef4444; }
-        """)
-        reset_btn.clicked.connect(self._reset_usage)
-        btn_row.addWidget(reset_btn)
-
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        return widget
-
-    def _refresh_usage(self):
-        """刷新用量统计显示"""
-        try:
-            from app.core.ai_engine import ai_engine
-            stats = ai_engine.get_stats()
-
-            self._usage_table.setRowCount(0)
-            total_calls = total_success = total_failed = total_tokens = total_cost = 0.0
-
-            for provider, s in sorted(stats.items()):
-                row = self._usage_table.rowCount()
-                self._usage_table.insertRow(row)
-
-                self._usage_table.setItem(row, 0, QTableWidgetItem(provider))
-                self._usage_table.setItem(row, 1, QTableWidgetItem(str(s['total_calls'])))
-                self._usage_table.setItem(row, 2, QTableWidgetItem(f"{s['success_rate']}%"))
-
-                fail_item = QTableWidgetItem(str(s['failed_calls']))
-                if s['failed_calls'] > 0:
-                    fail_item.setForeground(QColor("#ef4444"))
-                self._usage_table.setItem(row, 3, fail_item)
-
-                self._usage_table.setItem(row, 4, QTableWidgetItem(f"{s['total_tokens']:,}"))
-                self._usage_table.setItem(row, 5, QTableWidgetItem(f"¥{s['total_cost_rmb']:.4f}"))
-
-                status = "⛔ 熔断" if s.get('circuit_open') else "🟢 正常"
-                status_item = QTableWidgetItem(status)
-                if s.get('circuit_open'):
-                    status_item.setForeground(QColor("#f59e0b"))
-                else:
-                    status_item.setForeground(QColor("#22c55e"))
-                self._usage_table.setItem(row, 6, status_item)
-
-                total_calls += s['total_calls']
-                total_success += s['success_calls']
-                total_failed += s['failed_calls']
-                total_tokens += s['total_tokens']
-                total_cost += s['total_cost_rmb']
-
-            # 更新汇总
-            parent = self._usage_table.parent().parent()
-            if parent:
-                for child in parent.findChildren(QLabel):
-                    name = child.objectName()
-                    if name == "summary_总调用":
-                        child.setText(str(total_calls))
-                    elif name == "summary_成功":
-                        child.setText(str(total_success))
-                    elif name == "summary_失败":
-                        child.setText(str(total_failed))
-                    elif name == "summary_Token":
-                        child.setText(f"{total_tokens:,}")
-                    elif name == "summary_费用¥":
-                        child.setText(f"¥{total_cost:.2f}")
-
-            if not stats:
-                self._usage_table.setRowCount(1)
-                self._usage_table.setItem(0, 0, QTableWidgetItem("暂无AI调用记录"))
-                self._usage_table.setSpan(0, 0, 1, 7)
-        except Exception as e:
-            logger.warning(f"刷新用量统计失败: {e}")
-
-    def _reset_usage(self):
-        """重置用量统计"""
-        reply = QMessageBox.question(
-            self, "确认重置", "确定要清除所有AI调用统计吗？此操作不可恢复。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                from app.core.ai_engine import ai_engine
-                ai_engine.reset_stats()
-                self._refresh_usage()
-                QMessageBox.information(self, "成功", "统计已重置")
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"重置失败: {e}")
-
-    def _create_benchmark_tab(self) -> QWidget:
-        """模型性能对比面板 — 展示各 Provider 的响应速度/质量/成本等维度的基准信息"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-
-        header = QLabel("⏱️ 模型性能对比")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(header)
-
-        desc = QLabel("展示各AI模型在响应速度、推理质量、价格等维度的参考数据（数据来源：公开Benchmark & 官方文档，实际表现因网络/负载而异）")
-        desc.setStyleSheet("font-size: 13px; color: #808080;")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
-
-        # Launcher row
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        test_btn = QPushButton("🚀 速度测试")
-        test_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde; color: white; border: none;
-                border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600;
-            }
-            QPushButton:hover { background-color: #2a7bef; }
-        """)
-        test_btn.clicked.connect(self._run_speed_test)
-        btn_row.addWidget(test_btn)
-
-        btn_row.addStretch()
-
-        self._bench_loading = QLabel("")
-        self._bench_loading.setStyleSheet("font-size: 12px; color: #f59e0b;")
-        btn_row.addWidget(self._bench_loading)
-        layout.addLayout(btn_row)
-
-        # ── 对比表格 ──
-        self._bench_table = QTableWidget()
-        self._bench_table.setColumnCount(8)
-        self._bench_table.setHorizontalHeaderLabels([
-            "Provider", "模型", "响应速度", "推理质量", "价格($/1M tok)", "上下文窗口", "本地/云端", "综合评价"
-        ])
-        self._bench_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in range(1, 8):
-            self._bench_table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        self._bench_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1a1a1a; border: 1px solid #333333; border-radius: 8px;
-                color: #ffffff; gridline-color: #2a2a2a;
-            }
-            QTableWidget::item { padding: 8px; }
-            QTableWidget::item:selected { background-color: #1e6bde; }
-            QHeaderView::section {
-                background-color: #2a2a2a; color: white; padding: 10px; border: none;
-                font-weight: bold; font-size: 12px;
-            }
-        """)
-        layout.addWidget(self._bench_table, 1)
-
-        # 预填基准数据
-        self._populate_benchmark_defaults()
-
-        return widget
-
-    def _populate_benchmark_defaults(self):
-        """填充模型性能基准的默认参考数据"""
-        self._bench_table.setRowCount(0)
-        bench_data = [
-            # (provider_display, model, speed, quality, price, context, local_cloud, overall)
-            ("DeepSeek", "deepseek-chat", "⚡中等 (~2s)", "⭐⭐⭐⭐☆", "$0.14 / $0.28", "64K", "☁️ 云端", "性价比极高"),
-            ("DeepSeek", "deepseek-reasoner", "🐢较慢 (~8s)", "⭐⭐⭐⭐⭐", "$0.55 / $2.19", "64K", "☁️ 云端", "深度推理王"),
-            ("OpenAI", "gpt-4o", "⚡中等 (~2.5s)", "⭐⭐⭐⭐⭐", "$2.50 / $10.00", "128K", "☁️ 云端", "全能旗舰"),
-            ("OpenAI", "gpt-4o-mini", "⚡快速 (~1s)", "⭐⭐⭐⭐☆", "$0.15 / $0.60", "128K", "☁️ 云端", "轻量高效"),
-            ("Ollama 本地", "qwen2.5:7b", "⚡快速 (~0.8s)", "⭐⭐⭐☆☆", "免费 (本地)", "32K", "💻 本地", "零延迟零成本"),
-            ("Ollama 本地", "llama3.1:8b", "⚡快速 (~0.7s)", "⭐⭐⭐⭐☆", "免费 (本地)", "128K", "💻 本地", "隐私安全"),
-            ("豆包", "doubao-pro-32k", "⚡快速 (~1.2s)", "⭐⭐⭐⭐☆", "¥0.80 / ¥2.00", "32K", "☁️ 云端", "国内优选"),
-            ("智谱 AI", "glm-4-plus", "⚡中等 (~2s)", "⭐⭐⭐⭐☆", "¥1.00 / ¥1.00", "128K", "☁️ 云端", "国产旗舰"),
-            ("通义千问", "qwen-max", "⚡中等 (~2.5s)", "⭐⭐⭐⭐☆", "¥2.00 / ¥6.00", "32K", "☁️ 云端", "阿里系首选"),
-            ("通义千问", "qwen-turbo", "⚡快速 (~0.5s)", "⭐⭐⭐☆☆", "¥0.30 / ¥0.60", "8K", "☁️ 云端", "极速响应"),
-            ("月之暗面", "moonshot-v1-8k", "⚡中等 (~1.5s)", "⭐⭐⭐⭐☆", "¥12.00 / ¥12.00", "8K", "☁️ 云端", "长文理解强"),
-            ("Claude", "claude-3.5-sonnet", "🐢较慢 (~4s)", "⭐⭐⭐⭐⭐", "$3.00 / $15.00", "200K", "☁️ 云端", "代码/写作王"),
-            ("硅基流动", "Qwen/Qwen2.5-7B-Instruct", "⚡快速 (~0.6s)", "⭐⭐⭐☆☆", "¥0.70 / ¥1.40", "32K", "☁️ 云端", "低价推理"),
-        ]
-        for row_data in bench_data:
-            row = self._bench_table.rowCount()
-            self._bench_table.insertRow(row)
-            for col, val in enumerate(row_data):
-                item = QTableWidgetItem(val)
-                if col == 3:  # speed
-                    if "快速" in val:
-                        item.setForeground(QColor("#4caf50"))
-                    elif "慢" in val:
-                        item.setForeground(QColor("#f59e0b"))
-                    else:
-                        item.setForeground(QColor("#1e6bde"))
-                elif col == 4:  # quality
-                    item.setForeground(QColor("#f59e0b"))
-                elif col == 7:  # overall
-                    if any(kw in val for kw in ["极高", "旗舰", "王"]):
-                        item.setForeground(QColor("#22c55e"))
-                    else:
-                        item.setForeground(QColor("#1e6bde"))
-                self._bench_table.setItem(row, col, item)
-
-    def _run_speed_test(self):
-        """对当前激活的模型进行简单的响应速度测试"""
-        if not self._active_provider:
-            QMessageBox.information(self, "提示", "请先在模型广场中激活一个模型再进行速度测试")
-            return
-
-        self._bench_loading.setText("⏳ 测试中...")
-        QApplication.processEvents()
-
-        def _do_test():
-            try:
-                from app.core.ai_engine import ai_engine
-                t0 = time.time()
-                # 修复：ai_engine.chat() 返回的是生成器，此前只创建生成器对象、
-                # 从未迭代它——真正的网络请求根本没有发出，elapsed 测的只是
-                # "创建生成器"的耗时（接近 0），resp 也不是文本而是生成器对象本身。
-                # 必须真正消费生成器才能触发请求并拿到完整响应文本。
-                chunks = ai_engine.chat(
-                    provider=self._active_provider,
-                    messages=[{"role": "user", "content": "回复：OK"}],
-                    max_tokens=5
-                )
-                resp = "".join(chunks)
-                elapsed = time.time() - t0
-                if not resp or resp.startswith("错误") or resp.startswith("Error"):
-                    return None, resp or "无响应内容"
-                return elapsed, resp
-            except Exception as e:
-                return None, str(e)
-
-        elapsed, resp = _do_test()
-        if elapsed is not None:
-            self._bench_loading.setText(f"✅ 响应时间: {elapsed:.2f}s")
-            provider_name = (PROVIDERS.get(self._active_provider) or self._custom_providers.get(self._active_provider) or {}).get("name", self._active_provider)
-            QMessageBox.information(self, "速度测试结果",
-                f"模型: {provider_name}\n"
-                f"响应时间: {elapsed:.2f} 秒\n"
-                f"响应内容: {resp[:100] if isinstance(resp, str) else resp}\n\n"
-                f"💡 提示: 响应速度受网络、模型负载等因素影响，仅供参考")
-        else:
-            self._bench_loading.setText("❌ 测试失败")
-            QMessageBox.warning(self, "测试失败", f"请求失败: {resp}\n\n请检查模型配置和网络连接")
 
     def _on_activate_provider(self, provider_id: str):
         if self._active_provider == provider_id:
@@ -548,10 +228,51 @@ class ModelManagementModule(QWidget):
         self._active_label.setText(f"🟢 当前激活: {provider_name}")
         self._active_label.setStyleSheet("font-size: 12px; color: #22c55e; font-weight: 600;")
         self._status_bar.showMessage(f"已激活 {provider_name} - 所有AI功能将使用此模型")
+        try:
+            from app.modules.lego.model_config import save_active_provider
+            save_active_provider(provider_id)
+        except Exception:
+            pass
+        try:
+            from .core import EventBus, EventType
+            EventBus.get_instance().emit(
+                EventType.PROVIDER_ACTIVATED,
+                {"provider": provider_id, "name": provider_name},
+            )
+        except Exception:
+            pass
 
     def _on_config_saved(self, provider_id: str, config: dict[str, Any]):
         provider_name = (PROVIDERS.get(provider_id) or self._custom_providers.get(provider_id) or {}).get("name", provider_id)
-        self._status_bar.showMessage(f"✅ {provider_name} 配置已保存", 3000)
+        # 保存云端配置后自动激活，避免仍停在 ollama 导致 Agent/文案不走 DeepSeek
+        info = PROVIDERS.get(provider_id) or self._custom_providers.get(provider_id) or {}
+        if not info.get("is_local"):
+            if self._active_provider != provider_id:
+                # 直接激活（勿走 toggle：已激活再点会取消）
+                for pid, card in self._cards.items():
+                    card.set_active(pid == provider_id)
+                self._active_provider = provider_id
+                self._save_active_provider()
+                self._active_label.setText(f"🟢 当前激活: {provider_name}")
+                self._active_label.setStyleSheet("font-size: 12px; color: #22c55e; font-weight: 600;")
+            self._status_bar.showMessage(
+                f"✅ {provider_name} 已保存并激活 — Agent / 文案将优先使用此模型", 5000
+            )
+            try:
+                from app.modules.lego.model_config import save_active_provider
+                save_active_provider(provider_id)
+            except Exception:
+                pass
+            try:
+                from .core import EventBus, EventType
+                EventBus.get_instance().emit(
+                    EventType.PROVIDER_ACTIVATED,
+                    {"provider": provider_id, "name": provider_name},
+                )
+            except Exception:
+                pass
+        else:
+            self._status_bar.showMessage(f"✅ {provider_name} 配置已保存", 3000)
 
     def _save_all_configs(self):
         try:
@@ -672,7 +393,14 @@ class ModelManagementModule(QWidget):
             self._status_bar.showMessage(f"✅ 已添加 {info['name']}")
 
     def on_activated(self):
-        """模块激活时恢复上次选择的模型状态"""
+        """模块激活时恢复上次选择的模型状态；必要时从不可用的 Ollama 切到云端。"""
+        try:
+            from app.modules.lego.model_config import ensure_active_provider_sensible
+            switched = ensure_active_provider_sensible()
+            if switched:
+                self._active_provider = switched
+        except Exception:
+            pass
         self._restore_active_state()
 
     def on_deactivated(self):

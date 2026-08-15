@@ -56,12 +56,28 @@ class NavigationButton(QPushButton):
         self._is_active = False
         self._is_hovered = False
         self._theme = "dark"  # 默认深色主题
-        
+        self._icon = icon
+        self._text = text
+        self._collapsed = False
+
         self.setText(f"  {icon}  {text}" if icon else text)
         self.setMinimumHeight(44)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
         self._update_style()
+
+    def set_collapsed(self, collapsed: bool):
+        """折叠时只显示图标，展开恢复文字"""
+        self._collapsed = collapsed
+        if collapsed:
+            self.setText(self._icon if self._icon else "•")
+            self.setMinimumWidth(44)
+            self.setMaximumWidth(44)
+            self.setToolTip(self._text)
+        else:
+            self.setText(f"  {self._icon}  {self._text}" if self._icon else self._text)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+            self.setToolTip("")
     
     def set_theme(self, theme: str):
         """设置主题"""
@@ -217,6 +233,7 @@ class NavigationBar(QWidget):
         self._buttons: Dict[str, NavigationButton] = {}
         self._current_module: Optional[str] = None
         self._theme = "dark"
+        self._collapsed = False
         self._setup_ui()
     
     def set_theme(self, theme: str):
@@ -270,9 +287,10 @@ class NavigationBar(QWidget):
         layout.setSpacing(12)
         
         logo_widget = QWidget()
-        logo_layout = QVBoxLayout(logo_widget)
+        logo_layout = QHBoxLayout(logo_widget)
         logo_layout.setContentsMargins(0, 0, 0, 0)
-        
+        logo_layout.setSpacing(4)
+
         self._logo_label = QLabel("🎬 拾光剪影")
         self._logo_label.setStyleSheet("""
             QLabel {
@@ -282,13 +300,34 @@ class NavigationBar(QWidget):
                 padding: 10px 0;
             }
         """)
-        logo_layout.addWidget(self._logo_label)
-        
+        logo_layout.addWidget(self._logo_label, 1)
+
+        self._toggle_btn = QPushButton("«")
+        self._toggle_btn.setFixedSize(28, 28)
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.setToolTip("收起导航栏")
+        self._toggle_btn.clicked.connect(self._on_toggle_clicked)
+        self._toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #aab6cc;
+                border: 1px solid #253044;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #1f2b42;
+                color: #edf3ff;
+            }
+        """)
+        logo_layout.addWidget(self._toggle_btn)
+
+        logo_layout.addWidget(logo_widget)
+
         self._version_label = QLabel(f"v{__version__} Qt6版")
         self._version_label.setStyleSheet("color: #aab6cc; font-size: 12px; padding-left: 2px;")
-        logo_layout.addWidget(self._version_label)
-        
-        layout.addWidget(logo_widget)
+        layout.addWidget(self._version_label)
         
         self._separator = QFrame()
         self._separator.setFrameShape(QFrame.Shape.HLine)
@@ -341,6 +380,33 @@ class NavigationBar(QWidget):
         if module_id in self._buttons:
             self._on_button_clicked(module_id)
 
+    # —— 折叠/展开 ——
+
+    def set_collapsed(self, collapsed: bool):
+        """折叠/展开导航栏：折叠时只显示图标，宽度缩到 56px"""
+        self._collapsed = collapsed
+        target_w = 56 if collapsed else 220
+        self.setFixedWidth(target_w)
+
+        # logo + 版本 + 分隔线：折叠时隐藏
+        self._logo_label.setVisible(not collapsed)
+        self._version_label.setVisible(not collapsed)
+        self._separator.setVisible(not collapsed)
+
+        # 所有导航按钮：折叠时只保留图标
+        for btn in self._buttons.values():
+            btn.set_collapsed(collapsed)
+
+        # 折叠按钮：折叠时显示展开图标，展开时显示折叠图标
+        self._toggle_btn.setText("»" if collapsed else "«")
+        self._toggle_btn.setToolTip("展开导航栏" if collapsed else "收起导航栏")
+
+    def is_collapsed(self) -> bool:
+        return getattr(self, "_collapsed", False)
+
+    def _on_toggle_clicked(self):
+        self.set_collapsed(not self.is_collapsed())
+
 
 class MainWindow(QMainWindow):
     """
@@ -376,9 +442,8 @@ class MainWindow(QMainWindow):
             'copywriting': 3,
             'tasks': 4,
             'characters': 5,
-            'account': 6,
+            'extensions': 6,
             'materials': 7,
-            'plugins': 8,
             'performance': 9,
             'models': 10,
             'settings': 11,
@@ -554,6 +619,7 @@ class MainWindow(QMainWindow):
     
     def _setup_event_handlers(self):
         self._event_bus.on(EventType.MODULE_ACTIVATED, self._on_module_activated)
+        self._event_bus.on(EventType.PROVIDER_ACTIVATED, self._on_provider_sync_canvas_models)
         # 功能开关变更：动态刷新导航栏
         self._event_bus.on(EventType.MODULE_CONFIG_CHANGED,
                            lambda _evt: self.apply_module_changes())
@@ -579,7 +645,7 @@ class MainWindow(QMainWindow):
             desc = mod.get("description", "")
             widget_class = self._lazy_import_widget_class(mod)
             if widget_class is None:
-                # 可选模块（如 character_management_module）导入失败则静默跳过
+                logger.warning("模块 %s 无界面类，已从导航栏省略", module_id)
                 continue
             self.register_module(module_id, name, icon, desc, widget_class)
 
@@ -592,11 +658,10 @@ class MainWindow(QMainWindow):
     def _lazy_import_widget_class(self, mod_def: dict):
         """
         延迟导入：按需 import 模块类，避免启动时一次性加载所有 UI 代码。
-        对 optional=True 的模块，导入失败时静默跳过。
+        导入失败时记日志并跳过（不再因 optional 静默吞掉）。
         """
         import_module = mod_def.get("import_module")
         import_class = mod_def.get("import_class")
-        is_optional = mod_def.get("optional", False)
 
         if not import_module or not import_class:
             return None
@@ -613,8 +678,7 @@ class MainWindow(QMainWindow):
             widget_class = getattr(module, import_class, None)
             return widget_class
         except Exception as e:
-            if not is_optional:
-                logger.warning("模块 %s (%s) 导入失败: %s", mod_def.get("id"), import_class, e)
+            logger.warning("模块 %s (%s) 导入失败: %s", mod_def.get("id"), import_class, e)
             return None
 
     def apply_module_changes(self):
@@ -951,16 +1015,55 @@ class MainWindow(QMainWindow):
                 self.show_status(nav_hint, "#a78bfa")
             return
 
+        # 账号运营宿主为拓展中心插件
+        if module_id in ("extensions", "plugins") and action == "account_ops":
+            if widget is not None and hasattr(widget, "_open_account_ops"):
+                widget._open_account_ops()
+            if nav_hint:
+                self.show_status(nav_hint, "#14b8a6")
+            return
+
         if module_id == "editor" and workflow_hint and widget:
             if hasattr(widget, "_on_workflow_hint_received"):
                 widget._on_workflow_hint_received(workflow_hint)
             elif nav_hint:
                 self.show_status(nav_hint, "#ea580c")
 
+        if module_id == "characters" and pending.get("sync_models") and widget:
+            if hasattr(widget, "_on_sync_models"):
+                try:
+                    widget._on_sync_models()
+                except Exception as e:
+                    self.show_status(f"同步模型池失败: {e}", "#f97316")
+            if nav_hint:
+                self.show_status(nav_hint, "#14b8a6")
+            return
+
+        if module_id == "characters" and nav_hint:
+            self.show_status(nav_hint, "#14b8a6")
+
+    def _on_provider_sync_canvas_models(self, _event) -> None:
+        """模型管理保存/激活 Key 后，若 AI 画布已加载则静默同步模型池（不切页签）。"""
+        info = self._modules.get("characters")
+        if not info or not info.instance:
+            return
+        widget = info.instance
+        if hasattr(widget, "_on_provider_activated_sync"):
+            try:
+                widget._on_provider_activated_sync(_event)
+            except Exception as e:
+                logger.debug("画布模型池静默同步失败: %s", e)
+
     def _on_module_activated(self, event):
         """模块激活事件处理 — 支持携带数据、子页跳转与工作流提示"""
         data = event.data if isinstance(event.data, dict) else {}
-        target = data.get("target") or event.data
+        # _activate_module 会广播 {module_id, module_name}，不是跨模块跳转请求
+        if data.get("module_id") and not data.get("target"):
+            return
+
+        target = data.get("target")
+        if not target and isinstance(event.data, str):
+            target = event.data
         payload = data.get("data")
         action = data.get("action")
         workflow_hint = data.get("workflow_hint")
@@ -974,6 +1077,18 @@ class MainWindow(QMainWindow):
         if target == "plugins":
             target = "extensions"
 
+        # 账号运营已迁插件：旧 target=account → 拓展中心并打开界面
+        if target == "account":
+            target = "extensions"
+            action = action or "account_ops"
+            nav_hint = nav_hint or "账号运营已迁至拓展中心插件"
+            data = {
+                **data,
+                "target": target,
+                "action": action,
+                "hint": nav_hint,
+            }
+
         registry = get_registry()
         if not registry.is_enabled(target):
             self.show_status(f"模块「{target}」未启用，请在设置 → 功能开关中打开", "#f97316")
@@ -983,13 +1098,14 @@ class MainWindow(QMainWindow):
             self.show_status(f"导航中无模块「{target}」", "#f97316")
             return
 
-        if action or workflow_hint or nav_hint or payload:
+        if action or workflow_hint or nav_hint or payload or data.get("sync_models"):
             self._pending_module_actions[target] = {
                 "action": action,
                 "workflow_hint": workflow_hint,
                 "hint": nav_hint,
                 "project": project_path,
                 "data": payload,
+                "sync_models": bool(data.get("sync_models")),
             }
 
         self._nav_bar.select_module(target)

@@ -32,6 +32,7 @@ class CapabilityCategory(str, Enum):
     WORKFLOW = "workflow"    # 多任务调度
     ACCOUNT = "account"      # 账号运营
     PIPELINE = "pipeline"    # Agent 全链路闭环
+    CANVAS = "canvas"        # AI 画布
 
 
 @dataclass
@@ -43,6 +44,9 @@ class CapabilityRequest:
     caller: str = "agent"                             # 调用源标记，便于 trace
     timeout: Optional[float] = None
     async_mode: bool = False
+    agent_mode: str = ""                              # plan / collaborative / autonomous
+    approved: bool = False                            # 协作模式用户已确认
+    session_id: str = ""
 
 
 @dataclass
@@ -168,6 +172,54 @@ class CapabilityDispatcher:
         start = time.time()
         entry = self._handlers.get(request.capability_id)
 
+        if (request.agent_mode or "").strip() or request.caller in ("canvas", "project_agent"):
+            try:
+                from app.core.agent_policy import (
+                    DECISION_DENY,
+                    DECISION_REQUIRE_APPROVAL,
+                    decide,
+                    sanitize_for_log,
+                )
+                from app.core.agent_session import agent_sessions
+
+                if request.session_id:
+                    ok_b, err_b = agent_sessions.begin_tool_call(request.session_id)
+                    if not ok_b:
+                        return CapabilityResult(
+                            request_id=request.request_id,
+                            success=False,
+                            error=err_b,
+                            capability_id=request.capability_id,
+                        )
+                decision = decide(
+                    tool_id=request.capability_id,
+                    mode=request.agent_mode,
+                    approved=request.approved,
+                )
+                if decision.action == DECISION_DENY:
+                    return CapabilityResult(
+                        request_id=request.request_id,
+                        success=False,
+                        error=decision.reason,
+                        capability_id=request.capability_id,
+                    )
+                if decision.action == DECISION_REQUIRE_APPROVAL and not request.approved:
+                    return CapabilityResult(
+                        request_id=request.request_id,
+                        success=False,
+                        error="waiting_approval",
+                        output=sanitize_for_log(
+                            {
+                                "require_approval": True,
+                                "tool_id": request.capability_id,
+                                "reason": decision.reason,
+                            }
+                        ),
+                        capability_id=request.capability_id,
+                    )
+            except Exception as e:
+                logger.debug("[CapabilityDispatcher] policy skip: %s", e)
+
         # 广播调用开始
         self._safe_emit(
             "CAPABILITY_INVOKED",
@@ -285,9 +337,18 @@ class CapabilityDispatcher:
     @staticmethod
     def _summarize_params(params: Dict[str, Any], max_len: int = 200) -> str:
         """参数摘要，避免记忆过大"""
-        s = str(params)
+        try:
+            from app.core.agent_policy import sanitize_for_log
+
+            s = str(sanitize_for_log(params))
+        except Exception:
+            s = str(params)
         return s if len(s) <= max_len else s[:max_len] + "..."
 
 
 # 全局单例便捷引用
 capability_dispatcher = CapabilityDispatcher.get_instance()
+
+
+def get_capability_dispatcher() -> CapabilityDispatcher:
+    return capability_dispatcher

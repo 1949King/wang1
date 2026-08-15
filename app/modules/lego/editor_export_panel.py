@@ -38,6 +38,7 @@ import os
 import time
 import shutil
 import logging
+import tempfile
 
 from PyQt6.QtWidgets import QMessageBox, QComboBox
 
@@ -252,10 +253,8 @@ class EditorExportPanelMixin:
                 pass
             if self._has_timeline_edits():
                 try:
-                    output_dir = "短剧AI剪辑输出"
-                    os.makedirs(output_dir, exist_ok=True)
                     edited_temp_path = os.path.join(
-                        output_dir, f"_edited_{int(time.time() * 1000)}.mp4")
+                        tempfile.gettempdir(), f"sgxj_edited_{int(time.time() * 1000)}.mp4")
                     self._notify_edit("导出：拼接时间线…")
                     built = self._build_edited_video(edited_temp_path)
                     if not built:
@@ -304,12 +303,31 @@ class EditorExportPanelMixin:
                 "默认": "通用HD",
             }
             render_platform = platform_map.get(platform, "通用HD")
-            output_dir = "短剧AI剪辑输出"
-            os.makedirs(output_dir, exist_ok=True)
+
+            # ── 让用户选择导出路径（替代硬编码 "短剧AI剪辑输出"）──
+            from PyQt6.QtWidgets import QFileDialog
             base_name = os.path.basename(source_clip_path)
             kernel_prefix = "Pro" if self._kernel_mode == "pro" else "Fast"
-            output_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"
-            output_path = os.path.join(output_dir, output_name)
+            default_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"
+
+            _format_filters = {
+                "mp4": "MP4 视频 (*.mp4)",
+                "mov": "MOV 视频 (*.mov)",
+                "mkv": "MKV 视频 (*.mkv)",
+                "avi": "AVI 视频 (*.avi)",
+            }
+            filter_str = _format_filters.get(format, "视频文件 (*.*)")
+
+            save_path, _sel_filter = QFileDialog.getSaveFileName(
+                self, "选择导出位置", default_name, filter_str
+            )
+            if not save_path:
+                self._notify_edit("导出已取消")
+                return
+            # 确保扩展名与用户选择的格式一致
+            if not save_path.lower().endswith(f".{format}"):
+                save_path = os.path.splitext(save_path)[0] + f".{format}"
+            output_path = save_path
 
             # 无 FFmpeg 时：未剪辑可直接复制；有剪辑则明确提示
             # 使用统一的 FFmpeg 路径检测（包含项目内置的 thirdparty/ffmpeg）

@@ -2,7 +2,7 @@
 云端 Provider 注册表（懒加载）
 =============================
 Sprint 2 目标：用统一的「模块注册 + 懒加载」机制，取代 cloud_api.py 中
-硬编码的 ``PROVIDERS`` 字典。原字典在模块导入时即 eager import 全部 15 个
+硬编码的 ``PROVIDERS`` 字典。原字典在模块导入时即 eager import 全部
 provider 类（连带拖入 requests），既拖慢启动又不利于插件化扩展。
 
 本模块只登记「模块路径 + 类名」字符串，真正的 import 延迟到首次
@@ -26,8 +26,8 @@ from .base import BaseCloudProvider
 
 logger = logging.getLogger(__name__)
 
-# 15 个云端 provider 的「类全名」→ 注册用 spec。
-# 注意：ollama 是本地离线 provider，由 CloudAPIService 单独处理，不在此登记。
+# 云端 / 自托管 provider 的「类全名」→ 注册用 spec。
+# 注意：ollama 由 CloudAPIService 单独处理本地探测；chatgpt2api 为自托管 OpenAI 兼容网关。
 _PROVIDER_CLASS_NAMES: Dict[str, str] = {
     "deepseek": "DeepSeekProvider",
     "doubao": "DoubaoProvider",
@@ -46,6 +46,10 @@ _PROVIDER_CLASS_NAMES: Dict[str, str] = {
     "yi": "YiProvider",
     "ollama": "OllamaProvider",
     "modelscope": "ModelScopeProvider",
+    "chatgpt2api": "ChatGPT2APIProvider",
+    "kling": "KlingProvider",
+    "fishaudio": "FishAudioProvider",
+    "stability": "StabilityProvider",
 }
 
 _PROVIDER_MODULE = "app.modules.lego.cloud_providers.providers"
@@ -125,6 +129,6 @@ class ProviderRegistry:
         self._lazy_failed.clear()
 
 
-# 全局默认注册表：预登记 15 个云端 provider（仅 spec，import 延后）
+# 全局默认注册表：预登记全部内置 provider（仅 spec，import 延后）
 default_registry = ProviderRegistry()
 default_registry.bulk_register(_PROVIDER_CLASS_NAMES, _PROVIDER_MODULE)

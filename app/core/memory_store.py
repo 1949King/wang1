@@ -10,6 +10,8 @@
   - learned_rule: 自主学习提炼的规则（3条同模式 feedback 自动合成）
   - strategy_adjustment: 策略调整记录
   - user_preference: 用户偏好
+  - project_context: 当前剧名/集数/平台备注（Dify 式「应用变量」轻量版）
+  - episode_note: 某一集剪辑备忘
 """
 from __future__ import annotations
 import json
@@ -93,6 +95,43 @@ class MemoryStore:
         self._append_to_disk(entry)
         return entry.entry_id
 
+    def propose_user_preference(
+        self,
+        content: Dict[str, Any],
+        *,
+        mode: str = "collaborative",
+        approved: bool = False,
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """B 需确认、C 自动写入；Plan 拒绝。禁止密钥/绝对路径/全文。"""
+        from app.core.agent_policy import (
+            DECISION_ALLOW,
+            DECISION_DENY,
+            decide,
+            memory_content_allowed,
+        )
+
+        ok, reason = memory_content_allowed(content if isinstance(content, dict) else {})
+        if not ok:
+            return {"ok": False, "message": reason, "require_approval": False}
+        decision = decide(tool_id="memory.suggest", mode=mode, approved=approved)
+        if decision.action == DECISION_DENY:
+            return {"ok": False, "message": decision.reason, "require_approval": False}
+        if decision.action != DECISION_ALLOW:
+            return {
+                "ok": False,
+                "message": decision.reason,
+                "require_approval": True,
+                "suggestion": content,
+            }
+        eid = self.record(
+            category="user_preference",
+            content=content,
+            tags=list(tags or ["preference"]),
+            score=0.8,
+        )
+        return {"ok": True, "entry_id": eid}
+
     def query(self, category: Optional[str] = None,
               tags: Optional[List[str]] = None,
               keyword: Optional[str] = None,
@@ -119,30 +158,105 @@ class MemoryStore:
         result.sort(key=lambda x: (x.score, x.timestamp), reverse=True)
         return result[:limit]
 
+    def set_project_context(
+        self,
+        *,
+        drama_title: str = "",
+        episode: str = "",
+        platform: str = "",
+        notes: str = "",
+    ) -> str:
+        """写入/覆盖当前项目·多集上下文（高权重，优先注入 Agent）。"""
+        content = {
+            "drama_title": (drama_title or "").strip(),
+            "episode": str(episode or "").strip(),
+            "platform": (platform or "").strip(),
+            "notes": (notes or "").strip(),
+        }
+        tags = ["project"]
+        if content["episode"]:
+            tags.append(f"ep:{content['episode']}")
+        if content["drama_title"]:
+            tags.append("drama")
+        # 去掉旧的 project_context，只保留最新一条
+        with self._lock:
+            stale = [eid for eid, e in self._entries.items() if e.category == "project_context"]
+            for eid in stale:
+                del self._entries[eid]
+        return self.record(
+            category="project_context",
+            content=content,
+            tags=tags,
+            score=0.95,
+        )
+
+    def add_episode_note(self, episode: str, note: str, *, drama_title: str = "") -> str:
+        """追加一集备忘。"""
+        ep = str(episode or "").strip() or "?"
+        return self.record(
+            category="episode_note",
+            content={
+                "drama_title": (drama_title or "").strip(),
+                "episode": ep,
+                "note": (note or "").strip(),
+            },
+            tags=["episode", f"ep:{ep}"],
+            score=0.7,
+        )
+
+    def get_project_context(self) -> Dict[str, Any]:
+        rows = self.query(category="project_context", limit=1)
+        if not rows:
+            return {}
+        return dict(rows[0].content or {})
+
     def get_agent_context(self, top_k: int = 5) -> str:
         """
         生成注入 Agent system prompt 的记忆摘要
 
         优先召回：
+        0. project_context / episode_note（多集）
         1. feedback（发布效果反馈）
         2. learned_rule（自主学习规则）
         3. 近期失败 trace
         """
+        lines: List[str] = []
+
+        project = self.get_project_context()
+        if any(project.get(k) for k in ("drama_title", "episode", "platform", "notes")):
+            lines.append("\n\n[项目 / 多集上下文]")
+            if project.get("drama_title"):
+                lines.append(f"- 剧名: {project['drama_title']}")
+            if project.get("episode"):
+                lines.append(f"- 集数: {project['episode']}")
+            if project.get("platform"):
+                lines.append(f"- 平台: {project['platform']}")
+            if project.get("notes"):
+                lines.append(f"- 备注: {project['notes']}")
+
+        ep_notes = self.query(category="episode_note", limit=2)
+        if ep_notes:
+            if not any(project.get(k) for k in ("drama_title", "episode", "platform", "notes")):
+                lines.append("\n\n[项目 / 多集上下文]")
+            for e in ep_notes:
+                c = e.content or {}
+                lines.append(
+                    f"- 集备忘 ep:{c.get('episode', '?')}: {str(c.get('note', ''))[:120]}"
+                )
+
         feedbacks = self.query(category="feedback", limit=2)
         rules = self.query(category="learned_rule", limit=2)
-        # 失败的 trace（error 非空）
         failures = [e for e in self.query(category="execution_trace", limit=10)
                     if e.content.get("error")]
         failures = failures[:2]
         merged = (feedbacks + rules + failures)[:top_k]
-        if not merged:
-            return ""
-        lines = ["\n\n[长期记忆 · 历史经验]"]
-        for e in merged:
-            ts = time.strftime("%m-%d %H:%M", time.localtime(e.timestamp))
-            content_str = json.dumps(e.content, ensure_ascii=False)[:160]
-            lines.append(f"- [{e.category}] {ts} {content_str}")
-        return "\n".join(lines)
+        if merged:
+            lines.append("\n\n[长期记忆 · 历史经验]")
+            for e in merged:
+                ts = time.strftime("%m-%d %H:%M", time.localtime(e.timestamp))
+                content_str = json.dumps(e.content, ensure_ascii=False)[:160]
+                lines.append(f"- [{e.category}] {ts} {content_str}")
+        return "".join(lines) if lines else ""
 
     def learn_from_feedback(self, feedback: Dict[str, Any]) -> Optional[str]:
         """
@@ -209,6 +323,7 @@ class MemoryStore:
                     if e.score >= 0.5 or e.category in (
                         "feedback", "learned_rule",
                         "strategy_adjustment", "user_preference",
+                        "project_context", "episode_note",
                     )]
             self._entries = OrderedDict((e.entry_id, e) for e in keep)
         try:

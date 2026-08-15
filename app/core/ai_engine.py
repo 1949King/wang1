@@ -171,6 +171,11 @@ class AIEngine:
         self._call_history: List[AICallRecord] = []
         self._max_history = 500
 
+        # ── 预算追踪（AI NG 预算 / 成本仪表盘） ──
+        self._budget_limit: float = 0.0          # 0 = 不限制
+        self._project_budget: float = 0.0        # 单项目预算上限，0 = 不限制
+        self._ng_budget_total: int = 0           # 生成图片/视频的 NG 总次数（调用方可增量更新）
+
         # ── 缓存 ──
         self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._max_cache_size = 100
@@ -354,6 +359,62 @@ class AIEngine:
             + (completion_tokens / 1_000_000) * output_price
         )
         return round(cost, 6)
+
+    # ────────────────────────────────────────────────────────────────
+    # 预算追踪（AI NG 预算 / 成本仪表盘）
+    # ────────────────────────────────────────────────────────────────
+
+    def set_budget_limit(self, limit: float, project_limit: float = 0.0) -> None:
+        """设置全局 / 单项目预算上限（单位：元）。0 = 不限制。"""
+        self._budget_limit = max(0.0, float(limit))
+        self._project_budget = max(0.0, float(project_limit))
+
+    def check_budget(self) -> Dict[str, Any]:
+        """返回当前预算使用情况 + 是否超支标记。"""
+        total_cost = sum(s.total_cost for s in self._stats.values())
+        return {
+            "total_cost": round(total_cost, 4),
+            "budget_limit": self._budget_limit,
+            "project_budget": self._project_budget,
+            "over_budget": bool(self._budget_limit > 0 and total_cost >= self._budget_limit),
+            "ng_count": self._ng_budget_total,
+            "providers": {
+                p: {
+                    "calls": s.total_calls,
+                    "cost": round(s.total_cost, 4),
+                    "tokens": s.total_tokens,
+                    "success_rate": round(
+                        s.success_calls / max(1, s.total_calls), 3
+                    ),
+                }
+                for p, s in self._stats.items()
+            },
+        }
+
+    def increment_ng_count(self, delta: int = 1) -> int:
+        """增加生成图片/视频的 NG 次数（失败/不满意都算）。返回新总数。"""
+        self._ng_budget_total += max(0, int(delta))
+        return self._ng_budget_total
+
+    def get_recent_calls(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """返回最近 N 次调用记录（供前端仪表盘展示）。"""
+        recents = self._call_history[-max(1, limit):]
+        return [
+            {
+                "provider": r.provider,
+                "model": r.model,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+                "duration_ms": round(r.duration_ms, 1),
+                "success": r.success,
+                "cost": round(
+                    self._estimate_cost(r.provider, r.prompt_tokens, r.completion_tokens),
+                    4,
+                ),
+                "timestamp": round(r.timestamp, 3),
+            }
+            for r in recents
+        ]
 
     # ────────────────────────────────────────────────────────────────
     # 缓存

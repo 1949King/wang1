@@ -2,29 +2,35 @@
 
 > 由 `scripts/sync_knowledge.py` 自动生成。勿手改表格（会被覆盖）。
 >
-> 上次同步：`2026-08-11T03:43:44+14:00` · 共 **287** 个 Markdown
+> 上次同步：`2026-08-14T05:59:07+14:00` · 共 **297** 个 Markdown
 
 知识库入口：[INDEX.md](../INDEX.md)
 
-## 知识库正文（13）
+## 知识库正文（19）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
-| [docs/knowledge/00-overview.md](../00-overview.md) | 3.8 | 00 — 产品概览与北极星 |
-| [docs/knowledge/01-glossary.md](../01-glossary.md) | 2.5 | 01 — 术语表（Glossary） |
+| [docs/knowledge/00-overview.md](../00-overview.md) | 3.9 | 00 — 产品概览与北极星 |
+| [docs/knowledge/01-glossary.md](../01-glossary.md) | 3.4 | 01 — 术语表（Glossary） |
 | [docs/knowledge/02-architecture.md](../02-architecture.md) | 26.7 | 02 — 架构 |
 | [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 4.3 | 03 — 剪辑活路径（Editor Pipeline） |
-| [docs/knowledge/04-module-map.md](../04-module-map.md) | 2.7 | 04 — 模块地图 |
-| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 84.0 | 05 — 已知问题与近期修复 |
-| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 9.6 | 06 — 路线图 |
+| [docs/knowledge/04-module-map.md](../04-module-map.md) | 3.1 | 04 — 模块地图 |
+| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 97.2 | 05 — 已知问题与近期修复 |
+| [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 10.4 | 06 — 路线图 |
 | [docs/knowledge/07-coding-rules.md](../07-coding-rules.md) | 1.3 | 07 — 编码规则 |
 | [docs/knowledge/08-frozen-zones.md](../08-frozen-zones.md) | 1.7 | 08 — 冻结区（已修好功能锁死） |
-| [docs/knowledge/09-tool-registry-design.md](../09-tool-registry-design.md) | 7.4 | 09 — Tool Registry 收敛设计（提案，未实施） |
+| [docs/knowledge/09-tool-registry-design.md](../09-tool-registry-design.md) | 7.1 | 09 — Tool Registry 收敛设计（提案，未实施） |
 | [docs/knowledge/10-editor-module-split-plan.md](../10-editor-module-split-plan.md) | 8.0 | 10 — `editor_module.py` 拆分方案（量化分析 + 提案，未执行代码拆分） |
-| [docs/knowledge/INDEX.md](../INDEX.md) | 3.6 | 快速入口 |
-| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 51.5 | 源文档清单（MANIFEST） |
+| [docs/knowledge/11-opentake-gap.md](../11-opentake-gap.md) | 2.8 | 11 — OpenTake / OTIO / 选模 / 画布对照（只学不换壳） |
+| [docs/knowledge/12-otio-clip-fields.md](../12-otio-clip-fields.md) | 3.0 | 12 — OTIO 概念 ↔ 拾光剪影 clip 字段 |
+| [docs/knowledge/13-agent-skill-memory.md](../13-agent-skill-memory.md) | 1.9 | 13 — Agent Skill / 多集记忆（Dify 对照，不部署 Dify） |
+| [docs/knowledge/14-canvas-strategy.md](../14-canvas-strategy.md) | 4.6 | 14 — 自研导演台画布策略（替代 infinite-canvas） |
+| [docs/knowledge/15-long-term-iteration.md](../15-long-term-iteration.md) | 4.9 | 15 — 长期迭代计划（自动执行轨） |
+| [docs/knowledge/16-aigc-canvas-gap.md](../16-aigc-canvas-gap.md) | 5.8 | 16 — 主流 AIGC 画布借鉴对照（执行索引） |
+| [docs/knowledge/INDEX.md](../INDEX.md) | 4.2 | 拾光剪影 — 项目知识库 |
+| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 53.4 | 源文档清单（MANIFEST） |
 
-## 根目录方案/报告（37）
+## 根目录方案/报告（36）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -32,8 +38,7 @@
 | [AI_Agent_Skill智能剪辑原理与实现方案.md](../../AI_Agent_Skill智能剪辑原理与实现方案.md) | 43.2 | AI Agent与Skill在智能剪辑领域的应用研究 |
 | [AI智能剪辑产品分类整理.md](../../AI智能剪辑产品分类整理.md) | 30.5 | AI智能剪辑产品分类整理 |
 | [AI智能剪辑技术文献汇总.md](../../AI智能剪辑技术文献汇总.md) | 23.4 | AI智能剪辑技术文献与资源汇总 |
-| [AI智能剪辑最优秀产品全景图.md](../../AI智能剪辑最优秀产品全景图.md) | 26.9 | AI智能剪辑领域最优秀的产品全景图 |
-| [CONTEXT.md](../../CONTEXT.md) | 3.1 | AI Short Drama Editor — Context |
+| [CONTEXT.md](../../CONTEXT.md) | 3.2 | AI Short Drama Editor — Context |
 | [DEVELOPMENT_REPORT.md](../../DEVELOPMENT_REPORT.md) | 11.5 | AI短剧编辑器 专业版开发报告 (个人开发版) |
 | [MCP_USAGE.md](../../MCP_USAGE.md) | 1.8 | 配置完成 |
 | [OPTIMIZATION_GUIDE.md](../../OPTIMIZATION_GUIDE.md) | 6.8 | AI短剧编辑器 - 完整优化方案 |
@@ -66,17 +71,18 @@
 | [短剧筛选模块独立方案分析.md](../../短剧筛选模块独立方案分析.md) | 12.4 | 短剧筛选模块独立方案分析 |
 | [短剧筛选模块现状分析与优化建议.md](../../短剧筛选模块现状分析与优化建议.md) | 11.5 | 短剧筛选模块现状分析与优化建议 |
 
-## docs/（17）
+## docs/（19）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [docs/API文档.md](../../docs/API文档.md) | 23.3 | ShortPlayAI Engine V1.0 API文档 |
-| [docs/CHANGELOG.md](../../docs/CHANGELOG.md) | 13.3 | 拾光剪影 — 变更日志 |
+| [docs/Agent诊断与优化方案.md](../../docs/Agent诊断与优化方案.md) | 8.2 | Agent 诊断与优化方案 |
+| [docs/CHANGELOG.md](../../docs/CHANGELOG.md) | 14.3 | 拾光剪影 — 变更日志 |
 | [docs/CODE_REVIEW_STANDARD.md](../../docs/CODE_REVIEW_STANDARD.md) | 9.7 | 拾光剪影 · 代码审查标准与流程（Code Review Standard & Process） |
 | [docs/P0_CAPCUT_ALIGN.md](../../docs/P0_CAPCUT_ALIGN.md) | 2.1 | 拾光剪影 vs 剪映：差距与分期验收 |
 | [docs/help/copywriting.md](../../docs/help/copywriting.md) | 1.1 | ✍️ 文案生成 |
 | [docs/help/editor.md](../../docs/help/editor.md) | 1.5 | 剪辑功能 |
-| [docs/help/faq.md](../../docs/help/faq.md) | 3.8 | ❓ 常见问题 (FAQ) |
+| [docs/help/faq.md](../../docs/help/faq.md) | 3.7 | ❓ 常见问题 (FAQ) |
 | [docs/help/performance.md](../../docs/help/performance.md) | 0.9 | 📊 性能监控 |
 | [docs/help/quick_start.md](../../docs/help/quick_start.md) | 1.4 | 🚀 快速入门 |
 | [docs/help/video_tutorials.md](../../docs/help/video_tutorials.md) | 1.1 | 🎥 视频教程 |
@@ -86,9 +92,10 @@
 | [docs/商用化改造路线图.md](../../docs/商用化改造路线图.md) | 12.7 | 拾光剪影 - 商用化改造路线图 |
 | [docs/开发者文档.md](../../docs/开发者文档.md) | 22.5 | ShortPlayAI Engine V1.0 开发者文档 |
 | [docs/用户手册.md](../../docs/用户手册.md) | 12.3 | ShortPlayAI Engine V1.0 用户手册 |
+| [docs/画布功能借鉴清单.md](../../docs/画布功能借鉴清单.md) | 6.3 | 主流 AI 画布功能借鉴清单（LibTV / ComfyUI / TapNow / 即梦 / InvokeAI / Krea / Runway） |
 | [docs/精简定稿方案.md](../../docs/精简定稿方案.md) | 9.1 | 拾光剪影 精简定稿方案 |
 
-## .workbuddy 记忆（5）
+## .workbuddy 记忆（6）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -96,7 +103,8 @@
 | [.workbuddy/memory/2026-07-12.md](../../.workbuddy/memory/2026-07-12.md) | 3.0 | 2026-07-12 — 剪辑模块可用性修复（续） |
 | [.workbuddy/memory/2026-07-13.md](../../.workbuddy/memory/2026-07-13.md) | 6.0 | 2026-07-13 工作日志 |
 | [.workbuddy/memory/2026-07-22.md](../../.workbuddy/memory/2026-07-22.md) | 8.5 | 2026-07-22 工作日志 |
-| [.workbuddy/memory/MEMORY.md](../../.workbuddy/memory/MEMORY.md) | 1.6 | 拾光剪影 — 项目长期记忆（核心事实） |
+| [.workbuddy/memory/2026-08-13.md](../../.workbuddy/memory/2026-08-13.md) | 1.2 | 2026-08-13 工作日志 |
+| [.workbuddy/memory/MEMORY.md](../../.workbuddy/memory/MEMORY.md) | 2.2 | 拾光剪影 — 项目长期记忆（核心事实） |
 
 ## app/ 内文档（56）
 
@@ -104,8 +112,8 @@
 |------|-----:|------|
 | [app/core/video_processing/cpp_engine/README.md](../../app/core/video_processing/cpp_engine/README.md) | 3.9 | Py+C++ 混合内核编译指南 |
 | [app/modules/lego/REFACTOR_PLAN.md](../../app/modules/lego/REFACTOR_PLAN.md) | 2.5 | AI短剧编辑器代码拆分计划 |
+| [app/plugins/account_ops_plugin/README.md](../../app/plugins/account_ops_plugin/README.md) | 0.2 | 账号运营插件 — 与短剧筛选同级，仅拓展中心入口 |
 | [app/plugins/ai_effects_plugin/README.md](../../app/plugins/ai_effects_plugin/README.md) | 16.9 | AI特效制作插件 🎨 |
-| [app/plugins/drama_finder_plugin/README.md](../../app/plugins/drama_finder_plugin/README.md) | 2.0 | 短剧筛选插件 |
 | [app/skills/external/AGENTS.md](../../app/skills/external/AGENTS.md) | 14.2 | 外部 Skill 与 Agent 研究手册 |
 | [app/skills/external/seedance2-skill/README-zh.md](../../app/skills/external/seedance2-skill/README-zh.md) | 1.6 | Seedance 2.0 视频提示词撰写技能 |
 | [app/skills/external/seedance2-skill/README.md](../../app/skills/external/seedance2-skill/README.md) | 1.6 | Seedance 2.0 Prompt Writing Skills |
@@ -179,7 +187,7 @@
 | [.claude/skills/write-a-skill/SKILL.md](../../.claude/skills/write-a-skill/SKILL.md) | 1.8 | Write a Skill — 创建技能 |
 | [.claude/skills/zoom-out/SKILL.md](../../.claude/skills/zoom-out/SKILL.md) | 1.5 | Zoom Out — 全局视角 |
 
-## .trae（42）
+## .trae（43）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -188,6 +196,7 @@
 | [.trae/documents/Agent左右脑神经链接架构方案.md](../../.trae/documents/Agent左右脑神经链接架构方案.md) | 16.3 | Agent 左右脑神经链接架构方案 |
 | [.trae/documents/Agent面板优化方案_P0P1.md](../../.trae/documents/Agent面板优化方案_P0P1.md) | 10.3 | Agent 面板优化方案（P0 + P1 全套） |
 | [.trae/documents/导演Skill与BlenderMCP接入方案.md](../../.trae/documents/导演Skill与BlenderMCP接入方案.md) | 16.9 | 导演 Skill（全功能型）+ Blender MCP（harveyxiacn 增强版）接入方案 |
+| [.trae/documents/当前进度_20260813.md](../../.trae/documents/当前进度_20260813.md) | 1.1 | 当前进度（2026-08-13） |
 | [.trae/documents/统一调用层架构重构计划.md](../../.trae/documents/统一调用层架构重构计划.md) | 9.1 | 统一调用层架构重构计划 |
 | [.trae/documents/项目重构改进计划.md](../../.trae/documents/项目重构改进计划.md) | 8.6 | 拾光剪影 项目重构改进计划 |
 | [.trae/rules/0.md](../../.trae/rules/0.md) | 2.5 | (无标题) |
@@ -226,14 +235,14 @@
 | [.trae/skills/superpowers/SKILL.md](../../.trae/skills/superpowers/SKILL.md) | 3.2 | Superpowers — HTML5 2D/3D 游戏引擎 |
 | [.trae/skills/sweep-ai/SKILL.md](../../.trae/skills/sweep-ai/SKILL.md) | 1.8 | Sweep AI - JetBrains IDE 智能编程助手 |
 
-## 其他（102）
+## 其他（103）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md) | 1.5 | 代码审查清单（拾光剪影） |
 | [byox_visualizer/README_raw.md](../../byox_visualizer/README_raw.md) | 45.6 | Build your own &lt;insert-technology-here&gt; |
 | [byox_visualizer/代码讲解_剪辑模块.md](../../byox_visualizer/代码讲解_剪辑模块.md) | 6.2 | 逐行读代码 · 剪辑模块小白讲解（配合 byox 学习地图） |
-| [vendor/README.md](../../vendor/README.md) | 0.3 | infinite-canvas（MIT）— 由 scripts/setup_infinite_canvas.ps1 克隆 |
+| [vendor/README.md](../../vendor/README.md) | 0.5 | vendor 前端资源 |
 | [vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md](../../vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md) | 4.4 | Design Thinking |
 | [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md) | 109.4 | React Best Practices |
 | [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md) | 3.4 | React Best Practices |
@@ -332,4 +341,5 @@
 | [vendor/infinite-canvas/plugins/infinite-canvas/README.md](../../vendor/infinite-canvas/plugins/infinite-canvas/README.md) | 0.7 | Infinite Canvas Codex Plugin |
 | [vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md) | 1.8 | Infinite Canvas |
 | [vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md) | 1.6 | Open Infinite Canvas |
+| [vendor/shiguang-canvas/README.md](../../vendor/shiguang-canvas/README.md) | 1.1 | 拾光导演台（shiguang-canvas） |
 

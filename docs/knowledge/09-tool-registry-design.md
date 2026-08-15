@@ -1,6 +1,6 @@
 # 09 — Tool Registry 收敛设计（提案，未实施）
 
-> 状态：**设计提案**，仅完成最小安全修复（见下）；完整迁移未执行，需按里程碑分批落地。
+> 状态：**阶段 0 + 阶段 1 部分落地**；**2026-08-14** 增加 Policy Engine 叠层（`agent_policy.py`），不替代四套登记、不跳到阶段 2 动态白名单。完整动态白名单（阶段 2）未执行。对照见 [`11-opentake-gap.md`](11-opentake-gap.md) 与 [`13-agent-skill-memory.md`](13-agent-skill-memory.md)。
 > 起因：2026-08-11 项目技术债务评估 P0 项——"能力表面分裂成 4 套并行体系"。
 
 ## 一、现状（基于代码实证，非推测）
@@ -12,7 +12,7 @@ Agent / UI 想要"调用一个能力"时，实际存在 **4 套并不完全同�
 | ① `CapabilityDispatcher` | `editor.split_clip` / `account.publish`（点分 `category.verb`） | `capability_handlers.py::register_builtin_handlers` 硬编码调用 25 次 `dispatcher.register(...)` | `list_capabilities()` | `{capability_id, category, description, schema}` |
 | ② `SkillEngine` | `publish_content` / `matrix_publish`（扁平 skill_id，类属性 `skill_id = "..."`） | 各 `Skill` 子类自带 `skill_id`，`skill_engine.register_skill(cls)` | `skill_engine.list_all()` | `Skill` 实例（`skill_id/skill_name/skill_description`） |
 | ③ `ExtensionsRegistry` | `extension_id` + `tool_id`（插件/MCP 粒度） | `extension_base.get_extensions_registry()` | `ext.get_tools()` | `ExtensionInfo` + `Tool(id, name, description)` |
-| ④ 对话白名单 | `add_track` / `ripple_delete` 等简化动词（非点分） | `ai_agent_panel.py::_AGENT_SAFE_ACTIONS` / `_AGENT_DANGEROUS_ACTIONS` 硬编码 `frozenset` | 无枚举接口；映射靠**注释**手写（"对话 action ↔ capability"） | 无 schema，纯字符串集合 |
+| ④ 对话白名单 | `add_track` / `ripple_delete` 等简化动词 | **`agent_action_registry.py`**（`ai_agent_panel` 再导入） | `get_allowed_actions()` | frozenset + `ACTION_TO_CAPABILITY` |
 
 **已验证的具体后果**（非假设）：
 
@@ -42,14 +42,15 @@ CapabilityDispatcher.invoke(CapabilityRequest)
 
 - 修复 `account.publish` 默认 `skill_id` 死值 bug。
 
-### 阶段 1 — 注册期一致性校验（低风险，建议下一步先做）
+### 阶段 1 — 注册期一致性校验（**部分完成 2026-08-12**）
 
-在 `register_builtin_handlers()` 完成全部 25 个 `dispatcher.register(...)` 之后，新增一次一次性自检：
+已落地：
 
-- 对每个 handler 源码中出现的字面量默认 `skill_id="xxx"`（如本轮修的那处），改为从一份显式常量表读取，而不是散落的字符串字面量；
-- 启动时（仅 debug/dev 模式，不影响生产路径）用 `skill_engine.list_all()` 的真实 `skill_id` 集合校验这份常量表，任何对不上的默认值在日志里 `logger.warning`，而不是等到运行时才通过"Skill 不存在"报错暴露。
+- `app/core/agent_action_registry.py`：对话 action / 危险级 / `ACTION_TO_CAPABILITY` 单一来源；
+- `register_builtin_handlers()` 结束后对映射做 `logger.warning` 自检；
+- `ai_agent_panel` 白名单改为从 registry 导入；Agent 系统提示用 `build_agent_actions_help_block()`。
 
-**验收**：故意改错一个默认值，启动日志能看到告警，无需真正触发一次 Agent 调用。
+仍待：散落在 handler 内的默认 `skill_id` 常量表 + debug 启动校验（原提案全文）。
 
 ### 阶段 2 — 对话白名单改为动态派生（中风险，需要行为对比测试）
 

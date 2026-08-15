@@ -1,4 +1,59 @@
-﻿# Python
+# ====== 顶层：Windows 用户系统目录（防止在 C:\Users\xxx 错误 git init）======
+# 如果这些出现在项目根，100% 是 cd 错目录导致，直接忽略避免灾难级提交
+/3D Objects/
+/AppData/
+/Contacts/
+/Desktop/
+/Documents/
+/Doubao/
+/Downloads/
+/Favorites/
+/Links/
+/Music/
+/OneDrive/
+/Pictures/
+/Saved Games/
+/Searches/
+/Videos/
+/WPS Cloud Files/
+/WPSDrive/
+/WorkBuddy/
+/sd-webui-forge-neo/
+
+# Windows 注册表配置文件（用户目录专属，出现在项目层必然是误 init）
+/NTUSER.DAT
+/NTUSER.DAT*
+/ntuser.dat
+/ntuser.dat.*
+/ntuser.ini
+
+# ====== 顶层：各种 AI/IDE 全局缓存（用户级别，非项目内）======
+/.AndrowsBox/
+/.EasyOCR/
+/.ai_completion/
+/.cache/
+/.codebuddy/
+/.codex/
+/.infinite-canvas/
+/.kimi-webbridge/
+/.kimi-work/
+/.matplotlib/
+/.ollama/
+/.qoderwake/
+/.thumbnails/
+/.trae-cn/
+/.u2net/
+/.video_editor_cache/
+/.vscode-shared/
+/.workbuddy-key-fallback/
+/.gitconfig
+
+# ====== 备份的上游仓库 git 目录（解除 embedded submodule 指针用，绝对不要上传）======
+# 任何层级的 .git.bak（目录或 worktree 文件）都是为了把原 openshot 上游 git 库剥离而改名的备份
+.git.bak/
+.git.bak
+
+# Python
 __pycache__/
 *.py[cod]
 *.class
@@ -60,6 +115,9 @@ downloads/
 # infinite-canvas vendor (clone via scripts/setup_infinite_canvas.ps1)
 vendor/infinite-canvas/
 
+# AI-Canvas-tauri 参考仓（对照用，勿提交）
+vendor/AI-Canvas-tauri/
+
 # Externally-cloned skill repos (nested git repos, not vendored in-tree)
 app/skills/external/seedance2-skill/
 app/skills/external/video-use/
@@ -90,4 +148,85 @@ assets/cache/
 # SQLite journal files
 *.db-shm
 *.db-wal
+
+# ====== 项目补充：敏感数据、临时文件、大文件 ======
+
+# 调试与临时目录
+.dbg/
+app/temp/
+temp/
+autosave/
+新建文件夹/
+
+# IDE / Agent 配置与缓存
+.vite/
+.claude/
+.cursor/
+.trae/
+.workbuddy/
+.writerHelper/
+
+# 运行时数据与数据库（敏感）
+app/data/
+openclow_data/
+data/*.json
+!data/bound_accounts.json
+!data/ollama_config.json
+
+# 第三方二进制文件（太大）
+thirdparty/
+libopenshot-audio-build/
+
+# 视频素材与导出
+素材库/
+assets/videos/
+app/assets/projects.json
+assets/projects.json
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+
+# 构建产物与打包
+app/0.10/
+app/1.25.0/
+10.1
+pacman
+pip
+*.spec
+*.db
+video_monitor.db
+
+# 环境变量与密钥
+.env
+API Keys.env
+*.enc.json
+.bridge_token
+
+# 日志与输出
+*.log
+qt6_run_log.txt
+startup_log.txt
+startup_log2.txt
+log4.txt
+log5.txt
+log5_err.txt
+_sys_out.txt
+_sys_err.txt
+e2e_test_output.txt
+app/_secure_test_log.txt
+app/e2e_test_output.txt
+app/短剧AI剪辑输出/error_log.txt
+_dbg/*.txt
+
+# 扫描与测试临时产物
+scan_results.json
+test_report.json
+test_result.txt
+e2e_test_output.txt
+
+# 代码审查报告（临时文档）
+代码审查与优化建议报告_*.md
 

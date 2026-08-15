@@ -5,7 +5,7 @@
 
 支持提供商: DeepSeek / 豆包 / OpenAI / 智谱 AI / 通义千问 / 文心一言 /
              讯飞星火 / Kimi / 百川 / MiniMax / Claude / Groq /
-             SiliconFlow / 阶跃星辰 / 零一万物 / Ollama
+             SiliconFlow / 阶跃星辰 / 零一万物 / ModelScope / ChatGPT2API / Ollama
 
 提供者实现: cloud_providers/providers.py
 基类定义:   cloud_providers/base.py
@@ -283,6 +283,13 @@ PROVIDER_INFO = {
         "models": ["Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3", "meta-llama/Llama-3.3-70B-Instruct"],
         "pricing": "按模型计费",
         "website": "https://cloud.siliconflow.cn"
+    },
+    "chatgpt2api": {
+        "name": "ChatGPT2API",
+        "description": "自托管 ChatGPT 官网能力网关，OpenAI 兼容，支持 gpt-image-2 生图",
+        "models": ["gpt-image-2", "codex-gpt-image-2", "auto", "gpt-5", "gpt-5-mini"],
+        "pricing": "依赖自建号池 / 订阅额度",
+        "website": "https://github.com/basketikun/chatgpt2api"
     },
     "stepfun": {
         "name": "阶跃星辰",

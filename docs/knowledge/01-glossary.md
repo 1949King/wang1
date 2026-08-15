@@ -13,10 +13,13 @@
 | **拓展中心** | 注册表 id=`extensions`（原 `plugins` 已迁移）；Skill 工坊 + MCP + 旧插件兼容 |
 | **账号矩阵** | 多账号多平台发布运营 |
 | **AI剪辑** | 自动切片、转场、字幕、策略剪辑；另有编辑器 Agent 面板 |
+| **Agent 模式** | Plan（只规划）/ 协作 B（写需确认）/ 自主 C（白名单自动、付费不重试）；见 `agent_policy` |
 | **薄指令执行器** | `edit_commands`：Split / Ripple Delete 写回 `_clips` + 撤销（B1） |
 | **文本↔帧绑定** | `text_frame_map`：字幕时间码 → 半开帧区间（B0） |
 | **去水词** | `filler_silence_detect` + 字幕面板「一键去水词」（B2） |
 | **Ollama本地** | `http://localhost:11434` 本地 LLM |
+| **ChatGPT2API** | 自托管 OpenAI 兼容网关（默认 `http://127.0.0.1:8000/v1`）；模型广场 Provider=`chatgpt2api`，优先用于 `gpt-image-2` 生图并同步画布 `shiguang-aigc` |
+| **AIGC 模型** | 生图/生视频/语音类能力目录（`AIGC_MODELS`），与对话模型分开配置；在「模型管理 → AIGC」页浏览 |
 | **OpenClaw** | 多平台发布自动化 |
 | **SkillEngine** | Skill 编排执行引擎 |
 | **EventBus** | 模块间唯一推荐通信通道（勿模块互调） |
@@ -26,11 +29,15 @@
 | **WaveformGenerator** | 音频轨峰值波形 |
 | **联动音频片** | 导入视频时自动挂到 audio 轨的同路径片段；主音由视频 QMediaPlayer 播，BGM 同步须跳过 |
 | **墙钟播放** | `QElapsedTimer` 驱动 playhead，忙则丢帧，避免 `+=0.033` 越播越拖 |
+| **3D 导演台** | 画布内 `vendor/shiguang-canvas` 的 Three.js 站位台；素模 **vinchau BodyKun/BodyChan**（CC0，BlendSwap 23521；灰白关节分割人偶，`bodykun-v3`）；点选可见网格；**拉肢 IK**（拉手带动整臂，单人/群像同一套）；**正面=+Z** |
+| **群像模板** | 导演台一键生成 2–5 人（对峙/弧形/一字/围圆）；与「重排现有人模」不同 |
+| **账号运营** | 仅拓展中心插件 `account_ops_plugin`（UI 复用 `account_ops_module.py`）；非导航模块 id |
 | **CORE / ADVANCED / EXPERIMENTAL** | 模块分级：核心不可关 / 高级默认关 / 实验默认关（**例外**：`extensions` 实验级但默认开） |
 
 ## 模块 ID（注册表 · 2026-08 复核）
 
-`home` · `editor` · `settings` · `help` · `copywriting` · `tasks` · `materials` · `models` · `characters` · `account` · **`extensions`** · `performance` · `ai_clip_flow`
+`home` · `editor` · `settings` · `help` · `copywriting` · `tasks` · `materials` · `models` · `characters` · **`extensions`** · `performance` · `ai_clip_flow`  
+（`account` 已迁插件，非导航 id）
 
 已移除：`drama`（改插件）、`plugins`（迁 `extensions`，旧 id 有迁移逻辑）。  
 注意：`PluginsModule` 源文件可能仍在，但**不在注册表**，勿当活入口。

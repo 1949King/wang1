@@ -277,7 +277,7 @@ class EditingAgentWorker(QThread):
                     messages=self._messages,
                     model=self._model or None,
                     use_cache=False,
-                    template=lambda: '[{"action":"answer","params":{"message":"模型暂不可用，请检查云端 API Key 或本地 Ollama 服务。"},"confidence":0.8}]',
+                    template=lambda: "模型暂不可用，请检查云端 API Key 或本地 Ollama 服务是否正常。",
                 )
 
             for chunk in stream:
@@ -288,7 +288,12 @@ class EditingAgentWorker(QThread):
                     chunks.append(str(chunk))
                     self.chunk_ready.emit(str(chunk))
 
-            self.result_ready.emit("".join(chunks))
+            raw = "".join(chunks).strip()
+            # 引擎用 yield "错误: ..." 表示失败，不能当正常 JSON 结果吞掉
+            if raw.startswith("错误:") or raw.startswith("API 错误"):
+                self.error_ready.emit(raw)
+                return
+            self.result_ready.emit(raw)
         except Exception as e:
             self.error_ready.emit(str(e))
 
@@ -586,8 +591,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         # 接收文案推送数据
         self._received_copywriting = None
 
-        # 调用父类__init__方法
+        # 调用父类__init__方法（内部会 _setup_ui）
+        _t_super = time.perf_counter()
         super().__init__()
+        logger.info(
+            "editor BaseModule+setup_ui wall=%.0fms",
+            (time.perf_counter() - _t_super) * 1000,
+        )
 
         # 连接字幕生成线程信号
         self._subtitle_generated_signal.connect(self._on_subtitle_generated)
@@ -603,29 +613,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         # 注册 material_to_timeline 事件：接收素材库拖拽/右键推送
         self._event_bus.on(EventType.MATERIAL_TO_TIMELINE, self._on_material_dropped)
         
-        # 连接工作流管理器
-        try:
-            self.connect_to_workflow()
-        except Exception as e:
-            print(f"⚠️ 连接工作流管理器失败: {e}")
-        
-        # 连接数据分析器
-        try:
-            self.connect_to_data_analyzer()
-        except Exception as e:
-            print(f"⚠️ 连接数据分析器失败: {e}")
-        
-        # 安装额外快捷键
-        self._install_additional_shortcuts()
+        # 连接工作流 / 数据分析 / JKL：延后到首屏渲染后，避免挡住模块打开
+        QTimer.singleShot(0, self._deferred_editor_boot)
 
-        # JKL 渐进变速 Shuttle — 零侵入接管播放速率与 JKL 键
-        try:
-            from app.modules.lego.playback_shuttle import PlaybackShuttle
-            self._playback_shuttle = PlaybackShuttle(self)
-            self._playback_shuttle.install()
-        except Exception as _e:
-            print(f"⚠️ JKL shuttle 安装失败（已忽略）: {_e}")
-            self._playback_shuttle = None
+        # 安装额外快捷键（轻量，可同步）
+        self._install_additional_shortcuts()
 
         # P0：定时自动保存（静默）+ 脏标记防抖（连续操作合并写盘）
         self._autosave_timer = QTimer(self)
@@ -674,6 +666,29 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._proxy_preview_enabled = True
         self._preview_quality_before_play = None
         QTimer.singleShot(800, self._init_proxy_media_manager)
+
+    def _deferred_editor_boot(self) -> None:
+        """首屏 UI 已挂上后再接工作流 / 分析器 / JKL，缩短模块打开阻塞。"""
+        t0 = time.perf_counter()
+        try:
+            self.connect_to_workflow()
+        except Exception as e:
+            logger.warning("连接工作流管理器失败: %s", e)
+        try:
+            self.connect_to_data_analyzer()
+        except Exception as e:
+            logger.warning("连接数据分析器失败: %s", e)
+        try:
+            from app.modules.lego.playback_shuttle import PlaybackShuttle
+            self._playback_shuttle = PlaybackShuttle(self)
+            self._playback_shuttle.install()
+        except Exception as _e:
+            logger.warning("JKL shuttle 安装失败（已忽略）: %s", _e)
+            self._playback_shuttle = None
+        logger.info(
+            "editor deferred boot done in %.0fms",
+            (time.perf_counter() - t0) * 1000,
+        )
     
     def _ensure_top0_engine(self):
         """通过统一调度器懒加载 TOP0 引擎。"""
@@ -934,12 +949,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         return self._transition_manager
     
     def _setup_ui(self):
+        t0 = time.perf_counter()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
         
         toolbar = self._create_toolbar()
         layout.addWidget(toolbar)
+        t_toolbar = time.perf_counter()
         
         main_splitter = QSplitter(Qt.Orientation.Vertical)
         main_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; height: 4px; }")
@@ -949,18 +966,22 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         
         left_panel = self._create_left_panel()
         top_splitter.addWidget(left_panel)
+        t_left = time.perf_counter()
         
         preview_panel = self._create_preview_panel()
         top_splitter.addWidget(preview_panel)
+        t_preview = time.perf_counter()
         
         tools_panel = self._create_tools_panel()
         top_splitter.addWidget(tools_panel)
+        t_tools = time.perf_counter()
         
         top_splitter.setSizes([280, 750, 380])
         main_splitter.addWidget(top_splitter)
         
         timeline_panel = self._create_timeline_panel()
         main_splitter.addWidget(timeline_panel)
+        t_timeline = time.perf_counter()
         
         main_splitter.setCollapsible(0, False)
         main_splitter.setCollapsible(1, False)
@@ -970,6 +991,15 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         main_splitter.setSizes([450, 350])
         
         layout.addWidget(main_splitter, 1)
+        logger.info(
+            "editor _setup_ui total=%.0fms (toolbar=%.0f left=%.0f preview=%.0f tools=%.0f timeline=%.0f)",
+            (t_timeline - t0) * 1000,
+            (t_toolbar - t0) * 1000,
+            (t_left - t_toolbar) * 1000,
+            (t_preview - t_left) * 1000,
+            (t_tools - t_preview) * 1000,
+            (t_timeline - t_tools) * 1000,
+        )
     
     def _create_toolbar(self) -> QWidget:
         toolbar = QFrame()
@@ -1286,23 +1316,93 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             }
             QTabBar::tab:hover:!selected { color: #cccccc; }
         """)
-        
+
+        # 首屏只建「属性」；其余 Tab 点开再构造（显著缩短首次打开）
+        self._tools_lazy_built: set = set()
+        self._tools_lazy_factories: Dict[int, Any] = {}
+
+        def _placeholder() -> QWidget:
+            w = QWidget()
+            lo = QVBoxLayout(w)
+            lo.setContentsMargins(0, 0, 0, 0)
+            lo.setSpacing(0)
+            tip = QLabel("加载中…")
+            tip.setStyleSheet("color:#666;font-size:11px;padding:16px;")
+            tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lo.addWidget(tip)
+            w._lazy_tip = tip  # type: ignore[attr-defined]
+            return w
+
+        def _add_lazy(title: str, factory) -> int:
+            holder = _placeholder()
+            idx = tabs.addTab(holder, title)
+            self._tools_lazy_factories[idx] = factory
+            return idx
+
+        # 属性：选中片段立刻要用，同步构建
         tabs.addTab(self._make_pro_tab(), "属性")
-        tabs.addTab(self._make_color_tab(), "调色")
-        tabs.addTab(self._make_effect_tab(), "特效")
-        tabs.addTab(self._make_text_tab(), "文字")
-        tabs.addTab(self._make_sticker_tab(), "贴纸")
-        tabs.addTab(self._make_audio_tab(), "音频")
-        tabs.addTab(self._create_character_tab(), "角色")
-        tabs.addTab(self._create_ai_tools_tab(), "AI")
-        tabs.addTab(self._create_edit_agent_panel(), "🤖 Agent")
-        self._agent_tab_index = tabs.count() - 1  # 加「导出」前先记，避免指错标签
-        tabs.addTab(self._create_params_tab(), "导出")
-        
+        _add_lazy("调色", self._make_color_tab)
+        _add_lazy("特效", self._make_effect_tab)
+        _add_lazy("文字", self._make_text_tab)
+        _add_lazy("贴纸", self._make_sticker_tab)
+        _add_lazy("音频", self._make_audio_tab)
+        _add_lazy("角色", self._create_character_tab)
+        _add_lazy("AI", self._create_ai_tools_tab)
+        self._agent_tab_index = _add_lazy("🤖 Agent", self._create_edit_agent_panel)
+        _add_lazy("导出", self._create_params_tab)
+
+        tabs.currentChanged.connect(self._on_tools_tab_changed)
         self._tools_tabs = tabs
         layout.addWidget(tabs, 1)
         return card
 
+    def _on_tools_tab_changed(self, index: int) -> None:
+        """首次切到某工具 Tab 时再构造内容。"""
+        if index < 0:
+            return
+        if index in getattr(self, "_tools_lazy_built", set()):
+            return
+        factories = getattr(self, "_tools_lazy_factories", None) or {}
+        factory = factories.get(index)
+        if factory is None:
+            # 同步建好的「属性」等
+            self._tools_lazy_built.add(index)
+            return
+        tabs = getattr(self, "_tools_tabs", None)
+        if tabs is None:
+            return
+        holder = tabs.widget(index)
+        if holder is None:
+            return
+        t0 = time.perf_counter()
+        try:
+            content = factory()
+        except Exception as e:
+            logger.exception("lazy tools tab failed idx=%s", index)
+            tip = getattr(holder, "_lazy_tip", None)
+            if tip is not None:
+                tip.setText(f"加载失败: {e}")
+            return
+        lo = holder.layout()
+        if lo is None:
+            lo = QVBoxLayout(holder)
+            lo.setContentsMargins(0, 0, 0, 0)
+        # 清掉占位
+        while lo.count():
+            item = lo.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        lo.addWidget(content)
+        self._tools_lazy_built.add(index)
+        factories.pop(index, None)
+        ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "editor tools tab lazy-built idx=%s title=%s in %.0fms",
+            index,
+            tabs.tabText(index),
+            ms,
+        )
     def _sect(self, title):
         grp = QGroupBox(title)
         grp.setStyleSheet("""
@@ -4770,6 +4870,41 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 self._notify_edit(msg)
             except Exception:
                 pass
+
+    def _on_send_clip_to_canvas(self):
+        """剪辑选中片段 → AI 画布 outbox。"""
+        targets = self._property_target_clips()
+        if not targets:
+            try:
+                from app.modules.lego.modules import show_clear_messagebox as _clear_msgbox
+            except Exception:
+                def _clear_msgbox(title, text):  # type: ignore
+                    QMessageBox.information(self, title, text)
+            _clear_msgbox("操作提示", "请先在时间线选中一个片段")
+            return
+        clip = targets[0]
+        path = (clip.get("path") or clip.get("file_path") or "") if isinstance(clip, dict) else ""
+        if not path or not os.path.exists(path):
+            QMessageBox.warning(self, "发送失败", f"片段文件不存在: {path or '(空)'}")
+            return
+        try:
+            from app.core.canvas_bridge import push_editor_to_canvas, get_canvas_bridge
+        except ImportError:
+            from core.canvas_bridge import push_editor_to_canvas, get_canvas_bridge  # type: ignore
+        get_canvas_bridge().start()
+        title = clip.get("name") or clip.get("title") or os.path.basename(path)
+        res = push_editor_to_canvas(path, title=str(title), source="editor")
+        if res.get("success"):
+            self._notify_edit(res.get("message") or "已推送到画布")
+            self._record_ai_tool_history(res.get("message") or "发送到画布")
+            QMessageBox.information(
+                self,
+                "已发送到画布",
+                (res.get("message") or "成功")
+                + "\n请打开「AI 画布」，在右下角「来自剪辑」下载或导入。",
+            )
+        else:
+            QMessageBox.warning(self, "发送失败", res.get("message") or "未知错误")
 
     def _on_files_dropped(self, file_paths):
         """处理时间线拖放导入的文件列表"""
@@ -9956,9 +10091,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         mode_label.setStyleSheet("color:#8b949e;font-size:11px;")
         head.addWidget(mode_label)
         self._agent_mode_combo = QComboBox()
-        self._agent_mode_combo.addItem("执行", "execute")
+        self._agent_mode_combo.addItem("协作 B", "collaborative")
         self._agent_mode_combo.addItem("Plan", "plan")
-        self._agent_mode_combo.setMinimumWidth(90)
+        self._agent_mode_combo.addItem("自主 C", "autonomous")
+        self._agent_mode_combo.setMinimumWidth(100)
+        self._agent_mode_combo.setToolTip(
+            "Plan：只规划不改时间线；协作 B：只读自动、删除需确认；自主 C：白名单自动执行（付费生成不重试）"
+        )
         self._agent_mode_combo.setStyleSheet("""
             QComboBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:3px 8px;font-size:11px;}
             QComboBox::drop-down{border:none;width:16px;}
@@ -9982,11 +10121,56 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         refresh_btn.clicked.connect(self._refresh_edit_agent_models)
         head.addWidget(refresh_btn)
 
+        self._agent_active_hint = QLabel("")
+        self._agent_active_hint.setStyleSheet("color:#3fb950;font-size:11px;padding-left:4px;")
+        head.addWidget(self._agent_active_hint)
+
         close_btn = QPushButton("收起")
         close_btn.setStyleSheet("QPushButton{background:#2a1f24;color:#ffb4bd;border:1px solid #5c222b;border-radius:6px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#5c222b;color:#fff;}")
         close_btn.clicked.connect(self._close_agent_tab)
         head.addWidget(close_btn)
         layout.addLayout(head)
+
+        # 多集上下文（Dify 式应用变量，写入 MemoryStore）
+        proj_row = QHBoxLayout()
+        proj_row.setSpacing(6)
+        _pl = "color:#8b949e;font-size:11px;"
+        _pe = "QLineEdit{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}"
+        for text in ("剧名",):
+            lb = QLabel(text)
+            lb.setStyleSheet(_pl)
+            proj_row.addWidget(lb)
+        self._agent_drama_edit = QLineEdit()
+        self._agent_drama_edit.setPlaceholderText("漫剧名（写入多集记忆）")
+        self._agent_drama_edit.setStyleSheet(_pe)
+        proj_row.addWidget(self._agent_drama_edit, 2)
+        lb_ep = QLabel("集数")
+        lb_ep.setStyleSheet(_pl)
+        proj_row.addWidget(lb_ep)
+        self._agent_episode_edit = QLineEdit()
+        self._agent_episode_edit.setPlaceholderText("如 03")
+        self._agent_episode_edit.setMaximumWidth(72)
+        self._agent_episode_edit.setStyleSheet(_pe)
+        proj_row.addWidget(self._agent_episode_edit)
+        lb_pf = QLabel("平台")
+        lb_pf.setStyleSheet(_pl)
+        proj_row.addWidget(lb_pf)
+        self._agent_platform_edit = QLineEdit()
+        self._agent_platform_edit.setPlaceholderText("douyin")
+        self._agent_platform_edit.setMaximumWidth(90)
+        self._agent_platform_edit.setStyleSheet(_pe)
+        proj_row.addWidget(self._agent_platform_edit)
+        save_ctx_btn = QPushButton("保存上下文")
+        save_ctx_btn.setStyleSheet(
+            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
+            "border-radius:6px;padding:4px 10px;font-size:11px;}"
+            "QPushButton:hover{background:#30363d;}"
+        )
+        save_ctx_btn.clicked.connect(self._save_agent_project_context)
+        proj_row.addWidget(save_ctx_btn)
+        layout.addLayout(proj_row)
+        self._load_agent_project_context_fields()
+        self._subscribe_provider_activated()
 
         # ── 内容区 QScrollArea（确保内容超出时可滚动）──
         scroll_area = QScrollArea()
@@ -10135,6 +10319,23 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._edit_agent_stop_btn.setStyleSheet("QPushButton{background:#3a1f24;color:#ffb4bd;border:1px solid #6b2530;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}QPushButton:disabled{background:#1b1f24;color:#555;border-color:#2a2f36;}QPushButton:hover:enabled{background:#5c222b;}")
         self._edit_agent_stop_btn.clicked.connect(self._stop_edit_agent_message)
         input_row.addWidget(self._edit_agent_stop_btn)
+
+        self._edit_agent_pause_btn = QPushButton("暂停")
+        self._edit_agent_pause_btn.setToolTip("暂停任务；点「继续」后才会再跑")
+        self._edit_agent_pause_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
+        self._edit_agent_pause_btn.clicked.connect(self._pause_edit_agent_task)
+        input_row.addWidget(self._edit_agent_pause_btn)
+
+        self._edit_agent_resume_btn = QPushButton("继续")
+        self._edit_agent_resume_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
+        self._edit_agent_resume_btn.clicked.connect(self._resume_edit_agent_task)
+        input_row.addWidget(self._edit_agent_resume_btn)
+
+        self._edit_agent_replan_btn = QPushButton("重规划")
+        self._edit_agent_replan_btn.setToolTip("切到 Plan 并用上一条指令重新规划")
+        self._edit_agent_replan_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
+        self._edit_agent_replan_btn.clicked.connect(self._replan_edit_agent_task)
+        input_row.addWidget(self._edit_agent_replan_btn)
         interaction_layout.addLayout(input_row)
         scroll_layout.addWidget(interaction_card)
 
@@ -10144,6 +10345,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
 
         self._edit_agent_worker = None
         self._edit_agent_stream_buffer = ""
+        self._edit_agent_inbox = []
         self._refresh_edit_agent_models()
         self._append_agent_message("Agent", "已就绪。下方输入剪辑需求或点击快捷指令。")
 
@@ -10154,6 +10356,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             register_builtin_handlers(capability_dispatcher, editor_module_ref=lambda: self)
         except Exception as e:
             logger.warning(f"[Agent] 注册 CapabilityDispatcher 失败: {e}")
+
+        # 画布 HTTP 共享同一 Agent / 拓展面
+        try:
+            from app.core.project_agent_host import bind_editor_module
+            bind_editor_module(self)
+        except Exception as e:
+            logger.debug("bind project_agent_host: %s", e)
 
         # 监听反馈可用事件，刷新面板指示
         try:
@@ -10182,6 +10391,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         if agent_idx < 0:
             return
         tabs.setCurrentIndex(agent_idx)
+        # 懒挂载：切页会触发 _on_tools_tab_changed；若信号被挡住则手动确保
+        self._on_tools_tab_changed(agent_idx)
         if hasattr(self, '_edit_agent_toggle_btn'):
             self._edit_agent_toggle_btn.setChecked(True)
             self._edit_agent_toggle_btn.setText("🤖 Agent")
@@ -10222,31 +10433,172 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         y = min(max(anchor.y(), available.top() + 8), available.bottom() - panel_height - 8)
         panel.move(x, y)
 
+    def _subscribe_provider_activated(self):
+        """模型管理激活变化时刷新 Agent 下拉。"""
+        if getattr(self, "_provider_activated_hooked", False):
+            return
+        try:
+            from .core import EventBus, EventType
+            bus = EventBus.get_instance()
+            bus.on(EventType.PROVIDER_ACTIVATED, self._on_provider_activated_event)
+            self._provider_activated_hooked = True
+        except Exception as e:
+            logger.debug("[Agent] 订阅 PROVIDER_ACTIVATED 失败: %s", e)
+
+    def _on_provider_activated_event(self, event):
+        try:
+            self._refresh_edit_agent_models()
+        except Exception as e:
+            logger.debug("[Agent] 激活事件刷新模型失败: %s", e)
+
+    def _load_agent_project_context_fields(self):
+        try:
+            from app.core.memory_store import memory_store
+            ctx = memory_store.get_project_context() or {}
+            if getattr(self, "_agent_drama_edit", None) is not None:
+                self._agent_drama_edit.setText(str(ctx.get("drama_title") or ""))
+            if getattr(self, "_agent_episode_edit", None) is not None:
+                self._agent_episode_edit.setText(str(ctx.get("episode") or ""))
+            if getattr(self, "_agent_platform_edit", None) is not None:
+                self._agent_platform_edit.setText(str(ctx.get("platform") or ""))
+        except Exception:
+            pass
+
+    def _save_agent_project_context(self):
+        try:
+            from app.core.memory_store import memory_store
+            title = self._agent_drama_edit.text().strip() if getattr(self, "_agent_drama_edit", None) else ""
+            episode = self._agent_episode_edit.text().strip() if getattr(self, "_agent_episode_edit", None) else ""
+            platform = self._agent_platform_edit.text().strip() if getattr(self, "_agent_platform_edit", None) else ""
+            memory_store.set_project_context(
+                drama_title=title,
+                episode=episode,
+                platform=platform,
+                notes="",
+            )
+            self._append_agent_message(
+                "系统",
+                f"已保存多集上下文：{title or '（无剧名）'} / 第{episode or '?'}集 / {platform or '未指定平台'}",
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "多集上下文", f"保存失败: {e}")
+
+    def _persist_agent_project_context_silent(self):
+        """发送指令前静默把输入框写入记忆，避免用户忘点保存。"""
+        try:
+            from app.core.memory_store import memory_store
+            title = ""
+            episode = ""
+            platform = ""
+            if getattr(self, "_agent_drama_edit", None) is not None:
+                title = self._agent_drama_edit.text().strip()
+            if getattr(self, "_agent_episode_edit", None) is not None:
+                episode = self._agent_episode_edit.text().strip()
+            if getattr(self, "_agent_platform_edit", None) is not None:
+                platform = self._agent_platform_edit.text().strip()
+            if title or episode or platform:
+                memory_store.set_project_context(
+                    drama_title=title,
+                    episode=episode,
+                    platform=platform,
+                )
+        except Exception:
+            pass
+
     def _refresh_edit_agent_models(self):
-        """加载云端 provider 与本地 Ollama 模型到 Agent 模型切换框。"""
+        """加载可用 Provider 到 Agent 模型框；优先选中「模型管理」当前激活项。"""
         combo = getattr(self, '_edit_agent_model_combo', None)
         if combo is None:
             return
         combo.clear()
         try:
-            from app.modules.lego.model_config import PROVIDERS
+            from app.modules.lego.model_config import (
+                PROVIDERS,
+                ensure_active_provider_sensible,
+                load_active_provider,
+            )
+            ensure_active_provider_sensible()
         except Exception:
             PROVIDERS = {}
+            load_active_provider = lambda: ""  # noqa: E731
 
+        try:
+            from app.core.ai_engine import ai_engine
+            available = set(ai_engine.get_available_providers() or [])
+        except Exception:
+            available = set()
+
+        try:
+            from app.modules.lego.cloud_api import cloud_api_service
+        except Exception:
+            cloud_api_service = None
+
+        active = ""
+        try:
+            active = load_active_provider() or ""
+        except Exception:
+            active = ""
+
+        # 排序：激活 > 已配置可用云端 > 其余
+        entries = []
         for provider, cfg in PROVIDERS.items():
             name = cfg.get("name", provider)
+            is_local = bool(cfg.get("is_local"))
+            configured = False
+            if is_local:
+                configured = provider in available
+            elif cloud_api_service is not None:
+                try:
+                    configured = bool(cloud_api_service.is_configured(provider))
+                except Exception:
+                    configured = provider in available
             models = list(cfg.get("models") or [])
             if provider == "ollama":
-                models = self._list_local_ollama_models() or ["auto"]
-            if not models:
-                combo.addItem(f"{name} / 默认", (provider, ""))
+                models = self._list_local_ollama_models() or (["auto"] if configured else [])
+            if not configured and not models:
                 continue
+            if not models:
+                models = [""]
             for model in models:
-                label = f"{name} / {model}" if model != "auto" else f"{name} / 自动"
-                combo.addItem(label, (provider, "" if model == "auto" else model))
+                # 跳过未配置的云端（避免默认点到空 Key）
+                if not is_local and not configured:
+                    continue
+                label = f"{name} / {model}" if model and model != "auto" else f"{name} / 自动"
+                if provider == active:
+                    label = "★ " + label
+                if configured or provider in available:
+                    label = label + " ✓"
+                entries.append((provider == active, configured or provider in available, provider, model, label))
+
+        entries.sort(key=lambda x: (0 if x[0] else 1, 0 if x[1] else 1, x[2], x[3] or ""))
+
+        select_idx = 0
+        for i, (_is_active, _ok, provider, model, label) in enumerate(entries):
+            combo.addItem(label, (provider, "" if model == "auto" else model))
+            if _is_active and select_idx == 0:
+                select_idx = i
+            elif active and provider == active and model and select_idx == 0:
+                select_idx = i
 
         if combo.count() == 0:
             combo.addItem("自动降级 / 可用模型", ("", ""))
+        else:
+            # 若激活项在列表中，选中它；否则选第一个已配置项
+            if active:
+                for i in range(combo.count()):
+                    data = combo.itemData(i)
+                    if isinstance(data, tuple) and data[0] == active:
+                        select_idx = i
+                        break
+            combo.setCurrentIndex(min(select_idx, combo.count() - 1))
+
+        hint = getattr(self, "_agent_active_hint", None)
+        if hint is not None:
+            try:
+                name = (PROVIDERS.get(active) or {}).get("name") or active or "未激活"
+                hint.setText(f"激活:{name}")
+            except Exception:
+                hint.setText("")
 
     def _list_local_ollama_models(self) -> List[str]:
         """读取本地 Ollama 模型列表；失败时返回空列表并保留自动模式。"""
@@ -10375,7 +10727,20 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         t.setStyleSheet("color:#e6edf3;font-size:12px;font-weight:700;")
         head.addWidget(t)
         head.addStretch()
+        toggle = QPushButton("收起")
+        toggle.setFixedHeight(24)
+        toggle.setStyleSheet(
+            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
+            "border-radius:6px;padding:2px 10px;font-size:11px;}"
+            "QPushButton:hover{background:#30363d;}"
+        )
+        head.addWidget(toggle)
         lay.addLayout(head)
+
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(6)
 
         grid = QGridLayout()
         grid.setSpacing(6)
@@ -10422,14 +10787,22 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._agent_provider_combo.setCurrentIndex(0)
         grid.addWidget(lbl4, 1, 2)
         grid.addWidget(self._agent_provider_combo, 1, 3)
-        lay.addLayout(grid)
+        body_lay.addLayout(grid)
 
-        # Provider 状态标签
+        # Provider 状态警告
         self._agent_provider_status_lbl = QLabel("")
         self._agent_provider_status_lbl.setStyleSheet("color:#7ee787;font-size:10px;")
         self._agent_provider_status_lbl.setWordWrap(True)
-        lay.addWidget(self._agent_provider_status_lbl)
+        body_lay.addWidget(self._agent_provider_status_lbl)
         self._agent_provider_combo.currentIndexChanged.connect(self._refresh_provider_status)
+        lay.addWidget(body)
+
+        def _toggle_config():
+            visible = body.isVisible()
+            body.setVisible(not visible)
+            toggle.setText("展开" if visible else "收起")
+
+        toggle.clicked.connect(_toggle_config)
 
         parent_layout.addWidget(card)
 
@@ -10897,17 +11270,51 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
     def _send_edit_agent_message(self):
         """发送剪辑 Agent 指令并启动后台模型请求。"""
         if getattr(self, '_edit_agent_worker', None) and self._edit_agent_worker.isRunning():
-            QMessageBox.information(self, "剪辑 Agent", "Agent 正在处理中，如需中断请点击“终止”。")
+            user_text = self._edit_agent_input.text().strip()
+            if user_text:
+                inbox = getattr(self, "_edit_agent_inbox", None)
+                if inbox is None:
+                    self._edit_agent_inbox = []
+                    inbox = self._edit_agent_inbox
+                inbox.append(user_text)
+                self._edit_agent_input.clear()
+                self._append_agent_message("系统", f"已排队（串行）：{user_text[:80]}")
+            else:
+                QMessageBox.information(self, "剪辑 Agent", "Agent 正在处理中，可点「暂停/终止」或等待完成后自动发送队列。")
             return
         user_text = self._edit_agent_input.text().strip()
         if not user_text:
             QMessageBox.warning(self, "剪辑 Agent", "请输入剪辑指令")
             return
 
+        from app.core.agent_context import compress_messages
+        from app.core.agent_session import agent_sessions
+        from app.core.agent_task_store import agent_tasks
+
+        ok_round, err_round = agent_sessions.begin_model_round("editor")
+        if not ok_round:
+            QMessageBox.warning(self, "剪辑 Agent", err_round)
+            return
+
         provider, model = self._get_selected_edit_agent_model()
-        messages = self._build_edit_agent_messages(user_text)
+        self._persist_agent_project_context_silent()
+        messages = compress_messages(self._build_edit_agent_messages(user_text))
+        task = agent_tasks.create(
+            session_id="editor",
+            goal=user_text,
+            mode=self._get_agent_session_mode(),
+            source="editor",
+        )
+        self._edit_agent_task_id = task.get("id")
+        try:
+            agent_tasks.transition(task["id"], "running")
+        except Exception:
+            pass
         self._append_agent_message("你", user_text)
-        self._append_agent_message("Agent", "正在分析并生成剪辑指令...")
+        using = provider or "自动降级"
+        if model:
+            using = f"{using}/{model}"
+        self._append_agent_message("Agent", f"正在用 {using} 分析并生成剪辑指令...")
         self._edit_agent_input.clear()
 
         self._edit_agent_stream_buffer = ""
@@ -10923,41 +11330,109 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._edit_agent_stop_btn.setEnabled(True)
         worker.start()
 
+    def _pause_edit_agent_task(self):
+        from app.core.agent_session import agent_sessions
+        from app.core.agent_task_store import agent_tasks
+
+        agent_sessions.pause("editor")
+        tid = getattr(self, "_edit_agent_task_id", "") or ""
+        if tid:
+            try:
+                agent_tasks.transition(tid, "paused", pausedReason="user")
+            except Exception:
+                pass
+        worker = getattr(self, "_edit_agent_worker", None)
+        if worker and worker.isRunning():
+            worker.request_stop()
+        stop_btn = getattr(self, "_edit_agent_stop_btn", None)
+        if stop_btn is not None:
+            stop_btn.setEnabled(False)
+        self._append_agent_message("系统", "任务已暂停。点「继续」解除暂停后再发送。")
+
+    def _resume_edit_agent_task(self):
+        from app.core.agent_session import agent_sessions
+        from app.core.agent_task_store import agent_tasks
+
+        agent_sessions.resume("editor")
+        tid = getattr(self, "_edit_agent_task_id", "") or ""
+        if tid:
+            try:
+                agent_tasks.transition(tid, "running")
+            except Exception:
+                pass
+        self._append_agent_message("系统", "已继续。可以发送下一条或等待队列。")
+
+    def _replan_edit_agent_task(self):
+        combo = getattr(self, "_agent_mode_combo", None)
+        if combo is not None:
+            idx = combo.findData("plan")
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        last = getattr(self, "_edit_agent_last_user_text", "") or ""
+        if last:
+            self._fill_edit_agent_prompt(last)
+        self._append_agent_message("系统", "已切 Plan。确认输入后发送以重新规划。")
+
     def _stop_edit_agent_message(self):
         """终止当前剪辑 Agent 输出。"""
+        from app.core.agent_session import agent_sessions
+        from app.core.agent_task_store import agent_tasks
+
+        agent_sessions.stop("editor")
+        tid = getattr(self, "_edit_agent_task_id", "") or ""
+        if tid:
+            try:
+                agent_tasks.transition(tid, "stopped")
+            except Exception:
+                pass
         worker = getattr(self, '_edit_agent_worker', None)
         if worker and worker.isRunning():
             worker.request_stop()
             self._append_agent_message("系统", "已请求终止当前输出。")
-        self._edit_agent_stop_btn.setEnabled(False)
+        stop_btn = getattr(self, "_edit_agent_stop_btn", None)
+        if stop_btn is not None:
+            stop_btn.setEnabled(False)
 
     def _get_selected_edit_agent_model(self):
-        """获取当前 Agent 模型选择。"""
+        """获取当前 Agent 模型选择；空时回退到模型管理激活项。"""
         combo = getattr(self, '_edit_agent_model_combo', None)
-        if combo is None:
-            return "", ""
-        data = combo.currentData()
-        if isinstance(data, tuple) and len(data) == 2:
-            return data
+        if combo is not None:
+            data = combo.currentData()
+            if isinstance(data, tuple) and len(data) == 2 and data[0]:
+                return data
+        try:
+            from app.modules.lego.model_config import load_active_provider
+            active = load_active_provider() or ""
+            if active:
+                return active, ""
+        except Exception:
+            pass
         return "", ""
 
     def _build_edit_agent_messages(self, user_text: str) -> List[Dict[str, str]]:
         """构建剪辑 Agent 专用提示词，要求模型返回可执行 JSON 指令。"""
+        from app.core.agent_action_registry import (
+            build_agent_actions_help_block,
+            list_editor_capabilities_for_prompt,
+        )
+
         context = self._get_agent_timeline_context()
         extensions_info = self._get_agent_extensions_context()
+        from app.core.agent_policy import mode_prompt_block
+
         is_plan_mode = self._is_agent_plan_mode()
+        agent_mode = self._get_agent_session_mode()
+        caps_info = list_editor_capabilities_for_prompt()
 
         system_prompt = (
-            "你是拾光剪影的剪辑 Agent，负责把用户自然语言转成可执行剪辑指令。"
-            "只返回 JSON，不要 Markdown，不要解释文字。"
-            # 注意：这里列出的 action 必须和 ai_agent_panel._AGENT_ALLOWED_ACTIONS 一一对应，
-            # 否则模型生成的指令会被白名单直接拒绝（历史上 add_clip/move_clip 未实现却写在这里，
-            # 导致模型一提就被拒）。
-            "可用 action: remove_clip, trim_clip, split_clip, "
-            "duplicate_clip, add_track, add_transition, add_effect, apply_filter, "
-            "call_extension, call_model, start_workflow, account_optimize, "
-            "suggest_cleanup, answer。"
-            "时间单位是秒，clip_index 从 0 开始。"
+            "你是拾光剪影的 AI 剪辑助手，也是一位友善的对话伙伴。"
+            "你可以像普通 AI 助手一样自由对话，自然回答剪辑技巧、项目功能、视频创作等任何问题，"
+            "文字内容不限格式，直接回复即可，不要套 JSON。\n\n"
+            "只有当用户提出明确的剪辑操作需求（切分、删除、滤镜、转场、特效、字幕、轨等）时，"
+            "才输出可执行的 JSON 指令数组，且不要附带多余解释文字。\n"
+            f"{build_agent_actions_help_block()}"
+            + mode_prompt_block(agent_mode)
+            + "时间单位是秒，clip_index 从 0 开始。"
             "add_effect 参数示例: {\"effect_type\":\"filter\",\"params\":{\"filter_name\":\"电影\",\"intensity\":0.7}}。"
             "add_transition 参数示例: {\"transition_type\":\"fade\",\"duration\":0.5,\"clip_index\":0}。"
             "call_extension 用于调用拓展中心的插件/Skill/MCP 工具，参数示例: "
@@ -10965,7 +11440,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             "call_model 参数示例: {\"provider\":\"deepseek\",\"messages\":[{\"role\":\"user\",\"content\":\"...\"}],\"model\":\"...\"}。"
             "start_workflow 参数示例: {\"drama_info\":{\"title\":\"...\",\"platform\":\"douyin\"}}。"
             "account_optimize 参数示例: {\"platform\":\"douyin\",\"features\":{...}}。"
-            "如果只是咨询问题，返回 answer。"
         )
 
         # Plan 模式要求先规划
@@ -10991,26 +11465,29 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 summaries = [f.get("summary", agent_feedback_bridge._brief(f)) for f in pending]
                 system_prompt += "\n\n[近期发布反馈]\n" + "\n".join(f"- {s}" for s in summaries)
                 system_prompt += "\n请在生成剪辑指令时考虑以上反馈。"
-                # 修复：get_pending_feedback 只读不消费，mark_feedback_consumed
-                # 此前从未被任何调用方触发——同一条反馈会在之后每一次 Agent
-                # 对话里被反复注入 system prompt，且 _pending 列表本身也会
-                # 无限增长（虽然这里 limit=3 只取最前 3 条，旧反馈永远排在
-                # 前面，新反馈实际上从未被真正看到过）。已展示给本次 prompt
-                # 的反馈标记为已消费，下次改为展示更新的反馈。
                 agent_feedback_bridge.mark_feedback_consumed(
                     [f.get("feedback_id") for f in pending if f.get("feedback_id")]
                 )
         except Exception as e:
             logger.debug(f"[Agent] 注入记忆失败: {e}")
 
-        # 注入拓展中心可用工具
+        # 注入拓展中心可用工具 + Dispatcher 能力（OpenTake 式「可枚举工具面」）
         ext_prompt = ""
         if extensions_info:
-            ext_prompt = f"\n\n拓展中心可用工具:\n{json.dumps(extensions_info, ensure_ascii=False, indent=2)}"
+            # 截断过长列表，避免撑爆上下文
+            slim = extensions_info[:40]
+            ext_prompt = f"\n\n拓展中心可用工具:\n{json.dumps(slim, ensure_ascii=False, indent=2)}"
+        caps_prompt = ""
+        if caps_info:
+            caps_prompt = (
+                f"\n\n已注册剪辑相关 capability（供理解，对话仍用上面 action）:\n"
+                f"{json.dumps(caps_info, ensure_ascii=False, indent=2)}"
+            )
 
         user_prompt = (
             f"用户剪辑指令: {user_text}\n\n"
             f"当前时间线状态:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+            f"{caps_prompt}"
             f"{ext_prompt}"
         )
         return [
@@ -11020,10 +11497,15 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
 
     def _is_agent_plan_mode(self) -> bool:
         """判断当前是否为 Plan 模式。"""
-        combo = getattr(self, '_agent_mode_combo', None)
+        return self._get_agent_session_mode() == "plan"
+
+    def _get_agent_session_mode(self) -> str:
+        from app.core.agent_policy import normalize_mode
+
+        combo = getattr(self, "_agent_mode_combo", None)
         if combo is None:
-            return False
-        return combo.currentData() == "plan"
+            return "collaborative"
+        return normalize_mode(combo.currentData())
 
     def _get_agent_extensions_context(self) -> List[Dict[str, Any]]:
         """收集拓展中心可用工具，供 Agent 调用。"""
@@ -11096,21 +11578,65 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         return tools
 
     def _get_agent_timeline_context(self) -> Dict[str, Any]:
-        """整理当前时间线上下文，供云端 API 或本地大模型使用。"""
+        """整理当前时间线上下文（OpenTake get_timeline 风格：可自省、可决策）。"""
         clips = []
+        track_ids = set()
+        total_end = 0.0
         for index, clip in enumerate(getattr(self, '_clips', [])):
+            start = float(clip.get("start_time", 0) or 0)
+            duration = float(clip.get("duration", 0) or 0)
+            end = start + duration
+            if end > total_end:
+                total_end = end
+            track = clip.get("track", 0)
+            try:
+                track_ids.add(int(track))
+            except (TypeError, ValueError):
+                track_ids.add(track)
+            path = clip.get("path") or ""
             clips.append({
                 "clip_index": index,
                 "id": clip.get("id"),
-                "path": clip.get("path"),
-                "start_time": clip.get("start_time", 0),
-                "duration": clip.get("duration", 0),
-                "track": clip.get("track", 0),
+                "name": clip.get("name") or (path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""),
+                "path": path,
+                "start_time": start,
+                "duration": duration,
+                "end_time": end,
+                "in_point": clip.get("in_point", 0),
+                "out_point": clip.get("out_point"),
+                "track": track,
+                "volume": clip.get("volume"),
+                "speed": clip.get("speed", 1.0),
                 "effects": clip.get("effects", {}),
                 "transition": clip.get("transition"),
+                "has_keyframes": bool(clip.get("keyframes")),
             })
+
+        # 同轨空隙摘要（供去静音/吸附决策，不改数据）
+        gaps = []
+        by_track: Dict[Any, list] = {}
+        for c in clips:
+            by_track.setdefault(c["track"], []).append(c)
+        for track, items in by_track.items():
+            items = sorted(items, key=lambda x: x["start_time"])
+            for i in range(len(items) - 1):
+                gap_start = items[i]["end_time"]
+                gap_end = items[i + 1]["start_time"]
+                if gap_end - gap_start > 0.05:
+                    gaps.append({
+                        "track": track,
+                        "t_in": round(gap_start, 3),
+                        "t_out": round(gap_end, 3),
+                        "duration": round(gap_end - gap_start, 3),
+                    })
+
         return {
             "clip_count": len(clips),
+            "track_count": len(track_ids),
+            "tracks": sorted(track_ids, key=lambda x: (isinstance(x, str), x)),
+            "timeline_duration": round(total_end, 3),
+            "gap_count": len(gaps),
+            "gaps": gaps[:20],
             "selected_clip_id": getattr(self, '_current_clip', None).get("id") if getattr(self, '_current_clip', None) else None,
             "playhead_position": getattr(self, '_playhead_position', 0),
             "clips": clips,
@@ -11254,25 +11780,35 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
     def _do_on_edit_agent_result(self, user_text: str, raw: str):
         """实际处理模型输出并应用剪辑指令（被 _on_edit_agent_result 包裹）。"""
         text = raw.strip() or self._edit_agent_stream_buffer.strip()
-        self._append_agent_message("Agent", text[:1200] if text else "模型无输出，尝试规则解析。")
+        if text.startswith("错误:") or text.startswith("API 错误"):
+            self._append_agent_message("系统", f"❌ {text}")
+            self._append_agent_message(
+                "系统",
+                "请到「模型管理」确认 DeepSeek 等已保存并激活（卡片圆形按钮为绿），再在 Agent 下拉选 ★ DeepSeek。",
+            )
+            return
 
-        # Plan 模式：解析 {plan, commands}，展示规划等待用户确认
+        # 方案三（Function Calling 体验）：先判定是否为可执行 JSON 指令，
+        # 是则执行；不是则视为自由对话回复，直接展示原文（不再误报"无指令"）。
         if self._is_agent_plan_mode():
             plan_steps, commands = self._parse_agent_plan(text)
             if plan_steps:
+                self._append_agent_message("Agent", text[:1200] if text else "模型无输出。")
                 self._show_agent_plan(plan_steps, commands, user_text)
                 self._append_agent_message("系统", "规划已生成，请确认后执行。")
                 return
-            # Plan 解析失败，回退到普通解析
-            self._append_agent_message("系统", "Plan 解析失败，尝试直接执行。")
+            # Plan 解析失败，回退到普通指令解析
 
         commands = self._parse_agent_commands(user_text, text)
-        if not commands:
-            self._append_agent_message("系统", "没有解析到可执行剪辑指令。")
+        if commands:
+            self._append_agent_message("Agent", text[:1200] if text else "模型无输出。")
+            results = self._apply_agent_commands_to_editor(commands)
+            summary = self._format_agent_command_summary(results)
+            self._append_agent_message("系统", summary or "剪辑指令已处理。")
             return
-        results = self._apply_agent_commands_to_editor(commands)
-        summary = self._format_agent_command_summary(results)
-        self._append_agent_message("系统", summary or "剪辑指令已处理。")
+
+        # 未解析出可执行指令 → 当作自由对话回复直接展示
+        self._append_agent_message("Agent", text[:2000] if text else "模型无输出。")
 
     def _parse_agent_plan(self, text: str):
         """解析 Plan 模式的 {plan, commands} 结构。"""
@@ -11400,6 +11936,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 send_btn.setEnabled(True)
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
+            inbox = getattr(self, "_edit_agent_inbox", None) or []
+            if inbox:
+                nxt = inbox.pop(0)
+                self._edit_agent_inbox = inbox
+                self._edit_agent_input.setText(nxt)
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, self._send_edit_agent_message)
         except Exception as e:
             logger.warning(f"[Agent] _on_edit_agent_finished 处理失败: {e}")
 
@@ -11692,6 +12235,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             if commands:
                 return commands
 
+            # 提取到 JSON 但无有效 action 指令 → 视为自由对话文本
+            if items is not None:
+                return []
+
+            # 模型未输出 JSON（自由对话）时，用离线规则对用户原始输入做兜底，
+            # 仅在用户输入命中剪辑指令模式时补救执行，闲聊文本不会命中。
             result = llm_editor.parse(user_text, use_ai=False, timeline_context=self._get_agent_timeline_context())
             return result.commands if result.success else []
         except Exception as e:
@@ -11706,6 +12255,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
             result = capability_dispatcher.invoke(CapabilityRequest(
                 capability_id=cap_id, params=params, caller="agent",
+                agent_mode=self._get_agent_session_mode() if hasattr(self, "_get_agent_session_mode") else "",
+                approved=True,
             ))
             if result.success:
                 msg = str(result.output)[:120] if result.output is not None else "ok"
@@ -11729,6 +12280,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 capability_id="ext.run_extension",
                 params=params,
                 caller="agent",
+                agent_mode=self._get_agent_session_mode() if hasattr(self, "_get_agent_session_mode") else "",
+                approved=True,
             ))
             if result.success:
                 output = result.output.get("result") if result.output else None

@@ -1,0 +1,578 @@
+/**
+ * AI-Canvas 对齐补缺：3D 导演台 / 逐帧动画 / 全景 / 画布笔记 / 源文件
+ */
+import React, { memo, useMemo, useRef } from "react";
+import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react";
+import {
+  useCanvasStore,
+  type DirectorData,
+  type AnimationData,
+  type AnimationAction,
+  type PanoramaData,
+  type NoteData,
+  type SourceData,
+  ANIMATION_ACTION_LABELS,
+  animationGrid,
+} from "./store";
+import { generateImageViaHost, readFileAsDataUrl, uploadAssetToHost } from "./bridge";
+
+function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
+  return (
+    prev.id === next.id &&
+    prev.selected === next.selected &&
+    prev.dragging === next.dragging &&
+    prev.data === next.data
+  );
+}
+
+function stop(e: React.SyntheticEvent) {
+  e.stopPropagation();
+}
+
+/** 占位 Sprite Sheet（无模型时也能预览播放） */
+export function makePlaceholderSpriteSheet(
+  action: AnimationAction,
+  frames: number,
+): string {
+  const { cols, rows } = animationGrid(frames);
+  const fw = 96;
+  const fh = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = cols * fw;
+  canvas.height = rows * fh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  for (let i = 0; i < frames; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const ox = col * fw;
+    const oy = row * fh;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(ox, oy, fw, fh);
+    ctx.strokeStyle = "#334155";
+    ctx.strokeRect(ox + 0.5, oy + 0.5, fw - 1, fh - 1);
+    const t = i / Math.max(frames - 1, 1);
+    const cx = ox + fw / 2;
+    const cy = oy + fh / 2 + 6;
+    const bob =
+      action === "jump"
+        ? -Math.sin(t * Math.PI) * 18
+        : action === "hit"
+          ? Math.sin(t * Math.PI * 2) * 4
+          : Math.sin(t * Math.PI * 2) * (action === "run" ? 5 : 3);
+    const lean =
+      action === "attack"
+        ? t * 12
+        : action === "walk" || action === "run"
+          ? Math.sin(t * Math.PI * 2) * 6
+          : 0;
+    const leg =
+      action === "idle"
+        ? 0
+        : Math.sin(t * Math.PI * 2) * (action === "run" ? 16 : 10);
+    ctx.save();
+    ctx.translate(cx + lean, cy + bob);
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(0, -28, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(0, 6);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(-14, action === "attack" ? -2 : 4);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(14, action === "attack" ? 8 : 4);
+    ctx.moveTo(0, 6);
+    ctx.lineTo(-10, 28 + leg);
+    ctx.moveTo(0, 6);
+    ctx.lineTo(10, 28 - leg);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "10px sans-serif";
+    ctx.fillText(String(i + 1), ox + 4, oy + 12);
+  }
+  ctx.fillStyle = "#64748b";
+  ctx.font = "11px sans-serif";
+  ctx.fillText(`${ANIMATION_ACTION_LABELS[action]} · ${frames}f`, 8, canvas.height - 8);
+  return canvas.toDataURL("image/png");
+}
+
+export const DirectorNode = memo(function DirectorNode({ id, data, selected }: NodeProps) {
+  const d = data as DirectorData;
+  const openDirectorForNode = useCanvasStore((s) => s.openDirectorForNode);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const captures = d.captureUrls || [];
+
+  return (
+    <div className={`sg-node director${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={260} minHeight={200} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🎥 {d.title || "3D 导演台"}</span>
+        <button
+          type="button"
+          className="sg-node-mini-btn primary"
+          onClick={() => openDirectorForNode(id)}
+        >
+          打开舞台
+        </button>
+      </div>
+      <div className="body nodrag">
+        {d.imageUrl ? (
+          <div className="img-wrap">
+            <img src={d.imageUrl} alt="" />
+          </div>
+        ) : (
+          <div className="sg-director-empty">摆姿 · 机位 · 截图回写本节点</div>
+        )}
+        {d.lastCameraName ? (
+          <div className="meta">最近机位：{d.lastCameraName}</div>
+        ) : null}
+        {captures.length > 1 ? (
+          <div className="sg-director-thumbs">
+            {captures.slice(-6).map((u, i) => (
+              <button
+                key={`${i}_${u.slice(0, 24)}`}
+                type="button"
+                className="sg-director-thumb"
+                onClick={() => updateNodeData(id, { imageUrl: u })}
+                title="设为主图"
+              >
+                <img src={u} alt="" />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          className="sg-node-inline-ta"
+          value={d.prompt || ""}
+          placeholder="镜头意图 / 下游提示词备注…"
+          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+        />
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+export const AnimationNode = memo(function AnimationNode({ id, data, selected }: NodeProps) {
+  const d = data as AnimationData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const { cols, rows } = useMemo(() => animationGrid(d.frames || 8), [d.frames]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onUpload = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const url = await readFileAsDataUrl(file);
+      updateNodeData(id, { sheetUrl: url, status: "success", errorMessage: "" });
+      setStatus("已载入 Sprite Sheet");
+    } catch (e) {
+      updateNodeData(id, { status: "failed", errorMessage: String(e) });
+    }
+  };
+
+  const makePlaceholder = () => {
+    const sheetUrl = makePlaceholderSpriteSheet(d.action || "walk", d.frames || 8);
+    updateNodeData(id, { sheetUrl, status: "success", previewMode: "playing" });
+    setStatus("已生成占位逐帧表");
+  };
+
+  const aiGenerate = async () => {
+    updateNodeData(id, { status: "generating", errorMessage: "" });
+    const prompt =
+      `${d.prompt || "角色"}，${ANIMATION_ACTION_LABELS[d.action] || d.action}动作，` +
+      `${cols}x${rows} sprite sheet，${d.frames}帧，纯白背景，侧视图，游戏像素清晰轮廓`;
+    try {
+      const res = await generateImageViaHost({ prompt, n: 1 });
+      const url = res.images?.[0] || res.image_data_url || res.image_url;
+      if (!res.ok || !url) throw new Error(res.message || "生图失败");
+      updateNodeData(id, { sheetUrl: url, status: "success", previewMode: "sheet" });
+      setStatus("逐帧表已生成");
+    } catch (e) {
+      updateNodeData(id, { status: "failed", errorMessage: String(e) });
+      setStatus(`逐帧生成失败：${e}`);
+    }
+  };
+
+  return (
+    <div className={`sg-node animation${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={280} minHeight={220} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🎞️ {d.title || "逐帧动画"}</span>
+        <span className="sg-meta-tiny">{ANIMATION_ACTION_LABELS[d.action] || d.action}</span>
+      </div>
+      <div className="body nodrag">
+        <div className="sg-anim-toolbar">
+          <select
+            value={d.action}
+            onChange={(e) => updateNodeData(id, { action: e.target.value as AnimationAction })}
+          >
+            {(Object.keys(ANIMATION_ACTION_LABELS) as AnimationAction[]).map((k) => (
+              <option key={k} value={k}>
+                {ANIMATION_ACTION_LABELS[k]}
+              </option>
+            ))}
+          </select>
+          <select
+            value={d.frames}
+            onChange={(e) => updateNodeData(id, { frames: Number(e.target.value) as AnimationData["frames"] })}
+          >
+            {[6, 8, 12, 16].map((n) => (
+              <option key={n} value={n}>
+                {n}帧
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={d.fps || 8}
+            title="FPS"
+            onChange={(e) => updateNodeData(id, { fps: Math.max(1, Number(e.target.value) || 8) })}
+          />
+        </div>
+        {d.sheetUrl ? (
+          d.previewMode === "playing" ? (
+            <div
+              className="sg-sprite-play"
+              style={{
+                backgroundImage: `url(${d.sheetUrl})`,
+                backgroundSize: `${cols * 100}% ${rows * 100}%`,
+                animationDuration: `${(d.frames || 8) / Math.max(d.fps || 8, 1)}s`,
+                // @ts-expect-error CSS custom props
+                "--sg-sprite-steps": d.frames - 1,
+                "--sg-sprite-cols": cols,
+                "--sg-sprite-rows": rows,
+              }}
+            />
+          ) : (
+            <div className="img-wrap">
+              <img src={d.sheetUrl} alt="" />
+            </div>
+          )
+        ) : (
+          <div className="sg-director-empty">上传 Sheet / 占位表 / AI 生成</div>
+        )}
+        <div className="sg-anim-actions">
+          <button type="button" className="sg-node-mini-btn" onClick={() => fileRef.current?.click()}>
+            上传
+          </button>
+          <button type="button" className="sg-node-mini-btn" onClick={makePlaceholder}>
+            占位表
+          </button>
+          <button type="button" className="sg-node-mini-btn primary" onClick={() => void aiGenerate()}>
+            AI 生成
+          </button>
+          {d.sheetUrl ? (
+            <button
+              type="button"
+              className="sg-node-mini-btn"
+              onClick={() =>
+                updateNodeData(id, {
+                  previewMode: d.previewMode === "playing" ? "sheet" : "playing",
+                })
+              }
+            >
+              {d.previewMode === "playing" ? "看整表" : "播放"}
+            </button>
+          ) : null}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => void onUpload(e.target.files?.[0] || null)}
+        />
+        <textarea
+          className="sg-node-inline-ta"
+          value={d.prompt || ""}
+          placeholder="角色描述…"
+          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+        />
+        {d.status === "failed" && d.errorMessage ? (
+          <div className="meta" style={{ color: "#fca5a5" }}>
+            {d.errorMessage}
+          </div>
+        ) : null}
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+function PanoramaViewport({
+  imageUrl,
+  yaw,
+  pitch,
+  onYawPitch,
+}: {
+  imageUrl: string;
+  yaw: number;
+  pitch: number;
+  onYawPitch: (yaw: number, pitch: number) => void;
+}) {
+  const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+  const xPct = ((yaw % 360) + 360) % 360 / 360 * 100;
+  const yPct = 50 - Math.max(-80, Math.min(80, pitch)) * 0.4;
+
+  return (
+    <div
+      className="sg-pano-view"
+      style={{
+        backgroundImage: `url(${imageUrl})`,
+        backgroundPosition: `${xPct}% ${yPct}%`,
+      }}
+      onPointerDown={(e) => {
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        drag.current = { x: e.clientX, y: e.clientY, yaw, pitch };
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        const dx = e.clientX - drag.current.x;
+        const dy = e.clientY - drag.current.y;
+        onYawPitch(drag.current.yaw - dx * 0.4, Math.max(-80, Math.min(80, drag.current.pitch + dy * 0.3)));
+      }}
+      onPointerUp={() => {
+        drag.current = null;
+      }}
+    />
+  );
+}
+
+export const PanoramaNode = memo(function PanoramaNode({ id, data, selected }: NodeProps) {
+  const d = data as PanoramaData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onUpload = async (file: File | null) => {
+    if (!file) return;
+    const url = await readFileAsDataUrl(file);
+    updateNodeData(id, { imageUrl: url, status: "success" });
+    setStatus("已载入全景图");
+  };
+
+  const bindSelectedImage = () => {
+    const st = useCanvasStore.getState();
+    const sel = st.nodes.find((n) => n.id === st.selectedId && n.id !== id);
+    const sd = sel?.data as { kind?: string; imageUrl?: string } | undefined;
+    if (sd?.imageUrl && (sd.kind === "image" || sd.kind === "shot" || sd.kind === "director")) {
+      updateNodeData(id, { imageUrl: sd.imageUrl });
+      setStatus("已绑定选中节点图片为全景源");
+      return;
+    }
+    setStatus("请先选中带图片的镜头/图片/导演台节点");
+  };
+
+  return (
+    <div className={`sg-node panorama${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={280} minHeight={200} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🌐 {d.title || "全景"}</span>
+        <span className="sg-meta-tiny">
+          {Math.round(d.yaw || 0)}° / {Math.round(d.pitch || 0)}°
+        </span>
+      </div>
+      <div className="body nodrag">
+        {d.imageUrl ? (
+          <PanoramaViewport
+            imageUrl={d.imageUrl}
+            yaw={d.yaw || 0}
+            pitch={d.pitch || 0}
+            onYawPitch={(yaw, pitch) => updateNodeData(id, { yaw, pitch })}
+          />
+        ) : (
+          <div className="sg-director-empty">等距柱状全景图 · 拖拽环视</div>
+        )}
+        <div className="sg-anim-actions">
+          <button type="button" className="sg-node-mini-btn" onClick={() => fileRef.current?.click()}>
+            上传
+          </button>
+          <button type="button" className="sg-node-mini-btn" onClick={bindSelectedImage}>
+            绑选中图
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => void onUpload(e.target.files?.[0] || null)}
+        />
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+export const NoteNode = memo(function NoteNode({ id, data, selected }: NodeProps) {
+  const d = data as NoteData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const color = d.color || "#fbbf24";
+
+  return (
+    <div
+      className={`sg-node note note-${d.noteType || "text"}${selected ? " selected" : ""}`}
+      style={{ borderColor: color, ["--note-accent" as string]: color }}
+      onMouseDown={stop}
+    >
+      <NodeResizer minWidth={160} minHeight={100} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>📌 {d.title || "笔记"}</span>
+        <select
+          value={d.noteType || "text"}
+          onChange={(e) =>
+            updateNodeData(id, {
+              noteType: e.target.value as NoteData["noteType"],
+            })
+          }
+        >
+          <option value="text">文字</option>
+          <option value="rect">矩形</option>
+          <option value="ellipse">椭圆</option>
+          <option value="arrow">箭头</option>
+        </select>
+      </div>
+      <div className="body nodrag">
+        {d.noteType === "arrow" ? (
+          <div className="sg-note-arrow" style={{ color }}>
+            ➜
+            <input
+              value={d.content || ""}
+              onChange={(e) => updateNodeData(id, { content: e.target.value })}
+              placeholder="标注…"
+            />
+          </div>
+        ) : (
+          <textarea
+            className="sg-note-body"
+            style={{
+              borderRadius: d.noteType === "ellipse" ? "50%" : 8,
+              borderColor: color,
+            }}
+            value={d.content || ""}
+            onChange={(e) => updateNodeData(id, { content: e.target.value })}
+          />
+        )}
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => updateNodeData(id, { color: e.target.value })}
+          title="颜色"
+        />
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeProps) {
+  const d = data as SourceData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const accept =
+    d.mediaType === "video"
+      ? "video/*"
+      : d.mediaType === "audio"
+        ? "audio/*"
+        : d.mediaType === "text"
+          ? ".txt,.md,.json,text/*"
+          : "image/*";
+
+  const onFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      if (d.mediaType === "text") {
+        const content = await file.text();
+        updateNodeData(id, { content, fileName: file.name, title: file.name });
+        setStatus(`已载入文本：${file.name}`);
+        return;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        const up = await uploadAssetToHost(file);
+        if (!up.ok || !up.url) throw new Error(up.message || "上传失败");
+        if (d.mediaType === "image") updateNodeData(id, { imageUrl: up.url, fileName: file.name, title: file.name });
+        if (d.mediaType === "video") updateNodeData(id, { videoUrl: up.url, fileName: file.name, title: file.name });
+        if (d.mediaType === "audio") updateNodeData(id, { audioUrl: up.url, fileName: file.name, title: file.name });
+      } else {
+        const url = await readFileAsDataUrl(file);
+        if (d.mediaType === "image") updateNodeData(id, { imageUrl: url, fileName: file.name, title: file.name });
+        if (d.mediaType === "video") updateNodeData(id, { videoUrl: url, fileName: file.name, title: file.name });
+        if (d.mediaType === "audio") updateNodeData(id, { audioUrl: url, fileName: file.name, title: file.name });
+      }
+      setStatus(`源文件已载入：${file.name}`);
+    } catch (e) {
+      setStatus(`源文件失败：${e}`);
+    }
+  };
+
+  return (
+    <div className={`sg-node source${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={240} minHeight={160} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>📂 {d.title || "源文件"}</span>
+        <select
+          value={d.mediaType}
+          onChange={(e) =>
+            updateNodeData(id, { mediaType: e.target.value as SourceData["mediaType"] })
+          }
+        >
+          <option value="image">图片</option>
+          <option value="video">视频</option>
+          <option value="audio">音频</option>
+          <option value="text">文本</option>
+        </select>
+      </div>
+      <div className="body nodrag">
+        {d.mediaType === "image" && d.imageUrl ? (
+          <div className="img-wrap">
+            <img src={d.imageUrl} alt="" />
+          </div>
+        ) : null}
+        {d.mediaType === "video" && d.videoUrl ? (
+          <div className="img-wrap">
+            <video src={d.videoUrl} muted playsInline controls />
+          </div>
+        ) : null}
+        {d.mediaType === "audio" && d.audioUrl ? <audio src={d.audioUrl} controls /> : null}
+        {d.mediaType === "text" ? (
+          <textarea
+            className="sg-node-inline-ta"
+            value={d.content || ""}
+            onChange={(e) => updateNodeData(id, { content: e.target.value })}
+            placeholder="文本源…"
+          />
+        ) : null}
+        {!d.imageUrl && !d.videoUrl && !d.audioUrl && d.mediaType !== "text" ? (
+          <div className="sg-director-empty">本地素材入口 · 连到下游生成</div>
+        ) : null}
+        <button type="button" className="sg-node-mini-btn primary" onClick={() => fileRef.current?.click()}>
+          选择文件
+        </button>
+        {d.fileName ? <div className="meta">{d.fileName}</div> : null}
+        <input
+          ref={fileRef}
+          type="file"
+          accept={accept}
+          hidden
+          onChange={(e) => void onFile(e.target.files?.[0] || null)}
+        />
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);

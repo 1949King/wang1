@@ -1,0 +1,640 @@
+[
+  {
+    "id": "curated-001",
+    "title": "街拍雨夜霓虹",
+    "category": "photo-realism",
+    "tags": [
+      "photo",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "城市雨夜街道，霓虹倒影，成年路人撑伞走过，湿沥青反光，35mm纪实摄影，浅景深。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-002",
+    "title": "窗边自然光人像",
+    "category": "photo-realism",
+    "tags": [
+      "photo",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性靠窗阅读，柔和侧光，书页纹理清晰，生活感写实摄影。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-003",
+    "title": "咖啡店周末早晨",
+    "category": "lifestyle",
+    "tags": [
+      "lifestyle",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "咖啡馆木质桌面，拿铁拉花，笔记本电脑微开，暖色晨光，生活方式静物。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-004",
+    "title": "露营星空篝火",
+    "category": "lifestyle",
+    "tags": [
+      "lifestyle",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "山顶营地，帐篷与篝火，成年旅人剪影，银河星空，广角夜景。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-005",
+    "title": "中式夜宵火锅",
+    "category": "food",
+    "tags": [
+      "food",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "铜火锅翻滚红汤，配菜摆盘丰富，蒸汽升腾，餐厅暖光，美食商业摄影。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-006",
+    "title": "日式便当俯拍",
+    "category": "food",
+    "tags": [
+      "food",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "木质托盘日式便当俯拍，米饭光泽，酱汁细节，干净背景，电商美食图。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-007",
+    "title": "清水混凝土展厅",
+    "category": "architecture",
+    "tags": [
+      "architecture",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "极简清水混凝土美术馆中庭，天光洒落，长曝光无人，建筑摄影。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-008",
+    "title": "老洋房旋转楼梯",
+    "category": "architecture",
+    "tags": [
+      "architecture",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "民国老洋房木制旋转楼梯，彩色玻璃窗光，尘埃可见，氛围建筑照。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-009",
+    "title": "无线耳机开箱台",
+    "category": "product",
+    "tags": [
+      "product",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "白色无线耳机与充电盒居中，微距，柔光箱，电商主图，干净浅灰背景。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-010",
+    "title": "护肤精华瓶湿感",
+    "category": "product",
+    "tags": [
+      "product",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "磨砂玻璃精华瓶，水珠与绿叶，侧逆光，高端护肤静物广告。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-011",
+    "title": "商务头像棚拍",
+    "category": "portrait",
+    "tags": [
+      "portrait",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年男性商务正装半身像，柔光棚拍，中性灰背景，领英头像质感。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-012",
+    "title": "胶片色人像特写",
+    "category": "portrait",
+    "tags": [
+      "portrait",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性面部特写，Kodak色调，轻微颗粒，眼神光，复古肖像。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-013",
+    "title": "赛博朋克角色设定",
+    "category": "character",
+    "tags": [
+      "character",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性赛博朋克角色设定图，霓虹义眼，机能外套，角色概念三视图。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-014",
+    "title": "古风仙侠男主",
+    "category": "character",
+    "tags": [
+      "character",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年古风仙侠男角色，白衣长发，山水背景，插画设定板，正面半身。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-015",
+    "title": "秋冬大衣街拍",
+    "category": "fashion",
+    "tags": [
+      "fashion",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性驼色大衣街拍，落叶街道，全身，时尚杂志编辑风。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-016",
+    "title": "运动潮牌Lookbook",
+    "category": "fashion",
+    "tags": [
+      "fashion",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年男性潮牌运动套装，水泥墙背景，Lookbook站姿，硬光。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-017",
+    "title": "暗黑骑士盔甲",
+    "category": "cosplay",
+    "tags": [
+      "cosplay",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年角色暗黑板甲cos，雾森林背景，戏剧侧光，道具细节清晰。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-018",
+    "title": "金融App首页Mock",
+    "category": "ui-ux",
+    "tags": [
+      "ui",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "深色金融App手机界面mockup，图表卡片，立体设备渲染，UI展示图。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-019",
+    "title": "社交Feed界面",
+    "category": "ui-ux",
+    "tags": [
+      "ui",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "浅色社交App信息流界面，头像卡片瀑布流，干净UI设计稿。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-020",
+    "title": "音乐节主视觉",
+    "category": "poster",
+    "tags": [
+      "poster",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "夏日音乐节海报主视觉，渐变夕阳，剪影人群，大标题留白，KV设计。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-021",
+    "title": "科幻电影预告海报",
+    "category": "poster",
+    "tags": [
+      "poster",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "科幻电影角色背影海报，星球环绕，粒子特效，电影字体排版。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-022",
+    "title": "服装平铺详情",
+    "category": "ecommerce",
+    "tags": [
+      "ecommerce",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "夏季连衣裙平铺电商详情图，白底，褶皱自然，标签清晰。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-023",
+    "title": "数码配件组合",
+    "category": "ecommerce",
+    "tags": [
+      "ecommerce",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "手机壳+充电线+支架组合电商主图，悬浮摆放，浅灰背景。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-024",
+    "title": "数据对比信息图",
+    "category": "infographic",
+    "tags": [
+      "infographic",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "三栏数据对比信息图，图标+数字，蓝白配色，演示文稿插图。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-025",
+    "title": "流程步骤图解",
+    "category": "infographic",
+    "tags": [
+      "infographic",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "五步流程横向信息图，圆角卡片，箭头连接，扁平插画风。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-026",
+    "title": "中文大字海报",
+    "category": "typography",
+    "tags": [
+      "typography",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "超大黑体中文标题海报，红黑对比，极简排版，印刷质感。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-027",
+    "title": "英文杂志封面字",
+    "category": "typography",
+    "tags": [
+      "typography",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "时尚杂志封面大标题排版，衬线字体，模特半身虚化背景。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-028",
+    "title": "小红书封面竖图",
+    "category": "social",
+    "tags": [
+      "social",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "竖版生活方式封面，大标题+好物平铺，高饱和，小红书风格。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-029",
+    "title": "短视频封面钩子",
+    "category": "social",
+    "tags": [
+      "social",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "竖版短视频封面，惊讶表情成年角色，爆炸文字，强对比。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-030",
+    "title": "YouTube科技评测封面",
+    "category": "thumbnail",
+    "tags": [
+      "thumbnail",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "YouTube科技评测封面，产品特写+表情对比，醒目箭头，16:9。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-031",
+    "title": "游戏实况封面",
+    "category": "thumbnail",
+    "tags": [
+      "thumbnail",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "游戏实况缩略图，角色剪影与大数字，高对比霓虹，16:9。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-032",
+    "title": "品牌VI名片",
+    "category": "design",
+    "tags": [
+      "design",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "极简品牌名片正反面，烫金logo，灰纸质感，平面设计展示。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-033",
+    "title": "包装盒展开图",
+    "category": "design",
+    "tags": [
+      "design",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "化妆品包装盒三视图与展开图，烫印工艺标注，设计稿。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-034",
+    "title": "开放式办公空间",
+    "category": "work",
+    "tags": [
+      "work",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "现代开放式办公室，绿植与落地窗，多人协作氛围，企业宣传摄影。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-035",
+    "title": "在线课程封面",
+    "category": "learn",
+    "tags": [
+      "learn",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成人教育课程封面，笔记本与平板，蓝绿渐变，知识付费主图。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-036",
+    "title": "水彩城市插画",
+    "category": "illustration",
+    "tags": [
+      "illustration",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "水彩风格城市街角插画，温暖色调，手绘纹理，绘本页。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-037",
+    "title": "儿童绘本风动物",
+    "category": "illustration",
+    "tags": [
+      "illustration",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "友好的森林动物角色插画，柔和配色，绘本内页构图（角色为动物非儿童）。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-038",
+    "title": "二次元校园风成年",
+    "category": "anime",
+    "tags": [
+      "anime",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年二次元角色立绘，秋季校园背景，细描边，动漫上色。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-039",
+    "title": "机甲少女概念",
+    "category": "anime",
+    "tags": [
+      "anime",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年机甲驾驶员角色概念，机械细节，动态姿势，二次元厚涂。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-040",
+    "title": "低多边形山城",
+    "category": "game-3d",
+    "tags": [
+      "game",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "低多边形风格山城，暖黄昏光，游戏场景概念，3D渲染。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-041",
+    "title": "写实游戏道具枪",
+    "category": "game-3d",
+    "tags": [
+      "game",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "写实游戏道具步枪，脏污磨损材质，棚拍三视图，游戏资产。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-042",
+    "title": "四格日常喜剧",
+    "category": "comic",
+    "tags": [
+      "comic",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "四格漫画，职场成年角色日常翻车，简洁线条，日式分格。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-043",
+    "title": "双人对话气泡漫",
+    "category": "comic",
+    "tags": [
+      "comic",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "横向漫画分格，两名成年角色对话，夸张表情，气泡排版。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-044",
+    "title": "表情包九宫格",
+    "category": "fun",
+    "tags": [
+      "fun",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "九宫格表情包，同一成年角色夸张表情升级，白底，梗图风。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-045",
+    "title": "对比前后梗图",
+    "category": "fun",
+    "tags": [
+      "fun",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "左右对比梗图，同一场景前后反差，大字标题，网络迷因。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-046",
+    "title": "短剧分手对峙",
+    "category": "storyboard",
+    "tags": [
+      "storyboard",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "短剧分镜：雨夜天台两名成年角色对峙，正反打标注，电影感。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-047",
+    "title": "短剧重逢机场",
+    "category": "storyboard",
+    "tags": [
+      "storyboard",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "短剧分镜：机场到达口重逢，人群虚化，女主特写泪光，叙事静帧。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-048",
+    "title": "短剧追逐巷战",
+    "category": "storyboard",
+    "tags": [
+      "storyboard",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "短剧分镜：窄巷追逐手持跟拍，成年男主奔跑，霓虹残影。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-049",
+    "title": "回忆杀拼贴板",
+    "category": "video-edit",
+    "tags": [
+      "video",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "九宫格回忆杀视觉板，暖黄滤镜，同一角色不同季节，拼贴。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-050",
+    "title": "MV分镜色板",
+    "category": "video-edit",
+    "tags": [
+      "video",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "音乐MV分镜色板，冷暖交替，歌词字幕占位，电影调色参考。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-051",
+    "title": "油画风格迁移说明",
+    "category": "style-transfer",
+    "tags": [
+      "style",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "把参考照片转为古典油画风格，可见笔触，伦勃朗光，保留主体可识别。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-052",
+    "title": "像素风重绘",
+    "category": "style-transfer",
+    "tags": [
+      "style",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "把场景重绘为16-bit像素艺术，有限色板，清晰轮廓。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-053",
+    "title": "角色三视图定妆",
+    "category": "consistency",
+    "tags": [
+      "consistency",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "同一成年角色正面侧面四分之三定妆三视图，统一服装打光，白底。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-054",
+    "title": "表情表九宫格",
+    "category": "consistency",
+    "tags": [
+      "consistency",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "同一成年角色九宫格表情表，喜怒哀乐，统一画风便于复用。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-055",
+    "title": "晚宴红毯魅力",
+    "category": "mature-glamour",
+    "tags": [
+      "mature",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性红毯晚礼服全身，闪光灯散景，时尚周刊魅力写真，优雅。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-056",
+    "title": "天台夜风暧昧",
+    "category": "mature-atmosphere",
+    "tags": [
+      "mature",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性天台栏杆，风掀外套，城市灯海，暧昧电影静帧。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-057",
+    "title": "窗光蕾丝家居",
+    "category": "mature-lingerie",
+    "tags": [
+      "mature",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性窗边半透蕾丝家居套装，晨光，杂志内衣广告，克制优雅。高质量，细节清晰，构图专业。"
+  },
+  {
+    "id": "curated-058",
+    "title": "健身房力量写真",
+    "category": "mature-body",
+    "tags": [
+      "mature",
+      "拾光精选",
+      "离线"
+    ],
+    "prompt": "成年女性哑铃区运动内衣，汗水与肌肉线条，硬光运动时尚。高质量，细节清晰，构图专业。"
+  }
+]

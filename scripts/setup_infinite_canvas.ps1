@@ -28,12 +28,15 @@ Push-Location $Web
 try {
     Write-Host "npm install --legacy-peer-deps ..."
     npm install --legacy-peer-deps
+    Write-Host "npm run build（生成 dist，应用内静态秒开）..."
+    npm run build
     Write-Host ""
     Write-Host "完成。启动方式：" -ForegroundColor Green
-    Write-Host "  1) 应用内「AI 画布」→「启动画布」"
+    Write-Host "  1) 应用内「AI 画布」→ 自动预热 /「启动画布」"
     Write-Host "  2) 或: cd vendor/infinite-canvas/web; npm run dev"
     Write-Host "桥接端口: http://127.0.0.1:18765"
-    Write-Host "画布端口: http://127.0.0.1:3000"
+    Write-Host "静态秒开: http://127.0.0.1:3001 （有 dist 时）"
+    Write-Host "Vite 开发: http://127.0.0.1:3000"
 } finally {
     Pop-Location
 }

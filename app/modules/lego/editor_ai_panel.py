@@ -49,6 +49,7 @@ class _AiPanelHost(Protocol):
     def _lora_edit_process(self) -> None: ...
     def _generate_ai_subtitles(self) -> None: ...
     def _enhance_audio(self) -> None: ...
+    def _on_send_clip_to_canvas(self) -> None: ...
 
 
 def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
@@ -196,6 +197,21 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
         g.addWidget(btn, i // 2, i % 2)
     fl_lo.addLayout(g)
     l.addWidget(fl)
+
+    canvas_sec = self._sect("🎨 AI 画布联动")
+    canvas_lo = canvas_sec.layout()
+    canvas_hint = QLabel("把当前选中片段推到 AI 画布（右下角「来自剪辑」可下载导入）")
+    canvas_hint.setStyleSheet("color:#888;font-size:10px;")
+    canvas_hint.setWordWrap(True)
+    canvas_lo.addWidget(canvas_hint)
+    to_canvas_btn = QPushButton("发送选中片段到画布")
+    to_canvas_btn.setStyleSheet(
+        "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:4px;"
+        "padding:8px;font-size:11px;font-weight:600;}QPushButton:hover{background:#6d28d9;}"
+    )
+    to_canvas_btn.clicked.connect(self._on_send_clip_to_canvas)
+    canvas_lo.addWidget(to_canvas_btn)
+    l.addWidget(canvas_sec)
 
     hs = self._sect("📋 处理历史")
     self._ai_history_list = QListWidget()

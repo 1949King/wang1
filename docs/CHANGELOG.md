@@ -1,5 +1,40 @@
 # 拾光剪影 — 变更日志
 
+## V4.10.1 (2026-08-14) — Agent Plan/B/C 策略
+
+### 🆕 新增 / 增强
+- **会话模式**：剪辑 Agent 与画布 Agent-IM 统一 Plan / 协作 B / 自主 C（默认 B）。
+- **Policy Engine**：`agent_policy.py` 按工具 effect 决定允许 / 需确认 / 拒绝；Plan 不向模型暴露写工具。
+- **预算与停止**：每会话 12 轮模型、24 次工具；侧栏「停止」暂停后续轮次。
+- **画布写确认**：协作模式下 `task.create` 改节点/生成前弹出确认；与后端矩阵一致。
+- **任务与工具循环**：`agent_task_store` 持久化；B/C 可输出 `canvas_tools` 经 SSE 落画布；剪辑/画布支持排队、暂停、继续、重规划。
+
+### 明确不做
+- 未接入 Tauri MCP、通用网页搜索、会话文件授权、IndexedDB 任务持久化。
+
+---
+
+## V4.10.0 (2026-08-13) — AI画布与Agent调度
+
+### 🆕 新增 / 增强
+- **AI 画布** (`vendor/shiguang-canvas` + 宿主桥): 无限画布落地页顶栏/导航壳；默认 `shiguang-canvas`；3D 导演台单人/群像模板；AIGC 生成入轨链路持续对齐。
+- **Agent 能力调度层**: 能力注册与剪辑面板拆分模块；Tool Registry 收敛设计落地起步。
+- **账号运营插件化**: `account_ops_plugin`，入口改走拓展中心（注册表不再挂 `account` 内置模块）。
+- **帮助中心**: 补充 AI 画布与 AIGC 模型说明。
+
+### 🐞 修复
+- **画布预热卡住 / 切换无反应**: 后台线程改用 `pyqtSignal` 回主线程。
+- **AIEngine 单例腰斩**: `__init__` 被 `get_instance()` 中断导致 `_clients_loaded` 永不设置。
+- **Agent publish**: `account.publish` 默认 `skill_id` 死值修复。
+- **FFmpeg/ffprobe**: 路径自动检测统一；波形生成优先 FFmpeg；缩略图/初始化兼容修复。
+- **高危/中低危批次**: Agent、剪辑核心与模块审计修复。
+
+### 🧹 工程
+- 删除零引用死代码（`AppState`、孤儿 render 包等）；`.venv312` 移出跟踪。
+- 冻结区重新上锁并更新哈希基线；知识库同步至 2026-08。
+
+---
+
 ## V4.9.2 (2026-07-13) — 贴纸预览与滤镜播放优化
 
 ### 🐞 修复

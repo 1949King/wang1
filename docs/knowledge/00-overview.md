@@ -13,7 +13,7 @@
 1. AI 精剪辑 → `editor_module`（已建；含 Agent 面板 / capability 管线）
 2. 人工修改 → 编辑器 UI（已建）
 3. AI 文案/话题/标题 → `copywriting`（已建，ADVANCED 默认关）
-4. 发布到视频平台 → `account`（已建，EXPERIMENTAL 默认关；**C1 真回执**）
+4. 发布到视频平台 → `account` **插件**（`account_ops_plugin`；EXPERIMENTAL；**C1 真回执**）
 5. 获取播放/点赞/评论 → `account_analyzer`（已建，偏本地运营数据目录）
 6. AI 优化建议 → `viral_optimization_engine`（**C2 已接账号运营 UI**；样例/本地数据，非平台真 API）
 7. 下一步选题 → 短剧筛选插件（`drama_finder_plugin`+crawler）/ viral 基因分析

@@ -1,15 +1,18 @@
 """
-账号运营模块 (AccountOpsModule)
+账号运营 UI (AccountOpsModule)
 ===============================
-从 modules.py 拆分出来的独立模块文件。
+从 modules.py 拆分出来的独立界面实现。
+
+入口（2026-08 起）：拓展中心插件 `app/plugins/account_ops_plugin`，
+不再注册主导航模块。Agent 侧 `account.*` / account_skills 仍可用。
 
 功能:
 - 多平台账号管理（8平台：抖音/快手/视频号/小红书/B站/微博/头条/西瓜）
 - 智能运营建议（LLM 驱动）
 - 爆款优化建议（account_analyzer → viral_optimization_engine）
 - 数据看板（7天趋势图）
-- 矩阵批量发布
-- OAuth 2.0 授权绑定
+- 矩阵批量发布（无真 API 时本地队列/导出）
+- OAuth 2.0 授权绑定（视平台 Integrator 能力）
 """
 
 import json

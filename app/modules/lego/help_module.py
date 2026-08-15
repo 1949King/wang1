@@ -2,7 +2,7 @@
 帮助模块 (HelpModule)
 ======================
 从 settings_module.py 中拆分出来的独立帮助模块。
-提供 18 个帮助话题的搜索和浏览功能。
+提供 19 个帮助话题的搜索和浏览功能。
 """
 
 from PyQt6.QtCore import Qt
@@ -75,19 +75,20 @@ class HelpModule(BaseModule):
             ("📖", "新手专区 🌟", self._beginner),
             ("🎥", "视频教程 📺", self._video_tutorials),
             ("📡", "API网址大全", self._api_urls),
-            ("🔧", "OpenClaw教程", self._openclaw_guide),
             ("🏠", "首页", self._home),
             ("🎬", "剪辑功能", self._editor),
             ("⚙️", "内核模式", self._kernel_mode_guide),
             ("✍️", "文案生成", self._copywriting),
             ("📋", "多任务管理", self._tasks),
             ("🎭", "短剧筛选", self._drama),
-            ("👤", "账号运营", self._account),
+            ("👤", "账号运营（插件）", self._account),
             ("📁", "素材库", self._materials),
+            ("🌐", "素材网站直达", self._material_sites),
             ("🧩", "插件中心", self._plugins),
             ("📊", "性能监控", self._perf),
             ("🤖", "模型广场", self._models),
             ("🎨", "AI画布", self._ai_canvas),
+            ("🌐", "外部画布备选", self._canvas_alternatives),
             ("❓", "常见问题", self._faq),
         ]
         self._help_topics = topics  # 保存引用供搜索使用
@@ -389,12 +390,10 @@ class HelpModule(BaseModule):
         self._link_row("B站：AI短剧编辑器入门", "https://search.bilibili.com/all?keyword=AI视频剪辑入门", "推荐先看")
         self._link_row("B站：DeepSeek API注册教程", "https://search.bilibili.com/all?keyword=DeepSeek+API注册", "第三方内容")
         self._link_row("B站：Ollama本地模型安装", "https://search.bilibili.com/all?keyword=Ollama安装教程", "通用")
-        self._link_row("B站：OpenClaw自动化运营", "https://search.bilibili.com/all?keyword=AI自动化运营", "进阶")
         self._link_row("B站：短视频剪辑新手入门", "https://search.bilibili.com/all?keyword=短视频剪辑新手", "零基础")
         self._subtitle("🆘 遇到问题？")
         self._bullet(["查看左侧「常见问题」栏目",
-                      "切换左侧「API网址大全」查看所有平台注册地址",
-                      "切换左侧「OpenClaw教程」了解自动化运营组件"])
+                      "切换左侧「API网址大全」查看所有平台注册地址"])
         self._cl.addStretch()
 
     def _api_urls(self):
@@ -419,6 +418,7 @@ class HelpModule(BaseModule):
             ("Claude (Anthropic)", "https://console.anthropic.com", "console.anthropic.com", "需海外网络，编程强", ""),
             ("🆓 Groq", "https://console.groq.com", "console.groq.com", "超快推理，免费额度", "⭐"),
             ("🆓 硅基流动", "https://cloud.siliconflow.cn", "cloud.siliconflow.cn", "模型聚合平台", "⭐"),
+            ("🖥️ ChatGPT2API", "https://github.com/basketikun/chatgpt2api", "github.com/basketikun/chatgpt2api", "自托管 OpenAI 兼容网关，gpt-image-2 生图", "⭐AIGC"),
             ("🖥️ Ollama (本地部署)", "https://ollama.com", "ollama.com", "完全免费本地运行，支持千问、Llama等模型，可在模型广场直接拉取", "⭐免费"),
             ("🆓 腾讯混元", "https://cloud.tencent.com/product/hunyuan", "cloud.tencent.com/product/hunyuan", "腾讯大模型", "🆓"),
             ("🆓 魔搭社区 (ModelScope)", "https://modelscope.cn", "modelscope.cn", "阿里达摩院开源模型平台，可在模型广场直接下载本地部署", "⭐"),
@@ -467,40 +467,6 @@ class HelpModule(BaseModule):
                       "4. 复制Key（形如 sk-xxxx...），粘贴到模型广场对应卡片",
                       "5. 在模型广场中「保存」→ 点击圆形按钮激活 → 即可使用",
                       "⚠️ API Key = 钱包密码，不要分享！平台按token用量计费"])
-        self._cl.addStretch()
-
-    def _openclaw_guide(self):
-        self._clear(); self._title("🔧 OpenClaw 教程")
-        self._text("OpenClaw 是本软件内置的自动化运营组件，可实现智能剪辑、批量处理、定时发布等自动工作流。")
-        self._subtitle("什么是 OpenClaw？")
-        self._bullet(["一个可视化的工作流编排引擎，类似 IFTTT/Zapier",
-                      "通过拖拽节点来定义自动化任务流程",
-                      "支持触发条件 → AI处理 → 执行动作 三段式流程",
-                      "内置剪辑/文案/发布/数据采集等节点类型"])
-        self._subtitle("快速上手（5分钟）")
-        self._bullet(["1. 打开「模型广场」→ 切换到「📡 OpenClaw」标签页",
-                      "2. 点击「新建工作流」→ 输入名称（如\"每日自动发布\"）",
-                      "3. 添加「定时触发」节点 → 设置每天 18:00 执行",
-                      "4. 添加「AI文案」节点 → 选择平台和风格 → 自动生成当日文案",
-                      "5. 添加「矩阵发布」节点 → 选择目标账号 → 自动发布",
-                      "6. 点击「启用」开关 → 工作流开始自动运行",
-                      "7. 在「运行日志」中查看每次执行结果"])
-        self._subtitle("常见自动化场景")
-        self._bullet(["场景1：每日定时从素材库选取视频→AI剪辑→自动发布到抖音",
-                      "场景2：监控短剧热榜→发现新剧→自动生成解说文案→发布",
-                      "场景3：每小时采集各平台数据→生成报表→发送到邮箱",
-                      "场景4：收到新视频→AI去重→添加水印→批量发布矩阵号"])
-        self._subtitle("节点类型说明")
-        self._bullet(["🎬 剪辑节点：自动裁剪/合并/添加特效",
-                      "📝 文案节点：AI生成标题/话题/描述",
-                      "📤 发布节点：一键发布到指定平台账号",
-                      "📊 数据节点：采集播放量/点赞/评论数据",
-                      "⏰ 定时节点：设置按分钟/小时/天/周循环触发",
-                      "🔔 通知节点：企业微信/钉钉/邮件推送结果"])
-        self._subtitle("📺 视频教程（点击跳转浏览器）")
-        self._link_row("B站：OpenClaw自动化工作流", "https://search.bilibili.com/all?keyword=自动化运营", "第三方内容")
-        self._link_row("B站：AI剪辑实战教程", "https://search.bilibili.com/all?keyword=AI剪辑实战", "跟做就会")
-        self._tip("新手建议先从简单的「定时+发布」流程开始，熟悉后再添加AI处理节点")
         self._cl.addStretch()
 
     def _quick_start(self):
@@ -647,44 +613,75 @@ class HelpModule(BaseModule):
         self._cl.addStretch()
 
     def _account(self):
-        self._clear(); self._title("👤 账号运营")
-        self._text("多平台账号统一管理，支持绑定/数据看板/AI运营建议/矩阵批量发布。")
-        self._subtitle("平台支持")
-        self._bullet(["8大平台：抖音/快手/视频号/小红书/B站/微博/头条/西瓜视频",
-                      "左侧平台列表点击切换，右侧内容实时更新",
-                      "每个平台独立管理自己的绑定账号和数据"])
-        self._subtitle("绑定账号")
-        self._bullet(["点击「➕绑定账号」弹出配置窗口，输入账号名/粉丝数/状态",
-                      "已绑定账号以列表形式展示，显示状态标签（正常/限流/异常）",
-                      "点击「管理」可刷新数据或解绑账号",
-                      "数据概览自动计算：绑定数/总粉丝/正常率/异常数"])
-        self._subtitle("AI运营建议")
-        self._bullet(["系统自动生成5条智能建议：最佳发布时间、热门话题、异常预警",
-                      "建议卡绿色边框突出显示，一目了然",
-                      "包含格式优化建议（30秒竖版完播率+28%）",
-                      "粉丝活跃时段分析：工作日12:00-13:00, 20:00-22:00"])
-        self._subtitle("矩阵发布")
-        self._bullet(["勾选要发布的账号，支持跨平台批量勾选",
-                      "填写视频标题、描述文案，选择智能标签自动生成话题",
-                      "点击「批量发布」一键推送至选中平台",
-                      "全平台数据采集：点击「🔄全平台数据采集」获取最新数据"])
+        self._clear(); self._title("👤 账号运营（拓展中心插件）")
+        self._text("账号运营已从主导航迁出，与短剧筛选同级：在「拓展中心」打开。"
+                    "Agent 的 account.* 能力仍可用。无平台真 API 时，发布多为本地队列/导出。")
+        self._subtitle("怎么打开")
+        self._bullet(["左侧导航「拓展中心」→ 顶部「👤 账号运营」",
+                      "或首页快捷「账号运营」（会跳到拓展中心并打开界面）",
+                      "插件目录：app/plugins/account_ops_plugin/"])
+        self._subtitle("平台与绑定")
+        self._bullet(["8 大平台：抖音/快手/视频号/小红书/B站/微博/头条/西瓜",
+                      "绑定账号后本地管理；勿把样例数据当成平台真粉丝数"])
+        self._subtitle("发布与数据")
+        self._bullet(["矩阵/快速发布：有 Integrator 则尝试上传，否则本地队列或导出",
+                      "「汇总本地发布日志」不联网拉平台数据",
+                      "爆款建议读本地运营目录 + viral 引擎，非平台真播放 API"])
+        self._tip("精剪与导出仍在「剪辑」；运营扩展按需打开即可。")
         self._cl.addStretch()
 
     def _materials(self):
         self._clear(); self._title("📁 素材库")
-        self._text("本地素材管理和在线素材资源，支持视频/音频/图片/字幕/模板/特效/转场/贴纸等8大类。")
+        self._text("素材库分两个顶部分区：「本地素材」与「提示词库」。"
+                    "本地区只管理本机文件（视频/音频/图片/字幕/模板/特效/转场/贴纸）。"
+                    "需要外站素材时请到左侧「素材网站直达」打开官网下载，再回到本页导入。")
         self._subtitle("本地素材")
         self._bullet(["支持导入视频（MP4/AVI/MOV/MKV/WebM）",
                       "支持导入音频（MP3/WAV/AAC/FLAC）",
                       "支持导入图片（JPG/PNG/GIF/SVG/BMP）",
-                      "素材可标记星标、添加标签、按类型筛选",
-                      "拖拽素材到时间轴即可添加到编辑区域"])
-        self._subtitle("在线素材库")
-        self._bullet(["内置丰富的免版权素材资源",
-                      "视频模板：竖版/横版/方形，适配不同平台",
-                      "背景音乐：按情绪/节奏/时长分类",
-                      "特效转场：一键应用的预设效果包"])
-        self._tip("定期清理不用的素材可释放磁盘空间，素材库支持外挂硬盘路径")
+                      "按类型分标签页；顶部标签可快速跳转到对应分类",
+                      "拖拽或双击/右键「添加到时间线」即可送入剪辑"])
+        self._subtitle("提示词库分区")
+        self._bullet(["同源 GitHub JSON（yukkcat / stimQQ / NeXra）+ 本地短剧包 / 成人 18+ 包",
+                      "左侧细分类（摄影/人像/设计/插画/短剧/成熟/成人）与尺度筛选",
+                      "点 ★ 收藏；「我的收藏」可只看已收藏条目",
+                      "支持复制提示词、发送到画布；成人源默认关闭需手动勾选"])
+        self._subtitle("推荐工作流")
+        self._bullet(["在「素材网站直达」打开 Pexels / Pixabay 等站点下载到本地",
+                      "回到「素材库」点「导入本地素材」或各分类下的导入/浏览文件夹",
+                      "再拖到剪辑时间线精剪与导出",
+                      "做 AIGC 时到「提示词库」同步源 → 收藏常用 → 复制或发到画布"])
+        self._tip("定期清理不用的素材可释放磁盘空间；完整外链列表见「素材网站直达」。")
+        self._cl.addStretch()
+
+    def _material_sites(self):
+        """免费/商用素材网站 — 浏览器直达，非软件内置库。"""
+        self._clear()
+        self._title("🌐 素材网站直达")
+        self._text("下列站点在系统浏览器中打开。它们不是本软件内置资源，也不走软件内下载。"
+                    "请自行下载到本地后，再回到「素材库」导入或「剪辑」直接导入。"
+                    "授权条款、商用限制与费用以各官网为准。")
+        self._subtitle("视频 / 图片（常用免费向）")
+        self._link_row("Pexels", "https://www.pexels.com/", "免版权视频与图片")
+        self._link_row("Pixabay", "https://pixabay.com/", "图片 / 视频 / 音乐")
+        self._link_row("Unsplash", "https://unsplash.com/", "高质量图片")
+        self._link_row("Mixkit", "https://mixkit.co/", "视频 / 音乐 / 音效")
+        self._link_row("Coverr", "https://coverr.co/", "免费库存视频")
+        self._link_row("Videvo", "https://www.videvo.net/", "视频与音乐素材")
+        self._subtitle("音频 / 音效")
+        self._link_row("Freesound", "https://freesound.org/", "社区音效（注意授权）")
+        self._link_row("Pixabay Music", "https://pixabay.com/music/", "免版权背景音乐")
+        self._subtitle("国内常用素材站（需自行核对授权）")
+        self._link_row("爱给网", "https://www.aigei.com/", "音效 / 配乐 / 视频素材")
+        self._link_row("包图网", "https://ibaotu.com/", "商用素材（多为付费）")
+        self._link_row("摄图网", "https://588ku.com/", "图片 / 视频素材")
+        self._subtitle("怎么和本软件配合")
+        self._bullet([
+            "浏览器下载 → 本地文件夹",
+            "「素材库」导入（按类型归类）或「剪辑」里直接加到时间线",
+            "精剪、字幕、导出、发布请始终在拾光剪影内完成",
+        ])
+        self._tip("外链仅作直达入口；本软件不托管、不代理这些网站的内容。")
         self._cl.addStretch()
 
     def _plugins(self):
@@ -727,12 +724,13 @@ class HelpModule(BaseModule):
 
     def _models(self):
         self._clear(); self._title("🤖 模型广场")
-        self._text("AI模型管理中控台，内置16个主流平台，支持自定义添加任意API。")
-        self._subtitle("内置平台（16个）")
+        self._text("AI模型管理中控台，内置主流平台（含 ChatGPT2API 自托管网关），支持自定义添加任意 API。")
+        self._subtitle("内置平台")
         self._bullet(["DeepSeek（深度求索）/ 豆包（字节跳动）/ OpenAI（GPT-4o/o1）",
                       "智谱AI（GLM-4）/ 通义千问（阿里云）/ 文心一言（百度）",
                       "讯飞星火 / Kimi（月之暗面）/ 百川 / MiniMax",
-                      "Claude（Anthropic）/ Groq / 硅基流动 / 阶跃星辰 / 零一万物",
+                      "Claude（Anthropic）/ Groq / 硅基流动 / 阶跃星辰 / 零一万物 / 魔搭",
+                      "ChatGPT2API（自托管，默认本机 :8000，gpt-image-2 生图）",
                       "Ollama（本地模型，支持llama3/deepseek-r1/qwen2.5等）"])
         self._subtitle("操作指南")
         self._bullet(["展开卡片：点击模型名称区域展开/折叠配置面板",
@@ -746,31 +744,24 @@ class HelpModule(BaseModule):
                       "支持所有兼容OpenAI API格式的平台（ChatGPT/OpenRouter等）",
                       "自定义模型持久化保存到custom_providers.json，重启不丢失",
                       "与内置平台同等待遇：支持激活/配置/测试/切换"])
-        self._subtitle("🎨 AIGC 标签页（生图/生视频/语音模型，非对话模型）")
-        self._text("和「模型广场」是两个不同的东西：模型广场配的是文字对话模型（写文案/分析用），"
-                    "AIGC 页展示的是生图/生视频/语音这类多模态模型目录，两者不能互相替代。")
-        self._bullet(["目录来源：内置 AIGC_MODELS 清单，覆盖硅基流动/OpenAI/通义等 Provider 的生图、生视频、语音模型",
-                      "怎么激活：先回到「模型广场」找到对应 Provider 卡片（如硅基流动）填好 API Key 并保存",
-                      "填完 Key 后 AIGC 页对应条目才会显示可用，下拉框选择具体的 [生图]/[生视频] 型号",
-                      "生效范围：配好后可在「AI画布」模块里生图/生视频，回流到时间线剪辑",
-                      "对话类模型（DeepSeek/GPT 等）无需来这页，直接在模型广场卡片配置即可"])
-        self._subtitle("其他标签页")
-        self._bullet(["OpenClaw：自动化运营组件配置",
-                      "技能管理：Skill接口管理和调用",
-                      "💾保存全部：一键保存所有平台的配置"])
+        self._subtitle("🎨 生图/生视频/语音模型怎么配？")
+        self._text("生图/生视频/语音模型统一在模型广场卡片里配置（硅基流动、OpenAI、通义、豆包、ChatGPT2API 等）。"
+                    "填好 API Key 并激活后，打开「AI 画布」点顶部「🔄 同步模型池」即可自动发现对应能力的模型，"
+                    "在画布节点下拉框里就能选到。对话模型（DeepSeek/GPT 等）也在模型广场配置，两者不冲突。")
         self._tip("激活的模型将应用于所有AI功能：文案生成/短剧筛选/字幕生成等")
         self._cl.addStretch()
 
     def _ai_canvas(self):
         self._clear(); self._title("🎨 AI画布")
-        self._text("左侧导航「AI 画布」模块（原「角色管理」）：把 infinite-canvas 开源画布镶嵌进软件内，"
-                    "在画布上生图/生视频，管理角色资产，并能一键把生成结果送回时间线剪辑。")
+        self._text("左侧导航「AI 画布」默认加载开源 infinite-canvas（vendor/infinite-canvas）。"
+                    "顶栏「画布引擎」下拉可随时切换为自研「拾光导演台」（LibTV 向节点画布，"
+                    "vendor/shiguang-canvas），切换会重启画布服务。生成结果经 bridge 送回时间线。")
         self._subtitle("首次使用前置条件")
         self._bullet(["需要 PyQt6-WebEngine：未安装时画布区域会显示红字错误，按提示"
                       "`.venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0` 装好后完全重启软件",
-                      "需要先跑一次 `scripts/setup_infinite_canvas.ps1` 拉取/构建前端资源",
-                      "有构建产物（dist）时秒开；没有构建产物时会拉起本地 Vite 开发服务器，首次加载稍慢，属正常现象",
-                      "生图/生视频需要先在「模型管理 → AIGC」标签页确认对应 Provider 已填 Key（见「模型广场」章节）"])
+                      "infinite-canvas（默认）：`scripts/setup_infinite_canvas.ps1`（clone + npm install + build，有 dist 则秒开 :3001）",
+                      "自研导演台：`cd vendor/shiguang-canvas && npm install && npm run build`（有 dist 则秒开 :3011）",
+                      "生图：infinite-canvas 画布内选模型生成；导演台左侧选 AIGC 模型 →「生成选中节点」（走宿主代理）；无 Key/失败时用占位图仍可入轨"])
         self._subtitle("界面说明")
         self._bullet(["主区域：嵌入式画布，生图/生视频、拖拽排版",
                       "左侧「角色库」（可展开/收起）：新增角色、填写外貌/性格/台词等字段，持久化保存，供生成时挂载参考",
@@ -779,7 +770,34 @@ class HelpModule(BaseModule):
                       "　- 同步模型：把模型广场里配置好的 Key 同步给画布内部调用",
                       "　- 连接 Agent：可选，拉起本地 17371 端口给外部 Agent/Codex 接入（`codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp`）",
                       "插帧选项是线性插值补帧，不是 RIFE 等神经网络补帧，追求丝滑请用剪辑模块里的专业补帧功能"])
-        self._tip("画布是可选功能：即使不启用，视频剪辑主流程完全不受影响；若长期用不到可以在设置里关闭该模块减少启动开销")
+        self._subtitle("外部云端画布备选（浏览器直达，非本软件内置）")
+        self._text("若需要体验更完整的商业「导演台 / Agent 画布」，可打开下列官网试用；"
+                    "生成结果请自行下载后，再回到本软件「剪辑」导入或「素材库」入库。"
+                    "这些站点与本软件无关，需单独注册账号，费用与隐私政策以对方为准。")
+        self._link_row("LibTV（liblib.tv）", "https://www.liblib.tv/", "导演台 / 画布生图生视频")
+        self._link_row("TapNow", "https://tapnow.ai/", "Agentic Creative Canvas")
+        self._tip("完整说明与链接亦见左侧「🌐 外部画布备选」；内置 AI 画布仍走 infinite-canvas，成片精剪请回「剪辑」模块。")
+        self._cl.addStretch()
+
+    def _canvas_alternatives(self):
+        """LibTV / TapNow 等外部云端画布 — 浏览器直达备选，非内置。"""
+        self._clear()
+        self._title("🌐 外部画布备选")
+        self._text("本软件内置的是开源 infinite-canvas（左侧「AI 画布」）。"
+                    "若你想对照或临时使用商业云端「导演台 / Agent 画布」体验，可点下方按钮在系统浏览器中打开官网。"
+                    "它们不是本软件的一部分，也不走本地 bridge 自动入轨。")
+        self._subtitle("推荐备选（点击「打开」跳转浏览器）")
+        self._link_row("LibTV", "https://www.liblib.tv/", "liblib.tv · 画布 / 导演台 / 生图生视频")
+        self._link_row("LibTV 画布入口", "https://www.liblib.tv/canvas", "直接进画布页（需登录）")
+        self._link_row("TapNow", "https://tapnow.ai/", "tapnow.ai · Agentic Creative Canvas")
+        self._link_row("Infinite-Canvas（开源）", "https://github.com/basketikun/infinite-canvas", "内置 AI 画布上游 · 节点画布工作台")
+        self._subtitle("怎么和本软件配合")
+        self._bullet([
+            "日常漫剧分镜：优先用软件内「AI 画布」→「发送到剪辑」入时间线",
+            "需要 LibTV / TapNow 特有能力时：浏览器里生成 → 下载到本地 → 回到「剪辑」导入或素材库",
+            "模型 Key：本软件「模型广场 / AIGC」只服务于内置画布与剪辑 Agent，不会自动同步到 LibTV/TapNow",
+        ])
+        self._tip("外链仅作备选体验；精剪、字幕、导出、发布请始终在拾光剪影内完成。")
         self._cl.addStretch()
 
     # ── 搜索功能 ──

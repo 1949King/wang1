@@ -1,13 +1,11 @@
 """
 统一扩展抽象层 (Extension Base)
 =============================
-为 Plugin / Skill / MCP Server 提供统一的抽象接口，
-避免出现"三轨制"问题。
+为 Skill / MCP Server 提供统一的抽象接口。
 
 架构设计:
     Extension (抽象基类)
-    ├── PluginExtension   → 传统插件 (现有 PluginManager)
-    ├── SkillExtension    → AI 技能 (skill_engine.py)
+    ├── SkillExtension    → AI 技能 (skill_engine.py，含旧 PluginExtension 兼容)
     └── McpExtension     → MCP 服务 (Model Context Protocol)
 
 统一接口:
@@ -28,10 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 class ExtensionType(str, Enum):
-    """扩展类型枚举"""
-    PLUGIN = "plugin"       # 传统插件
-    SKILL = "skill"         # AI 技能
-    MCP_SERVER = "mcp_server"  # MCP 服务
+    """扩展类型枚举（已统一：插件并入技能，只留两类）"""
+    SKILL = "skill"             # AI 技能（含原"传统插件"）
+    MCP_SERVER = "mcp_server"   # MCP 服务
 
 
 class ExtensionStatus(str, Enum):
@@ -151,19 +148,20 @@ class Extension(ABC):
 
 class PluginExtension(Extension):
     """
-    传统插件适配器
+    插件适配器（已 deprecated：插件统一为 Skill，保留类只为兼容旧调用）
 
-    将现有的 PluginManager 插件包装为统一接口。
+    将现有的 PluginManager 插件包装为统一接口。类型已统一为 SKILL。
     """
 
     def __init__(self, plugin_obj: Any):
         info = ExtensionInfo(
             id=getattr(plugin_obj, 'name', 'unknown'),
-            name=getattr(plugin_obj, 'name', '未知插件'),
-            type=ExtensionType.PLUGIN,
+            name=getattr(plugin_obj, 'name', '未知技能'),
+            type=ExtensionType.SKILL,  # 插件并入 Skill 体系
             version=getattr(plugin_obj, 'version', '1.0.0'),
             description=getattr(plugin_obj, 'description', ''),
-            icon="🧩",
+            icon="⚡",
+            tags=[getattr(plugin_obj, 'category', '视频处理')],
         )
         super().__init__(info)
         self._plugin_obj = plugin_obj

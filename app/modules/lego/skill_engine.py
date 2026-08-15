@@ -95,13 +95,38 @@ class Skill(ABC):
     - 依赖其他步骤
     - 有条件执行
     - 支持重试和超时
+    
+    分类体系：
+        skill_category  — 功能分类（导演/剪辑/AIGC/账号...）
+        skill_domain    — 执行域（pipeline=后端执行 / canvas=交给画布节点）
     """
+    
+    # ── 标准分类常量（UI 过滤用）──
+    CATEGORY_AIGC = "AIGC 生成"        # 生图/生视频/音频 → 交给画布
+    CATEGORY_DIRECTOR = "AI 导演"      # 剧本/分镜/创意
+    CATEGORY_EDITING = "视频处理"       # 剪辑/字幕/转码
+    CATEGORY_QUALITY = "AI 质检"        # 画质/特效检测
+    CATEGORY_ACCOUNT = "账号运营"       # 发布/数据/矩阵
+    CATEGORY_AUDIO = "音频处理"         # TTS/音频增强
+    CATEGORY_TEXT = "文本工具"          # 文案/润色/翻译
+    CATEGORY_OTHER = "其他"
+    
+    ALL_CATEGORIES = [
+        CATEGORY_AIGC, CATEGORY_DIRECTOR, CATEGORY_EDITING,
+        CATEGORY_QUALITY, CATEGORY_ACCOUNT, CATEGORY_AUDIO,
+        CATEGORY_TEXT, CATEGORY_OTHER,
+    ]
+    
+    # ── 执行域常量（决定在哪运行）──
+    DOMAIN_PIPELINE = "pipeline"  # 后端 SkillEngine 执行（默认）
+    DOMAIN_CANVAS = "canvas"      # 交给 AI 画布节点
     
     skill_id: str = ""
     skill_name: str = ""
     skill_description: str = ""
-    skill_category: str = "通用"
-    skill_icon: str = "⚙️"
+    skill_category: str = CATEGORY_OTHER
+    skill_domain: str = DOMAIN_PIPELINE  # pipeline 或 canvas
+    skill_icon: str = "⚡"
     skill_version: str = "1.0.0"
     
     def __init__(self):
@@ -606,6 +631,14 @@ class SkillEngine:
     def list_available_skills(self) -> List[Dict[str, Any]]:
         """列出可用的 Skill"""
         return self._registry.list_skills()
+
+    def list_all(self) -> List:
+        """列出所有 Skill 实例 —— Agent / Capability 枚举入口。
+
+        历史 bug：多处调用 ``skill_engine.list_all()``，但方法只在 SkillRegistry 上，
+        导致 try/except 静默吞掉，Agent 拓展上下文里永远看不到 Skill。
+        """
+        return self._registry.list_all()
     
     def get_latest_skills(self) -> Dict[str, Any]:
         """获取最新的 Skill（当前无远程更新源，仅返回本地已注册 Skill）

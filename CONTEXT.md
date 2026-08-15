@@ -33,6 +33,8 @@ A PyQt6-based desktop application（**拾光剪影**）for editing and publishin
 | **OpenClaw** | Multi-platform publish automation |
 | **SkillEngine** | Skill orchestration |
 | **墙钟播放** | Wall-clock playhead (not `+=0.033`) |
+| **3D 导演台** | Canvas Three.js stage (`dummy13-v3`); front = +Z; solo/group templates |
+| **账号运营** | Plugin `account_ops_plugin` via **extensions** (not a nav module id) |
 | **联动音频片** | Auto audio-track twin of imported video; skip in BGM sync |
 
 ## Directory Structure

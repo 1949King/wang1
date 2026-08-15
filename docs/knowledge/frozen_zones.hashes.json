@@ -40,20 +40,12 @@
     "symbol:app/modules/lego/editor_module.py:_overlay_transform_handles_on_qimage": "9a99d782cd718379",
     "symbol:app/modules/lego/editor_module.py:_apply_preview_transform_to_clip": "153098f75928e8b5",
     "symbol:app/modules/lego/editor_module.py:eventFilter": "9fb34aa4ac75a15f",
-    "symbol:app/plugins/drama_finder_plugin/main.py:run": "f6931b89019f078b",
     "symbol:app/modules/lego/plugins_module.py:_plugin_offers_widget_ui": "d273070ee66bda49",
     "symbol:app/modules/lego/plugins_module.py:_ensure_plugin_initialized": "289f042838d37d94",
-    "symbol:app/modules/lego/plugins_module.py:_create_drama_finder_tab": "041d98c9abd81d8f",
-    "symbol:app/modules/lego/plugins_module.py:_ensure_drama_finder_widget": "4285d10b3f53862d",
-    "symbol:app/modules/lego/plugins_module.py:_open_drama_finder_tab": "cbd6e318dde92064",
     "symbol:app/modules/lego/plugins_module.py:_open_plugin_ui": "3e0bead6d7bfa79a",
-    "file:app/plugins/drama_finder_plugin/drama_ui.py": "41184eb320cb0471",
-    "marker:app/plugins/drama_finder_plugin/drama_ui.py:drama-finder-ui:module": "8c854d1685929c8c",
-    "marker:app/plugins/drama_finder_plugin/main.py:drama-finder-ui:plugin-lifecycle": "01b4c48e563b544f",
-    "marker:app/plugins/drama_finder_plugin/main.py:drama-finder-ui:run": "75800c980c6b49e5",
     "marker:app/modules/lego/plugins_module.py:drama-finder-ui:plugins-host": "cfa97d36943261aa",
     "symbol:app/modules/lego/plugin_store.py:init_official_items": "989b4308f0cf74e2",
     "symbol:app/modules/lego/plugin_store.py:_resolve_plugin_path": "5c7b1fe2c933aaf1",
-    "marker:app/modules/lego/plugin_store.py:plugin-store-catalog:official": "3a4281650ad1d57e"
+    "marker:app/modules/lego/plugin_store.py:plugin-store-catalog:official": "090f51f1fdf19fb5"
   }
 }

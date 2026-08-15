@@ -13,6 +13,7 @@
 
 import json
 import os
+import time
 import datetime
 import logging
 import threading
@@ -526,6 +527,8 @@ class CharacterManagementModule(BaseModule):
     def __init__(self):
         self._store = CharacterStore()
         self._web = None
+        self._web_host = None  # 延后挂载 WebEngine 的容器 layout
+        self._web_placeholder = None
         self._status_label = None
         self._interp_check = None
         self._char_combo = None
@@ -533,6 +536,8 @@ class CharacterManagementModule(BaseModule):
         self._library_panel = None
         self._bridge_started = False
         self._pending_canvas_url = ""
+        self._agent_btn = None
+        self._agent_connected = False
         super().__init__()
         self._ui_status.connect(self._set_status)
         self._ui_canvas_started.connect(self._after_start)
@@ -570,15 +575,17 @@ class CharacterManagementModule(BaseModule):
         self._interp_check.setToolTip("非神经网络：帧差 + 线性混合（ai_interpolation）")
         header.addWidget(self._interp_check)
 
-        # 画布引擎切换：拾光导演台（自研，默认） / infinite-canvas（开源）
+        # 画布引擎：默认拾光导演台；infinite 需明确确认（默认「否」防误切）
         self._engine_combo = QComboBox()
         self._engine_combo.setMinimumWidth(170)
         self._engine_combo.setStyleSheet(
             "QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;padding:4px 8px;border-radius:4px;}"
         )
         self._engine_combo.addItem("🎛 拾光导演台", "shiguang")
-        self._engine_combo.addItem("📐 infinite-canvas", "infinite")
-        self._engine_combo.setToolTip("切换画布引擎：自研导演台或开源 infinite-canvas（切换会重启画布）")
+        self._engine_combo.addItem("📐 infinite-canvas（较重）", "infinite")
+        self._engine_combo.setToolTip(
+            "默认拾光导演台（轻）。infinite-canvas 体积更大，切换需确认并会重启服务。"
+        )
         header.addWidget(self._engine_combo)
 
         start_btn = QPushButton("启动画布")
@@ -588,8 +595,12 @@ class CharacterManagementModule(BaseModule):
 
         agent_btn = QPushButton("连接 Agent")
         agent_btn.setStyleSheet(self._btn_style("#7c3aed"))
-        agent_btn.setToolTip("启动 npx @basketikun/canvas-agent 并写入 WebView 连接信息")
+        agent_btn.setToolTip(
+            "启动本机 canvas-agent（:17371），供 Codex/MCP 调画布。"
+            "这是工具通道，不会在 3D 导演台出现人物。"
+        )
         agent_btn.clicked.connect(self._on_connect_agent)
+        self._agent_btn = agent_btn
         header.addWidget(agent_btn)
 
         sync_btn = QPushButton("同步模型池")
@@ -653,30 +664,30 @@ class CharacterManagementModule(BaseModule):
         body.addWidget(self._library_panel)
         self._refresh_lib_list()
 
-        # 主画布
+        # 主画布：先出壳，WebEngine 延后到真正 load 时再创建（缩短进模块卡顿）
         canvas_wrap = QFrame()
         canvas_wrap.setStyleSheet("QFrame{background:#0a0a0a;border:1px solid #1e1e1e;border-radius:8px;}")
         cw = QVBoxLayout(canvas_wrap)
         cw.setContentsMargins(0, 0, 0, 0)
+        self._web_host = cw
+        self._web = None
 
         if WEBENGINE_AVAILABLE:
-            self._web = QWebEngineView()
-            self._install_inject_script()
-            try:
-                self._web.loadStarted.connect(self._on_web_load_started)
-                self._web.loadFinished.connect(self._on_web_load_finished)
-            except Exception as e:
-                logger.debug("web load signals connect failed: %s", e)
-            cw.addWidget(self._web, 1)
+            ph = QLabel("画布壳已就绪\n正在准备 WebEngine / 静态服务…")
+            ph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ph.setStyleSheet("color:#64748b;font-size:13px;padding:32px;")
+            ph.setWordWrap(True)
+            self._web_placeholder = ph
+            cw.addWidget(ph, 1)
         else:
-            self._web = None
+            self._web_placeholder = None
             detail = WEBENGINE_IMPORT_ERROR or "未知原因"
             err = QLabel(
                 "无法镶嵌画布（QtWebEngine 不可用）。\n"
                 f"原因: {detail}\n\n"
                 "请确认已安装: .venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0\n"
                 "并完全退出后重新启动应用（须在创建窗口前加载 WebEngine）。\n\n"
-                "临时方案：点「启动画布」会用系统浏览器打开 http://127.0.0.1:3000"
+                "临时方案：点「启动画布」会用系统浏览器打开"
             )
             err.setAlignment(Qt.AlignmentFlag.AlignCenter)
             err.setStyleSheet("color:#f87171;padding:24px;")
@@ -687,8 +698,8 @@ class CharacterManagementModule(BaseModule):
         root.addLayout(body, 1)
 
         tip = QLabel(
-            "右下角「拾光剪影」面板：发送到剪辑 / 同步模型；"
-            "「连接 Agent」按需拉起 :17371（不再进模块自动预热 Agent，避免卡住）；"
+            "「连接 Agent」拉起本机 :17371 工具通道（Codex/MCP），不会在 3D 场景出现人物；"
+            "不再进模块自动预热 Agent，避免卡住。"
             "模型 Key 来自模型广场。插帧为线性补帧，非 RIFE。"
             "可选 Codex: codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp"
         )
@@ -703,8 +714,13 @@ class CharacterManagementModule(BaseModule):
         self._sync_engine_combo()
         self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
 
-        # 延迟启动桥与探测画布
+        # 延迟启动桥与探测画布；定期刷新 Agent 按钮状态
         QTimer.singleShot(200, self._bootstrap)
+        self._agent_poll = QTimer(self)
+        self._agent_poll.setInterval(10000)
+        self._agent_poll.timeout.connect(self._poll_agent_btn_state)
+        self._agent_poll.start()
+        QTimer.singleShot(1500, self._poll_agent_btn_state)
 
     def _sync_engine_combo(self):
         """下拉框与当前生效引擎对齐（不触发切换回调）。"""
@@ -757,9 +773,18 @@ class CharacterManagementModule(BaseModule):
         ret = QMessageBox.question(
             self,
             "切换画布引擎",
-            f"将切换到 {label}，当前画布服务会重启。\n\n是否继续？",
+            f"将切换到 {label}，当前画布服务会重启。\n\n"
+            + (
+                "提示：infinite-canvas 首包更大，首开通常更慢。\n\n"
+                if "infinite" in label.lower()
+                else ""
+            )
+            + "是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            # 切到 infinite 时默认「否」，减少误切
+            QMessageBox.StandardButton.No
+            if "infinite" in label.lower()
+            else QMessageBox.StandardButton.Yes,
         )
         return ret == QMessageBox.StandardButton.Yes
 
@@ -772,9 +797,8 @@ class CharacterManagementModule(BaseModule):
         rt = get_canvas_runtime()
         self._ensure_bridge()
         # 先清空 WebView，避免用户以为「切换没反应」
-        if self._web is not None:
+        if self._ensure_web_view() and self._web is not None:
             try:
-                from PyQt6.QtCore import QUrl
                 self._web.setHtml(
                     "<html><body style='background:#0a0a0a;color:#888;"
                     "font-family:sans-serif;display:flex;align-items:center;"
@@ -853,6 +877,40 @@ class CharacterManagementModule(BaseModule):
         except Exception as e:
             logger.debug("runJavaScript failed: %s", e)
 
+    def _apply_agent_btn_state(self, connected: bool, url: str = ""):
+        """顶栏按钮反映 Agent 是否已监听（工具通道，非 3D 角色）。"""
+        self._agent_connected = bool(connected)
+        btn = self._agent_btn
+        if btn is None:
+            return
+        if connected:
+            short = (url or ":17371").replace("http://", "").replace("https://", "")
+            btn.setText(f"Agent 已连接")
+            btn.setStyleSheet(self._btn_style("#0d9488"))
+            btn.setToolTip(
+                f"画布 Agent 已就绪：{url or short}\n"
+                "供 Codex/MCP 调用；不会在 3D 导演台出现人物。"
+            )
+        else:
+            btn.setText("连接 Agent")
+            btn.setStyleSheet(self._btn_style("#7c3aed"))
+            btn.setToolTip(
+                "启动本机 canvas-agent（:17371），供 Codex/MCP 调画布。"
+                "这是工具通道，不会在 3D 导演台出现人物。"
+            )
+
+    def _poll_agent_btn_state(self):
+        try:
+            from app.core.canvas_agent_runtime import get_canvas_agent_runtime
+        except ImportError:
+            from core.canvas_agent_runtime import get_canvas_agent_runtime  # type: ignore
+        try:
+            rt = get_canvas_agent_runtime()
+            on = bool(rt.is_listening() and rt.token)
+            self._apply_agent_btn_state(on, rt.url if on else "")
+        except Exception:
+            pass
+
     def _inject_agent_credentials(self, url: str, token: str, reload_page: bool = False):
         u = (url or "").replace("\\", "\\\\").replace("'", "\\'")
         t = (token or "").replace("\\", "\\\\").replace("'", "\\'")
@@ -864,7 +922,10 @@ class CharacterManagementModule(BaseModule):
 
     def _on_connect_agent(self):
         self._ensure_bridge()
-        self._set_status("正在启动 canvas-agent…")
+        self._set_status("正在启动 canvas-agent（:17371，工具通道，非 3D 角色）…")
+        if self._agent_btn is not None:
+            self._agent_btn.setEnabled(False)
+            self._agent_btn.setText("连接中…")
 
         def work():
             try:
@@ -884,31 +945,94 @@ class CharacterManagementModule(BaseModule):
 
     def _on_agent_done_ui(self, ok: bool, msg: str, url: str, token: str):
         """主线程：Agent 启动结果。"""
-        self._set_status(msg)
+        if self._agent_btn is not None:
+            self._agent_btn.setEnabled(True)
+        self._set_status(msg if ok else f"Agent 失败：{msg}")
         if ok and token:
+            self._apply_agent_btn_state(True, url)
             self._inject_agent_credentials(url, token, reload_page=False)
             QTimer.singleShot(
                 800, lambda: self._inject_agent_credentials(url, token, False)
             )
-        elif not ok:
-            QMessageBox.warning(self, "连接 Agent", msg)
+            # 向 WebView 推送状态文案，顶栏 chip 会轮询到 listening
+            safe = (msg or "Agent 已连接").replace("\\", "\\\\").replace("'", "\\'")
+            self._run_js(
+                f"window.__shiguangSetStatus && window.__shiguangSetStatus('{safe}');"
+            )
+        else:
+            self._apply_agent_btn_state(False)
+            if not ok:
+                QMessageBox.warning(
+                    self,
+                    "连接 Agent",
+                    f"{msg}\n\n说明：Agent 是本机工具服务（:17371），"
+                    "连接成功后也不会在 3D 场景里出现人物。",
+                )
 
     def _on_sync_models(self):
+        self._sync_models_to_canvas(force_reload=True)
+
+    def _on_provider_activated_sync(self, _event=None):
+        """模型管理保存/激活 Key 后静默同步模型池（不切换页签、不整页刷新）。"""
+        if not self._web:
+            return
+        self._sync_models_to_canvas(force_reload=False)
+
+    def _sync_models_to_canvas(self, *, force_reload: bool):
         self._ensure_bridge()
         self._sync_bridge_prefs()
-        self._set_status("正在同步模型池到画布…")
+        label = "正在同步模型池到画布…" if force_reload else "模型 Key 已更新，同步模型池…"
+        self._set_status(label)
+        flag = "true" if force_reload else "false"
         self._run_js(
-            "window.__shiguangSyncModels && window.__shiguangSyncModels(true);"
+            f"window.__shiguangSyncModels && window.__shiguangSyncModels({flag});"
         )
         try:
             from app.modules.lego.model_config import load_active_provider, PROVIDERS
             ap = load_active_provider() or ""
             name = (PROVIDERS.get(ap) or {}).get("name") or ap or "未激活"
-            self._set_status(f"已请求同步模型池 · 当前激活 {name}")
+            self._set_status(f"已同步模型池 · 当前激活 {name}")
         except Exception:
-            self._set_status("已请求同步模型池（画布将刷新）")
+            self._set_status("已同步模型池到画布")
+
+    def _ensure_web_view(self) -> bool:
+        """首次需要加载页面时再创建 QWebEngineView（进模块只出壳）。"""
+        if self._web is not None:
+            return True
+        if not WEBENGINE_AVAILABLE:
+            return False
+        host = self._web_host
+        if host is None:
+            return False
+        t0 = time.perf_counter()
+        self._web = QWebEngineView()
+        self._install_inject_script()
+        try:
+            self._web.loadStarted.connect(self._on_web_load_started)
+            self._web.loadFinished.connect(self._on_web_load_finished)
+        except Exception as e:
+            logger.debug("web load signals connect failed: %s", e)
+        if self._web_placeholder is not None:
+            host.removeWidget(self._web_placeholder)
+            self._web_placeholder.deleteLater()
+            self._web_placeholder = None
+        host.addWidget(self._web, 1)
+        logger.info(
+            "canvas WebEngineView created in %.0fms",
+            (time.perf_counter() - t0) * 1000,
+        )
+        return True
 
     def _bootstrap(self):
+        # 未显式指定时锁在 shiguang，避免误用重引擎
+        try:
+            from app.core.canvas_runtime import active_canvas_engine, set_active_canvas_engine
+        except ImportError:
+            from core.canvas_runtime import active_canvas_engine, set_active_canvas_engine  # type: ignore
+        if not (os.environ.get("SHIGUANG_CANVAS_ENGINE") or "").strip():
+            set_active_canvas_engine("shiguang")
+            self._sync_engine_combo()
+
         self._ensure_bridge()
         self._sync_bridge_prefs()
         try:
@@ -921,11 +1045,6 @@ class CharacterManagementModule(BaseModule):
             self._set_status(f"已连接 {rt.url}")
             QTimer.singleShot(800, self._maybe_inject_existing_agent)
             return
-        # 进入模块即后台预热，避免干等「启动画布」
-        try:
-            from app.core.canvas_runtime import active_canvas_engine
-        except ImportError:
-            from core.canvas_runtime import active_canvas_engine  # type: ignore
         eng = active_canvas_engine()
         eng_label = "拾光导演台（自研）" if eng == "shiguang" else "infinite-canvas（开源）"
         self._set_status(f"正在预热 {eng_label}（有 dist 则秒开）…")
@@ -951,12 +1070,14 @@ class CharacterManagementModule(BaseModule):
             from core.canvas_agent_runtime import get_canvas_agent_runtime  # type: ignore
         rt = get_canvas_agent_runtime()
         if rt.is_listening() and rt.token:
+            self._apply_agent_btn_state(True, rt.url)
             self._inject_agent_credentials(rt.url, rt.token, False)
             QTimer.singleShot(
                 1200, lambda: self._inject_agent_credentials(rt.url, rt.token, False)
             )
             # 不覆盖 loadFinished 的「画布已就绪」文案（若页面还在加载则稍后再写）
             return
+        self._apply_agent_btn_state(False)
         # 不自动 warmup agent —— 那是「预热太慢」的主因之一；需 Agent 时点「连接 Agent」
         return
 
@@ -1011,7 +1132,7 @@ class CharacterManagementModule(BaseModule):
         except Exception:
             pass
         self._pending_canvas_url = url
-        if self._web is None:
+        if not self._ensure_web_view():
             import webbrowser
             webbrowser.open(url)
             return

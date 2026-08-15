@@ -4,6 +4,7 @@
 从 model_management.py 拆分出来的共享数据/常量，供所有子模块引用。
 """
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -35,14 +36,337 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "minimax": {"name": "MiniMax", "icon": "🎯", "url": "https://api.minimax.chat/v1", "models": ["abab6.5s-chat", "abab6.5-chat", "abab5.5-chat"], "is_local": False},
     "claude": {"name": "Claude", "icon": "🎨", "url": "https://api.anthropic.com/v1", "models": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"], "is_local": False},
     "groq": {"name": "Groq", "icon": "⚡", "url": "https://api.groq.com/openai/v1", "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"], "is_local": False},
-    "siliconflow": {"name": "硅基流动", "icon": "🔬", "url": "https://api.siliconflow.cn/v1", "models": ["Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3"], "is_local": False},
-    "stepfun": {"name": "阶跃星辰", "icon": "⭐", "url": "https://api.stepfun.com/v1", "models": ["step-1-8k", "step-1-32k", "step-1-128k"], "is_local": False},
+    "siliconflow": {
+        "name": "硅基流动",
+        "icon": "🔬",
+        "url": "https://api.siliconflow.cn/v1",
+        "models": [
+            "Qwen/Qwen2.5-72B-Instruct",
+            "deepseek-ai/DeepSeek-V3",
+            "black-forest-labs/FLUX.1-schnell",
+            "black-forest-labs/FLUX.1-dev",
+            "black-forest-labs/FLUX.1-Kontext-pro",
+            "Wan-AI/Wan2.1-T2V-14B",
+            "Wan-AI/Wan2.1-I2V-14B-720P",
+        ],
+        "is_local": False,
+    },
+    "chatgpt2api": {
+        "name": "ChatGPT2API",
+        "icon": "🖼️",
+        "url": "http://127.0.0.1:8000/v1",
+        "models": [
+            "gpt-image-2",
+            "codex-gpt-image-2",
+            "auto",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-3",
+            "gpt-5-3-mini",
+        ],
+        "is_local": True,
+        "hint": "自托管 OpenAI 兼容网关（默认本机 :8000）。填 Auth Key + Base URL，优先用于 gpt-image-2 生图。",
+    },
+    "stepfun": {"name": "阶跃星辰", "icon": "⭐", "url": "https://api.stepfun.com/v1", "models": ["step-1-8k", "step-1-32k", "step-1-128k", "step-1v-8k"], "is_local": False},
     "yi": {"name": "零一万物", "icon": "🔮", "url": "https://api.lingyiwanwu.com/v1", "models": ["yi-lightning", "yi-large", "yi-medium"], "is_local": False},
     "modelscope": {"name": "魔搭社区", "icon": "🏛️", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "models": ["qwen-turbo", "qwen-plus", "qwen-max"], "is_local": False},
+    "kling": {"name": "可灵 AI", "icon": "🎬", "url": "https://api.klingai.com/v1", "models": ["kling-v1.5", "kling-v1.6", "kling-v1.6-i2v"], "is_local": False},
+    "fishaudio": {"name": "Fish Audio", "icon": "🐟", "url": "https://api.fish.audio/v1", "models": ["fish-speech-v1.5", "fish-speech-v1.5-turbo", "fish-speech-v1.5-hd"], "is_local": False, "hint": "开源语音合成，自托管可填自定义 Base URL（如 http://127.0.0.1:8080/v1）"},
+    "stability": {"name": "Stability AI", "icon": "🖌️", "url": "https://api.stability.ai/v2beta", "models": ["sd3-large", "sd3-medium", "sd3-large-turbo", "sdxl-base-1.0", "sdxl-turbo"], "is_local": False},
 }
+
+# 画布 / AIGC 专用：按 provider 追加生图·生视频·多模态模型（capability 供 infinite-canvas）
+# 名称尽量对齐各平台 OpenAI-compatible 路由；实际可用性取决于账号开通。
+AIGC_MODELS: dict[str, list[dict[str, str]]] = {
+    "chatgpt2api": [
+        {"name": "gpt-image-2", "capability": "image"},
+        {"name": "codex-gpt-image-2", "capability": "image"},
+        {"name": "auto", "capability": "image"},
+        {"name": "gpt-5", "capability": "text"},
+        {"name": "gpt-5-1", "capability": "text"},
+        {"name": "gpt-5-2", "capability": "text"},
+        {"name": "gpt-5-3", "capability": "text"},
+        {"name": "gpt-5-3-mini", "capability": "text"},
+        {"name": "gpt-5-mini", "capability": "text"},
+    ],
+    "siliconflow": [
+        {"name": "black-forest-labs/FLUX.1-schnell", "capability": "image"},
+        {"name": "black-forest-labs/FLUX.1-dev", "capability": "image"},
+        {"name": "black-forest-labs/FLUX.1-Kontext-pro", "capability": "image"},
+        {"name": "black-forest-labs/FLUX.1-Kontext-dev", "capability": "image"},
+        {"name": "black-forest-labs/FLUX.1-Kontext-max", "capability": "image"},
+        {"name": "Qwen/Qwen-Image", "capability": "image"},
+        {"name": "Kwai-Kolors/Kolors", "capability": "image"},
+        {"name": "stabilityai/stable-diffusion-3-5-large", "capability": "image"},
+        {"name": "stabilityai/stable-diffusion-3-medium", "capability": "image"},
+        {"name": "stabilityai/stable-diffusion-xl-base-1.0", "capability": "image"},
+        {"name": "stabilityai/stable-diffusion-xl-refiner-1.0", "capability": "image"},
+        {"name": "stabilityai/stable-diffusion-xl-turbo", "capability": "image"},
+        {"name": "Wan-AI/Wan2.1-T2V-14B", "capability": "video"},
+        {"name": "Wan-AI/Wan2.1-I2V-14B-720P", "capability": "video"},
+        {"name": "Wan-AI/Wan2.2-T2V-A14B", "capability": "video"},
+        {"name": "Wan-AI/Wan2.1-Fun-V1.1-14B", "capability": "video"},
+        {"name": "Qwen/Qwen2.5-72B-Instruct", "capability": "text"},
+        {"name": "deepseek-ai/DeepSeek-V3", "capability": "text"},
+    ],
+    "openai": [
+        {"name": "gpt-image-2", "capability": "image"},
+        {"name": "gpt-image-1", "capability": "image"},
+        {"name": "gpt-image-1-mini", "capability": "image"},
+        {"name": "dall-e-3", "capability": "image"},
+        {"name": "dall-e-3-hd", "capability": "image"},
+        {"name": "dall-e-2", "capability": "image"},
+        {"name": "sora-2", "capability": "video"},
+        {"name": "sora-2-turbo", "capability": "video"},
+        {"name": "sora", "capability": "video"},
+        {"name": "gpt-4o", "capability": "text"},
+        {"name": "gpt-4o-mini", "capability": "text"},
+        {"name": "gpt-4o-mini-tts", "capability": "audio"},
+        {"name": "tts-1", "capability": "audio"},
+        {"name": "tts-1-hd", "capability": "audio"},
+    ],
+    "qwen": [
+        {"name": "wanx-v1", "capability": "image"},
+        {"name": "wanx2.1-t2i-turbo", "capability": "image"},
+        {"name": "wanx2.1-t2i-plus", "capability": "image"},
+        {"name": "wanx2.1-t2i-high", "capability": "image"},
+        {"name": "wanx2.1-t2v-plus", "capability": "video"},
+        {"name": "wanx2.1-i2v-plus", "capability": "video"},
+        {"name": "qwen-image", "capability": "image"},
+        {"name": "qwen-vl-max", "capability": "text"},
+        {"name": "qwen-max", "capability": "text"},
+        {"name": "qwen-plus", "capability": "text"},
+        {"name": "qwen-tts", "capability": "audio"},
+        {"name": "cosyvoice-v2", "capability": "audio"},
+    ],
+    "modelscope": [
+        {"name": "wanx-v1", "capability": "image"},
+        {"name": "wanx2.1-t2i-turbo", "capability": "image"},
+        {"name": "wanx2.1-t2i-plus", "capability": "image"},
+        {"name": "qwen-image", "capability": "image"},
+        {"name": "qwen-max", "capability": "text"},
+    ],
+    "doubao": [
+        {"name": "doubao-seedream-3-0-t2i", "capability": "image"},
+        {"name": "doubao-seedream-4-0", "capability": "image"},
+        {"name": "doubao-seedream-4-0-t2i", "capability": "image"},
+        {"name": "doubao-seedance-1-0-pro", "capability": "video"},
+        {"name": "doubao-seedance-1-0-lite", "capability": "video"},
+        {"name": "doubao-seedance-2-0-pro", "capability": "video"},
+        {"name": "doubao-pro-32k", "capability": "text"},
+    ],
+    "zhipu": [
+        {"name": "cogview-4", "capability": "image"},
+        {"name": "cogview-4-flash", "capability": "image"},
+        {"name": "cogview-3-plus", "capability": "image"},
+        {"name": "cogvideox-2", "capability": "video"},
+        {"name": "cogvideox-3", "capability": "video"},
+        {"name": "cogvideox-3-turbo", "capability": "video"},
+        {"name": "glm-4v", "capability": "text"},
+        {"name": "glm-4-flash", "capability": "text"},
+    ],
+    "minimax": [
+        {"name": "image-01", "capability": "image"},
+        {"name": "image-01-live", "capability": "image"},
+        {"name": "video-01", "capability": "video"},
+        {"name": "video-01-live2d", "capability": "video"},
+        {"name": "video-02", "capability": "video"},
+        {"name": "speech-01", "capability": "audio"},
+        {"name": "speech-02-hd", "capability": "audio"},
+        {"name": "abab6.5s-chat", "capability": "text"},
+    ],
+    "stepfun": [
+        {"name": "step-1x-medium", "capability": "image"},
+        {"name": "step-1v-8k", "capability": "text"},
+        {"name": "step-1-32k", "capability": "text"},
+    ],
+    "deepseek": [
+        {"name": "deepseek-chat", "capability": "text"},
+        {"name": "deepseek-reasoner", "capability": "text"},
+    ],
+    "kimi": [
+        {"name": "moonshot-v1-128k", "capability": "text"},
+        {"name": "moonshot-v1-32k", "capability": "text"},
+    ],
+    "kling": [
+        {"name": "kling-v1.5", "capability": "video"},
+        {"name": "kling-v1.6", "capability": "video"},
+        {"name": "kling-v1.6-i2v", "capability": "video"},
+        {"name": "kling-v1.6-t2i", "capability": "image"},
+    ],
+    "fishaudio": [
+        {"name": "fish-speech-v1.5", "capability": "audio"},
+        {"name": "fish-speech-v1.5-turbo", "capability": "audio"},
+        {"name": "fish-speech-v1.5-hd", "capability": "audio"},
+    ],
+    "stability": [
+        {"name": "sd3-large", "capability": "image"},
+        {"name": "sd3-medium", "capability": "image"},
+        {"name": "sd3-large-turbo", "capability": "image"},
+        {"name": "sdxl-base-1.0", "capability": "image"},
+        {"name": "sdxl-refiner-1.0", "capability": "image"},
+        {"name": "sdxl-turbo", "capability": "image"},
+        {"name": "sdxl-lightning", "capability": "image"},
+        {"name": "stable-image-ultra", "capability": "image"},
+    ],
+}
+
+# 无云端 Key 时仍注入的「目录占位」渠道（apiKey 空，用户可在画布内补）
+AIGC_CATALOG_PLACEHOLDER: dict[str, Any] = {
+    "id": "shiguang-aigc-catalog",
+    "name": "拾光·AIGC目录",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "apiKey": "",
+    "apiFormat": "openai",
+    "models": list(AIGC_MODELS.get("siliconflow") or []),
+}
+
+# 同步到画布时优先用这些 provider 的 Key 作为默认 AIGC 渠道
+AIGC_KEY_PRIORITY: tuple[str, ...] = (
+    "chatgpt2api",
+    "siliconflow",
+    "openai",
+    "qwen",
+    "doubao",
+    "zhipu",
+    "kling",
+    "stability",
+    "minimax",
+    "fishaudio",
+    "modelscope",
+    "stepfun",
+)
+
+CAP_LABEL = {
+    "image": "生图",
+    "video": "生视频",
+    "audio": "语音",
+    "text": "对话",
+}
+
+
+def aigc_entries_for(provider_id: str) -> list[dict[str, str]]:
+    return list(AIGC_MODELS.get(provider_id) or [])
+
+
+def merge_aigc_into_providers() -> None:
+    """把 AIGC 模型名并入 PROVIDERS[*].models，并打上 aigc 标记供 UI 展示。"""
+    for pid, entries in AIGC_MODELS.items():
+        info = PROVIDERS.get(pid)
+        if not isinstance(info, dict):
+            continue
+        existing = list(info.get("models") or [])
+        seen = set(existing)
+        for ent in entries:
+            name = str(ent.get("name") or "")
+            if name and name not in seen:
+                existing.append(name)
+                seen.add(name)
+        info["models"] = existing
+        info["aigc"] = list(entries)
+        caps = {str(e.get("capability") or "") for e in entries}
+        info["has_aigc"] = bool(caps & {"image", "video", "audio"})
+
+
+def provider_model_choices(provider_id: str, provider_info: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """返回 (显示文案, 真实模型名) 列表，AIGC 带能力标签。"""
+    info = provider_info or PROVIDERS.get(provider_id) or {}
+    aigc_map = {
+        str(e.get("name")): str(e.get("capability") or "text")
+        for e in (info.get("aigc") or AIGC_MODELS.get(provider_id) or [])
+        if e.get("name")
+    }
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for name in list(info.get("models") or []):
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        cap = aigc_map.get(name)
+        if cap and cap != "text":
+            out.append((f"[{CAP_LABEL.get(cap, cap)}] {name}", name))
+        elif cap == "text" and name in aigc_map:
+            out.append((f"[对话] {name}", name))
+        else:
+            out.append((name, name))
+    # AIGC 里有但 models 未收录的
+    for name, cap in aigc_map.items():
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append((f"[{CAP_LABEL.get(cap, cap)}] {name}", name))
+    return out
+
+
+merge_aigc_into_providers()
 
 CUSTOM_PROVIDERS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "custom_providers.json")
 ACTIVE_PROVIDER_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "active_provider.json")
 
 CARD_COLLAPSED = "collapsed"
 CARD_EXPANDED = "expanded"
+
+
+def load_active_provider() -> str:
+    """读取当前激活的 Provider ID（空字符串表示未激活）。"""
+    try:
+        if os.path.isfile(ACTIVE_PROVIDER_FILE):
+            with open(ACTIVE_PROVIDER_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return str(data.get("active_provider") or "")
+    except Exception:
+        pass
+    return ""
+
+
+def save_active_provider(provider_id: str) -> bool:
+    """写入激活 Provider。"""
+    try:
+        os.makedirs(os.path.dirname(ACTIVE_PROVIDER_FILE), exist_ok=True)
+        with open(ACTIVE_PROVIDER_FILE, "w", encoding="utf-8") as f:
+            json.dump({"active_provider": provider_id or ""}, f, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+
+def ensure_active_provider_sensible() -> str:
+    """若激活为 Ollama 但本地不可用、且已有云端 Key，则切到首个可用云端（优先 deepseek）。
+
+    返回最终激活的 provider_id（可能未变）。
+    """
+    active = load_active_provider()
+    cloud_candidates = (
+        "deepseek", "doubao", "zhipu", "qwen", "openai", "siliconflow",
+        "chatgpt2api", "moonshot", "kimi",
+    )
+
+    ollama_ok = False
+    try:
+        from app.modules.lego.ollama_client import ollama_client
+        ollama_ok = bool(ollama_client and ollama_client.is_available())
+    except Exception:
+        ollama_ok = False
+
+    configured_cloud: list[str] = []
+    try:
+        from app.modules.lego.cloud_api import cloud_api_service
+        for pid in cloud_candidates:
+            try:
+                if cloud_api_service.is_configured(pid):
+                    configured_cloud.append(pid)
+            except Exception:
+                continue
+    except Exception:
+        configured_cloud = []
+
+    if active == "ollama" and not ollama_ok and configured_cloud:
+        save_active_provider(configured_cloud[0])
+        return configured_cloud[0]
+    if not active and configured_cloud:
+        save_active_provider(configured_cloud[0])
+        return configured_cloud[0]
+    if not active and ollama_ok:
+        save_active_provider("ollama")
+        return "ollama"
+    return active

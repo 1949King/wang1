@@ -1,4 +1,67 @@
-# 05 — 已知问题与近期修复
+## 已完善（2026-08-14 · 导演台 / 3D 快捷指令）
+
+画布与 3D 导演台增加 **Ctrl+K 指令面板**（亦可 `/`、`?`）：可搜索执行保存/生成/入轨/姿势等，并显示对应快捷键。
+
+---
+
+## 已完善（2026-08-14 · Agent Plan/B/C 策略层）
+
+对照外部「对话助手 Agent 能力实施方案」落地**可执行子集**（不引入 Tauri MCP / 无限制联网工具）：
+
+| 项 | 落点 |
+|----|------|
+| Plan / 协作 B / 自主 C | 剪辑侧栏下拉；画布 Agent-IM 模式选择；默认 B |
+| Policy Engine | `app/core/agent_policy.py`：Plan 禁写；B 写需确认；C 自动；付费/写零自动重试 |
+| 预算 | 每会话 12 轮模型 / 24 次工具；`agent_session.py`；停止后暂停 |
+| 画布写 | `AgentPanel.executeRemoteTask` + `agentPolicy.ts` 与后端矩阵一致 |
+| 上下文压缩 | `agent_context.compress_messages`（不删原始历史） |
+| 记忆提议 | `MemoryStore.propose_user_preference`（B 确认 / 禁密钥与绝对路径） |
+| 任务状态机 | `agent_task_store.py`：重启 inflight → paused；非法迁移 `AGENT_INVALID_TRANSITION` |
+| 画布工具循环 | 模型可追加 `canvas_tools` JSON；宿主 `task.create` → 前端执行（B 确认） |
+| 串行排队 | 运行中再发送进入队列；暂停/继续/重规划在剪辑侧栏与画布侧栏 |
+
+**明确未搬**：Tauri 权限、会话级文件 grant、通用网页搜索、IndexedDB 任务库、只读专家子 Agent。四套能力表面仍在，策略层叠在 Dispatcher / 画布 action 之上。
+
+---
+
+## 已修复（2026-08-14 · 3D 导演台姿势/拉肢/转视角无效）
+
+**现象**：点姿势预设人偶不变；拖关节没有动作；无法旋转查看模型。
+
+**根因**：
+1. GLB 用了 `Object3D.clone()`，`SkinnedMesh.skeleton.bones` 仍指向原场景，旋转克隆层级里的骨头 mesh 不跟着变形。
+2. 关节模式左键在人偶或空白处都会抢走指针并关掉 `OrbitControls`，视角转不动。
+
+**修复**：`SkeletonUtils.clone` 重绑蒙皮；姿势打在骨架骨骼四元数上；左键点肢体才 IK（带黄色轨迹），空白处拖动旋转，右键平移。
+
+## 已完善（2026-08-13 · 画布首次打开加速 P0）
+
+| 项 | 说明 |
+|----|------|
+| 壳先显 | 进「AI 画布」先出顶栏+占位，**真正 load URL 时**才创建 `QWebEngineView` |
+| 默认引擎 | 未设 `SHIGUANG_CANVAS_ENGINE` 时强制 `shiguang`；切 infinite 确认默认「否」 |
+| JS 分包 | `CanvasShell` 对 Studio / Agent / 提示词库 / 插件 / 蒙版对话框 `lazy()` |
+| 计时日志 | `canvas WebEngineView created in …ms` |
+
+涉及：`character_management_module.py` · `vendor/shiguang-canvas/src/CanvasShell.tsx`（未改冻结区）。
+
+## 已完善（2026-08-13 · 剪辑首次打开加速 P0）
+
+| 项 | 说明 |
+|----|------|
+| 工具 Tab 懒挂载 | 右侧仅同步建「属性」；调色/特效/文字/贴纸/音频/角色/AI/Agent/导出点开再建 |
+| 延后 boot | 工作流连接、数据分析器、JKL shuttle 放到 `QTimer.singleShot(0)` |
+| 计时日志 | `editor _setup_ui …` / `editor deferred boot` / `tools tab lazy-built` |
+
+涉及：`editor_module.py`（未改冻结播放路径）。
+
+## 已修复（2026-08-13 · 左侧导航没有「AI 画布」）
+
+**现象**：导航「模型管理」和「拓展中心」之间缺 🎨；设置里功能开关默认应开。
+
+**根因**：`character_management_module.py` `_refresh_lib_list` 缩进损坏 → `IndentationError`。模块标了 `optional=True`，导入失败被静默跳过，导航不出现、日志也没有。
+
+**修复**：修好缩进；导入失败一律打 warning；回归测试 `app/tests/test_module_registry_imports.py`。需重启后左侧出现「🎨 AI 画布」。
 
 ## 已修复（2026-08-12 · AI 画布「预热卡住 / 切换引擎无反应」）
 
@@ -6,7 +69,7 @@
 
 **根因**：`character_management_module.py` 在后台线程（`CanvasWarmup` / 引擎切换 / 手动启动 / Agent）里用 `QTimer.singleShot(0, lambda…)` 试图回主线程更新 UI、调用 `_load_canvas`。QTimer 必须在归属线程调度，从纯 `threading.Thread` 里 `singleShot` 经常**永不触发**——于是服务已监听、状态不更新、WebView 从不 `load(url)`。叠加：画布就绪后还会自动 `warmup` `canvas-agent`（npx，常 30–60s+），即便 UI 回调偶尔成功也会感觉「预热永远不完」。
 
-**修复**：后台改 `pyqtSignal` 跨线程投递；取消进模块自动拉起 Agent（需用时点「连接 Agent」）；WebView `loadFinished` 反馈；切换引擎确认默认「是」并先清空页面提示。
+**修复**：后台改 `pyqtSignal` 跨线程投递；取消进模块自动拉起 Agent（需用时点「连接 Agent」）；WebView `loadFinished` 反馈；切换引擎先清空页面提示；切 infinite 确认默认「否」。
 
 涉及：`app/modules/lego/character_management_module.py`。需重启 Qt6 进程后生效。
 
@@ -19,8 +82,10 @@
 | 项 | 说明 |
 |----|------|
 | UI | 顶栏模式切换（画布/App/3D）；侧栏折叠面板；去掉按钮墙 |
-| 3D | `Stage3D.tsx`：人体素模/道具、VRS 工具、导演/机位视角、FOV、截图→镜头节点 |
-| 局限 | 非 LibTV 关节级姿态；无 720° 全景上传；素模级站位构图 |
+| 3D | `Stage3D.tsx` + `riggedHumanoid.ts`：BodyKun/BodyChan 用 `SkeletonUtils.clone` 重绑蒙皮；点姿势预设立刻变形；拉肢 IK + 黄色拖拽轨迹；空白处拖动旋转视角 |
+| 画布 Agent-IM | **快路径**默认启用：不强制先开「剪辑」；轻量提示 + SSE 流式 `chat.delta`；对话模型仍来自模型管理 |
+| 参考视频 | 镜头/图/视频节点可挂 `refVideoUrl`；大文件走 `/host/upload-asset` 落盘 inbox |
+| 局限 | 肢体 IK 为 2 骨近似（非全手指 FK）；无 720° 全景上传；素模级站位构图 |
 
 涉及：`vendor/shiguang-canvas`（`CanvasShell` / `Stage3D` / `three`）
 
@@ -39,7 +104,7 @@
 | 项 | 说明 |
 |----|------|
 | 三视图 | 导演台「角色三视图」铺正/侧/背镜头节点 |
-| 参考重绘 | 有图或首帧时 img2img；完整蒙版局部后置 |
+| 参考重绘 | 有图或首帧时 img2img；**蒙版局部重绘**走 `/host/inpaint` |
 | 导出 | 分镜 JSON + CSV 下载 |
 
 ## 已完善（2026-08-12 · 长期计划 P1：@角色 / 批量 / img2img）
@@ -972,7 +1037,8 @@
 |------|--------|------|
 | 账号「矩阵发布」假成功 | — | **已修（2026-07-28 C1）**：不再写 `status=published` 假回执；须选视频+标题；弹窗区分 `local_queue` / `local_export` / `upload_attempted` / `failed` |
 | 账号「快速发布」死按钮 | — | **已修（2026-07-28 C1）**：`pub_btn.clicked.connect` → `_quick_publish`；补视频浏览与诚实说明 |
-| 在线素材假目录 | 高 | `online_materials._generate_materials` 随机造卡；下载 MOCK |
+| 在线素材假目录 | — | **已移除（2026-08）**：素材库仅本地导入；外站直达迁至「帮助 → 素材网站直达」；删除 `online_materials` |
+| 账号运营主导航 | — | **已迁插件（2026-08）**：`account_ops_plugin`；拓展中心打开；注册表去掉 `account`；旧 `target=account` 重定向 |
 | 短剧筛选入口 | — | **已收口（同日）**：删注册表 drama 模块；仅插件；爬虫打包进 `drama_finder_plugin/crawler/` |
 | 短剧筛选无打开入口 | — | **已修（同日）**：详情页「打开界面」→ `plugin.run()` 弹 `DramaFinderWidget` |
 | 打开插件 `'Plugin' has no _widget` | — | **已修**：PluginManager 只实例化不 `initialize`；`getattr(_initialized, True)` 误跳过；短剧插件补 `__init__`/`_initialized`，打开前 `_ensure_plugin_initialized` |

@@ -21,6 +21,65 @@ from app.core.capability_dispatcher import (
 logger = logging.getLogger(__name__)
 
 
+# ────────────── 画布能力 handlers ──────────────
+class CanvasCapabilityHandlers:
+    """AI 画布：打开模块 / 同步模型池（走 EventBus + bridge 侧刷新）。"""
+
+    def open(self, req: CapabilityRequest) -> CapabilityResult:
+        try:
+            from app.modules.lego.core import EventBus, EventType
+        except ImportError:
+            from modules.lego.core import EventBus, EventType  # type: ignore
+        bus = EventBus.get_instance()
+        bus.emit(
+            EventType.MODULE_ACTIVATED,
+            {"target": "characters", "hint": "Agent 请求打开画布", "source": "agent"},
+            source="agent",
+        )
+        return CapabilityResult(req.request_id, True, output={"module": "characters"}, error=None)
+
+    def sync_models(self, req: CapabilityRequest) -> CapabilityResult:
+        try:
+            from app.core.canvas_bridge import build_host_ai_config_patch
+        except ImportError:
+            from core.canvas_bridge import build_host_ai_config_patch  # type: ignore
+        patch = build_host_ai_config_patch()
+        try:
+            from app.modules.lego.core import EventBus, EventType
+        except ImportError:
+            from modules.lego.core import EventBus, EventType  # type: ignore
+        bus = EventBus.get_instance()
+        bus.emit(
+            EventType.MODULE_ACTIVATED,
+            {
+                "target": "characters",
+                "hint": "Agent 请求同步模型池",
+                "source": "agent",
+                "sync_models": True,
+            },
+            source="agent",
+        )
+        warns = patch.get("warnings") or []
+        msg = (
+            f"已请求同步：渠道 {len(patch.get('channels') or [])}，"
+            f"生图={'有' if patch.get('has_image_models') else '无'}，"
+            f"激活 {patch.get('active_provider_label') or '无'}"
+        )
+        if warns:
+            msg += "；" + str(warns[0])
+        return CapabilityResult(
+            req.request_id,
+            True,
+            output={
+                "channels": len(patch.get("channels") or []),
+                "has_image_models": patch.get("has_image_models"),
+                "warnings": warns,
+                "message": msg,
+            },
+            error=None,
+        )
+
+
 # ────────────── 剪辑能力 handlers ──────────────
 class EditorCapabilityHandlers:
     """剪辑能力 handlers —— 通过 EditorModule lazy 引用操作时间线"""
@@ -260,7 +319,13 @@ class WorkflowCapabilityHandlers:
     """多任务调度 handlers —— Flow/Workflow/Batch 三件套统一入口"""
 
     def start_workflow(self, req: CapabilityRequest) -> CapabilityResult:
-        """启动全链路工作流"""
+        """启动全链路工作流
+
+        链路边界（见 docs/Agent诊断与优化方案.md）：
+        - 本能力走【链路 C：WorkflowManager】短剧产品流程（抓剧→剪辑→文案→发布）
+        - 素材精剪全链路为【链路 B：AgentPipelineOrchestrator】（分流→打分→脚本→精剪）
+        - 对外能力名 workflow.start 保持不变
+        """
         from app.modules.lego.workflow_manager import WorkflowManager
         from app.modules.lego.drama_crawler import DramaInfo
         manager = WorkflowManager()
@@ -525,6 +590,7 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     workflow_handlers = WorkflowCapabilityHandlers()
     account_handlers = AccountCapabilityHandlers()
     pipeline_handlers = PipelineCapabilityHandlers(editor_module_ref)
+    canvas_handlers = CanvasCapabilityHandlers()
 
     # 拓展模块
     dispatcher.register("ext.run_extension", CapabilityCategory.EXTENSION,
@@ -541,6 +607,12 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         model_handlers.chat_with_fallback, "智能降级调用 AI")
     dispatcher.register("model.list_models", CapabilityCategory.MODEL,
                         model_handlers.list_models, "列出可用 AI 提供者")
+
+    # 画布
+    dispatcher.register("canvas.open", CapabilityCategory.CANVAS,
+                        canvas_handlers.open, "打开 AI 画布模块")
+    dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
+                        canvas_handlers.sync_models, "同步模型管理渠道到画布")
 
     # 剪辑模块
     dispatcher.register("editor.split_clip", CapabilityCategory.EDITOR,
@@ -588,7 +660,20 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("pipeline.run_full", CapabilityCategory.PIPELINE,
                         pipeline_handlers.run_full, "全链路一键执行")
 
-    logger.info("[capability_handlers] 已注册 25 个内置能力")
+    logger.info("[capability_handlers] 已注册内置能力（含画布）")
+
+    # 阶段 1：对话 action → capability 映射一致性（仅告警，不阻断启动）
+    try:
+        from app.core.agent_action_registry import ACTION_TO_CAPABILITY
+        known = {e["capability_id"] for e in dispatcher.list_capabilities()}
+        for action, cap_id in ACTION_TO_CAPABILITY.items():
+            if cap_id not in known:
+                logger.warning(
+                    "[capability_handlers] 对话 action %r 映射到未注册 capability %r",
+                    action, cap_id,
+                )
+    except Exception as e:
+        logger.debug("[capability_handlers] action↔capability 自检跳过: %s", e)
 
     # ── 左右脑神经链接：让 AgentBrain 感知所有已注册 capability ──
     try:

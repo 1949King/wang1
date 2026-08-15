@@ -1,7 +1,7 @@
 """
 云厂商 API 提供者实现
 =====================
-15 个云平台的具体适配实现。
+云平台的具体适配实现（含自托管 OpenAI 兼容网关）。
 所有类继承自 cloud_providers.base.BaseCloudProvider。
 """
 
@@ -1000,4 +1000,266 @@ class ModelScopeProvider(BaseCloudProvider):
                 yield content
         except Exception as e:
             logger.error(f"魔搭社区 API 调用失败: {e}")
+            yield f"错误: {str(e)}"
+
+
+class ChatGPT2APIProvider(BaseCloudProvider):
+    """ChatGPT2API — 自托管 OpenAI 兼容网关（gpt-image-2 / gpt-5*）。
+
+    默认本机 ``http://127.0.0.1:8000/v1``；Auth Key 与 Base URL 在模型广场卡片配置。
+    """
+
+    @property
+    @override
+    def default_base_url(self) -> str:
+        return "http://127.0.0.1:8000/v1"
+
+    @property
+    @override
+    def default_model(self) -> str:
+        return "gpt-image-2"
+
+    @override
+    def chat(self, messages: list[dict[str, str]], model: str | None = None,
+             stream: bool = False, **kwargs: object) -> Generator[str, None, None]:
+        model = model or self.default_model
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+                stream=stream,
+                timeout=180,
+            )
+            if response.status_code != 200:
+                yield f"API 错误: {response.status_code} - {response.text[:400]}"
+                return
+            if stream:
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode("utf-8")
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except Exception as e:
+                                logger.warning(f"API error: {e}")
+            else:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                yield content
+        except requests.exceptions.ConnectionError:
+            yield "错误: 无法连接 ChatGPT2API，请确认服务已启动（默认 http://127.0.0.1:8000）"
+        except Exception as e:
+            logger.error(f"ChatGPT2API 调用失败: {e}")
+            yield f"错误: {str(e)}"
+
+
+class KlingProvider(BaseCloudProvider):
+    """可灵 AI Provider — 快手视频生成大模型（OpenAI-compatible chat/completions）。
+
+    视频/生图走画布 AIGC 专用路由；文本对话复用 chat/completions。
+    """
+
+    @property
+    @override
+    def default_base_url(self) -> str:
+        return "https://api.klingai.com/v1"
+
+    @property
+    @override
+    def default_model(self) -> str:
+        return "kling-v1.6"
+
+    @override
+    def chat(self, messages: list[dict[str, str]], model: str | None = None,
+             stream: bool = False, **kwargs: object) -> Generator[str, None, None]:
+        model = model or self.default_model
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers=headers, json=payload, stream=stream, timeout=180,
+            )
+            if response.status_code != 200:
+                yield f"API 错误: {response.status_code} - {response.text[:400]}"
+                return
+            if stream:
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode("utf-8")
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except Exception as e:
+                                logger.warning(f"Kling stream error: {e}")
+            else:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                yield content
+        except Exception as e:
+            logger.error(f"Kling API 调用失败: {e}")
+            yield f"错误: {str(e)}"
+
+
+class FishAudioProvider(BaseCloudProvider):
+    """Fish Audio Provider — 开源语音合成（OpenAI-compatible）。
+
+    支持云端 https://api.fish.audio/v1 或自托管（本地部署填自定义 Base URL）。
+    """
+
+    @property
+    @override
+    def default_base_url(self) -> str:
+        return "https://api.fish.audio/v1"
+
+    @property
+    @override
+    def default_model(self) -> str:
+        return "fish-speech-v1.5"
+
+    @override
+    def chat(self, messages: list[dict[str, str]], model: str | None = None,
+             stream: bool = False, **kwargs: object) -> Generator[str, None, None]:
+        model = model or self.default_model
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers=headers, json=payload, stream=stream, timeout=180,
+            )
+            if response.status_code != 200:
+                yield f"API 错误: {response.status_code} - {response.text[:400]}"
+                return
+            if stream:
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode("utf-8")
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except Exception as e:
+                                logger.warning(f"FishAudio stream error: {e}")
+            else:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                yield content
+        except Exception as e:
+            logger.error(f"FishAudio API 调用失败: {e}")
+            yield f"错误: {str(e)}"
+
+
+class StabilityProvider(BaseCloudProvider):
+    """Stability AI Provider — 直接对接 Stability AI v2beta API。
+
+    区别于 siliconflow 中转：此处用官方 api.stability.ai，需官方 API Key。
+    生图走 images/generations 路由；文本对话走 chat/completions。
+    """
+
+    @property
+    @override
+    def default_base_url(self) -> str:
+        return "https://api.stability.ai/v2beta"
+
+    @property
+    @override
+    def default_model(self) -> str:
+        return "sd3-large"
+
+    @override
+    def chat(self, messages: list[dict[str, str]], model: str | None = None,
+             stream: bool = False, **kwargs: object) -> Generator[str, None, None]:
+        model = model or self.default_model
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": stream,
+            "max_tokens": kwargs.get("max_tokens", 4096),
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers=headers, json=payload, stream=stream, timeout=180,
+            )
+            if response.status_code != 200:
+                yield f"API 错误: {response.status_code} - {response.text[:400]}"
+                return
+            if stream:
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode("utf-8")
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                            except Exception as e:
+                                logger.warning(f"Stability stream error: {e}")
+            else:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                yield content
+        except Exception as e:
+            logger.error(f"Stability AI API 调用失败: {e}")
             yield f"错误: {str(e)}"

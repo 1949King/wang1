@@ -33,7 +33,7 @@ PM_TO_QUALITY_LABEL = {
     "high": "100%",
 }
 
-DEFAULT_USER_PREVIEW_QUALITY = "medium"  # 漫剧日常粗剪默认 1/2
+DEFAULT_USER_PREVIEW_QUALITY = "high"  # 100% 精剪，预览保持原片分辨率；拖动/播放时自动降至 1/4 保流畅
 
 
 def normalize_preview_quality(quality: Optional[str]) -> str:

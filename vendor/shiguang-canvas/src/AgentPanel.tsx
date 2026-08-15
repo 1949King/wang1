@@ -1,0 +1,1294 @@
+/**
+ * LibTV 向 Agent-IM 侧栏（借鉴 libtv-skills 会话 UX + assistant-ui sidebar 布局思路）。
+ * 不引入 assistant-ui 重依赖，保持 Qt WebEngine 可加载；对话走项目 Agent。
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  BRIDGE,
+  getAgentStatus,
+  startCanvasAgent,
+  listChatModels,
+  projectAgentChatViaHost,
+  listProjectTools,
+  runProjectToolViaHost,
+  syncModelPool,
+  resolveMediaUrl,
+  subscribeAgentEvents,
+  sendAgentReply,
+  controlAgentSession,
+  type AgentEventEnvelope,
+  type ChatModelProvider,
+  type ProjectTool,
+} from "./bridge";
+import { useCanvasStore, type NodeData } from "./store";
+import ConfirmDialog from "./ConfirmDialog";
+import {
+  decideCanvasTool,
+  loadAgentMode,
+  saveAgentMode,
+  type AgentMode,
+} from "./agentPolicy";
+
+type Attach = {
+  id: string;
+  kind: "image" | "video";
+  url: string;
+  name: string;
+};
+
+type Msg = {
+  role: "user" | "assistant" | "system";
+  text: string;
+  attaches?: Attach[];
+  streamId?: string;
+  streaming?: boolean;
+};
+
+type Tab = "chat" | "models" | "tools" | "budget";
+
+type Props = {
+  open: boolean;
+  docked?: boolean;
+  onClose: () => void;
+  onRequestGenerate: () => void;
+  onRequestBreakdown?: () => void;
+};
+
+const QUICK = [
+  { id: "gen", label: "生成选中", text: "/generate" },
+  { id: "shot", label: "+镜头", text: "/add shot" },
+  { id: "sync", label: "同步模型", text: "/sync" },
+  { id: "status", label: "状态", text: "/status" },
+  { id: "tools", label: "工具", text: "/tools" },
+] as const;
+
+function sessionId(): string {
+  const k = "shiguang-canvas:agent-session-id";
+  try {
+    const ex = localStorage.getItem(k);
+    if (ex) return ex;
+    const id = `sg_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(k, id);
+    return id;
+  } catch {
+    return "local";
+  }
+}
+
+export default function AgentPanel({
+  open,
+  docked = true,
+  onClose,
+  onRequestGenerate,
+  onRequestBreakdown,
+}: Props) {
+  const [tab, setTab] = useState<Tab>("chat");
+  const [mcpOn, setMcpOn] = useState(false);
+  const [mcpUrl, setMcpUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [thinkSec, setThinkSec] = useState(0);
+  const streamBufRef = useRef<Record<string, string>>({});
+  const activeStreamRef = useRef<string>("");
+  const [input, setInput] = useState("");
+  const [providers, setProviders] = useState<ChatModelProvider[]>([]);
+  const [modelKey, setModelKey] = useState("");
+  const [tools, setTools] = useState<ProjectTool[]>([]);
+  const [toolFilter, setToolFilter] = useState("");
+  const [attaches, setAttaches] = useState<Attach[]>([]);
+  const [budgetData, setBudgetData] = useState<any>(null);
+  const [budgetLoading, setBudgetLoading] = useState(false);
+  const [recentCalls, setRecentCalls] = useState<any[]>([]);
+  const [sid] = useState(() => sessionId());
+  const [agentMode, setAgentMode] = useState<AgentMode>(() => loadAgentMode());
+  const agentModeRef = useRef<AgentMode>(agentMode);
+  agentModeRef.current = agentMode;
+  const [confirmBox, setConfirmBox] = useState<{
+    title: string;
+    message: string;
+    danger: boolean;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const msgsEndRef = useRef<HTMLDivElement>(null);
+  const [msgs, setMsgs] = useState<Msg[]>([
+    {
+      role: "system",
+      text:
+        "画布 Agent（快路径，无需先开剪辑）：① 选好对话模型 → ② 输入 → ③ 发送。" +
+        "回复会边生成边显示。快捷芯片=/指令；可 📎 附图视频。" +
+        "3D 姿势/机位请在导演台左侧栏手动调。",
+    },
+  ]);
+
+  const addNode = useCanvasStore((s) => s.addNode);
+  const addVideoReference = useCanvasStore((s) => s.addVideoReference);
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const selectedId = useCanvasStore((s) => s.selectedId);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setSelected = useCanvasStore((s) => s.setSelected);
+  const onConnect = useCanvasStore((s) => s.onConnect);
+  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
+  const setNodeImage = useCanvasStore((s) => s.setNodeImage);
+  const setNodeVideo = useCanvasStore((s) => s.setNodeVideo);
+  const duplicateSelected = useCanvasStore((s) => s.duplicateSelected);
+  const groupSelected = useCanvasStore((s) => s.groupSelected);
+  const undoGraph = useCanvasStore((s) => s.undoGraph);
+  const redoGraph = useCanvasStore((s) => s.redoGraph);
+
+  const push = (role: Msg["role"], text: string, atts?: Attach[]) =>
+    setMsgs((m) => [...m, { role, text, attaches: atts }]);
+
+  useEffect(() => {
+    if (!busy) {
+      setThinkSec(0);
+      return;
+    }
+    setThinkSec(0);
+    const t = window.setInterval(() => setThinkSec((s) => s + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [busy]);
+
+  const upsertStreamMsg = (streamId: string, text: string, streaming: boolean) => {
+    setMsgs((m) => {
+      const idx = m.findIndex((x) => x.streamId === streamId);
+      if (idx >= 0) {
+        const next = m.slice();
+        next[idx] = { ...next[idx], text, streaming, role: "assistant" };
+        return next;
+      }
+      return [...m, { role: "assistant", text, streamId, streaming }];
+    });
+  };
+
+  useEffect(() => {
+    msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, busy, thinkSec]);
+
+  // budget tab 自动刷新
+  useEffect(() => {
+    if (tab === "budget") void refreshBudget();
+  }, [tab]);
+
+  // ── SSE: 订阅剪辑 Agent 主动推过来的事件 ──────────────────────
+
+  const handleEditorEvent = (evt: AgentEventEnvelope) => {
+    // 心跳忽略
+    if (evt.type === "ping" || evt.type === "pong") return;
+
+    // 流式对话增量
+    if (evt.type === "chat.delta") {
+      const p = evt.payload || {};
+      const streamId = String(p.stream_id || "");
+      if (!streamId) return;
+      if (activeStreamRef.current && streamId !== activeStreamRef.current) return;
+      if (p.status === "start") {
+        streamBufRef.current[streamId] = "";
+        upsertStreamMsg(streamId, "…", true);
+        return;
+      }
+      const delta = String(p.delta || "");
+      if (!delta) return;
+      streamBufRef.current[streamId] = (streamBufRef.current[streamId] || "") + delta;
+      upsertStreamMsg(streamId, streamBufRef.current[streamId], true);
+      return;
+    }
+    if (evt.type === "chat.done") {
+      const p = evt.payload || {};
+      const streamId = String(p.stream_id || "");
+      if (!streamId) return;
+      if (activeStreamRef.current && streamId !== activeStreamRef.current) return;
+      const text = String(p.text || streamBufRef.current[streamId] || "");
+      if (p.ok === false) {
+        upsertStreamMsg(streamId, String(p.error || "生成失败"), false);
+      } else if (text) {
+        upsertStreamMsg(streamId, text, false);
+      }
+      return;
+    }
+
+    // chat.message：剪辑 Agent 主动发一句话（推到聊天区）
+    if (evt.type === "chat.message") {
+      const p = evt.payload || {};
+      const text = String(p.text || p || "");
+      const role: Msg["role"] =
+        p.role === "system" ? "system" : p.role === "error" ? "system" : "assistant";
+      push(role, text);
+      return;
+    }
+
+    // task / progress / done / fail：任务状态推送（展示为 system 消息）
+    if (evt.type === "task.progress") {
+      const p = evt.payload || {};
+      const pct = p.percent != null ? `${p.percent}%` : "";
+      const msg = String(p.message || pct || "任务进行中...");
+      push("system", `🔄 任务 ${evt.payload?.task_id || ""} ${msg}`);
+      return;
+    }
+    if (evt.type === "task.done") {
+      push("system", `✅ 任务 ${evt.payload?.task_id || ""} 完成`);
+      return;
+    }
+    if (evt.type === "task.fail") {
+      push("system", `❌ 任务 ${evt.payload?.task_id || ""} 失败: ${evt.payload?.error || ""}`);
+      return;
+    }
+
+    // task.create：给画布派任务（加节点 / 更新 / 连边 / 删除 / 生图 / 导入）
+    if (evt.type === "task.create") {
+      executeRemoteTask(evt);
+      return;
+    }
+
+    // compliance.report：剧本合规守护推送（AI 审查建议）
+    if (evt.type === "compliance.report") {
+      const p = evt.payload || {};
+      const items: any[] = p.suggestions || [];
+      if (items.length === 0) {
+        push("system", `✅ 剧本合规守护通过（${p.total_shots || 0} 分镜 / ${p.total_characters || 0} 角色）`);
+      } else {
+        const header = `🛡️ 剧本合规守护：${p.summary || `${items.length} 条建议`}`;
+        push("system", header);
+        items.forEach((it, i) => {
+          const lvl = it.level === "warning" ? "⚠️" : it.level === "error" ? "❌" : "💡";
+          push("system", `${lvl} [${it.category || "建议"}] ${it.message || ""}`);
+        });
+      }
+      return;
+    }
+
+    // 未知类型：推 system 展示原文，方便调试
+    push("system", `📨 收到事件 ${evt.type}: ${JSON.stringify(evt.payload).slice(0, 200)}`);
+  };
+
+  const askConfirm = (title: string, message: string, danger = false) =>
+    new Promise<boolean>((resolve) => {
+      setConfirmBox({ title, message, danger, resolve });
+    });
+
+  const executeRemoteTask = async (evt: AgentEventEnvelope) => {
+    const p = evt.payload || {};
+    const taskId: string = String(p.task_id || evt.id || "");
+    const action: string = String(p.action || "");
+    const params: Record<string, any> = p.params || {};
+
+    const policy = decideCanvasTool(action, agentModeRef.current);
+    if (policy.action === "deny") {
+      push("system", `⛔ Plan 已拦截「${action}」：${policy.reason}`);
+      if (evt.ack_required || evt.correlation_id) {
+        await sendAgentReply({
+          correlation_id: evt.correlation_id || evt.id,
+          type: "canvas.reply",
+          payload: { task_id: taskId, ok: false, action, error: policy.reason },
+        });
+      }
+      return;
+    }
+    if (policy.action === "require_approval") {
+      const ok = await askConfirm(
+        "确认画布操作",
+        `Agent 请求执行「${action}」。协作模式下改画布/生成需你确认。`,
+        action === "deleteNode" || action === "runGenerate",
+      );
+      if (!ok) {
+        push("system", `已取消「${action}」`);
+        if (evt.ack_required || evt.correlation_id) {
+          await sendAgentReply({
+            correlation_id: evt.correlation_id || evt.id,
+            type: "canvas.reply",
+            payload: { task_id: taskId, ok: false, action, error: "user_cancelled" },
+          });
+        }
+        return;
+      }
+    }
+
+    const reply = async (ok: boolean, extra: Record<string, any> = {}) => {
+      if (!evt.ack_required && !evt.correlation_id) return;
+      const res = await sendAgentReply({
+        correlation_id: evt.correlation_id || evt.id,
+        type: "canvas.reply",
+        payload: { task_id: taskId, ok, action, ...extra },
+      });
+      if (!res.ok) {
+        // 回执失败不阻塞执行，但要让用户知道
+        push("system", `⚠️ 回执失败（桥可能未连通）: ${res.message}`);
+      }
+    };
+
+    try {
+      let canvasNodeId = "";
+      switch (action) {
+        case "addNode": {
+          const kind = String(params.kind || params.type || "shot");
+          const pos = params.x != null && params.y != null ? { x: Number(params.x), y: Number(params.y) } : undefined;
+          addNode(kind as any, pos);
+          // addNode 内部设 selectedId，立即读
+          const sid = useCanvasStore.getState().selectedId;
+          canvasNodeId = sid || "";
+          // 如果有额外数据要写（prompt / camera 等），用 updateNodeData
+          const extra: Record<string, any> = {};
+          for (const k of Object.keys(params)) {
+            if (k !== "kind" && k !== "type" && k !== "x" && k !== "y") {
+              extra[k] = params[k];
+            }
+          }
+          if (canvasNodeId && Object.keys(extra).length > 0) {
+            updateNodeData(canvasNodeId, extra);
+          }
+          break;
+        }
+        case "updateNode": {
+          const id = String(params.id || params.node_id || "");
+          if (!id) throw new Error("updateNode 缺少 id");
+          const patch = params.patch || params.data || {};
+          updateNodeData(id, patch);
+          break;
+        }
+        case "connectNodes": {
+          const src = String(params.source || "");
+          const tgt = String(params.target || "");
+          if (!src || !tgt) throw new Error("connectNodes 缺少 source/target");
+          onConnect({
+            source: src,
+            target: tgt,
+            sourceHandle: params.sourceHandle,
+            targetHandle: params.targetHandle,
+          } as any);
+          break;
+        }
+        case "deleteNode": {
+          const id = String(params.id || "");
+          if (!id) throw new Error("deleteNode 缺少 id");
+          onNodesChange([{ type: "remove", id }] as any);
+          break;
+        }
+        case "runGenerate": {
+          onRequestGenerate();
+          break;
+        }
+        case "setNodeImage": {
+          const id = String(params.id || "");
+          const url = String(params.url || "");
+          if (!id || !url) throw new Error("setNodeImage 缺少 id/url");
+          setNodeImage(id, url);
+          break;
+        }
+        case "setNodeVideo": {
+          const id = String(params.id || "");
+          const url = String(params.url || "");
+          if (!id || !url) throw new Error("setNodeVideo 缺少 id/url");
+          setNodeVideo(id, url, params.posterUrl);
+          break;
+        }
+        case "importImage": {
+          const url = String(params.url || "");
+          if (!url) throw new Error("importImage 缺少 url");
+          addVideoReference(url, { title: String(params.title || ""), name: String(params.name || "") });
+          const sid = useCanvasStore.getState().selectedId;
+          canvasNodeId = sid || "";
+          break;
+        }
+        case "queryNodes":
+        case "canvas_query": {
+          const kind = String(params.kind || params.type || "").trim();
+          const keyword = String(params.keyword || params.q || "").trim().toLowerCase();
+          const list = useCanvasStore.getState().nodes
+            .filter((n) => {
+              const d = n.data as any;
+              if (kind && d?.kind !== kind && n.type !== kind) return false;
+              if (!keyword) return true;
+              const blob = `${d?.title || ""} ${d?.prompt || ""} ${d?.content || ""} ${d?.text || ""}`.toLowerCase();
+              return blob.includes(keyword);
+            })
+            .map((n) => ({
+              id: n.id,
+              type: n.type,
+              kind: (n.data as any)?.kind,
+              title: (n.data as any)?.title,
+              selected: n.selected,
+            }));
+          await reply(true, { nodes: list, total: list.length, edges: edges.length });
+          push("system", `✅ queryNodes → ${list.length} 个节点`);
+          return;
+        }
+        case "selectNode":
+        case "canvas_select": {
+          const id = String(params.id || params.node_id || "");
+          if (!id) throw new Error("selectNode 缺少 id");
+          setSelected(id);
+          useCanvasStore.setState((s) => ({
+            nodes: s.nodes.map((n) => ({ ...n, selected: n.id === id })),
+          }));
+          canvasNodeId = id;
+          break;
+        }
+        case "duplicateNode":
+        case "canvas_duplicate_node": {
+          const id = String(params.id || params.node_id || selectedId || "");
+          if (id) setSelected(id);
+          duplicateSelected();
+          canvasNodeId = useCanvasStore.getState().selectedId || "";
+          break;
+        }
+        case "groupNodes":
+        case "canvas_group": {
+          groupSelected();
+          canvasNodeId = useCanvasStore.getState().selectedId || "";
+          break;
+        }
+        case "undo":
+        case "canvas_undo": {
+          undoGraph();
+          break;
+        }
+        case "redo":
+        case "canvas_redo": {
+          redoGraph();
+          break;
+        }
+        case "bindShotlistFrame":
+        case "canvas_bind_shotlist_frame": {
+          const shotlistId = String(params.shotlist_id || params.id || "");
+          const rowId = String(params.row_id || "");
+          const frameId = String(params.frame_node_id || params.image_id || "");
+          if (!shotlistId || !rowId || !frameId) throw new Error("bindShotlistFrame 缺少参数");
+          const st = useCanvasStore.getState();
+          const sl = st.nodes.find((n) => n.id === shotlistId);
+          const fr = st.nodes.find((n) => n.id === frameId);
+          if (!sl || (sl.data as any).kind !== "shotlist") throw new Error("不是分镜表节点");
+          if (!fr) throw new Error("画面节点不存在");
+          const fd = fr.data as any;
+          const rows = ((sl.data as any).rows || []).map((r: any) =>
+            r.id === rowId
+              ? {
+                  ...r,
+                  frameNodeId: frameId,
+                  frameKind: fd.kind === "video" ? "video" : "image",
+                  frameUrl: fd.imageUrl || fd.posterUrl || fd.videoUrl || "",
+                }
+              : r,
+          );
+          updateNodeData(shotlistId, { rows });
+          canvasNodeId = shotlistId;
+          break;
+        }
+        case "fillStoryboardCell":
+        case "canvas_fill_storyboard_cell": {
+          const sbId = String(params.storyboard_id || params.id || "");
+          const index = Number(params.index ?? params.cell ?? 0);
+          const url = String(params.url || "");
+          if (!sbId) throw new Error("fillStoryboardCell 缺少 id");
+          const st = useCanvasStore.getState();
+          const sb = st.nodes.find((n) => n.id === sbId);
+          if (!sb || (sb.data as any).kind !== "storyboard") throw new Error("不是宫格分镜节点");
+          const d = sb.data as any;
+          const cols = d.cols || 3;
+          const rowsN = d.rows || 3;
+          const cells = [...(d.cells || Array.from({ length: cols * rowsN }, () => ({})))];
+          while (cells.length < cols * rowsN) cells.push({});
+          if (url) {
+            cells[index] = { ...(cells[index] || {}), overrideUrl: url };
+            updateNodeData(sbId, { cells });
+          } else if (d.sourceUrl) {
+            // 触发裁格拖出
+            const { cropGridCell } = await import("./imageTools");
+            const cut = await cropGridCell(d.sourceUrl, cols, rowsN, index);
+            cells[index] = { ...(cells[index] || {}), overrideUrl: cut };
+            updateNodeData(sbId, { cells });
+            st.addNode("image", {
+              x: (sb.position.x || 0) + 460,
+              y: (sb.position.y || 0) + index * 40,
+            });
+            const sid = useCanvasStore.getState().selectedId;
+            if (sid) updateNodeData(sid, { title: `格 ${index + 1}`, imageUrl: cut });
+            canvasNodeId = sid || sbId;
+          } else {
+            throw new Error("宫格无源图且未提供 url");
+          }
+          if (!canvasNodeId) canvasNodeId = sbId;
+          break;
+        }
+        default:
+          throw new Error(`未知 action: ${action}`);
+      }
+
+      push("system", `✅ 执行 ${action}${canvasNodeId ? ` → 节点 ${canvasNodeId}` : ""}`);
+      await reply(true, canvasNodeId ? { canvas_node_id: canvasNodeId } : {});
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      push("system", `❌ 执行 ${action} 失败: ${msg}`);
+      await reply(false, { error: msg });
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const unsub = subscribeAgentEvents({
+      onEvent: handleEditorEvent,
+      onError: (err) => {
+        push("system", `ℹ️ ${err}`);
+      },
+    });
+    return () => {
+      try {
+        unsub();
+      } catch {
+        /* ignore */
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const refreshMcp = async () => {
+    const ag = await getAgentStatus();
+    setMcpOn(Boolean(ag.listening || (ag.ok && ag.token)));
+    setMcpUrl(String(ag.url || ""));
+  };
+
+  const refreshModels = async () => {
+    const res = await listChatModels();
+    setProviders(res.providers || []);
+    if (!modelKey) {
+      const active = (res.providers || []).find((p) => p.active && p.configured);
+      const any = (res.providers || []).find((p) => p.configured);
+      const pick = active || any;
+      if (pick) {
+        const m = pick.models[0] || "";
+        setModelKey(m ? `${pick.id}::${m}` : `${pick.id}::`);
+      }
+    }
+  };
+
+  const refreshTools = async () => {
+    const res = await listProjectTools(agentMode);
+    setTools(res.tools || []);
+    if (res.message) setStatus(res.message);
+  };
+
+  const refreshBudget = async () => {
+    setBudgetLoading(true);
+    const BRIDGE = (window as any).__BRIDGE__ || "http://127.0.0.1:18765";
+    try {
+      const [budgetRes, callsRes] = await Promise.all([
+        fetch(`${BRIDGE}/host/budget`),
+        fetch(`${BRIDGE}/host/calls?limit=10`),
+      ]);
+      if (budgetRes.ok) {
+        const j = await budgetRes.json();
+        if (j.ok) setBudgetData(j.data);
+      }
+      if (callsRes.ok) {
+        const j = await callsRes.json();
+        if (j.ok) setRecentCalls(j.data || []);
+      }
+    } catch {
+      setBudgetData(null);
+    } finally {
+      setBudgetLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    void refreshMcp();
+    void refreshModels();
+    void refreshTools();
+    const t = window.setInterval(() => void refreshMcp(), 10000);
+    return () => window.clearInterval(t);
+  }, [open]);
+
+  const filteredTools = useMemo(() => {
+    const q = toolFilter.trim().toLowerCase();
+    if (!q) return tools.slice(0, 80);
+    return tools
+      .filter(
+        (t) =>
+          t.tool_name.toLowerCase().includes(q) ||
+          t.extension_name.toLowerCase().includes(q) ||
+          t.extension_id.toLowerCase().includes(q) ||
+          (t.description || "").toLowerCase().includes(q),
+      )
+      .slice(0, 80);
+  }, [tools, toolFilter]);
+
+  const resolveModel = () => {
+    if (!modelKey.includes("::")) return { provider: modelKey, model: "" };
+    const [p, ...rest] = modelKey.split("::");
+    return { provider: p, model: rest.join("::") };
+  };
+
+  const canvasContext = (extraAttaches?: Attach[]) => {
+    const sel = nodes.find((n) => n.id === selectedId);
+    const d = sel?.data as NodeData | undefined;
+    const atts = extraAttaches || attaches;
+    return {
+      session_id: sid,
+      agent_mode: agentMode,
+      selected_id: selectedId,
+      selected_kind: d?.kind,
+      selected_title: d && "title" in d ? d.title : undefined,
+      selected_prompt:
+        d && "prompt" in d ? d.prompt : d && "text" in d ? d.text : undefined,
+      selected_ref_video:
+        d && "refVideoUrl" in d && d.refVideoUrl
+          ? { url: d.refVideoUrl, name: (d as { refVideoName?: string }).refVideoName }
+          : undefined,
+      node_count: nodes.length,
+      attachments: atts.map((a) => ({
+        kind: a.kind,
+        name: a.name,
+        url: a.url.slice(0, 200),
+      })),
+    };
+  };
+
+  const runLocalOp = async (line: string): Promise<boolean> => {
+    const t = line.trim();
+    if (!t.startsWith("/")) return false;
+    const [cmd, ...rest] = t.slice(1).split(/\s+/);
+    const arg = rest.join(" ");
+    if (cmd === "add") {
+      const kind = (arg || "shot") as NodeData["kind"];
+      const allowed = ["shot", "image", "video", "audio", "generator", "prompt", "script", "group"];
+      if (!allowed.includes(kind)) {
+        push("assistant", `未知节点类型：${kind}`);
+        return true;
+      }
+      addNode(kind);
+      push("assistant", `已添加节点：${kind}`);
+      return true;
+    }
+    if (cmd === "sync") {
+      const msg = await syncModelPool();
+      push("assistant", msg);
+      setStatus(msg);
+      await refreshModels();
+      return true;
+    }
+    if (cmd === "generate") {
+      onRequestGenerate();
+      push("assistant", "已触发生成选中节点");
+      return true;
+    }
+    if (cmd === "breakdown") {
+      onRequestBreakdown?.();
+      push("assistant", "已触发一键拉片");
+      return true;
+    }
+    if (cmd === "tools") {
+      await refreshTools();
+      push("assistant", `已刷新工具列表：${tools.length}（见「工具」页）`);
+      setTab("tools");
+      return true;
+    }
+    if (cmd === "status") {
+      const { provider, model } = resolveModel();
+      push(
+        "assistant",
+        `会话=${sid}；项目模型=${provider || "自动"}${model ? "/" + model : ""}；画布MCP=${mcpOn ? mcpUrl : "未连"}；选中=${selectedId || "无"}；附件=${attaches.length}`,
+      );
+      return true;
+    }
+    if (cmd === "prompt" && selectedId) {
+      updateNodeData(selectedId, { prompt: arg });
+      push("assistant", "已更新选中节点提示词");
+      return true;
+    }
+    push("assistant", `未知指令：/${cmd}`);
+    return true;
+  };
+
+  const pickAttach = async (file: File) => {
+    const isVid = file.type.startsWith("video/");
+    const isImg = file.type.startsWith("image/");
+    if (!isVid && !isImg) {
+      push("system", "仅支持图片或视频附件");
+      return;
+    }
+    setBusy(true);
+    const res = await resolveMediaUrl(file);
+    setBusy(false);
+    if (!res.ok || !res.url) {
+      push("system", res.message || "附件失败");
+      return;
+    }
+    const att: Attach = {
+      id: `att_${Math.random().toString(36).slice(2, 8)}`,
+      kind: isVid ? "video" : "image",
+      url: res.url,
+      name: file.name,
+    };
+    setAttaches((a) => [...a, att].slice(-4));
+    if (isVid) {
+      push("system", `已附参考视频「${file.name}」。可点「挂到选中」或「落画布」。`);
+    }
+  };
+
+  const attachToSelected = () => {
+    const vid = [...attaches].reverse().find((a) => a.kind === "video");
+    if (!vid) {
+      push("system", "请先附上视频");
+      return;
+    }
+    if (!selectedId) {
+      push("system", "请先选中镜头/图片/视频节点");
+      return;
+    }
+    const sel = nodes.find((n) => n.id === selectedId);
+    const kind = (sel?.data as NodeData | undefined)?.kind;
+    if (kind !== "shot" && kind !== "image" && kind !== "video") {
+      push("system", "选中节点不支持参考视频槽");
+      return;
+    }
+    updateNodeData(selectedId, { refVideoUrl: vid.url, refVideoName: vid.name });
+    push("assistant", `已将「${vid.name}」挂到选中节点作参考视频`);
+    setStatus(`参考视频 → ${vid.name}`);
+  };
+
+  const dropAttachToCanvas = () => {
+    const vid = [...attaches].reverse().find((a) => a.kind === "video");
+    if (!vid) {
+      push("system", "请先附上视频");
+      return;
+    }
+    addVideoReference(vid.url, { title: `参考·${vid.name}`, name: vid.name });
+    push("assistant", `已在画布添加参考视频节点「${vid.name}」`);
+  };
+
+  const busyRef = useRef(false);
+  const inboxRef = useRef<string[]>([]);
+
+  const send = async (preset?: string) => {
+    const text = (preset ?? input).trim();
+    if (!text && !attaches.length) return;
+    const payload =
+      text ||
+      (attaches.length
+        ? `请结合附件（${attaches.map((a) => a.name).join("、")}）给当前分镜提建议`
+        : "");
+    if (busyRef.current) {
+      inboxRef.current.push(payload);
+      setInput("");
+      push("system", `已排队（串行）：${payload.slice(0, 80)}`);
+      return;
+    }
+    setInput("");
+    const used = attaches.slice();
+    push("user", payload, used);
+    setAttaches([]);
+    if (await runLocalOp(payload)) return;
+    const streamId = `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    activeStreamRef.current = streamId;
+    streamBufRef.current[streamId] = "";
+    upsertStreamMsg(streamId, "…", true);
+    busyRef.current = true;
+    setBusy(true);
+    const { provider, model } = resolveModel();
+    const res = await projectAgentChatViaHost({
+      message: payload,
+      provider,
+      model,
+      apply: false,
+      mode: "canvas_fast",
+      stream_id: streamId,
+      agent_mode: agentMode,
+      session_id: sid,
+      canvas_context: canvasContext(used),
+    });
+    const finalText =
+      res.reply ||
+      streamBufRef.current[streamId] ||
+      res.message ||
+      "（空回复）";
+    upsertStreamMsg(streamId, finalText, false);
+    if (!res.ok) setStatus(res.message || "画布 Agent 失败");
+    else if (res.path) setStatus(`Agent 快路径 · ${res.path}`);
+    activeStreamRef.current = "";
+    busyRef.current = false;
+    setBusy(false);
+    const nxt = inboxRef.current.shift();
+    if (nxt) void send(nxt);
+  };
+
+  if (!open) return null;
+
+  return (
+    <aside
+      className={`sg-agent-panel sg-agent-panel-wide${docked ? " sg-agent-dock" : ""}`}
+      data-sg-no-autoclick="1"
+    >
+      <div className="sg-agent-head">
+        <div className="sg-agent-brand">
+          <strong>Agent-IM</strong>
+          <span className="muted tiny">会话 {sid.slice(0, 10)}</span>
+          <select
+            className="sg-agent-mode"
+            value={agentMode}
+            title="Plan 只规划；协作 B 改画布需确认；自主 C 自动执行（生成不重试）"
+            onChange={(e) => {
+              const m = e.target.value as AgentMode;
+              setAgentMode(m);
+              saveAgentMode(m);
+              void controlAgentSession({ session_id: sid, action: "mode", mode: m });
+              push(
+                "system",
+                m === "plan"
+                  ? "已切 Plan：只分析/只读。"
+                  : m === "autonomous"
+                    ? "已切自主 C：画布写与生成将自动执行。"
+                    : "已切协作 B：改画布/生成前会确认。",
+              );
+            }}
+          >
+            <option value="collaborative">协作 B</option>
+            <option value="plan">Plan</option>
+            <option value="autonomous">自主 C</option>
+          </select>
+        </div>
+        <span className={providers.some((p) => p.configured) ? "chip-ok" : "chip-warn"}>
+          {providers.find((p) => p.active)?.name || "模型管理"}
+        </span>
+        <button
+          type="button"
+          className="btn"
+          title="暂停当前任务"
+          onClick={() => {
+            void controlAgentSession({ session_id: sid, action: "pause" });
+            busyRef.current = false;
+            setBusy(false);
+            push("system", "已暂停。点继续后再发送。");
+          }}
+        >
+          暂停
+        </button>
+        <button
+          type="button"
+          className="btn"
+          title="继续任务"
+          onClick={() => {
+            void controlAgentSession({ session_id: sid, action: "resume" });
+            push("system", "已继续。");
+          }}
+        >
+          继续
+        </button>
+        <button
+          type="button"
+          className="btn"
+          title="停止当前 Agent 任务"
+          onClick={() => {
+            void controlAgentSession({ session_id: sid, action: "stop" });
+            inboxRef.current = [];
+            busyRef.current = false;
+            setBusy(false);
+            push("system", "已停止跟踪（供应商若不支持远端取消，生成可能仍在跑）。");
+          }}
+        >
+          停止
+        </button>
+        <button type="button" className="btn" onClick={onClose} title="收起侧栏">
+          收起
+        </button>
+      </div>
+
+      <div className="sg-agent-tabs">
+        {(
+          [
+            ["chat", "对话"],
+            ["models", "模型"],
+            ["tools", "工具"],
+            ["budget", "预算"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`btn${tab === id ? " primary" : ""}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "chat" ? (
+        <div className="sg-agent-chat">
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label>对话模型</label>
+            <select value={modelKey} onChange={(e) => setModelKey(e.target.value)}>
+              <option value="">自动 / 激活 Provider</option>
+              {providers.map((p) =>
+                (p.models.length ? p.models : [""]).map((m) => (
+                  <option
+                    key={`${p.id}::${m}`}
+                    value={`${p.id}::${m}`}
+                    disabled={!p.configured}
+                  >
+                    {p.active ? "★ " : ""}
+                    {p.name}
+                    {m ? ` / ${m}` : ""}
+                    {p.configured ? "" : "（未配置）"}
+                  </option>
+                )),
+              )}
+            </select>
+          </div>
+
+          <div className="sg-agent-chips">
+            {QUICK.map((q) => (
+              <button
+                key={q.id}
+                type="button"
+                className="chip"
+                disabled={busy}
+                onClick={() => void send(q.text)}
+              >
+                {q.label}
+              </button>
+            ))}
+            {onRequestBreakdown ? (
+              <button
+                type="button"
+                className="chip"
+                disabled={busy}
+                onClick={() => void send("/breakdown")}
+              >
+                拉片
+              </button>
+            ) : null}
+          </div>
+
+          <div className="sg-agent-msgs">
+            {msgs.map((m, i) => (
+              <div key={i} className={`sg-agent-msg ${m.role}${m.streaming ? " streaming" : ""}`}>
+                {m.text}
+                {m.streaming ? <span className="sg-agent-cursor">▍</span> : null}
+                {m.attaches?.length ? (
+                  <div className="sg-agent-msg-atts">
+                    {m.attaches.map((a) =>
+                      a.kind === "video" ? (
+                        <video key={a.id} src={a.url} muted playsInline controls />
+                      ) : (
+                        <img key={a.id} src={a.url} alt={a.name} />
+                      ),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {busy ? (
+              <div className="sg-agent-msg system">
+                {thinkSec < 1 ? "连接模型…" : `生成中 ${thinkSec}s`}
+              </div>
+            ) : null}
+            <div ref={msgsEndRef} />
+          </div>
+
+          {attaches.length ? (
+            <div className="sg-agent-pending">
+              {attaches.map((a) => (
+                <span key={a.id} className="sg-agent-pending-item">
+                  {a.kind === "video" ? "🎬" : "🖼"} {a.name}
+                  <button
+                    type="button"
+                    className="linkish"
+                    onClick={() => setAttaches((xs) => xs.filter((x) => x.id !== a.id))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button type="button" className="btn" onClick={attachToSelected}>
+                挂到选中
+              </button>
+              <button type="button" className="btn" onClick={dropAttachToCanvas}>
+                落画布
+              </button>
+            </div>
+          ) : null}
+
+          <div className="sg-agent-input">
+            <label className="sg-agent-attach" title="附参考图/视频">
+              📎
+              <input
+                type="file"
+                accept="image/*,video/*"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void pickAttach(f);
+                }}
+              />
+            </label>
+            <textarea
+              value={input}
+              placeholder="输入消息，Enter 发送，Shift+Enter 换行…"
+              disabled={busy}
+              rows={2}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="sg-agent-send"
+              disabled={busy}
+              onClick={() => void send()}
+            >
+              {busy ? "…" : "发送"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "models" ? (
+        <div className="sg-agent-scroll">
+          <p className="muted" style={{ fontSize: 11 }}>
+            与「模型管理」同源。生图/生视频用顶栏 AIGC；此处管对话 Agent。
+          </p>
+          <div className="btn-row" style={{ marginBottom: 8 }}>
+            <button
+              type="button"
+              className="btn teal"
+              onClick={async () => {
+                setBusy(true);
+                const msg = await syncModelPool();
+                push("system", msg);
+                await refreshModels();
+                setBusy(false);
+                setStatus(msg);
+              }}
+            >
+              同步 AIGC
+            </button>
+            <button type="button" className="btn" onClick={() => void refreshModels()}>
+              刷新
+            </button>
+          </div>
+          {providers.map((p) => (
+            <div key={p.id} className="sg-tool-row">
+              <div>
+                <strong>
+                  {p.active ? "★ " : ""}
+                  {p.name}
+                </strong>
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {p.configured ? "已配置 Key" : "未配置"}
+                  {p.is_local ? " · 本地" : ""} · 模型 {p.models.length}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                disabled={!p.configured}
+                onClick={() => setModelKey(`${p.id}::${p.models[0] || ""}`)}
+              >
+                选用
+              </button>
+            </div>
+          ))}
+          <div className="section-title" style={{ marginTop: 12 }}>
+            画布 MCP（Codex :17371）
+          </div>
+          <p className="muted" style={{ fontSize: 11 }}>
+            与项目对话分离。仅外部 MCP/Codex 需要时连接。
+          </p>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn"
+              data-sg-no-autoclick="1"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const r = await startCanvasAgent();
+                push("system", r.message || (r.ok ? "画布 MCP 已连接" : "连接失败"));
+                await refreshMcp();
+                setBusy(false);
+              }}
+            >
+              {mcpOn ? "MCP 已连接" : "连接画布MCP"}
+            </button>
+            <span className="muted" style={{ fontSize: 11 }}>
+              {mcpUrl || ":17371"}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "tools" ? (
+        <div className="sg-agent-scroll">
+          <p className="muted" style={{ fontSize: 11 }}>
+            拓展中心 Skill / 插件（与剪辑 Agent 同源）。
+          </p>
+          <div className="btn-row" style={{ marginBottom: 6 }}>
+            <input
+              style={{ flex: 1 }}
+              placeholder="搜索工具…"
+              value={toolFilter}
+              onChange={(e) => setToolFilter(e.target.value)}
+            />
+            <button type="button" className="btn" onClick={() => void refreshTools()}>
+              刷新
+            </button>
+          </div>
+          {filteredTools.length === 0 ? (
+            <p className="muted">暂无工具。请打开一次「拓展中心」或「剪辑」页。</p>
+          ) : (
+            filteredTools.map((t) => (
+              <div key={`${t.extension_id}:${t.tool_id}`} className="sg-tool-row">
+                <div>
+                  <strong>{t.tool_name || t.tool_id}</strong>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {t.extension_type} · {t.extension_name}
+                    {t.description ? ` — ${t.description.slice(0, 60)}` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    const res = await runProjectToolViaHost({
+                      extension_id: t.extension_id,
+                      tool_id: t.tool_id,
+                      skill_id: t.extension_type === "skill" ? t.extension_id : "",
+                      agent_mode: agentMode,
+                      session_id: sid,
+                      approved: true,
+                    });
+                    push(
+                      "assistant",
+                      `运行 ${t.tool_name}: ${res.message || (res.ok ? "完成" : "失败")}`,
+                    );
+                    setTab("chat");
+                    setBusy(false);
+                  }}
+                >
+                  运行
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+      {tab === "budget" ? (
+        <div className="sg-agent-scroll">
+          <div className="btn-row" style={{ marginBottom: 10, gap: 6 }}>
+            <button type="button" className="btn" onClick={() => void refreshBudget()}>
+              {budgetLoading ? "加载中…" : "刷新数据"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                const v = window.prompt("设置预算上限（元，0 = 不限制）", String(budgetData?.budget_limit || 0));
+                if (v == null) return;
+                const limit = parseFloat(v) || 0;
+                try {
+                  await fetch(`${BRIDGE}/host/budget/set`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-Shiguang-Token": sessionStorage.getItem("sg_token") || "" },
+                    body: JSON.stringify({ budget_limit: limit, project_budget: 0 }),
+                  });
+                  push("system", `预算上限已设置为 ¥${limit.toFixed(2)}`);
+                  await refreshBudget();
+                } catch {
+                  push("system", "设置失败，请确认桥已连通");
+                }
+              }}
+              disabled={!budgetData}
+            >
+              设置预算
+            </button>
+            {budgetData?.over_budget ? (
+              <span style={{ color: "#ef4444", fontSize: 11, alignSelf: "center" }}>⚠️ 已超支</span>
+            ) : null}
+          </div>
+          {!budgetData ? (
+            <p className="muted" style={{ fontSize: 12 }}>
+              {budgetLoading ? "连接 budget 端点中…" : "预算数据不可用。请确认剪辑服务已启动。"}
+            </p>
+          ) : (
+            <>
+              {/* 总览卡 */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <div className="sg-budget-card" style={{ background: "#1e293b" }}>
+                  <div className="sg-budget-label">累计成本</div>
+                  <div className="sg-budget-value" style={{ color: budgetData.over_budget ? "#ef4444" : "#22d3ee" }}>
+                    ¥ {budgetData.total_cost.toFixed(4)}
+                  </div>
+                </div>
+                <div className="sg-budget-card" style={{ background: "#1e293b" }}>
+                  <div className="sg-budget-label">NG 次数</div>
+                  <div className="sg-budget-value" style={{ color: "#f59e0b" }}>{budgetData.ng_count}</div>
+                </div>
+                {budgetData.budget_limit > 0 ? (
+                  <div className="sg-budget-card" style={{ background: "#1e293b" }}>
+                    <div className="sg-budget-label">预算上限</div>
+                    <div className="sg-budget-value">¥ {budgetData.budget_limit.toFixed(2)}</div>
+                  </div>
+                ) : null}
+              </div>
+              {/* Provider 详情 */}
+              {Object.keys(budgetData.providers || {}).length > 0 ? (
+                <div>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>按 Provider 聚合</div>
+                  {Object.entries(budgetData.providers).map(([p, v]: [string, any]) => (
+                    <div key={p} className="sg-budget-row">
+                      <strong>{p}</strong>
+                      <span className="muted">
+                        {v.calls} 次 · {v.tokens?.toLocaleString?.() || v.tokens} tokens · 成功率 {(v.success_rate * 100).toFixed(0)}%
+                      </span>
+                      <span className="sg-budget-cost">¥ {v.cost.toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted" style={{ fontSize: 12 }}>暂无 AI 调用记录。</p>
+              )}
+              {/* 最近调用 */}
+              {recentCalls.length > 0 ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>最近 {recentCalls.length} 次调用</div>
+                  {recentCalls.map((c, i) => (
+                    <div key={i} className="sg-budget-row">
+                      <strong>{c.provider}</strong>
+                      <span className="muted">
+                        {c.model} · {c.prompt_tokens}+{c.completion_tokens} tokens · {c.duration_ms?.toFixed?.(0) || c.duration_ms}ms
+                      </span>
+                      <span className="sg-budget-cost">¥ {c.cost?.toFixed?.(4) || c.cost}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+      <ConfirmDialog
+        open={!!confirmBox}
+        title={confirmBox?.title}
+        message={confirmBox?.message || ""}
+        danger={confirmBox?.danger}
+        confirmLabel="执行"
+        cancelLabel="取消"
+        onConfirm={() => {
+          confirmBox?.resolve(true);
+          setConfirmBox(null);
+        }}
+        onCancel={() => {
+          confirmBox?.resolve(false);
+          setConfirmBox(null);
+        }}
+      />
+    </aside>
+  );
+}

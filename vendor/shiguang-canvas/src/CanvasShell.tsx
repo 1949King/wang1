@@ -9,14 +9,67 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { type NodeData, type ViewMode } from "./store";
-import { nodeTypes } from "./nodes";
-import { readFileAsDataUrl, type BridgePrefs, type ImageModelOption } from "./bridge";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import {
+  readFileAsDataUrl,
+  resolveMediaUrl,
+  type BridgePrefs,
+  type ImageModelOption,
+  type VideoModelOption,
+  type AudioModelOption,
+  type MusicModelOption,
+  getAgentStatus,
+  startCanvasAgent,
+} from "./bridge";
 import AppNav, { type AppRoute } from "./AppNav";
+import type { PromptItem } from "./promptLibrary";
 import HomeLanding from "./HomeLanding";
-import StudioPage from "./StudioPages";
+import NodePalette, { buildAddNodeItems, isBuiltinNodeKind } from "./NodePalette";
+import CommandPalette, { type CommandItem } from "./CommandPalette";
+import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
+import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
+import { LibTvBottomDock, LibTvEmptyState, LibTvPaneContextMenu, type CtxPaneAction, type EmptyCardId } from "./LibTvChrome";
+import { type NodeData, type ViewMode, type CanvasLayoutMode, useCanvasStore } from "./store";
+import {
+  ANGLE_PRESETS,
+  FOCAL_PRESETS,
+  MOVEMENT_OPTIONS,
+  buildCameraPromptBlock,
+} from "./shotCamera";
+// nodeTypes 改为从 registry 动态读（内置节点 + 插件节点统一入口）
+import { buildNodeTypes, useNodeRegistryVersion } from "./plugins/node-registry";
+
+/** 重面板按需分包：缩短首屏 JS，打开对应模式/侧栏再拉 chunk */
+const PromptLibraryPanel = lazy(() => import("./PromptLibraryPanel"));
+const StudioPage = lazy(() => import("./StudioPages"));
+const ImageStudio = lazy(() => import("./ImageStudio"));
+const VideoStudio = lazy(() => import("./VideoStudio"));
+const PluginManagerPanel = lazy(() => import("./PluginManagerPanel"));
+const MaskEditDialog = lazy(() => import("./MaskEditDialog"));
+const AgentPanel = lazy(() => import("./AgentPanel"));
+
+function PanelFallback({ label }: { label: string }) {
+  return (
+    <div className="sg-panel-fallback" style={{ color: "#8b9bb0", padding: "12px 8px", fontSize: 12 }}>
+      正在加载{label}…
+    </div>
+  );
+}
+
+type CtxMenu =
+  | { mode: "pane"; clientX: number; clientY: number; flow: { x: number; y: number } }
+  | { mode: "node"; clientX: number; clientY: number; nodeId: string }
+  | { mode: "edge"; clientX: number; clientY: number; edgeId: string };
+
+type PaletteState = {
+  open: boolean;
+  clientX: number;
+  clientY: number;
+  flow: { x: number; y: number };
+};
 
 export function FrameSlot({
   label,
@@ -58,6 +111,54 @@ export function FrameSlot({
   );
 }
 
+export function VideoRefSlot({
+  label,
+  url,
+  name,
+  onPick,
+  onClear,
+}: {
+  label: string;
+  url?: string;
+  name?: string;
+  onPick: (url: string, fileName: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      {url ? (
+        <div className="video-ref-box">
+          <video src={url} muted playsInline controls />
+          <div className="muted tiny">{name || "参考视频"}</div>
+          <button type="button" className="btn" onClick={onClear}>
+            清除
+          </button>
+        </div>
+      ) : null}
+      <label className="file-btn">
+        选择视频片段…
+        <input
+          type="file"
+          accept="video/*"
+          hidden
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (!f) return;
+            const res = await resolveMediaUrl(f);
+            if (!res.ok || !res.url) {
+              window.alert(res.message || "上传参考视频失败");
+              return;
+            }
+            onPick(res.url, f.name);
+          }}
+        />
+      </label>
+    </div>
+  );
+}
+
 export type CanvasShellProps = {
   viewMode: ViewMode;
   setViewMode: (m: ViewMode) => void;
@@ -68,6 +169,19 @@ export type CanvasShellProps = {
   imageModels: ImageModelOption[];
   selectedModelKey: string;
   setSelectedModelKey: (k: string) => void;
+  compareModelKey: string;
+  setCompareModelKey: (k: string) => void;
+  videoModels: VideoModelOption[];
+  selectedVideoModelKey: string;
+  setSelectedVideoModelKey: (k: string) => void;
+  compareVideoModelKey: string;
+  setCompareVideoModelKey: (k: string) => void;
+  audioModels: AudioModelOption[];
+  selectedAudioModelKey: string;
+  setSelectedAudioModelKey: (k: string) => void;
+  musicModels: MusicModelOption[];
+  selectedMusicModelKey: string;
+  setSelectedMusicModelKey: (k: string) => void;
   breakdownDraft: string;
   setBreakdownDraft: (v: string) => void;
   templates: { id: string; name: string; savedAt: string }[];
@@ -75,33 +189,62 @@ export type CanvasShellProps = {
   episode: string;
   setMeta: (dramaTitle: string, episode: string) => void;
   selectedData: NodeData | null;
-  nodes: Node[];
-  edges: Edge[];
-  onNodesChange: OnNodesChange;
-  onEdgesChange: OnEdgesChange;
-  onConnect: OnConnect;
+  /** nodes/edges/onNodesChange/onEdgesChange/onConnect 改从 store 直取，避免 App.tsx 重渲染链 */
   onSelectionChange: (params: { nodes: Node[] }) => void;
   updateSelectedData: (patch: Record<string, unknown>) => void;
-  addNode: (type: NodeData["kind"]) => void;
+  addNode: (type: NodeData["kind"], pos?: { x: number; y: number }) => void;
+  addRegistryNode: (type: string, pos?: { x: number; y: number }) => void;
   addStoryboardGrid: (count?: 9 | 25) => void;
   addThreeView: () => void;
   addVariants: (axis?: "表情" | "服装" | "背景", count?: number) => void;
   removeSelected: () => void;
-  saveProject: () => void;
+  deleteEdge: (edgeId: string) => void;
+  duplicateSelected: () => void;
+  copySelected: () => void;
+  pasteClipboard: (pos?: { x: number; y: number }) => void;
+  selectAll: () => void;
+  undoGraph: () => void;
+  redoGraph: () => void;
+  clearSelection: () => void;
+  alignSelected: (mode: "left" | "center" | "top" | "middle" | "distribute-h") => void;
+  beginGraphEdit: () => void;
+  saveProject: (opts?: { silent?: boolean }) => void;
   loadProject: () => void;
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
   deleteTemplate: (id: string) => void;
   refreshTemplates: () => void;
   onGenerate: () => void;
+  onCompareGenerate: () => void;
+  onMultiAngleGenerate: () => void;
+  onExportSkill: () => void;
+  onImportSkill: (file: File) => void;
+  onSetPrimaryVideo: (nodeId: string, videoId: string) => void;
   onBatchGenerate: () => void;
   onAbortBatch: () => void;
   onSendToEditor: () => void;
   onSendAllToEditor: () => void;
   onSyncModels: () => void;
+  onApplyPromptLibrary: (item: PromptItem) => void;
   onBreakdown: () => void;
   onExportStoryboard: () => void;
+  onInpaint: (mask: string, prompt: string) => void;
+  onSetPrimaryImage: (nodeId: string, imageId: string) => void;
+  onGroupSelected: () => void;
+  onExportZip: () => void;
+  onImportZip: (file: File) => void;
+  onApplyImageTool: (tool: "crop916" | "split2" | "split3" | "upscale" | "rotate90") => void;
+  onSetNodeAudio: (dataUrl: string) => void;
   stage3dContent?: React.ReactNode;
+  onSendStudioToCanvas: (payload: {
+    kind: "image" | "video" | "prompt";
+    title: string;
+    prompt?: string;
+    text?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    posterUrl?: string;
+  }) => void;
 };
 
 export default function CanvasShell(props: CanvasShellProps) {
@@ -115,6 +258,19 @@ export default function CanvasShell(props: CanvasShellProps) {
     imageModels,
     selectedModelKey,
     setSelectedModelKey,
+    compareModelKey,
+    setCompareModelKey,
+    videoModels,
+    selectedVideoModelKey,
+    setSelectedVideoModelKey,
+    compareVideoModelKey,
+    setCompareVideoModelKey,
+    audioModels,
+    selectedAudioModelKey,
+    setSelectedAudioModelKey,
+    musicModels,
+    selectedMusicModelKey,
+    setSelectedMusicModelKey,
     breakdownDraft,
     setBreakdownDraft,
     templates,
@@ -122,18 +278,30 @@ export default function CanvasShell(props: CanvasShellProps) {
     episode,
     setMeta,
     selectedData,
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
     onSelectionChange,
     updateSelectedData,
     addNode,
+    addRegistryNode,
     addStoryboardGrid,
     addThreeView,
     addVariants,
     removeSelected,
+    deleteEdge,
+    duplicateSelected,
+    copySelected,
+    pasteClipboard,
+    selectAll,
+    undoGraph,
+    redoGraph,
+    clearSelection,
+    // 角色库对接（Step A）
+    characters,
+    refreshCharacters,
+    bindCharacterToShot,
+    unbindCharacterFromShot,
+    syncCharacterToShot,
+    alignSelected,
+    beginGraphEdit,
     saveProject,
     loadProject,
     saveTemplate,
@@ -141,40 +309,322 @@ export default function CanvasShell(props: CanvasShellProps) {
     deleteTemplate,
     refreshTemplates,
     onGenerate,
+    onCompareGenerate,
+    onMultiAngleGenerate,
+    onExportSkill,
+    onImportSkill,
+    onSetPrimaryVideo,
     onBatchGenerate,
     onAbortBatch,
     onSendToEditor,
     onSendAllToEditor,
     onSyncModels,
+    onApplyPromptLibrary,
     onBreakdown,
     onExportStoryboard,
+    onInpaint,
+    onSetPrimaryImage,
+    onGroupSelected,
+    onExportZip,
+    onImportZip,
+    onApplyImageTool,
+    onSetNodeAudio,
     stage3dContent,
+    onSendStudioToCanvas,
   } = props;
 
-  const showcaseItems = nodes
-    .map((n) => {
-      const d = n.data as NodeData;
-      const cover =
-        ("imageUrl" in d && d.imageUrl) ||
-        ("posterUrl" in d && d.posterUrl) ||
-        ("firstFrameUrl" in d && d.firstFrameUrl) ||
-        "";
-      if (!cover) return null;
-      return {
-        id: n.id,
-        title: ("title" in d && d.title) || n.id,
-        prompt: ("prompt" in d && d.prompt) || ("text" in d && d.text) || "",
-        coverUrl: cover,
-        tags: [d.kind],
+  const rfRef = useRef<ReactFlowInstance | null>(null);
+  // 从 registry 动态读 nodeTypes：内置节点 + 插件节点统一入口
+  const registryVersion = useNodeRegistryVersion((s) => s.version);
+  const registryNodeTypes = useMemo(() => buildNodeTypes(), [registryVersion]);
+  const addNodeItems = useMemo(() => buildAddNodeItems(), [registryVersion]);
+  const pickNodeByType = (type: string, pos?: { x: number; y: number }) => {
+    if (isBuiltinNodeKind(type)) addNode(type, pos);
+    else addRegistryNode(type, pos);
+  };
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const [palette, setPalette] = useState<PaletteState>({
+    open: false,
+    clientX: 120,
+    clientY: 120,
+    flow: { x: 160, y: 120 },
+  });
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const lastPointerRef = useRef({ clientX: 200, clientY: 200 });
+  const [spacePan, setSpacePan] = useState(false);
+  const [snapGrid, setSnapGrid] = useState(true);
+  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("shiguang-canvas:left-collapsed") === "1");
+  const [rightCollapsed, setRightCollapsed] = useState(() => localStorage.getItem("shiguang-canvas:right-collapsed") === "1");
+  // 持久化折叠偏好：用户手动折叠/展开后记住
+  useEffect(() => { localStorage.setItem("shiguang-canvas:left-collapsed", leftCollapsed ? "1" : "0"); }, [leftCollapsed]);
+  useEffect(() => { localStorage.setItem("shiguang-canvas:right-collapsed", rightCollapsed ? "1" : "0"); }, [rightCollapsed]);
+  const [autoSavedAt, setAutoSavedAt] = useState<string>("");
+  const [agentListening, setAgentListening] = useState(false);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentUrl, setAgentUrl] = useState("");
+  const [maskOpen, setMaskOpen] = useState(false);
+  const [zoomPct, setZoomPct] = useState(100);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const skillImportRef = useRef<HTMLInputElement>(null);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem("shiguang-canvas:agent-dock:open");
+      // LibTV 空画布默认收起 Agent，避免挡四卡
+      return v === null ? false : v === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const selectedId = useCanvasStore((s) => s.selectedId);
+  const setNodeImage = useCanvasStore((s) => s.setNodeImage);
+  const canvasLayoutMode = useCanvasStore((s) => s.canvasLayoutMode);
+  const setCanvasLayoutMode = useCanvasStore((s) => s.setCanvasLayoutMode);
+  const directorTargetNodeId = useCanvasStore((s) => s.directorTargetNodeId);
+  const addVideoReference = useCanvasStore((s) => s.addVideoReference);
+  /** 脏版本号：仅在节点/连线实际变更时 +1，替代订阅整个 nodes/edges 数组做 auto-save 触发源 */
+  const dirtyVersion = useCanvasStore((s) => s.dirtyVersion);
+  /** 高频变化项：从 store 直取，避免 App.tsx 每次 nodes/edges 变化都重渲染并向下传递 */
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
+  const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
+  const onConnect = useCanvasStore((s) => s.onConnect);
+  const exportProjectJSON = useCanvasStore((s) => s.exportProjectJSON);
+
+  // ===== 画布 Tab bar（多画布快速切换）=====
+  const activeProjectId = useCanvasStore((s) => s.activeProjectId);
+  const activeCanvasId = useCanvasStore((s) => s.activeCanvasId);
+  const listCanvases = useCanvasStore((s) => s.listCanvases);
+  const switchCanvas = useCanvasStore((s) => s.switchCanvas);
+  const createCanvas = useCanvasStore((s) => s.createCanvas);
+  const renameCanvas = useCanvasStore((s) => s.renameCanvas);
+  const deleteCanvas = useCanvasStore((s) => s.deleteCanvas);
+
+  const flowEdges = canvasLayoutMode === "flow" ? edges : [];
+  const storyboardShots = useMemo(
+    () =>
+      nodes
+        .filter((n) => (n.data as NodeData).kind === "shot")
+        .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x),
+    [nodes],
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("shiguang-canvas:agent-dock:open", agentPanelOpen ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [agentPanelOpen]);
+
+  const refreshAgentStatus = async () => {
+    const ag = await getAgentStatus();
+    const on = Boolean(ag.listening || (ag.ok && ag.token));
+    setAgentListening(on);
+    setAgentUrl(String(ag.url || ""));
+    return ag;
+  };
+
+  useEffect(() => {
+    void refreshAgentStatus();
+    const t = window.setInterval(() => {
+      void refreshAgentStatus();
+    }, 8000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const selectedCount = nodes.filter((n) => n.selected).length || (selectedData ? 1 : 0);
+
+  const openPaletteAt = (clientX: number, clientY: number) => {
+    const flow =
+      rfRef.current?.screenToFlowPosition({ x: clientX, y: clientY }) || {
+        x: 160,
+        y: 120,
       };
-    })
-    .filter(Boolean) as {
-    id: string;
-    title: string;
-    prompt: string;
-    coverUrl?: string;
-    tags?: string[];
-  }[];
+    setCtxMenu(null);
+    setPalette({ open: true, clientX, clientY, flow });
+  };
+
+  useEffect(() => {
+    const down = (ev: KeyboardEvent) => {
+      if (ev.code === "Space" && viewMode === "canvas") {
+        const t = ev.target as HTMLElement | null;
+        if (t?.closest?.("input, textarea, select, [contenteditable='true']")) return;
+        if (!ev.repeat) setSpacePan(true);
+        ev.preventDefault();
+      }
+    };
+    const up = (ev: KeyboardEvent) => {
+      if (ev.code === "Space") setSpacePan(false);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [viewMode]);
+
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (viewMode !== "canvas") return;
+      const t = ev.target as HTMLElement | null;
+      const typing = Boolean(t?.closest?.("input, textarea, select, [contenteditable='true']"));
+      const key = ev.key;
+
+      if (palette.open || cmdOpen) {
+        if (key === "Escape") {
+          ev.preventDefault();
+          setPalette((p) => ({ ...p, open: false }));
+          setCmdOpen(false);
+        }
+        return;
+      }
+
+      const mod = ev.ctrlKey || ev.metaKey;
+      if (mod && (key.toLowerCase() === "k" || key.toLowerCase() === "p") && !ev.shiftKey) {
+        ev.preventDefault();
+        setPalette((p) => ({ ...p, open: false }));
+        setCmdOpen(true);
+        return;
+      }
+
+      if (typing) return;
+
+      if (key === "Escape") {
+        ev.preventDefault();
+        clearSelection();
+        setCtxMenu(null);
+        return;
+      }
+      if (key.toLowerCase() === "f" && !ev.ctrlKey && !ev.metaKey) {
+        ev.preventDefault();
+        rfRef.current?.fitView({ padding: 0.18, duration: 220 });
+        return;
+      }
+      if (key === "Delete" || key === "Backspace") {
+        ev.preventDefault();
+        removeSelected();
+        setCtxMenu(null);
+      } else if (key === "/" || key === "Tab") {
+        ev.preventDefault();
+        openPaletteAt(lastPointerRef.current.clientX, lastPointerRef.current.clientY);
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "d") {
+        ev.preventDefault();
+        duplicateSelected();
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "c") {
+        ev.preventDefault();
+        copySelected();
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "v") {
+        ev.preventDefault();
+        const flow =
+          rfRef.current?.screenToFlowPosition({
+            x: lastPointerRef.current.clientX,
+            y: lastPointerRef.current.clientY,
+          }) || undefined;
+        pasteClipboard(flow);
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "a") {
+        ev.preventDefault();
+        selectAll();
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "s") {
+        ev.preventDefault();
+        saveProject();
+        setAutoSavedAt(new Date().toLocaleTimeString());
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "z" && !ev.shiftKey) {
+        ev.preventDefault();
+        undoGraph();
+      } else if (
+        ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "y") ||
+        ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && key.toLowerCase() === "z")
+      ) {
+        ev.preventDefault();
+        redoGraph();
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "g") {
+        ev.preventDefault();
+        onGroupSelected();
+      } else if ((ev.ctrlKey || ev.metaKey) && key === "Enter") {
+        ev.preventDefault();
+        onGenerate();
+      } else if ((ev.ctrlKey || ev.metaKey) && key.toLowerCase() === "e") {
+        ev.preventDefault();
+        onSendToEditor();
+      } else if (key === "?" || key.toLowerCase() === "h") {
+        ev.preventDefault();
+        setCmdOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    viewMode,
+    palette.open,
+    cmdOpen,
+    removeSelected,
+    duplicateSelected,
+    copySelected,
+    pasteClipboard,
+    selectAll,
+    undoGraph,
+    redoGraph,
+    clearSelection,
+    saveProject,
+    onGroupSelected,
+    onGenerate,
+    onSendToEditor,
+  ]);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [ctxMenu]);
+
+  // 自动保存工程（防抖）— 只依赖 dirtyVersion，避免订阅 nodes/edges 数组导致拖拽时频繁触发
+  useEffect(() => {
+    if (viewMode !== "canvas") return;
+    const t = window.setTimeout(() => {
+      saveProject({ silent: true });
+      setAutoSavedAt(new Date().toLocaleTimeString());
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [dirtyVersion, dramaTitle, episode, viewMode, saveProject]);
+
+  const libShowcase = showcaseFromLibrary(6);
+  const showcaseItems = (() => {
+    const fromNodes = nodes
+      .map((n) => {
+        const d = n.data as NodeData;
+        const cover =
+          ("imageUrl" in d && d.imageUrl) ||
+          ("posterUrl" in d && d.posterUrl) ||
+          ("firstFrameUrl" in d && d.firstFrameUrl) ||
+          "";
+        if (!cover) return null;
+        return {
+          id: n.id,
+          title: ("title" in d && d.title) || n.id,
+          prompt: ("prompt" in d && d.prompt) || ("text" in d && d.text) || "",
+          coverUrl: cover,
+          tags: [d.kind],
+        };
+      })
+      .filter(Boolean) as {
+      id: string;
+      title: string;
+      prompt: string;
+      coverUrl?: string;
+      tags?: string[];
+    }[];
+    if (libShowcase.length > 0) return libShowcase;
+    return fromNodes;
+  })();
 
   const assetCount = nodes.filter((n) => {
     const d = n.data as NodeData;
@@ -190,10 +640,64 @@ export default function CanvasShell(props: CanvasShellProps) {
       ? "projects"
       : (viewMode as AppRoute);
 
+  const canvasCommands: CommandItem[] = useMemo(
+    () => [
+      { id: "add-node", label: "添加节点", hint: "搜索节点类型", shortcut: "/", keywords: "add node 添加", run: () => openPaletteAt(lastPointerRef.current.clientX, lastPointerRef.current.clientY) },
+      { id: "save", label: "保存工程", shortcut: "Ctrl+S", keywords: "save 保存", run: () => { saveProject(); setAutoSavedAt(new Date().toLocaleTimeString()); } },
+      { id: "undo", label: "撤销", shortcut: "Ctrl+Z", run: () => undoGraph() },
+      { id: "redo", label: "重做", shortcut: "Ctrl+Y", run: () => redoGraph() },
+      { id: "copy", label: "复制选中", shortcut: "Ctrl+C", run: () => copySelected() },
+      { id: "paste", label: "粘贴", shortcut: "Ctrl+V", run: () => pasteClipboard() },
+      { id: "dup", label: "原地复制", shortcut: "Ctrl+D", run: () => duplicateSelected() },
+      { id: "select-all", label: "全选", shortcut: "Ctrl+A", run: () => selectAll() },
+      { id: "delete", label: "删除选中", shortcut: "Delete", run: () => removeSelected() },
+      { id: "group", label: "编组选中", shortcut: "Ctrl+G", keywords: "group 编组", run: () => onGroupSelected() },
+      { id: "fit", label: "适配视野", shortcut: "F", keywords: "fit 聚焦", run: () => rfRef.current?.fitView({ padding: 0.18, duration: 220 }) },
+      { id: "generate", label: "生成选中节点", shortcut: "Ctrl+Enter", keywords: "generate 生图", run: () => onGenerate() },
+      { id: "send", label: "选中入轨", shortcut: "Ctrl+E", keywords: "editor 入轨 剪辑", run: () => onSendToEditor() },
+      { id: "send-all", label: "全部入轨", keywords: "editor 入轨", run: () => onSendAllToEditor() },
+      { id: "breakdown", label: "一键拉片", keywords: "breakdown 分镜", run: () => onBreakdown() },
+      { id: "stage3d", label: "打开 3D 导演台", keywords: "3d stage", run: () => { useCanvasStore.getState().clearDirectorTarget(); setViewMode("stage3d"); } },
+      { id: "agent", label: "打开 Agent 面板", keywords: "agent 对话", run: () => setAgentPanelOpen(true) },
+    ],
+    [
+      saveProject, undoGraph, redoGraph, copySelected, pasteClipboard, duplicateSelected,
+      selectAll, removeSelected, onGroupSelected, onGenerate, onSendToEditor, onSendAllToEditor, onBreakdown, setViewMode,
+    ],
+  );
+
   const showWorkspace = viewMode === "canvas";
   const showStage = viewMode === "stage3d" && Boolean(stage3dContent);
+  const showImageStudio = viewMode === "image";
+  const showVideoStudio = viewMode === "video";
   const showStudio =
-    viewMode !== "home" && viewMode !== "canvas" && viewMode !== "stage3d";
+    viewMode === "projects" ||
+    viewMode === "prompts" ||
+    viewMode === "assets" ||
+    viewMode === "settings";
+
+  const insertPrompt = (p: LocalPrompt) => {
+    onSendStudioToCanvas({ kind: "prompt", title: p.title, text: p.text, prompt: p.text });
+  };
+  const insertAsset = (a: LocalAsset) => {
+    if (a.kind === "video") {
+      onSendStudioToCanvas({
+        kind: "video",
+        title: a.title,
+        videoUrl: a.url,
+        prompt: a.prompt || "",
+      });
+    } else if (a.kind === "image") {
+      onSendStudioToCanvas({
+        kind: "image",
+        title: a.title,
+        imageUrl: a.url,
+        prompt: a.prompt || "",
+      });
+    } else {
+      onSendStudioToCanvas({ kind: "prompt", title: a.title, text: a.prompt || a.title });
+    }
+  };
 
   return (
     <div className="shell">
@@ -212,16 +716,43 @@ export default function CanvasShell(props: CanvasShellProps) {
         />
       ) : null}
 
+      {showImageStudio ? (
+        <Suspense fallback={<PanelFallback label="图片工作室" />}>
+          <ImageStudio
+            onOpenCanvas={() => setViewMode("canvas")}
+            onSyncModels={onSyncModels}
+            onSendToCanvas={(p) => onSendStudioToCanvas(p)}
+          />
+        </Suspense>
+      ) : null}
+
+      {showVideoStudio ? (
+        <Suspense fallback={<PanelFallback label="视频工作室" />}>
+          <VideoStudio
+            onOpenCanvas={() => setViewMode("canvas")}
+            onSyncModels={onSyncModels}
+            onSendToCanvas={(p) => onSendStudioToCanvas(p)}
+          />
+        </Suspense>
+      ) : null}
+
       {showStudio ? (
-        <StudioPage
-          route={viewMode}
-          onOpenCanvas={() => setViewMode("canvas")}
-          onOpenStage3d={() => setViewMode("stage3d")}
-          onSyncModels={onSyncModels}
-          templateCount={templates.length}
-          assetCount={assetCount}
-          status={status}
-        />
+        <Suspense fallback={<PanelFallback label="工作室页" />}>
+          <StudioPage
+            route={viewMode}
+            onOpenCanvas={() => setViewMode("canvas")}
+            onOpenStage3d={() => {
+              useCanvasStore.getState().clearDirectorTarget();
+              setViewMode("stage3d");
+            }}
+            onSyncModels={onSyncModels}
+            templateCount={templates.length}
+            assetCount={assetCount}
+            status={status}
+            onInsertPrompt={insertPrompt}
+            onInsertAsset={insertAsset}
+          />
+        </Suspense>
       ) : null}
 
       {showStage ? (
@@ -237,7 +768,9 @@ export default function CanvasShell(props: CanvasShellProps) {
             </div>
             <div className="spacer" />
             <div className="chip">
-              {prefs.active_provider_label || prefs.active_provider || "未同步"}
+              {directorTargetNodeId
+                ? "截图回写 · 已绑定导演台节点"
+                : prefs.active_provider_label || prefs.active_provider || "未同步"}
               {prefs.character_name ? ` · ${prefs.character_name}` : ""}
             </div>
           </header>
@@ -247,78 +780,290 @@ export default function CanvasShell(props: CanvasShellProps) {
 
       {showWorkspace ? (
         <>
-      <header className="topbar subbar">
-        <div className="brand">
-          拾光导演台
-          <span>LibTV 向</span>
-        </div>
-        <div className="seg">
+      <header className="topbar subbar libtv-topbar">
+        <div className="libtv-top-left">
+          <span className="libtv-logo" title="拾光导演台">
+            ⟦⟧
+          </span>
+          <WorkspaceCanvasMenus />
           <button
             type="button"
-            className="on"
-            onClick={() => setViewMode("canvas")}
+            className="libtv-icon-btn"
+            title="节点连线"
+            onClick={() => openPaletteAt(lastPointerRef.current.clientX, lastPointerRef.current.clientY)}
           >
-            画布
+            ⚭
           </button>
           <button
             type="button"
-            onClick={() => setViewMode("stage3d")}
+            className="libtv-icon-btn"
+            title="指令面板 Ctrl+K"
+            onClick={() => setCmdOpen(true)}
           >
+            ⌘
+          </button>
+          <button
+            type="button"
+            className="libtv-icon-btn"
+            title="侧栏"
+            onClick={() => {
+              setLeftCollapsed((v) => !v);
+              setRightCollapsed((v) => !v);
+            }}
+          >
+            ▥
+          </button>
+        </div>
+        <div className="seg">
+          <button type="button" className="on" onClick={() => setViewMode("canvas")}>
+            画布
+          </button>
+          <button type="button" onClick={() => {
+            useCanvasStore.getState().clearDirectorTarget();
+            setViewMode("stage3d");
+          }}>
             3D 导演台
           </button>
         </div>
-        <div className="spacer" />
-        <div className="chip">
-          {prefs.active_provider_label || prefs.active_provider || "未同步"}
-          {prefs.character_name ? ` · ${prefs.character_name}` : ""}
+        <div className="seg canvas-layout-seg" title="视图模式">
+          {(["flow", "simple", "storyboard"] as CanvasLayoutMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={canvasLayoutMode === m ? "on" : ""}
+              onClick={() => {
+                setCanvasLayoutMode(m);
+                if (m !== "flow") setRightCollapsed(false);
+              }}
+            >
+              {m === "flow" ? "节点" : m === "simple" ? "表单" : "分镜条"}
+            </button>
+          ))}
         </div>
-        <div className="top-actions">
-          <button className="btn primary" onClick={onGenerate} disabled={generating}>
-            {generating ? "生成中…" : "生成"}
+        <div className="spacer" />
+        <div className="libtv-top-right">
+          <div className="chip">
+            {prefs.active_provider_label || prefs.active_provider || "未同步"}
+          </div>
+          <button
+            type="button"
+            className={`libtv-agent-btn${agentPanelOpen ? " on" : ""}`}
+            onClick={() => setAgentPanelOpen((v) => !v)}
+          >
+            💬 Agent
           </button>
-          <button className="btn" onClick={onSendToEditor}>
-            入轨
-          </button>
-          <button className="btn teal" onClick={onSyncModels}>
-            同步
-          </button>
+          <div className="libtv-more-wrap">
+            <button type="button" className="libtv-icon-btn" onClick={() => setMoreOpen((v) => !v)}>
+              ☰
+            </button>
+            {moreOpen ? (
+              <div className="libtv-more-menu" onMouseLeave={() => setMoreOpen(false)}>
+                <button type="button" onClick={() => { undoGraph(); setMoreOpen(false); }}>撤销</button>
+                <button type="button" onClick={() => { onGenerate(); setMoreOpen(false); }} disabled={generating}>
+                  {generating ? "生成中…" : "生成选中"}
+                </button>
+                <button type="button" onClick={() => { onSendToEditor(); setMoreOpen(false); }}>入轨</button>
+                <button type="button" onClick={() => { onSyncModels(); setMoreOpen(false); }}>同步模型</button>
+                <button type="button" onClick={() => { onExportZip(); setMoreOpen(false); }}>导出 ZIP</button>
+                <button type="button" onClick={() => { setViewMode("settings"); setMoreOpen(false); }}>模型/Agent</button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
-        <div className="workspace">
-          <aside className="sidebar">
+        {activeProjectId ? (
+          <div className="canvas-tab-bar">
+            <div className="canvas-tabs">
+              {listCanvases().map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`canvas-tab${c.id === activeCanvasId ? " on" : ""}`}
+                  onClick={() => switchCanvas(c.id)}
+                  onDoubleClick={() => {
+                    const name = window.prompt("重命名画布", c.name);
+                    if (name && name.trim()) renameCanvas(c.id, name.trim());
+                  }}
+                  title={`${c.name} · ${c.nodeCount} 节点`}
+                >
+                  <span className="canvas-tab-name">{c.name}</span>
+                  <span className="canvas-tab-count">{c.nodeCount}</span>
+                  <span
+                    className="canvas-tab-close"
+                    role="button"
+                    aria-label="删除画布"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const canvases = listCanvases();
+                      if (canvases.length <= 1) {
+                        setStatus?.("至少保留一个画布");
+                        return;
+                      }
+                      if (window.confirm(`删除画布「${c.name}」？`)) deleteCanvas(c.id);
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="canvas-tab canvas-tab-add"
+                title="新建画布"
+                onClick={() => {
+                  const canvases = listCanvases();
+                  const name = window.prompt("新建画布名称", `画布 ${canvases.length + 1}`);
+                  createCanvas(name || undefined);
+                }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div
+          className={`workspace${leftCollapsed ? " left-collapsed" : ""}${rightCollapsed ? " right-collapsed" : ""}${agentPanelOpen ? " agent-open" : ""}${spacePan ? " space-pan" : ""}`}
+        >
+          <aside className={`sidebar${leftCollapsed ? " collapsed" : ""}`}>
+            {leftCollapsed ? null : (
+            <>
             <details className="panel" open>
-              <summary>添加</summary>
+              <summary>节点列表</summary>
+              <div className="panel-body node-locator">
+                {nodes.map((n) => {
+                  const d = n.data as NodeData;
+                  const title =
+                    ("title" in d && d.title) ||
+                    ("content" in d && String(d.content || "").slice(0, 12)) ||
+                    ("text" in d && String(d.text || "").slice(0, 12)) ||
+                    n.id;
+                  return (
+                    <button
+                      key={n.id}
+                      type="button"
+                      className={`node-locator-item${selectedId === n.id ? " on" : ""}`}
+                      onClick={() => {
+                        useCanvasStore.getState().setSelected(n.id);
+                        rfRef.current?.fitView({
+                          nodes: [{ id: n.id }],
+                          padding: 0.4,
+                          duration: 200,
+                        });
+                      }}
+                    >
+                      <span className="muted">{d.kind}</span> {title}
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+            <details className="panel" open>
+              <summary>添加节点</summary>
               <div className="panel-body">
+                <p className="muted" style={{ margin: "0 0 8px", fontSize: 11 }}>
+                  双击空白或按 <kbd>/</kbd> 搜索添加；也可把下方按钮<strong>拖到画布</strong>
+                </p>
                 <div className="btn-row">
-                  <button className="btn" onClick={() => addNode("script")}>
-                    剧本
+                  {addNodeItems.map((it) => (
+                    <button
+                      key={it.type}
+                      className="btn"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("application/shiguang-node", it.type);
+                        e.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={() => pickNodeByType(it.type)}
+                    >
+                      {it.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="btn-row">
+                  <button className="btn" onClick={duplicateSelected} disabled={!selectedData}>
+                    复制选中
                   </button>
-                  <button className="btn" onClick={() => addNode("shot")}>
-                    镜头
-                  </button>
-                  <button className="btn" onClick={() => addNode("prompt")}>
-                    提示词
-                  </button>
-                  <button className="btn" onClick={() => addNode("image")}>
-                    图片
-                  </button>
-                  <button className="btn" onClick={() => addNode("video")}>
-                    视频
-                  </button>
-                  <button className="btn primary" onClick={() => addStoryboardGrid(9)}>
-                    九宫格
+                  <button className="btn danger" onClick={removeSelected} disabled={!selectedData}>
+                    删除选中
                   </button>
                 </div>
+                <div className="btn-row">
+                  <button className="btn" onClick={undoGraph}>
+                    撤销
+                  </button>
+                  <button className="btn" onClick={redoGraph}>
+                    重做
+                  </button>
+                </div>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    openPaletteAt(lastPointerRef.current.clientX, lastPointerRef.current.clientY)
+                  }
+                >
+                  搜索添加节点…
+                </button>
+                <label className="btn teal" style={{ cursor: "pointer" }} title="上传本地视频作参考片段">
+                  + 参考视频
+                  <input
+                    type="file"
+                    accept="video/*"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      const res = await resolveMediaUrl(f);
+                      if (!res.ok || !res.url) {
+                        setStatus(res.message || "参考视频上传失败");
+                        return;
+                      }
+                      addVideoReference(res.url, { title: `参考·${f.name}`, name: f.name });
+                      setStatus(res.message || `已添加参考视频 ${f.name}`);
+                    }}
+                  />
+                </label>
+                <button className="btn primary" onClick={() => addStoryboardGrid(9)}>
+                  九宫格
+                </button>
                 <button className="btn" onClick={() => addStoryboardGrid(25)}>
                   二十五宫格
                 </button>
                 <button className="btn teal" onClick={addThreeView}>
                   角色三视图
                 </button>
-                <button className="btn" onClick={() => setViewMode("stage3d")}>
+                <button className="btn" onClick={() => {
+                  useCanvasStore.getState().clearDirectorTarget();
+                  setViewMode("stage3d");
+                }}>
                   打开 3D 导演台
                 </button>
+              </div>
+            </details>
+
+            <details className="panel">
+              <summary>插件管理</summary>
+              <div className="panel-body">
+                <Suspense fallback={<PanelFallback label="插件管理" />}>
+                  <PluginManagerPanel onStatus={setStatus} />
+                </Suspense>
+              </div>
+            </details>
+
+            <details className="panel" open>
+              <summary>提示词库</summary>
+              <div className="panel-body">
+                <Suspense fallback={<PanelFallback label="提示词库" />}>
+                  <PromptLibraryPanel
+                    onApply={onApplyPromptLibrary}
+                    onStatus={(msg) => {
+                      const el = document.getElementById("sg-status");
+                      if (el) el.textContent = msg;
+                    }}
+                  />
+                </Suspense>
               </div>
             </details>
 
@@ -355,7 +1100,7 @@ export default function CanvasShell(props: CanvasShellProps) {
               <summary>生成 / 入轨</summary>
               <div className="panel-body">
                 <div className="field">
-                  <label>AIGC 模型</label>
+                  <label>生图模型</label>
                   <select
                     value={selectedModelKey}
                     onChange={(e) => setSelectedModelKey(e.target.value)}
@@ -374,8 +1119,113 @@ export default function CanvasShell(props: CanvasShellProps) {
                     )}
                   </select>
                 </div>
+                <div className="field">
+                  <label>生视频模型</label>
+                  <select
+                    value={selectedVideoModelKey}
+                    onChange={(e) => setSelectedVideoModelKey(e.target.value)}
+                  >
+                    {videoModels.length === 0 ? (
+                      <option value="">无视频模型（选中视频节点会诚实失败）</option>
+                    ) : (
+                      videoModels.map((m) => (
+                        <option
+                          key={`v_${m.channel_id}::${m.model}`}
+                          value={`${m.channel_id}::${m.model}`}
+                        >
+                          {m.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>TTS 模型</label>
+                  <select
+                    value={selectedAudioModelKey}
+                    onChange={(e) => setSelectedAudioModelKey(e.target.value)}
+                  >
+                    {audioModels.length === 0 ? (
+                      <option value="">无 TTS 模型（走本地 edge-tts 降级）</option>
+                    ) : (
+                      audioModels.map((m) => (
+                        <option
+                          key={`a_${m.channel_id}::${m.model}`}
+                          value={`${m.channel_id}::${m.model}`}
+                        >
+                          {m.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>对比模型（TapNow 式 A/B）</label>
+                  <select
+                    value={compareModelKey}
+                    onChange={(e) => setCompareModelKey(e.target.value)}
+                  >
+                    {imageModels.length < 2 ? (
+                      <option value="">需至少 2 个生图模型</option>
+                    ) : (
+                      imageModels.map((m) => (
+                        <option
+                          key={`cmp_${m.channel_id}::${m.model}`}
+                          value={`${m.channel_id}::${m.model}`}
+                        >
+                          {m.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>对比视频模型</label>
+                  <select
+                    value={compareVideoModelKey}
+                    onChange={(e) => setCompareVideoModelKey(e.target.value)}
+                  >
+                    {videoModels.length < 2 ? (
+                      <option value="">需至少 2 个视频模型</option>
+                    ) : (
+                      videoModels.map((m) => (
+                        <option
+                          key={`vcmp_${m.channel_id}::${m.model}`}
+                          value={`${m.channel_id}::${m.model}`}
+                        >
+                          {m.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
                 <button className="btn primary" onClick={onGenerate} disabled={generating}>
-                  {generating ? "生成中…" : "生成选中"}
+                  {generating
+                    ? "生成中…"
+                    : selectedData?.kind === "video"
+                      ? "生成选中视频"
+                      : "生成选中"}
+                </button>
+                <button
+                  className="btn"
+                  onClick={onCompareGenerate}
+                  disabled={
+                    generating ||
+                    (selectedData?.kind === "video"
+                      ? videoModels.length < 2 || !compareVideoModelKey
+                      : selectedData?.kind === "shot" || selectedData?.kind === "image"
+                        ? imageModels.length < 2 || !compareModelKey
+                        : true)
+                  }
+                >
+                  双模型对比
+                </button>
+                <button
+                  className="btn"
+                  onClick={onMultiAngleGenerate}
+                  disabled={generating || selectedData?.kind !== "shot"}
+                >
+                  多角度预览
                 </button>
                 <button className="btn" onClick={onBatchGenerate} disabled={generating}>
                   批量生成
@@ -396,9 +1246,6 @@ export default function CanvasShell(props: CanvasShellProps) {
                 <button className="btn teal" onClick={onSyncModels}>
                   同步模型池
                 </button>
-                <button className="btn ghost" onClick={removeSelected}>
-                  删除选中
-                </button>
               </div>
             </details>
 
@@ -406,16 +1253,33 @@ export default function CanvasShell(props: CanvasShellProps) {
               <summary>工程</summary>
               <div className="panel-body">
                 <div className="btn-row">
-                  <button className="btn" onClick={saveProject}>
+                  <button className="btn" onClick={() => saveProject()}>
                     保存
                   </button>
-                  <button className="btn" onClick={loadProject}>
+                  <button className="btn" onClick={() => loadProject()}>
                     加载
                   </button>
                 </div>
                 <button className="btn" onClick={onExportStoryboard}>
                   导出分镜
                 </button>
+                <button className="btn" onClick={onExportSkill}>
+                  导出 Skill 包
+                </button>
+                <label className="btn" style={{ cursor: "pointer", textAlign: "center" }}>
+                  导入 Skill…
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    hidden
+                    ref={skillImportRef}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) void onImportSkill(f);
+                    }}
+                  />
+                </label>
                 <button
                   className="btn"
                   onClick={() => {
@@ -445,20 +1309,105 @@ export default function CanvasShell(props: CanvasShellProps) {
                 ))}
               </div>
             </details>
+            </>
+            )}
           </aside>
 
-          <div className="canvas-wrap">
+          <div
+            className="canvas-wrap"
+            onPointerMove={(e) => {
+              lastPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes("application/shiguang-node")) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }
+            }}
+            onDrop={(e) => {
+              const nodeType = e.dataTransfer.getData("application/shiguang-node");
+              if (!nodeType) return;
+              e.preventDefault();
+              const flow =
+                rfRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) || {
+                  x: 160,
+                  y: 120,
+                };
+              pickNodeByType(nodeType, flow);
+            }}
+          >
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={flowEdges}
+              className={canvasLayoutMode !== "flow" ? "canvas-simple-edges-off" : undefined}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               onSelectionChange={onSelectionChange}
-              nodeTypes={nodeTypes}
-              fitView
-              minZoom={0.2}
-              maxZoom={2}
+              onInit={(inst) => {
+                rfRef.current = inst;
+                inst.fitView({ padding: 0.2 });
+                setZoomPct(Math.round(inst.getZoom() * 100));
+              }}
+              onMoveEnd={(_, vp) => setZoomPct(Math.round(vp.zoom * 100))}
+              onNodeDragStart={() => beginGraphEdit()}
+              onPaneClick={(e) => {
+                setCtxMenu(null);
+                setPalette((p) => ({ ...p, open: false }));
+                if (e.detail === 2) {
+                  openPaletteAt(e.clientX, e.clientY);
+                }
+              }}
+              onPaneContextMenu={(e) => {
+                e.preventDefault();
+                const flow =
+                  rfRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) || {
+                    x: 120,
+                    y: 80,
+                  };
+                setPalette((p) => ({ ...p, open: false }));
+                setCtxMenu({
+                  mode: "pane",
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  flow,
+                });
+              }}
+              onNodeContextMenu={(e, node) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelectionChange({ nodes: [node] });
+                setPalette((p) => ({ ...p, open: false }));
+                setCtxMenu({
+                  mode: "node",
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  nodeId: node.id,
+                });
+              }}
+              onEdgeContextMenu={(e, edge) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPalette((p) => ({ ...p, open: false }));
+                setCtxMenu({
+                  mode: "edge",
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  edgeId: edge.id,
+                });
+              }}
+              onlyRenderVisibleElements
+              nodeTypes={registryNodeTypes}
+              minZoom={0.15}
+              maxZoom={2.5}
+              deleteKeyCode={null}
+              multiSelectionKeyCode="Shift"
+              selectionOnDrag={!spacePan}
+              panOnDrag={spacePan ? true : [1]}
+              panOnScroll
+              zoomOnScroll
+              snapToGrid={snapGrid}
+              snapGrid={[16, 16]}
               proOptions={{ hideAttribution: true }}
               colorMode="dark"
             >
@@ -466,10 +1415,344 @@ export default function CanvasShell(props: CanvasShellProps) {
               <MiniMap pannable zoomable />
               <Controls />
             </ReactFlow>
-            <div className="status-bar">{status}</div>
+            {nodes.length === 0 ? (
+              <LibTvEmptyState
+                onCard={(id: EmptyCardId) => {
+                  if (id === "script") {
+                    addNode("script");
+                    setStatus("已添加剧本节点，可继续一键拉片");
+                  } else if (id === "threeview") {
+                    addThreeView();
+                  } else if (id === "refvideo") {
+                    addNode("video");
+                    setStatus("已添加视频节点 · 可上传全能参考片段");
+                  } else {
+                    addNode("audio");
+                    addNode("video", { x: 360, y: 160 });
+                    setStatus("已添加音频 + 视频节点（音频生视频工作流起点）");
+                  }
+                }}
+              />
+            ) : null}
+            {canvasLayoutMode === "storyboard" && storyboardShots.length > 0 ? (
+              <div className="storyboard-strip" aria-label="分镜时间条">
+                {storyboardShots.map((n, i) => {
+                  const d = n.data as Extract<NodeData, { kind: "shot" }>;
+                  return (
+                    <button
+                      key={n.id}
+                      type="button"
+                      className={`storyboard-strip-item${selectedId === n.id ? " on" : ""}`}
+                      onClick={() => {
+                        useCanvasStore.getState().setSelected(n.id);
+                        rfRef.current?.fitView({
+                          nodes: [{ id: n.id }],
+                          padding: 0.55,
+                          duration: 220,
+                        });
+                      }}
+                    >
+                      <span className="idx">{String(i + 1).padStart(2, "0")}</span>
+                      {d.imageUrl ? (
+                        <img src={d.imageUrl} alt="" />
+                      ) : (
+                        <span className="ph">待生成</span>
+                      )}
+                      <span className="cap">{d.title || `镜 ${i + 1}`}</span>
+                      <span className="meta">{d.shotSize} · {d.duration}s</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <LibTvBottomDock
+              zoomPct={zoomPct}
+              onAdd={() =>
+                openPaletteAt(lastPointerRef.current.clientX, lastPointerRef.current.clientY)
+              }
+              onAssets={() => setViewMode("assets")}
+              onZoomFit={() => rfRef.current?.fitView({ padding: 0.2 })}
+              onHelp={() => setCmdOpen(true)}
+              onRole={() => {
+                addThreeView();
+                setStatus("已创建角色三视图（正面 / 侧面 / 背面）");
+              }}
+              onConnect={() => {
+                // 自动连线：按 y 坐标分层，把同层无出边节点连到下一层无入边节点
+                const ns = nodes;
+                if (ns.length < 2) { setStatus("至少需要 2 个节点才能自动连线"); return; }
+                const existing = new Set(edges.map((e) => `${e.source}→${e.target}`));
+                // 按 y 坐标近似分层（差值 < 80 算同一层）
+                const sorted = [...ns].sort((a, b) => (a.position.y + a.position.x * 0.1) - (b.position.y + b.position.x * 0.1));
+                let connected = 0;
+                // shot 节点优先按 x 顺序连（分镜序列）
+                const shots = sorted.filter((n) => (n.data as NodeData).kind === "shot");
+                if (shots.length >= 2) {
+                  for (let i = 0; i < shots.length - 1; i++) {
+                    const key = `${shots[i].id}→${shots[i + 1].id}`;
+                    if (!existing.has(key)) {
+                      onConnect({ source: shots[i].id, target: shots[i + 1].id });
+                      existing.add(key);
+                      connected++;
+                    }
+                  }
+                }
+                // 剩余节点按位置顺序连
+                const rest = sorted.filter((n) => (n.data as NodeData).kind !== "shot");
+                for (let i = 0; i < rest.length - 1; i++) {
+                  const key = `${rest[i].id}→${rest[i + 1].id}`;
+                  if (!existing.has(key)) {
+                    onConnect({ source: rest[i].id, target: rest[i + 1].id });
+                    existing.add(key);
+                    connected++;
+                  }
+                }
+                setStatus(connected > 0 ? `自动完成 ${connected} 条连线` : "所有节点已存在连线");
+              }}
+              onSend={() => {
+                if (!selectedId && !selectedData) { setStatus("请先选中至少一个节点再发送"); return; }
+                onSendToEditor();
+              }}
+              onShare={async () => {
+                const json = exportProjectJSON();
+                if (!json) { setStatus("导出失败：工程数据为空"); return; }
+                try {
+                  await navigator.clipboard.writeText(json);
+                  setStatus("已复制工程 JSON 到剪贴板");
+                } catch {
+                  // fallback：用临时 textarea
+                  const ta = document.createElement("textarea");
+                  ta.value = json;
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(ta);
+                  setStatus("已复制工程 JSON 到剪贴板");
+                }
+              }}
+              onBranch={() => {
+                if (!selectedId) { setStatus("请先选中一个节点再分支"); return; }
+                duplicateSelected();
+                setStatus("已从选中节点复制分支（原地复制）");
+              }}
+              onPreview={() => {
+                // 简单的预览：先 fitView 展示全貌，提示后续做真正的节点连线时序预览
+                rfRef.current?.fitView({ padding: 0.2 });
+                setStatus("预览模式：已聚焦全部节点 · 后续版本将支持节点连线时序播放");
+              }}
+              onHistory={() => {
+                // 简单展示：用 window.alert 列出可用的撤销步数
+                const past = useCanvasStore.getState().graphPast?.length ?? 0;
+                const future = useCanvasStore.getState().graphFuture?.length ?? 0;
+                setStatus(`历史栈：可撤销 ${past} 步，可重做 ${future} 步（Ctrl+Z / Ctrl+Y）`);
+              }}
+              onGallery={() => {
+                // 图库预览：统计当前画布的图片数量
+                const images = nodes.filter((n) => (n.data as NodeData).kind === "image");
+                const videos = nodes.filter((n) => (n.data as NodeData).kind === "video");
+                setStatus(`当前画布含 ${images.length} 张图片节点 · ${videos.length} 个视频节点 · 后续版本将支持缩略图网格浏览`);
+              }}
+            />
+            <input
+              ref={uploadRef}
+              type="file"
+              accept="image/*,video/*,audio/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                const flow =
+                  rfRef.current?.screenToFlowPosition({
+                    x: lastPointerRef.current.clientX,
+                    y: lastPointerRef.current.clientY,
+                  }) || { x: 160, y: 120 };
+                if (f.type.startsWith("image/")) {
+                  const url = await readFileAsDataUrl(f);
+                  addNode("image", flow);
+                  setNodeImage(useCanvasStore.getState().selectedId!, url);
+                  setStatus(`已添加图片节点 · ${f.name}`);
+                } else if (f.type.startsWith("video/")) {
+                  const res = await resolveMediaUrl(f);
+                  if (res.ok && res.url) {
+                    addNode("video", flow);
+                    setStatus(`已添加视频节点 · ${f.name}`);
+                  } else {
+                    setStatus(res.message || "上传视频失败");
+                  }
+                } else {
+                  addNode("audio", flow);
+                  setStatus(`已添加音频节点 · ${f.name}`);
+                }
+              }}
+            />
+            {selectedCount > 0 ? (
+              <div className="sel-toolbar">
+                <span className="sel-toolbar-count">已选 {selectedCount}</span>
+                <button type="button" className="btn primary" onClick={onGenerate} disabled={generating}>
+                  生成
+                </button>
+                <button type="button" className="btn" onClick={copySelected}>
+                  复制
+                </button>
+                <button type="button" className="btn" onClick={duplicateSelected}>
+                  原地复制
+                </button>
+                {selectedCount >= 2 ? (
+                  <>
+                    <button type="button" className="btn" onClick={() => alignSelected("left")}>
+                      左齐
+                    </button>
+                    <button type="button" className="btn" onClick={() => alignSelected("distribute-h")}>
+                      横分布
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" className="btn" onClick={onSendToEditor}>
+                  入轨
+                </button>
+                <button type="button" className="btn danger" onClick={removeSelected}>
+                  删除
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setSnapGrid((v) => !v)}
+                  title="切换网格吸附"
+                >
+                  吸附
+                </button>
+              </div>
+            ) : null}
+            <NodePalette
+              open={palette.open}
+              x={palette.clientX}
+              y={palette.clientY}
+              onClose={() => setPalette((p) => ({ ...p, open: false }))}
+              onPick={(type) => pickNodeByType(type, palette.flow)}
+            />
+            <CommandPalette
+              open={cmdOpen}
+              title="导演台指令"
+              items={canvasCommands}
+              onClose={() => setCmdOpen(false)}
+            />
+            {ctxMenu ? (
+              <div
+                className="ctx-menu"
+                style={{ left: ctxMenu.clientX, top: ctxMenu.clientY }}
+                onClick={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {ctxMenu.mode === "pane" ? (
+                  <LibTvPaneContextMenu
+                    onAction={(a: CtxPaneAction) => {
+                      const flow = ctxMenu.flow;
+                      if (a.type === "node") {
+                        addNode(a.kind, flow);
+                        setCtxMenu(null);
+                      } else if (a.type === "stage3d") {
+                        useCanvasStore.getState().clearDirectorTarget();
+                        setViewMode("stage3d");
+                        setCtxMenu(null);
+                      } else if (a.type === "breakdown") {
+                        setCtxMenu(null);
+                        onBreakdown();
+                      } else if (a.type === "smart_edit") {
+                        setCtxMenu(null);
+                        setStatus("智能剪辑：请回到宿主「剪辑」模块精剪（画布内为 Beta 入口）");
+                      } else if (a.type === "upload") {
+                        setCtxMenu(null);
+                        uploadRef.current?.click();
+                      } else if (a.type === "history") {
+                        setCtxMenu(null);
+                        setStatus("生成历史：请从左侧工程/素材或 Agent 附件选用");
+                      } else if (a.type === "assets") {
+                        setCtxMenu(null);
+                        setViewMode("assets");
+                      } else if (a.type === "palette") {
+                        openPaletteAt(ctxMenu.clientX, ctxMenu.clientY);
+                      } else if (a.type === "paste") {
+                        pasteClipboard(flow);
+                        setCtxMenu(null);
+                      }
+                    }}
+                  />
+                ) : ctxMenu.mode === "edge" ? (                  <>
+                    <div className="ctx-menu-title">连线</div>
+                    <button
+                      type="button"
+                      className="ctx-menu-item danger"
+                      onClick={() => {
+                        deleteEdge(ctxMenu.edgeId);
+                        setCtxMenu(null);
+                      }}
+                    >
+                      删除连线
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="ctx-menu-title">节点操作</div>
+                    <button
+                      type="button"
+                      className="ctx-menu-item"
+                      onClick={() => {
+                        copySelected();
+                        setCtxMenu(null);
+                      }}
+                    >
+                      复制
+                    </button>
+                    <button
+                      type="button"
+                      className="ctx-menu-item"
+                      onClick={() => {
+                        duplicateSelected();
+                        setCtxMenu(null);
+                      }}
+                    >
+                      原地复制
+                    </button>
+                    <button
+                      type="button"
+                      className="ctx-menu-item danger"
+                      onClick={() => {
+                        removeSelected();
+                        setCtxMenu(null);
+                      }}
+                    >
+                      删除
+                    </button>
+                    <div className="ctx-menu-sep" />
+                    <div className="ctx-menu-title">在此添加</div>
+                    {addNodeItems.map((it) => (
+                      <button
+                        key={it.type}
+                        type="button"
+                        className="ctx-menu-item"
+                        onClick={() => {
+                          const flow =
+                            rfRef.current?.screenToFlowPosition({
+                              x: ctxMenu.clientX,
+                              y: ctxMenu.clientY,
+                            }) || { x: 120, y: 80 };
+                          pickNodeByType(it.type, flow);
+                          setCtxMenu(null);
+                        }}
+                      >
+                        + {it.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
 
-          <aside className="inspector">
+          <aside className={`inspector${rightCollapsed ? " collapsed" : ""}`}>
+            {rightCollapsed ? null : (
+            <>
             <div className="section-title">项目</div>
             <div className="field">
               <label>剧名</label>
@@ -489,9 +1772,21 @@ export default function CanvasShell(props: CanvasShellProps) {
             </div>
             <div className="section-title">选中节点</div>
             {!selectedData ? (
-              <div className="muted">点击画布节点编辑</div>
+              <div className="muted">
+                {canvasLayoutMode === "simple"
+                  ? "简化表单：选镜头节点编辑提示词/机位，点「生成选中」"
+                  : "点击画布节点编辑；空白处右键可添加"}
+              </div>
             ) : (
               <>
+                <div className="btn-row" style={{ marginBottom: 8 }}>
+                  <button type="button" className="btn" onClick={duplicateSelected}>
+                    复制
+                  </button>
+                  <button type="button" className="btn danger" onClick={removeSelected}>
+                    删除
+                  </button>
+                </div>
                 {"title" in selectedData && (
                   <div className="field">
                     <label>标题</label>
@@ -503,6 +1798,219 @@ export default function CanvasShell(props: CanvasShellProps) {
                 )}
                 {selectedData.kind === "shot" && (
                   <>
+                    {/* ====== 角色绑定（Step A 新增）====== */}
+                    <div className="field">
+                      <label>角色绑定</label>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <select
+                          value={selectedData.characterId || ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (!id) {
+                              if (selectedData.characterId) {
+                                unbindCharacterFromShot(selectedData.id);
+                              }
+                            } else {
+                              bindCharacterToShot(selectedData.id, id);
+                            }
+                          }}
+                          style={{ flex: 1 }}
+                        >
+                          <option value="">— 未绑定角色 —</option>
+                          {characters.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                              {c.role_type ? `（${c.role_type}）` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "4px 8px" }}
+                          onClick={() => refreshCharacters()}
+                          title="从角色库刷新"
+                        >
+                          ↻
+                        </button>
+                      </div>
+                      {selectedData.characterId && (
+                        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, lineHeight: 1.4 }}>
+                          📋 外貌: {selectedData.characterAppearance || "(角色库无外貌描述)"}
+                          <div style={{ marginTop: 2 }}>
+                            🔄 <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                syncCharacterToShot(selectedData.id);
+                              }}
+                              style={{ color: "#5eead4" }}
+                            >
+                              从角色库同步最新外貌描述到提示词
+                            </a>
+                            {" · "}
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                unbindCharacterFromShot(selectedData.id);
+                              }}
+                              style={{ color: "#f87171" }}
+                            >
+                              解除绑定
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* ====== AI 补帧面板（Step B 新增）====== */}
+                    <div className="field">
+                      <label>🎞️ AI 插补帧</label>
+                      <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!selectedData.interpolationEnabled}
+                            onChange={(e) =>
+                              updateSelectedData({
+                                interpolationEnabled: e.target.checked,
+                                interpolationMode: e.target.checked
+                                  ? (selectedData.interpolationMode || "smart")
+                                  : "disabled",
+                              })
+                            }
+                          />
+                          发送到剪辑时自动补帧
+                        </label>
+                      </div>
+                      {selectedData.interpolationEnabled && (
+                        <>
+                          <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: "#94a3b8" }}>模式</label>
+                              <select
+                                value={selectedData.interpolationMode || "smart"}
+                                onChange={(e) =>
+                                  updateSelectedData({ interpolationMode: e.target.value })}
+                                style={{ width: "100%" }}
+                              >
+                                <option value="smart">SMART（帧差自适应）</option>
+                                <option value="auto">AUTO（始终补帧）</option>
+                                <option value="always">ALWAYS（强制双倍）</option>
+                                <option value="disabled">DISABLED（关闭）</option>
+                              </select>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: "#94a3b8" }}>目标帧率</label>
+                              <select
+                                value={selectedData.interpolationTargetFps || 24}
+                                onChange={(e) =>
+                                  updateSelectedData({
+                                    interpolationTargetFps: Number(e.target.value) as 24 | 30 | 60,
+                                  })}
+                                style={{ width: "100%" }}
+                              >
+                                <option value={24}>24fps（电影）</option>
+                                <option value={30}>30fps（视频）</option>
+                                <option value={60}>60fps（顺滑）</option>
+                              </select>
+                            </div>
+                          </div>
+                          {/* 补帧执行状态（后端回写） */}
+                          {(selectedData.interpolationStatus &&
+                            selectedData.interpolationStatus !== "none") && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                marginTop: 6,
+                                padding: "4px 8px",
+                                borderRadius: 4,
+                                background:
+                                  selectedData.interpolationStatus === "done"
+                                    ? "#064e3b"
+                                    : selectedData.interpolationStatus === "failed"
+                                    ? "#7f1d1d"
+                                    : "#1e3a5f",
+                                color:
+                                  selectedData.interpolationStatus === "done"
+                                    ? "#6ee7b7"
+                                    : selectedData.interpolationStatus === "failed"
+                                    ? "#fca5a5"
+                                    : "#93c5fd",
+                              }}
+                            >
+                              {selectedData.interpolationStatus === "queued" && "⏳ 补帧排队中..."}
+                              {selectedData.interpolationStatus === "running" && "🎬 补帧执行中..."}
+                              {selectedData.interpolationStatus === "done" &&
+                                `✅ 补帧完成：新增 ${selectedData.interpolationFrames || "?"} 帧`}
+                              {selectedData.interpolationStatus === "failed" && "❌ 补帧失败"}
+                            </div>
+                          )}
+                          {/* 剪辑入轨状态（后端回写） */}
+                          {selectedData.editorStatus &&
+                            selectedData.editorStatus !== "not_sent" && (
+                              <div style={{ fontSize: 11, marginTop: 4, color: "#a7f3d0" }}>
+                                📌 入轨状态:{" "}
+                                {{
+                                  sent: "已发送到剪辑队列",
+                                  in_timeline: `已在时间线 ${selectedData.editorRange || ""}`,
+                                  trimmed: "已裁剪",
+                                  deleted: "已从时间线删除",
+                                }[selectedData.editorStatus] || selectedData.editorStatus}
+                              </div>
+                            )}
+                          <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ fontSize: 11, padding: "4px 8px" }}
+                              onClick={() => {
+                                const BRIDGE =
+                                  (window as any).__BRIDGE__ || "http://127.0.0.1:18765";
+                                const data = selectedData as ShotData;
+                                fetch(`${BRIDGE}/host/interpolate`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    mode: data.interpolationMode || "smart",
+                                    target_fps: data.interpolationTargetFps || 24,
+                                    title: data.title,
+                                  }),
+                                })
+                                  .then((r) => r.json().catch(() => ({ ok: true })))
+                                  .then((res: any) => {
+                                    setStatus(
+                                      res?.ok
+                                        ? "补帧预览请求已发送（需 canvas_bridge.py 后端）"
+                                        : `补帧预览: ${res?.message || "无后端，已记录参数"}`,
+                                    );
+                                  })
+                                  .catch(() => {
+                                    setStatus("补帧预览：canvas_bridge.py 离线，参数已记录");
+                                  });
+                              }}
+                              title="向 bridge 发送补帧预览请求"
+                            >
+                              ▶ 预览补帧
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ fontSize: 11, padding: "4px 8px" }}
+                              onClick={() =>
+                                updateSelectedData({
+                                  interpolationStatus: undefined,
+                                  interpolationFrames: undefined,
+                                })
+                              }
+                              title="清除补帧执行状态"
+                            >
+                              清除状态
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <div className="field">
                       <label>景别</label>
                       <select
@@ -569,6 +2077,102 @@ export default function CanvasShell(props: CanvasShellProps) {
                         </button>
                       </div>
                     </div>
+                    <div className="field">
+                      <label>机位预览（LibTV 式）</label>
+                      <div className="btn-row angle-preset-row">
+                        {ANGLE_PRESETS.slice(0, 6).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className={`btn tiny${
+                              (selectedData.cameraYaw ?? 0) === p.yaw &&
+                              (selectedData.cameraPitch ?? 0) === p.pitch
+                                ? " on"
+                                : ""
+                            }`}
+                            onClick={() =>
+                              updateSelectedData({ cameraYaw: p.yaw, cameraPitch: p.pitch })
+                            }
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="field compact">
+                        <label>水平 {selectedData.cameraYaw ?? 0}°</label>
+                        <input
+                          type="range"
+                          min={-180}
+                          max={180}
+                          step={5}
+                          value={selectedData.cameraYaw ?? 0}
+                          onChange={(e) =>
+                            updateSelectedData({ cameraYaw: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                      <div className="field compact">
+                        <label>俯仰 {selectedData.cameraPitch ?? 0}°</label>
+                        <input
+                          type="range"
+                          min={-60}
+                          max={60}
+                          step={5}
+                          value={selectedData.cameraPitch ?? 0}
+                          onChange={(e) =>
+                            updateSelectedData({ cameraPitch: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label>焦段</label>
+                        <select
+                          value={selectedData.focalLength ?? ""}
+                          onChange={(e) =>
+                            updateSelectedData({
+                              focalLength: e.target.value ? Number(e.target.value) : undefined,
+                            })
+                          }
+                        >
+                          <option value="">默认</option>
+                          {FOCAL_PRESETS.map((f) => (
+                            <option key={f} value={f}>
+                              {f}mm
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>运镜</label>
+                        <select
+                          value={selectedData.movement ?? "static"}
+                          onChange={(e) => updateSelectedData({ movement: e.target.value })}
+                        >
+                          {MOVEMENT_OPTIONS.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <p className="muted tiny">
+                        {buildCameraPromptBlock({
+                          shotSize: selectedData.shotSize,
+                          cameraYaw: selectedData.cameraYaw,
+                          cameraPitch: selectedData.cameraPitch,
+                          focalLength: selectedData.focalLength,
+                          movement: selectedData.movement,
+                        }) || "默认机位"}
+                      </p>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={generating}
+                        onClick={onMultiAngleGenerate}
+                      >
+                        生成 5 机位叠卡
+                      </button>
+                    </div>
                     <FrameSlot
                       label="首帧"
                       url={selectedData.firstFrameUrl}
@@ -581,6 +2185,58 @@ export default function CanvasShell(props: CanvasShellProps) {
                       onPick={(u) => updateSelectedData({ lastFrameUrl: u })}
                       onClear={() => updateSelectedData({ lastFrameUrl: "" })}
                     />
+                    <VideoRefSlot
+                      label="参考视频片段"
+                      url={selectedData.refVideoUrl}
+                      name={selectedData.refVideoName}
+                      onPick={(u, n) =>
+                        updateSelectedData({ refVideoUrl: u, refVideoName: n })
+                      }
+                      onClear={() =>
+                        updateSelectedData({ refVideoUrl: "", refVideoName: "" })
+                      }
+                    />
+                    {selectedData.imageUrl ? (
+                      <>
+                        <div className="section-title">图工具</div>
+                        <div className="btn-row">
+                          <button type="button" className="btn" onClick={() => setMaskOpen(true)}>
+                            蒙版重绘
+                          </button>
+                          <button type="button" className="btn" onClick={() => onApplyImageTool("crop916")}>
+                            裁9:16
+                          </button>
+                          <button type="button" className="btn" onClick={() => onApplyImageTool("split2")}>
+                            拆2×2
+                          </button>
+                          <button type="button" className="btn" onClick={() => onApplyImageTool("upscale")}>
+                            放大
+                          </button>
+                          <button type="button" className="btn" onClick={() => onApplyImageTool("rotate90")}>
+                            旋转
+                          </button>
+                        </div>
+                        {(selectedData.images?.length || 0) > 0 ? (
+                          <div className="field">
+                            <label>叠卡主图</label>
+                            <div className="stack-row">
+                              {selectedData.images!.map((im) => (
+                                <button
+                                  key={im.id}
+                                  type="button"
+                                  className={`stack-thumb${selectedData.primaryImageId === im.id ? " on" : ""}`}
+                                  onClick={() => onSetPrimaryImage(selectedId || "", im.id)}
+                                  title={im.label || undefined}
+                                >
+                                  <img src={im.url} alt="" />
+                                  {im.label ? <span className="stack-label">{im.label}</span> : null}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
                   </>
                 )}
                 {selectedData.kind === "script" && (
@@ -592,6 +2248,109 @@ export default function CanvasShell(props: CanvasShellProps) {
                     />
                   </div>
                 )}
+                {selectedData.kind === "markdown" && (
+                  <div className="field">
+                    <label>Markdown</label>
+                    <textarea
+                      value={selectedData.content}
+                      onChange={(e) => updateSelectedData({ content: e.target.value })}
+                    />
+                    <label className="chk">
+                      <input
+                        type="checkbox"
+                        checked={!!selectedData.preview}
+                        onChange={(e) => updateSelectedData({ preview: e.target.checked })}
+                      />
+                      预览模式
+                    </label>
+                  </div>
+                )}
+                {selectedData.kind === "shotlist" && (
+                  <div className="field">
+                    <label>分镜表</label>
+                    <p className="hint">在节点内编辑行；选中图片/镜头后点行内「绑定选中」；可「展开为镜头」。</p>
+                    <div className="meta">共 {(selectedData.rows || []).length} 行</div>
+                  </div>
+                )}
+                {selectedData.kind === "storyboard" && (
+                  <div className="field">
+                    <label>宫格分镜</label>
+                    <p className="hint">先选中图片节点 → 节点内「绑源图」→ 点击格裁出。</p>
+                    <label>提示词备注</label>
+                    <textarea
+                      value={selectedData.prompt || ""}
+                      onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                    />
+                  </div>
+                )}
+                {selectedData.kind === "director" && (
+                  <div className="field">
+                    <label>3D 导演台节点</label>
+                    <p className="hint">点节点「打开舞台」摆姿截图；截图回写本节点并另存镜头卡。</p>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => useCanvasStore.getState().openDirectorForNode(selectedId!)}
+                    >
+                      打开绑定舞台
+                    </button>
+                    <label>提示词备注</label>
+                    <textarea
+                      value={selectedData.prompt || ""}
+                      onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                    />
+                    <div className="meta">历史截图 {(selectedData.captureUrls || []).length} 张</div>
+                  </div>
+                )}
+                {selectedData.kind === "animation" && (
+                  <div className="field">
+                    <label>逐帧动画</label>
+                    <p className="hint">上传 Sheet / 占位表 / AI 生成；可切换播放预览。</p>
+                    <label>提示词</label>
+                    <textarea
+                      value={selectedData.prompt || ""}
+                      onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                    />
+                  </div>
+                )}
+                {selectedData.kind === "panorama" && (
+                  <div className="field">
+                    <label>全景</label>
+                    <p className="hint">等距柱状图；节点内拖拽环视。不接 XiaoLuo / 全景生成服务。</p>
+                    <label>偏航 {Math.round(selectedData.yaw || 0)}°</label>
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      value={selectedData.yaw || 0}
+                      onChange={(e) => updateSelectedData({ yaw: Number(e.target.value) })}
+                    />
+                    <label>俯仰 {Math.round(selectedData.pitch || 0)}°</label>
+                    <input
+                      type="range"
+                      min={-80}
+                      max={80}
+                      value={selectedData.pitch || 0}
+                      onChange={(e) => updateSelectedData({ pitch: Number(e.target.value) })}
+                    />
+                  </div>
+                )}
+                {selectedData.kind === "note" && (
+                  <div className="field">
+                    <label>画布笔记</label>
+                    <textarea
+                      value={selectedData.content || ""}
+                      onChange={(e) => updateSelectedData({ content: e.target.value })}
+                    />
+                  </div>
+                )}
+                {selectedData.kind === "source" && (
+                  <div className="field">
+                    <label>源文件</label>
+                    <p className="hint">本地素材入口，连到下游图片/视频/生成器。</p>
+                    <div className="meta">{selectedData.fileName || selectedData.mediaType}</div>
+                  </div>
+                )}
                 {(selectedData.kind === "image" || selectedData.kind === "video") && (
                   <div className="field">
                     <label>提示词</label>
@@ -601,8 +2360,277 @@ export default function CanvasShell(props: CanvasShellProps) {
                     />
                   </div>
                 )}
+                {selectedData.kind === "image" ? (
+                  <VideoRefSlot
+                    label="参考视频片段"
+                    url={selectedData.refVideoUrl}
+                    name={selectedData.refVideoName}
+                    onPick={(u, n) =>
+                      updateSelectedData({ refVideoUrl: u, refVideoName: n })
+                    }
+                    onClear={() =>
+                      updateSelectedData({ refVideoUrl: "", refVideoName: "" })
+                    }
+                  />
+                ) : null}
+                {selectedData.kind === "image" && selectedData.imageUrl ? (
+                  <>
+                    <div className="btn-row">
+                      <button type="button" className="btn" onClick={() => setMaskOpen(true)}>
+                        蒙版重绘
+                      </button>
+                      <button type="button" className="btn" onClick={() => onApplyImageTool("crop916")}>
+                        裁9:16
+                      </button>
+                      <button type="button" className="btn" onClick={() => onApplyImageTool("split3")}>
+                        拆3×3
+                      </button>
+                      <button type="button" className="btn" onClick={() => onApplyImageTool("upscale")}>
+                        放大
+                      </button>
+                    </div>
+                    {(selectedData.images?.length || 0) > 0 ? (
+                      <div className="field">
+                        <label>叠卡主图</label>
+                        <div className="stack-row">
+                          {selectedData.images!.map((im) => (
+                            <button
+                              key={im.id}
+                              type="button"
+                              className={`stack-thumb${selectedData.primaryImageId === im.id ? " on" : ""}`}
+                              onClick={() => onSetPrimaryImage(selectedId || "", im.id)}
+                              title={im.label || undefined}
+                            >
+                              <img src={im.url} alt="" />
+                              {im.label ? <span className="stack-label">{im.label}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+                {selectedData.kind === "generator" && (
+                  <>
+                    <div className="field">
+                      <label>模式</label>
+                      <select
+                        value={selectedData.mode}
+                        onChange={(e) =>
+                          updateSelectedData({
+                            mode: e.target.value as "image" | "video" | "audio" | "text",
+                          })
+                        }
+                      >
+                        <option value="image">生图</option>
+                        <option value="video">生视频</option>
+                        <option value="audio">生音频</option>
+                        <option value="text">文本</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>数量（叠卡）</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={4}
+                        value={selectedData.count}
+                        onChange={(e) =>
+                          updateSelectedData({ count: Math.max(1, Math.min(4, Number(e.target.value) || 1)) })
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label>提示词</label>
+                      <textarea
+                        value={selectedData.prompt}
+                        onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
+                {selectedData.kind === "audio" && (
+                  <>
+                    <div className="field">
+                      <label>提示词（TTS 占位）</label>
+                      <textarea
+                        value={selectedData.prompt}
+                        onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                      />
+                    </div>
+                    <label className="file-btn">
+                      上传音频…
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        hidden
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!f) return;
+                          onSetNodeAudio(await readFileAsDataUrl(f));
+                        }}
+                      />
+                    </label>
+                    {selectedData.audioUrl ? (
+                      <audio src={selectedData.audioUrl} controls style={{ width: "100%", marginTop: 8 }} />
+                    ) : null}
+                  </>
+                )}
+                {selectedData.kind === "music" && (
+                  <>
+                    <div className="field">
+                      <label>🎵 音乐提示词 / 风格描述</label>
+                      <textarea
+                        value={(selectedData as any).prompt || ""}
+                        onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                        rows={2}
+                        placeholder="例：soft piano, relaxing, lo-fi beat with warm synth"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>🎸 风格标签（Style）</label>
+                      <input
+                        type="text"
+                        value={(selectedData as any).style || ""}
+                        onChange={(e) => updateSelectedData({ style: e.target.value })}
+                        placeholder="pop / electronic / classical / lofi / rock / ambient…"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>📝 歌词（Lyrics，留空则生成纯音乐）</label>
+                      <textarea
+                        value={(selectedData as any).lyrics || ""}
+                        onChange={(e) => updateSelectedData({ lyrics: e.target.value })}
+                        rows={3}
+                        placeholder="每行一句，留空 + 勾选「纯音乐」= 纯音乐生成"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>📌 曲名（Title）</label>
+                      <input
+                        type="text"
+                        value={(selectedData as any).trackTitle || ""}
+                        onChange={(e) => updateSelectedData({ trackTitle: e.target.value })}
+                        placeholder="留空自动生成"
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="chk">
+                        <input
+                          type="checkbox"
+                          checked={!!(selectedData as any).instrumental}
+                          onChange={(e) => updateSelectedData({ instrumental: e.target.checked })}
+                        />
+                        🎹 纯音乐（Instrumental，无人声）
+                      </label>
+                    </div>
+                    <div className="field">
+                      <label>🤖 Suno 音乐模型</label>
+                      {musicModels.length === 0 ? (
+                        <p className="muted tiny">
+                          尚未配置音乐模型。请打开「AI 模型管理」→ 添加 Suno 渠道（capability = music，填 API Key），
+                          然后点顶部 🔄 刷新模型池。
+                        </p>
+                      ) : (
+                        <select
+                          value={selectedMusicModelKey}
+                          onChange={(e) => setSelectedMusicModelKey(e.target.value)}
+                          style={{ width: "100%" }}
+                        >
+                          {musicModels.map((m) => (
+                            <option
+                              key={`m_${m.channel_id}::${m.model}`}
+                              value={`${m.channel_id}::${m.model}`}
+                            >
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    {(selectedData as any).model ? (
+                      <div className="muted tiny" style={{ marginBottom: 6 }}>
+                        上次模型：{(selectedData as any).model}
+                      </div>
+                    ) : null}
+                    <label className="file-btn">
+                      上传音频覆盖…
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        hidden
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!f) return;
+                          onSetNodeAudio(await readFileAsDataUrl(f));
+                        }}
+                      />
+                    </label>
+                    {(selectedData as any).audioUrl ? (
+                      <audio src={(selectedData as any).audioUrl} controls style={{ width: "100%", marginTop: 8 }} />
+                    ) : (
+                      <p className="muted tiny" style={{ marginTop: 6 }}>
+                        点顶部「▶ 生成选中」开始调 Suno 生成音乐（通常需要 30–90 秒）
+                      </p>
+                    )}
+                  </>
+                )}
+                {selectedData.kind === "group" && (
+                  <p className="muted">拖拽子节点进出编组；拖动编组可整体移动。</p>
+                )}
                 {selectedData.kind === "video" && (
                   <>
+                    {selectedData.videoUrl ? (
+                      <div className="field">
+                        <label>预览</label>
+                        <video
+                          src={selectedData.videoUrl}
+                          controls
+                          playsInline
+                          style={{ width: "100%", borderRadius: 8, background: "#000" }}
+                        />
+                      </div>
+                    ) : (
+                      <p className="muted">尚未生成视频（生成选中会走视频渠道，不写假片）</p>
+                    )}
+                    {(selectedData.videos?.length || 0) > 1 ? (
+                      <div className="field">
+                        <label>视频叠卡（对比结果）</label>
+                        <div className="stack-row video-stack-row">
+                          {selectedData.videos!.map((v) => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              className={`stack-thumb video-stack-thumb${selectedData.primaryVideoId === v.id ? " on" : ""}`}
+                              onClick={() => onSetPrimaryVideo(selectedId || "", v.id)}
+                              title={v.label || undefined}
+                            >
+                              {v.posterUrl ? (
+                                <img src={v.posterUrl} alt="" />
+                              ) : (
+                                <span className="ph">▶</span>
+                              )}
+                              {v.label ? <span className="stack-label">{v.label}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="field">
+                      <label>时长（秒）</label>
+                      <input
+                        type="number"
+                        min={2}
+                        max={10}
+                        step={1}
+                        value={selectedData.duration ?? 5}
+                        onChange={(e) =>
+                          updateSelectedData({ duration: Number(e.target.value) || 5 })
+                        }
+                      />
+                    </div>
                     <FrameSlot
                       label="首帧"
                       url={selectedData.firstFrameUrl}
@@ -615,6 +2643,188 @@ export default function CanvasShell(props: CanvasShellProps) {
                       onPick={(u) => updateSelectedData({ lastFrameUrl: u })}
                       onClear={() => updateSelectedData({ lastFrameUrl: "" })}
                     />
+                    <VideoRefSlot
+                      label="参考视频片段"
+                      url={selectedData.refVideoUrl}
+                      name={selectedData.refVideoName}
+                      onPick={(u, n) =>
+                        updateSelectedData({ refVideoUrl: u, refVideoName: n })
+                      }
+                      onClear={() =>
+                        updateSelectedData({ refVideoUrl: "", refVideoName: "" })
+                      }
+                    />
+                    <label className="file-btn">
+                      上传本地视频到本节点…
+                      <input
+                        type="file"
+                        accept="video/*"
+                        hidden
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!f) return;
+                          const res = await resolveMediaUrl(f);
+                          if (!res.ok || !res.url) {
+                            setStatus(res.message || "上传失败");
+                            return;
+                          }
+                          updateSelectedData({
+                            videoUrl: res.url,
+                            isReference: true,
+                            refVideoUrl: res.url,
+                            refVideoName: f.name,
+                            title: selectedData.title || `参考·${f.name}`,
+                          });
+                          setStatus(`已写入参考视频 ${f.name}`);
+                        }}
+                      />
+                    </label>
+                    {/* ====== AI 补帧面板（Step B3: video 节点）====== */}
+                    <div className="field">
+                      <label>🎞️ AI 插补帧</label>
+                      <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!selectedData.interpolationEnabled}
+                            onChange={(e) =>
+                              updateSelectedData({
+                                interpolationEnabled: e.target.checked,
+                                interpolationMode: e.target.checked
+                                  ? (selectedData.interpolationMode || "smart")
+                                  : "disabled",
+                              })
+                            }
+                          />
+                          发送到剪辑时自动补帧
+                        </label>
+                      </div>
+                      {selectedData.interpolationEnabled && (
+                        <>
+                          <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: "#94a3b8" }}>模式</label>
+                              <select
+                                value={selectedData.interpolationMode || "smart"}
+                                onChange={(e) =>
+                                  updateSelectedData({ interpolationMode: e.target.value })}
+                                style={{ width: "100%" }}
+                              >
+                                <option value="smart">SMART（帧差自适应）</option>
+                                <option value="auto">AUTO（始终补帧）</option>
+                                <option value="always">ALWAYS（强制双倍）</option>
+                                <option value="disabled">DISABLED（关闭）</option>
+                              </select>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: "#94a3b8" }}>目标帧率</label>
+                              <select
+                                value={selectedData.interpolationTargetFps || 24}
+                                onChange={(e) =>
+                                  updateSelectedData({
+                                    interpolationTargetFps: Number(e.target.value) as 24 | 30 | 60,
+                                  })}
+                                style={{ width: "100%" }}
+                              >
+                                <option value={24}>24fps（电影）</option>
+                                <option value={30}>30fps（视频）</option>
+                                <option value={60}>60fps（顺滑）</option>
+                              </select>
+                            </div>
+                          </div>
+                          {(selectedData.interpolationStatus &&
+                            selectedData.interpolationStatus !== "none") && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                marginTop: 6,
+                                padding: "4px 8px",
+                                borderRadius: 4,
+                                background:
+                                  selectedData.interpolationStatus === "done"
+                                    ? "#064e3b"
+                                    : selectedData.interpolationStatus === "failed"
+                                    ? "#7f1d1d"
+                                    : "#1e3a5f",
+                                color:
+                                  selectedData.interpolationStatus === "done"
+                                    ? "#6ee7b7"
+                                    : selectedData.interpolationStatus === "failed"
+                                    ? "#fca5a5"
+                                    : "#93c5fd",
+                              }}
+                            >
+                              {selectedData.interpolationStatus === "queued" && "⏳ 补帧排队中..."}
+                              {selectedData.interpolationStatus === "running" && "🎬 补帧执行中..."}
+                              {selectedData.interpolationStatus === "done" &&
+                                `✅ 补帧完成：新增 ${selectedData.interpolationFrames || "?"} 帧`}
+                              {selectedData.interpolationStatus === "failed" && "❌ 补帧失败"}
+                            </div>
+                          )}
+                          {selectedData.editorStatus &&
+                            selectedData.editorStatus !== "not_sent" && (
+                              <div style={{ fontSize: 11, marginTop: 4, color: "#a7f3d0" }}>
+                                📌 入轨状态:{" "}
+                                {{
+                                  sent: "已发送到剪辑队列",
+                                  in_timeline: `已在时间线 ${selectedData.editorRange || ""}`,
+                                  trimmed: "已裁剪",
+                                  deleted: "已从时间线删除",
+                                }[selectedData.editorStatus] || selectedData.editorStatus}
+                              </div>
+                            )}
+                          <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ fontSize: 11, padding: "4px 8px" }}
+                              onClick={() => {
+                                const BRIDGE =
+                                  (window as any).__BRIDGE__ || "http://127.0.0.1:18765";
+                                fetch(`${BRIDGE}/host/interpolate`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    mode: selectedData.interpolationMode || "smart",
+                                    target_fps: selectedData.interpolationTargetFps || 24,
+                                    title: selectedData.title,
+                                  }),
+                                })
+                                  .then((r) => r.json().catch(() => ({ ok: true })))
+                                  .then((res: any) => {
+                                    setStatus(
+                                      res?.ok
+                                        ? "补帧预览请求已发送（需 canvas_bridge.py 后端）"
+                                        : `补帧预览: ${res?.message || "无后端，已记录参数"}`,
+                                    );
+                                  })
+                                  .catch(() => {
+                                    setStatus("补帧预览：canvas_bridge.py 离线，参数已记录");
+                                  });
+                              }}
+                              title="向 bridge 发送补帧预览请求"
+                            >
+                              ▶ 预览补帧
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ fontSize: 11, padding: "4px 8px" }}
+                              onClick={() =>
+                                updateSelectedData({
+                                  interpolationStatus: undefined,
+                                  interpolationFrames: undefined,
+                                })
+                              }
+                              title="清除补帧执行状态"
+                            >
+                              清除状态
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </>
                 )}
                 {selectedData.kind === "prompt" && (
@@ -626,12 +2836,114 @@ export default function CanvasShell(props: CanvasShellProps) {
                     />
                   </div>
                 )}
+                {selectedData.kind === "text" && (
+                  <>
+                    <div className="field">
+                      <label>内容</label>
+                      <textarea
+                        value={selectedData.content}
+                        onChange={(e) => updateSelectedData({ content: e.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>字号</label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={32}
+                        value={selectedData.fontSize ?? 14}
+                        onChange={(e) =>
+                          updateSelectedData({ fontSize: Number(e.target.value) || 14 })
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+                {selectedData.kind === "config" && (
+                  <>
+                    <div className="field">
+                      <label>生成模式</label>
+                      <select
+                        value={selectedData.generationMode}
+                        onChange={(e) =>
+                          updateSelectedData({
+                            generationMode: e.target.value as "image" | "video" | "audio" | "text",
+                          })
+                        }
+                      >
+                        <option value="image">生图</option>
+                        <option value="video">生视频</option>
+                        <option value="audio">生音频</option>
+                        <option value="text">生文本</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>数量</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={4}
+                        value={selectedData.count ?? 1}
+                        onChange={(e) =>
+                          updateSelectedData({ count: Math.max(1, Math.min(4, Number(e.target.value) || 1)) })
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label>提示词</label>
+                      <textarea
+                        value={selectedData.prompt || ""}
+                        onChange={(e) => updateSelectedData({ prompt: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
+            </>
+            )}
           </aside>
+          {agentPanelOpen ? (
+            <Suspense fallback={<PanelFallback label="Agent" />}>
+              <AgentPanel
+                open={agentPanelOpen}
+                docked
+                onClose={() => setAgentPanelOpen(false)}
+                onRequestGenerate={onGenerate}
+                onRequestBreakdown={onBreakdown}
+              />
+            </Suspense>
+          ) : null}
         </div>
         </>
       ) : null}
+      {!agentPanelOpen && showWorkspace ? (
+        <button
+          type="button"
+          className="sg-agent-fab primary"
+          data-sg-no-autoclick="1"
+          onClick={() => setAgentPanelOpen(true)}
+          title="打开 Agent-IM 侧栏"
+        >
+          Agent
+        </button>
+      ) : null}
+      <Suspense fallback={null}>
+        <MaskEditDialog
+          open={maskOpen}
+          busy={generating}
+          imageUrl={
+            selectedData && (selectedData.kind === "shot" || selectedData.kind === "image")
+              ? selectedData.imageUrl || ""
+              : ""
+          }
+          onClose={() => setMaskOpen(false)}
+          onSubmit={(mask, prompt) => {
+            setMaskOpen(false);
+            onInpaint(mask, prompt);
+          }}
+        />
+      </Suspense>
     </div>
   );
 }

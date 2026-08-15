@@ -114,29 +114,19 @@
       "markers": []
     },
     {
-      "id": "drama-finder-ui",
-      "title": "短剧筛选可视化",
-      "reason": "卡片墙+右侧预览+可读性下拉；插件中心常驻标签；run 自愈 initialize",
+      "id": "plugin-host-ui",
+      "title": "插件宿主常驻 UI 入口",
+      "reason": "短剧筛选插件已删除，但 plugins_module 宿主层的常驻标签打开/关闭逻辑仍须冻结",
       "invariants": [
-        "DramaFinderWidget 提供卡片/列表 + 详情预览",
-        "Plugin.__init__ 预置 _widget/_context/_initialized；run 可无先验 initialize",
-        "短剧筛选打开优先切插件中心常驻标签，不误走仅 apply_effect 的特效插件",
-        "QComboBox 弹出层必须深色底+浅色字（禁白底浅字）"
+        "插件中心常驻标签打开不误走仅 apply_effect 的特效插件",
+        "Plugin.__init__ 预置 _widget/_context/_initialized；run 可无先验 initialize"
       ],
       "symbols": [
-        {"file": "app/plugins/drama_finder_plugin/main.py", "name": "run"},
         {"file": "app/modules/lego/plugins_module.py", "name": "_plugin_offers_widget_ui"},
         {"file": "app/modules/lego/plugins_module.py", "name": "_ensure_plugin_initialized"},
-        {"file": "app/modules/lego/plugins_module.py", "name": "_create_drama_finder_tab"},
-        {"file": "app/modules/lego/plugins_module.py", "name": "_ensure_drama_finder_widget"},
-        {"file": "app/modules/lego/plugins_module.py", "name": "_open_drama_finder_tab"},
         {"file": "app/modules/lego/plugins_module.py", "name": "_open_plugin_ui"}
       ],
-      "files": ["app/plugins/drama_finder_plugin/drama_ui.py"],
       "markers": [
-        {"file": "app/plugins/drama_finder_plugin/drama_ui.py", "id": "drama-finder-ui:module"},
-        {"file": "app/plugins/drama_finder_plugin/main.py", "id": "drama-finder-ui:plugin-lifecycle"},
-        {"file": "app/plugins/drama_finder_plugin/main.py", "id": "drama-finder-ui:run"},
         {"file": "app/modules/lego/plugins_module.py", "id": "drama-finder-ui:plugins-host"}
       ]
     },

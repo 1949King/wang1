@@ -9,7 +9,7 @@ AI短剧编辑器 - Qt6 主程序入口
 ├── 文案生成模块 (CopywritingModule) - AI文案、标题、脚本
 ├── 多任务模块 (TasksModule) - 批量处理、任务队列
 ├── 短剧筛选（插件 drama_finder_plugin，含 crawler）- 剧单、热度、佣金
-├── 账号运营模块 (AccountOpsModule) - Skill化运营
+├── 账号运营插件 (account_ops_plugin) - 拓展中心入口；Skill 化运营
 ├── 素材库模块 (MaterialsModule) - 视频、音频、图片管理
 ├── 插件中心模块 (PluginsModule) - 积木管理
 └── 性能监控模块 (PerformanceModule) - 系统监控
@@ -479,7 +479,16 @@ class Application:
     def _init_qt(self):
         """初始化 Qt 应用"""
         print("\n🖥️ 初始化 Qt6 应用...")
-        
+
+        # QtWebEngine 必须在 QApplication 之前导入，否则懒加载模块里会 ImportError，
+        # 镶嵌页误报「未安装 PyQt6-WebEngine」。
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+            from PyQt6.QtWebEngineCore import QWebEngineScript  # noqa: F401
+            print("  ✅ QtWebEngine 预加载")
+        except Exception as e:
+            print(f"  ⚠️ QtWebEngine 不可用（AI 画布将外开浏览器）: {e}")
+
         from PyQt6.QtWidgets import QApplication  # type: ignore[reportMissingImports]
         from PyQt6.QtGui import QFont  # type: ignore[reportMissingImports]
         

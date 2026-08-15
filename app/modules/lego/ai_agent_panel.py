@@ -47,21 +47,17 @@ def _clear_msgbox(title: str, message: str, parent=None):
     from .modules import show_clear_messagebox
     return show_clear_messagebox(title, message, parent)
 
-# A：对话指令白名单（保留架构；未列出的 action 拒绝执行并诚实提示）
-_AGENT_SAFE_ACTIONS = frozenset({
-    "answer", "info",
-    "add_track", "duplicate_clip", "trim_clip", "split_clip",
-    "add_transition", "transition", "add_effect", "apply_filter",
-    "call_extension", "call_model", "start_workflow", "account_optimize",
-    "suggest_cleanup",  # M5：仅建议+确认 UI，不静默删
-})
-_AGENT_DANGEROUS_ACTIONS = frozenset({
-    "remove_clip", "ripple_delete", "ripple_delete_range",
-})
-# 对话 action ↔ capability：
-#   suggest_cleanup → editor.suggest_cleanup
-#   ripple_delete / ripple_delete_range → editor.ripple_delete_range
-_AGENT_ALLOWED_ACTIONS = _AGENT_SAFE_ACTIONS | _AGENT_DANGEROUS_ACTIONS
+# A：对话指令白名单 —— 单一事实来源见 agent_action_registry（防提示词漂移）
+from app.core.agent_action_registry import (
+    get_allowed_actions,
+    get_dangerous_actions,
+    get_safe_actions,
+)
+
+_AGENT_SAFE_ACTIONS = get_safe_actions()
+_AGENT_DANGEROUS_ACTIONS = get_dangerous_actions()
+_AGENT_ALLOWED_ACTIONS = get_allowed_actions()
+# 对话 action ↔ capability：见 agent_action_registry.ACTION_TO_CAPABILITY
 
 
 class AiAgentPanelMixin:
@@ -245,7 +241,16 @@ class AiAgentPanelMixin:
         return f"{head}。{detail}" if detail else head
 
     def _confirm_dangerous_agent_commands(self, commands: List[Any]) -> bool:
-        """A：危险指令（删除/波纹删）一次性确认；取消则整批危险指令跳过。"""
+        """A：危险指令（删除/波纹删）一次性确认；自主 C 跳过；取消则整批危险指令跳过。"""
+        try:
+            from app.core.agent_policy import MODE_AUTONOMOUS, normalize_mode
+
+            combo = getattr(self, "_agent_mode_combo", None)
+            mode = normalize_mode(combo.currentData() if combo is not None else "collaborative")
+            if mode == MODE_AUTONOMOUS:
+                return True
+        except Exception:
+            pass
         dangers = [
             c for c in commands
             if getattr(c, "action", "") in _AGENT_DANGEROUS_ACTIONS
@@ -455,6 +460,10 @@ class AiAgentPanelMixin:
                 res.setdefault("action", action)
                 return res
             return {"action": action, "success": False, "message": str(res)}
+        if action == "canvas_open":
+            return self._agent_dispatch("canvas.open", params)
+        if action == "canvas_sync_models":
+            return self._agent_dispatch("canvas.sync_models", params)
         # 正常不应到达（外层白名单）；仍给诚实文案
         return {
             "action": action,

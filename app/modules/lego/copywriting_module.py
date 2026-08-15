@@ -479,19 +479,24 @@ class CopywritingModule(BaseModule):
         self._last_llm_error = ""
 
         # ── 检查是否有激活的 AI 模型 ──
-        active_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                   "data", "active_provider.json")
-
-        provider_id = ""
         try:
-            if os.path.exists(active_file):
-                with open(active_file, 'r', encoding='utf-8') as f:
-                    provider_id = json.load(f).get("active_provider", "")
-        except (OSError, json.JSONDecodeError, KeyError):
-            pass
+            from app.modules.lego.model_config import load_active_provider
+            provider_id = load_active_provider()
+        except Exception:
+            provider_id = ""
+            active_file = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "data", "active_provider.json",
+            )
+            try:
+                if os.path.exists(active_file):
+                    with open(active_file, "r", encoding="utf-8") as f:
+                        provider_id = json.load(f).get("active_provider", "")
+            except (OSError, json.JSONDecodeError, KeyError):
+                pass
 
         if not provider_id:
-            self._last_llm_error = "未设置激活 Provider（app/data/active_provider.json）"
+            self._last_llm_error = "未设置激活 Provider。请到「模型管理」保存并点击圆形按钮激活 DeepSeek 等云端模型"
             return ""
 
         messages = [
@@ -499,22 +504,39 @@ class CopywritingModule(BaseModule):
             {"role": "user", "content": user_prompt}
         ]
 
-        # ── 策略 1: 通过 ai_engine 统一调用 ──
+        # ── 策略 1: 优先当前激活 Provider（不再忽略 active_provider）──
         try:
             from app.core.ai_engine import ai_engine
             result_parts = []
+            for chunk in ai_engine.chat(
+                provider_id,
+                messages,
+                stream=False,
+                use_cache=False,
+                temperature=0.8,
+                max_tokens=2048,
+            ):
+                if chunk and not str(chunk).startswith("错误") and not str(chunk).startswith("API 错误"):
+                    result_parts.append(str(chunk))
+            result = "".join(result_parts).strip()
+            if result and len(result) > 10:
+                return result
+            # 激活项失败时再按「激活优先」降级链尝试
+            result_parts = []
             for chunk in ai_engine.chat_with_fallback(
                 messages=messages,
+                providers=[provider_id],
                 template=lambda: "",
-                temperature=0.8, max_tokens=2048,
+                temperature=0.8,
+                max_tokens=2048,
             ):
-                if chunk and not chunk.startswith("错误") and not chunk.startswith("API 错误"):
-                    result_parts.append(chunk)
+                if chunk and not str(chunk).startswith("错误") and not str(chunk).startswith("API 错误"):
+                    result_parts.append(str(chunk))
             result = "".join(result_parts).strip()
             if result and len(result) > 10:
                 return result
             if not result:
-                self._last_llm_error = "ai_engine 返回为空"
+                self._last_llm_error = f"ai_engine 调用 {provider_id} 返回为空"
         except Exception as e:
             self._last_llm_error = f"ai_engine: {e}"
             logger.warning(f"[Copywriting] ai_engine 调用失败: {e}，回退到 cloud_api_service")

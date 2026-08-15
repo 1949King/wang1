@@ -139,6 +139,10 @@ class ExtensionsModule(BaseModule):
             self._create_store_tab(),
             "🛍️ 拓展商店"
         )
+        self._tabs.addTab(
+            self._create_canvas_plugins_tab(),
+            "🎨 画布节点"
+        )
 
         layout.addWidget(self._tabs, 1)
 
@@ -210,6 +214,16 @@ class ExtensionsModule(BaseModule):
         drama_btn.clicked.connect(self._open_drama_finder)
         bar.addWidget(drama_btn)
 
+        # 快捷入口：账号运营（原主导航模块，已迁插件）
+        account_btn = QPushButton("👤 账号运营")
+        account_btn.setStyleSheet(
+            "QPushButton{background:#0d9488;color:#fff;border:none;border-radius:6px;"
+            "padding:7px 14px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#0f766e;}"
+        )
+        account_btn.clicked.connect(self._open_account_ops)
+        bar.addWidget(account_btn)
+
         # 快捷入口：AI 特效工坊（兼容旧插件中心）
         ai_effect_btn = QPushButton("✨ AI特效工坊")
         ai_effect_btn.setStyleSheet(
@@ -263,6 +277,32 @@ class ExtensionsModule(BaseModule):
                 dlg.exec()
             except Exception as e:
                 QMessageBox.warning(self, "打开失败", f"短剧筛选插件未安装:\n{e}")
+
+    def _open_account_ops(self):
+        """打开账号运营插件界面（原主导航模块，已迁拓展中心）"""
+        plugin = self._find_plugin_by_name("账号运营")
+        if plugin is not None:
+            self._open_plugin_ui("账号运营")
+            return
+        try:
+            from app.modules.lego.account_ops_module import AccountOpsModule
+            dlg = QDialog(self)
+            dlg.setWindowTitle("账号运营")
+            dlg.resize(1100, 760)
+            dlg.setStyleSheet("QDialog{background:#121212;}")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(0, 0, 0, 0)
+            tip = QLabel(
+                "实验扩展：无平台真 API 时发布为本地队列/导出；数据看板读本地日志。"
+            )
+            tip.setWordWrap(True)
+            tip.setStyleSheet("color:#a1a1aa;font-size:11px;padding:8px 12px;")
+            lay.addWidget(tip)
+            widget = AccountOpsModule()
+            lay.addWidget(widget, 1)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "打开失败", f"账号运营插件未就绪:\n{e}")
 
     def _add_drama_send_to_editor_bar(self, dlg: QDialog, lay: QVBoxLayout, drama_widget) -> None:
         """M6：外挂「发送到剪辑」（不改冻结区 drama_ui.py）。"""
@@ -421,12 +461,6 @@ class ExtensionsModule(BaseModule):
         self._filter_all.clicked.connect(lambda: self._set_filter("all"))
         filter_row.addWidget(self._filter_all)
 
-        self._filter_plugin = QPushButton("🧩 插件")
-        self._filter_plugin.setCheckable(True)
-        self._filter_plugin.setStyleSheet(self._filter_btn_style(False))
-        self._filter_plugin.clicked.connect(lambda: self._set_filter("plugin"))
-        filter_row.addWidget(self._filter_plugin)
-
         self._filter_skill = QPushButton("⚡ 技能")
         self._filter_skill.setCheckable(True)
         self._filter_skill.setStyleSheet(self._filter_btn_style(False))
@@ -471,17 +505,12 @@ class ExtensionsModule(BaseModule):
         )
 
     def _set_filter(self, filter_type: str):
-        """设置筛选类型"""
+        """设置筛选类型（插件已并入技能，只有全部/技能/MCP 三种）"""
         self._current_filter = filter_type
 
-        # 更新按钮状态
         self._filter_all.setChecked(filter_type == "all")
         self._filter_all.setStyleSheet(
             self._filter_btn_style(filter_type == "all")
-        )
-        self._filter_plugin.setChecked(filter_type == "plugin")
-        self._filter_plugin.setStyleSheet(
-            self._filter_btn_style(filter_type == "plugin")
         )
         self._filter_skill.setChecked(filter_type == "skill")
         self._filter_skill.setStyleSheet(
@@ -492,38 +521,67 @@ class ExtensionsModule(BaseModule):
             self._filter_btn_style(filter_type == "mcp")
         )
 
-        # 刷新列表
         self._refresh_installed()
 
     def _create_skill_tab(self) -> QWidget:
-        """创建 Skill 工坊标签页"""
+        """创建 Skill 工坊标签页（含分类过滤 + domain 标签 + AIGC 跳转）"""
+        from .skill_engine import Skill
+
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # 左侧：技能列表
+        # ── 左侧：分类过滤 + 技能列表 ──
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        left_layout.setSpacing(6)
 
         left_label = QLabel("⚡ 可用技能")
         left_label.setStyleSheet("font-size:14px;font-weight:bold;color:#fff;")
         left_layout.addWidget(left_label)
 
+        # 分类过滤按钮组
+        cat_row = QHBoxLayout()
+        cat_row.setSpacing(4)
+
+        self._skill_cat_filter = "all"
+
+        cat_btn_style = (
+            "QPushButton{{background:{bg};color:{fg};border:1px solid #333;"
+            "border-radius:4px;padding:4px 10px;font-size:11px;}}"
+            "QPushButton:hover{{border-color:#7c3aed;}}"
+        )
+
+        self._skill_cats: Dict[str, QPushButton] = {}
+        cats = [("全部", "all", "#7c3aed", "#fff")]
+        for cat in Skill.ALL_CATEGORIES:
+            cats.append((cat, cat, "transparent", "#888"))
+
+        for label, key, bg, fg in cats:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == "all")
+            btn.setStyleSheet(cat_btn_style.format(bg=bg, fg=fg))
+            btn.clicked.connect(lambda _=False, k=key: self._filter_skill_category(k))
+            cat_row.addWidget(btn)
+            self._skill_cats[key] = btn
+
+        cat_row.addStretch()
+        left_layout.addLayout(cat_row)
+
         self._skill_list = QListWidget()
-        self._skill_list.setMinimumWidth(250)
+        self._skill_list.setMinimumWidth(280)
         self._skill_list.setStyleSheet(
             "QListWidget{background:#1a1a1a;border:1px solid #2a2a2a;"
             "border-radius:8px;}"
-            "QListWidget::item{padding:10px;color:#fff;}"
+            "QListWidget::item{padding:8px;color:#fff;}"
             "QListWidget::item:selected{background:#7c3aed;}"
         )
         self._skill_list.itemClicked.connect(self._on_skill_selected)
         left_layout.addWidget(self._skill_list, 1)
 
-        # 刷新技能按钮
         skill_btn = QPushButton("🔄 刷新技能列表")
         skill_btn.setStyleSheet(self._btn_secondary_style())
         skill_btn.clicked.connect(self._refresh_skill_list)
@@ -531,7 +589,7 @@ class ExtensionsModule(BaseModule):
 
         layout.addWidget(left_panel)
 
-        # 右侧：技能详情和执行
+        # ── 右侧：技能详情 + 执行 / 跳转 ──
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -539,25 +597,35 @@ class ExtensionsModule(BaseModule):
 
         self._skill_detail = QTextEdit()
         self._skill_detail.setReadOnly(True)
-        self._skill_detail.setPlaceholderText("选择左侧技能查看详情...")
+        self._skill_detail.setPlaceholderText("选择左侧技能查看详情...\n\n"
+                                              "💡 标注为「🎨 画布域」的 AIGC 技能，请前往 AI 画布使用节点生成。")
         self._skill_detail.setStyleSheet(
             "QTextEdit{background:#1a1a1a;border:1px solid #2a2a2a;"
             "border-radius:8px;padding:12px;color:#ccc;font-size:12px;}"
         )
         right_layout.addWidget(self._skill_detail, 1)
 
-        # 执行区域
-        exec_group = QGroupBox("执行技能")
-        exec_group.setStyleSheet(
+        # Domain 提示栏（动态显示）
+        self._skill_domain_bar = QLabel("")
+        self._skill_domain_bar.setWordWrap(True)
+        self._skill_domain_bar.setStyleSheet(
+            "padding:8px;border-radius:6px;font-size:12px;background:#1a2a3a;color:#60a5fa;"
+        )
+        self._skill_domain_bar.setVisible(False)
+        right_layout.addWidget(self._skill_domain_bar)
+
+        # 执行区域（pipeline domain 可见）
+        self._skill_exec_group = QGroupBox("执行技能（后端）")
+        self._skill_exec_group.setStyleSheet(
             "QGroupBox{color:#888;border:1px solid #2a2a2a;border-radius:8px;"
             "margin-top:12px;padding-top:16px;}"
             "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 6px;}"
         )
-        exec_layout = QVBoxLayout(exec_group)
+        exec_layout = QVBoxLayout(self._skill_exec_group)
         exec_layout.setSpacing(8)
 
         self._skill_input = QLineEdit()
-        self._skill_input.setPlaceholderText("输入技能参数（JSON 格式）")
+        self._skill_input.setPlaceholderText('输入技能参数（JSON 格式），例如 {"topic": "30秒科技产品介绍"}')
         self._skill_input.setStyleSheet(
             "QLineEdit{background:#0d0d0d;border:1px solid #2a2a2a;"
             "border-radius:6px;padding:8px;color:#fff;}"
@@ -579,14 +647,59 @@ class ExtensionsModule(BaseModule):
         )
         exec_layout.addWidget(self._skill_output)
 
-        right_layout.addWidget(exec_group)
+        right_layout.addWidget(self._skill_exec_group)
+
+        # 画布跳转按钮（canvas domain 可见）
+        self._skill_canvas_group = QGroupBox("🎨 AI 画布（AIGC 技能）")
+        self._skill_canvas_group.setStyleSheet(
+            "QGroupBox{color:#888;border:1px solid #2a2a2a;border-radius:8px;"
+            "margin-top:12px;padding-top:16px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 6px;color:#22c55e;}"
+        )
+        canvas_layout = QVBoxLayout(self._skill_canvas_group)
+        canvas_layout.setSpacing(8)
+
+        canvas_hint = QLabel(
+            "此技能属于 AIGC 生成域，在 Skill 工坊执行会自动委托给 AI 画布的"
+            "生图/生视频/音频节点。建议直接前往画布使用专业的节点式编辑面板。"
+        )
+        canvas_hint.setWordWrap(True)
+        canvas_hint.setStyleSheet("color:#aaa;font-size:12px;padding:4px;")
+        canvas_layout.addWidget(canvas_hint)
+
+        self._jump_to_canvas_btn = QPushButton("🎨 前往 AI 画布")
+        self._jump_to_canvas_btn.setStyleSheet(
+            "QPushButton{background:#22c55e;color:#fff;border:none;border-radius:6px;"
+            "padding:10px 16px;font-weight:600;}"
+            "QPushButton:hover{background:#16a34a;}"
+        )
+        self._jump_to_canvas_btn.clicked.connect(self._jump_to_canvas)
+        canvas_layout.addWidget(self._jump_to_canvas_btn)
+
+        self._skill_canvas_group.setVisible(False)
+        right_layout.addWidget(self._skill_canvas_group)
 
         layout.addWidget(right_panel, 1)
 
-        # 初始化技能列表
         self._refresh_skill_list()
-
         return container
+
+    def _filter_skill_category(self, category: str):
+        """按 skill_category 过滤左侧列表"""
+        self._skill_cat_filter = category
+        for key, btn in self._skill_cats.items():
+            if key == category:
+                btn.setStyleSheet(
+                    "QPushButton{background:#7c3aed;color:#fff;border:1px solid #7c3aed;"
+                    "border-radius:4px;padding:4px 10px;font-size:11px;}"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton{background:transparent;color:#888;border:1px solid #333;"
+                    "border-radius:4px;padding:4px 10px;font-size:11px;}"
+                    "QPushButton:hover{border-color:#7c3aed;}"
+                )
+        self._refresh_skill_list()
 
     def _create_mcp_tab(self) -> QWidget:
         """创建 MCP 服务标签页"""
@@ -882,6 +995,389 @@ class ExtensionsModule(BaseModule):
             QMessageBox.warning(self, "安装失败", str(e))
 
     # ═══════════════════════════════════════════════════════════════
+    # 🎨 画布节点插件 Tab（Qt ↔ React 插件生态入口）
+    # ═══════════════════════════════════════════════════════════════
+
+    def _create_canvas_plugins_tab(self) -> QWidget:
+        """创建「画布节点」标签页
+        左侧：官方/社区注册表 + 已安装列表切换
+        右侧：插件详情 + 安装/启停/卸载
+        """
+        try:
+            from app.core.canvas_bridge import (
+                _BUILTIN_PLUGIN_REGISTRY,
+                _load_canvas_plugins_manifest,
+                _upsert_canvas_plugin,
+                _toggle_canvas_plugin_enabled,
+                _remove_canvas_plugin,
+            )
+            self._cb_plugins_registry = _BUILTIN_PLUGIN_REGISTRY
+            self._cb_plugins_load = _load_canvas_plugins_manifest
+            self._cb_plugins_upsert = _upsert_canvas_plugin
+            self._cb_plugins_toggle = _toggle_canvas_plugin_enabled
+            self._cb_plugins_remove = _remove_canvas_plugin
+        except Exception as e:
+            logger.warning("加载 canvas_bridge 插件函数失败: %s", e)
+            self._cb_plugins_registry = []
+            self._cb_plugins_load = lambda: []
+            self._cb_plugins_upsert = lambda *a, **kw: None
+            self._cb_plugins_toggle = lambda *a, **kw: False
+            self._cb_plugins_remove = lambda *a, **kw: False
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 4, 0, 0)
+        layout.setSpacing(12)
+
+        # ── 左侧面板 ──
+        left = QWidget()
+        left_lay = QVBoxLayout(left)
+        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay.setSpacing(8)
+
+        # 切换按钮：注册表 / 已安装
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(4)
+        self._cb_tab_registry = QPushButton("🛍️ 注册表")
+        self._cb_tab_registry.setCheckable(True)
+        self._cb_tab_registry.setChecked(True)
+        self._cb_tab_registry.setStyleSheet(self._filter_btn_style(True))
+        self._cb_tab_registry.clicked.connect(lambda: self._switch_cb_list("registry"))
+        btn_row.addWidget(self._cb_tab_registry)
+        self._cb_tab_installed = QPushButton("📦 已安装")
+        self._cb_tab_installed.setCheckable(True)
+        self._cb_tab_installed.setStyleSheet(self._filter_btn_style(False))
+        self._cb_tab_installed.clicked.connect(lambda: self._switch_cb_list("installed"))
+        btn_row.addWidget(self._cb_tab_installed)
+        btn_row.addStretch()
+        left_lay.addLayout(btn_row)
+
+        # 搜索框
+        self._cb_search = QLineEdit()
+        self._cb_search.setPlaceholderText("🔍 搜索插件...")
+        self._cb_search.setStyleSheet(
+            "QLineEdit{background:#0d0d0d;border:1px solid #2a2a2a;"
+            "border-radius:6px;padding:8px;color:#fff;}"
+        )
+        self._cb_search.textChanged.connect(lambda _: self._refresh_canvas_plugins())
+        left_lay.addWidget(self._cb_search)
+
+        # 插件列表
+        self._cb_list = QListWidget()
+        self._cb_list.setMinimumWidth(280)
+        self._cb_list.setStyleSheet(
+            "QListWidget{background:#1a1a1a;border:1px solid #2a2a2a;"
+            "border-radius:8px;outline:none;}"
+            "QListWidget::item{padding:10px;color:#fff;border-bottom:1px solid #222;}"
+            "QListWidget::item:selected{background:#7c3aed;color:#fff;}"
+            "QListWidget::item:hover{background:#252525;}"
+        )
+        self._cb_list.itemClicked.connect(self._on_canvas_plugin_selected)
+        left_lay.addWidget(self._cb_list, 1)
+
+        # 开发者链接
+        dev_btn = QPushButton("📘 插件开发规范")
+        dev_btn.setStyleSheet(self._btn_secondary_style())
+        dev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dev_btn.clicked.connect(lambda: self._open_url(
+            "https://github.com/shiguang-canvas/node-plugin-sdk/blob/main/README.md",
+            "节点插件 SDK 开发规范",
+        ))
+        left_lay.addWidget(dev_btn)
+
+        layout.addWidget(left)
+
+        # ── 右侧详情面板 ──
+        right = QWidget()
+        right_lay = QVBoxLayout(right)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(10)
+
+        # 图标 + 标题 + 版本
+        self._cb_detail_header = QWidget()
+        self._cb_detail_header.setStyleSheet(
+            "QWidget{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:16px;}"
+        )
+        header_lay = QHBoxLayout(self._cb_detail_header)
+        header_lay.setContentsMargins(16, 16, 16, 16)
+        self._cb_detail_icon = QLabel("🔌")
+        self._cb_detail_icon.setStyleSheet("font-size:36px;")
+        header_lay.addWidget(self._cb_detail_icon)
+        meta_col = QVBoxLayout()
+        meta_col.setSpacing(4)
+        self._cb_detail_name = QLabel("选择左侧插件查看详情")
+        self._cb_detail_name.setStyleSheet("color:#fff;font-size:16px;font-weight:bold;")
+        meta_col.addWidget(self._cb_detail_name)
+        self._cb_detail_version = QLabel("")
+        self._cb_detail_version.setStyleSheet("color:#666;font-size:11px;")
+        meta_col.addWidget(self._cb_detail_version)
+        self._cb_detail_badge = QLabel("")
+        self._cb_detail_badge.setStyleSheet("color:#7c3aed;font-size:10px;padding:2px 6px;background:#2a1e4a;border-radius:4px;")
+        meta_col.addWidget(self._cb_detail_badge)
+        header_lay.addLayout(meta_col, 1)
+        right_lay.addWidget(self._cb_detail_header)
+
+        # 描述
+        self._cb_detail_desc = QLabel("")
+        self._cb_detail_desc.setStyleSheet("color:#888;font-size:12px;padding:12px;background:#1a1a1a;border-radius:8px;")
+        self._cb_detail_desc.setWordWrap(True)
+        self._cb_detail_desc.setMinimumHeight(60)
+        right_lay.addWidget(self._cb_detail_desc)
+
+        # 节点列表
+        self._cb_detail_nodes_label = QLabel("包含节点:")
+        self._cb_detail_nodes_label.setStyleSheet("color:#666;font-size:11px;margin-top:8px;")
+        right_lay.addWidget(self._cb_detail_nodes_label)
+        self._cb_detail_nodes = QListWidget()
+        self._cb_detail_nodes.setMaximumHeight(120)
+        self._cb_detail_nodes.setStyleSheet(
+            "QListWidget{background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;}"
+            "QListWidget::item{padding:6px;color:#ccc;font-size:11px;}"
+        )
+        right_lay.addWidget(self._cb_detail_nodes, 1)
+
+        # 操作按钮区
+        self._cb_action_bar = QHBoxLayout()
+        self._cb_action_bar.setSpacing(8)
+
+        self._cb_btn_install = QPushButton("📥 安装")
+        self._cb_btn_install.setStyleSheet(self._btn_primary_style())
+        self._cb_btn_install.clicked.connect(self._install_canvas_plugin)
+        self._cb_action_bar.addWidget(self._cb_btn_install)
+
+        self._cb_btn_toggle = QPushButton("✅ 启用")
+        self._cb_btn_toggle.setStyleSheet(
+            "QPushButton{background:#4caf50;color:#fff;border:none;border-radius:6px;"
+            "padding:7px 14px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{opacity:0.85;}"
+            "QPushButton:disabled{background:#3a3a3a;color:#666;}"
+        )
+        self._cb_btn_toggle.clicked.connect(self._toggle_canvas_plugin)
+        self._cb_action_bar.addWidget(self._cb_btn_toggle)
+
+        self._cb_btn_uninstall = QPushButton("🗑️ 卸载")
+        self._cb_btn_uninstall.setStyleSheet(self._btn_danger_style())
+        self._cb_btn_uninstall.clicked.connect(self._uninstall_canvas_plugin)
+        self._cb_action_bar.addWidget(self._cb_btn_uninstall)
+
+        self._cb_action_bar.addStretch()
+        right_lay.addLayout(self._cb_action_bar)
+
+        layout.addWidget(right, 1)
+
+        # 状态变量
+        self._cb_selected_plugin: Optional[Dict[str, Any]] = None
+        self._cb_current_list = "registry"  # registry | installed
+
+        self._refresh_canvas_plugins()
+        return container
+
+    def _switch_cb_list(self, list_type: str):
+        """切换注册表/已安装列表"""
+        self._cb_current_list = list_type
+        self._cb_tab_registry.setChecked(list_type == "registry")
+        self._cb_tab_registry.setStyleSheet(self._filter_btn_style(list_type == "registry"))
+        self._cb_tab_installed.setChecked(list_type == "installed")
+        self._cb_tab_installed.setStyleSheet(self._filter_btn_style(list_type == "installed"))
+        self._refresh_canvas_plugins()
+
+    def _refresh_canvas_plugins(self):
+        """刷新画布节点插件列表"""
+        self._cb_list.clear()
+        search = self._cb_search.text().strip().lower() if hasattr(self, "_cb_search") else ""
+
+        if self._cb_current_list == "registry":
+            items = self._cb_plugins_registry
+        else:
+            items = self._cb_plugins_load() or []
+
+        for p in items:
+            name = str(p.get("name") or p.get("id") or "")
+            desc = str(p.get("description") or "")
+            if search and search not in name.lower() and search not in desc.lower():
+                continue
+            icon = str(p.get("nodes", [{}])[0].get("icon", "🔌")) if p.get("nodes") else "🔌"
+            installed_badge = " ✅" if self._is_cb_plugin_installed(p.get("id", "")) else ""
+            official_badge = " 🏛️" if p.get("official") else ""
+            item_text = f"{icon} {name}{official_badge}{installed_badge}\n   v{p.get('version', '0.0.0')} — {desc[:60]}"
+            q_item = QListWidgetItem(item_text)
+            q_item.setData(Qt.ItemDataRole.UserRole, p)
+            self._cb_list.addItem(q_item)
+
+        if self._cb_list.count() == 0:
+            empty = QListWidgetItem("（暂无内容）")
+            empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            empty.setForeground(Qt.GlobalColor.gray)
+            self._cb_list.addItem(empty)
+
+    def _is_cb_plugin_installed(self, plugin_id: str) -> bool:
+        """检查插件是否已安装"""
+        if not plugin_id:
+            return False
+        installed = self._cb_plugins_load() or []
+        return any(p.get("id") == plugin_id for p in installed)
+
+    def _on_canvas_plugin_selected(self, q_item: QListWidgetItem):
+        """选中左侧列表项 → 刷新右侧详情"""
+        plugin = q_item.data(Qt.ItemDataRole.UserRole)
+        if not plugin:
+            self._cb_selected_plugin = None
+            return
+
+        self._cb_selected_plugin = plugin
+
+        icon = "🔌"
+        nodes = plugin.get("nodes") or []
+        if nodes:
+            icon = str(nodes[0].get("icon", "🔌"))
+        self._cb_detail_icon.setText(icon)
+        self._cb_detail_name.setText(str(plugin.get("name") or plugin.get("id") or "Unknown"))
+        self._cb_detail_version.setText(f"版本: {plugin.get('version', '0.0.0')}")
+        self._cb_detail_desc.setText(str(plugin.get("description") or ""))
+
+        badge_text = "🏛️ 官方" if plugin.get("official") else "🌐 社区"
+        self._cb_detail_badge.setText(badge_text)
+        self._cb_detail_badge.setVisible(True)
+
+        # 节点列表
+        self._cb_detail_nodes.clear()
+        for n in nodes:
+            t = str(n.get("title") or n.get("type") or "节点")
+            ic = str(n.get("icon", "⬜"))
+            self._cb_detail_nodes.addItem(f"{ic}  {t}")
+
+        # 按钮状态
+        installed = self._is_cb_plugin_installed(plugin.get("id", ""))
+        self._cb_btn_install.setEnabled(not installed)
+        self._cb_btn_toggle.setEnabled(installed)
+        self._cb_btn_uninstall.setEnabled(installed)
+
+        if installed:
+            manifest = self._cb_plugins_load() or []
+            manifest_entry = next((m for m in manifest if m.get("id") == plugin.get("id")), None)
+            enabled = bool(manifest_entry.get("enabled", True)) if manifest_entry else True
+            self._cb_btn_toggle.setText("🚫 禁用" if enabled else "✅ 启用")
+            self._cb_btn_toggle.setStyleSheet(
+                ("QPushButton{background:#555" if enabled else "QPushButton{background:#4caf50") +
+                ";color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:600;}"
+                "QPushButton:hover{opacity:0.85;}"
+            )
+
+    def _install_canvas_plugin(self):
+        """安装画布节点插件 → 调 Qt 端 manifest + 前端 fetch 激活"""
+        p = self._cb_selected_plugin
+        if not p:
+            return
+        plugin_id = str(p.get("id") or "")
+        if not plugin_id:
+            return
+
+        # 1) Qt 端持久化
+        try:
+            self._cb_plugins_upsert(
+                plugin_id,
+                name=str(p.get("name") or plugin_id),
+                version=str(p.get("version") or "0.0.0"),
+                description=str(p.get("description") or ""),
+                url=str(p.get("url") or ""),
+                nodes=p.get("nodes") or [],
+                official=bool(p.get("official", False)),
+                enabled=True,
+            )
+        except Exception as e:
+            logger.warning("Qt 端持久化插件失败: %s", e)
+
+        # 2) 通知前端（如果画布 bridge 正在运行）
+        self._notify_canvas_plugin_change("install", plugin_id)
+
+        # 3) UI 反馈
+        self._set_status(f"✅ 已安装 {p.get('name')}")
+        self._refresh_canvas_plugins()
+        # 如果当前在注册表列表，刷新后仍然选中
+        self._cb_list.setCurrentRow(self._cb_list.count() - 1)
+
+    def _toggle_canvas_plugin(self):
+        """切换启用/禁用"""
+        p = self._cb_selected_plugin
+        if not p:
+            return
+        plugin_id = str(p.get("id") or "")
+        manifest = self._cb_plugins_load() or []
+        entry = next((m for m in manifest if m.get("id") == plugin_id), None)
+        current_enabled = bool(entry.get("enabled", True)) if entry else True
+        new_enabled = not current_enabled
+
+        try:
+            self._cb_plugins_toggle(plugin_id, new_enabled)
+        except Exception as e:
+            logger.warning("切换插件启用失败: %s", e)
+
+        self._notify_canvas_plugin_change("toggle", plugin_id, new_enabled)
+        self._set_status(f"{'✅ 已启用' if new_enabled else '🚫 已禁用'} {p.get('name')}")
+        # 重新选中触发详情刷新
+        row = self._cb_list.currentRow()
+        self._refresh_canvas_plugins()
+        self._cb_list.setCurrentRow(row)
+
+    def _uninstall_canvas_plugin(self):
+        """卸载"""
+        p = self._cb_selected_plugin
+        if not p:
+            return
+        reply = QMessageBox.question(
+            self, "确认卸载",
+            f"确定要卸载「{p.get('name')}」吗？\n"
+            "画布中已存在的该类型节点将变为只读（需要手动删除）。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        plugin_id = str(p.get("id") or "")
+        try:
+            self._cb_plugins_remove(plugin_id)
+        except Exception as e:
+            logger.warning("卸载插件失败: %s", e)
+
+        self._notify_canvas_plugin_change("uninstall", plugin_id)
+        self._set_status(f"🗑️ 已卸载 {p.get('name')}")
+        self._refresh_canvas_plugins()
+        self._cb_selected_plugin = None
+        self._cb_detail_name.setText("选择左侧插件查看详情")
+        self._cb_detail_desc.setText("")
+        self._cb_detail_icon.setText("🔌")
+        self._cb_detail_nodes.clear()
+
+    def _notify_canvas_plugin_change(self, action: str, plugin_id: str, extra=None):
+        """通过 canvas_bridge HTTP 通知前端刷新插件状态"""
+        try:
+            import urllib.request
+            import urllib.parse
+            from app.core.canvas_bridge import DEFAULT_PORT, session_token
+            url = f"http://127.0.0.1:{DEFAULT_PORT}/host/plugins/{action}"
+            payload = json.dumps({"id": plugin_id, "enabled": extra}).encode("utf-8")
+            req = urllib.request.Request(
+                url + "?token=" + urllib.parse.quote(session_token()),
+                data=payload if action != "uninstall" else None,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            # 非阻塞：bridge 可能没启动
+            urllib.request.urlopen(req, timeout=2)
+        except Exception as e:
+            logger.debug("通知前端插件变更失败（bridge 可能未启动）: %s", e)
+
+    def _open_url(self, url: str, title: str = ""):
+        """打开外部链接"""
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:
+            QMessageBox.information(
+                self, title or "链接", f"请在浏览器中访问:\n{url}"
+            )
+
+    # ═══════════════════════════════════════════════════════════════
     # 刷新与数据更新
     # ═══════════════════════════════════════════════════════════════
 
@@ -951,6 +1447,7 @@ class ExtensionsModule(BaseModule):
                 # 特殊插件直接绑定专用方法
                 special_map = {
                     "短剧筛选": self._open_drama_finder,
+                    "账号运营": self._open_account_ops,
                     "AI特效制作": self._open_ai_effects_studio,
                 }
                 is_special = name in special_map
@@ -1287,13 +1784,13 @@ class ExtensionsModule(BaseModule):
                 QMessageBox.warning(self, "导入失败", str(e))
 
     def _refresh_skill_list(self):
-        """刷新技能列表"""
+        """刷新技能列表（按 skill_category 过滤 + domain 标签显示）"""
         self._skill_list.clear()
+
+        cat_filter = getattr(self, "_skill_cat_filter", "all")
 
         try:
             from .skill_engine import skill_registry
-            # 外部 skill 注册（幂等：仅首次实际扫描 external/，后续调用直接返回 0）
-            # 独立 try/except 包裹，外部加载失败不影响内置 skill 列表展示
             try:
                 from app.skills.external_loader import ensure_external_skills_registered
                 ensure_external_skills_registered()
@@ -1302,20 +1799,19 @@ class ExtensionsModule(BaseModule):
             if skill_registry:
                 skills = skill_registry.list_all()
                 for skill in skills:
-                    item = QListWidgetItem(
-                        f"⚡ {skill.skill_name} ({skill.skill_category})"
-                    )
+                    # 分类过滤
+                    if cat_filter != "all" and skill.skill_category != cat_filter:
+                        continue
+                    # domain 标签
+                    domain_tag = "🎨" if getattr(skill, "skill_domain", "pipeline") == "canvas" else "⚙️"
+                    item_text = f"{domain_tag} {skill.skill_name} ({skill.skill_category})"
+                    item = QListWidgetItem(item_text)
                     item.setData(Qt.ItemDataRole.UserRole, skill)
                     self._skill_list.addItem(item)
         except Exception as e:
             logger.warning(f"加载技能列表失败: {e}")
 
-        # 添加一些默认技能项（仅在 skill_registry 未注册任何真实技能时的空态兜底）
         if self._skill_list.count() == 0:
-            # 修复：占位项此前和真实技能用同样的 "⚡ 名称" 展示，列表里完全无法
-            # 区分，用户选中、点「运行技能」才会弹"是占位项，暂未实现"——
-            # 体验上像是"点了才发现是假的"。这里在文本和详情里都提前标注，
-            # 让用户在点击前就能看出这些是未接入的占位项。
             defaults = [
                 ("自动剪辑", "自动分析视频并执行剪辑"),
                 ("去水词", "自动识别并删除口语化表达"),
@@ -1324,8 +1820,14 @@ class ExtensionsModule(BaseModule):
                 ("自动卡点", "根据音乐节奏自动剪辑"),
             ]
             for name, desc in defaults:
-                item = QListWidgetItem(f"⚡ {name}（占位，未接入）")
-                item.setData(Qt.ItemDataRole.UserRole, {"name": name, "description": f"{desc}\n\n⚠️ 暂未接入真实技能引擎，此项目前仅作展示，选中后点「运行技能」不会有实际效果。"})
+                # 占位项也遵循分类过滤
+                if cat_filter != "all":
+                    continue
+                item = QListWidgetItem(f"⚙️ {name}（占位，未接入）")
+                item.setData(Qt.ItemDataRole.UserRole, {
+                    "name": name,
+                    "description": f"{desc}\n\n⚠️ 暂未接入真实技能引擎，此项目前仅作展示。",
+                })
                 self._skill_list.addItem(item)
 
     def _update_connected_mcp_list(self):
@@ -1448,22 +1950,55 @@ class ExtensionsModule(BaseModule):
     # ═══════════════════════════════════════════════════════════════
 
     def _on_skill_selected(self, item):
-        """技能选中事件"""
+        """技能选中事件：显示详情 + 根据 domain 切换执行域 UI"""
         skill_data = item.data(Qt.ItemDataRole.UserRole)
-        if skill_data:
-            # 修复：真实 Skill 实例没有 .get()，直接调用会 AttributeError 崩溃；
-            # 需要和 _run_selected_skill 一样区分 Skill 实例 / 占位 dict
-            if hasattr(skill_data, "skill_name"):
-                name = skill_data.skill_name
-                desc = getattr(skill_data, "skill_description", "")
-            elif isinstance(skill_data, dict):
-                name = skill_data.get('name', '')
-                desc = skill_data.get('description', '')
+        if not skill_data:
+            return
+
+        if hasattr(skill_data, "skill_name"):
+            name = skill_data.skill_name
+            desc = getattr(skill_data, "skill_description", "")
+            category = getattr(skill_data, "skill_category", "")
+            domain = getattr(skill_data, "skill_domain", "pipeline")
+        elif isinstance(skill_data, dict):
+            name = skill_data.get('name', '')
+            desc = skill_data.get('description', '')
+            category = ""
+            domain = skill_data.get('skill_domain', 'pipeline')
+        else:
+            name = str(skill_data)
+            desc = ""
+            category = ""
+            domain = "pipeline"
+
+        domain_label = "🎨 画布域（AIGC 生成）" if domain == "canvas" else "⚙️ 后端执行域"
+        hint = ("此技能属于 AIGC 生成域，建议前往 AI 画布使用专业的节点编辑面板。"
+                if domain == "canvas"
+                else "此技能在后端 SkillEngine 中执行，可在下方输入参数直接运行。")
+
+        detail_text = f"【{name}】  [{category}]\n\n{desc}\n\n---\n执行域: {domain_label}\n💡 {hint}"
+        self._skill_detail.setPlainText(detail_text)
+
+        # 动态切换 domain 提示栏
+        if hasattr(self, "_skill_domain_bar"):
+            if domain == "canvas":
+                self._skill_domain_bar.setText("🎨 此技能属于画布域，请前往 AI 画布使用节点生成")
+                self._skill_domain_bar.setStyleSheet(
+                    "padding:8px;border-radius:6px;font-size:12px;background:#1a3a2a;color:#22c55e;"
+                )
+                self._skill_domain_bar.setVisible(True)
             else:
-                name = str(skill_data)
-                desc = ""
-            detail_text = f"【{name}】\n\n{desc}\n\n---\n使用说明:\n在下方输入框中输入 JSON 格式的参数，点击「运行技能」执行。"
-            self._skill_detail.setPlainText(detail_text)
+                self._skill_domain_bar.setText("⚙️ 此技能在后端 SkillEngine 中执行")
+                self._skill_domain_bar.setStyleSheet(
+                    "padding:8px;border-radius:6px;font-size:12px;background:#1a2a3a;color:#60a5fa;"
+                )
+                self._skill_domain_bar.setVisible(True)
+
+        # 动态切换执行 / 画布跳转区域
+        if hasattr(self, "_skill_exec_group"):
+            self._skill_exec_group.setVisible(domain != "canvas")
+        if hasattr(self, "_skill_canvas_group"):
+            self._skill_canvas_group.setVisible(domain == "canvas")
 
     def _run_selected_skill(self):
         """运行选中的技能（异步执行，主线程安全）
@@ -1542,6 +2077,20 @@ class ExtensionsModule(BaseModule):
         prefix = "✅ 执行完成\n\n" if success else "❌ 执行失败\n\n"
         self._skill_output.setPlainText(prefix + result_text)
         self._set_status("完成" if success else "失败")
+
+    def _jump_to_canvas(self):
+        """跳转至 AI 画布（characters 模块）"""
+        try:
+            from .core import EventBus, EventType
+            event_bus = EventBus.get_instance()
+            event_bus.emit(
+                EventType.MODULE_ACTIVATED,
+                {"target": "characters", "hint": "从 Skill 工坊跳转，前往画布使用 AIGC 节点"},
+            )
+            self._set_status("已跳转至 AI 画布")
+        except Exception as e:
+            logger.error(f"跳转 AI 画布失败: {e}")
+            QMessageBox.warning(self, "跳转失败", f"无法跳转至 AI 画布:\n{e}")
 
     def _download_blender_mcp(self):
         """后台线程运行 setup_blender_mcp.ps1，从 Git 下载 harveyxiacn/blender-mcp"""
