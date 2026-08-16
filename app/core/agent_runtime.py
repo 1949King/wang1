@@ -63,7 +63,7 @@ def dispatch_canvas_tools(
     mode: str,
     session_id: str,
     task_id: str = "",
-    timeout: float = 25.0,
+    timeout: float = 120.0,
 ) -> List[Dict[str, Any]]:
     """策略校验后 push task.create，等待画布回执。"""
     from app.core.agent_policy import DECISION_DENY, MODE_PLAN, decide, normalize_mode, sanitize_for_log

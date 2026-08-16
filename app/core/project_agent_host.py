@@ -255,8 +255,9 @@ def _build_canvas_fast_messages(
     message: str,
     canvas_context: Optional[Dict[str, Any]] = None,
     agent_mode: str = "",
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, str]]:
-    """画布 Agent 轻量提示：不拉时间线/拓展清单，首字更快。"""
+    """画布 Agent 轻量提示：system + 历史对话 + 当前 user，不拉时间线/拓展清单。"""
     from app.core.agent_policy import canvas_tools_prompt_block, mode_prompt_block
 
     system = (
@@ -284,10 +285,12 @@ def _build_canvas_fast_messages(
             if canvas_context.get(k) is not None
         }
         user = f"{user}\n\n[画布上下文]\n{json.dumps(slim, ensure_ascii=False)[:2500]}"
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
+
+    messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user})
+    return messages
 
 
 def _resolve_chat_provider(provider: str, model: str, editor: Any) -> Tuple[str, str]:
@@ -340,6 +343,8 @@ def project_agent_chat(
     if not ok_round:
         return {"ok": False, "message": err_round, "agent_mode": amode}
 
+    history_msgs = agent_sessions.get_history_messages(sid_sess)
+
     task = agent_tasks.create(session_id=sid_sess, goal=message, mode=amode, source="canvas")
     agent_tasks.bump_round(task["id"])
     try:
@@ -361,7 +366,9 @@ def project_agent_chat(
     provider, model = _resolve_chat_provider(provider, model, editor)
 
     if use_fast:
-        messages = _build_canvas_fast_messages(message, canvas_context, agent_mode=amode)
+        messages = _build_canvas_fast_messages(
+            message, canvas_context, agent_mode=amode, history=history_msgs
+        )
         path = "canvas_fast"
     else:
         def _build():
@@ -373,13 +380,19 @@ def project_agent_chat(
                 )
                 if msgs and msgs[-1].get("role") == "user":
                     msgs[-1]["content"] = str(msgs[-1].get("content") or "") + extra
+            if history_msgs and msgs:
+                system = [m for m in msgs if m.get("role") == "system"]
+                rest = [m for m in msgs if m.get("role") != "system"]
+                msgs = system + history_msgs + rest
             return msgs
 
         ok, messages, err = _run_on_ui(_build)
         if not ok:
             # 主线程失败时降级快路径，避免整段不可用
             logger.warning("editor prompt build failed, fallback canvas_fast: %s", err)
-            messages = _build_canvas_fast_messages(message, canvas_context, agent_mode=amode)
+            messages = _build_canvas_fast_messages(
+                message, canvas_context, agent_mode=amode, history=history_msgs
+            )
             path = "canvas_fast_fallback"
         else:
             path = "editor"
@@ -515,6 +528,12 @@ def project_agent_chat(
             "task_id": task.get("id"),
         },
     )
+
+    # 落盘本轮对话到 session history（供下一轮作为上下文）
+    try:
+        agent_sessions.push_history(sid_sess, message, reply)
+    except Exception:
+        logger.warning("push_history 失败", exc_info=True)
 
     if canvas_tools:
         try:

@@ -1,8 +1,8 @@
 # 拾光剪影 — 项目知识库
 
-> 人和 Agent 共用的单一事实来源（Single Source of Truth）。  
-> 更新约定：改架构/活路径/已知问题后，先改本库，再改代码。  
-> 全量索引由 `python scripts/sync_knowledge.py` 刷新。
+> 人和 Agent 共用的单一事实来源(Single Source of Truth).  
+> 更新约定:改架构/活路径/已知问题后,先改本库,再改代码.  
+> 全量索引由 `python scripts/sync_knowledge.py` 刷新.
 
 ## 快速入口
 
@@ -16,16 +16,16 @@
 | [05-known-issues.md](05-known-issues.md) | 已知问题与已修复项 |
 | [06-roadmap.md](06-roadmap.md) | P0 剪映对齐与地基分层 |
 | [07-coding-rules.md](07-coding-rules.md) | 编码约定与最小入侵原则 |
-| [08-frozen-zones.md](08-frozen-zones.md) | **已修好功能冻结区**（禁改清单） |
-| [09-tool-registry-design.md](09-tool-registry-design.md) | Agent 能力表面收敛设计提案（4 套→1 套，分阶段） |
-| [10-editor-module-split-plan.md](10-editor-module-split-plan.md) | `editor_module.py` 量化分析 + 拆分方案（13,321 行现状与分期提取计划） |
-| [11-opentake-gap.md](11-opentake-gap.md) | OpenTake/OTIO/选模/画布对照：只学不换壳 |
-| [12-otio-clip-fields.md](12-otio-clip-fields.md) | OTIO 概念 ↔ `_clips` 字段对照（不换真相源） |
+| [08-frozen-zones.md](08-frozen-zones.md) | **已修好功能冻结区**(禁改清单) |
+| [09-tool-registry-design.md](09-tool-registry-design.md) | Agent 能力表面收敛设计提案(4 套→1 套,分阶段) |
+| [10-editor-module-split-plan.md](10-editor-module-split-plan.md) | `editor_module.py` 量化分析 + 拆分方案(13,321 行现状与分期提取计划) |
+| [11-opentake-gap.md](11-opentake-gap.md) | OpenTake/OTIO/选模/画布对照:只学不换壳 |
+| [12-otio-clip-fields.md](12-otio-clip-fields.md) | OTIO 概念 ↔ `_clips` 字段对照(不换真相源) |
 | [14-canvas-strategy.md](14-canvas-strategy.md) | 自研导演台画布 vs infinite-canvas / LibTV 策略 |
-| [15-long-term-iteration.md](15-long-term-iteration.md) | **长期迭代计划**（P/N/A 轨 + 当前自动执行波） |
+| [15-long-term-iteration.md](15-long-term-iteration.md) | **长期迭代计划**(P/N/A 轨 + 当前自动执行波) |
 | [16-aigc-canvas-gap.md](16-aigc-canvas-gap.md) | 主流 AIGC 画布借鉴清单 ↔ 落地状态 |
-| [sources/MANIFEST.md](sources/MANIFEST.md) | 全库 Markdown 源清单（自动生成） |
-| [catalog.json](catalog.json) | 机器可读目录（自动生成） |
+| [sources/MANIFEST.md](sources/MANIFEST.md) | 全库 Markdown 源清单(自动生成) |
+| [catalog.json](catalog.json) | 机器可读目录(自动生成) |
 
 ## 根上下文
 
@@ -36,11 +36,11 @@
 ## 同步命令
 
 ```bash
-# 在项目根执行：扫描全部 md → 刷新 MANIFEST + catalog.json
+# 在项目根执行:扫描全部 md → 刷新 MANIFEST + catalog.json
 python scripts/sync_knowledge.py
 ```
 
-## 活路径（编码时优先跟这些文件）
+## 活路径(编码时优先跟这些文件)
 
 **主路径**
 
@@ -56,7 +56,7 @@ app/core/editor_scheduler.py
 app/core/timeline_manager.py
 ```
 
-**剪辑抽出 / AI 体力活（副路径）**
+**剪辑抽出 / AI 体力活(副路径)**
 
 ```
 app/modules/lego/clip_transform.py
@@ -77,7 +77,7 @@ app/core/filler_silence_detect.py
 app/core/transition_plugin_registry.py
 ```
 
-**拓展 / 闭环（按需）**
+**拓展 / 闭环(按需)**
 
 ```
 app/modules/lego/extensions_module.py
@@ -94,12 +94,12 @@ app/core/agent_task_store.py
 app/core/agent_runtime.py
 app/plugins/drama_finder_plugin/
 app/plugins/account_ops_plugin/
-vendor/shiguang-canvas/   # 默认画布引擎；3D 导演台
+vendor/shiguang-canvas/   # 默认画布引擎;3D 导演台
 vendor/infinite-canvas/   # scripts/setup_infinite_canvas.ps1
 ```
 
-**明确不做**：重写时间线架构、GPU 流式预览大改、完整转场库、剪映商店包兼容、Desktop 栈迁入（见 `docs/P0_CAPCUT_ALIGN.md`）。
+**明确不做**:重写时间线架构、GPU 流式预览大改、完整转场库、剪映商店包兼容、Desktop 栈迁入(见 `docs/P0_CAPCUT_ALIGN.md`).
 
-自研拓展：`.cube` LUT 导入 · `transition_plugin_registry`（`ITransitionPlugin`）。
+自研拓展:`.cube` LUT 导入 · `transition_plugin_registry`(`ITransitionPlugin`).
 
-知识库最近全量对照代码复核：**2026-08-13**（3D 群像/正面、账号运营插件、素材库本机化）。
+知识库最近全量对照代码复核:**2026-08-13**(3D 群像/正面、账号运营插件、素材库本机化).

@@ -111,6 +111,16 @@ class AIShortDramaEditorApp:
 
 def main():
     """主函数"""
+    # WebEngine 必须在 QApplication 创建前设置此属性，否则报:
+    # QtWebEngineWidgets must be imported or Qt.AA_ShareOpenGLContexts
+    # must be set before a QCoreApplication instance is created
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    # 提前 import WebEngineWidgets，让 Qt 在创建 QApplication 前完成 OpenGL 上下文共享
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+    except ImportError:
+        pass
+
     app = QApplication(sys.argv)
     
     # 设置应用图标

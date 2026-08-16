@@ -13,35 +13,35 @@
 
 ## 使用方法
 
-由于系统执行策略限制，我们无法直接安装和运行 MCP 服务器。但您可以通过以下方式使用 MCP：
+由于系统执行策略限制,我们无法直接安装和运行 MCP 服务器.但您可以通过以下方式使用 MCP:
 
 ### 1. 使用 Trae IDE 内置 MCP
-Trae IDE 已经内置了 MCP 功能，您可以在 `.trae/settings.json` 中配置 MCP 服务器。
+Trae IDE 已经内置了 MCP 功能,您可以在 `.trae/settings.json` 中配置 MCP 服务器.
 
 ### 2. 手动启动 MCP 服务器
-当您需要使用 MCP 时，可以运行：
+当您需要使用 MCP 时,可以运行:
 ```bash
 # 启动 MCP 服务器
 python start_mcp.py
 ```
 
 ### 3. 安装和运行步骤
-1. 安装 MCP 服务器：
+1. 安装 MCP 服务器:
    ```bash
    npm install -g @modelcontextprotocol/server
    ```
 
-2. 启动服务器：
+2. 启动服务器:
    ```bash
    mcp-server --config .trae/settings.json
    ```
 
 ### 4. 测试 MCP 服务器
-服务器启动后，访问：
+服务器启动后,访问:
 http://127.0.0.1:8080
 
 ### 5. 集成到项目中
-在您的 Python 代码中使用 MCP：
+在您的 Python 代码中使用 MCP:
 ```python
 from mcp.client import Client
 

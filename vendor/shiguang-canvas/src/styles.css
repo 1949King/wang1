@@ -568,6 +568,53 @@ kbd {
 }
 .sg-node .meta { margin-top: 6px; color: var(--muted); font-size: 10px; }
 
+/* 节点内联文本编辑器 */
+.sg-editable-display {
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: text;
+  min-height: 24px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: background 0.15s;
+}
+.sg-editable-display:hover {
+  background: rgba(59, 130, 246, 0.12);
+  outline: 1px dashed rgba(59, 130, 246, 0.4);
+}
+.sg-editable-placeholder {
+  color: #64748b;
+  font-style: italic;
+}
+.sg-editable-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 6px 8px;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.sg-editable-textarea:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+.sg-editable-label {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 4px;
+  margin-bottom: 1px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 /* 节点首次使用提示条（降低学习成本） */
 .sg-node-hint {
   display: flex;
@@ -1574,6 +1621,102 @@ kbd {
   border-radius: 6px;
   background: #000;
 }
+/* ── Agent 画布引用可视化 ── */
+.sg-agent-canvas-ref {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+.sg-agent-ref-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.sg-agent-ref-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #60a5fa;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sg-agent-ref-summary {
+  font-size: 10px;
+}
+.sg-agent-ref-grid {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.sg-agent-ref-card {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #334155;
+  position: relative;
+  background: #1e293b;
+}
+.sg-agent-ref-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.sg-agent-ref-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #64748b;
+}
+.sg-agent-ref-kind {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #cbd5e1;
+  font-size: 9px;
+  padding: 1px 3px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.sg-agent-ref-more {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.sg-agent-ref-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.sg-agent-ref-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+}
+
 .sg-agent-pending {
   display: flex;
   flex-wrap: wrap;
@@ -1873,11 +2016,16 @@ kbd {
 }
 
 /* —— 节点状态 Badge —— */
+.sg-node .head .head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
 .sg-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-left: auto;
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
@@ -1893,6 +2041,46 @@ kbd {
 @keyframes sg-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+
+/* —— 节点重试按钮（仅 failed 时显示） —— */
+.sg-retry-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #7f1d1d;
+  background: #450a0a;
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+.sg-retry-btn:hover {
+  background: #7f1d1d;
+  color: #fee2e2;
+  border-color: #fca5a5;
+  transform: scale(1.1);
+}
+.sg-retry-btn:active { transform: scale(0.95); }
+
+/* —— 节点错误提示条（仅 failed 时显示，位于 head 下方、body 上方） —— */
+.sg-node-error {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 10px;
+  color: #fca5a5;
+  background: #450a0a;
+  border-top: 1px solid #7f1d1d;
+  border-bottom: 1px solid #7f1d1d;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* —— Shot 镜头语言 Tag 组 —— */

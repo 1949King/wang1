@@ -1,6 +1,14 @@
-import React, { memo, type ReactNode } from "react";
+import React, { createContext, memo, useContext, useRef, useState, type ReactNode } from "react";
 import { Handle, Position, type NodeProps, NodeResizer } from "@xyflow/react";
 import type { NodeData, NodeStatus } from "./store";
+import { useCanvasStore } from "./store";
+
+/** 节点全局动作上下文 — 由 App.tsx 注入 retryNode 等方法，节点组件通过它触发生成/重试 */
+export const NodeActionsContext = createContext<{
+  /** 重试指定节点（内部会自动 select + 调 generateForNode） */
+  retryNode?: (nodeId: string) => void;
+}>({});
+const useNodeActions = () => useContext(NodeActionsContext);
 
 /**
  * 节点浅比较：仅比较影响视觉输出的 selected / data / dragging，
@@ -130,8 +138,108 @@ function useNodeHintSeen(kind: string): { seen: boolean; markSeen: () => void } 
   return { seen, markSeen };
 }
 
-/** 通用 Shell — 带状态 badge + 首次使用提示条 */
+/**
+ * 可复用内联文本编辑器：双击 div 切换为 textarea 编辑，
+ * 失焦 / Ctrl+Enter 提交到 store，Esc 取消。
+ * textarea 内部 stopPropagation 防止 ReactFlow 把点击当成节点拖拽。
+ */
+function EditableText({
+  nodeId,
+  value,
+  field,
+  placeholder = "双击输入文字…",
+  rows = 3,
+  maxLength,
+  fontSize,
+}: {
+  nodeId: string;
+  value: string;
+  field: string;
+  placeholder?: string;
+  rows?: number;
+  maxLength?: number;
+  fontSize?: number;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const commit = () => {
+    const next = draft.trimEnd();
+    if (next !== value) {
+      useCanvasStore.getState().updateNodeData(nodeId, { [field]: next });
+    }
+    setEditing(false);
+  };
+
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDraft(value);
+    setEditing(true);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      commit();
+    }
+    // 普通 Enter 允许换行，不拦截
+  };
+
+  if (editing) {
+    return (
+      <textarea
+        ref={textareaRef}
+        className="sg-editable-textarea"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={handleKeyDown}
+        onPointerDown={handlePointerDown}
+        onMouseDown={handleMouseDown}
+        placeholder={placeholder}
+        rows={rows}
+        maxLength={maxLength}
+        style={fontSize ? { fontSize } : undefined}
+      />
+    );
+  }
+
+  const displayText = value || placeholder;
+  const isPlaceholder = !value;
+
+  return (
+    <div
+      className={`sg-editable-display${isPlaceholder ? " sg-editable-placeholder" : ""}`}
+      onDoubleClick={handleDoubleClick}
+      title="双击编辑"
+      style={fontSize ? { fontSize } : undefined}
+    >
+      {displayText}
+    </div>
+  );
+}
+
+/** 通用 Shell — 带状态 badge + 首次使用提示条 + 失败重试按钮 */
 function Shell({
+  nodeId,
   selected,
   kind,
   title,
@@ -140,6 +248,7 @@ function Shell({
   errorMessage,
   children,
 }: {
+  nodeId: string;
   selected?: boolean;
   kind: string;
   title: string;
@@ -151,13 +260,31 @@ function Shell({
   const hint = HINT_MAP[kind];
   const { seen, markSeen } = useNodeHintSeen(kind);
   const showHint = hint && !seen;
+  const { retryNode } = useNodeActions();
+
+  const canRetry = status === "failed" && !!retryNode;
 
   return (
     <div className={`sg-node ${kind}${selected ? " selected" : ""}`}>
       <Handle type="target" position={Position.Left} />
       <div className="head">
         <span>{title}</span>
-        <NodeStatusBadge status={status} progress={progress} errorMessage={errorMessage} />
+        <div className="head-actions">
+          <NodeStatusBadge status={status} progress={progress} errorMessage={errorMessage} />
+          {canRetry ? (
+            <button
+              type="button"
+              className="sg-retry-btn"
+              title={`重试生成${errorMessage ? ` · ${errorMessage.slice(0, 40)}` : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                retryNode!(nodeId);
+              }}
+            >
+              ↻
+            </button>
+          ) : null}
+        </div>
       </div>
       {showHint ? (
         <div
@@ -172,6 +299,11 @@ function Shell({
           <span className="sg-node-hint-close">✕</span>
         </div>
       ) : null}
+      {canRetry ? (
+        <div className="sg-node-error" title={errorMessage}>
+          ✕ {errorMessage || "生成失败"}
+        </div>
+      ) : null}
       <div className="body">{children}</div>
       <Handle type="source" position={Position.Right} />
     </div>
@@ -183,10 +315,10 @@ function StackBadge({ count }: { count?: number }) {
   return <span className="stack-badge">{count}</span>;
 }
 
-export const ShotNode = memo(function ShotNode({ data, selected }: NodeProps) {
+export const ShotNode = memo(function ShotNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "shot" }>;
   return (
-    <Shell selected={selected} kind="shot" title={`🎬 ${d.title || "镜头"}`}
+    <Shell nodeId={id} selected={selected} kind="shot" title={`🎬 ${d.title || "镜头"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       {d.imageUrl ? (
         <div className="img-wrap">
@@ -204,25 +336,27 @@ export const ShotNode = memo(function ShotNode({ data, selected }: NodeProps) {
         {d.shotSize} · {d.duration}s
         {d.seed != null ? <span className="sg-meta-tiny"> · seed:{d.seed}</span> : null}
       </div>
-      <div className="meta">{(d.prompt || "").slice(0, 60)}</div>
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入镜头提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const ScriptNode = memo(function ScriptNode({ data, selected }: NodeProps) {
+export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "script" }>;
   return (
-    <Shell selected={selected} kind="script" title={`📜 ${d.title || "剧本"}`}
+    <Shell nodeId={id} selected={selected} kind="script" title={`📜 ${d.title || "剧本"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
-      <div className="meta">{(d.content || "").slice(0, 120)}</div>
+      <EditableText nodeId={id} value={d.content || ""} field="content" rows={5}
+        placeholder="双击撰写剧本大纲…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps) {
+export const ImageNode = memo(function ImageNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "image" }>;
   return (
-    <Shell selected={selected} kind="image" title={`🖼️ ${d.title || "图片"}`}
+    <Shell nodeId={id} selected={selected} kind="image" title={`🖼️ ${d.title || "图片"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       {d.imageUrl ? (
         <div className="img-wrap">
@@ -232,19 +366,19 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps) 
       ) : (
         <div className="meta">未生成</div>
       )}
-      <div className="meta">
-        {(d.prompt || "").slice(0, 60)}
-        {d.seed != null ? <span className="sg-meta-tiny"> · seed:{d.seed}</span> : null}
-      </div>
+      {d.seed != null ? <div className="sg-meta-tiny">seed:{d.seed}</div> : null}
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入生图提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps) {
+export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "video" }>;
   const stackCount = d.videos?.length || (d.videoUrl ? 1 : 0);
   return (
     <Shell
+      nodeId={id}
       selected={selected}
       kind="video"
       title={`${d.isReference ? "📎" : "🎥"} ${d.title || (d.isReference ? "参考视频" : "视频")}`}
@@ -273,37 +407,42 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps) 
           {d.lastFrameWeight != null && <span className="sg-shot-tag">尾帧{d.lastFrameWeight}</span>}
         </div>
       ) : null}
-      <div className="meta">
-        {(d.duration ? `${d.duration}s · ` : "") + (d.prompt || "").slice(0, 60)}
-        {d.seed != null ? <span className="sg-meta-tiny"> · seed:{d.seed}</span> : null}
-      </div>
+      {(d.duration || d.seed != null) ? (
+        <div className="sg-meta-tiny">
+          {d.duration ? `${d.duration}s` : ""}
+          {d.duration && d.seed != null ? " · " : ""}
+          {d.seed != null ? `seed:${d.seed}` : ""}
+        </div>
+      ) : null}
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入生视频提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const PromptNode = memo(function PromptNode({ data, selected }: NodeProps) {
+export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "prompt" }>;
   return (
-    <Shell selected={selected} kind="prompt" title={`✨ ${d.title || "提示词"}`}
+    <Shell nodeId={id} selected={selected} kind="prompt" title={`✨ ${d.title || "提示词"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
-      <div className="meta">{(d.text || "").slice(0, 120)}</div>
+      <EditableText nodeId={id} value={d.text || ""} field="text" rows={3}
+        placeholder="双击输入风格 / 氛围提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const TextNode = memo(function TextNode({ data, selected }: NodeProps) {
+export const TextNode = memo(function TextNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "text" }>;
   return (
-    <Shell selected={selected} kind="text" title={`📄 ${d.title || "文本"}`}
+    <Shell nodeId={id} selected={selected} kind="text" title={`📄 ${d.title || "文本"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
-      <div className="meta" style={{ fontSize: d.fontSize || 14 }}>
-        {(d.content || "").slice(0, 160)}
-      </div>
+      <EditableText nodeId={id} value={d.content || ""} field="content" rows={3}
+        placeholder="双击输入文字内容…" fontSize={d.fontSize || 14} />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const ConfigNode = memo(function ConfigNode({ data, selected }: NodeProps) {
+export const ConfigNode = memo(function ConfigNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "config" }>;
   const modeLabel =
     d.generationMode === "video"
@@ -314,30 +453,32 @@ export const ConfigNode = memo(function ConfigNode({ data, selected }: NodeProps
           ? "文本"
           : "图片";
   return (
-    <Shell selected={selected} kind="config" title={`⚙️ ${d.title || "生成配置"}`}
+    <Shell nodeId={id} selected={selected} kind="config" title={`⚙️ ${d.title || "生成配置"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       <div>
         {modeLabel}
         {d.count != null && d.count > 1 ? ` · ×${d.count}` : ""}
         {d.model ? <span className="sg-shot-tag">{d.model}</span> : null}
       </div>
-      <div className="meta">{(d.prompt || d.content || "汇聚上游后生成").slice(0, 80)}</div>
+      <EditableText nodeId={id} value={d.prompt || d.content || ""} field={d.prompt != null ? "prompt" : "content"} rows={2}
+        placeholder="双击输入配置提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const GeneratorNode = memo(function GeneratorNode({ data, selected }: NodeProps) {
+export const GeneratorNode = memo(function GeneratorNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "generator" }>;
   const outputKindLabel = d.outputKind ? (d.outputKind === "image" ? "图" : "视频") : null;
   return (
-    <Shell selected={selected} kind="generator" title={`⚙️ ${d.title || "生成器"}`}
+    <Shell nodeId={id} selected={selected} kind="generator" title={`⚙️ ${d.title || "生成器"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       <div>
         {d.mode} · ×{d.count || 1}
         {d.autoCollectUpstream && <span className="sg-shot-tag">汇聚</span>}
         {outputKindLabel && <span className="sg-shot-tag">{outputKindLabel}</span>}
       </div>
-      <div className="meta">{(d.prompt || "汇聚上游后生成").slice(0, 80)}</div>
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入生成器统一提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
@@ -352,28 +493,27 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps) 
   );
 }, nodePropsEqual);
 
-export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps) {
+export const AudioNode = memo(function AudioNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "audio" }>;
   return (
-    <Shell selected={selected} kind="audio" title={`🔊 ${d.title || "音频"}`}
+    <Shell nodeId={id} selected={selected} kind="audio" title={`🔊 ${d.title || "音频"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       {d.audioUrl ? (
         <audio src={d.audioUrl} controls preload="metadata" />
       ) : (
         <div className="meta">未上传 / 未生成</div>
       )}
-      <div className="meta">
-        {(d.prompt || "").slice(0, 60)}
-        {d.seed != null ? <span className="sg-meta-tiny"> · seed:{d.seed}</span> : null}
-      </div>
+      {d.seed != null ? <div className="sg-meta-tiny">seed:{d.seed}</div> : null}
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入音频生成提示词…" />
     </Shell>
   );
 }, nodePropsEqual);
 
-export const MusicNode = memo(function MusicNode({ data, selected }: NodeProps) {
+export const MusicNode = memo(function MusicNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "music" }>;
   return (
-    <Shell selected={selected} kind="music" title={`🎵 ${d.title || "音乐"}`}
+    <Shell nodeId={id} selected={selected} kind="music" title={`🎵 ${d.title || "音乐"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       {d.audioUrl ? (
         <audio src={d.audioUrl} controls preload="metadata" />
@@ -381,9 +521,15 @@ export const MusicNode = memo(function MusicNode({ data, selected }: NodeProps) 
         <div className="meta">未生成</div>
       )}
       {d.model ? <span className="sg-shot-tag">{d.model}</span> : null}
-      <div className="meta">
-        {(d.style ? `风格:${d.style} · ` : "") + (d.prompt || d.lyrics || "").slice(0, 60)}
-      </div>
+      <div className="sg-editable-label">风格</div>
+      <EditableText nodeId={id} value={d.style || ""} field="style" rows={1}
+        placeholder="双击输入音乐风格…" />
+      <div className="sg-editable-label">提示词</div>
+      <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
+        placeholder="双击输入音乐描述…" />
+      <div className="sg-editable-label">歌词</div>
+      <EditableText nodeId={id} value={d.lyrics || ""} field="lyrics" rows={3}
+        placeholder="双击输入歌词（可选）…" />
     </Shell>
   );
 }, nodePropsEqual);

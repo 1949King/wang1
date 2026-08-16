@@ -866,6 +866,10 @@ export default function CanvasShell(props: CanvasShellProps) {
                 <button type="button" onClick={() => { onSyncModels(); setMoreOpen(false); }}>同步模型</button>
                 <button type="button" onClick={() => { onExportZip(); setMoreOpen(false); }}>导出 ZIP</button>
                 <button type="button" onClick={() => { setViewMode("settings"); setMoreOpen(false); }}>模型/Agent</button>
+                <button type="button" onClick={() => {
+                  (window as any).__shiguangShowBridgePanel?.();
+                  setMoreOpen(false);
+                }}>拾光面板</button>
               </div>
             ) : null}
           </div>

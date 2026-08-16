@@ -962,12 +962,11 @@ class CharacterManagementModule(BaseModule):
         else:
             self._apply_agent_btn_state(False)
             if not ok:
-                QMessageBox.warning(
-                    self,
-                    "连接 Agent",
-                    f"{msg}\n\n说明：Agent 是本机工具服务（:17371），"
-                    "连接成功后也不会在 3D 场景里出现人物。",
-                )
+                # canvas-agent 是外部 Node MCP 工具通道，自研画布 Agent 不受影响
+                # 失败时只在状态栏提示，不弹 QMessageBox 烦用户
+                short = (msg or "").split("\n")[0][:80]
+                self._set_status(f"Agent 未连接（可忽略）: {short}")
+                logger.info("canvas-agent 连接失败（非致命）: %s", msg[:200])
 
     def _on_sync_models(self):
         self._sync_models_to_canvas(force_reload=True)

@@ -124,6 +124,9 @@ export type ScriptData = {
   kind: "script";
   title: string;
   content: string;
+  status?: NodeStatus;
+  progress?: number;
+  errorMessage?: string;
 };
 
 export type ImageData = {
@@ -196,6 +199,7 @@ export type AudioData = {
   prompt: string;
   audioUrl?: string;
   duration?: number;
+  seed?: number;
   status?: NodeStatus;
   progress?: number;
   errorMessage?: string;
@@ -222,6 +226,9 @@ export type PromptData = {
   kind: "prompt";
   title: string;
   text: string;
+  status?: NodeStatus;
+  progress?: number;
+  errorMessage?: string;
 };
 
 /** infinite-canvas 对齐：Text 节点（content 字段） */

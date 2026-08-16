@@ -16,6 +16,7 @@ import {
   subscribeAgentEvents,
   sendAgentReply,
   controlAgentSession,
+  breakdownStoryboard,
   type AgentEventEnvelope,
   type ChatModelProvider,
   type ProjectTool,
@@ -91,7 +92,9 @@ export default function AgentPanel({
   const activeStreamRef = useRef<string>("");
   const [input, setInput] = useState("");
   const [providers, setProviders] = useState<ChatModelProvider[]>([]);
-  const [modelKey, setModelKey] = useState("");
+  const [modelKey, setModelKey] = useState<string>(() => {
+    try { return localStorage.getItem("shiguang-canvas:agent-model") || ""; } catch { return ""; }
+  });
   const [tools, setTools] = useState<ProjectTool[]>([]);
   const [toolFilter, setToolFilter] = useState("");
   const [attaches, setAttaches] = useState<Attach[]>([]);
@@ -135,6 +138,7 @@ export default function AgentPanel({
   const groupSelected = useCanvasStore((s) => s.groupSelected);
   const undoGraph = useCanvasStore((s) => s.undoGraph);
   const redoGraph = useCanvasStore((s) => s.redoGraph);
+  const applyStoryboard = useCanvasStore((s) => s.applyStoryboard);
 
   const push = (role: Msg["role"], text: string, atts?: Attach[]) =>
     setMsgs((m) => [...m, { role, text, attaches: atts }]);
@@ -148,6 +152,12 @@ export default function AgentPanel({
     const t = window.setInterval(() => setThinkSec((s) => s + 1), 1000);
     return () => window.clearInterval(t);
   }, [busy]);
+
+  useEffect(() => {
+    if (modelKey) {
+      try { localStorage.setItem("shiguang-canvas:agent-model", modelKey); } catch {}
+    }
+  }, [modelKey]);
 
   const upsertStreamMsg = (streamId: string, text: string, streaming: boolean) => {
     setMsgs((m) => {
@@ -491,7 +501,6 @@ export default function AgentPanel({
             cells[index] = { ...(cells[index] || {}), overrideUrl: url };
             updateNodeData(sbId, { cells });
           } else if (d.sourceUrl) {
-            // 触发裁格拖出
             const { cropGridCell } = await import("./imageTools");
             const cut = await cropGridCell(d.sourceUrl, cols, rowsN, index);
             cells[index] = { ...(cells[index] || {}), overrideUrl: cut };
@@ -507,6 +516,31 @@ export default function AgentPanel({
             throw new Error("宫格无源图且未提供 url");
           }
           if (!canvasNodeId) canvasNodeId = sbId;
+          break;
+        }
+        case "breakdown":
+        case "applyStoryboard":
+        case "storyboardBreakdown":
+        case "canvas_breakdown": {
+          let script = String(params.script || params.content || params.storyboard || "").trim();
+          if (!script) {
+            const firstScript = nodes.find((n) => (n.data as NodeData).kind === "script");
+            if (firstScript) {
+              script = String((firstScript.data as Extract<NodeData, { kind: "script" }>).content || "").trim();
+            }
+          }
+          if (!script) throw new Error("breakdown 缺少剧本内容（params.script / script 节点均为空）");
+          push("system", `🧩 收到剧本拆解请求（${script.length} 字），正在调用后端 LLM…`);
+          const res = await breakdownStoryboard(script);
+          if (!res.ok && !(res.shots && res.shots.length)) {
+            throw new Error(res.message || "剧本拆解失败");
+          }
+          applyStoryboard(res.shots || [], "Agent拆解剧本");
+          if (res.fallback) {
+            push("system", `⚠️ 启发式兜底，共生成 ${res.shots?.length || 0} 镜`);
+          } else {
+            push("system", `✅ LLM 拆解完成，共 ${res.shots?.length || 0} 镜`);
+          }
           break;
         }
         default:
@@ -548,15 +582,22 @@ export default function AgentPanel({
 
   const refreshModels = async () => {
     const res = await listChatModels();
-    setProviders(res.providers || []);
-    if (!modelKey) {
-      const active = (res.providers || []).find((p) => p.active && p.configured);
-      const any = (res.providers || []).find((p) => p.configured);
-      const pick = active || any;
-      if (pick) {
-        const m = pick.models[0] || "";
-        setModelKey(m ? `${pick.id}::${m}` : `${pick.id}::`);
-      }
+    const list = res.providers || [];
+    setProviders(list);
+    const stored = modelKey;
+    if (stored) {
+      // 校验：localStorage 里存的 provider 现在是否还 configured
+      const [pid] = stored.split("::");
+      const stillValid = list.some((p) => p.id === pid && p.configured);
+      if (stillValid) return; // 用户选的还能用，尊重它
+    }
+    // 没存或存的已失效 → 用后端 active / 第一个 configured
+    const active = list.find((p) => p.active && p.configured);
+    const any = list.find((p) => p.configured);
+    const pick = active || any;
+    if (pick) {
+      const m = pick.models[0] || "";
+      setModelKey(m ? `${pick.id}::${m}` : `${pick.id}::`);
     }
   };
 
@@ -984,6 +1025,79 @@ export default function AgentPanel({
             ) : null}
             <div ref={msgsEndRef} />
           </div>
+
+          {/* ── 画布引用可视化：让用户一眼看到 Agent 正在看什么 ── */}
+          {(() => {
+            const selNodes = nodes.filter((n) => n.selected);
+            const primarySel = nodes.find((n) => n.id === selectedId);
+            const showNodes = selNodes.length > 0 ? selNodes : primarySel ? [primarySel] : [];
+            const totalNodes = nodes.length;
+            const withImg = nodes.filter(
+              (n) => (n.data as NodeData).kind && ("imageUrl" in (n.data as NodeData) && (n.data as NodeData).imageUrl || "videoUrl" in (n.data as NodeData) && (n.data as NodeData).videoUrl || "posterUrl" in (n.data as NodeData) && (n.data as NodeData).posterUrl),
+            ).length;
+            const kindCount: Record<string, number> = {};
+            nodes.forEach((n) => {
+              const k = (n.data as NodeData).kind || "?";
+              kindCount[k] = (kindCount[k] || 0) + 1;
+            });
+            const kindBadges = Object.entries(kindCount).slice(0, 5);
+            if (showNodes.length === 0 && totalNodes === 0) return null;
+            return (
+              <div className="sg-agent-canvas-ref" title="Agent 即将把这些画布上下文发给模型">
+                <div className="sg-agent-ref-header">
+                  <span className="sg-agent-ref-title">
+                    📋 画布引用
+                    <span className="muted tiny">
+                      {showNodes.length > 0
+                        ? `选中 ${showNodes.length} 节点`
+                        : `全画布 ${totalNodes} 节点`}
+                    </span>
+                  </span>
+                  <span className="sg-agent-ref-summary muted tiny">
+                    节点 {totalNodes} · 带图/视频 {withImg} · 连线 {edges.length}
+                  </span>
+                </div>
+                {showNodes.length > 0 ? (
+                  <div className="sg-agent-ref-grid">
+                    {showNodes.slice(0, 6).map((n) => {
+                      const d = n.data as NodeData;
+                      const thumb =
+                        ("imageUrl" in d && d.imageUrl) ||
+                        ("posterUrl" in d && d.posterUrl) ||
+                        ("firstFrameUrl" in d && d.firstFrameUrl) ||
+                        "";
+                      const kindEmoji: Record<string, string> = {
+                        shot: "🎬", image: "🖼", video: "🎥", script: "📜",
+                        prompt: "✨", text: "📄", config: "⚙️", generator: "⚙",
+                        group: "📦", audio: "🔊", music: "🎵",
+                      };
+                      return (
+                        <div key={n.id} className="sg-agent-ref-card" title={`${d.kind} · ${("title" in d && d.title) || n.id}`}>
+                          {thumb ? (
+                            <img src={thumb} alt="" />
+                          ) : (
+                            <div className="sg-agent-ref-placeholder">
+                              {kindEmoji[d.kind] || "•"}
+                            </div>
+                          )}
+                          <span className="sg-agent-ref-kind">{d.kind}</span>
+                        </div>
+                      );
+                    })}
+                    {showNodes.length > 6 ? (
+                      <div className="sg-agent-ref-more">+{showNodes.length - 6}</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="sg-agent-ref-overview">
+                    {kindBadges.map(([k, c]) => (
+                      <span key={k} className="sg-agent-ref-badge">{k}×{c}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {attaches.length ? (
             <div className="sg-agent-pending">

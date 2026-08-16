@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-A PyQt6-based desktop application（**拾光剪影**）for editing and publishing short drama videos with AI assistance.
+A PyQt6-based desktop application(**拾光剪影**)for editing and publishing short drama videos with AI assistance.
 
-**完整知识库（优先阅读）**: [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
+**完整知识库(优先阅读)**: [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
 
 ## Tech Stack
 
@@ -16,7 +16,7 @@ A PyQt6-based desktop application（**拾光剪影**）for editing and publishin
 
 ## Key Terminology
 
-完整表见 [`docs/knowledge/01-glossary.md`](docs/knowledge/01-glossary.md)。常用：
+完整表见 [`docs/knowledge/01-glossary.md`](docs/knowledge/01-glossary.md).常用:
 
 | Term | Meaning |
 |------|---------|
@@ -24,8 +24,8 @@ A PyQt6-based desktop application（**拾光剪影**）for editing and publishin
 | **双内核** | `EditorScheduler`: PyAV light vs FFmpeg/MLT pro |
 | **时间线** | Timeline canvas; truth source = `EditorModule._clips` |
 | **素材库** | Asset library |
-| **短剧筛选** | Drama finder plugin only（`drama_finder_plugin` + crawler）；UI via **extensions** |
-| **拓展中心** | Registry id=`extensions`（migrated from `plugins`） |
+| **短剧筛选** | Drama finder plugin only(`drama_finder_plugin` + crawler);UI via **extensions** |
+| **拓展中心** | Registry id=`extensions`(migrated from `plugins`) |
 | **B0–B2** | `text_frame_map` / `edit_commands` / `filler_silence_detect` |
 | **账号矩阵** | Multi-account publishing |
 | **AI剪辑** | AI-assisted cutting / subtitles / strategy |
@@ -45,7 +45,7 @@ app/
   core/                    # Business logic (preview, timeline, ffmpeg, AI…)
   modules/lego/            # LEGO UI modules (editor, home, settings…)
 docs/
-  knowledge/               # ★ 项目知识库（INDEX + 00–07 + catalog）
+  knowledge/               # ★ 项目知识库(INDEX + 00–07 + catalog)
   P0_CAPCUT_ALIGN.md       # 剪映对齐分期
 scripts/
   sync_knowledge.py        # 刷新知识库清单

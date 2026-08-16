@@ -94,6 +94,12 @@ _CANVAS_TOOL_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "redo": (EFFECT_CANVAS_WRITE, False),
     "canvas_redo": (EFFECT_CANVAS_WRITE, False),
     "runGenerate": (EFFECT_MEDIA_WRITE, True),
+    "breakdown": (EFFECT_CANVAS_WRITE, False),
+    "applyStoryboard": (EFFECT_CANVAS_WRITE, False),
+    "storyboardBreakdown": (EFFECT_CANVAS_WRITE, False),
+    "canvas_breakdown": (EFFECT_CANVAS_WRITE, False),
+    "fillStoryboardCell": (EFFECT_CANVAS_WRITE, False),
+    "canvas_fill_storyboard_cell": (EFFECT_CANVAS_WRITE, False),
 }
 
 # 对话 action → effect（timeline 变更视同 canvas_write）
@@ -327,6 +333,9 @@ def canvas_tools_prompt_block(mode: Optional[str] = None) -> str:
         "需要改画布时，在中文说明后追加 JSON："
         '{"canvas_tools":[{"action":"addNode","params":{"kind":"shot","title":"镜头"}}]}。'
         "允许 action：queryNodes,selectNode,addNode,updateNode,connectNodes,deleteNode,"
-        "duplicateNode,groupNodes,runGenerate,undo,redo,setNodeImage,importImage。"
+        "duplicateNode,groupNodes,runGenerate,undo,redo,setNodeImage,importImage,"
+        "breakdown,fillStoryboardCell。"
+        "收到剧本文本并需要拆解为分镜时，必须用 breakdown 并携带剧本："
+        '{"action":"breakdown","params":{"script":"完整剧本文本"}}。'
         "不要编造未列出的 action。\n"
     )

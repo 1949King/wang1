@@ -75,6 +75,188 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "stability": {"name": "Stability AI", "icon": "🖌️", "url": "https://api.stability.ai/v2beta", "models": ["sd3-large", "sd3-medium", "sd3-large-turbo", "sdxl-base-1.0", "sdxl-turbo"], "is_local": False},
 }
 
+# ---------------------------------------------------------------------------
+# 模型可读名映射：供下拉框/卡片展示，key 为 provider 名或 "*"（通配）
+# 映射值为 str（直接用） 或 callable(model_id) -> str
+# ---------------------------------------------------------------------------
+MODEL_DISPLAY_NAMES: dict[str, dict[str, str]] = {
+    "ollama": {},
+    "deepseek": {
+        "deepseek-chat": "DeepSeek Chat V3（对话旗舰）",
+        "deepseek-coder": "DeepSeek Coder（代码专用）",
+        "deepseek-reasoner": "DeepSeek Reasoner（思考推理）",
+    },
+    "doubao": {
+        "doubao-pro-4k": "豆包 Pro 4K",
+        "doubao-pro-32k": "豆包 Pro 32K（长上下文）",
+        "doubao-pro-128k": "豆包 Pro 128K（超长上下文）",
+    },
+    "openai": {
+        "gpt-4o": "GPT-4o（多模态旗舰）",
+        "gpt-4o-mini": "GPT-4o Mini（轻量多模态）",
+        "gpt-4-turbo": "GPT-4 Turbo",
+        "o1": "o1（强推理）",
+        "o1-mini": "o1-mini（轻量推理）",
+    },
+    "zhipu": {
+        "glm-4": "GLM-4（旗舰）",
+        "glm-4-flash": "GLM-4 Flash（高速）",
+        "glm-4v": "GLM-4V（多模态）",
+        "glm-4-plus": "GLM-4 Plus（增强）",
+    },
+    "qwen": {
+        "qwen-turbo": "通义 Turbo（高速）",
+        "qwen-plus": "通义 Plus（均衡）",
+        "qwen-max": "通义 Max（旗舰）",
+        "qwen-max-longcontext": "通义 Max 长上下文",
+    },
+    "wenxin": {
+        "ernie-4.0-8k": "文心一言 4.0 8K",
+        "ernie-4.0-turbo-8k": "文心一言 4.0 Turbo",
+        "ernie-3.5-8k": "文心一言 3.5",
+    },
+    "spark": {
+        "generalv3.5": "星火 V3.5",
+        "generalv3": "星火 V3.0",
+        "generalv2": "星火 V2.0",
+    },
+    "kimi": {
+        "moonshot-v1-8k": "Kimi 8K",
+        "moonshot-v1-32k": "Kimi 32K（长上下文）",
+        "moonshot-v1-128k": "Kimi 128K（超长上下文）",
+    },
+    "baichuan": {
+        "Baichuan4": "百川 4",
+        "Baichuan3-Turbo": "百川 3 Turbo",
+        "Baichuan2-Turbo": "百川 2 Turbo",
+    },
+    "minimax": {
+        "abab6.5s-chat": "MiniMax 6.5S（极速）",
+        "abab6.5-chat": "MiniMax 6.5（均衡）",
+        "abab5.5-chat": "MiniMax 5.5",
+    },
+    "claude": {
+        "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet（推荐）",
+        "claude-3-opus-20240229": "Claude 3 Opus（旗舰）",
+        "claude-3-haiku-20240307": "Claude 3 Haiku（轻量）",
+    },
+    "groq": {
+        "llama-3.3-70b-versatile": "Llama 3.3 70B（高速推理）",
+        "llama-3.1-8b-instant": "Llama 3.1 8B（极速）",
+        "mixtral-8x7b-32768": "Mixtral 8x7B 32K",
+    },
+    "siliconflow": {},
+    "chatgpt2api": {
+        "auto": "自动（自适应）",
+        "gpt-image-2": "GPT Image 2（生图）",
+        "codex-gpt-image-2": "Codex GPT Image 2（代码+生图）",
+        "gpt-5": "GPT-5（旗舰）",
+        "gpt-5-1": "GPT-5.1",
+        "gpt-5-2": "GPT-5.2（新旗舰）",
+        "gpt-5-mini": "GPT-5 Mini（轻量）",
+        "gpt-5-3": "GPT-5.3（新旗舰）",
+        "gpt-5-3-mini": "GPT-5.3 Mini（新轻量）",
+    },
+    "stepfun": {
+        "step-1-8k": "阶跃 1 8K",
+        "step-1-32k": "阶跃 1 32K",
+        "step-1-128k": "阶跃 1 128K",
+        "step-1v-8k": "阶跃 1V 8K（多模态）",
+    },
+    "yi": {
+        "yi-lightning": "零一 Lightning（极速）",
+        "yi-large": "零一 Large（旗舰）",
+        "yi-medium": "零一 Medium（均衡）",
+    },
+    "modelscope": {
+        "qwen-turbo": "通义 Turbo（魔搭）",
+        "qwen-plus": "通义 Plus（魔搭）",
+        "qwen-max": "通义 Max（魔搭）",
+    },
+    "kling": {
+        "kling-v1.5": "可灵 1.5",
+        "kling-v1.6": "可灵 1.6",
+        "kling-v1.6-i2v": "可灵 1.6 图生视频",
+    },
+    "fishaudio": {
+        "fish-speech-v1.5": "Fish Speech 1.5",
+        "fish-speech-v1.5-turbo": "Fish Speech 1.5 Turbo",
+        "fish-speech-v1.5-hd": "Fish Speech 1.5 HD（高清）",
+    },
+    "stability": {
+        "sd3-large": "SD3 Large",
+        "sd3-medium": "SD3 Medium",
+        "sd3-large-turbo": "SD3 Large Turbo",
+        "sdxl-base-1.0": "SDXL Base 1.0",
+        "sdxl-turbo": "SDXL Turbo",
+    },
+}
+
+
+PROVIDER_ALIAS: dict[str, str] = {
+    "chatgpt2api": "chatgpt2api",
+    "chatgpt2_api": "chatgpt2api",
+    "chatgpt": "chatgpt2api",
+    "ollama": "ollama",
+    "deepseek": "deepseek",
+    "doubao": "doubao",
+    "openai": "openai",
+    "zhipu": "zhipu",
+    "qwen": "qwen",
+    "siliconflow": "siliconflow",
+    "moonshot": "moonshot",
+    "gemini": "gemini",
+    "claude": "claude",
+    "anthropic": "claude",
+    "kimi": "moonshot",
+    "glm": "zhipu",
+}
+
+MODEL_DISPLAY_NAMES["chatgpt2api"] = {
+    "gpt-4o": "GPT-4o（多模态旗舰）",
+    "gpt-4o-mini": "GPT-4o Mini（轻量）",
+    "gpt-4-turbo": "GPT-4 Turbo",
+    "gpt-5": "GPT-5（旗舰）",
+    "gpt-5-1": "GPT-5.1",
+    "gpt-5-2": "GPT-5.2（新旗舰）",
+    "gpt-5-3": "GPT-5.3（新旗舰）",
+    "gpt-5-mini": "GPT-5 Mini（轻量）",
+    "gpt-5-3-mini": "GPT-5.3 Mini（新轻量）",
+    "gpt-image-2": "GPT Image 2（生图）",
+    "codex-gpt-image-2": "Codex GPT Image 2（代码+生图）",
+    "auto": "自动（自适应）",
+}
+
+MODEL_DISPLAY_NAMES["ollama"] = {
+    "qwen2.5:7b": "qwen2.5:7b（通义轻量）",
+    "qwen2.5:14b": "qwen2.5:14b（通义均衡）",
+    "qwen2.5:32b": "qwen2.5:32b（通义旗舰）",
+    "llama3:8b": "llama3:8b",
+    "llama3.1:8b": "llama3.1:8b",
+    "llama3.2:1b": "llama3.2:1b（超轻量）",
+    "deepseek-r1:7b": "DeepSeek R1:7b（推理）",
+    "deepseek-r1:14b": "DeepSeek R1:14b（推理）",
+}
+
+MODEL_DISPLAY_NAMES["siliconflow"] = {
+    "black-forest-labs/FLUX.1-schnell": "FLUX.1 Schnell（高速生图）",
+    "black-forest-labs/FLUX.1-dev": "FLUX.1 Dev（精细生图）",
+    "stabilityai/stable-diffusion-3-5-large": "SD3.5 Large（生图）",
+    "stabilityai/stable-diffusion-3-medium": "SD3 Medium",
+}
+
+
+def model_display_name(provider: str, model_id: str) -> str:
+    """给定 provider 和 model_id，返回人类可读的显示名；无映射则原样返回。"""
+    if not model_id:
+        return "自动"
+    key = PROVIDER_ALIAS.get((provider or "").strip().lower(), (provider or "").strip().lower())
+    table = MODEL_DISPLAY_NAMES.get(key) or {}
+    if model_id in table:
+        return table[model_id]
+    return model_id
+
+
 # 画布 / AIGC 专用：按 provider 追加生图·生视频·多模态模型（capability 供 infinite-canvas）
 # 名称尽量对齐各平台 OpenAI-compatible 路由；实际可用性取决于账号开通。
 AIGC_MODELS: dict[str, list[dict[str, str]]] = {
@@ -90,13 +272,13 @@ AIGC_MODELS: dict[str, list[dict[str, str]]] = {
         {"name": "gpt-5-mini", "capability": "text"},
     ],
     "siliconflow": [
+        {"name": "Qwen/Qwen-Image", "capability": "image"},
+        {"name": "Kwai-Kolors/Kolors", "capability": "image"},
         {"name": "black-forest-labs/FLUX.1-schnell", "capability": "image"},
         {"name": "black-forest-labs/FLUX.1-dev", "capability": "image"},
         {"name": "black-forest-labs/FLUX.1-Kontext-pro", "capability": "image"},
         {"name": "black-forest-labs/FLUX.1-Kontext-dev", "capability": "image"},
         {"name": "black-forest-labs/FLUX.1-Kontext-max", "capability": "image"},
-        {"name": "Qwen/Qwen-Image", "capability": "image"},
-        {"name": "Kwai-Kolors/Kolors", "capability": "image"},
         {"name": "stabilityai/stable-diffusion-3-5-large", "capability": "image"},
         {"name": "stabilityai/stable-diffusion-3-medium", "capability": "image"},
         {"name": "stabilityai/stable-diffusion-xl-base-1.0", "capability": "image"},

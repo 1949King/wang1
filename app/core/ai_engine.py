@@ -615,7 +615,7 @@ class AIEngine:
                     logger.warning(
                         f"[AIEngine] ✗ {provider} 失败 "
                         f"(尝试 {attempt + 1}/{retries + 1}): "
-                        f"{e[:100]}，{wait}s 后重试..."
+                        f"{last_error[:100]}，{wait}s 后重试..."
                     )
                     time.sleep(wait)
                 else:

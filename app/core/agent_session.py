@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""进程内 Agent 会话：模式、预算计数、停止标志。重启后任务视为暂停（不自动续跑）。"""
+"""进程内 Agent 会话：模式、预算计数、停止标志、对话历史。重启后任务视为暂停（不自动续跑）。"""
 from __future__ import annotations
 
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.agent_policy import (
     MAX_MODEL_ROUNDS,
@@ -13,6 +13,9 @@ from app.core.agent_policy import (
     MODE_COLLABORATIVE,
     normalize_mode,
 )
+
+MAX_HISTORY_TURNS = 20
+MAX_HISTORY_CHARS = 12000
 
 
 @dataclass
@@ -24,6 +27,7 @@ class AgentSessionState:
     stopped: bool = False
     paused: bool = False
     updated_at: float = field(default_factory=time.time)
+    history: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class AgentSessionStore:
@@ -126,6 +130,55 @@ class AgentSessionStore:
             "max_model_rounds": MAX_MODEL_ROUNDS,
             "max_tool_calls": MAX_TOOL_CALLS,
         }
+
+    def push_history(
+        self,
+        session_id: str,
+        user_msg: str,
+        assistant_msg: str = "",
+    ) -> None:
+        """追加一轮 user/assistant 到历史；超限自动截断最早轮次。"""
+        st = self.get(session_id)
+        with self._mu:
+            st.history.append({"role": "user", "content": str(user_msg or ""), "ts": time.time()})
+            if assistant_msg:
+                st.history.append({"role": "assistant", "content": str(assistant_msg), "ts": time.time()})
+            self._truncate_history(st)
+            st.updated_at = time.time()
+
+    def push_user_only(self, session_id: str, user_msg: str) -> None:
+        """仅追加 user 消息（工具调用等场景）。"""
+        st = self.get(session_id)
+        with self._mu:
+            st.history.append({"role": "user", "content": str(user_msg or ""), "ts": time.time()})
+            self._truncate_history(st)
+            st.updated_at = time.time()
+
+    def get_history_messages(self, session_id: str) -> List[Dict[str, str]]:
+        """返回 LLM 可直接消费的 messages 列表（不含 system）。"""
+        st = self.get(session_id)
+        with self._mu:
+            return [
+                {"role": m["role"], "content": str(m.get("content") or "")}
+                for m in st.history
+                if m.get("role") in ("user", "assistant") and str(m.get("content") or "").strip()
+            ]
+
+    def clear_history(self, session_id: str) -> None:
+        st = self.get(session_id)
+        with self._mu:
+            st.history = []
+            st.updated_at = time.time()
+
+    @staticmethod
+    def _truncate_history(st: AgentSessionState) -> None:
+        """按轮次数 + 总字符数双重限制截断最早消息。"""
+        total_chars = sum(len(str(m.get("content") or "")) for m in st.history)
+        while len(st.history) > MAX_HISTORY_TURNS * 2 or total_chars > MAX_HISTORY_CHARS:
+            if not st.history:
+                break
+            dropped = st.history.pop(0)
+            total_chars -= len(str(dropped.get("content") or ""))
 
 
 agent_sessions = AgentSessionStore()

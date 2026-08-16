@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { type Node } from "@xyflow/react";
 import { useCanvasStore, type NodeData } from "./store";
 import CanvasShell from "./CanvasShell";
+import { NodeActionsContext } from "./nodes";
 import { registerBuiltinNodes } from "./registerBuiltinNodes";
 import { registerNodeDefinitions } from "./plugins/node-registry";
 import { STICKY_PLUGIN } from "./plugins/examples/sticky-note";
@@ -933,6 +934,11 @@ export default function App() {
       setStatus("当前节点不支持生成");
       return;
     }
+    useCanvasStore.getState().updateNodeData(selected.id, {
+      status: "generating",
+      progress: 0,
+      errorMessage: "",
+    });
     setGenerating(true);
     setStatus(
       selectedData.kind === "video"
@@ -941,8 +947,18 @@ export default function App() {
     );
     try {
       const { message } = await generateForNode(selected, selectedData);
+      useCanvasStore.getState().updateNodeData(selected.id, {
+        status: "success",
+        progress: 100,
+        errorMessage: "",
+      });
       setStatus(message);
     } catch (e) {
+      const errMsg = String(e);
+      useCanvasStore.getState().updateNodeData(selected.id, {
+        status: "failed",
+        errorMessage: errMsg.slice(0, 200),
+      });
       if (selectedData.kind === "video" || selectedData.kind === "audio") {
         setStatus(`生成异常: ${e}`);
       } else {
@@ -998,6 +1014,13 @@ export default function App() {
       setStatus("没有可生成的镜头/图/视频节点");
       return;
     }
+    shots.forEach((n) => {
+      useCanvasStore.getState().updateNodeData(n.id, {
+        status: "generating",
+        progress: 0,
+        errorMessage: "",
+      });
+    });
     setGenerating(true);
     batchAbortRef.current = false;
     let ok = 0;
@@ -1012,6 +1035,10 @@ export default function App() {
       const label = (d as { title?: string }).title || n.id;
       if (d.kind === "video" && !videoModels.length) {
         skipped += 1;
+        useCanvasStore.getState().updateNodeData(n.id, {
+          status: "failed",
+          errorMessage: "无可用生视频模型",
+        });
         setStatus(`批量 ${i + 1}/${shots.length}：跳过视频「${label}」（无生视频模型）`);
         continue;
       }
@@ -1019,11 +1046,30 @@ export default function App() {
         `批量生成 ${i + 1}/${shots.length}：${label}${d.kind === "video" ? "（视频）" : ""}`,
       );
       setSelected(n.id);
+      useCanvasStore.getState().updateNodeData(n.id, {
+        status: "generating",
+        progress: Math.round(((i + 1) / shots.length) * 100),
+      });
       try {
         const res = await generateForNode(n, d);
-        if (res.ok) ok += 1;
-      } catch {
-        /* continue */
+        if (res.ok) {
+          ok += 1;
+          useCanvasStore.getState().updateNodeData(n.id, {
+            status: "success",
+            progress: 100,
+            errorMessage: "",
+          });
+        } else {
+          useCanvasStore.getState().updateNodeData(n.id, {
+            status: "failed",
+            errorMessage: (res.message || "").slice(0, 200),
+          });
+        }
+      } catch (e) {
+        useCanvasStore.getState().updateNodeData(n.id, {
+          status: "failed",
+          errorMessage: String(e).slice(0, 200),
+        });
       }
     }
     if (!batchAbortRef.current) {
@@ -1288,7 +1334,57 @@ export default function App() {
     setStatus("正在中断批量…");
   };
 
+  /** 节点一键重试 — 由 NodeActionsContext 注入给各节点组件的 Shell */
+  const retryNode = useCallback(async (nodeId: string) => {
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      setStatus(`节点不存在（${nodeId}）`);
+      return;
+    }
+    const data = node.data as NodeData;
+    const kind = data.kind;
+    if (
+      kind !== "shot" && kind !== "image" && kind !== "video" &&
+      kind !== "generator" && kind !== "audio" && kind !== "music" &&
+      kind !== "text"
+    ) {
+      setStatus(`当前节点类型（${kind}）不支持重试生成`);
+      return;
+    }
+    useCanvasStore.getState().setSelected(nodeId);
+    useCanvasStore.getState().updateNodeData(nodeId, {
+      status: "generating",
+      progress: 0,
+      errorMessage: "",
+    });
+    setGenerating(true);
+    setStatus(`重试生成：${(data as { title?: string }).title || nodeId}…`);
+    try {
+      const { message } = await generateForNode(node, data);
+      useCanvasStore.getState().updateNodeData(nodeId, {
+        status: "success",
+        progress: 100,
+        errorMessage: "",
+      });
+      setStatus(message);
+    } catch (e) {
+      const errMsg = String(e);
+      useCanvasStore.getState().updateNodeData(nodeId, {
+        status: "failed",
+        errorMessage: errMsg.slice(0, 200),
+      });
+      if (kind === "video" || kind === "audio") {
+        setStatus(`重试异常: ${e}`);
+      } else {
+        setStatus(`重试异常: ${e}`);
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }, []);
+
   return (
+    <NodeActionsContext.Provider value={{ retryNode }}>
     <CanvasShell
       viewMode={viewMode}
       setViewMode={setViewMode}
@@ -1604,5 +1700,6 @@ export default function App() {
         </Suspense>
       }
     />
+    </NodeActionsContext.Provider>
   );
 }

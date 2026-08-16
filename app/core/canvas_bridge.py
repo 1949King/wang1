@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """infinite-canvas ↔ 拾光剪影 本地桥。
 
 职责：
@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -1801,6 +1802,52 @@ def generate_video_via_host(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
 
+    def _json_req_retryable(
+        method: str, url: str, body: Optional[Dict[str, Any]] = None, timeout: float = 60,
+        max_retry: int = 1,
+    ):
+        """带自动重试的 JSON 请求：遇到 429 (rate limit) 自动等 retry-after；遇到 5xx 短暂重试。"""
+        import urllib.error as _ue
+        for attempt in range(max_retry + 1):
+            try:
+                return _json_req(method, url, body, timeout)
+            except _ue.HTTPError as he:
+                # 429：限流 — 从响应头或 body 里提取 retry-after，等完重试
+                if he.code == 429 and attempt < max_retry:
+                    wait_sec = 60.0  # 默认等 60s
+                    try:
+                        ra = he.headers.get("Retry-After") or he.headers.get("retry-after")
+                        if ra:
+                            wait_sec = max(1.0, min(float(ra), 120.0))
+                    except Exception:
+                        pass
+                    try:
+                        raw = he.read().decode("utf-8", errors="replace")
+                        m = re.search(r'"reset_in"\s*:\s*(\d+)', raw)
+                        if m:
+                            wait_sec = max(1.0, min(float(m.group(1)) + 1, 120.0))
+                        else:
+                            m2 = re.search(r'"rate_limit_reset"\s*:\s*(\d+)', raw)
+                            if m2:
+                                wait_sec = max(1.0, min(float(m2.group(1)) + 1, 120.0))
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "API 429 限流，等待 %.0fs 后第 %d/%d 次重试 (%s %s)",
+                        wait_sec, attempt + 1, max_retry, method, url.split("?")[0],
+                    )
+                    time.sleep(wait_sec)
+                    continue
+                # 5xx：服务器抖动 — 短暂等待 5s 重试一次
+                if 500 <= he.code <= 599 and attempt < max_retry:
+                    logger.warning(
+                        "API %d 服务器错误，等待 5s 后第 %d/%d 次重试 (%s %s)",
+                        he.code, attempt + 1, max_retry, method, url.split("?")[0],
+                    )
+                    time.sleep(5)
+                    continue
+                raise
+
     def _save_video_bytes(raw: bytes, ext: str = ".mp4") -> Dict[str, Any]:
         name = f"{int(time.time())}_gen{ext}"
         path = os.path.join(canvas_inbox_dir(), name)
@@ -1849,7 +1896,7 @@ def generate_video_via_host(
                     mr, br64 = _data_url_to_b64(reference_image)
                     if br64:
                         body["reference_image"] = f"data:{mr or 'image/png'};base64,{br64}"
-                submit = _json_req("POST", base + "/videos/generations", body, timeout=60)
+                submit = _json_req_retryable("POST", base + "/videos/generations", body, timeout=60)
                 task_id = str(submit.get("id") or submit.get("request_id") or "")
                 if not task_id:
                     errors.append(f"CogVideoX submit 无任务 ID: {str(submit)[:200]}")
@@ -1873,7 +1920,7 @@ def generate_video_via_host(
                     else:
                         deadline = time.time() + 600
                         while time.time() < deadline:
-                            status_resp = _json_req(
+                            status_resp = _json_req_retryable(
                                 "GET",
                                 base + f"/async-result/{task_id}",
                                 None,
@@ -1924,7 +1971,7 @@ def generate_video_via_host(
                 body["image"] = f"data:{mime};base64,{ref_b64}"
             if duration:
                 body["duration"] = max(1, min(10, int(duration)))
-            submit = _json_req("POST", base + "/video/submit", body, timeout=90)
+            submit = _json_req_retryable("POST", base + "/video/submit", body, timeout=90)
             request_id = (
                 (submit.get("requestId") if isinstance(submit, dict) else None)
                 or (submit.get("id") if isinstance(submit, dict) else None)
@@ -1935,7 +1982,7 @@ def generate_video_via_host(
             else:
                 deadline = time.time() + 180
                 while time.time() < deadline:
-                    st = _json_req(
+                    st = _json_req_retryable(
                         "POST",
                         base + "/video/status",
                         {"requestId": request_id},
@@ -1993,7 +2040,7 @@ def generate_video_via_host(
                 body["first_frame"] = f"data:{mime};base64,{ref_b64}"
             if duration:
                 body["duration"] = max(1, min(20, int(duration)))
-            submit = _json_req("POST", base + "/v1/video", body, timeout=90)
+            submit = _json_req_retryable("POST", base + "/v1/video", body, timeout=90)
             task_id = str(
                 (submit.get("id") or "")
                 or (submit.get("task_id") or "")
@@ -2011,7 +2058,7 @@ def generate_video_via_host(
             else:
                 deadline = time.time() + 240
                 while time.time() < deadline:
-                    st = _json_req("GET", base + f"/v1/video/{task_id}", None, timeout=30)
+                    st = _json_req_retryable("GET", base + f"/v1/video/{task_id}", None, timeout=30)
                     status = str(
                         (st.get("status") if isinstance(st, dict) else "")
                         or ((st.get("data") or {}).get("status") if isinstance(st, dict) else "")
@@ -2056,7 +2103,7 @@ def generate_video_via_host(
                 body["image"] = f"data:{mime};base64,{ref_b64}"
             if duration:
                 body["duration"] = max(1, min(10, int(duration)))
-            submit = _json_req("POST", base + "/v1/generate", body, timeout=90)
+            submit = _json_req_retryable("POST", base + "/v1/generate", body, timeout=90)
             task_id = str(
                 (submit.get("id") or "")
                 or (submit.get("task_id") or "")
@@ -2067,7 +2114,7 @@ def generate_video_via_host(
             else:
                 deadline = time.time() + 240
                 while time.time() < deadline:
-                    st = _json_req("GET", base + f"/v1/tasks/{task_id}", None, timeout=30)
+                    st = _json_req_retryable("GET", base + f"/v1/tasks/{task_id}", None, timeout=30)
                     status = str(
                         (st.get("status") if isinstance(st, dict) else "")
                         or ((st.get("task") or {}).get("status") if isinstance(st, dict) else "")
@@ -2116,7 +2163,7 @@ def generate_video_via_host(
                 mime, ref_b64 = _data_url_to_b64(reference_image)
                 if ref_b64:
                     body["image"] = f"data:{mime};base64,{ref_b64}"
-            submit = _json_req("POST", base + endpoint, body, timeout=90)
+            submit = _json_req_retryable("POST", base + endpoint, body, timeout=90)
             task_id = str(
                 (submit.get("task_id") or "")
                 or ((submit.get("data") or {}).get("task_id") or "")
@@ -2127,7 +2174,7 @@ def generate_video_via_host(
             else:
                 deadline = time.time() + 600
                 while time.time() < deadline:
-                    st = _json_req("GET", base + f"/kling/v1/videos/{task_id}", None, timeout=30)
+                    st = _json_req_retryable("GET", base + f"/kling/v1/videos/{task_id}", None, timeout=30)
                     data = st.get("data") if isinstance(st.get("data"), dict) else st
                     status = str(
                         (data.get("task_status") if isinstance(data, dict) else "")
@@ -2173,7 +2220,7 @@ def generate_video_via_host(
                 body["image_first_frame"] = f"data:{mime};base64,{ref_b64}"
             if duration:
                 body["duration"] = max(5, min(15, int(duration)))
-            submit = _json_req("POST", base + "/v1/video/generations", body, timeout=90)
+            submit = _json_req_retryable("POST", base + "/v1/video/generations", body, timeout=90)
             task_id = str(
                 (submit.get("task_id") or "")
                 or ((submit.get("data") or {}).get("task_id") or "")
@@ -2184,7 +2231,7 @@ def generate_video_via_host(
             else:
                 deadline = time.time() + 240
                 while time.time() < deadline:
-                    st = _json_req("GET", base + f"/v1/query/video/{task_id}", None, timeout=30)
+                    st = _json_req_retryable("GET", base + f"/v1/query/video/{task_id}", None, timeout=30)
                     data = st.get("data") if isinstance(st.get("data"), dict) else st
                     status = str(
                         (data.get("status") if isinstance(data, dict) else "")
@@ -2278,7 +2325,7 @@ def generate_video_via_host(
             last_err = ""
             for pf in poll_endpoints:
                 try:
-                    st = _json_req("GET", base + pf(task_id), None, timeout=30)
+                    st = _json_req_retryable("GET", base + pf(task_id), None, timeout=30)
                     # 直接挖到 video_url → 成功
                     v = _extract_video_url(st)
                     if v:
@@ -2315,7 +2362,7 @@ def generate_video_via_host(
                 body2["duration"] = int(max(1, min(10, float(duration) or 5)))
             if size:
                 body2["size"] = size
-            payload = _json_req("POST", base + endpoint, body2, timeout=120)
+            payload = _json_req_retryable("POST", base + endpoint, body2, timeout=120)
 
             # 路径 A：同步直接返回 video_url
             direct_url = _extract_video_url(payload)
@@ -2745,65 +2792,65 @@ def _heuristic_storyboard(script: str) -> List[Dict[str, Any]]:
     return out
 
 
-def storyboard_breakdown(script: str) -> Dict[str, Any]:
-    """一键拉片：剧本 → 分镜表。优先 AIEngine，失败启发式。"""
+def storyboard_breakdown(script: str, use_llm: bool = False) -> Dict[str, Any]:
+    """一键拉片：剧本 → 分镜表。
+
+    默认 use_llm=False：直接启发式拆解（逗号/句号/换行切场景，不二次 LLM 不优化剧本）。
+    use_llm=True：调 AIEngine 做结构化拆解（更智能但多一次模型调用，可能对剧本做润色）。
+    """
     script = (script or "").strip()
     if not script:
         return {"ok": False, "shots": [], "message": "剧本为空"}
 
-    try:
-        from app.core.ai_engine import AIEngine
+    if use_llm:
+        try:
+            from app.core.ai_engine import AIEngine
 
-        engine = AIEngine()
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是分镜师。把剧本拆成结构化分镜表，每镜一行 JSON："
-                    '{"id":1,"duration":5,"shot":"特写/中景/远景",'
-                    '"description":"画面描述","dialogue":"对白"}。'
-                    "输出 JSON 数组，不要其他文字。"
-                ),
-            },
-            {"role": "user", "content": f"剧本：\n{script}\n\n请输出分镜表 JSON。"},
-        ]
-        full = ""
-        for chunk in engine.chat_with_fallback(
-            messages, template=lambda: json.dumps(_heuristic_storyboard(script), ensure_ascii=False)
-        ):
-            full += chunk
-        shots = _parse_storyboard_json(full.strip())
-        if shots:
-            # 规范化字段
-            norm: List[Dict[str, Any]] = []
-            for i, s in enumerate(shots):
-                if not isinstance(s, dict):
-                    continue
-                norm.append(
-                    {
-                        "id": int(s.get("id") or i + 1),
-                        "duration": float(s.get("duration") or 5),
-                        "shot": str(s.get("shot") or "中景"),
-                        "description": str(s.get("description") or ""),
-                        "dialogue": str(s.get("dialogue") or ""),
+            engine = AIEngine()
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是分镜师。严格按剧本原文拆解，不要添加/修改/润色剧本内容，"
+                        "不要优化或重新创作。把每一段落/场景对应成结构化分镜，"
+                        '每镜一行 JSON：{"id":1,"duration":5,"shot":"特写/中景/远景",'
+                        '"description":"画面描述（用剧本原文，不要自由发挥）","dialogue":"对白"}。'
+                        "输出 JSON 数组，不要其他文字。"
+                    ),
+                },
+                {"role": "user", "content": f"剧本：\n{script}\n\n请输出分镜表 JSON。"},
+            ]
+            full = ""
+            for chunk in engine.chat_with_fallback(
+                messages, template=lambda: json.dumps(_heuristic_storyboard(script), ensure_ascii=False)
+            ):
+                full += chunk
+            shots = _parse_storyboard_json(full.strip())
+            if shots:
+                norm: List[Dict[str, Any]] = []
+                for i, s in enumerate(shots):
+                    if not isinstance(s, dict):
+                        continue
+                    norm.append(
+                        {
+                            "id": int(s.get("id") or i + 1),
+                            "duration": float(s.get("duration") or 5),
+                            "shot": str(s.get("shot") or "中景"),
+                            "description": str(s.get("description") or ""),
+                            "dialogue": str(s.get("dialogue") or ""),
+                        }
+                    )
+                if norm:
+                    return {
+                        "ok": True,
+                        "shots": norm,
+                        "fallback": False,
+                        "message": f"拉片完成（LLM）{len(norm)} 镜",
                     }
-                )
-            if norm:
-                return {
-                    "ok": True,
-                    "shots": norm,
-                    "fallback": False,
-                    "message": f"拉片完成（LLM）{len(norm)} 镜",
-                }
-    except Exception as e:
-        shots = _heuristic_storyboard(script)
-        return {
-            "ok": True,
-            "shots": shots,
-            "fallback": True,
-            "message": f"LLM 失败，已用启发式：{e}",
-        }
+        except Exception as e:
+            logger.warning("LLM 拆剧本失败，降级启发式: %s", e)
 
+    # 默认：启发式拆解（快速、不优化剧本原文）
     shots = _heuristic_storyboard(script)
     return {
         "ok": True,
@@ -2935,6 +2982,14 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         logger.debug("bridge %s - %s", self.address_string(), fmt % args)
+
+    def handle(self) -> None:  # noqa: D401
+        try:
+            super().handle()
+        except (OSError, ConnectionResetError):
+            logger.debug("bridge client closed connection: %s", self.address_string())
+        except BrokenPipeError:
+            logger.debug("bridge broken pipe: %s", self.address_string())
 
     def _cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -3450,6 +3505,61 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        # ── GET /host/video-batch?job_id=xxx：查询批量视频任务状态 ──
+        if path == "/host/video-batch":
+            if not _check_host_token(self):
+                self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            qs = parse_qs(parsed.query)
+            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
+            if not job_id:
+                with _BATCH_LOCK:
+                    summary = [
+                        {
+                            "job_id": jid,
+                            "status": j["status"],
+                            "total": j["total"],
+                            "done": j["done"],
+                            "failed": j["failed"],
+                            "model": j["model"],
+                            "created_at": j["created_at"],
+                            "concat_status": j["concat_status"],
+                            "output_path": j["output_path"],
+                        }
+                        for jid, j in list(_BATCH_JOBS.items())[-20:]
+                    ]
+                self._json(200, {"ok": True, "jobs": summary})
+                return
+            with _BATCH_LOCK:
+                job = _BATCH_JOBS.get(job_id)
+            if not job:
+                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
+                return
+            segs = [
+                {
+                    "index": s["index"],
+                    "camera_name": s["camera_name"],
+                    "status": s["status"],
+                    "local_path": s["local_path"],
+                    "video_url": s["video_url"],
+                    "error": s["error"][:200] if s["error"] else "",
+                }
+                for s in job["segments"]
+            ]
+            self._json(200, {
+                "ok": True,
+                "job_id": job_id,
+                "status": job["status"],
+                "total": job["total"],
+                "done": job["done"],
+                "failed": job["failed"],
+                "concat_status": job["concat_status"],
+                "output_path": job["output_path"],
+                "segments": segs,
+                "updated_at": job["updated_at"],
+            })
+            return
+
         if path.startswith("/inbox_file/"):
             name = _safe_filename(path.split("/inbox_file/", 1)[-1])
             fpath = os.path.join(canvas_inbox_dir(), name)
@@ -3970,56 +4080,25 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # ── GET /host/video-batch?job_id=xxx：查询批量任务状态 ──
-        if parsed.path == "/host/video-batch":
-            qs = parse_qs(parsed.query)
-            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
-            if not job_id:
-                # 列出所有任务
-                with _BATCH_LOCK:
-                    summary = [
-                        {
-                            "job_id": jid,
-                            "status": j["status"],
-                            "total": j["total"],
-                            "done": j["done"],
-                            "failed": j["failed"],
-                            "model": j["model"],
-                            "created_at": j["created_at"],
-                            "concat_status": j["concat_status"],
-                            "output_path": j["output_path"],
-                        }
-                        for jid, j in list(_BATCH_JOBS.items())[-20:]
-                    ]
-                self._json(200, {"ok": True, "jobs": summary})
+        # ── POST /host/interpolate：帧间插值（VFI）占位，记录参数后返回 ok ──
+        if parsed.path == "/host/interpolate":
+            if not _check_host_token(self):
+                self._json(401, {"ok": False, "message": "unauthorized"})
                 return
-            with _BATCH_LOCK:
-                job = _BATCH_JOBS.get(job_id)
-            if not job:
-                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                self._json(400, {"ok": False, "message": "invalid json"})
                 return
-            segs = [
-                {
-                    "index": s["index"],
-                    "camera_name": s["camera_name"],
-                    "status": s["status"],
-                    "local_path": s["local_path"],
-                    "video_url": s["video_url"],
-                    "error": s["error"][:200] if s["error"] else "",
-                }
-                for s in job["segments"]
-            ]
+            mode = str(body.get("mode") or "smart")
+            target_fps = int(body.get("target_fps") or 24)
+            logger.info("[/host/interpolate] stub: mode=%s fps=%d title=%s", mode, target_fps, body.get("title"))
             self._json(200, {
                 "ok": True,
-                "job_id": job_id,
-                "status": job["status"],
-                "total": job["total"],
-                "done": job["done"],
-                "failed": job["failed"],
-                "concat_status": job["concat_status"],
-                "output_path": job["output_path"],
-                "segments": segs,
-                "updated_at": job["updated_at"],
+                "message": "帧间插值占位：后端暂未实现实际 VFI（可后续接 RIFE/EMA-VFI）",
+                "mode": mode,
+                "target_fps": target_fps,
+                "todo": "backend-vfi-integration",
             })
             return
 
@@ -4216,7 +4295,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             except Exception:
                 self._json(400, {"ok": False, "message": "invalid json", "shots": []})
                 return
-            res = storyboard_breakdown(str(data.get("script") or ""))
+            use_llm = bool(data.get("use_llm"))
+            res = storyboard_breakdown(str(data.get("script") or ""), use_llm=use_llm)
             code = 200 if res.get("ok") else 400
             self._json(code, res)
             return
@@ -4323,25 +4403,30 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             duration_sec=duration_sec,
         )
         self._json(200 if res.get("success") else 400, res)
+        return
 
         # ── 画布节点插件操作（install / toggle / uninstall）──
         if parsed.path == "/host/plugins/install":
             if not _check_host_token(self):
                 self._json(401, {"ok": False, "message": "unauthorized"})
                 return
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                self._json(400, {"ok": False, "message": "invalid json"})
+                return
             plugin_id = str(data.get("id") or "").strip()
             if not plugin_id:
                 self._json(400, {"ok": False, "message": "plugin id required"})
                 return
-            # 先在官方注册表找预设
             preset = next((p for p in _BUILTIN_PLUGIN_REGISTRY if p.get("id") == plugin_id), None)
             entry: Dict[str, Any] = {
-                "name": str(data.get("name") or preset.get("name") or plugin_id),
-                "version": str(data.get("version") or preset.get("version") or "0.0.0"),
-                "description": str(data.get("description") or preset.get("description") or ""),
-                "url": str(data.get("url") or preset.get("url") or ""),
-                "nodes": data.get("nodes") or preset.get("nodes") or [],
-                "official": bool(data.get("official", preset.get("official", False))),
+                "name": str(data.get("name") or (preset.get("name") if preset else "") or plugin_id),
+                "version": str(data.get("version") or (preset.get("version") if preset else "") or "0.0.0"),
+                "description": str(data.get("description") or (preset.get("description") if preset else "") or ""),
+                "url": str(data.get("url") or (preset.get("url") if preset else "") or ""),
+                "nodes": data.get("nodes") or (preset.get("nodes") if preset else []) or [],
+                "official": bool(data.get("official", (preset.get("official") if preset else False))),
                 "enabled": True,
             }
             saved = _upsert_canvas_plugin(plugin_id, **entry)
@@ -4351,6 +4436,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/host/plugins/toggle":
             if not _check_host_token(self):
                 self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                self._json(400, {"ok": False, "message": "invalid json"})
                 return
             plugin_id = str(data.get("id") or "").strip()
             enabled = bool(data.get("enabled", True))
@@ -4364,6 +4454,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/host/plugins/uninstall":
             if not _check_host_token(self):
                 self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                self._json(400, {"ok": False, "message": "invalid json"})
                 return
             plugin_id = str(data.get("id") or "").strip()
             ok = _remove_canvas_plugin(plugin_id)
@@ -4403,7 +4498,7 @@ _INJECT_JS_TEMPLATE = r"""
     var panel = document.createElement("div");
     panel.id = "shiguang-bridge-panel";
     panel.style.cssText = [
-      "position:fixed", "right:16px", "bottom:16px", "z-index:2147483647",
+      "position:fixed", "right:16px", "top:16px", "z-index:2147483647",
       "background:#111827", "color:#e5e7eb", "border:1px solid #374151",
       "border-radius:12px", "padding:12px", "width:280px",
       "font:13px/1.4 system-ui,sans-serif", "box-shadow:0 8px 24px rgba(0,0,0,.4)"
@@ -4432,36 +4527,20 @@ _INJECT_JS_TEMPLATE = r"""
     ].join("");
     document.documentElement.appendChild(panel);
 
-    var fab = document.createElement("button");
-    fab.id = "shiguang-bridge-fab";
-    fab.type = "button";
-    fab.textContent = "拾光";
-    fab.title = "打开拾光剪影面板";
-    fab.style.cssText = [
-      "position:fixed", "right:16px", "bottom:16px", "z-index:2147483647",
-      "display:none", "padding:10px 14px", "border:0", "border-radius:999px",
-      "background:#2563eb", "color:#fff", "font:12px/1 system-ui,sans-serif",
-      "font-weight:700", "cursor:pointer", "box-shadow:0 6px 18px rgba(0,0,0,.35)"
-    ].join(";");
-    document.documentElement.appendChild(fab);
-
     function hidePanel(persist) {
       panel.style.display = "none";
-      fab.style.display = "block";
       if (persist) localStorage.setItem("__shiguang_panel_hidden", "1");
     }
     function showPanel() {
       panel.style.display = "block";
-      fab.style.display = "none";
       localStorage.removeItem("__shiguang_panel_hidden");
     }
     document.getElementById("sg-close").onclick = function () { hidePanel(true); };
     document.getElementById("sg-min").onclick = function () { hidePanel(true); };
-    fab.onclick = showPanel;
     window.__shiguangShowBridgePanel = showPanel;
     window.__shiguangHideBridgePanel = function () { hidePanel(true); };
 
-    if (localStorage.getItem("__shiguang_panel_hidden") === "1") {
+    if (localStorage.getItem("__shiguang_panel_hidden") !== "0") {
       hidePanel(false);
     }
 

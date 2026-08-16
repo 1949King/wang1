@@ -10099,8 +10099,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             "Plan：只规划不改时间线；协作 B：只读自动、删除需确认；自主 C：白名单自动执行（付费生成不重试）"
         )
         self._agent_mode_combo.setStyleSheet("""
-            QComboBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:3px 8px;font-size:11px;}
+            QComboBox{
+                background:#161b22;color:#e6edf3;border:1px solid #30363d;
+                border-radius:6px;padding:3px 8px;font-size:11px;
+            }
             QComboBox::drop-down{border:none;width:16px;}
+            QComboBox QAbstractItemView{
+                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+                selection-background-color:#238636;selection-color:#ffffff;
+                outline:0;font-size:11px;padding:2px 0px;
+            }
+            QComboBox QAbstractItemView::item{
+                padding:4px 10px;min-height:22px;color:#e6edf3;
+            }
+            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
+            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
         """)
         head.addWidget(self._agent_mode_combo)
 
@@ -10109,10 +10122,32 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         head.addWidget(model_label)
 
         self._edit_agent_model_combo = QComboBox()
-        self._edit_agent_model_combo.setMinimumWidth(220)
+        self._edit_agent_model_combo.setMinimumWidth(260)
         self._edit_agent_model_combo.setStyleSheet("""
-            QComboBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}
+            QComboBox{
+                background:#161b22;color:#e6edf3;border:1px solid #30363d;
+                border-radius:6px;padding:4px 8px;font-size:11px;
+            }
             QComboBox::drop-down{border:none;width:18px;}
+            QComboBox QAbstractItemView{
+                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+                selection-background-color:#238636;selection-color:#ffffff;
+                outline:0;font-size:11px;
+                padding:2px 0px;
+            }
+            QComboBox QAbstractItemView::item{
+                padding:4px 10px;min-height:22px;color:#e6edf3;
+            }
+            QComboBox QAbstractItemView::item:hover{
+                background:#1f2937;
+            }
+            QComboBox QAbstractItemView::item:selected{
+                background:#238636;color:#ffffff;
+            }
+            QComboBox QAbstractItemView::item:disabled{
+                color:#484f58;background:transparent;
+                padding:4px 10px;min-height:22px;
+            }
         """)
         head.addWidget(self._edit_agent_model_combo)
 
@@ -10506,7 +10541,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             pass
 
     def _refresh_edit_agent_models(self):
-        """加载可用 Provider 到 Agent 模型框；优先选中「模型管理」当前激活项。"""
+        """加载可用 Provider 到 Agent 模型框；按 provider 分组 + 可读名 + 激活优先。"""
         combo = getattr(self, '_edit_agent_model_combo', None)
         if combo is None:
             return
@@ -10516,10 +10551,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 PROVIDERS,
                 ensure_active_provider_sensible,
                 load_active_provider,
+                model_display_name,
             )
             ensure_active_provider_sensible()
         except Exception:
             PROVIDERS = {}
+            model_display_name = lambda p, m: m or "自动"  # noqa: E731
             load_active_provider = lambda: ""  # noqa: E731
 
         try:
@@ -10539,10 +10576,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         except Exception:
             active = ""
 
-        # 排序：激活 > 已配置可用云端 > 其余
-        entries = []
+        # ── 收集所有可用条目 ──
+        # 按 provider 分组：provider -> list[(model, configured)]
+        groups: dict[str, list[tuple[str, bool]]] = {}
+        provider_meta: dict[str, dict] = {}
+
         for provider, cfg in PROVIDERS.items():
             name = cfg.get("name", provider)
+            icon = cfg.get("icon", "")
             is_local = bool(cfg.get("is_local"))
             configured = False
             if is_local:
@@ -10552,6 +10593,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     configured = bool(cloud_api_service.is_configured(provider))
                 except Exception:
                     configured = provider in available
+
             models = list(cfg.get("models") or [])
             if provider == "ollama":
                 models = self._list_local_ollama_models() or (["auto"] if configured else [])
@@ -10559,37 +10601,81 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 continue
             if not models:
                 models = [""]
+
+            valid_models = []
             for model in models:
-                # 跳过未配置的云端（避免默认点到空 Key）
                 if not is_local and not configured:
                     continue
-                label = f"{name} / {model}" if model and model != "auto" else f"{name} / 自动"
-                if provider == active:
-                    label = "★ " + label
-                if configured or provider in available:
-                    label = label + " ✓"
-                entries.append((provider == active, configured or provider in available, provider, model, label))
+                valid_models.append((model, configured))
 
-        entries.sort(key=lambda x: (0 if x[0] else 1, 0 if x[1] else 1, x[2], x[3] or ""))
+            if valid_models:
+                groups[provider] = valid_models
+                provider_meta[provider] = {
+                    "name": name,
+                    "icon": icon,
+                    "is_local": is_local,
+                    "configured": configured,
+                }
+
+        # ── 排序：激活 provider 最前，其余按已配置优先 ──
+        provider_order = sorted(
+            groups.keys(),
+            key=lambda p: (
+                0 if p == active else 1,
+                0 if provider_meta[p]["configured"] or p in available else 1,
+                p,
+            ),
+        )
 
         select_idx = 0
-        for i, (_is_active, _ok, provider, model, label) in enumerate(entries):
-            combo.addItem(label, (provider, "" if model == "auto" else model))
-            if _is_active and select_idx == 0:
-                select_idx = i
-            elif active and provider == active and model and select_idx == 0:
-                select_idx = i
+        first_item_after_separators = 0
+
+        for pi, provider in enumerate(provider_order):
+            meta = provider_meta[provider]
+            p_name = meta["name"]
+            p_icon = meta["icon"]
+            p_local = meta["is_local"]
+            p_configured = meta["configured"] or provider in available
+            is_active_p = provider == active
+
+            # provider 分组标签（带 icon 和可用性）
+            suffix = "✓" if p_configured else "✗"
+            local_tag = " 🖥️" if p_local else ""
+            header_text = f"{p_icon} {p_name}{local_tag}  [{suffix}]"
+            if pi > 0:
+                combo.insertSeparator(combo.count())
+            # 不可点击的分组标题：用 QComboBox 的 setItemData 标记后在 currentIndexChanged 过滤太麻烦，
+            # 简单做法：加一个带灰色样式的条目 + separator
+            header_idx = combo.count()
+            combo.addItem(header_text, ("__header__", provider))
+            cmodel = combo.model()
+            if cmodel is not None:
+                hitem = cmodel.item(header_idx)
+                if hitem is not None:
+                    hitem.setEnabled(False)
+
+            for model_id, _cfg in groups[provider]:
+                # 用可读名
+                mid = "" if model_id == "auto" else model_id
+                display = model_display_name(provider, mid) if mid else "自动"
+                # 完整 label：[激活星] 可读名  [原始 ID]  [可用标记]
+                raw_hint = f"（{mid}）" if mid and mid != display else ""
+                active_tag = "★ " if is_active_p and not mid else ""
+                ok_tag = " ✓" if p_configured else ""
+                label = f"  {active_tag}{display}{raw_hint}{ok_tag}"
+                combo.addItem(label, (provider, mid))
+
+                # 选第一个匹配激活项
+                if is_active_p and mid == "":
+                    if select_idx == 0:
+                        select_idx = combo.count() - 1
+                elif is_active_p and mid and provider == active:
+                    if select_idx == 0:
+                        select_idx = combo.count() - 1
 
         if combo.count() == 0:
             combo.addItem("自动降级 / 可用模型", ("", ""))
         else:
-            # 若激活项在列表中，选中它；否则选第一个已配置项
-            if active:
-                for i in range(combo.count()):
-                    data = combo.itemData(i)
-                    if isinstance(data, tuple) and data[0] == active:
-                        select_idx = i
-                        break
             combo.setCurrentIndex(min(select_idx, combo.count() - 1))
 
         hint = getattr(self, "_agent_active_hint", None)
@@ -10714,8 +10800,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         card.setStyleSheet("""
             QFrame#agentConfigCard{background:#111722;border:1px solid #263244;border-radius:10px;}
             QLabel{color:#8b949e;font-size:11px;}
-            QComboBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}
+            QComboBox{
+                background:#161b22;color:#e6edf3;border:1px solid #30363d;
+                border-radius:6px;padding:4px 8px;font-size:11px;
+            }
             QComboBox::drop-down{border:none;width:18px;}
+            QComboBox QAbstractItemView{
+                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
+                selection-background-color:#238636;selection-color:#ffffff;
+                outline:0;font-size:11px;padding:2px 0px;
+            }
+            QComboBox QAbstractItemView::item{
+                padding:4px 10px;min-height:22px;color:#e6edf3;
+            }
+            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
+            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
             QDoubleSpinBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}
         """)
         lay = QVBoxLayout(card)
