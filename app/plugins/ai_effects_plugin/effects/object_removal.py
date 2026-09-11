@@ -77,7 +77,7 @@ class ObjectRemovalEffect:
         os.makedirs(models_path, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        print("[物体移除] 初始化完成")
+        logger.info('[物体移除] 初始化完成')
     
     def load_model(self) -> bool:
         """加载AI修复模型 — 接入神经网络引擎"""
@@ -85,18 +85,18 @@ class ObjectRemovalEffect:
             from app.core.neural.inpainting import InpaintingEngine
             self._neural_engine = InpaintingEngine()
             if self._neural_engine.load():
-                print("[物体移除] 神经网络 Inpainting 引擎就绪")
+                logger.info('[物体移除] 神经网络 Inpainting 引擎就绪')
                 self._inpainting_model = "neural"
                 return True
             self._inpainting_model = "opencv_mode"
-            print("[物体移除] 神经网络引擎不可用，将使用传统算法")
+            logger.info('[物体移除] 神经网络引擎不可用，将使用传统算法')
             return True
         except ImportError as e:
-            print(f"[物体移除] 神经网络模块未安装: {e}")
+            logger.info(f'[物体移除] 神经网络模块未安装: {e}')
             self._inpainting_model = "opencv_mode"
             return True
         except Exception as e:
-            print(f"[物体移除] 模型加载失败: {e}")
+            logger.error(f'[物体移除] 模型加载失败: {e}')
             return False
     
     def unload_model(self) -> None:
@@ -113,7 +113,7 @@ class ObjectRemovalEffect:
         except Exception as e:
             logger.debug(f"清理GPU缓存时失败: {e}")
 
-        print("[物体移除] 模型已卸载")
+        logger.info('[物体移除] 模型已卸载')
     
     def remove_object(self,
                      frame_data: Any,
@@ -146,7 +146,7 @@ class ObjectRemovalEffect:
         image = self._to_numpy(frame_data).copy()
         h, w = image.shape[:2]
         
-        print(f"[物体移除] 模式: {mode}, 填充: {fill_method}")
+        logger.info(f'[物体移除] 模式: {mode}, 填充: {fill_method}')
         
         # 根据模式生成要移除的区域掩码
         removal_mask = self._create_removal_mask(
@@ -155,10 +155,10 @@ class ObjectRemovalEffect:
         )
         
         if removal_mask is None or removal_mask.sum() == 0:
-            print("[物体移除] ⚠️ 未检测到要移除的区域")
+            logger.info('[物体移除] ⚠️ 未检测到要移除的区域')
             return image
         
-        print(f"[物体移除] 待移除区域占比: {removal_mask.sum()/(h*w)*100:.1f}%")
+        logger.info(f'[物体移除] 待移除区域占比: {removal_mask.sum() / (h * w) * 100:.1f}%')
         
         # 对掩码进行边缘羽化
         if edge_feathering > 0:
@@ -189,7 +189,7 @@ class ObjectRemovalEffect:
                 x, y, rw, rh = selected_rect
                 base_mask[y:y+rh, x:x+rw] = 255
             else:
-                print("[物体移除] ⚠️ 手动模式但未提供选择区域")
+                logger.info('[物体移除] ⚠️ 手动模式但未提供选择区域')
                 return None
         
         elif mode == 'brush_paint':
@@ -199,7 +199,7 @@ class ObjectRemovalEffect:
             elif self._brush_mask is not None:
                 base_mask = self._brush_mask.copy()
             else:
-                print("[物体移除] ⚠️ 笔刷模式但未提供掩码")
+                logger.info('[物体移除] ⚠️ 笔刷模式但未提供掩码')
                 return None
         else:
             raise ValueError(f"未知移除模式: {mode}")
@@ -221,7 +221,7 @@ class ObjectRemovalEffect:
         if target_objects is None:
             target_objects = ['text', 'logo', 'stamp']
         
-        print(f"[物体移除] 自动检测目标: {target_objects}")
+        logger.info(f'[物体移除] 自动检测目标: {target_objects}')
         
         for obj_type in target_objects:
             obj_mask = np.zeros((h, w), dtype=np.uint8)
@@ -422,7 +422,7 @@ class ObjectRemovalEffect:
         """
         AI 驱动修复 — 优先使用 LaMa 神经网络，回退到传统算法
         """
-        print("[填充] 使用AI Inpainting...")
+        logger.info('[填充] 使用AI Inpainting...')
 
         # 尝试神经网络引擎
         if hasattr(self, '_neural_engine') and self._neural_engine:
@@ -450,7 +450,7 @@ class ObjectRemovalEffect:
     
     def _content_aware_fill(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """内容感知填充（PatchMatch算法的简化版）"""
-        print("[填充] 使用Content-Aware Fill...")
+        logger.info('[填充] 使用Content-Aware Fill...')
         
         h, w = image.shape[:2]
         result = image.copy()
@@ -522,7 +522,7 @@ class ObjectRemovalEffect:
     
     def _blur_fill(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """模糊填充（快速但简单的填充方式）"""
-        print("[填充] 使用Blur Fill...")
+        logger.info('[填充] 使用Blur Fill...')
         
         # 强模糊周围环境
         blurred = cv2.GaussianBlur(image, (51, 51), 0)
@@ -537,7 +537,7 @@ class ObjectRemovalEffect:
     
     def _clone_stamp_fill(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """仿制图章填充（需要用户交互指定源点）"""
-        print("[填充] 使用Clone Stamp（需指定源点，当前使用自动源点）...")
+        logger.info('[填充] 使用Clone Stamp（需指定源点，当前使用自动源点）...')
         
         h, w = image.shape[:2]
         result = image.copy()

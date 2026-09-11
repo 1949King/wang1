@@ -27,6 +27,8 @@ export const NODE_PALETTE: PaletteItem[] = [
   { type: "shotlist", label: "分镜表", keywords: "shotlist 分镜表 表格", hint: "AI-Canvas 对齐 · 可编辑镜号表" },
   { type: "storyboard", label: "宫格分镜", keywords: "storyboard 宫格 九宫格", hint: "AI-Canvas 对齐 · 交互裁格" },
   { type: "director", label: "3D 导演台", keywords: "director stage3d 导演台 3d", hint: "自研 Stage3D · 截图回写" },
+  { type: "directorCard", label: "导演卡", keywords: "directorCard 导演卡 剧本 拆解 拉片", hint: "剧本输入 → 自动拆解分镜" },
+  { type: "digitalHuman", label: "数字人", keywords: "digital human 数字人 tts 配音 口型", hint: "形象 + 台词配音；口型后置" },
   { type: "animation", label: "逐帧动画", keywords: "animation sprite 逐帧 动作", hint: "Sprite Sheet / 占位 / AI" },
   { type: "panorama", label: "全景", keywords: "panorama 全景 360", hint: "等距柱状图环视" },
   { type: "note", label: "画布笔记", keywords: "note 笔记 标注 箭头", hint: "文字 / 形状标注" },
@@ -157,7 +159,7 @@ export function buildAddNodeItems(): PaletteItem[] {
 export function isBuiltinNodeKind(type: string): type is NodeData["kind"] {
   const kinds: NodeData["kind"][] = [
     "shot", "script", "image", "video", "prompt", "text", "config", "generator", "group", "audio",
-    "markdown", "shotlist", "storyboard", "director", "animation", "panorama", "note", "source",
+    "markdown", "shotlist", "storyboard", "director", "directorCard", "digitalHuman", "animation", "panorama", "note", "source", "music",
   ];
   return kinds.includes(type as NodeData["kind"]);
 }

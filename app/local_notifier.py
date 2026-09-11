@@ -27,7 +27,7 @@ def send_local_notification(message: str):
     """
     logger.info(message)
     # 可选：再额外打印一次，确保在所有控制台上都可见
-    print(f"[NOTIFICATION] {message}")
+    logger.info(f'[NOTIFICATION] {message}')
 
 def main():
     """主函数"""

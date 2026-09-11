@@ -4,6 +4,9 @@ import subprocess
 import json
 from datetime import datetime
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.integrations.olive")
+
 class OliveVideoEditor:
     """
     Olive Video Editor 集成类
@@ -79,7 +82,7 @@ class OliveVideoEditor:
             
             return True
         except Exception as e:
-            print(f"导入媒体文件失败: {e}")
+            logger.error(f'导入媒体文件失败: {e}')
             return False
     
     def edit_video(self, project_path, edit_params):
@@ -117,7 +120,7 @@ class OliveVideoEditor:
             
             return True
         except Exception as e:
-            print(f"编辑视频失败: {e}")
+            logger.error(f'编辑视频失败: {e}')
             return False
     
     def export_video(self, project_path, output_path, export_settings):
@@ -154,7 +157,7 @@ class OliveVideoEditor:
                 # 使用内置的FFmpeg实现
                 return self._export_with_ffmpeg(project_data, output_path, export_settings)
         except Exception as e:
-            print(f"导出视频失败: {e}")
+            logger.error(f'导出视频失败: {e}')
             return False
     
     def _export_with_ffmpeg(self, project_data, output_path, export_settings):
@@ -191,7 +194,7 @@ class OliveVideoEditor:
             
             return result.returncode == 0
         except Exception as e:
-            print(f"FFmpeg导出失败: {e}")
+            logger.error(f'FFmpeg导出失败: {e}')
             return False
     
     def get_project_info(self, project_path):
@@ -203,7 +206,7 @@ class OliveVideoEditor:
                 project_data = json.load(f)
             return project_data
         except Exception as e:
-            print(f"获取项目信息失败: {e}")
+            logger.error(f'获取项目信息失败: {e}')
             return None
     
     def list_projects(self):
@@ -223,7 +226,7 @@ class OliveVideoEditor:
                             'created': info['created']
                         })
         except Exception as e:
-            print(f"列出项目失败: {e}")
+            logger.error(f'列出项目失败: {e}')
         return projects
 
 # 创建全局Olive实例

@@ -614,109 +614,156 @@ class ModelCardWidget(QFrame):
     
     def check_ollama_status(self):
         """
-        检测 Ollama 状态（含安装诊断和自动启动尝试）
+        检测 Ollama 状态（含安装诊断和自动启动尝试）。
 
-        【完整检测流程】
-        ┌──────────────────────────────────────────────────────────┐
-        │  1. diagnose()  → 检查 Ollama 是否已安装                │
-        │  2. 未安装       → 显示 "📥 安装 Ollama" 按钮           │
-        │  3. 已安装未运行 → start_service() 尝试自动启动         │
-        │     ├─ 启动成功  → 等 3 秒 → re-diagnose → 刷新模型列表 │
-        │     └─ 启动失败  → 显示 "▶ 启动服务" 手动按钮          │
-        │  4. 已运行       → 显示绿色 "运行中" → 刷新模型列表     │
-        └──────────────────────────────────────────────────────────┘
+        诊断 / 启动服务 / 等待初始化 / 拉取模型列表均为耗时操作，统一放到
+        后台线程（内嵌 _StatusWorker.run）执行，完成后通过 finished 信号回到
+        主线程，由 _apply_ollama_status 更新 UI，避免阻塞主线程造成切换卡顿。
 
-        【Ollama HTTP 检测改进历程】
-        - 旧问题：host 缺少 http:// 前缀 → requests 报 "No connection adapters"
-        - 旧问题：系统代理干扰 localhost 连接
-        - 修复：_load_config() 自动补全 http:// + session.trust_env=False 忽略代理
-        - 详见 app/modules/lego/ollama_client.py 中 is_available() / diagnose()
+        【检测流程】
+          1. diagnose()  → 检查 Ollama 是否已安装
+          2. 未安装       → 显示 "📥 安装 Ollama" 按钮
+          3. 已安装未运行 → start_service() 尝试自动启动（成功等 3 秒复诊）
+          4. 已运行       → 显示绿色 "运行中" 并刷新模型列表
 
-        【强制重新检测】
-        diagnose() 每次都重新发起 HTTP 请求，不使用缓存结果，
-        确保用户看到的始终是实时状态。
+        diagnose() 每次都重新发起 HTTP 请求，不使用缓存，保证实时状态。
         """
-        try:
-            from .ollama_client import ollama_client
+        class _StatusWorker(QThread):
+            """后台执行 Ollama 诊断（diagnose/start_service/list_models），不阻塞主线程。"""
+            finished = pyqtSignal(object)  # 携带结果 dict
 
-            # ── 第1步：强制重新诊断（不用缓存） ──
-            # ollama_client.diagnose() 返回 dict:
-            #   { installed: bool, service_running: bool, suggestion: str, ... }
-            report = ollama_client.diagnose()
-            if not report["installed"]:
-                # Ollama 可执行文件未找到（ollama.exe / ollama 不在 PATH 中）
-                self._status_label.setText("● 未安装")
-                sug = report.get("suggestion") or "请安装 Ollama"
-                self._status_label.setToolTip(
-                    ollama_client.format_diagnose_report(report)
-                )
-                self._status_label.setStyleSheet(
-                    "font-size: 12px; color: #ef4444; background: transparent;")
-                self._start_ollama_btn.setText("📥 安装 Ollama")
-                self._start_ollama_btn.setToolTip(sug)
-                self._start_ollama_btn.show()
-                self._models_list.clear()
-                self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:60]))
-                return
+            def run(self):
+                import time
+                try:
+                    from .ollama_client import ollama_client
+                    result = {
+                        "ok": True,
+                        "installed": False,
+                        "service_running": False,
+                        "suggestion": "",
+                        "error": "",
+                        "tooltip": "",
+                        "model_names": [],
+                        "display_names": [],
+                    }
+                    report = ollama_client.diagnose()
+                    result["installed"] = bool(report.get("installed"))
+                    result["service_running"] = bool(report.get("service_running"))
+                    result["suggestion"] = report.get("suggestion", "")
+                    result["error"] = report.get("error", "")
+                    result["tooltip"] = ollama_client.format_diagnose_report(report)
 
-            if not report["service_running"]:
-                # ── 第2步：服务未运行，尝试自动启动 ──
-                # start_service() 内部会先检查是否已在运行，避免重复启动
-                logger.info("Ollama 服务未运行，尝试自动启动...")
-                if ollama_client.start_service():
-                    import time
-                    time.sleep(3)  # 等待服务完成初始化（增加等待时间，确保服务就绪）
-                    # 启动后重新诊断，确认服务真正可用
-                    report2 = ollama_client.diagnose()
-                    if report2["service_running"]:
-                        # 自动启动成功
-                        self._status_label.setText("● 运行中")
-                        self._status_label.setToolTip(
-                            ollama_client.format_diagnose_report(report2)
-                        )
-                        self._status_label.setStyleSheet(
-                            "font-size: 12px; color: #22c55e; background: transparent;")
-                        self._start_ollama_btn.hide()
-                        self._refresh_models()
+                    if not result["installed"]:
+                        self.finished.emit(result)
                         return
 
-                # ── 第3步：自动启动失败，提供手动操作入口 ──
-                err = report.get("error") or "服务未运行"
-                self._status_label.setText(f"● 未运行 · {err}")
-                self._status_label.setToolTip(
-                    ollama_client.format_diagnose_report(report)
-                )
-                self._status_label.setStyleSheet(
-                    "font-size: 12px; color: #ef4444; background: transparent;")
-                self._start_ollama_btn.setText("▶ 启动服务")
-                self._start_ollama_btn.setToolTip(
-                    report.get("suggestion")
-                    or "点击启动 Ollama 服务\n或手动: 打开 Ollama 桌面应用 / 运行 ollama serve"
-                )
-                self._start_ollama_btn.show()
-                self._models_list.clear()
-                sug = (report.get("suggestion") or "").replace("\n", " ")
-                if sug:
-                    self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:80]))
-                return
+                    if not result["service_running"]:
+                        # 服务未运行：尝试自动启动，成功后等待初始化再复诊
+                        if ollama_client.start_service():
+                            time.sleep(3)  # 等待服务完成初始化
+                            report2 = ollama_client.diagnose()
+                            if report2.get("service_running"):
+                                result["service_running"] = True
+                                result["suggestion"] = report2.get("suggestion", "")
+                                result["error"] = report2.get("error", "")
+                                result["tooltip"] = ollama_client.format_diagnose_report(report2)
+                        # 启动失败或仍不可用：保留原始 report 的 error/suggestion
 
-            # ── 第4步：服务运行中，更新 UI 为正常状态 ──
-            self._status_label.setText("● 运行中")
-            self._status_label.setToolTip(
-                ollama_client.format_diagnose_report(report)
-            )
-            self._status_label.setStyleSheet(
-                "font-size: 12px; color: #22c55e; background: transparent;")
-            self._start_ollama_btn.hide()
-            self._refresh_models()
+                    if result["service_running"]:
+                        # 服务可用：后台拉取已安装模型列表
+                        try:
+                            models = ollama_client.list_models(force_refresh=True)
+                            result["model_names"] = [m.name for m in models]
+                            result["display_names"] = [m.display_name for m in models]
+                        except Exception as list_err:
+                            logger.warning(f"刷新模型列表失败: {list_err}")
 
-        except (ImportError, ConnectionError, OSError, RuntimeError) as e:
-            logger.error(f"Ollama 状态检测异常: {e}")
-            self._status_label.setText(f"● 检测失败 · {e}")
-            self._status_label.setToolTip(str(e))
+                    self.finished.emit(result)
+                except (ImportError, ConnectionError, OSError, RuntimeError) as e:
+                    self.finished.emit({"ok": False, "error": str(e)})
+
+        # 防重复：已有检测线程在跑则忽略本次请求
+        running = getattr(self, "_ollama_status_worker", None)
+        if running is not None and running.isRunning():
+            return
+        worker = _StatusWorker()
+        worker.finished.connect(self._apply_ollama_status)
+        # 保存实例引用防止被 GC 回收（线程结束后由引用覆盖自然释放）
+        self._ollama_status_worker = worker
+        worker.start()
+
+    def _apply_ollama_status(self, result):
+        """后台诊断完成后的主线程回调：根据结果更新状态标签、按钮与模型列表。
+
+        仅由 _StatusWorker.finished 信号在主线程触发，原诊断逻辑的
+        未安装 / 未运行 / 运行中三个分支的 UI 表现保持不变。
+        """
+        if not result.get("ok"):
+            err = result.get("error") or "未知错误"
+            self._status_label.setText(f"● 检测失败 · {err}")
+            self._status_label.setToolTip(str(err))
             self._status_label.setStyleSheet(
                 "font-size: 12px; color: #f59e0b; background: transparent;")
             self._start_ollama_btn.hide()
+            return
+
+        installed = bool(result.get("installed"))
+        service_running = bool(result.get("service_running"))
+        suggestion = result.get("suggestion") or ""
+        error = result.get("error") or ""
+        tooltip = result.get("tooltip") or ""
+
+        if not installed:
+            # Ollama 可执行文件未找到（ollama.exe / ollama 不在 PATH 中）
+            sug = suggestion or "请安装 Ollama"
+            self._status_label.setText("● 未安装")
+            self._status_label.setToolTip(tooltip)
+            self._status_label.setStyleSheet(
+                "font-size: 12px; color: #ef4444; background: transparent;")
+            self._start_ollama_btn.setText("📥 安装 Ollama")
+            self._start_ollama_btn.setToolTip(sug)
+            self._start_ollama_btn.show()
+            self._models_list.clear()
+            self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:60]))
+            return
+
+        if not service_running:
+            # 自动启动失败，提供手动操作入口
+            err = error or "服务未运行"
+            self._status_label.setText(f"● 未运行 · {err}")
+            self._status_label.setToolTip(tooltip)
+            self._status_label.setStyleSheet(
+                "font-size: 12px; color: #ef4444; background: transparent;")
+            self._start_ollama_btn.setText("▶ 启动服务")
+            self._start_ollama_btn.setToolTip(
+                suggestion
+                or "点击启动 Ollama 服务\n或手动: 打开 Ollama 桌面应用 / 运行 ollama serve"
+            )
+            self._start_ollama_btn.show()
+            self._models_list.clear()
+            sug = suggestion.replace("\n", " ")
+            if sug:
+                self._models_list.addItem(QListWidgetItem("（诊断）" + sug[:80]))
+            return
+
+        # 服务运行中：更新 UI 为正常状态
+        self._status_label.setText("● 运行中")
+        self._status_label.setToolTip(tooltip)
+        self._status_label.setStyleSheet(
+            "font-size: 12px; color: #22c55e; background: transparent;")
+        self._start_ollama_btn.hide()
+
+        # 用后台已拉取的模型列表填充，避免再次在网络中阻塞
+        self._models_list.clear()
+        model_names = result.get("model_names") or []
+        display_names = result.get("display_names") or []
+        if not model_names:
+            self._models_list.addItem(QListWidgetItem("（无模型）请执行: ollama pull qwen2.5:7b"))
+        else:
+            for name, display in zip(model_names, display_names):
+                item = QListWidgetItem(f" {display}")
+                item.setData(Qt.ItemDataRole.UserRole, name)
+                self._models_list.addItem(item)
 
     def _refresh_models(self):
         """刷新已安装模型列表"""
@@ -1063,7 +1110,11 @@ class ModelCardWidget(QFrame):
     
     def _load_saved_config(self):
         if self._provider_info.get("is_local"):
-            self.check_ollama_status()
+            # 本地服务仅 Ollama 需要探测运行状态；该探测含 subprocess 与 time.sleep，
+            # 构造时同步执行会阻塞主线程（实测单卡片约 6 秒），改为延迟到下一事件循环。
+            # chatgpt2api 等本地自托管网关不是 Ollama，不再误触发 Ollama 探测。
+            if self._provider_id == "ollama":
+                QTimer.singleShot(0, self.check_ollama_status)
             return
         try:
             from .cloud_api import cloud_api_service

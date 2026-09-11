@@ -1,5 +1,59 @@
 # 拾光剪影 — 变更日志
 
+## 未发布 (2026-08-21) — 时间线控件大文件治理
+
+### 🔧 重构
+- **`timeline_widget.py` 拆分**（3462 → 1427 行）：
+  - 阶段1：底层常量 / 工具函数 / `_MediaWorkerGate` + 4 个子控件（`TimeRuler`、`TimelineMarkerLayer`、`TrackControlPanel`、`TrackViewport`）抽到 `timeline_subwidgets.py`。
+  - 阶段2：`ClipWidget`（~1310 行）抽到 `clip_widget.py`，`_find_timeline_widget` 内延迟导入 `TimelineWidget` 解除 `isinstance` 循环依赖。
+  - 原文件通过 re-export 保持外部 `import` 兼容。
+- **`modules.py` 死代码清理**（3327 → 1903 行）：
+  - 删除尾部重复的时间线控件实现（`TimeRuler` / `TrackControlPanel` / `TimelineWidget` / `ClipWidget`，约 1424 行），这些类已被 `timeline_widget.py` / `timeline_subwidgets.py` / `clip_widget.py` 取代。
+  - 改为从新模块 re-export 保持向后兼容，`from .modules import TimelineWidget / ClipWidget / TimeRuler / TrackControlPanel` 等外部引用继续可用。
+- **`canvas_bridge.py` AIGC 层拆分**（4700 → 2763 行，抽离 2072 行到 `canvas_aigc.py`）：
+  - 关键词常量 `VIDEO/AUDIO/IMAGE_KEYWORDS`、`guess_capability`、`build_host_ai_config_patch`（模型广场渠道配置）、`_data_url_to_b64`、`generate_image_openai_compatible`、`inpaint_via_host`、`_resolve_aigc_channel`、`generate_audio_via_host`、`agent_chat_proxy`、`generate_video_via_host`、`generate_music_via_host` 及分镜拉片（`_parse_storyboard_json` / `_heuristic_storyboard` / `storyboard_breakdown`）统一迁移。
+  - `canvas_aigc.py` 提供 `_canvas_inbox_dir()` 惰性代理（调用时再 `import canvas_bridge`），解除拆分后的循环导入。
+  - 原文件通过 re-export 保持外部 `import` 兼容。
+- **`canvas_bridge.py` HTTP 服务层拆分**（2763 → 870 行，抽离 2093 行到 `canvas_server.py`）：
+  - 本地小 HTTP 桥（`_check_host_token`、`_BridgeHandler`、`_build_inject_js`、`CanvasBridgeServer`、`get_canvas_bridge`）及提示词远程代理、`/host/*`、`/ingest`、`/ingest_path`、`/push_from_editor`、`/inbox_file`、`/editor_outbox`、`/inject.js` 等 HTTP 端点与 SSE 事件流统一迁移。
+  - `canvas_server.py` 顶部单向依赖 `canvas_bridge`（IO / 状态 / 媒体层符号，共 28 项）+ `canvas_aigc`（AIGC 能力，8 项）；`canvas_bridge.py` 末尾 re-export `canvas_server.py` 形成闭包，解除循环导入。
+  - 端口 18765（stage3d-core 冻结）仍由 `canvas_bridge.py` 的 `DEFAULT_PORT` 唯一定义，`canvas_server.py` 仅引用不改写。
+
+### ✅ 验证
+- `py_compile` / `compileall` 通过；`TimelineWidget`、`ClipWidget`、`_TIMELINE_BASE_PPS` 均可正常导入（re-export 有效，无循环导入）。
+- `modules.py` re-export 身份验证通过（`modules.TimelineWidget is timeline_widget.TimelineWidget`）。
+- `canvas_bridge.py` re-export 身份验证通过（`canvas_bridge.storyboard_breakdown is canvas_aigc.storyboard_breakdown`），16 个拆分符号均可在原模块访问。
+- `canvas_server.py` re-export 身份验证通过（`canvas_bridge.get_canvas_bridge is canvas_server.get_canvas_bridge` 等 5 个服务层符号 + 28 项 IO 层符号共享状态一致），无循环导入。
+- `frozen_zone_guard.py` 52 锁完好（拆分后 `--update` 重写基线）；`stability_gate.py` 无新增违规（430 项存量固化，含随行号迁移的 11 项 `swallow-except`）。
+
+---
+
+## V4.10.3 (2026-08-19) — 打包就绪（spec 重写 + venv 清理）
+
+### 🐞 修复
+- **spec torch 子模块收集时序 bug** (`app/ai_video_editor_local.spec`): torch/torchvision/torchaudio 的 `collect_submodules` 在 `hiddenimports` 拼接**之后**才执行，结果收集结果从未进入 hiddenimports（打包后极易出现 `ModuleNotFoundError: torch.xxx`）。已将全部 11 个包的收集移到拼接之前，torch 2247 个子模块现可正确入包。
+
+### 🆕 新增 / 增强
+- **spec 重写**：datas 补齐 `license/`（入口 `main_qt6.py` 直接导入）与 `app/config.json`；hiddenimports 补齐 `PyQt6.QtWebChannel/QtPrintSupport`、`cv2`、`psutil`、`aiohttp`、`requests`、`imageio_ffmpeg` 等；easyocr/faster_whisper 数据文件经 `collect_data_files` 收集（easyocr 116 条）。
+- **虚拟环境清理**：删除 5 个冗余/损坏 venv（`.venv`、`venv`、`app/venv`、`app/packaging_env`、`bmf_env`，合计约 1.9G），仅保留开发主力 `.venv312`。
+
+### ✅ 验证
+- 用 PyInstaller 同款机制（桩掉 Analysis/PYZ/EXE/COLLECT）exec 解析 spec：hiddenimports 6832 项、datas 125 条全部存在、关键项（license/cv2/psutil/QtWebChannel 等）全在列，RESULT: PASS。
+- 旧 spec `AI短剧编辑器.spec` 已不存在，无残留冲突。
+
+---
+
+## V4.10.2 (2026-08-19) — add_clip 撤销支持补全
+
+### 🐞 修复
+- **AI剪辑/画布入轨/素材拖入的片段不可撤销** (`editor_module.py`): `_add_clip_to_timeline()` 此前不调用 `_record_action()`，导致所有通过 FunClip/AutoClip/LLM裁剪/画布「发送到剪辑」/素材库拖入进入时间线的片段按 Ctrl+Z 无反应。现新增 `"add_clip"` 类型的 undo/redo 处理（`_apply_action` 新增分支），同时处理视频片段与联动音频片段的撤销与重做。
+
+### ✅ 验证
+- `py_compile` 编译通过；`frozen_zone_guard.py` 确认 45 锁完好无 drift。
+- 修改仅在 `_apply_action()` 新增分支 + `_add_clip_to_timeline()` 末尾追加 `_record_action()` 调用，未触碰任何冻结符号。
+
+---
+
 ## V4.10.1 (2026-08-14) — Agent Plan/B/C 策略
 
 ### 🆕 新增 / 增强

@@ -293,7 +293,7 @@ class ExtensionsModule(BaseModule):
             lay = QVBoxLayout(dlg)
             lay.setContentsMargins(0, 0, 0, 0)
             tip = QLabel(
-                "实验扩展：无平台真 API 时发布为本地队列/导出；数据看板读本地日志。"
+                "插件功能已卸，仅保留接口。Agent 的 account.* 调用会诚实失败。"
             )
             tip.setWordWrap(True)
             tip.setStyleSheet("color:#a1a1aa;font-size:11px;padding:8px 12px;")

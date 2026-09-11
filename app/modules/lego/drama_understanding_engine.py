@@ -38,7 +38,7 @@ def _detect_whisper():
             return True
         except (ImportError, OSError) as e:
             try:
-                print(f"[warn] Whisper not loaded: {e}")
+                logger.warning(f'[warn] Whisper not loaded: {e}')
             except Exception as e:
                 logger.debug("Whisper print fallback failed: %s", e)
             return False
@@ -51,7 +51,7 @@ try:
     from PIL import Image
     VISION_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️ 视觉分析未加载: {e}")
+    logger.info(f'⚠️ 视觉分析未加载: {e}')
     VISION_AVAILABLE = False
 
 # 本地LLM
@@ -67,13 +67,13 @@ def _check_ollama():
         if models and models.get('models'):
             OLLAMA_AVAILABLE = True
             return True
-        print("⚠️ Ollama服务已安装但未运行，请执行: ollama serve")
+        logger.info('⚠️ Ollama服务已安装但未运行，请执行: ollama serve')
         return False
     except ImportError:
-        print("⚠️ Ollama未安装: pip install ollama")
+        logger.info('⚠️ Ollama未安装: pip install ollama')
         return False
     except Exception as e:
-        print(f"⚠️ Ollama连接失败: {e}")
+        logger.error(f'⚠️ Ollama连接失败: {e}')
         return False
 
 _check_ollama()
@@ -243,16 +243,16 @@ class DramaUnderstandingEngine:
         self._yolo_model = None
         self._yolo_available = False
 
-        print(f"🎭 DramaUnderstandingEngine 初始化完成")
-        print(f"   - Whisper模型: {whisper_model} {'(可用)' if WHISPER_AVAILABLE else '(不可用)'}")
-        print(f"   - Ollama模型: {ollama_model} {'(可用)' if OLLAMA_AVAILABLE else '(不可用)'}")
-        print(f"   - 视觉分析: {'(可用)' if VISION_AVAILABLE else '(不可用)'}")
-        print(f"   - 本地AI优先: {use_local_ai}")
+        logger.info(f'🎭 DramaUnderstandingEngine 初始化完成')
+        logger.info(f"   - Whisper模型: {whisper_model} {('(可用)' if WHISPER_AVAILABLE else '(不可用)')}")
+        logger.info(f"   - Ollama模型: {ollama_model} {('(可用)' if OLLAMA_AVAILABLE else '(不可用)')}")
+        logger.info(f"   - 视觉分析: {('(可用)' if VISION_AVAILABLE else '(不可用)')}")
+        logger.info(f'   - 本地AI优先: {use_local_ai}')
     
     def _load_whisper(self):
         """加载Whisper模型，支持faster-whisper和openai-whisper"""
         if self._whisper_model is None:
-            print(f"🎤 加载Whisper模型: {self.whisper_model_name} (类型: {_whisper_model_type})")
+            logger.info(f'🎤 加载Whisper模型: {self.whisper_model_name} (类型: {_whisper_model_type})')
             if _whisper_model_type == "faster_whisper":
                 import faster_whisper
                 compute_type = "int8" if self.whisper_model_name in ("tiny", "base") else "float16"
@@ -277,9 +277,9 @@ class DramaUnderstandingEngine:
         Returns:
             DramaStructure: 完整的剧情结构分析
         """
-        print(f"\n{'='*60}")
-        print(f"🎬 开始分析视频: {os.path.basename(video_path)}")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f'🎬 开始分析视频: {os.path.basename(video_path)}')
+        logger.info(f"{'=' * 60}\n")
 
         # 1) 尝试命中缓存 — 如果文件未被修改则直接复用
         try:
@@ -287,54 +287,54 @@ class DramaUnderstandingEngine:
             cache = AnalysisCache()
             cached = cache.get_drama(video_path)
             if cached is not None:
-                print(f"⚡ 命中缓存：跳过 Whisper + LLM，直接复用上次分析结果")
-                print(f"   角色数: {len(cached.characters)}, 场景数: {len(cached.scenes)}")
-                print(f"{'='*60}")
+                logger.info(f'⚡ 命中缓存：跳过 Whisper + LLM，直接复用上次分析结果')
+                logger.info(f'   角色数: {len(cached.characters)}, 场景数: {len(cached.scenes)}')
+                logger.info(f"{'=' * 60}")
                 return cached
         except Exception as cache_err:
-            print(f"   ⚠️ 缓存读取异常（忽略）: {cache_err}")
+            logger.error(f'   ⚠️ 缓存读取异常（忽略）: {cache_err}')
 
         # 第1层：语音层分析
-        print("🔊 第1层：语音分析...")
+        logger.info('🔊 第1层：语音分析...')
         dialogues = self._analyze_audio_layer(video_path)
-        print(f"   ✓ 提取了 {len(dialogues)} 段对话")
+        logger.info(f'   ✓ 提取了 {len(dialogues)} 段对话')
         
         # 第2层：文本层分析
-        print("\n📝 第2层：文本剧情分析...")
+        logger.info('\n📝 第2层：文本剧情分析...')
         drama_structure = self._analyze_text_layer(dialogues)
-        print(f"   ✓ 识别了 {len(drama_structure.characters)} 个角色")
-        print(f"   ✓ 分析了 {len(drama_structure.plot_points)} 个情节点")
+        logger.info(f'   ✓ 识别了 {len(drama_structure.characters)} 个角色')
+        logger.info(f'   ✓ 分析了 {len(drama_structure.plot_points)} 个情节点')
         
         # 第3层：视觉层分析
-        print("\n👁️ 第3层：视觉内容分析...")
+        logger.info('\n👁️ 第3层：视觉内容分析...')
         scenes = self._analyze_visual_layer(video_path, dialogues)
-        print(f"   ✓ 识别了 {len(scenes)} 个场景")
+        logger.info(f'   ✓ 识别了 {len(scenes)} 个场景')
 
         # 跨模态对齐：将 LLM 情节点时间戳修正到视觉场景边界
         if scenes and drama_structure.plot_points:
             aligned_count = self._align_plot_to_scenes(drama_structure.plot_points, scenes)
             if aligned_count > 0:
-                print(f"   ✓ 跨模态对齐: {aligned_count} 个情节点已修正到场景边界")
+                logger.info(f'   ✓ 跨模态对齐: {aligned_count} 个情节点已修正到场景边界')
         
         # 第4层：决策层分析
-        print("\n🧠 第4层：决策分析...")
+        logger.info('\n🧠 第4层：决策分析...')
         drama_structure.scenes = scenes
         drama_structure = self._analyze_decision_layer(drama_structure, video_path)
-        print(f"   ✓ 生成了多模态情绪曲线")
-        print(f"   ✓ 完成了节奏分析")
+        logger.info(f'   ✓ 生成了多模态情绪曲线')
+        logger.info(f'   ✓ 完成了节奏分析')
         
-        print(f"\n{'='*60}")
-        print(f"✅ 视频分析完成!")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f'✅ 视频分析完成!')
+        logger.info(f"{'=' * 60}\n")
 
         # 写入缓存（文件未变动时下次直接命中）
         try:
             from .character_cache import AnalysisCache
             cache = AnalysisCache()
             cache.put_drama(video_path, drama_structure)
-            print(f"💾 分析结果已缓存（下次导入同一视频可秒回）")
+            logger.info(f'💾 分析结果已缓存（下次导入同一视频可秒回）')
         except Exception as cache_err:
-            print(f"   ⚠️ 缓存写入异常（忽略）: {cache_err}")
+            logger.error(f'   ⚠️ 缓存写入异常（忽略）: {cache_err}')
 
         return drama_structure
     
@@ -608,7 +608,7 @@ class DramaUnderstandingEngine:
                         vec = vec / total
                     results[idx] = vec
         except Exception as e:
-            print(f"   ⚠️ 批量LLM情绪分析失败，使用关键词fallback: {e}")
+            logger.error(f'   ⚠️ 批量LLM情绪分析失败，使用关键词fallback: {e}')
         return results
     
     def _calc_speech_speed(self, start: float, end: float, text: str) -> float:
@@ -683,7 +683,7 @@ class DramaUnderstandingEngine:
                 raise ValueError("Ollama 返回空响应")
             analysis_result = json.loads(raw_response)
         except Exception as e:
-            print(f"   ⚠️ LLM分析失败，使用基础分析: {e}")
+            logger.error(f'   ⚠️ LLM分析失败，使用基础分析: {e}')
             analysis_result = self._basic_text_analysis(dialogues)
         
         # 构建DramaStructure
@@ -756,12 +756,13 @@ class DramaUnderstandingEngine:
         scenes = []
         current_scene_start = 0
         last_frame = None
+        scene_persons = {}  # 场景人物计数缓存（按场景起始时间累积）
         scene_change_threshold = 30  # 场景变化阈值
         
         sample_interval = int(fps * 2)  # 每2秒采样一帧
         frame_count = 0
         
-        print(f"   📊 视频信息: {total_frames}帧, {fps}fps, 采样间隔: {sample_interval}")
+        logger.info(f'   📊 视频信息: {total_frames}帧, {fps}fps, 采样间隔: {sample_interval}')
         
         while True:
             ret, frame = cap.read()
@@ -797,7 +798,7 @@ class DramaUnderstandingEngine:
             # 显示进度
             if frame_count % (sample_interval * 10) == 0:
                 progress = (frame_count / total_frames) * 100
-                print(f"   ⏳ 视觉分析进度: {progress:.1f}%")
+                logger.info(f'   ⏳ 视觉分析进度: {progress:.1f}%')
         
         # 添加最后一个场景
         if current_scene_start < (frame_count / fps):
@@ -817,11 +818,11 @@ class DramaUnderstandingEngine:
                 from ultralytics import YOLO
                 self._yolo_model = YOLO("yolov8n.pt")
                 self._yolo_available = True
-                print("   - YOLOv8人物检测: (可用)")
+                logger.info('   - YOLOv8人物检测: (可用)')
             except ImportError:
-                print("   - YOLOv8人物检测: (未安装)")
+                logger.info('   - YOLOv8人物检测: (未安装)')
             except Exception as e:
-                print(f"   - YOLOv8加载失败: {e}")
+                logger.error(f'   - YOLOv8加载失败: {e}')
         return self._yolo_model
 
     def _detect_persons(self, frame: np.ndarray) -> list:
@@ -1015,11 +1016,11 @@ class DramaUnderstandingEngine:
                 segments = [(d.start_time, d.end_time) for d in drama.dialogues]
                 audio_vectors = audio_analyzer.analyze_segments(video_path, segments)
                 if audio_vectors and len(audio_vectors) == len(drama.dialogues):
-                    print(f"   🎵 音频情绪分析完成 ({len(audio_vectors)} 段)")
+                    logger.info(f'   🎵 音频情绪分析完成 ({len(audio_vectors)} 段)')
                 else:
                     audio_vectors = []
             except Exception as e:
-                print(f"   ⚠️ 音频情绪分析跳过: {e}")
+                logger.info(f'   ⚠️ 音频情绪分析跳过: {e}')
                 audio_vectors = []
 
         # ── 3) 多模态融合 + 构建多维情绪曲线 ──
@@ -1661,12 +1662,11 @@ class DramaUnderstandingEngine:
             List[HighlightClip]: 质量排序的高光片段列表
         """
         effective_genre = genre or drama.genre or "未知"
-        print(f"\n✨ ABCD融合矩阵高光提取（目标: {target_duration}s，剧种: {effective_genre}）...")
+        logger.info(f'\n✨ ABCD融合矩阵高光提取（目标: {target_duration}s，剧种: {effective_genre}）...')
 
         # Step 0: 获取该剧种的融合权重
         weights = self._get_genre_weights(effective_genre)
-        print(f"   📊 融合权重: A(剧情)={weights['A']:.2f} B(情绪)={weights['B']:.2f} "
-              f"C(视觉)={weights['C']:.2f} D(爆款)={weights['D']:.2f}")
+        logger.info(f"   📊 融合权重: A(剧情)={weights['A']:.2f} B(情绪)={weights['B']:.2f} C(视觉)={weights['C']:.2f} D(爆款)={weights['D']:.2f}")
 
         # Step 1: 构建 ABCD 四维时间轴评分地图
         timeline = self._build_timeline_score_map(drama, weights)
@@ -1677,7 +1677,7 @@ class DramaUnderstandingEngine:
         # Step 3: 找融合曲线上的连续高分区域
         regions = self._find_continuous_regions(score_curve, threshold=0.35,
                                                  min_duration=3.0, max_duration=30.0)
-        print(f"   🔍 融合曲线检测到 {len(regions)} 个高分区域")
+        logger.info(f'   🔍 融合曲线检测到 {len(regions)} 个高分区域')
 
         # Step 4: 补充情绪反差峰（反转式高潮 · v3.0 向量距离版）
         if drama.emotional_curve:
@@ -1694,11 +1694,11 @@ class DramaUnderstandingEngine:
                 cp_end = min(drama.total_duration, cp_t + 3)
                 cp_score = min(1.0, abs(cp_delta) * 1.5)
                 regions.append((cp_start, cp_end, cp_score))
-            print(f"   ⚡ 向量反差峰 + 情绪旅程补充 {min(5, len(contrast_peaks))} 个片段")
+            logger.info(f'   ⚡ 向量反差峰 + 情绪旅程补充 {min(5, len(contrast_peaks))} 个片段')
 
         # Step 5: 时序编排（合并碎片 + 保证叙事连贯 + 控制总时长）
         orchestrated = self._temporal_orchestrate(regions, target_duration, drama)
-        print(f"   🎬 时序编排后保留 {len(orchestrated)} 个片段")
+        logger.info(f'   🎬 时序编排后保留 {len(orchestrated)} 个片段')
 
         # Step 6: 构建 HighlightClip
         highlights = []
@@ -1748,7 +1748,7 @@ class DramaUnderstandingEngine:
         highlights.sort(key=lambda x: x.score, reverse=True)
 
         total = sum(h.duration for h in highlights)
-        print(f"   ✅ 提取 {len(highlights)} 个高光片段，总时长 {total:.1f}s")
+        logger.info(f'   ✅ 提取 {len(highlights)} 个高光片段，总时长 {total:.1f}s')
         return highlights
     
     def _find_emotion_peaks(self, emotional_curve: List[Tuple[float, float]], 
@@ -1909,10 +1909,10 @@ class DramaUnderstandingEngine:
 
             # 重新按分数排序
             highlights.sort(key=lambda x: x.score, reverse=True)
-            print(f"   ✓ LLM精修完成: {len(score_map)} 个片段重新评分")
+            logger.info(f'   ✓ LLM精修完成: {len(score_map)} 个片段重新评分')
 
         except Exception as e:
-            print(f"   ⚠️ LLM精修异常（保留原始评分）: {e}")
+            logger.error(f'   ⚠️ LLM精修异常（保留原始评分）: {e}')
 
         return highlights
 
@@ -1930,7 +1930,7 @@ class DramaUnderstandingEngine:
         Returns:
             EditingStrategy: 剪辑策略
         """
-        print(f"\n🎯 生成剪辑策略（平台: {target_platform}, 风格: {video_style}）...")
+        logger.info(f'\n🎯 生成剪辑策略（平台: {target_platform}, 风格: {video_style}）...')
         
         # 根据平台确定参数
         platform_configs = {
@@ -1989,7 +1989,7 @@ class DramaUnderstandingEngine:
                     max_duration=config["duration"]
                 )
             except Exception as e:
-                print(f"   ⚠️ LLM精修失败（使用原始结果）: {e}")
+                logger.error(f'   ⚠️ LLM精修失败（使用原始结果）: {e}')
         
         strategy = EditingStrategy(
             target_platform=target_platform,
@@ -2003,11 +2003,11 @@ class DramaUnderstandingEngine:
             structure_template=style_config["structure"]
         )
         
-        print(f"   ✓ 策略生成完成")
-        print(f"   - 结构模板: {strategy.structure_template}")
-        print(f"   - 节奏: {strategy.pacing}")
-        print(f"   - BGM风格: {strategy.bgm_style}")
-        print(f"   - 高光片段: {len(strategy.highlights)}个")
+        logger.info(f'   ✓ 策略生成完成')
+        logger.info(f'   - 结构模板: {strategy.structure_template}')
+        logger.info(f'   - 节奏: {strategy.pacing}')
+        logger.info(f'   - BGM风格: {strategy.bgm_style}')
+        logger.info(f'   - 高光片段: {len(strategy.highlights)}个')
         
         return strategy
 

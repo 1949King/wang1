@@ -14,7 +14,7 @@
 
 ## 硬边界
 
-- 不换 `_clips` 真相源；成片入轨仍走 `canvas_bridge` → `MATERIAL_TO_TIMELINE`
+- 不换 `_clips` 真相源；成片入轨仍走 `canvas_bridge` → `MATERIAL_TO_TIMELINE`（带 `canvas_node_id` round-trip）
 - 不把商业 LibTV/TapNow 嵌进 EXE（帮助中心仅外链备选）
 - MVP 生图可为占位图；真实 AIGC 接模型广场渠道（后续）
 
@@ -34,12 +34,14 @@ SHIGUANG_CANVAS_ENGINE=infinite   # 旧画布
 | Qt 宿主 | 进模块先出壳；`_load_canvas` 时再 `_ensure_web_view()` |
 | 引擎 | 默认锁 `shiguang`；infinite 确认默认「否」 |
 | 前端 | Studio / Agent / 提示词库 / 插件 / 蒙版 `lazy()`；3D 已 `lazy(Stage3D)` |
+| 3D 维持（2026-08-18） | persist 防抖 ~420ms；GLB 处理后模板缓存 + clone；Bloom=0 直渲；拖姿跳过高亮遍历；`/models/*.glb?v=` 版本查询 + 1 天缓存（不用 immutable）；空闲预热 Body 图；prompt-image 磁盘缓存；页面加载失败重试 1 次 |
+| M0 收口（2026-08-19） | 工程媒体落盘 inbox；单节点 Error Boundary；生图失败不写占位；连线松手接续菜单 |
 | 不做 | 进模块不自动拉 Agent（npx）；不默认 infinite |
 
 ## MVP 已有
 
 剧本/镜头/提示词/图/视频节点 · 连线 · 九/二十五宫格 · 本地工程 · 同步模型池 · 发送到剪辑  
-**「生成选中节点」→ `/host/generate-image`**（模型广场 AIGC；失败占位兜底）
+**「生成选中节点」→ `/host/generate-image`**（模型广场 AIGC；失败诚实报错，不写占位图）
 
 ### 迭代（2026-08-12）
 
@@ -65,7 +67,7 @@ SHIGUANG_CANVAS_ENGINE=infinite   # 旧画布
 | **指令面板** | 画布 / 3D 导演台 **Ctrl+K**（或 `/`、`?`）搜索执行；画布另有 Ctrl+G 编组、Ctrl+Enter 生成、Ctrl+E 入轨；3D 有 V/R/S、J、N 加角色、C 截图、1–9 姿势 |
 | 侧栏折叠 | 顶栏一键折叠左右栏放大画布 |
 | 自动保存 | 工程防抖写入 localStorage（静默） |
-| Dummy13 / BodyKun 关节素模 | 3D 导演台内置可动人偶：GLTFLoader 加载 `bodykun.glb` / `bodychan.glb`，保留 15 骨 JointPose；点选可见网格；**拉手/脚带动整条肢体（IK）**，单人与群像同一套；旋转环微调；Alt 移整人；正面=+Z |
+| Dummy13 / BodyKun 关节素模 | 3D 导演台加载 vinchau BodyKun/BodyChan GLB（桌面 `.blend` 导出），**保留原分段网格与材质**；JointPose / IK/FK 仍走现有 15 骨；勿再把 UV 刷成程序化等高线 |
 | **LibTV 空画布复刻** | 四卡空态 + 顶栏/底栏；右键「添加节点/资源」（导演台 NEW / 拉片 / 上传） |
 | **LibTV 3D 导演台** | 左图标栏画幅/角色/机位；AI 识图导入（本地参考层）；底栏场景描述 |
 | Agent 状态 | 顶栏 chip +「连接 Agent」按钮；宿主按钮变「Agent 已连接」；明确是 :17371 工具通道 |
@@ -77,6 +79,7 @@ SHIGUANG_CANVAS_ENGINE=infinite   # 旧画布
 | 编组 | React Flow `parentId` 编组 |
 | 节点列表 | 左侧定位/适配视野 |
 | 音频节点 | 上传入轨；TTS `/host/generate-audio` 诚实桩 |
+| **数字人节点** | `digitalHuman`：形象图 + 台词 TTS；入轨配音+形象；口型成片无模型诚实失败（≠ 3D 导演台素模） |
 | **AI-Canvas-tauri 对齐** | `markdown` / `shotlist` / `storyboard`；补 `director`（自研 Stage3D 节点）· `animation` · `panorama` · `note` · `source` |
 | 画布 Agent 面板 | **Agent-IM 快路径**（默认 `canvas_fast`，不依赖先开剪辑）；SSE `chat.delta` 流式显示；经 `/host/project-agent/chat` |
 | 参考视频片段 | 左侧「+参考视频」或节点「参考视频」槽；宿主 `/host/upload-asset` → `/inbox_file/` |
@@ -84,8 +87,8 @@ SHIGUANG_CANVAS_ENGINE=infinite   # 旧画布
 ### 已对齐（含 P1–P4 + UI/3D + 体验）
 
 宫格 · 拉片 · 模板 · AIGC 生成选中/批量 · 首尾帧 img2img · @角色/@素材 · 三视图 · 变体循环 · 上游提示汇聚 · 全部入轨+时长 · 分镜导出 · 参考重绘 · **视频节点真生成**
-**UI 简洁化** · **3D 导演台** · **ComfyUI 向节点编排体验**
+**UI 简洁化** · **3D 导演台** · **数字人（TTS+形象）** · **ComfyUI 向节点编排体验**
 
 ### 后置
 
-蒙版局部重绘 · Form 参数锁定 · 涂鸦生视频 · Krea 实时 · 社区模板云 · 3D 关节精调 / 720° 全景 · Canvas Agent
+蒙版局部重绘 · Form 参数锁定 · 涂鸦生视频 · Krea 实时 · 社区模板云 · 3D 关节精调 / 720° 全景 · Canvas Agent · **数字人口型驱动成片**（需形象驱动模型）

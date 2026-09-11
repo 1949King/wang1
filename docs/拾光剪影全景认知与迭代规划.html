@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光剪影 · 全景认知与迭代规划（双视角·全模块）</title>
+<style>
+  :root{--bg:#0f1115;--bg-soft:#161922;--bg-card:#1c2030;--border:#2a2f42;--text:#e6e8ef;
+    --dim:#9aa0b4;--muted:#6b7280;--accent:#7c8cff;--green:#4ade80;--yellow:#fbbf24;--red:#f87171;
+    --purple:#c084fc;--cyan:#22d3ee;--orange:#fb923c;--blue:#60a5fa;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.75;font-size:14.5px;}
+  .container{max-width:1100px;margin:0 auto;padding:52px 30px 120px;}
+  .hero{text-align:center;padding:34px 0 38px;border-bottom:1px solid var(--border);margin-bottom:40px;}
+  .hero .tag{display:inline-block;padding:4px 14px;background:rgba(96,165,250,.14);color:var(--blue);
+    border-radius:20px;font-size:13px;font-weight:600;margin-bottom:16px;}
+  .hero h1{font-size:29px;font-weight:700;margin-bottom:12px;
+    background:linear-gradient(135deg,#fff,#60a5fa,#c084fc);-webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;}
+  .hero .sub{color:var(--dim);font-size:14px;max-width:780px;margin:0 auto;}
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:22px 0 0;}
+  .duo .box{border-radius:12px;padding:18px 20px;text-align:left;}
+  .box.ceo{background:linear-gradient(135deg,rgba(96,165,250,.08),rgba(192,132,252,.08));border:1px solid var(--border);}
+  .box.up{background:linear-gradient(135deg,rgba(74,222,128,.08),rgba(34,211,238,.08));border:1px solid var(--border);}
+  .box .ttl{font-weight:700;font-size:15px;margin-bottom:8px;}
+  .box.ceo .ttl{color:var(--blue);}
+  .box.up .ttl{color:var(--green);}
+  h2{font-size:21px;font-weight:700;margin:48px 0 16px;padding-left:12px;border-left:4px solid var(--accent);}
+  h3{font-size:16px;font-weight:600;margin:26px 0 10px;}
+  h4{font-size:14.5px;font-weight:600;margin:18px 0 8px;color:var(--dim);}
+  p{margin:8px 0;}
+  table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:13px;}
+  th,td{padding:9px 11px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top;}
+  th{background:var(--bg-soft);font-weight:600;color:var(--dim);font-size:12.5px;}
+  tr:hover td{background:var(--bg-soft);}
+  .pill{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap;}
+  .p0{background:rgba(248,113,113,.15);color:var(--red);}
+  .p1{background:rgba(251,191,36,.15);color:var(--yellow);}
+  .p2{background:rgba(34,211,238,.15);color:var(--cyan);}
+  .p3{background:rgba(107,114,128,.15);color:var(--muted);}
+  .good{background:rgba(74,222,128,.16);color:var(--green);}
+  .warn{background:rgba(251,191,36,.15);color:var(--yellow);}
+  .bad{background:rgba(248,113,113,.15);color:var(--red);}
+  .tagx{display:inline-block;padding:1px 8px;border-radius:8px;font-size:11px;font-weight:600;margin-right:4px;}
+  .tg-core{background:rgba(74,222,128,.14);color:var(--green);}
+  .tg-ui{background:rgba(96,165,250,.14);color:var(--blue);}
+  .tg-canvas{background:rgba(192,132,252,.14);color:var(--purple);}
+  .tg-plugin{background:rgba(251,146,60,.14);color:var(--orange);}
+  .quote{border-left:3px solid var(--accent);padding:12px 18px;background:rgba(124,140,255,.06);
+    border-radius:0 8px 8px 0;margin:14px 0;font-size:14.5px;}
+  .quote b{color:var(--cyan);}
+  .stat{display:inline-block;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;
+    padding:10px 16px;margin:4px 4px 4px 0;}
+  .stat b{font-size:18px;color:var(--cyan);}
+  .stat span{color:var(--muted);font-size:12px;display:block;}
+  code{background:var(--bg-soft);padding:1px 6px;border-radius:5px;font-family:"Consolas","SF Mono",monospace;
+    font-size:12.5px;color:var(--cyan);}
+  ul,ol{margin:8px 0 8px 22px;}
+  li{margin:5px 0;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:12px 0 18px;}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .card .t{font-weight:600;margin-bottom:4px;}
+  .card .d{font-size:12.8px;color:var(--dim);}
+  .toc{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:14px 0;}
+  .toc a{color:var(--dim);text-decoration:none;margin-right:18px;font-size:13px;}
+  .toc a:hover{color:var(--text);}
+  .legend{font-size:12.5px;color:var(--muted);margin:6px 0 2px;}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="hero">
+  <div class="tag">全景认知 · 全模块迭代规划 · 双视角</div>
+  <h1>拾光剪影 — 代码扫描解析与升级路线</h1>
+  <p class="sub">站在 <b>DeepSeek CEO</b>（战略 / 护城河 / 第一性原理）× <b>百万编程 UP 主</b>（工程 / 诚实 / 可演示）双视角，基于真机扫描，覆盖 <b>core 引擎 123 文件 + UI 12 模块 + 画布双库 + 插件 5 组</b></p>
+  <div class="duo">
+    <div class="box ceo">
+      <div class="ttl">DeepSeek CEO 视角 · 一句话</div>
+      剪映抢用户靠<b>功能全</b>，你抢用户只能靠<b>「AI 更懂你的意图」</b>——功能是成本，理解力才是护城河。五维评分是这项目唯一能长出<b>数据飞轮</b>的东西，让「剪辑审美」从玄学变成可量化、可优化的工程信号。<b>假闭环等于亲手填平自己的护城河。</b>
+    </div>
+    <div class="box up">
+      <div class="ttl">百万编程 UP 视角 · 一句话</div>
+      这套代码在独立开发者里是<b>前 1%</b>：四层分层、53 个冻结锁、知识库、88 个测试都齐。但 <b>editor_module 8492 行上帝类</b>和<b>双库 16 文件漂移</b>是「现在不还、以后还不起」的债。<b>诚实工程是这个项目的脸面</b>——守住了，观众才信你，才有下一期视频。
+    </div>
+  </div>
+</div>
+
+<div class="toc">
+  <a href="#sec1">一、项目认知</a>
+  <a href="#sec2">二、债与假</a>
+  <a href="#sec3">三、CEO 战略</a>
+  <a href="#sec4">四、UP 工程</a>
+  <a href="#sec5">五、全模块迭代（4 层）</a>
+  <a href="#sec6">六、优先级路线</a>
+  <a href="#sec7">七、收尾</a>
+</div>
+
+<h2 id="sec1">一、我对这个项目的认知（扫描后）</h2>
+<p>这是一个 <b>PyQt6 桌面端专业级 AI 剪辑器</b>，入口 <code>main_qt6.py</code>。它真正的产品命题不是「又一个剪映」，而是<b>剪辑底座（NLE）+ AI 导演台画布（Canvas）+ Agent 遥控器（Agent）三件套合体</b>：把剪辑这件「体力活 + 审美活」交给 AI 协作完成，但把最终控制权留在人手里——<b>确认后执行、可撤销、诚实失败</b>。</p>
+
+<h3>1.1 代码规模实况（真机扫描 2026-09-11）</h3>
+<div>
+  <span class="stat"><b>123</b><span>app/core 文件数</span></span>
+  <span class="stat"><b>53,801</b><span>app/core 总行数</span></span>
+  <span class="stat"><b>12</b><span>注册模块数</span></span>
+  <span class="stat"><b>88</b><span>test_*.py</span></span>
+  <span class="stat"><b>2</b><span>画布引擎(双库)</span></span>
+  <span class="stat"><b>16</b><span>漂移文件数</span></span>
+  <span class="stat"><b>53</b><span>冻结锁</span></span>
+</div>
+<p class="legend">上帝类实况：<code>editor_module.py</code> 8492 行 · <code>settings_module.py</code> 2585 行 · <code>video_processor.py</code> 2567 行 · <code>canvas_server.py</code> 2289 行 · <code>canvas_aigc.py</code> 2248 行 · <code>extensions_module.py</code> 1994 行</p>
+
+<h3>1.2 四层架构（架构是清晰的，这是最大底气）</h3>
+<table>
+  <tr><th>层</th><th>职责</th><th>代表文件</th></tr>
+  <tr><td>数据层</td><td>媒体源抽取、元数据、项目管理</td><td><code>media_source</code> · <code>project_manager</code> · <code>metadata_extractor</code></td></tr>
+  <tr><td>解码服务层</td><td>FFmpeg 解码 / 音频波形分析</td><td><code>ffmpeg_service.py</code> · <code>waveform_generator.py</code> · <code>proxy_media.py</code></td></tr>
+  <tr><td>全局状态层</td><td>轨道 / 选中 / 播放态单例</td><td><code>timeline_manager.py</code> · <code>app_state</code>（已清孤儿）</td></tr>
+  <tr><td>UI 交互层</td><td>只渲染，不写业务</td><td><code>editor_module.py</code>（边界正被侵蚀，见债务）</td></tr>
+</table>
+<p>关键是 <code>editor_scheduler.py</code> 的<b>双内核调度</b>：预览走 PyAV 轻量内核，成片走 FFmpeg/MLT 专业内核，再由 <code>render_manager.py</code> 做 <b>C++ 引擎 → FFmpeg CLI → CPU 回退</b>三级降级。这层设计是「不卡 UI、可回退」的工程地基。</p>
+
+<h3>1.3 三件套引擎（差异化所在）</h3>
+<div class="grid">
+  <div class="card"><div class="t">① 剪辑底座（NLE）</div><div class="d">时间线+预览≈成片；字幕烧录、转场、多轨、BGM 混音、speed、关键帧、GPU LUT 基本完成，已锁为冻结区。</div></div>
+  <div class="card"><div class="t">② 导演台画布（Canvas）</div><div class="d">自研 shiguang-canvas：节点编排+连线+宫格+拉片+模板+AIGC+@角色/@素材+三视图+数字人。磁吸、软连接、五维评分刚上线。</div></div>
+  <div class="card"><div class="t">③ Agent 遥控器（Agent）</div><div class="d">左右脑 Hebbian 学习 + 25 capability 白名单 + 确认后触发 + 时间线快照只读 + 入轨带 node_id。</div></div>
+</div>
+
+<h2 id="sec2">二、扫描暴露的「债」与「假」</h2>
+<table>
+  <tr><th>#</th><th>问题</th><th>证据</th><th>严重度</th></tr>
+  <tr><td>1</td><td><b>上帝类仍大</b></td><td><code>editor_module.py</code> 8492 行（已从 13,321 拆掉近 5k，方向对）；<code>settings_module</code> 2585、<code>video_processor</code> 2567、<code>canvas_server</code>/<code>canvas_aigc</code> 各 2.2k+ 待拆</td><td><span class="pill p1">中</span></td></tr>
+  <tr><td>2</td><td><b>双库漂移已发生</b></td><td>shiguang-canvas（真源）↔ AI-Canvas-tauri 16 文件 MD5 不一致；本轮 AI 审阅只落 tauri 侧，<code>bridge/store/App</code> 三文件真源没跟上</td><td><span class="pill p0">高</span></td></tr>
+  <tr><td>3</td><td><b>五维评分假闭环</b></td><td><code>five_dimension_scorer</code> 244 行已成型，但前端 <code>quality_scores</code> 传空→70 基线→每张卡「通过·70 分」，假成功违背诚实原则</td><td><span class="pill p0">高</span></td></tr>
+  <tr><td>4</td><td><b>画布深度能力未真用</b></td><td>磁吸 / 软连接 / 意图胶囊 / 空间叙事接了 UI，但 <code>SpatialAnalyzer</code> 一键整理、意图胶囊分支等深度能力未接线</td><td><span class="pill p2">低</span></td></tr>
+  <tr><td>5</td><td><b>类型债（three 版本差）</b></td><td><code>Stage3D.tsx</code> / <code>riggedHumanoid.ts</code> 在 three 0.184/0.185 间类型不匹配，tsc -b 不过（esbuild 转译能跑）</td><td><span class="pill p2">低</span></td></tr>
+</table>
+
+<h2 id="sec3">三、DeepSeek CEO 视角 — 战略判断</h2>
+<div class="quote">判断一个模块该不该做，只问一句：<b>它是否让「AI 理解意图 → 高质量执行」这条链路更短、更准？</b>不是，就砍或后置。</div>
+
+<h3>3.1 护城河：不是功能数量，是「可量化的 AI 审美」</h3>
+<p>剪映/CapCut 已用功能全、模板多封死了「工具平替」这条路。你唯一能赢的是<b>AI 原生</b>：一个能<b>看懂你的分镜、给别人打分、还能解释为什么</b>的 AI 剪辑导演。五维评分（画面质量 25 / 叙事 25 / 文案 20 / BGM 15 / 时长 15）正是把「剪辑审美」工程化的第一步——这是唯一能形成<b>数据飞轮</b>的能力：用户确认的高分镜头 → 反向强化 Agent 的 <code>executed_path</code> → 越用越懂你。</p>
+
+<h3>3.2 三条战略取舍（DeepSeek 式克制）</h3>
+<ul>
+  <li><b>做真不做假</b>：评分没有真实信号源就是「假的判断」，会把护城河填平。第一阶段哪怕只接 1 个真信号，也比 5 个假数字值钱。</li>
+  <li><b>竖切不横铺</b>：不做 WebDAV、不整仓嵌商业引擎、不一键全链路假成片——把「空间叙事 → AI 审阅 → 确认入轨」一条竖切做到极致，比摊开十个半成品强。</li>
+  <li><b>北极星定死</b>：不是「剪映平替」，是<b>「懂你意图的 AI 创作伙伴 + 专业级剪辑」</b>。所有模块围绕这条主轴排优先级。</li>
+</ul>
+
+<h3>3.3 数据飞轮的机会（项目里已埋了种子）</h3>
+<p>项目已做了 <code>executed_path</code>（记录 Agent 真实执行的能力序列）+ 五维评分器 + 4 条真实 Hebbian 学习路径——这是<b>强化学习的三块拼图</b>。CEO 视角最高优先级：把这三块接起来，让「人工反馈 → 评分 → 执行路径」闭环，形成竞品给不了的自有数据。这是长期主义的胜负手。</p>
+
+<h2 id="sec4">四、百万 UP 视角 — 工程判断</h2>
+<div class="quote">先别急着加功能。把<b>「空间叙事 + AI 审阅」做成一个 3 分钟能 demo 的竖切</b>——这是你能在 B 站讲 10 分钟的故事，也是别人抄不走的东西。</div>
+
+<h3>4.1 工程素养评分（诚实的）</h3>
+<table>
+  <tr><th>维度</th><th>评价</th><th>依据</th></tr>
+  <tr><td>架构分层</td><td><span class="pill good">优秀</span></td><td>四层隔离 + 信号槽 + 单例状态 + 53 冻结锁，纪律感很强</td></tr>
+  <tr><td>文档/知识库</td><td><span class="pill good">优秀</span></td><td>18 篇 knowledge md + 单一事实源约定 + sync 脚本 + 架构 mermaid 图</td></tr>
+  <tr><td>测试</td><td><span class="pill good">良好</span></td><td>88 个测试，覆盖评分 / 字幕 / 编辑命令 / 能力分发等核心</td></tr>
+  <tr><td>诚实工程</td><td><span class="pill good">优秀</span></td><td>生图失败不写占位、口型无模型不造假、账号插件卸空仍诚实失败——最值钱的价值观</td></tr>
+  <tr><td>死代码清理</td><td><span class="pill good">优秀</span></td><td>已删孤儿 AppState / 双 render 目录 / 备份文件，且 grep 验证零引用</td></tr>
+  <tr><td>上帝类</td><td><span class="pill warn">需还债</span></td><td>editor_module 8.5k、多个 2k+ 级文件，历史包袱仍在</td></tr>
+  <tr><td>双库漂移</td><td><span class="pill bad">需根治</span></td><td>16 文件分叉，手抄维护，已造成功能单侧落地</td></tr>
+</table>
+
+<h3>4.2 还债顺序（up 主式「房贷还款法」）</h3>
+<ol>
+  <li><b>先止漂</b>：抽包 Phase 0 分叉合并——不还这个，后面每次改画布都在制造新债。</li>
+  <li><b>再拆类</b>：editor_module 继续抽（AI 面板/属性页），8.5k → 目标 &lt; 3k，主路径无回归。</li>
+  <li><b>后补测</b>：为五维评分、审阅接口、磁吸引擎补行为测试——这是 up 主能拍「TDD 实战」的素材。</li>
+</ol>
+
+<h2 id="sec5">五、全模块迭代点 × 升级点（四层全覆盖）</h2>
+<p class="legend">分组：<span class="tagx tg-core">CORE 引擎</span><span class="tagx tg-ui">UI 模块</span><span class="tagx tg-canvas">画布</span><span class="tagx tg-plugin">插件</span>　优先级 P0=止血(最高) / P1=高 / P2=中 / P3=低</p>
+
+<h3>5.1 剪辑核心引擎（<span class="tagx tg-core">core</span> 真相源）</h3>
+<table>
+  <tr><th>子系统</th><th>现状 / 证据</th><th>迭代点</th><th>升级优化点</th><th>优先级</th></tr>
+  <tr><td><b>editor_scheduler</b><br>双内核调度</td><td>preview=PyAV / pro=FFmpeg·MLT</td><td>speed 斜坡仍弱 → 补速度斜坡内核</td><td>语义化 kernel 选择策略（按成片/草稿自动判）</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>render_manager</b><br>三级 fallback</td><td>C++ → FFmpeg CLI → CPU 已接</td><td>导出链路 NVENC/QSV/AMF 诊断可视化</td><td>失败降级时给用户可见提示 + 日志分级</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>timeline_manager</b></td><td>状态层单例，稳定</td><td>多轨跨轨继续打磨</td><td>BGM 定时混音 + 空隙黑场已经可用，做回归保护</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>subtitle_manager</b><br>+ editor_burn</td><td>ASS → SRT 双 fallback，完整</td><td>AI 字幕批量生成入口统一</td><td>whisper 多模型 fallback 已有，补断网降级提示</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>效果/关键帧</b></td><td>GPU LUT、连续 KF、mask 已通</td><td>速度斜坡补齐</td><td>EffectManager → 预览链路继续接线，不留假按钮</td><td><span class="pill p2">中</span></td></tr>
+</table>
+
+<h3>5.2 AI 生成与 Agent（<span class="tagx tg-core">core</span> 差异化核心）</h3>
+<table>
+  <tr><th>子系统</th><th>现状 / 证据</th><th>迭代点</th><th>升级优化点</th><th>优先级</th></tr>
+  <tr><td><b>five_dimension_scorer</b></td><td>244 行成型，但前端传空→70 假闭环</td><td><b>接 ≥1 真信号源</b>（镜头时长规则 / 文案 CLIP）</td><td>诚实标注「估算」维度；评分结果可解释（为什么是 72 分）</td><td><span class="pill p0">最高</span></td></tr>
+  <tr><td><b>canvas_server</b>（2289 行）</td><td>/host/canvas-ai-review 已接五维评分器</td><td>审阅接口补行为测试</td><td>拆分 2.2k 上帝类：路由 / handler / 评分分离</td><td><span class="pill p1">高</span></td></tr>
+  <tr><td><b>canvas_aigc</b>（2248 行）</td><td>生图/生视频诚实路径</td><td>img2img 失败降级提示已通</td><td>拆分；批量生成中断/恢复能力</td><td><span class="pill p1">高</span></td></tr>
+  <tr><td><b>agent_brain</b><br>Hebbian 左右脑</td><td>4 条真实学习路径，闭环</td><td>接入 executed_path 真实序列</td><td>severity 阈值（5000/20000）外置配置，别硬编码</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>agent_pipeline_*</b></td><td>route→score→script→execute 六级</td><td>router 只看「有无素材」，忽略时长/平台</td><td>分流上下文加创意简报/目标平台/时长维度</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>capability_dispatcher</b></td><td>25 capability，6 个 editor.*</td><td>导入/字幕 CRUD/关键帧/调色未暴露</td><td>按 70/20/10 按需加，不堆卖点；补 MCP 能力</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>local_video_infer</b> / <b>lip_sync</b></td><td>口型无模型诚实降级</td><td>等真实形象驱动模型</td><td>不假写口型视频（坚守底线）</td><td><span class="pill p3">低</span></td></tr>
+</table>
+
+<h3>5.3 画布（<span class="tagx tg-canvas">vendor</span> 双库 + 磁吸 + 审阅）</h3>
+<table>
+  <tr><th>子系统</th><th>现状 / 证据</th><th>迭代点</th><th>升级优化点</th><th>优先级</th></tr>
+  <tr><td><b>双库抽包</b></td><td>16 文件 MD5 漂移，真源没跟上</td><td><b>Phase 0 分叉合并 + 依赖对齐</b></td><td>pnpm workspace 抽 @shiguang/libtv，删副本</td><td><span class="pill p0">最高</span></td></tr>
+  <tr><td><b>MagneticEngine</b><br>磁吸核心</td><td>磁吸/层叠/碰撞已接 UI</td><td>磁吸开关（U 型磁铁图标）单点切换</td><td>碰撞分离 + 呼吸动画视觉反馈补齐</td><td><span class="pill p1">高</span></td></tr>
+  <tr><td><b>SpatialAnalyzer</b></td><td>已写但未接产品</td><td>「一键整理布局」真接 FloatingToolbar</td><td>或明确删除，不留死代码</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>CardStack / SoftConnection</b></td><td>层叠/软连接落地</td><td>意图胶囊分支真用</td><td>空间语义（近=分组、箭头=方向）加深</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>reviewNode + 审阅</b></td><td>生成后触发，桥接五维评分</td><td>接真信号源，消灭 70 分</td><td>AI 读评分出「换镜/重生成」建议</td><td><span class="pill p0">最高</span></td></tr>
+  <tr><td><b>三视图 / 数字人节点</b></td><td>三视图+局部重绘+分镜导出已通</td><td>3D 关节轻量精调</td><td>不换壳，口型诚实降级</td><td><span class="pill p3">低</span></td></tr>
+</table>
+
+<h3>5.4 UI 模块（<span class="tagx tg-ui">lego</span> 12 注册模块）</h3>
+<table>
+  <tr><th>模块</th><th>现状</th><th>迭代点</th><th>升级优化点</th><th>优先级</th></tr>
+  <tr><td><b>editor</b> 剪辑</td><td>P0–P4 完成，冻结区</td><td>B3 音乐卡点切镜；A4 涨分 8.5 收口</td><td>继续拆 editor_module（AI 面板/属性页）；mixin 类名去壳</td><td><span class="pill p1">高</span></td></tr>
+  <tr><td><b>settings</b> 设置</td><td>可用，2585 行上帝类</td><td>环境诊断已有双入口（手动/启动）</td><td>拆 settings_module；诊断报告可导出</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>characters</b> AI 画布</td><td>P0–P4 + M0 完成</td><td>消除漂移/假闭环</td><td>评分真信号；空间叙事深化；Form 锁定</td><td><span class="pill p0">最高</span></td></tr>
+  <tr><td><b>copywriting</b> 文案</td><td>半通，脚本下游接拉片</td><td>拉片→分镜链路打磨</td><td>文案→镜头匹配度回填（喂评分文案维）</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>models</b> 模型</td><td>半通，需 Provider</td><td>模型广场↔画布同步已通</td><td>per-model custom script（中转站非 OpenAI 路由）</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>materials</b> 素材</td><td>半通，在线假目录已移除</td><td>本地素材窗沉淀</td><td>语义搜素材（D1 向量库，后置）</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>tasks</b> 多任务</td><td>半通</td><td>接入编排，作批量入口</td><td>进度/取消/失败重试</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>ai_clip_flow</b></td><td>默认关，半通</td><td>明确「确认后调 editor」还是继续关</td><td>与 Agent 建议清单合并，避免两套 AI 入口打架</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>extensions</b> 拓展中心</td><td>默认开，接口壳为主</td><td>收口 plugins→extensions 迁移</td><td>插件生命周期/manifest 规范</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>performance</b> 性能</td><td>可用，依赖 psutil</td><td>GPU 检测统一走 HardwareDetector</td><td>导出链路 NVENC/QSV/AMF 诊断</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>home</b> / <b>help</b></td><td>可用</td><td>冷启动导航</td><td>引导看板 + onboarding 竖切</td><td><span class="pill p3">低</span></td></tr>
+</table>
+
+<h3>5.5 插件与安全基建（<span class="tagx tg-plugin">plugins</span>）</h3>
+<table>
+  <tr><th>组件</th><th>现状 / 证据</th><th>迭代点</th><th>升级优化点</th><th>优先级</th></tr>
+  <tr><td><b>短剧筛选插件</b></td><td>接口壳，功能已卸</td><td>维持壳，不恢复功能体</td><td>能力名/回流签名保留，诚实失败</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>账号运营插件</b></td><td>接口壳，capability 成功=False</td><td>维持壳</td><td>account.* 诚实失败，不写假数据</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>ai_effects_plugin</b></td><td>本波接入确认入轨</td><td>巩固</td><td>与特效面板/导出链路回归保护</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>plugin_manager / loader</b><br>+ hotloader + sandbox</td><td>三层加载 + 热更 + 沙箱齐</td><td>插件生命周期统一</td><td>manifest 版本规范；sandbox 输入校验收口</td><td><span class="pill p2">中</span></td></tr>
+  <tr><td><b>security / permission</b><br>+ secure_store</td><td>密钥不落代码；权限归集 auth</td><td>巩固</td><td>外部命令禁止拼接未校验输入（已有，保持）</td><td><span class="pill p3">低</span></td></tr>
+  <tr><td><b>apm / alert / cache</b></td><td>监控+告警+缓存分层</td><td>接入导出诊断</td><td>内存优化策略按扫描结果落地</td><td><span class="pill p3">低</span></td></tr>
+</table>
+
+<h2 id="sec6">六、优先级路线（拿来就干）</h2>
+<div class="grid">
+  <div class="card"><div class="t">P0 · 止血（本周）</div><div class="d">① 抽包 Phase 0：16 文件分叉合并 + 依赖对齐（three→0.185 顺手修类型债）。② 五维评分接 ≥1 真信号源，消灭 70 分假闭环。验收：两库 MD5 100% 一致 + build 绿 + 评分可解释。</div></div>
+  <div class="card"><div class="t">P1 · 抽包 + 做真（下 1–2 周）</div><div class="d">① Phase 1–2：pnpm workspace + bridge 接口依赖注入，删 libtv 副本。② 评分接 2 个便宜信号（时长规则 + 文案 CLIP）。验收：单一事实源 + typecheck 过 + 审阅不再全 70。</div></div>
+  <div class="card"><div class="t">P2 · 打穿差异化（本月）</div><div class="d">① 空间叙事 + AI 审阅 + 意图胶囊三合一竖切（3 分钟可 demo）。② Agent 读五维评分出「换镜/重生成」建议。验收：一条「构图→评分→换镜→入轨」链路可演示。</div></div>
+  <div class="card"><div class="t">P3 · 还债 + 飞轮（季度）</div><div class="d">① editor_module 拆到 &lt;3k。② 五维评分 + executed_path 接强化学习。③ 社区模板云/语义搜素材按数据反馈再开。</div></div>
+</div>
+
+<h2 id="sec7">七、一句话收尾</h2>
+<div class="quote">项目已越过「能不能做」的阶段（四轨 P0–P4 全绿），现在的敌人只剩两个：<b>漂移</b>（技术债）和<b>假闭环</b>（诚信债）。把这两个还清，再把「AI 更懂你的意图」做成别人抄不走的竖切——这就是从「剪映的替代品」变成「AI 剪辑的标杆」的全部路径。</div>
+
+</div>
+</body>
+</html>

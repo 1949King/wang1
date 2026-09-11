@@ -21,3 +21,7 @@ numpy>=1.24.0
 librosa>=0.10.0
 imageio-ffmpeg>=0.4.0
 onnxruntime>=1.14.0
+# ============== 安全依赖 (REQUIRED) ==============
+# 缺失会静默降级为不安全路径：bcrypt→SHA256+盐、cryptography→明文 PII，商用发布必须安装
+bcrypt>=4.0.0
+cryptography>=41.0.0

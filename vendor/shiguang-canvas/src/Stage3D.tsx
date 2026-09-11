@@ -11,22 +11,33 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import {
   applyPose,
+  applyPoseResolved,
   applyPreset,
   boneKeyToRegion,
   chainBonesFor,
   defaultPose,
+  EASING_LABELS,
+  EASING_NAMES,
   endEffectorBoneKey,
   exportBVH,
   formationPositions,
   facingYForFormation,
   getPoseBones,
   GROUP_TEMPLATES,
+  highlightBonesFor,
   HUMAN_PRESETS,
+  isIkOnlyUnlockBone,
   JOINT_LABELS,
+  limbDragMode,
   makeRiggedHumanoid,
   mergePose,
+  MOTION_BREATHING,
+  MOTION_IDLE_SWAY,
   MOTION_PRESETS,
+  MOTION_WALK_GAIT,
   POSE_PRESETS,
+  POSE_ROOT_OFFSET_Y,
+  preloadBodyFigures,
   readPosePatchFromBone,
   resolveHitBoneKey,
   RIG_MESH_STYLE,
@@ -34,17 +45,34 @@ import {
   sampleKeyframes,
   sampleMotionFrames,
   solveChainIk,
+  solveSegmentFk,
   yawToward,
+  type EasingName,
   type FormationId,
   type HairStyle,
   type HumanVariant,
   type JointPose,
   type MotionPreset,
+  type PoseKeyframe,
   type PosePresetId,
 } from "./riggedHumanoid";
 import { exportAllControlNetChannels } from "./stage3dControlNet";
+import {
+  COCO18_CN,
+  COCO18_SKELETON,
+  findStandHipY,
+  isFrameEmpty,
+  KP_VIS_THRESHOLD,
+  lerpJointPose,
+  parsePoseTrack,
+  solveFramePose,
+  solveFrameRoot,
+  type PoseFrame,
+  type PoseTrack,
+} from "./stage3dPoseRetarget";
 import StageImportModal, { type StageImportResult } from "./StageImportModal";
 import { useCanvasStore } from "./store";
+import { uploadAssetToHost, poseExtractViaHost } from "./bridge";
 import CommandPalette, { isTypingTarget, type CommandItem } from "./CommandPalette";
 
 export type StageActor = {
@@ -61,6 +89,15 @@ export type StageActor = {
   variant?: HumanVariant;
   /** 发型预设（仅 kind==="actor" 时生效） */
   hairStyle?: HairStyle;
+  /** 角色移动路线（点列 + 形状 + 速度 + 播放状态） */
+  route?: {
+    points: [number, number, number][];
+    shape: "smooth" | "polyline";
+    speed: "uniform" | "soft" | "custom";
+    playing: boolean;
+    /** 播放进度 0~1 */
+    progress?: number;
+  };
 };
 
 export type StageCamera = {
@@ -87,8 +124,8 @@ type ScenePersist = {
   activeCamId: string | null;
   lightPreset?: LightPreset;
   groundPreset?: GroundPreset;
-  /** 姿势关键帧轨：actorId → 关键帧数组 */
-  poseTracks?: Record<string, { t: number; pose: JointPose }[]>;
+  /** 姿势关键帧轨：actorId → 关键帧数组（每帧可携带 easing / bezier / interpolation） */
+  poseTracks?: Record<string, PoseKeyframe[]>;
   selectedId?: string | null;
   sceneMode?: "solo" | "group";
   /** 全景图环境贴图 base64（equirectangular） */
@@ -163,6 +200,8 @@ type Props = {
       resolution?: string;
       referenceImage?: string;
       referenceActor?: string;
+      /** 参考视频（motion-ref 模式 A）inbox URL；空串表示未挂载 */
+      referenceVideoUrl?: string;
     },
   ) => void;
   /** 批量导出分镜回调：给 V2 多机位编排 + V3 完整时长管线用 */
@@ -388,22 +427,16 @@ function loadScene(): ScenePersist | null {
   }
 }
 
-function saveScene(data: ScenePersist) {
-  try {
-    localStorage.setItem(STAGE_KEY, JSON.stringify(data));
-  } catch {
-    /* ignore quota */
-  }
-}
-
 function disposeObject3D(obj: THREE.Object3D) {
+  obj.userData._disposed = true;
   obj.traverse((ch) => {
-    if (ch instanceof THREE.Mesh) {
-      ch.geometry?.dispose();
-      const mat = ch.material;
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat?.dispose();
-    }
+    if (!(ch instanceof THREE.Mesh)) return;
+    // GLB 模板几何/材质是共享的，dispose 会把缓存里的人偶一起毁掉，下次只能看到胶囊骨架
+    if (ch.userData.sharedTemplate) return;
+    ch.geometry?.dispose();
+    const mat = ch.material;
+    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+    else mat?.dispose();
   });
 }
 
@@ -539,17 +572,19 @@ function defaultCameras(): StageCamera[] {
   ];
 }
 
-/** 姿势关键帧时间轴小组件 —— 组件内维护一个时间戳输入框 + 关键帧列表 */
+/** 姿势关键帧时间轴小组件 —— 组件内维护一个时间戳输入框 + 关键帧列表 + 逐帧缓动/贝塞尔 */
 function PoseTimeline({
   track,
   onRecord,
   onDelete,
+  onPatch,
   onPlay,
   onStop,
 }: {
-  track: { t: number; pose: JointPose }[];
+  track: PoseKeyframe[];
   onRecord: (t: number) => void;
   onDelete: (t: number) => void;
+  onPatch: (t: number, patch: Partial<PoseKeyframe>) => void;
   onPlay: () => void;
   onStop: () => void;
 }) {
@@ -577,7 +612,7 @@ function PoseTimeline({
                 key={k.t}
                 type="button"
                 className="stage3d-pose-key"
-                title={`t=${k.t}ms · 点右键删除`}
+                title={`t=${k.t}ms · 点击定位 · 点右键删除`}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   onDelete(k.t);
@@ -593,6 +628,49 @@ function PoseTimeline({
       ) : (
         <p className="muted tiny">无关键帧</p>
       )}
+      {sorted.length > 0 ? (
+        <div className="stage3d-pose-list">
+          {sorted.map((k) => (
+            <div className="stage3d-pose-row" key={k.t}>
+              <button type="button" className="muted tiny" onClick={() => setT(k.t)}>t={k.t}</button>
+              <select
+                value={k.easing ?? "ease_in_out"}
+                onChange={(e) => onPatch(k.t, { easing: e.target.value as EasingName })}
+              >
+                {EASING_NAMES.map((n) => (
+                  <option key={n} value={n}>{EASING_LABELS[n]}</option>
+                ))}
+              </select>
+              <select
+                value={k.interpolation ?? "linear"}
+                onChange={(e) => onPatch(k.t, { interpolation: e.target.value as PoseKeyframe["interpolation"] })}
+              >
+                <option value="linear">线性</option>
+                <option value="bezier">贝塞尔</option>
+                <option value="step">阶跃</option>
+              </select>
+              {k.interpolation === "bezier" ? (
+                <span className="stage3d-pose-bezier">
+                  控制点
+                  <input
+                    type="number"
+                    step={0.05}
+                    value={k.bezierC1 ? k.bezierC1[1] : 0.33}
+                    onChange={(e) => onPatch(k.t, { bezierC1: [0, Number(e.target.value) || 0] })}
+                  />
+                  <input
+                    type="number"
+                    step={0.05}
+                    value={k.bezierC2 ? k.bezierC2[1] : 0.67}
+                    onChange={(e) => onPatch(k.t, { bezierC2: [0, Number(e.target.value) || 0] })}
+                  />
+                </span>
+              ) : null}
+              <button type="button" className="btn" onClick={() => onDelete(k.t)}>删</button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="seg">
         <button type="button" className="on" onClick={onPlay} disabled={sorted.length < 2}>▶ 播放循环</button>
         <button type="button" onClick={onStop}>■ 停止</button>
@@ -619,6 +697,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     ikTrail: THREE.Line;
     ikRubber: THREE.Line;
     ikTrailCount: number;
+    fitDirectorFraming: () => void;
   } | null>(null);
 
   const persisted = loadScene();
@@ -655,11 +734,15 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const [aspect, setAspect] = useState<AspectId>((persisted?.aspect as AspectId) || "9:16");
   const [lightPreset, setLightPreset] = useState<LightPreset>(persisted?.lightPreset ?? "neutral");
   const [groundPreset, setGroundPreset] = useState<GroundPreset>(persisted?.groundPreset ?? "studio-dark");
-  const [poseTracks, setPoseTracks] = useState<Record<string, { t: number; pose: JointPose }[]>>(persisted?.poseTracks ?? {});
+  const [poseTracks, setPoseTracks] = useState<Record<string, PoseKeyframe[]>>(persisted?.poseTracks ?? {});
   /** 选了"从X到Y的路径"时保存两个相机 id */
   const [pathFromId, setPathFromId] = useState<string | null>(null);
   const pathRafRef = useRef<number | null>(null);
   const poseRafRef = useRef<number | null>(null);
+  /** 一键运镜：跟踪主体（角色 id，空=用当前 lookAt） */
+  const [trackTargetId, setTrackTargetId] = useState<string>("");
+  /** 一键运镜：轨迹范围 0~100% */
+  const [moveRange, setMoveRange] = useState(100);
   const ASPECTS: { id: AspectId; label: string }[] = [
     { id: "auto", label: "自适应" },
     { id: "21:9", label: "21:9" },
@@ -700,6 +783,47 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   ];
 
   const [railTab, setRailTab] = useState<"frame" | "actor" | "camera" | "shot" | "image">("actor");
+  /** 角色面板四子标签页（属性/姿势/动作/路线） */
+  const [actorTab, setActorTab] = useState<"attr" | "pose" | "motion" | "route">("pose");
+  const motionFileRef = useRef<HTMLInputElement | null>(null);
+  /** 参考视频驱动（motion-ref 模式 A）：上传到宿主 inbox 后的引用，生成视频时作为动作参考条件 */
+  const [motionRefVideo, setMotionRefVideo] = useState<{ url: string; name: string } | null>(null);
+  const motionRefFileRef = useRef<HTMLInputElement | null>(null);
+  /** 模式 B 姿态解析结果：关键点 JSON 摘要（帧数/时长/URL），第三刀驱动白模的直接输入 */
+  const [motionPoseData, setMotionPoseData] = useState<{
+    frames: number;
+    duration: number;
+    fps: number;
+    url: string;
+  } | null>(null);
+  const [poseBusy, setPoseBusy] = useState(false);
+  /* ── 模式 B 第三刀：关键点 → 白模 IK 时序驱动状态 ── */
+  /** 已解析的姿态轨迹（含用户修正；ref 存活跨渲染，驱动循环直接读） */
+  const poseTrackRef = useRef<PoseTrack | null>(null);
+  /** 驱动开关：开启后选中 actor 由姿态轨迹逐帧驱动 */
+  const [poseDriveOn, setPoseDriveOn] = useState(false);
+  /** 播放开关（驱动开启时生效） */
+  const [posePlaying, setPosePlaying] = useState(false);
+  /** 当前帧索引（UI 显示与叠加小窗同步） */
+  const [poseFrameIdx, setPoseFrameIdx] = useState(0);
+  /** 手动标记的坏帧集合（播放时线性插值跳过） */
+  const [poseBadFrames, setPoseBadFrames] = useState<Set<number>>(new Set());
+  /** 关键点编辑模式：叠加小窗可拖拽修正 */
+  const [poseEditOn, setPoseEditOn] = useState(false);
+  /** 驱动播放 rAF 句柄 */
+  const poseDriveRafRef = useRef<number | null>(null);
+  /** 播放起始时间戳（帧推进基准） */
+  const poseDriveT0Ref = useRef(0);
+  /** 已求解姿态缓存（帧号 → JointPose；关键点修正后按帧失效） */
+  const poseSolvedCacheRef = useRef<Map<number, JointPose>>(new Map());
+  /** 髋部站立基线 y（root 高度换算） */
+  const poseStandHipYRef = useRef(0.5);
+  /** 驱动前 actor 的原始位置（关闭驱动时还原） */
+  const poseDriveBasePosRef = useRef<[number, number, number] | null>(null);
+  /** OpenPose 参考小窗 canvas */
+  const poseOverlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** 小窗拖拽会话（命中关键点索引 + 修正中坐标） */
+  const poseDragKpRef = useRef<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [refImage, setRefImage] = useState<string | null>(null);
   const [scenePrompt, setScenePrompt] = useState("");
@@ -736,11 +860,13 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     y1: number;
     active: boolean;
   } | null>(null);
+  const framedOnceRef = useRef(false);
   const transformDraggingRef = useRef(false);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const actorsRef = useRef(actors);
   actorsRef.current = actors;
   const actorSyncRafRef = useRef(false);
+  const highlightSigRef = useRef("");
   const toolRef = useRef(tool);
   const selectedRef = useRef(selectedId);
   const viewModeRef = useRef(viewMode);
@@ -751,6 +877,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const ikSessionRef = useRef<{
     actorId: string;
     boneKey: string;
+    mode: "chainIk" | "segmentFk" | "look";
     grabPoint: THREE.Vector3;
     endOffset: THREE.Vector3;
     clientX: number;
@@ -770,17 +897,73 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const selected = actors.find((a) => a.id === selectedId) || null;
   const activeCam = cameras.find((c) => c.id === activeCamId) || cameras[0] || null;
 
-  // Persist scene — 同时同步到 store.stage3dSnapshot，便于工程 bundle 导出/导入
+  // 消费 AI 分镜相机计划：applyStage3dCameraPlan 递增 stage3dApplySeq 后，把 pendingStage3dCameras 应用进实时视口
+  const stage3dApplySeq = useCanvasStore((state) => state.stage3dApplySeq);
+  useEffect(() => {
+    const pending = useCanvasStore.getState().pendingStage3dCameras;
+    if (!pending || !pending.length) return;
+    // 后端相机计划字段与 StageCamera 对齐，仅剔除冗余的 movement 字段
+    const appliedCams: StageCamera[] = pending.map((c) => ({
+      id: c.id,
+      name: c.name,
+      position: c.position,
+      lookAt: c.lookAt,
+      fov: c.fov,
+      shotSize: c.shotSize,
+      pathPoints: c.pathPoints,
+      pathDuration: c.pathDuration,
+    }));
+    setCameras(appliedCams);
+    setActiveCamId(appliedCams[0]?.id ?? null);
+    setViewMode("camera");
+    useCanvasStore.getState().consumeStage3dCameraPlan();
+    onStatus(`已应用 ${appliedCams.length} 个 AI 分镜机位`);
+  }, [stage3dApplySeq]);
+
+  // Persist scene — 拖姿高频 setActors 时防抖，避免主线程被 localStorage 卡住
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistLastJsonRef = useRef("");
+  const persistPendingRef = useRef<ScenePersist | null>(null);
   useEffect(() => {
     const persistData: ScenePersist = {
       actors, cameras, fov, aspect, activeCamId, lightPreset, groundPreset, poseTracks, selectedId, sceneMode, envEquirect,
     };
-    saveScene(persistData);
-    try {
-      useCanvasStore.getState().setStage3dSnapshot(persistData);
-    } catch {
-      /* store 尚未初始化时跳过，不影响本地持久化 */
-    }
+    persistPendingRef.current = persistData;
+    const flush = () => {
+      const data = persistPendingRef.current;
+      if (!data) return;
+      persistPendingRef.current = null;
+      let json = "";
+      try {
+        json = JSON.stringify(data);
+      } catch {
+        return;
+      }
+      if (json === persistLastJsonRef.current) return;
+      persistLastJsonRef.current = json;
+      try {
+        localStorage.setItem(STAGE_KEY, json);
+      } catch {
+        /* ignore quota */
+      }
+      try {
+        useCanvasStore.getState().setStage3dSnapshot(data);
+      } catch {
+        /* store 尚未初始化时跳过 */
+      }
+    };
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      flush();
+    }, 420);
+    return () => {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+        flush();
+      }
+    };
   }, [actors, cameras, fov, aspect, activeCamId, lightPreset, groundPreset, poseTracks, selectedId, sceneMode, envEquirect]);
 
   // Init three.js
@@ -788,15 +971,22 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     const el = mountRef.current;
     if (!el) return;
 
+    // 空闲预热 BodyKun/BodyChan 处理后模板，缩短首个角色 GLB 等待
+    preloadBodyFigures();
+
     const scene = new THREE.Scene();
     const initialLight = LIGHT_PRESETS[persisted?.lightPreset ?? "neutral"];
     scene.background = new THREE.Color(initialLight.bg);
     scene.fog = new THREE.Fog(initialLight.fog, 18, 42);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(5, 4, 7);
+    // 默认入画：全身可见，避免素模贴满视口
+    camera.position.set(3.05, 2.15, 4.2);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    // 不保留 drawing buffer：保留会迫使 GPU 每帧复制全屏缓冲，叠加 toDataURL 同步读像素
+    // 在 NVIDIA 上易触发「GPU stall due to ReadPixels (GL_CLOSE_PATH_NV)」甚至杀 GPU 子进程。
+    // 截图统一改走 WebGLRenderTarget + readRenderTargetPixels（见 readRenderTargetToDataURL）。
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = false;
     el.appendChild(renderer.domElement);
@@ -812,7 +1002,10 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.target.set(0, 1, 0);
+    controls.target.set(0, 0.95, 0);
+    controls.minDistance = 1.6;
+    controls.maxDistance = 22;
+    controls.maxPolarAngle = Math.PI * 0.49;
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.DOLLY,
@@ -845,9 +1038,14 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
+    ground.name = "stage-ground";
+    ground.userData.locked = true;
+    ground.matrixAutoUpdate = true;
     scene.add(ground);
 
     const grid = new THREE.GridHelper(40, 40, 0x2a3a4d, 0x1a2433);
+    grid.name = "stage-grid";
+    grid.userData.locked = true;
     (grid.material as THREE.Material).opacity = 0.55;
     (grid.material as THREE.Material).transparent = true;
     scene.add(grid);
@@ -895,6 +1093,43 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     ikRubber.visible = false;
     scene.add(ikRubber);
 
+    const fitDirectorFraming = () => {
+      const box = new THREE.Box3();
+      let has = false;
+      objects.forEach((obj) => {
+        const b = new THREE.Box3().setFromObject(obj);
+        if (!b.isEmpty()) {
+          box.union(b);
+          has = true;
+        }
+      });
+      const size = new THREE.Vector3(0.55, 1.82, 0.4);
+      const center = new THREE.Vector3(0, 0.9, 0);
+      if (has) {
+        box.getSize(size);
+        box.getCenter(center);
+      }
+      // 异常巨大包围盒（坏缩放）压回合理人体尺度
+      const rawMax = Math.max(size.x, size.y, size.z, 0.01);
+      const maxDim = Math.min(6.5, Math.max(0.9, rawMax > 12 ? 1.85 : rawMax));
+      if (rawMax > 12) {
+        center.set(center.x, 0.9, center.z);
+      }
+      const fovRad = (camera.fov * Math.PI) / 180;
+      const dist = (maxDim * 0.62) / Math.tan(fovRad / 2);
+      const safeDist = Math.min(16, Math.max(2.6, dist * 1.2));
+      controls.target.set(center.x, Math.max(0.55, Math.min(1.35, center.y)), center.z);
+      camera.position.set(
+        center.x + safeDist * 0.58,
+        Math.max(1.2, center.y + safeDist * 0.32),
+        center.z + safeDist * 0.78,
+      );
+      controls.minDistance = Math.max(1.4, maxDim * 0.5);
+      controls.maxDistance = Math.max(14, maxDim * 7);
+      controls.update();
+      camera.lookAt(controls.target);
+    };
+
     apiRef.current = {
       scene,
       camera,
@@ -911,11 +1146,13 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       ikTrail,
       ikRubber,
       ikTrailCount: 0,
+      fitDirectorFraming,
     };
 
     // TransformControls 拖拽时临时禁用 Orbit，结束后恢复
     transform.addEventListener("dragging-changed", (e: { value: boolean }) => {
-      controls.enabled = !e.value;
+      // 转环拖动时同样锁死导演轨道，避免视角跟着转
+      controls.enabled = !e.value && viewModeRef.current === "director";
       transformDraggingRef.current = e.value;
       if (e.value) {
         marqueeSessionRef.current = null;
@@ -993,9 +1230,54 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         setFps(Math.round(f.value));
       }
       controls.update();
-      // MotionPreset 采样：直接写 3D 对象，绕过 React state
       const apiNow = apiRef.current;
       if (apiNow) {
+        // —— 掌镜 WASD：自由走镜头 ——
+        if (wasdActiveRef.current && wasdRef.current.size) {
+          const spd = 0.06;
+          const fwd = new THREE.Vector3();
+          apiNow.camera.getWorldDirection(fwd);
+          fwd.y = 0; fwd.normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+          const delta = new THREE.Vector3();
+          const keys = wasdRef.current;
+          if (keys.has("w")) delta.add(fwd);
+          if (keys.has("s")) delta.sub(fwd);
+          if (keys.has("d")) delta.add(right);
+          if (keys.has("a")) delta.sub(right);
+          if (keys.has("e")) delta.y += 1;
+          if (keys.has("q")) delta.y -= 1;
+          if (delta.lengthSq() > 0) {
+            delta.normalize().multiplyScalar(spd);
+            apiNow.camera.position.add(delta);
+            apiNow.controls.target.add(delta);
+          }
+        }
+        // —— 角色路线跟随：沿点列插值移动 ——
+        actorsRef.current.forEach((actor) => {
+          const route = actor.route;
+          if (!route?.playing || route.points.length < 1) return;
+          const obj = apiNow.objects.get(actor.id);
+          if (!obj) return;
+          const pts = route.points;
+          const speedMul = route.speed === "soft" ? 0.5 : route.speed === "custom" ? 1.5 : 1;
+          const prevProg = routeProgressRef.current.get(actor.id) ?? 0;
+          const prog = prevProg + 0.0015 * speedMul;
+          const p = prog >= 1 ? 0 : prog; // 循环
+          routeProgressRef.current.set(actor.id, p);
+          const segT = p * Math.max(pts.length - 1, 1);
+          const i = Math.min(Math.floor(segT), pts.length - 2);
+          const localT = route.shape === "smooth" ? (segT - i) * (segT - i) * (3 - 2 * (segT - i)) : segT - i;
+          const a = pts[Math.max(i, 0)];
+          const b = pts[Math.min(i + 1, pts.length - 1)];
+          const nx = a[0] + (b[0] - a[0]) * localT;
+          const nz = a[2] + (b[2] - a[2]) * localT;
+          // 朝向：沿移动方向
+          const dx = b[0] - a[0], dz = b[2] - a[2];
+          const rotY = Math.abs(dx) + Math.abs(dz) > 1e-4 ? Math.atan2(dx, dz) : obj.rotation.y;
+          obj.position.set(nx, obj.position.y, nz);
+          obj.rotation.y = rotY;
+        });
         const nowMs = performance.now();
         activeMotionsRef.current.forEach((motions, actorId) => {
           const obj = apiNow.objects.get(actorId);
@@ -1005,7 +1287,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           const startedAt = motionStartRef.current.get(actorId) ?? nowMs;
           const elapsed = nowMs - startedAt;
           const { pose, rootOffset } = sampleCompositeMotion(motions, elapsed);
-          applyPose(obj, pose);
+          applyPoseResolved(obj, pose);
           const basePos = motionBasePosRef.current.get(actorId);
           if (basePos) {
             obj.position.set(
@@ -1016,25 +1298,41 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           }
         });
       }
-      // 动态 Bloom 强度：用 ref 直接读，避免 state 延迟
+      // Bloom=0 时直渲，避免 EffectComposer 双通道开销
       const targetStrength = bloomStrengthRef.current;
       if (bloomPass.strength !== targetStrength) {
         bloomPass.strength = targetStrength;
       }
-      composer.render();
+      if (targetStrength > 0.001) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
     };
     tick();
 
-    onStatus("3D 导演台就绪 — 点姿势或拉手/脚摆动作 · 空白处拖动旋转视角 · 右键平移");
+    onStatus("3D 导演台就绪 — 手/脚整肢 · 大腿小腿肘肩单关节 · 空白处转视角");
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      objects.forEach((obj) => {
+        scene.remove(obj);
+        disposeObject3D(obj);
+      });
+      objects.clear();
       transform.dispose();
       scene.remove(transform);
       controls.dispose();
+      try {
+        composer.dispose();
+      } catch {
+        /* older three */
+      }
       renderer.dispose();
-      el.removeChild(renderer.domElement);
+      if (renderer.domElement.parentElement === el) {
+        el.removeChild(renderer.domElement);
+      }
       apiRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1151,6 +1449,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       const sBone = selectedBoneKeyRef.current;
       const hBone = hoveredBoneKeyRef.current;
       const keep = new Set(latestActors.map((a) => a.id));
+      let spawned = false;
       for (const [id, obj] of api.objects) {
         if (!keep.has(id)) {
           api.scene.remove(obj);
@@ -1180,6 +1479,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           obj.userData.id = a.id;
           api.scene.add(obj);
           api.objects.set(a.id, obj);
+          spawned = true;
         } else if (a.kind === "actor") {
           const draggingKey = transformBoneKeyRef.current || null;
           const ikActorId = ikDraggingRef.current ? ikSessionRef.current?.actorId : null;
@@ -1190,56 +1490,71 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           if (!isDraggingThisActor && !hasActiveMotion) {
             applyPose(obj!, actorPose(a));
           }
-          obj.traverse((ch) => {
-            if (
-              ch instanceof THREE.Mesh &&
-              ch.userData.tint === "clothes" &&
-              ch.material instanceof THREE.MeshStandardMaterial
-            ) {
-              ch.material.color.set(a.color);
-            }
-          });
         } else if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
           obj.material.color.set(a.color);
         }
         obj.position.set(a.position[0], a.position[1], a.position[2]);
         obj.rotation.y = a.rotationY;
-        obj.scale.setScalar(a.scale);
-        const isSel = a.id === sid;
-        const selChain = isSel && sBone ? chainBonesFor(sBone) : [];
-        const hoverChain = isSel && hBone ? chainBonesFor(hBone) : [];
-        const selRegions = new Set(selChain.map(boneKeyToRegion).filter(Boolean) as string[]);
-        const hoverRegions = new Set(hoverChain.map(boneKeyToRegion).filter(Boolean) as string[]);
-        obj.traverse((ch) => {
-          if (!(ch instanceof THREE.Mesh) || !(ch.material instanceof THREE.MeshStandardMaterial)) return;
-          const tint = ch.userData.tint as string | undefined;
-          if (tint === "front" || ch.userData.frontMarker) return;
-          const bone = ch.userData.boneKey as string | undefined;
-          const region = ch.userData.boneRegion as string | undefined;
-          const isBone =
-            isSel &&
-            sBone &&
-            (selChain.includes(bone || "") || Boolean(region && selRegions.has(region)));
-          const isHover =
-            isSel &&
-            hBone &&
-            !isBone &&
-            (hoverChain.includes(bone || "") || Boolean(region && hoverRegions.has(region)));
-          const canGlow = !tint || tint === "clothes" || tint === "skin" || tint === "face";
-          if (isBone) {
-            ch.material.emissive = new THREE.Color("#f59e0b");
-            ch.material.emissiveIntensity = 0.62;
-          } else if (isHover) {
-            ch.material.emissive = new THREE.Color("#fbbf24");
-            ch.material.emissiveIntensity = 0.4;
-          } else if (isSel && canGlow) {
-            ch.material.emissive = new THREE.Color("#1d4ed8");
-            ch.material.emissiveIntensity = 0.16;
-          } else {
-            ch.material.emissive = new THREE.Color("#000000");
-            ch.material.emissiveIntensity = 0;
+        const safeScale = Math.min(2.2, Math.max(0.35, Number.isFinite(a.scale) ? a.scale : 1));
+        obj.scale.setScalar(safeScale);
+      }
+      if (spawned) highlightSigRef.current = "";
+      // 拖姿每帧都会 setActors；高亮/衣服色只在选中或配色变化时遍历，避免 GLB 全树 emissive 开销
+      const highlightSig = latestActors
+        .map((a) => `${a.id}:${a.color}:${a.id === sid ? "1" : "0"}`)
+        .join("|") + `:${sBone || ""}:${hBone || ""}`;
+      if (highlightSig !== highlightSigRef.current) {
+        highlightSigRef.current = highlightSig;
+        for (const a of latestActors) {
+          const obj = api.objects.get(a.id);
+          if (!obj) continue;
+          if (a.kind === "actor") {
+            obj.traverse((ch) => {
+              if (
+                ch instanceof THREE.Mesh &&
+                ch.userData.tint === "clothes" &&
+                ch.material instanceof THREE.MeshStandardMaterial
+              ) {
+                ch.material.color.set(a.color);
+              }
+            });
           }
-        });
+          const isSel = a.id === sid;
+          const selChain = isSel && sBone ? highlightBonesFor(sBone) : [];
+          const hoverChain = isSel && hBone ? highlightBonesFor(hBone) : [];
+          const selRegions = new Set(selChain.map(boneKeyToRegion).filter(Boolean) as string[]);
+          const hoverRegions = new Set(hoverChain.map(boneKeyToRegion).filter(Boolean) as string[]);
+          obj.traverse((ch) => {
+            if (!(ch instanceof THREE.Mesh) || !(ch.material instanceof THREE.MeshStandardMaterial)) return;
+            const tint = ch.userData.tint as string | undefined;
+            if (tint === "front" || ch.userData.frontMarker) return;
+            const bone = ch.userData.boneKey as string | undefined;
+            const region = ch.userData.boneRegion as string | undefined;
+            const isBone =
+              isSel &&
+              sBone &&
+              (selChain.includes(bone || "") || Boolean(region && selRegions.has(region)));
+            const isHover =
+              isSel &&
+              hBone &&
+              !isBone &&
+              (hoverChain.includes(bone || "") || Boolean(region && hoverRegions.has(region)));
+            const canGlow = !tint || tint === "clothes" || tint === "skin" || tint === "face";
+            if (isBone) {
+              ch.material.emissive = new THREE.Color("#f59e0b");
+              ch.material.emissiveIntensity = 0.62;
+            } else if (isHover) {
+              ch.material.emissive = new THREE.Color("#fbbf24");
+              ch.material.emissiveIntensity = 0.4;
+            } else if (isSel && canGlow) {
+              ch.material.emissive = new THREE.Color("#1d4ed8");
+              ch.material.emissiveIntensity = 0.16;
+            } else {
+              ch.material.emissive = new THREE.Color("#000000");
+              ch.material.emissiveIntensity = 0;
+            }
+          });
+        }
       }
       if (sid) {
         const sel = latestActors.find((a) => a.id === sid);
@@ -1249,6 +1564,14 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         }
       } else {
         api.axisHelper.visible = false;
+      }
+      // 地面/网格锁定，防止误挂到骨骼矩阵
+      api.ground.position.set(0, 0, 0);
+      api.ground.scale.set(1, 1, 1);
+      api.ground.rotation.set(-Math.PI / 2, 0, 0);
+      if (!framedOnceRef.current && latestActors.length > 0 && api.objects.size > 0) {
+        framedOnceRef.current = true;
+        requestAnimationFrame(() => api.fitDirectorFraming());
       }
     });
   }, [actors, selectedId, selectedBoneKey, hoveredBoneKey]);
@@ -1318,8 +1641,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           api.controls.target.set(...saved.target);
           directorCamRef.current = null;
         } else {
-          api.camera.position.set(5, 4, 7);
-          api.controls.target.set(0, 1, 0);
+          api.camera.position.set(3.05, 2.15, 4.2);
+          api.controls.target.set(0, 0.95, 0);
+          api.fitDirectorFraming();
         }
       }
       api.controls.update();
@@ -1445,24 +1769,41 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       const bone = bones[boneKey];
       if (!bone) return;
       undoRef.current = actorsRef.current;
-      api.transform.enabled = true;
-      api.transform.attach(bone);
-      api.transform.setMode("rotate");
-      onStatus(`已选 ${BONE_CN[boneKey] || boneKey} · 拖肢体带动整条链 · 旋转环可微调`);
+      const mode = limbDragMode(boneKey);
+      const label = BONE_CN[boneKey] || boneKey;
+      if (isIkOnlyUnlockBone(boneKey) || mode === "look") {
+        api.transform.enabled = false;
+        api.transform.detach();
+        onStatus(`已选 ${label} · 拖动调节朝向`);
+      } else if (mode === "segmentFk") {
+        // 单关节：转环可微调；主拖动走 FK，不整肢
+        api.transform.enabled = true;
+        api.transform.attach(bone);
+        api.transform.setMode("rotate");
+        onStatus(`已选 ${label} · 单关节调节（大腿/小腿/上臂/前臂）`);
+      } else {
+        api.transform.enabled = true;
+        api.transform.attach(bone);
+        api.transform.setMode("rotate");
+        onStatus(`已选 ${label} · 拖动手/脚带动整肢 · 转环微调腕踝`);
+      }
     };
 
     const beginIkSession = (actorId: string, boneKey: string, point: THREE.Vector3, ev: PointerEvent) => {
       const actorObj = api.objects.get(actorId);
       if (!actorObj) return;
       const bones = getPoseBones(actorObj);
-      const endKey = endEffectorBoneKey(boneKey);
-      const endBone = bones[endKey] || bones[boneKey];
+      const mode = limbDragMode(boneKey);
+      // 整肢 IK 跟末端；单关节 FK 跟当前骨
+      const trackKey = mode === "chainIk" ? endEffectorBoneKey(boneKey) : boneKey;
+      const trackBone = bones[trackKey] || bones[boneKey];
       const endWorld = new THREE.Vector3();
-      if (endBone) endBone.getWorldPosition(endWorld);
+      if (trackBone) trackBone.getWorldPosition(endWorld);
       else endWorld.copy(point);
       ikSessionRef.current = {
         actorId,
         boneKey,
+        mode,
         grabPoint: point.clone(),
         endOffset: endWorld.sub(point),
         clientX: ev.clientX,
@@ -1477,22 +1818,32 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       if (ev.button !== 0) return;
       if (api.transform.enabled && api.transform.axis) return;
 
+      // 点住部位即可拖：按下立即锁住导演视角，避免拖姿时相机跟着转
       if (editModeRef.current === "joint" && !ev.altKey && !ev.shiftKey) {
         const hit = pickHit(ev);
         if (hit.actorId && hit.boneKey && hit.point) {
+          ev.preventDefault();
           ev.stopImmediatePropagation();
+          api.controls.enabled = false;
           attachSelectedBone(hit.actorId, hit.boneKey);
           beginIkSession(hit.actorId, hit.boneKey, hit.point, ev);
           pendingDragRef.current = null;
           dragStartRef.current = null;
           marqueeSessionRef.current = null;
           setMarquee(null);
+          try {
+            api.renderer.domElement.setPointerCapture(ev.pointerId);
+          } catch {
+            /* ignore */
+          }
           return;
         }
       }
 
       if (editModeRef.current === "joint" && ev.shiftKey && !ev.altKey) {
+        ev.preventDefault();
         ev.stopImmediatePropagation();
+        api.controls.enabled = false;
         marqueeSessionRef.current = {
           x0: ev.clientX,
           y0: ev.clientY,
@@ -1514,6 +1865,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           setSelectedBoneKey(null);
           return;
         }
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        api.controls.enabled = false;
         setSelectedId(actorId);
         setRailTab("actor");
         api.transform.enabled = false;
@@ -1534,12 +1888,13 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
       const ik = ikSessionRef.current;
       if (ik && ev.buttons === 1 && editModeRef.current === "joint") {
+        // 拖姿全程锁视角（含尚未超过阈值的微动）
+        api.controls.enabled = false;
         const dist = Math.hypot(ev.clientX - ik.clientX, ev.clientY - ik.clientY);
         if (!ik.active && dist < DRAG_THRESHOLD_PX) return;
         if (!ik.active) {
           ik.active = true;
           ikDraggingRef.current = true;
-          api.controls.enabled = false;
           api.transform.enabled = false;
           api.transform.detach();
           resetIkTrail();
@@ -1562,8 +1917,18 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         const obj = api.objects.get(ik.actorId);
         const actor = actorsRef.current.find((a) => a.id === ik.actorId);
         if (!obj || !actor) return;
-        const next = mergePose(actorPose(actor), solveChainIk(obj, ik.boneKey, target, actorPose(actor)));
+        const next = mergePose(
+          actorPose(actor),
+          ik.mode === "segmentFk"
+            ? solveSegmentFk(obj, ik.boneKey, target, actorPose(actor))
+            : solveChainIk(obj, ik.boneKey, target, actorPose(actor)),
+        );
         applyPose(obj, next);
+        if (isIkOnlyUnlockBone(ik.boneKey) || ik.mode === "look") {
+          obj.position.set(actor.position[0], actor.position[1], actor.position[2]);
+          api.ground.position.set(0, 0, 0);
+          api.ground.scale.set(1, 1, 1);
+        }
         pushIkTrail(target, chainOrigin(obj, ik.boneKey));
         setActors((prev) => prev.map((a) => (a.id === ik.actorId ? { ...a, pose: next } : a)));
         return;
@@ -1641,9 +2006,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       } else if (t === "scale") {
         const base = dragStartRef.current.actors.find((a) => a.id === sid);
         if (!base) return;
-        const next = Math.min(2.5, Math.max(0.4, base.scale + -dy * 0.01));
+        const nextScale = Math.min(2.2, Math.max(0.35, base.scale + -dy * 0.01));
         setActors((prev) =>
-          prev.map((a) => (a.id === sid ? { ...a, scale: next } : a)),
+          prev.map((a) => (a.id === sid ? { ...a, scale: nextScale } : a)),
         );
       }
     };
@@ -1662,7 +2027,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         }
         if (wasIk) {
           attachSelectedBone(ik.actorId, ik.boneKey);
-          onStatus(`已拉「${BONE_CN[ik.boneKey] || ik.boneKey}」整条肢体 · 空白处拖可转视角`);
+          onStatus(`已调「${BONE_CN[ik.boneKey] || ik.boneKey}」· 空白处拖可转视角`);
         }
         if (viewModeRef.current === "director") api.controls.enabled = true;
         return;
@@ -1688,7 +2053,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
               api.transform.enabled = false;
               api.transform.detach();
               setSelectedBoneKey(null);
-              onStatus("框选未命中部位 · 再拖框或点选");
+              onStatus("框选未命中 · 直接点住肢体拖动即可");
             }
           } else {
             const { actorId, boneKey } = pickHit(session);
@@ -1746,7 +2111,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
           setSelectedBoneKey(null);
           onStatus("移整人：拖模型平移 · V/R/S 移动旋转缩放");
         } else {
-          onStatus("点选或拉肢体摆姿势 · 拉手带动整臂 · Alt 移动整人");
+          onStatus("手/脚整肢拖 · 大腿/小腿/上臂/前臂单关节 · Alt 移动整人");
         }
       }
       if (k === "escape") {
@@ -1757,7 +2122,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         setMarquee(null);
         ikSessionRef.current = null;
         ikDraggingRef.current = false;
-        onStatus("已取消部位选中 · 再点选或拉肢体");
+        onStatus("已取消部位选中 · 再点住肢体拖动");
       }
       if (k === "delete" || k === "backspace") {
         const sid = selectedRef.current;
@@ -1954,8 +2319,18 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     if (!selectedId || selected?.kind !== "actor") return;
     pushUndo();
     const next = applyPreset(id);
+    const rootY = POSE_ROOT_OFFSET_Y[id] ?? 0;
     setActors((prev) =>
-      prev.map((a) => (a.id === selectedId ? { ...a, pose: next } : a)),
+      prev.map((a) =>
+        a.id === selectedId
+          ? {
+              ...a,
+              pose: next,
+              // 坐蹲跪降髋；其它预设回到地面高度，避免沿用上次的漂浮 Y
+              position: [a.position[0], rootY, a.position[2]] as [number, number, number],
+            }
+          : a,
+      ),
     );
     const obj = apiRef.current?.objects.get(selectedId);
     if (obj) applyPose(obj, next);
@@ -2012,8 +2387,18 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       api.camera.aspect = rw / rh;
       api.camera.updateProjectionMatrix();
     }
+    const captureRt = new THREE.WebGLRenderTarget(rw, rh, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      generateMipmaps: false,
+    });
+    api.renderer.setRenderTarget(captureRt);
     api.renderer.render(api.scene, api.camera);
-    const dataUrl = api.renderer.domElement.toDataURL("image/png");
+    api.renderer.setRenderTarget(null);
+    const dataUrl = readRenderTargetToDataURL(api.renderer, captureRt, rw, rh);
+    captureRt.dispose();
     api.renderer.setSize(prevW, prevH, false);
     api.camera.aspect = w / Math.max(h, 1);
     api.camera.updateProjectionMatrix();
@@ -2261,9 +2646,10 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       resolution: resSize,
       referenceImage: meta.referenceImage,
       referenceActor: meta.referenceActor,
+      referenceVideoUrl: motionRefVideo?.url || "",
     });
     onStatus(
-      `已导出首尾帧 ${resSize}（${cam.pathPoints.length} 点${meta.referenceActor ? ` · 参考「${meta.referenceActor}」` : ""}）`,
+      `已导出首尾帧 ${resSize}（${cam.pathPoints.length} 点${meta.referenceActor ? ` · 参考「${meta.referenceActor}」` : ""}${motionRefVideo ? ` · 动作参考「${motionRefVideo.name}」` : ""}）`,
     );
   };
 
@@ -2406,8 +2792,18 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       );
       ortho.position.copy(camPos);
       ortho.lookAt(actorCenter);
+      const orthoRt = new THREE.WebGLRenderTarget(rw, rh, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        generateMipmaps: false,
+      });
+      api.renderer.setRenderTarget(orthoRt);
       api.renderer.render(api.scene, ortho);
-      const dataUrl = api.renderer.domElement.toDataURL("image/png");
+      api.renderer.setRenderTarget(null);
+      const dataUrl = readRenderTargetToDataURL(api.renderer, orthoRt, rw, rh);
+      orthoRt.dispose();
       ortho.dispose();
       return dataUrl;
     };
@@ -2455,6 +2851,443 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       ),
     );
     onStatus(`已为「${to.name}」生成从「${from.name}」的 ${steps} 段路径`);
+  };
+
+  // ============ 一键运镜（8 种）+ 跟踪主体 + 轨迹范围 ============
+
+  type CamMoveId =
+    | "push" | "pull" | "panL" | "panR" | "tilt" | "crane" | "trackL" | "trackR";
+
+  const CAM_MOVES: { id: CamMoveId; label: string }[] = [
+    { id: "push", label: "推镜" },
+    { id: "pull", label: "拉镜" },
+    { id: "panL", label: "左摇镜" },
+    { id: "panR", label: "右摇镜" },
+    { id: "tilt", label: "俯仰抬镜" },
+    { id: "crane", label: "俯拍压镜" },
+    { id: "trackL", label: "左移镜" },
+    { id: "trackR", label: "右移镜" },
+  ];
+
+  /** 生成一键运镜路径：以当前机位为起点，按运镜类型生成 pathPoints */
+  const applyCameraMove = (move: CamMoveId) => {
+    const cam = cameras.find((c) => c.id === activeCamId);
+    if (!cam) {
+      onStatus("请先选中一个机位（或添加当前视角机位）");
+      return;
+    }
+    // 跟踪主体：优先用选中角色位置作为 lookAt 目标
+    const trackActor = actors.find((a) => a.id === (trackTargetId || selectedId));
+    const target: [number, number, number] = trackActor
+      ? [trackActor.position[0], 1.2 * trackActor.scale, trackActor.position[2]]
+      : cam.lookAt;
+    const range = moveRange / 100; // 轨迹范围 0~1
+    const steps = 10;
+    const pts: { pos: [number, number, number]; look: [number, number, number] }[] = [];
+    const start = cam.position;
+    const dirToTarget = new THREE.Vector3(
+      target[0] - start[0], target[1] - start[1], target[2] - start[2],
+    );
+    const dist = dirToTarget.length();
+    dirToTarget.normalize();
+    // 右向量（水平垂直于视线）
+    const right = new THREE.Vector3().crossVectors(dirToTarget, new THREE.Vector3(0, 1, 0)).normalize();
+    for (let i = 1; i <= steps; i++) {
+      const t = (i / steps) * range;
+      let pos: [number, number, number] = [...start] as [number, number, number];
+      let look: [number, number, number] = [...target] as [number, number, number];
+      switch (move) {
+        case "push": {
+          const d = Math.min(dist * 0.6, dist - 0.5) * t;
+          pos = [start[0] + dirToTarget.x * d, start[1] + dirToTarget.y * d * 0.3, start[2] + dirToTarget.z * d];
+          break;
+        }
+        case "pull": {
+          const d = dist * 0.6 * t;
+          pos = [start[0] - dirToTarget.x * d, start[1] + dirToTarget.y * d * 0.2, start[2] - dirToTarget.z * d];
+          break;
+        }
+        case "panL":
+        case "panR": {
+          const sign = move === "panL" ? 1 : -1;
+          const ang = sign * (Math.PI / 6) * t; // 30° 摇镜
+          const rx = start[0] + (right.x * sign) * Math.sin(ang) * dist * 0.4;
+          const rz = start[2] + (right.z * sign) * Math.sin(ang) * dist * 0.4;
+          pos = [rx, start[1], rz];
+          break;
+        }
+        case "tilt": {
+          look = [target[0], target[1] + 1.2 * t, target[2]];
+          break;
+        }
+        case "crane": {
+          pos = [start[0], start[1] + 2.5 * t, start[2]];
+          look = [target[0], target[1] - 0.5 * t, target[2]];
+          break;
+        }
+        case "trackL":
+        case "trackR": {
+          const sign = move === "trackL" ? 1 : -1;
+          const d = 2.0 * t * sign;
+          pos = [start[0] + right.x * d, start[1], start[2] + right.z * d];
+          break;
+        }
+      }
+      pts.push({ pos, look });
+    }
+    setCameras((prev) =>
+      prev.map((c) => (c.id === cam.id ? { ...c, pathPoints: pts, pathDuration: 3000 } : c)),
+    );
+    onStatus(`已生成「${CAM_MOVES.find((m) => m.id === move)?.label}」路径（范围 ${moveRange}%）`);
+  };
+
+  // ============ 掌镜（WASD 自由走镜头） ============
+  const wasdRef = useRef<Set<string>>(new Set());
+  const wasdActiveRef = useRef(false);
+  const [wasdActive, setWasdActive] = useState(false);
+  /** 角色路线播放进度（ref，避免 tick 内 setState 抖动） */
+  const routeProgressRef = useRef<Map<string, number>>(new Map());
+
+  // WASD 键盘监听（仅掌镜模式）
+  useEffect(() => {
+    if (!wasdActive) return;
+    const down = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (["w", "a", "s", "d", "q", "e"].includes(k)) {
+        e.preventDefault();
+        wasdRef.current.add(k);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      wasdRef.current.delete(e.key.toLowerCase());
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      wasdRef.current.clear();
+    };
+  }, [wasdActive]);
+
+  const toggleWasd = () => {
+    const next = !wasdActiveRef.current;
+    wasdActiveRef.current = next;
+    setWasdActive(next);
+    if (next) {
+      onStatus("掌镜模式：WASD 走镜头 · Q/E 升降 · 再点一次退出");
+    } else {
+      wasdRef.current.clear();
+      onStatus("已退出掌镜模式");
+    }
+  };
+
+  // ============ 角色路线（添加点 / 平滑折线 / 速度） ============
+  type RouteShape = "smooth" | "polyline";
+  type RouteSpeed = "uniform" | "soft" | "custom";
+  const [routeShape, setRouteShape] = useState<RouteShape>("smooth");
+  const [routeSpeed, setRouteSpeed] = useState<RouteSpeed>("uniform");
+
+  const addRoutePoint = () => {
+    const actor = actors.find((a) => a.id === selectedId);
+    if (!actor) {
+      onStatus("请先选中一个角色再添加路线点");
+      return;
+    }
+    const api = apiRef.current;
+    if (!api) return;
+    // 在角色前方 1m 处添加一个点（可后续拖拽）
+    const fwd = new THREE.Vector3(Math.sin(actor.rotationY), 0, Math.cos(actor.rotationY));
+    const existing = actor.route?.points || [];
+    const last = existing.length ? existing[existing.length - 1] : actor.position;
+    const pt: [number, number, number] = [last[0] + fwd.x, 0, last[2] + fwd.z];
+    setActors((prev) =>
+      prev.map((a) =>
+        a.id === actor.id
+          ? { ...a, route: { points: [...existing, pt], shape: routeShape, speed: routeSpeed, playing: a.route?.playing ?? false } }
+          : a,
+      ),
+    );
+    onStatus(`已为「${actor.name}」添加路线点（共 ${existing.length + 1} 个）`);
+  };
+
+  const clearRoute = () => {
+    if (!selectedId) return;
+    setActors((prev) =>
+      prev.map((a) => (a.id === selectedId ? { ...a, route: undefined } : a)),
+    );
+    onStatus("已清空角色路线");
+  };
+
+  const toggleRoutePlay = () => {
+    const actor = actors.find((a) => a.id === selectedId);
+    if (!actor?.route?.points?.length) {
+      onStatus("请先添加至少一个路线点");
+      return;
+    }
+    const playing = !actor.route.playing;
+    setActors((prev) =>
+      prev.map((a) => (a.id === selectedId ? { ...a, route: { ...a.route!, playing } } : a)),
+    );
+    onStatus(playing ? "角色开始沿路线移动" : "角色路线已暂停");
+  };
+
+  /** 导入自定义动作（FBX / GLB）— 记录文件名，占位提示（完整骨骼解析待后续） */
+  const onImportMotion = async (file: File | null) => {
+    if (!file) return;
+    const name = file.name.replace(/\.(fbx|glb|gltf)$/i, "");
+    onStatus(`已登记自定义动作「${name}」（${file.name}）· 骨骼解析待后续版本`);
+  };
+
+  /** 参考视频驱动（模式 A）：上传到宿主 inbox，生成视频时作为 motion-ref 条件 */
+  const onMotionRefVideoPick = async (file: File | null) => {
+    if (!file) return;
+    onStatus(`正在上传参考视频「${file.name}」…`);
+    const res = await uploadAssetToHost(file);
+    if (res.ok && res.url) {
+      setMotionRefVideo({ url: res.url, name: file.name });
+      setMotionPoseData(null);
+      // 换视频即丢弃旧轨迹与驱动状态（避免错配驱动）
+      stopPoseDriveLoop();
+      poseTrackRef.current = null;
+      setPoseDriveOn(false);
+      setPosePlaying(false);
+      setPoseBadFrames(new Set());
+      setPoseEditOn(false);
+      onStatus(`参考视频已挂载「${file.name}」，生成视频时将作为动作参考条件`);
+    } else {
+      onStatus(`参考视频上传失败：${res.message || "未知错误"}`);
+    }
+  };
+
+  /** 模式 B 姿态解析：参考视频 → 子进程 BlazePose 关键点 JSON（推理完进程退出释放显存） */
+  const onPoseExtract = async () => {
+    if (!motionRefVideo || poseBusy) return;
+    setPoseBusy(true);
+    onStatus(`正在解析参考视频姿态（模式 B）「${motionRefVideo.name}」…`);
+    try {
+      const res = await poseExtractViaHost({ video: motionRefVideo.url });
+      if (res.ok && res.json_url) {
+        setMotionPoseData({
+          frames: res.frame_count || 0,
+          duration: res.duration || 0,
+          fps: res.fps || 0,
+          url: res.json_url,
+        });
+        // 解析成功即拉取关键点轨迹（第三刀驱动白模的直接输入）
+        await loadPoseTrack(res.json_url);
+      } else {
+        onStatus(`❌ 姿态解析失败：${res.message || "未知错误"}`);
+      }
+    } catch (e) {
+      onStatus(`❌ 姿态解析异常：${(e as Error).message}`);
+    } finally {
+      setPoseBusy(false);
+    }
+  };
+
+  /* ── 模式 B 第三刀：关键点 → 白模 IK 时序驱动 ─────────────────── */
+
+  /** 求解第 i 帧姿态（缓存 + 坏帧插值；关键点全缺失帧自动插值，手动坏帧强制插值） */
+  const solvePoseForFrame = (i: number): JointPose | null => {
+    const track = poseTrackRef.current;
+    if (!track || i < 0 || i >= track.frames.length) return null;
+    const cached = poseSolvedCacheRef.current.get(i);
+    if (cached) return cached;
+    const isBad = poseBadFrames.has(i) || isFrameEmpty(track.frames[i]);
+    if (!isBad) {
+      const prev = poseSolvedCacheRef.current.get(i - 1) ?? null;
+      const pose = solveFramePose(track.frames[i], prev);
+      poseSolvedCacheRef.current.set(i, pose);
+      return pose;
+    }
+    // 坏帧：向两侧找最近好帧线性插值
+    let p = i - 1;
+    while (p >= 0 && (poseBadFrames.has(p) || isFrameEmpty(track.frames[p]))) p--;
+    let q = i + 1;
+    while (q < track.frames.length && (poseBadFrames.has(q) || isFrameEmpty(track.frames[q]))) q++;
+    const poseP = p >= 0 ? solvePoseForFrame(p) : null;
+    const poseQ = q < track.frames.length ? solvePoseForFrame(q) : null;
+    if (poseP && poseQ) {
+      const t = q === p ? 0 : (i - p) / (q - p);
+      return lerpJointPose(poseP, poseQ, t);
+    }
+    return poseP ?? poseQ;
+  };
+
+  /** 把第 i 帧姿态 + root 偏移应用到目标 actor（驱动与手动 scrub 共用） */
+  const applyPoseFrameToActor = (i: number, actorId: string) => {
+    const track = poseTrackRef.current;
+    const api = apiRef.current;
+    if (!track || !api) return;
+    const obj = api.objects.get(actorId);
+    if (!obj) return;
+    const pose = solvePoseForFrame(i);
+    if (!pose) return;
+    applyPoseResolved(obj, pose);
+    const base = poseDriveBasePosRef.current;
+    if (base) {
+      const [dx, dy, dz] = solveFrameRoot(track, i, poseStandHipYRef.current);
+      obj.position.set(base[0] + dx, base[1] + dy, base[2] + dz);
+    }
+  };
+
+  /** 停止姿态驱动播放（rAF），保留驱动开关状态 */
+  const stopPoseDriveLoop = () => {
+    if (poseDriveRafRef.current !== null) {
+      cancelAnimationFrame(poseDriveRafRef.current);
+      poseDriveRafRef.current = null;
+    }
+  };
+
+  /** 停止姿态驱动播放（rAF） */
+  const stopPoseDrive = () => {
+    stopPoseDriveLoop();
+    setPosePlaying(false);
+    setPoseDriveOn(false);
+    poseSolvedCacheRef.current.clear();
+    // 还原 actor 姿势与位置
+    const actorId = selectedRef.current;
+    const obj = actorId ? apiRef.current?.objects.get(actorId) : null;
+    const actor = actorId ? actorsRef.current.find((a) => a.id === actorId) : null;
+    if (obj && actor) applyPose(obj, actorPose(actor));
+    const base = poseDriveBasePosRef.current;
+    if (obj && base) {
+      obj.position.set(base[0], base[1], base[2]);
+      poseDriveBasePosRef.current = null;
+    }
+  };
+
+  /** 姿态驱动播放循环：按轨迹有效帧率推进，循环往返 */
+  const startPoseDriveLoop = () => {
+    const track = poseTrackRef.current;
+    const actorId = selectedRef.current;
+    if (!track || !actorId) return;
+    stopPoseDriveLoop();
+    const effFps = Math.max(1, track.fps);
+    poseDriveT0Ref.current = performance.now();
+    const step = () => {
+      const trackNow = poseTrackRef.current;
+      const aid = selectedRef.current;
+      if (!trackNow || !aid) return;
+      const elapsed = (performance.now() - poseDriveT0Ref.current) / 1000;
+      const total = trackNow.frames.length;
+      const cycle = total * 2;
+      const raw = Math.floor(elapsed * effFps) % cycle;
+      const idx = raw < total ? raw : cycle - 1 - raw;
+      setPoseFrameIdx(idx);
+      applyPoseFrameToActor(idx, aid);
+      poseDriveRafRef.current = requestAnimationFrame(step);
+    };
+    poseDriveRafRef.current = requestAnimationFrame(step);
+  };
+
+  /** 拉取并解析姿态 JSON（解析完成后自动调用；失败诚实提示） */
+  const loadPoseTrack = async (url: string) => {
+    onStatus("正在加载关键点 JSON…");
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const track = parsePoseTrack(json);
+      if (!track) throw new Error("JSON 结构无效（无有效帧）");
+      poseTrackRef.current = track;
+      poseSolvedCacheRef.current.clear();
+      poseStandHipYRef.current = findStandHipY(track);
+      setPoseBadFrames(new Set());
+      setPoseFrameIdx(0);
+      onStatus(`🦴 关键点轨迹已加载：${track.frameCount} 帧 · ${track.duration}s（可驱动白模）`);
+    } catch (e) {
+      poseTrackRef.current = null;
+      onStatus(`❌ 关键点 JSON 加载失败：${(e as Error).message}`);
+    }
+  };
+
+  /** 驱动开关切换：开启时记录 actor 基准位置并立即应用首帧 */
+  const togglePoseDrive = () => {
+    const track = poseTrackRef.current;
+    if (!track) {
+      onStatus("请先解析姿态并加载关键点轨迹");
+      return;
+    }
+    if (poseDriveOn) {
+      stopPoseDrive();
+      onStatus("已关闭白模姿态驱动");
+      return;
+    }
+    const actorId = selectedRef.current;
+    const actor = actorId ? actorsRef.current.find((a) => a.id === actorId) : null;
+    const obj = actorId ? apiRef.current?.objects.get(actorId) : null;
+    if (!actor || actor.kind !== "actor" || !obj) {
+      onStatus("请先选中一个角色（actor）再开启驱动");
+      return;
+    }
+    poseDriveBasePosRef.current = [obj.position.x, obj.position.y, obj.position.z];
+    setPoseDriveOn(true);
+    setPosePlaying(false);
+    applyPoseFrameToActor(poseFrameIdx, actorId);
+    onStatus(`🧍 白模姿态驱动已开启（${track.frameCount} 帧，选中角色逐帧跟随）`);
+  };
+
+  /** 播放/暂停姿态时序 */
+  const togglePosePlay = () => {
+    if (!poseDriveOn) return;
+    if (posePlaying) {
+      stopPoseDriveLoop();
+      setPosePlaying(false);
+    } else {
+      setPosePlaying(true);
+      startPoseDriveLoop();
+    }
+  };
+
+  /** 手动步进帧（暂停时 scrub；同时应用到 actor） */
+  const stepPoseFrame = (delta: number) => {
+    const track = poseTrackRef.current;
+    if (!track) return;
+    if (posePlaying) {
+      stopPoseDriveLoop();
+      setPosePlaying(false);
+    }
+    const next = Math.min(track.frames.length - 1, Math.max(0, poseFrameIdx + delta));
+    setPoseFrameIdx(next);
+    const actorId = selectedRef.current;
+    if (poseDriveOn && actorId) applyPoseFrameToActor(next, actorId);
+  };
+
+  /** 时间轴 scrub 到指定帧 */
+  const scrubPoseFrame = (i: number) => {
+    const track = poseTrackRef.current;
+    if (!track) return;
+    const next = Math.min(track.frames.length - 1, Math.max(0, i));
+    setPoseFrameIdx(next);
+    const actorId = selectedRef.current;
+    if (poseDriveOn && actorId) applyPoseFrameToActor(next, actorId);
+  };
+
+  /** 标记/取消坏帧（该帧播放时用前后好帧插值替换） */
+  const togglePoseBadFrame = (i: number) => {
+    setPoseBadFrames((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+    // 该帧缓存失效（插值结果随标记变化）
+    poseSolvedCacheRef.current.delete(i);
+    if (poseDriveOn && i === poseFrameIdx) {
+      const actorId = selectedRef.current;
+      if (actorId) applyPoseFrameToActor(i, actorId);
+    }
+  };
+
+  /** 重置全部手动修正与坏帧标记（重新从解析结果求解） */
+  const resetPoseEdits = () => {
+    const track = poseTrackRef.current;
+    if (!track) return;
+    // 重新加载原始 JSON（丢弃叠加在 ref 上的关键点修正）
+    void loadPoseTrack(motionPoseData?.url || "");
+    setPoseEditOn(false);
   };
 
   /** 停止正在播放的路径 */
@@ -2525,10 +3358,13 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     const currentPose = actorPose(actor);
     setPoseTracks((prev) => {
       const list = [...(prev[actorId] || [])];
-      // 同时间戳覆盖
+      // 同时间戳覆盖：保留既有 easing/interpolation/bezier，仅刷新 pose
       const idx = list.findIndex((k) => k.t === t);
-      if (idx >= 0) list[idx] = { t, pose: currentPose };
-      else list.push({ t, pose: currentPose });
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], pose: currentPose };
+      } else {
+        list.push({ t, pose: currentPose, easing: "ease_in_out" });
+      }
       list.sort((a, b) => a.t - b.t);
       onStatus(`已记录关键帧 t=${t}ms（${actor.name}）`);
       return { ...prev, [actorId]: list };
@@ -2538,6 +3374,14 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const deletePoseKeyframe = (actorId: string, t: number) => {
     setPoseTracks((prev) => {
       const list = (prev[actorId] || []).filter((k) => k.t !== t);
+      return { ...prev, [actorId]: list };
+    });
+  };
+
+  /** 修改关键帧的 easing / interpolation / bezier 控制点 */
+  const patchPoseKeyframe = (actorId: string, t: number, patch: Partial<PoseKeyframe>) => {
+    setPoseTracks((prev) => {
+      const list = (prev[actorId] || []).map((k) => (k.t === t ? { ...k, ...patch } : k));
       return { ...prev, [actorId]: list };
     });
   };
@@ -2574,7 +3418,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       const elapsed = performance.now() - startedAt;
       const nowMs = minT + ((elapsed % (range * 2)) < range ? elapsed % (range * 2) : range * 2 - (elapsed % (range * 2)));
       const pose = sampleKeyframes(track, nowMs);
-      applyPose(actorObj, pose);
+      applyPoseResolved(actorObj, pose);
       poseRafRef.current = requestAnimationFrame(step);
     };
     poseRafRef.current = requestAnimationFrame(step);
@@ -2685,7 +3529,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       { id: "dup", label: "复制选中", shortcut: "D", run: () => duplicateSelectedActor() },
       { id: "capture", label: "当前视角截图入画布", shortcut: "C", keywords: "capture 截图", run: () => capture() },
       { id: "cam-view", label: "切换导演视图 / 点位视角", shortcut: "Tab", run: () => setViewMode((v) => (v === "director" ? "camera" : "director")) },
-      { id: "fit", label: "重置轨道视角", shortcut: "F", run: () => { apiRef.current?.controls.reset(); onStatus("已重置视角"); } },
+      { id: "fit", label: "适配入画（全身可见）", shortcut: "F", run: () => { apiRef.current?.fitDirectorFraming(); onStatus("已适配相机入画"); } },
       { id: "face", label: "角色正面朝向镜头", keywords: "face 正面", run: () => faceSelectedToCamera() },
       { id: "flip", label: "角色转身 180°", run: () => flipSelectedFront() },
       { id: "undo", label: "撤销变换", shortcut: "Ctrl+Z", run: () => {
@@ -2731,8 +3575,8 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         capture();
       } else if (k === "f") {
         ev.preventDefault();
-        apiRef.current?.controls.reset();
-        onStatus("已重置视角");
+        apiRef.current?.fitDirectorFraming();
+        onStatus("已适配相机入画");
       } else if (k === "tab") {
         ev.preventDefault();
         setViewMode((v) => (v === "director" ? "camera" : "director"));
@@ -2763,9 +3607,15 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       <div className="stage3d-drag-hint">
         {editMode === "joint"
           ? selectedBoneKey
-            ? `已选「${BONE_CN[selectedBoneKey] || selectedBoneKey}」· 拖肢体带动整条链 · 空白处转视角`
-            : "点姿势预设或拉手/脚摆动作 · 空白处拖动旋转视角 · 右键平移"
-          : "移整人模式 · 拖模型平移 · J 回到框选调关节"}
+            ? `已选「${BONE_CN[selectedBoneKey] || selectedBoneKey}」· ${
+                limbDragMode(selectedBoneKey) === "segmentFk"
+                  ? "单关节拖（大腿/小腿/肘）"
+                  : limbDragMode(selectedBoneKey) === "chainIk"
+                    ? "整肢拖（手/脚）"
+                    : "拖动调节"
+              } · 空白处转视角`
+            : "手/脚=整肢 · 大腿小腿上臂前臂=单关节 · 空白处转视角"
+          : "移整人模式 · 拖模型平移 · J 回到拉肢调关节"}
       </div>
       <div className="stage3d-frame" data-aspect={aspect} />
       {refImage ? (
@@ -2995,144 +3845,304 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
             {selected?.kind === "actor" ? (
               <div className="stage3d-pose-block">
-                <div className="section-title">姿势 · {selected.name}</div>
-                <p className="muted tiny">
-                  点「挥手/思考」等预设会立刻改姿势。在手上拖会带动整臂（黄色轨迹）。空白处拖动旋转视角，右键平移。
-                </p>
-                <div className="seg">
-                  <button
-                    type="button"
-                    className={editMode === "joint" ? "on" : ""}
-                    onClick={() => {
-                      setEditMode("joint");
-                      onStatus("点选或拉肢体摆姿势 · 拉手带动整臂 · Alt 移动整人");
-                    }}
-                  >
-                    拉肢摆姿势
-                  </button>
-                  <button
-                    type="button"
-                    className={editMode === "actor" ? "on" : ""}
-                    onClick={() => {
-                      setEditMode("actor");
-                      const api = apiRef.current;
-                      if (api) {
-                        api.transform.enabled = false;
-                        api.transform.detach();
-                      }
-                      setSelectedBoneKey(null);
-                      onStatus("移整人：拖模型平移 · V/R/S 旋转缩放");
-                    }}
-                  >
-                    移整人
-                  </button>
+                <div className="section-title">角色 · {selected.name}</div>
+                {/* —— 四子标签页（图片：属性/姿势/动作/路线）—— */}
+                <div className="stage3d-subtabs">
+                  <button type="button" className={actorTab === "attr" ? "on" : ""} onClick={() => setActorTab("attr")}>属性</button>
+                  <button type="button" className={actorTab === "pose" ? "on" : ""} onClick={() => setActorTab("pose")}>姿势</button>
+                  <button type="button" className={actorTab === "motion" ? "on" : ""} onClick={() => setActorTab("motion")}>动作</button>
+                  <button type="button" className={actorTab === "route" ? "on" : ""} onClick={() => setActorTab("route")}>路线</button>
                 </div>
-                <div className="section-title">正反面</div>
-                <p className="muted tiny">眼睛/胸口白块/脚前黄箭头 = 正面。挥手等动作相对正面，勿背对镜头再调。</p>
-                <div className="seg">
-                  <button type="button" onClick={faceSelectedToCamera}>正面朝向镜头</button>
-                  <button type="button" onClick={flipSelectedFront}>转身 180°</button>
-                </div>
-                <div className="section-title">姿势预设</div>
-                <div className="stage3d-chips">
-                  {POSE_PRESETS.map((p) => (
-                    <button key={p.id} type="button" className="chip" onClick={() => setPosePreset(p.id)}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <details className="stage3d-add-block">
-                  <summary>关节滑条（精调，可选）</summary>
-                  <div className="stage3d-joints">
-                    {JOINT_LABELS.map((j) => {
-                      const pose = actorPose(selected);
-                      return (
-                        <div className="field compact" key={j.key}>
-                          <label>
-                            {j.label} {Math.round(pose[j.key])}°
-                          </label>
-                          <input
-                            type="range"
-                            min={j.min}
-                            max={j.max}
-                            step={1}
-                            value={pose[j.key]}
-                            onChange={(e) => patchPose({ [j.key]: Number(e.target.value) })}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-                <div className="field">
-                  <label>体型</label>
-                  <select
-                    value={selected.variant || "male_std"}
-                    onChange={(e) => patchSelected({ variant: e.target.value as HumanVariant })}
-                    style={{ width: "100%" }}
-                  >
-                    {Object.values(HUMAN_PRESETS).map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>发型</label>
-                  <select
-                    value={selected.hairStyle || "none"}
-                    onChange={(e) => patchSelected({ hairStyle: e.target.value as HairStyle })}
-                    style={{ width: "100%" }}
-                  >
-                    <option value="none">光头 / 无</option>
-                    <option value="short">短发</option>
-                    <option value="long">长发（后披+刘海）</option>
-                    <option value="round">圆头（儿童）</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>朝向 Y</label>
-                  <input
-                    type="range"
-                    min={-Math.PI}
-                    max={Math.PI}
-                    step={0.01}
-                    value={selected.rotationY}
-                    onChange={(e) => patchSelected({ rotationY: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="field">
-                  <label>体色</label>
-                  <input
-                    type="color"
-                    value={selected.color}
-                    onChange={(e) => patchSelected({ color: e.target.value })}
-                  />
-                </div>
-                <div className="section-title">动作轨迹（循环播放）</div>
-                <p className="muted tiny">多选叠加 · tick 内直接驱动骨骼 · 拖拽关节时自动暂停</p>
-                <div className="stage3d-chips">
-                  {MOTION_PRESETS.map((m) => {
-                    const on = isMotionActive(selected.id, m.id);
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className={`chip${on ? " on" : ""}`}
-                        onClick={() => toggleActorMotion(selected.id, m.id)}
-                        title={`${m.label} · ${(m.duration / 1000).toFixed(1)}s`}
+
+                {actorTab === "attr" ? (
+                  <>
+                    <div className="section-title">正反面</div>
+                    <p className="muted tiny">眼睛/胸口白块/脚前黄箭头 = 正面。</p>
+                    <div className="seg">
+                      <button type="button" onClick={faceSelectedToCamera}>正面朝向镜头</button>
+                      <button type="button" onClick={flipSelectedFront}>转身 180°</button>
+                    </div>
+                    <div className="field">
+                      <label>体型</label>
+                      <select
+                        value={selected.variant || "male_std"}
+                        onChange={(e) => patchSelected({ variant: e.target.value as HumanVariant })}
+                        style={{ width: "100%" }}
                       >
-                        {m.label}
+                        {Object.values(HUMAN_PRESETS).map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>发型</label>
+                      <select
+                        value={selected.hairStyle || "none"}
+                        onChange={(e) => patchSelected({ hairStyle: e.target.value as HairStyle })}
+                        style={{ width: "100%" }}
+                      >
+                        <option value="none">光头 / 无</option>
+                        <option value="short">短发</option>
+                        <option value="long">长发（后披+刘海）</option>
+                        <option value="round">圆头（儿童）</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>朝向 Y</label>
+                      <input
+                        type="range"
+                        min={-Math.PI}
+                        max={Math.PI}
+                        step={0.01}
+                        value={selected.rotationY}
+                        onChange={(e) => patchSelected({ rotationY: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>体色</label>
+                      <input
+                        type="color"
+                        value={selected.color}
+                        onChange={(e) => patchSelected({ color: e.target.value })}
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {actorTab === "pose" ? (
+                  <>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={editMode === "joint" ? "on" : ""}
+                        onClick={() => {
+                          setEditMode("joint");
+                          onStatus("手/脚整肢 · 大腿小腿肘肩单关节 · Alt 移动整人");
+                        }}
+                      >
+                        拉肢摆姿势
                       </button>
-                    );
-                  })}
-                </div>
+                      <button
+                        type="button"
+                        className={editMode === "actor" ? "on" : ""}
+                        onClick={() => {
+                          setEditMode("actor");
+                          const api = apiRef.current;
+                          if (api) {
+                            api.transform.enabled = false;
+                            api.transform.detach();
+                          }
+                          setSelectedBoneKey(null);
+                          onStatus("移整人：拖模型平移 · V/R/S 旋转缩放");
+                        }}
+                      >
+                        移整人
+                      </button>
+                    </div>
+                    <div className="section-title">姿势预设</div>
+                    <div className="stage3d-pose-grid">
+                      {POSE_PRESETS.map((p) => (
+                        <button key={p.id} type="button" className="stage3d-pose-btn" onClick={() => setPosePreset(p.id)}>
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="section-title">姿势调节</div>
+                    <div className="stage3d-joints">
+                      {JOINT_LABELS.map((j) => {
+                        const pose = actorPose(selected);
+                        return (
+                          <div className="field compact stage3d-joint-row" key={j.key}>
+                            <label>{j.label}</label>
+                            <input
+                              type="range"
+                              min={j.min}
+                              max={j.max}
+                              step={1}
+                              value={pose[j.key]}
+                              onChange={(e) => patchPose({ [j.key]: Number(e.target.value) })}
+                            />
+                            <input
+                              type="number"
+                              className="stage3d-joint-num"
+                              min={j.min}
+                              max={j.max}
+                              value={Math.round(pose[j.key])}
+                              onChange={(e) => patchPose({ [j.key]: Math.max(j.min, Math.min(j.max, Number(e.target.value) || 0)) })}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : null}
+
+                {actorTab === "motion" ? (
+                  <>
+                    <div className="section-title">动作预设</div>
+                    <p className="muted tiny">多选叠加 · tick 内驱动骨骼 · 拖拽关节时自动暂停</p>
+                    <div className="stage3d-chips">
+                      <button
+                        type="button"
+                        className="chip"
+                        onClick={() => {
+                          MOTION_PRESETS.forEach((m) => {
+                            if (isMotionActive(selected.id, m.id)) toggleActorMotion(selected.id, m.id);
+                          });
+                        }}
+                      >
+                        无动作
+                      </button>
+                      {MOTION_PRESETS.map((m) => {
+                        const on = isMotionActive(selected.id, m.id);
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            className={`chip${on ? " on" : ""}`}
+                            onClick={() => toggleActorMotion(selected.id, m.id)}
+                            title={`${m.label} · ${(m.duration / 1000).toFixed(2)} 秒`}
+                          >
+                            {m.label}
+                            <span className="stage3d-chip-dur">{(m.duration / 1000).toFixed(2)} 秒</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="section-title">我的动作</div>
+                    <div className="stage3d-route-row">
+                      <p className="muted tiny" style={{ flex: 1, margin: 0 }}>支持 FBX / GLB</p>
+                      <button type="button" className="btn" onClick={() => motionFileRef.current?.click()}>
+                        ⬆ 导入动作
+                      </button>
+                    </div>
+                    <input
+                      ref={motionFileRef}
+                      type="file"
+                      accept=".fbx,.glb,.gltf"
+                      hidden
+                      onChange={(e) => void onImportMotion(e.target.files?.[0] || null)}
+                    />
+                    <div className="section-title">参考视频驱动（模式 A）</div>
+                    <p className="muted tiny">
+                      整段动作参考视频直接作 motion-ref 条件送模型；当前模型池未接入支持的模型时会诚实提示
+                    </p>
+                    <div className="stage3d-route-row">
+                      {motionRefVideo ? (
+                        <>
+                          <p className="muted tiny" style={{ flex: 1, margin: 0 }} title={motionRefVideo.url}>
+                            🎞 {motionRefVideo.name}
+                          </p>
+                          <button
+                            type="button"
+                            className="btn danger"
+                            onClick={() => {
+                              setMotionRefVideo(null);
+                              onStatus("已移除参考视频");
+                            }}
+                            title="移除参考视频"
+                          >
+                            🗑
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="muted tiny" style={{ flex: 1, margin: 0 }}>尚未挂载参考视频</p>
+                          <button type="button" className="btn" onClick={() => motionRefFileRef.current?.click()}>
+                            ⬆ 上传参考视频
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      ref={motionRefFileRef}
+                      type="file"
+                      accept="video/*"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        e.target.value = "";
+                        void onMotionRefVideoPick(f);
+                      }}
+                    />
+                    <div className="section-title">姿态解析（模式 B）</div>
+                    <p className="muted tiny">
+                      参考视频 → 子进程 BlazePose 关键点 JSON（推理完释放显存）；后续可在时间轴编辑、驱动白模、换机位
+                    </p>
+                    <div className="stage3d-route-row">
+                      <button
+                        type="button"
+                        className="btn primary"
+                        onClick={() => void onPoseExtract()}
+                        disabled={!motionRefVideo || poseBusy}
+                        title={motionRefVideo ? "解析参考视频的骨骼关键点" : "请先挂载参考视频"}
+                      >
+                        {poseBusy ? "⏳ 解析中…" : "🦴 解析姿态"}
+                      </button>
+                      {motionPoseData ? (
+                        <p className="muted tiny" style={{ flex: 1, margin: 0 }} title={motionPoseData.url}>
+                          ✓ {motionPoseData.frames} 帧 / {motionPoseData.duration}s · 关键点已就绪
+                        </p>
+                      ) : (
+                        <p className="muted tiny" style={{ flex: 1, margin: 0 }}>未解析</p>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+
+                {actorTab === "route" ? (
+                  <>
+                    <div className="section-title">人物路线</div>
+                    <p className="muted tiny">添加第一个路线点后，角色沿路线循环移动</p>
+                    <div className="stage3d-route-row">
+                      <button type="button" className="btn primary" onClick={addRoutePoint}>
+                        ⊕ 添加点
+                      </button>
+                      <button type="button" className="btn" onClick={toggleRoutePlay} title="播放/暂停路线">
+                        {selected.route?.playing ? "⏸" : "▶"}
+                      </button>
+                      <button type="button" className="btn danger" onClick={clearRoute} title="清空路线">
+                        🗑
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label>形状</label>
+                      <div className="seg">
+                        <button type="button" className={routeShape === "smooth" ? "on" : ""} onClick={() => setRouteShape("smooth")}>
+                          平滑
+                        </button>
+                        <button type="button" className={routeShape === "polyline" ? "on" : ""} onClick={() => setRouteShape("polyline")}>
+                          折线
+                        </button>
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label>速度</label>
+                      <div className="seg">
+                        <button type="button" className={routeSpeed === "uniform" ? "on" : ""} onClick={() => setRouteSpeed("uniform")}>
+                          匀速
+                        </button>
+                        <button type="button" className={routeSpeed === "soft" ? "on" : ""} onClick={() => setRouteSpeed("soft")}>
+                          柔和
+                        </button>
+                        <button type="button" className={routeSpeed === "custom" ? "on" : ""} onClick={() => setRouteSpeed("custom")}>
+                          自定义
+                        </button>
+                      </div>
+                    </div>
+                    {selected.route?.points?.length ? (
+                      <p className="muted tiny">已添加 {selected.route.points.length} 个路线点</p>
+                    ) : null}
+                  </>
+                ) : null}
                 <div className="section-title">姿势关键帧</div>
                 <PoseTimeline
                   track={poseTracks[selected.id] || []}
                   onRecord={(t) => recordPoseKeyframe(selected.id, t)}
                   onDelete={(t) => deletePoseKeyframe(selected.id, t)}
+                  onPatch={(t, patch) => patchPoseKeyframe(selected.id, t, patch)}
                   onPlay={() => playPoseTimeline(selected.id)}
                   onStop={stopPoseTimeline}
                 />
@@ -3157,7 +4167,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
                   setViewMode("director");
                   setEditMode("joint");
                   setSceneMode("solo");
-                  onStatus("已重置为单人素模 · 点选或拉肢体摆姿势");
+                  framedOnceRef.current = false;
+                  requestAnimationFrame(() => apiRef.current?.fitDirectorFraming());
+                  onStatus("已重置为单人素模 · 点住肢体拖动调节");
                 }}
               >
                 重置单人场景
@@ -3221,6 +4233,44 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
                 }}
               />
             </div>
+            {/* —— 一键镜头（图片：8 运镜 + 跟踪主体 + 轨迹范围 + 掌镜）—— */}
+            <div className="section-title">一键镜头</div>
+            <p className="muted tiny">选择主体和幅度，再套用镜头</p>
+            <div className="field">
+              <label>跟踪主体</label>
+              <select
+                value={trackTargetId}
+                onChange={(e) => setTrackTargetId(e.target.value)}
+                style={{ width: "100%" }}
+              >
+                <option value="">— 不跟踪（用当前 lookAt）—</option>
+                {actors.filter((a) => a.kind === "actor").map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>轨迹范围 {moveRange}%</label>
+              <input
+                type="range"
+                min={10}
+                max={100}
+                step={5}
+                value={moveRange}
+                onChange={(e) => setMoveRange(Number(e.target.value))}
+              />
+            </div>
+            <div className="stage3d-cammove-grid">
+              {CAM_MOVES.map((m) => (
+                <button key={m.id} type="button" className="stage3d-cammove" onClick={() => applyCameraMove(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="section-title">制作镜头</div>
+            <button type="button" className={`btn${wasdActive ? " primary" : ""}`} onClick={toggleWasd}>
+              🎯 {wasdActive ? "退出掌镜" : "开始掌镜"}（WASD 走镜头）
+            </button>
             <button className="btn primary" onClick={() => capture()}>当前视角 → 画布</button>
             <button className="btn teal" onClick={() => capture(activeCam)} disabled={!activeCam}>当前机位 → 镜头</button>
             <button className="btn" onClick={captureAllCams}>全部机位截图</button>
@@ -3286,7 +4336,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
             <div className="seg">
               <button type="button" className={editMode === "joint" ? "on" : ""} onClick={() => {
                 setEditMode("joint");
-                onStatus("点选或拉肢体摆姿势 · 拉手带动整臂 · Alt 移动整人");
+                onStatus("手/脚整肢 · 大腿小腿肘肩单关节");
               }}>拉肢摆姿势</button>
               <button type="button" className={editMode === "actor" ? "on" : ""} onClick={() => {
                 setEditMode("actor");

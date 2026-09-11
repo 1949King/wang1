@@ -18,6 +18,9 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap, QFont, QIcon, QPainter, QColor
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.plugins.ai_effects_plugin.ui.ai_effects_widget")
+
 class EffectProcessorThread(QThread):
     """AI特效处理线程（避免阻塞UI）"""
     
@@ -89,7 +92,7 @@ class AIEffectsWidget(QWidget):
         self._setup_ui()
         self._connect_signals()
         
-        print("[UI] AI特效控制面板已初始化")
+        logger.info('[UI] AI特效控制面板已初始化')
     
     def _setup_ui(self):
         """设置UI布局"""
@@ -661,7 +664,7 @@ class AIEffectsWidget(QWidget):
                     'super_resolution', 'beauty_filter', 'object_removal']
         if index < len(tab_names):
             self.current_params['effect_type'] = tab_names[index]
-            print(f"[UI] 切换到特效类型: {tab_names[index]}")
+            logger.info(f'[UI] 切换到特效类型: {tab_names[index]}')
     
     @pyqtSlot(str)
     def _on_style_changed(self, style_name: str):
@@ -708,7 +711,7 @@ class AIEffectsWidget(QWidget):
         self.eye_large_slider.setValue(int(params['eye_enlargement'] * 100))
         self.natural_look_cb.setChecked(params['natural_look'])
         
-        print(f"[UI] 已应用美颜预设: {preset['name']}")
+        logger.info(f"[UI] 已应用美颜预设: {preset['name']}")
     
     @pyqtSlot()
     def _reset_params(self):
@@ -750,7 +753,7 @@ class AIEffectsWidget(QWidget):
                       self.cb_date, self.cb_person, self.cb_car, self.cb_building]:
                 cb.setChecked(False)
         
-        print(f"[UI] 已重置参数（标签页{current_tab}）")
+        logger.info(f'[UI] 已重置参数（标签页{current_tab}）')
     
     def _collect_current_params(self) -> Dict[str, Any]:
         """收集当前标签页的所有参数"""
@@ -877,7 +880,7 @@ class AIEffectsWidget(QWidget):
         if self.tab_widget.currentIndex() == 0 and result is not None:
             self._update_preview(result)
         
-        print(f"[UI] ✅ 特效应用完成，输出尺寸: {result.shape[1]}x{result.shape[0]}")
+        logger.info(f'[UI] ✅ 特效应用完成，输出尺寸: {result.shape[1]}x{result.shape[0]}')
     
     @pyqtSlot(str)
     def _on_processing_error(self, error_msg: str):
@@ -887,12 +890,12 @@ class AIEffectsWidget(QWidget):
         self.apply_btn.setText("✨ 应用特效")
         
         QMessageBox.critical(self, "处理错误", f"特效处理失败:\n{error_msg}")
-        print(f"[UI] ❌ 处理错误: {error_msg}")
+        logger.error(f'[UI] ❌ 处理错误: {error_msg}')
     
     def set_input_image(self, image: np.ndarray):
         """设置输入图像"""
         self.current_image = image.copy()
-        print(f"[UI] 已设置输入图像: {image.shape[1]}x{image.shape[0]}")
+        logger.info(f'[UI] 已设置输入图像: {image.shape[1]}x{image.shape[0]}')
     
     def get_output_image(self) -> Optional[np.ndarray]:
         """获取最近一次的处理结果（如果需要缓存的话）"""
@@ -931,7 +934,7 @@ class AIEffectsWidget(QWidget):
             self.style_preview_label.setPixmap(pixmap)
             
         except Exception as e:
-            print(f"[UI] 更新预览失败: {e}")
+            logger.error(f'[UI] 更新预览失败: {e}')
             self.style_preview_label.setText("预览生成失败")
     
     def enable_controls(self, enabled: bool = True):

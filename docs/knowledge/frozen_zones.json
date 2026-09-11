@@ -146,6 +146,71 @@
       "markers": [
         {"file": "app/modules/lego/plugin_store.py", "id": "plugin-store-catalog:official"}
       ]
+    },
+    {
+      "id": "stage3d-core",
+      "title": "3D导演台 · 模型渲染与桥接",
+      "reason": "用户明确要求冻结，防止 GLB 模型加载、骨骼绑定、姿势应用、材质渲染、Python 桥接层被误改；2026-08-20",
+      "invariants": [
+        "bodyFigureUrl 只返回 bodychan.glb 或 bodykun.glb（来自用户 blend 文件）",
+        "prepareBodyFigureMeshes 不得覆盖 GLB 原始材质",
+        "loadGLBRiggedHumanoid 加载 GLB 后不做材质替换或颜色覆盖",
+        "canvas_bridge 端口 18765 不得更改",
+        "canvas_runtime 静态端口 3011 / dev 端口 3010 不得更改",
+        "export_vinchau_glb.py 导出时不得修改骨名映射或材质设置"
+      ],
+      "symbols": [],
+      "files": [
+        "vendor/shiguang-canvas/src/riggedHumanoid.ts",
+        "vendor/shiguang-canvas/src/Stage3D.tsx",
+        "vendor/shiguang-canvas/src/stage3dControlNet.ts",
+        "app/core/canvas_bridge.py",
+        "app/core/canvas_runtime.py",
+        "app/modules/lego/character_management_module.py",
+        "scripts/export_vinchau_glb.py"
+      ],
+      "markers": []
+    },
+    {
+      "id": "canvas-magnetic-intent",
+      "title": "画布磁吸意图系统 · 导演卡 + L1 参数",
+      "reason": "小白画布按《磁吸意图画布开发规格说明书》实现：四向磁吸紧密贴合、六向槽位高亮、导演卡剧本自动拆解、生成卡 L1 导演参数；用户要求冻结锁定，2026-09-12",
+      "invariants": [
+        "卡片间距 gap=0 紧密贴合（MagneticEngine.ts）",
+        "磁吸阈值 weak/medium/strong = 80/50/25px，过冲5、回弹200ms、拉伸30、断裂50",
+        "六向语义：左输入参考 / 右输出接续 / 上并行对照 / 下分支备选 / 前导演卡 / 后历史版本",
+        "导演卡自动拆解走 breakdownStoryboard + breakdownDirectorCard，非破坏式追加下游分镜卡",
+        "生成卡 L1 画质四档 qualityTier = draft/standard/fine/cinema，与 shot 一致",
+        "生成卡默认 duration=5、motionStrength=60、consistency=75",
+        "L1 面板仅在非参考视频节点显示（isReference 不显示）",
+        "缩小色块视觉由 .react-flow.zoomed-out 类控制"
+      ],
+      "symbols": [],
+      "files": [
+        "vendor/shiguang-canvas/src/magnetic/CardStack.ts",
+        "vendor/shiguang-canvas/src/magnetic/FloatingToolbar.tsx",
+        "vendor/shiguang-canvas/src/magnetic/MagneticEngine.ts",
+        "vendor/shiguang-canvas/src/magnetic/MagneticLines.tsx",
+        "vendor/shiguang-canvas/src/magnetic/SnapSlotHighlight.tsx",
+        "vendor/shiguang-canvas/src/magnetic/SoftConnection.ts",
+        "vendor/shiguang-canvas/src/magnetic/SoftConnectionLines.tsx",
+        "vendor/shiguang-canvas/src/magnetic/SpatialAnalyzer.ts",
+        "vendor/shiguang-canvas/src/magnetic/SpatialIndex.ts",
+        "vendor/shiguang-canvas/src/magnetic/StackBadge.tsx",
+        "vendor/shiguang-canvas/src/magnetic/StatusBadge.tsx",
+        "vendor/shiguang-canvas/src/magnetic/types.ts",
+        "vendor/shiguang-canvas/src/magnetic/useMagneticDrag.ts",
+        "vendor/shiguang-canvas/src/CanvasShell.tsx",
+        "vendor/shiguang-canvas/src/styles.css",
+        "vendor/shiguang-canvas/src/nodes.tsx",
+        "vendor/shiguang-canvas/src/store.ts",
+        "vendor/shiguang-canvas/src/stores/node-factory.ts",
+        "vendor/shiguang-canvas/src/mediaExtraNodes.tsx",
+        "vendor/shiguang-canvas/src/registerBuiltinNodes.ts",
+        "vendor/shiguang-canvas/src/NodePalette.tsx",
+        "vendor/shiguang-canvas/src/components/canvas/CanvasEmptyState.tsx"
+      ],
+      "markers": []
     }
   ]
 }

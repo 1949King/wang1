@@ -1,11 +1,13 @@
 /**
- * AI-Canvas 对齐补缺：3D 导演台 / 逐帧动画 / 全景 / 画布笔记 / 源文件
+ * AI-Canvas 对齐补缺：3D 导演台 / 数字人 / 逐帧动画 / 全景 / 画布笔记 / 源文件
  */
 import React, { memo, useMemo, useRef } from "react";
 import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react";
 import {
   useCanvasStore,
   type DirectorData,
+  type DirectorCardData,
+  type DigitalHumanData,
   type AnimationData,
   type AnimationAction,
   type PanoramaData,
@@ -14,7 +16,7 @@ import {
   ANIMATION_ACTION_LABELS,
   animationGrid,
 } from "./store";
-import { generateImageViaHost, readFileAsDataUrl, uploadAssetToHost } from "./bridge";
+import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard } from "./bridge";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -28,6 +30,16 @@ function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
+
+/** 动作图标（火柴人风格，对应图片中的 6 个动作按钮） */
+const ACTION_ICONS: Record<AnimationAction, string> = {
+  idle: "🧍",
+  walk: "🚶",
+  run: "🏃",
+  jump: "🤸",
+  attack: "🤺",
+  hit: "💥",
+};
 
 /** 占位 Sprite Sheet（无模型时也能预览播放） */
 export function makePlaceholderSpriteSheet(
@@ -159,11 +171,196 @@ export const DirectorNode = memo(function DirectorNode({ id, data, selected }: N
   );
 }, nodePropsEqual);
 
+/** 导演卡：输入剧本 → 调用宿主 LLM 自动拆解 → 生成下游分镜卡（spec §6） */
+export const DirectorCardNode = memo(function DirectorCardNode({ id, data, selected }: NodeProps) {
+  const d = data as DirectorCardData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const breakdownDirectorCard = useCanvasStore((s) => s.breakdownDirectorCard);
+  const busy = d.status === "generating";
+
+  const onBreakdown = async () => {
+    const script = (d.script || "").trim();
+    if (!script) {
+      updateNodeData(id, { status: "failed", errorMessage: "请先填写剧本/脚本" });
+      return;
+    }
+    updateNodeData(id, { status: "generating", errorMessage: "" });
+    try {
+      const res = await breakdownStoryboard(script);
+      if (!res.ok && !(res.shots && res.shots.length)) {
+        throw new Error(res.message || "拆解失败");
+      }
+      breakdownDirectorCard(id, res.shots || []);
+    } catch (e) {
+      updateNodeData(id, { status: "failed", errorMessage: String(e).slice(0, 200) });
+    }
+  };
+
+  return (
+    <div className={`sg-node director-card${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={280} minHeight={200} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🎬 {d.title || "导演卡"}</span>
+        <button
+          type="button"
+          className="sg-node-mini-btn primary"
+          disabled={busy}
+          onClick={() => void onBreakdown()}
+        >
+          {busy ? "拆解中…" : "自动拆解"}
+        </button>
+      </div>
+      <div className="body nodrag">
+        <textarea
+          className="sg-node-inline-ta sg-director-card-script"
+          value={d.script || ""}
+          placeholder="在此粘贴剧本/脚本，点击「自动拆解」生成分镜卡…"
+          onChange={(e) => updateNodeData(id, { script: e.target.value })}
+        />
+        {d.lastBreakdown ? (
+          <div className="sg-director-card-result">
+            已拆解 → {d.lastBreakdown.shots} 个分镜卡
+          </div>
+        ) : null}
+        {d.errorMessage ? <div className="sg-node-error">{d.errorMessage}</div> : null}
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+const TALKING_HEAD_UNAVAILABLE =
+  "未配置形象驱动模型，口型成片未接入。请先生成配音并上传形象图入轨。";
+
+export const DigitalHumanNode = memo(function DigitalHumanNode({ id, data, selected }: NodeProps) {
+  const d = data as DigitalHumanData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setNodeAudio = useCanvasStore((s) => s.setNodeAudio);
+  const setStatus = useCanvasStore((s) => s.setStatus);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const busy = d.status === "generating";
+
+  const onUploadPortrait = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const url = await readFileAsDataUrl(file);
+      updateNodeData(id, { imageUrl: url, status: "success", errorMessage: "" });
+      setStatus("已载入数字人形象");
+    } catch (e) {
+      updateNodeData(id, { status: "failed", errorMessage: String(e).slice(0, 200) });
+    }
+  };
+
+  const bindSelectedImage = () => {
+    const st = useCanvasStore.getState();
+    const sel = st.nodes.find((n) => n.id === st.selectedId && n.id !== id);
+    const sd = sel?.data as { kind?: string; imageUrl?: string } | undefined;
+    if (
+      sd?.imageUrl &&
+      (sd.kind === "image" || sd.kind === "shot" || sd.kind === "director" || sd.kind === "digitalHuman")
+    ) {
+      updateNodeData(id, { imageUrl: sd.imageUrl });
+      setStatus("已绑定选中节点图片为数字人形象");
+      return;
+    }
+    setStatus("请先选中带图片的镜头/图片/导演台节点");
+  };
+
+  const generateVoice = async () => {
+    const line = (d.line || "").trim();
+    if (!line) {
+      updateNodeData(id, { status: "failed", errorMessage: "请先填写台词" });
+      setStatus("请先填写台词");
+      return;
+    }
+    updateNodeData(id, { status: "generating", errorMessage: "" });
+    const prompt = d.characterName?.trim() ? `${d.characterName.trim()}：${line}` : line;
+    try {
+      const res = await generateAudioViaHost({ prompt });
+      if (!res.ok || !res.audio_url) {
+        throw new Error(res.message || "配音失败");
+      }
+      setNodeAudio(id, res.audio_url);
+      updateNodeData(id, { status: "success", errorMessage: "" });
+      setStatus(`${res.message || "配音已生成"}（口型成片未接入）`);
+    } catch (e) {
+      updateNodeData(id, { status: "failed", errorMessage: String(e).slice(0, 200) });
+      setStatus(`配音失败：${e}`);
+    }
+  };
+
+  const talkingHead = () => {
+    updateNodeData(id, { status: "failed", errorMessage: TALKING_HEAD_UNAVAILABLE });
+    setStatus(TALKING_HEAD_UNAVAILABLE);
+  };
+
+  return (
+    <div className={`sg-node digital-human${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={260} minHeight={240} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🧑 {d.title || "数字人"}</span>
+        <button
+          type="button"
+          className="sg-node-mini-btn primary"
+          disabled={busy}
+          onClick={() => void generateVoice()}
+        >
+          {busy ? "配音中…" : "生成配音"}
+        </button>
+      </div>
+      <div className="body nodrag">
+        {d.imageUrl ? (
+          <div className="img-wrap">
+            <img src={d.imageUrl} alt="" />
+          </div>
+        ) : (
+          <div className="sg-director-empty">上传或绑定形象图 · 台词走 TTS</div>
+        )}
+        <input
+          className="sg-node-inline-input"
+          value={d.characterName || ""}
+          placeholder="角色名（可选）"
+          onChange={(e) => updateNodeData(id, { characterName: e.target.value })}
+        />
+        <textarea
+          className="sg-node-inline-ta"
+          value={d.line || ""}
+          placeholder="台词…"
+          onChange={(e) => updateNodeData(id, { line: e.target.value })}
+        />
+        <div className="sg-anim-actions">
+          <button type="button" className="sg-node-mini-btn" onClick={() => fileRef.current?.click()}>
+            上传形象
+          </button>
+          <button type="button" className="sg-node-mini-btn" onClick={bindSelectedImage}>
+            绑选中图
+          </button>
+          <button type="button" className="sg-node-mini-btn" onClick={talkingHead}>
+            口型成片
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => void onUploadPortrait(e.target.files?.[0] || null)}
+        />
+        {d.audioUrl ? <audio src={d.audioUrl} controls style={{ width: "100%", marginTop: 6 }} /> : null}
+        {d.errorMessage ? <div className="sg-node-error">{d.errorMessage}</div> : null}
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
 export const AnimationNode = memo(function AnimationNode({ id, data, selected }: NodeProps) {
   const d = data as AnimationData;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const setStatus = useCanvasStore((s) => s.setStatus);
-  const { cols, rows } = useMemo(() => animationGrid(d.frames || 8), [d.frames]);
+  const { cols, rows } = useMemo(() => animationGrid(d.frames || 20), [d.frames]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onUpload = async (file: File | null) => {
@@ -178,7 +375,7 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
   };
 
   const makePlaceholder = () => {
-    const sheetUrl = makePlaceholderSpriteSheet(d.action || "walk", d.frames || 8);
+    const sheetUrl = makePlaceholderSpriteSheet(d.action || "walk", d.frames || 20);
     updateNodeData(id, { sheetUrl, status: "success", previewMode: "playing" });
     setStatus("已生成占位逐帧表");
   };
@@ -186,7 +383,8 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
   const aiGenerate = async () => {
     updateNodeData(id, { status: "generating", errorMessage: "" });
     const prompt =
-      `${d.prompt || "角色"}，${ANIMATION_ACTION_LABELS[d.action] || d.action}动作，` +
+      `${d.prompt || "2D俯视角游戏角色，保持角色造型、朝向、比例和光照一致"}，` +
+      `${ANIMATION_ACTION_LABELS[d.action] || d.action}动作，` +
       `${cols}x${rows} sprite sheet，${d.frames}帧，纯白背景，侧视图，游戏像素清晰轮廓`;
     try {
       const res = await generateImageViaHost({ prompt, n: 1 });
@@ -205,40 +403,31 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
       <NodeResizer minWidth={280} minHeight={220} isVisible={!!selected} />
       <Handle type="target" position={Position.Left} />
       <div className="head">
-        <span>🎞️ {d.title || "逐帧动画"}</span>
-        <span className="sg-meta-tiny">{ANIMATION_ACTION_LABELS[d.action] || d.action}</span>
+        <span>🎞️ {d.title || "生成动画"}</span>
+        <span className="head-actions">
+          {d.sheetUrl ? (
+            <>
+              <button
+                type="button"
+                className="sg-node-mini-btn"
+                title={d.previewMode === "playing" ? "播放动画" : "播放"}
+                onClick={() => updateNodeData(id, { previewMode: "playing" })}
+              >
+                ▶
+              </button>
+              <button
+                type="button"
+                className={`sg-node-mini-btn${d.previewMode === "sheet" ? " on" : ""}`}
+                title="查看整表（网格）"
+                onClick={() => updateNodeData(id, { previewMode: "sheet" })}
+              >
+                ▦
+              </button>
+            </>
+          ) : null}
+        </span>
       </div>
       <div className="body nodrag">
-        <div className="sg-anim-toolbar">
-          <select
-            value={d.action}
-            onChange={(e) => updateNodeData(id, { action: e.target.value as AnimationAction })}
-          >
-            {(Object.keys(ANIMATION_ACTION_LABELS) as AnimationAction[]).map((k) => (
-              <option key={k} value={k}>
-                {ANIMATION_ACTION_LABELS[k]}
-              </option>
-            ))}
-          </select>
-          <select
-            value={d.frames}
-            onChange={(e) => updateNodeData(id, { frames: Number(e.target.value) as AnimationData["frames"] })}
-          >
-            {[6, 8, 12, 16].map((n) => (
-              <option key={n} value={n}>
-                {n}帧
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={1}
-            max={30}
-            value={d.fps || 8}
-            title="FPS"
-            onChange={(e) => updateNodeData(id, { fps: Math.max(1, Number(e.target.value) || 8) })}
-          />
-        </div>
         {d.sheetUrl ? (
           d.previewMode === "playing" ? (
             <div
@@ -246,7 +435,7 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
               style={{
                 backgroundImage: `url(${d.sheetUrl})`,
                 backgroundSize: `${cols * 100}% ${rows * 100}%`,
-                animationDuration: `${(d.frames || 8) / Math.max(d.fps || 8, 1)}s`,
+                animationDuration: `${(d.frames || 20) / Math.max(d.fps || 8, 1)}s`,
                 // @ts-expect-error CSS custom props
                 "--sg-sprite-steps": d.frames - 1,
                 "--sg-sprite-cols": cols,
@@ -259,8 +448,59 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
             </div>
           )
         ) : (
-          <div className="sg-director-empty">上传 Sheet / 占位表 / AI 生成</div>
+          <div className="sg-anim-empty">
+            <span className="sg-anim-empty-icon">🎞️</span>
+            <span className="sg-anim-empty-title">点击节点描述角色并生成</span>
+            <span className="sg-anim-empty-meta">
+              {d.status === "generating" ? "生成中…" : "待机"} · {d.frames} 帧 · {cols}×{rows}
+            </span>
+          </div>
         )}
+        <textarea
+          className="sg-anim-prompt"
+          rows={2}
+          placeholder="2D俯视角游戏角色，保持角色造型、朝向、比例和光照一致"
+          value={d.prompt || ""}
+          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+        />
+        <div className="sg-anim-toolbar">
+          {/* 动作图标行 */}
+          <div className="sg-anim-actions-row">
+            {(Object.keys(ANIMATION_ACTION_LABELS) as AnimationAction[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`sg-anim-action-icon${d.action === k ? " on" : ""}`}
+                title={ANIMATION_ACTION_LABELS[k]}
+                onClick={() => updateNodeData(id, { action: k })}
+              >
+                {ACTION_ICONS[k]}
+              </button>
+            ))}
+          </div>
+          <select
+            value={d.frames}
+            onChange={(e) => updateNodeData(id, { frames: Number(e.target.value) as AnimationData["frames"] })}
+            title="帧数"
+          >
+            {[6, 8, 12, 16, 20].map((n) => (
+              <option key={n} value={n}>
+                {n} 帧
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={d.fps || 8}
+            title="FPS"
+            onChange={(e) => updateNodeData(id, { fps: Math.max(1, Number(e.target.value) || 8) })}
+          />
+          <button type="button" className="sg-node-mini-btn primary" onClick={() => void aiGenerate()} title="AI 生成">
+            →
+          </button>
+        </div>
         <div className="sg-anim-actions">
           <button type="button" className="sg-node-mini-btn" onClick={() => fileRef.current?.click()}>
             上传
@@ -271,19 +511,6 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
           <button type="button" className="sg-node-mini-btn primary" onClick={() => void aiGenerate()}>
             AI 生成
           </button>
-          {d.sheetUrl ? (
-            <button
-              type="button"
-              className="sg-node-mini-btn"
-              onClick={() =>
-                updateNodeData(id, {
-                  previewMode: d.previewMode === "playing" ? "sheet" : "playing",
-                })
-              }
-            >
-              {d.previewMode === "playing" ? "看整表" : "播放"}
-            </button>
-          ) : null}
         </div>
         <input
           ref={fileRef}
@@ -291,12 +518,6 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
           accept="image/*"
           hidden
           onChange={(e) => void onUpload(e.target.files?.[0] || null)}
-        />
-        <textarea
-          className="sg-node-inline-ta"
-          value={d.prompt || ""}
-          placeholder="角色描述…"
-          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
         />
         {d.status === "failed" && d.errorMessage ? (
           <div className="meta" style={{ color: "#fca5a5" }}>
@@ -564,6 +785,12 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
           选择文件
         </button>
         {d.fileName ? <div className="meta">{d.fileName}</div> : null}
+        {d.editorRange || d.editorStatus ? (
+          <div className="meta">
+            剪辑{d.editorStatus === "in_timeline" ? "已入轨" : d.editorStatus === "sent" ? "已推送" : ""}{" "}
+            {d.editorRange || ""}
+          </div>
+        ) : null}
         <input
           ref={fileRef}
           type="file"

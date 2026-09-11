@@ -163,6 +163,12 @@ from .core import EventBus, EventType, MasterClock, DataBus
 from .skill_engine import SkillEngine, Skill
 from .ai_agent_panel import AiAgentPanelMixin  # P0 拆分：AI 方法 Mixin
 from .editor_export_panel import EditorExportPanelMixin  # P0 拆分：导出方法 Mixin
+from .editor_agent_panel_mixin import EditorAgentPanelMixin
+from .editor_effects_mixin import EditorEffectsMixin
+from .editor_ui_builder_mixin import EditorUiBuilderMixin
+from .editor_ai_process_mixin import EditorAiProcessMixin
+from .editor_ai_tools_mixin import EditorAiToolsMixin
+from .editor_agent_runtime_mixin import EditorAgentRuntimeMixin
 from .account_skills import (
     AccountDataCollectSkill, AccountAnalysisSkill,
     PublishContentSkill, MatrixPublishSkill, register_account_skills
@@ -210,7 +216,7 @@ try:
     from .viral_optimization_engine import ViralOptimizationEngine, Platform, VideoFeatures
     VIRAL_ENGINE_AVAILABLE = True
 except ImportError as e:
-    print(f"爆款优化引擎导入失败: {e}")
+    logger.error(f'爆款优化引擎导入失败: {e}')
     VIRAL_ENGINE_AVAILABLE = False
 
 # 工具类
@@ -469,7 +475,7 @@ def composite_overlay_bgr_blend(base_bgr, overlay_bgr, tf: dict, opacity: float 
     return result
 
 
-class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
+class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, EditorAgentPanelMixin, EditorEffectsMixin, EditorUiBuilderMixin, EditorAiProcessMixin, EditorAiToolsMixin, EditorAgentRuntimeMixin):
     """
     视频剪辑模块
     - 轨道,预览,波形,切割,滤镜,转场,字幕
@@ -504,6 +510,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         # 视频片段管理
         self._clips = []  # 存储视频片段
         self._current_clip = None  # 当前选中的片段
+        self._last_beat_times = []
         self._clip_widgets = []  # 存储片段控件
         # 补短 P1#8：clip_id -> ClipWidget 映射，便于按 id 注入关键帧
         self._clip_id_to_widget = {}
@@ -612,6 +619,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
 
         # 注册 material_to_timeline 事件：接收素材库拖拽/右键推送
         self._event_bus.on(EventType.MATERIAL_TO_TIMELINE, self._on_material_dropped)
+        try:
+            from app.core.canvas_bridge import set_timeline_snapshot_provider
+            set_timeline_snapshot_provider(lambda: self.agent_get_timeline_context())
+        except Exception:
+            pass
         
         # 连接工作流 / 数据分析 / JKL：延后到首屏渲染后，避免挡住模块打开
         QTimer.singleShot(0, self._deferred_editor_boot)
@@ -701,44 +713,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             except ImportError:
                 from core.editor_scheduler import editor_scheduler
             self._top0_processor = editor_scheduler.get_top0_processor()
-            print("✅ TOP 0级剪辑引擎已通过统一内核调度器加载")
+            logger.info('✅ TOP 0级剪辑引擎已通过统一内核调度器加载')
         except Exception as e:
-            print(f"⚠️ TOP 0级引擎初始化失败: {e}")
+            logger.error(f'⚠️ TOP 0级引擎初始化失败: {e}')
         return self._top0_processor
     
-    def _ensure_viral_engine(self):
-        """懒加载爆款引擎"""
-        if self._viral_initialized:
-            return self._viral_engine
-        self._viral_initialized = True
-        if VIRAL_ENGINE_AVAILABLE:
-            try:
-                self._viral_engine = ViralOptimizationEngine()
-                print("✅ 爆款优化引擎已加载")
-            except Exception as e:
-                print(f"⚠️ 爆款优化引擎初始化失败: {e}")
-        return self._viral_engine
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def _ensure_ai_clip_algorithm(self):
-        """懒加载AI剪辑算法（避免顶层导入 PyQt6 重模块引发循环依赖）。"""
-        if getattr(self, "_ai_clip_initialized", False):
-            return getattr(self, "_ai_clip_algorithm", None)
-        self._ai_clip_initialized = True
-        try:
-            from app.modules.lego.modules import AIClipAlgorithm
-            self._ai_clip_algorithm = AIClipAlgorithm()
-            print("✅ 智能剪辑算法已加载")
-        except Exception as _e:
-            logger.warning("AIClipAlgorithm 加载失败: %s", _e)
-            self._ai_clip_algorithm = None
-        return self._ai_clip_algorithm
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
     def _ensure_audio_manager(self):
         """懒加载音频管理器"""
         if self._audio_manager is not None:
             return self._audio_manager
         self._audio_manager = AudioManager()
-        print("✅ 音频处理系统已加载")
+        logger.info('✅ 音频处理系统已加载')
         return self._audio_manager
     
     def _ensure_subtitle_manager(self):
@@ -746,7 +735,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         if self._subtitle_manager is not None:
             return self._subtitle_manager
         self._subtitle_manager = SubtitleManager()
-        print("✅ 字幕系统已加载")
+        logger.info('✅ 字幕系统已加载')
         return self._subtitle_manager
     
     def _ensure_preset_manager(self):
@@ -754,7 +743,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         if self._preset_manager is not None:
             return self._preset_manager
         self._preset_manager = PresetManager()
-        print("✅ 预设系统已加载")
+        logger.info('✅ 预设系统已加载')
         return self._preset_manager
     
     def _ensure_plugin_manager(self):
@@ -763,7 +752,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             return self._plugin_manager
         self._plugin_manager = PluginManager()
         self._plugin_manager.load_plugins()
-        print("✅ 插件系统已加载")
+        logger.info('✅ 插件系统已加载')
         return self._plugin_manager
     
     def _ensure_preview_manager(self):
@@ -785,7 +774,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 )
         except Exception as e:
             logger.debug("初始化预览档位失败: %s", e)
-        print("✅ 预览管理器已加载")
+        logger.info('✅ 预览管理器已加载')
         return self._preview_manager
 
     def _ensure_gl_preview(self):
@@ -855,7 +844,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             # GL 接管滤镜后，PreviewManager 只供原始帧
             if getattr(self, '_preview_manager', None) is not None:
                 self._preview_manager.set_active_effects(None)
-            print("✅ GPU 滤镜预览已启用")
+            logger.info('✅ GPU 滤镜预览已启用')
             return w
         except Exception as e:
             orphan = locals().get("w")
@@ -896,32 +885,48 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         """懒加载调度器"""
         if self._editor_scheduler is not None:
             return self._editor_scheduler
-        self._editor_scheduler = get_editor_scheduler()
-        print("✅ 双内核调度器已加载")
+        try:
+            from app.core.editor_scheduler import editor_scheduler as _scheduler
+        except ImportError:
+            from core.editor_scheduler import editor_scheduler as _scheduler
+        self._editor_scheduler = _scheduler
+        logger.info('✅ 双内核调度器已加载')
         return self._editor_scheduler
     
     def _ensure_project_manager(self):
         """懒加载项目管理器"""
         if self._project_manager is not None:
             return self._project_manager
-        self._project_manager = get_project_manager()
-        print("✅ 项目管理系统已加载")
+        try:
+            from app.core.project_manager import project_manager as _pm
+        except ImportError:
+            from core.project_manager import project_manager as _pm
+        self._project_manager = _pm
+        logger.info('✅ 项目管理系统已加载')
         return self._project_manager
     
     def _ensure_media_manager(self):
         """懒加载素材管理器"""
         if self._media_manager is not None:
             return self._media_manager
-        self._media_manager = get_media_manager()
-        print("✅ 素材管理系统已加载")
+        try:
+            from app.core.asset_manager import asset_manager as _am
+        except ImportError:
+            from core.asset_manager import asset_manager as _am
+        self._media_manager = _am
+        logger.info('✅ 素材管理系统已加载')
         return self._media_manager
     
     def _ensure_timeline_manager(self):
         """懒加载时间线管理器"""
         if self._timeline_manager is not None:
             return self._timeline_manager
-        self._timeline_manager = get_timeline_manager()
-        print("✅ 时间线管理系统已加载")
+        try:
+            from app.core.timeline_manager import timeline_manager as _tm
+        except ImportError:
+            from core.timeline_manager import timeline_manager as _tm
+        self._timeline_manager = _tm
+        logger.info('✅ 时间线管理系统已加载')
         return self._timeline_manager
     
     def _ensure_effect_manager(self):
@@ -933,7 +938,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         except ImportError:
             from core.effect_manager import get_effect_manager as _gem
         self._effect_manager = _gem()
-        print("✅ 特效管理系统已加载")
+        logger.info('✅ 特效管理系统已加载')
         return self._effect_manager
     
     def _ensure_transition_manager(self):
@@ -945,7 +950,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         except ImportError:
             from core.transition_manager import get_transition_manager as _gtm
         self._transition_manager = _gtm()
-        print("✅ 转场管理系统已加载")
+        logger.info('✅ 转场管理系统已加载')
         return self._transition_manager
     
     def _setup_ui(self):
@@ -1001,361 +1006,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             (t_timeline - t_tools) * 1000,
         )
     
-    def _create_toolbar(self) -> QWidget:
-        toolbar = QFrame()
-        toolbar.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333333;")
-        toolbar.setFixedHeight(50)
-        
-        layout = QHBoxLayout(toolbar)
-        layout.setContentsMargins(15, 5, 15, 5)
-        layout.setSpacing(10)
-        
-        # 工具栏与快捷键共用 editor_ux_commands 调度
-        from app.modules.lego.editor_ux_commands import bind_action
-        actions = [
-            ("📁 导入", bind_action(self, "import")),
-            ("📂 打开", bind_action(self, "open_project")),
-            ("💾 保存", bind_action(self, "save_project")),
-            ("✂️ 剪切", bind_action(self, "cut")),
-            ("📋 复制", bind_action(self, "copy")),
-            ("📄 粘贴", bind_action(self, "paste")),
-            ("🗑️ 删除", bind_action(self, "delete")),
-            ("🔄 撤销", bind_action(self, "undo"), "undo"),
-            ("🔄 重做", bind_action(self, "redo"), "redo"),
-            ("🧲 收拢", bind_action(self, "close_gap"), "close_gap"),
-        ]
-
-        for entry in actions:
-            # 兼容 (text, cb) 和 (text, cb, tag) 两种条目
-            if len(entry) == 3:
-                text, callback, tag = entry
-            else:
-                text, callback = entry
-                tag = ""
-            btn = QPushButton(text)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a2a2a;
-                    color: #ffffff;
-                    border: 1px solid #3a3a3a;
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    font-size: 13px;
-                    font-weight: 500;
-                    height: 40px;
-                }
-                QPushButton:hover {
-                    background-color: #3a3a3a;
-                    border-color: #4a4a4a;
-                }
-                QPushButton:pressed {
-                    background-color: #1e6bde;
-                    border-color: #1e6bde;
-                }
-            """)
-            btn.clicked.connect(callback)
-            # 补短 P0#4：保存撤销/重做按钮引用，便于状态联动
-            if tag == "undo":
-                self._undo_btn = btn
-                btn.setShortcut(QKeySequence("Ctrl+Z"))
-                btn.setToolTip("撤销 (Ctrl+Z)")
-            elif tag == "redo":
-                self._redo_btn = btn
-                btn.setShortcut(QKeySequence("Ctrl+Y"))
-                btn.setToolTip("重做 (Ctrl+Y)")
-            elif tag == "close_gap":
-                btn.setToolTip("空隙收拢 / 波纹消隙 (Shift+Delete)")
-            layout.addWidget(btn)
-
-        layout.addStretch()
-        
-        # 内核选择下拉菜单
-        kernel_layout = QHBoxLayout()
-        kernel_label = QLabel("内核:")
-        kernel_label.setStyleSheet("color: #808080; font-size: 13px; padding-right: 8px;")
-        self._kernel_combo = QComboBox()
-        self._kernel_combo.addItems(["自动选择", "轻量内核", "专业内核"])
-        self._kernel_combo.setCurrentIndex(0)  # 默认由统一调度器自主选择内核
-        self._kernel_combo.currentIndexChanged.connect(self._on_kernel_changed)
-        self._kernel_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #3a3a3a;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 12px;
-                min-width: 100px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: url(:/icons/arrow-down.png);
-                width: 12px;
-                height: 12px;
-            }
-        """)
-        kernel_layout.addWidget(kernel_label)
-        kernel_layout.addWidget(self._kernel_combo)
-        layout.addLayout(kernel_layout)
-        
-        self._time_label = QLabel("00:00:00:00")
-        self._time_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 14px; color: #1e6bde; padding: 0 10px;")
-        layout.addWidget(self._time_label)
-        
-        export_btn = QPushButton("💾 导出")
-        export_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde;
-                color: white;
-                border: 1px solid #1e6bde;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: 600;
-                height: 40px;
-            }
-            QPushButton:hover {
-                background-color: #1557b0;
-                border-color: #1557b0;
-            }
-            QPushButton:pressed {
-                background-color: #0d47a1;
-                border-color: #0d47a1;
-            }
-        """)
-        export_btn.clicked.connect(self._export_video)
-        layout.addWidget(export_btn)
-
-        # 补短 P0#4：toolbar 创建完毕，初始化撤销/重做按钮禁用态
-        # （无历史时按钮应当不可点，避免用户误操作）
-        if not getattr(self, '_action_history', []):
-            if self._undo_btn is not None:
-                self._undo_btn.setEnabled(False)
-                self._undo_btn.setToolTip("无可撤销操作")
-            if self._redo_btn is not None:
-                self._redo_btn.setEnabled(False)
-                self._redo_btn.setToolTip("无可重做操作")
-
-        return toolbar
-    
-    def _create_preview_panel(self) -> QWidget:
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame#previewCard {
-                background-color: #121212; border: 1px solid #252525; border-radius: 12px;
-            }
-        """)
-        card.setObjectName("previewCard")
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        title_bar = QFrame()
-        title_bar.setStyleSheet("background-color: transparent; border-bottom: 1px solid #1e1e1e;")
-        title_bar.setFixedHeight(32)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(12, 0, 12, 0)
-        title_label = QLabel("🖥 预览窗口")
-        title_label.setStyleSheet("color: #999999; font-size: 11px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-
-        # 分级预览：1/4 · 1/2 · 100%（拖 scrub / 播放强制 1/4，静止回用户档）
-        from app.modules.lego.editor_preview_ux import quality_combo_items
-        q_lbl = QLabel("预览")
-        q_lbl.setStyleSheet("color:#666;font-size:10px;padding-left:8px;")
-        title_layout.addWidget(q_lbl)
-        self._preview_quality_combo = QComboBox()
-        self._preview_quality_combo.setFixedWidth(96)
-        self._preview_quality_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#ddd;border:1px solid #333;border-radius:4px;"
-            "padding:1px 4px;font-size:10px;}QComboBox:hover{border-color:#1e6bde;}"
-        )
-        for text, pm_q in quality_combo_items():
-            self._preview_quality_combo.addItem(text, pm_q)
-        # 默认选中用户档
-        want = getattr(self, "_user_preview_quality", "medium")
-        for i in range(self._preview_quality_combo.count()):
-            if self._preview_quality_combo.itemData(i) == want:
-                self._preview_quality_combo.setCurrentIndex(i)
-                break
-        self._preview_quality_combo.setToolTip(
-            "预览分辨率：粗剪 1/4 · 常规 1/2 · 精剪 100%；拖动/播放自动降至 1/4"
-        )
-        self._preview_quality_combo.currentIndexChanged.connect(self._on_preview_quality_combo)
-        title_layout.addWidget(self._preview_quality_combo)
-
-        self._proxy_toggle_btn = QPushButton("代理")
-        self._proxy_toggle_btn.setCheckable(True)
-        self._proxy_toggle_btn.setChecked(bool(getattr(self, "_proxy_preview_enabled", True)))
-        self._proxy_toggle_btn.setFixedHeight(22)
-        self._proxy_toggle_btn.setStyleSheet(
-            "QPushButton{background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;"
-            "padding:2px 8px;font-size:10px;}"
-            "QPushButton:checked{background:#1e6bde;color:#fff;border-color:#1e6bde;}"
-        )
-        self._proxy_toggle_btn.setToolTip("预览走代理媒体（导出仍用原片）；高码率/4K 建议开启")
-        self._proxy_toggle_btn.toggled.connect(self.set_proxy_preview_enabled)
-        title_layout.addWidget(self._proxy_toggle_btn)
-
-        title_layout.addStretch()
-        self._timecode_label = QLabel("00:00:00:00")
-        self._timecode_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 12px; font-weight: 600; color: #1e6bde;")
-        title_layout.addWidget(self._timecode_label)
-        layout.addWidget(title_bar)
-        
-        body = QWidget()
-        body_lo = QVBoxLayout(body)
-        body_lo.setContentsMargins(8, 8, 8, 8)
-        body_lo.setSpacing(8)
-        
-        self._preview_frame = QFrame()
-        self._preview_frame.setStyleSheet("background-color: #000000; border-radius: 8px;")
-        self._video_widget.setStyleSheet("background-color: #000000; border-radius: 8px;")
-        pv_layout = QStackedLayout(self._preview_frame)
-        pv_layout.setContentsMargins(0, 0, 0, 0)
-        self._video_widget.setStyleSheet("background-color: #000000;")
-        pv_layout.addWidget(self._video_widget)
-        self._preview_label = QLabel("")
-        self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setScaledContents(False)
-        self._preview_label.setStyleSheet("color: #666666; font-size: 16px; background-color: #000000;")
-        self._preview_label.setMouseTracking(True)
-        self._preview_label.installEventFilter(self)
-        self._preview_frame.installEventFilter(self)
-        self._preview_drag_active = False
-        self._preview_drag_origin = None
-        self._preview_drag_tf0 = None
-        self._preview_drag_mode = "move"
-        self._preview_drag_angle0 = 0.0
-        pv_layout.addWidget(self._preview_label)
-        pv_layout.setCurrentWidget(self._preview_label)
-        body_lo.addWidget(self._preview_frame, 1)
-        
-        controls = QWidget()
-        controls_layout = QHBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 4, 0, 0)
-        controls_layout.setSpacing(6)
-        
-        self._progress_bar = QSlider(Qt.Orientation.Horizontal)
-        self._progress_bar.setRange(0, 1000)
-        self._progress_bar.setToolTip("拖动跳转时间线播放头")
-        self._progress_bar.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background-color: #1e1e1e; height: 4px; border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background-color: #1e6bde; width: 12px; height: 12px;
-                margin: -4px 0; border-radius: 6px;
-            }
-        """)
-        self._progress_bar.sliderMoved.connect(self._on_progress_slider_moved)
-        self._progress_bar.sliderReleased.connect(self._on_progress_slider_released)
-        controls_layout.addWidget(self._progress_bar, 1)
-        
-        self._time_label = QLabel("00:00 / 00:00")
-        self._time_label.setStyleSheet("color: #666666; font-size: 11px;")
-        controls_layout.addWidget(self._time_label)
-
-        # M2：预览区画幅提示（竖屏漫剧默认 9:16）
-        self._preview_aspect_badge = QLabel(self._sequence_format.badge_text())
-        self._preview_aspect_badge.setStyleSheet(
-            "QLabel{background:#1a3a2a;color:#7ee787;border:1px solid #2f5139;"
-            "border-radius:4px;padding:2px 8px;font-size:10px;font-weight:600;}"
-        )
-        self._preview_aspect_badge.setToolTip(
-            "工程画幅 SSOT；点击切换 黑边/裁切；预览 letterbox；导出同步"
-        )
-        self._preview_aspect_badge.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._preview_aspect_badge.mousePressEvent = (  # type: ignore[method-assign]
-            lambda _e: self._toggle_sequence_fit_mode()
-        )
-        controls_layout.addWidget(self._preview_aspect_badge)
-        
-        body_lo.addWidget(controls)
-        
-        layout.addWidget(body, 1)
-        return card
-    
-    def _create_tools_panel(self) -> QWidget:
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame#toolsCard {
-                background-color: #121212; border: 1px solid #252525; border-radius: 12px;
-            }
-        """)
-        card.setObjectName("toolsCard")
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        title_bar = QFrame()
-        title_bar.setStyleSheet("background-color: transparent; border-bottom: 1px solid #1e1e1e;")
-        title_bar.setFixedHeight(32)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(12, 0, 12, 0)
-        title_label = QLabel("🔧 工具栏")
-        title_label.setStyleSheet("color: #999999; font-size: 11px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        layout.addWidget(title_bar)
-        
-        tabs = QTabWidget()
-        tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; background-color: #121212; }
-            QTabBar::tab {
-                background-color: transparent; color: #888888; border: none;
-                padding: 6px 8px; font-size: 11px; min-width: 40px;
-                border-bottom: 2px solid transparent;
-            }
-            QTabBar::tab:selected {
-                color: #ffffff; border-bottom: 2px solid #1e6bde;
-            }
-            QTabBar::tab:hover:!selected { color: #cccccc; }
-        """)
-
-        # 首屏只建「属性」；其余 Tab 点开再构造（显著缩短首次打开）
-        self._tools_lazy_built: set = set()
-        self._tools_lazy_factories: Dict[int, Any] = {}
-
-        def _placeholder() -> QWidget:
-            w = QWidget()
-            lo = QVBoxLayout(w)
-            lo.setContentsMargins(0, 0, 0, 0)
-            lo.setSpacing(0)
-            tip = QLabel("加载中…")
-            tip.setStyleSheet("color:#666;font-size:11px;padding:16px;")
-            tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lo.addWidget(tip)
-            w._lazy_tip = tip  # type: ignore[attr-defined]
-            return w
-
-        def _add_lazy(title: str, factory) -> int:
-            holder = _placeholder()
-            idx = tabs.addTab(holder, title)
-            self._tools_lazy_factories[idx] = factory
-            return idx
-
-        # 属性：选中片段立刻要用，同步构建
-        tabs.addTab(self._make_pro_tab(), "属性")
-        _add_lazy("调色", self._make_color_tab)
-        _add_lazy("特效", self._make_effect_tab)
-        _add_lazy("文字", self._make_text_tab)
-        _add_lazy("贴纸", self._make_sticker_tab)
-        _add_lazy("音频", self._make_audio_tab)
-        _add_lazy("角色", self._create_character_tab)
-        _add_lazy("AI", self._create_ai_tools_tab)
-        self._agent_tab_index = _add_lazy("🤖 Agent", self._create_edit_agent_panel)
-        _add_lazy("导出", self._create_params_tab)
-
-        tabs.currentChanged.connect(self._on_tools_tab_changed)
-        self._tools_tabs = tabs
-        layout.addWidget(tabs, 1)
-        return card
-
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     def _on_tools_tab_changed(self, index: int) -> None:
         """首次切到某工具 Tab 时再构造内容。"""
         if index < 0:
@@ -1523,108 +1176,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         from app.modules.lego.editor_color_panel import build_color_panel_tab
         return build_color_panel_tab(self)
 
-    def _make_effect_tab(self):
-        t = QWidget()
-        s = QScrollArea()
-        s.setWidgetResizable(True)
-        s.setStyleSheet("QScrollArea{background:#121212;border:none;}")
-        c = QWidget()
-        l = QVBoxLayout(c)
-        l.setContentsMargins(8,8,8,8)
-        l.setSpacing(6)
-
-        fl = self._sect("滤镜")
-        self._filter_category_combo = QComboBox()
-        self._filter_category_combo.addItems(
-            ["全部", "电影感", "复古", "清新", "黑白", "暖色调", "冷色调", "梦幻", "锐利", "柔和", "都市", "黄昏"]
-        )
-        self._filter_category_combo.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;"
-            "padding:3px 6px;font-size:10px;}QComboBox:hover{border-color:#333;}"
-            "QComboBox::drop-down{border:none;width:14px;}"
-            "QComboBox QAbstractItemView{background:#121212;color:#fff;border:1px solid #333;selection-background-color:#1e6bde;}"
-        )
-        self._add_cmb_row(fl.layout(), "分类", self._filter_category_combo)
-        g = QGridLayout()
-        g.setSpacing(4)
-        fts = [("🎞原片","#666"),("🎬电影","#d4a574"),("📷复古","#c4956a"),("🌿清新","#7ec87b"),
-               ("🖤黑白","#888"),("☀暖阳","#e8b86d"),("❄冷调","#7eb8da"),("💫梦幻","#c9a0dc"),
-               ("🎯锐利","#6db3f2"),("🌾柔和","#e8c4a2"),("🏙都市","#5d7b93"),("🌅黄昏","#e8945a")]
-        FILTER_KEYS = {
-            "🎞原片": "", "🎬电影": "电影感", "📷复古": "复古", "🌿清新": "清新",
-            "🖤黑白": "黑白", "☀暖阳": "暖色调", "❄冷调": "冷色调", "💫梦幻": "梦幻",
-            "🎯锐利": "锐利", "🌾柔和": "柔和", "🏙都市": "都市", "🌅黄昏": "黄昏",
-        }
-        self._filter_buttons = []
-        for i,(nm,hc) in enumerate(fts):
-            b = QPushButton(nm)
-            b.setStyleSheet(f"QPushButton{{background:#0a0a0a;color:#ccc;border:1px solid #222;border-left:3px solid {hc};border-radius:3px;padding:5px 6px;font-size:10px;text-align:left;}}QPushButton:hover{{background:#1a1a1a;color:#fff;}}")
-            key = FILTER_KEYS.get(nm, "")
-            if key == "":
-                b.clicked.connect(lambda _, b=b: self._clear_filter())
-            else:
-                b.clicked.connect(lambda _, k=key: self._select_filter(k))
-            g.addWidget(b,i//3,i%3)
-            self._filter_buttons.append((b, key))
-        self._filter_category_combo.currentTextChanged.connect(self._on_filter_category_changed)
-        fl.layout().addLayout(g)
-        self._filter_intensity_slider = QSlider(Qt.Orientation.Horizontal)
-        self._filter_intensity_slider.setRange(0, 100)
-        self._filter_intensity_slider.setValue(50)
-        self._filter_intensity_slider.setStyleSheet(
-            "QSlider::groove:horizontal{background:#222;height:3px;border-radius:2px;}"
-            "QSlider::handle:horizontal{background:#1e6bde;width:10px;height:10px;"
-            "border-radius:5px;margin:-3px 0;}"
-        )
-        self._filter_intensity_slider.valueChanged.connect(self._on_filter_intensity_live)
-        self._add_setting_row(fl.layout(), "强度", self._filter_intensity_slider, "%")
-        l.addWidget(fl)
-
-        tr = self._sect("转场")
-        self._transition_type_var = QComboBox()
-        self._transition_type_var.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;"
-            "padding:3px 6px;font-size:10px;}"
-        )
-        self._rebuild_transition_combo()
-        self._add_cmb_row(tr.layout(), "类型", self._transition_type_var)
-        self._transition_duration_var = QSpinBox()
-        self._transition_duration_var.setRange(100, 3000)
-        self._transition_duration_var.setValue(500)
-        self._transition_duration_var.setStyleSheet(
-            "QSpinBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;"
-            "padding:3px 5px;font-size:10px;}"
-        )
-        self._add_setting_row(tr.layout(), "时长", self._transition_duration_var, "ms")
-        self._transition_curve_var = QComboBox()
-        self._transition_curve_var.addItems(
-            ["线性", "缓入", "缓出", "缓入缓出", "弹性", "回弹"]
-        )
-        self._transition_curve_var.setStyleSheet(
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;"
-            "padding:3px 6px;font-size:10px;}"
-        )
-        self._add_cmb_row(tr.layout(), "曲线", self._transition_curve_var)
-        l.addWidget(tr)
-
-        efb = QHBoxLayout()
-        afb = QPushButton("✅ 应用滤镜")
-        afb.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:4px;padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
-        afb.clicked.connect(lambda: self._apply_active_filter_with_intensity())
-        efb.addWidget(afb)
-        atb = QPushButton("✅ 应用转场")
-        atb.setStyleSheet("QPushButton{background:#22c55e;color:#fff;border:none;border-radius:4px;padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#16a34a;}")
-        atb.clicked.connect(self._apply_transition)
-        efb.addWidget(atb)
-        l.addLayout(efb)
-
-        l.addStretch()
-        s.setWidget(c)
-        o = QVBoxLayout(t)
-        o.setContentsMargins(0,0,0,0)
-        o.addWidget(s)
-        return t
-
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     def _make_text_tab(self):
         t = QWidget()
         s = QScrollArea()
@@ -1660,387 +1212,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         from app.modules.lego.editor_audio_panel import build_audio_panel_tab
         return build_audio_panel_tab(self)
 
-    def _make_sticker_tab(self):
-        t = QWidget()
-        s = QScrollArea()
-        s.setWidgetResizable(True)
-        s.setStyleSheet("QScrollArea{background:#121212;border:none;}")
-        c = QWidget()
-        l = QVBoxLayout(c)
-        l.setContentsMargins(8,8,8,8)
-        l.setSpacing(6)
-
-        lib = self._sect("贴纸库")
-        g = QGridLayout()
-        g.setSpacing(4)
-        stickers = [("❤", "爱心"), ("⭐", "星星"), ("🔥", "火焰"), ("💎", "钻石"),
-                    ("🎵", "音符"), ("✨", "闪亮"), ("💬", "聊天气泡"), ("🏷", "标签"),
-                    ("👑", "皇冠"), ("🎯", "靶心"), ("🌈", "彩虹"), ("🎪", "马戏团")]
-        self._sticker_btns = []
-        for i, (emoji, name) in enumerate(stickers):
-            b = QPushButton(f"{emoji}\n{name}")
-            b.setStyleSheet("QPushButton{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:6px;padding:8px 4px;font-size:10px;min-height:48px;}QPushButton:hover{background:#1a1a1a;border-color:#1e6bde;}")
-            b.clicked.connect(lambda checked, n=name, e=emoji: self._add_sticker(n, e))
-            self._sticker_btns.append(b)
-            g.addWidget(b, i // 4, i % 4)
-        lib.layout().addLayout(g)
-        l.addWidget(lib)
-
-        cst = self._sect("自定义贴纸")
-        self._sticker_size = QSlider(Qt.Orientation.Horizontal); self._sticker_size.setRange(20,200); self._sticker_size.setValue(100)
-        self._sticker_rot = QSlider(Qt.Orientation.Horizontal); self._sticker_rot.setRange(-360,360); self._sticker_rot.setValue(0)
-        self._sticker_posx = QSlider(Qt.Orientation.Horizontal); self._sticker_posx.setRange(0,100); self._sticker_posx.setValue(50)
-        self._sticker_posy = QSlider(Qt.Orientation.Horizontal); self._sticker_posy.setRange(0,100); self._sticker_posy.setValue(50)
-        self._sticker_opacity = QSlider(Qt.Orientation.Horizontal); self._sticker_opacity.setRange(30,100); self._sticker_opacity.setValue(100)
-        for sl in [self._sticker_size, self._sticker_rot, self._sticker_posx, self._sticker_posy, self._sticker_opacity]:
-            sl.setStyleSheet("QSlider::groove:horizontal{background:#222;height:3px;border-radius:2px;}QSlider::handle:horizontal{background:#22c55e;width:10px;height:10px;border-radius:5px;margin:-3px 0;}")
-            sl.valueChanged.connect(self._on_sticker_param_live)
-        self._add_setting_row(cst.layout(), "大小", self._sticker_size, "%")
-        self._add_setting_row(cst.layout(), "旋转", self._sticker_rot, "°")
-        self._add_setting_row(cst.layout(), "位置X", self._sticker_posx, "%")
-        self._add_setting_row(cst.layout(), "位置Y", self._sticker_posy, "%")
-        self._add_setting_row(cst.layout(), "透明度", self._sticker_opacity, "%")
-        self._sticker_start = QDoubleSpinBox()
-        self._sticker_start.setRange(0, 99999)
-        self._sticker_start.setDecimals(1)
-        self._sticker_start.setSingleStep(0.5)
-        self._sticker_start.setValue(0.0)
-        self._sticker_end = QDoubleSpinBox()
-        self._sticker_end.setRange(0, 99999)
-        self._sticker_end.setDecimals(1)
-        self._sticker_end.setSingleStep(0.5)
-        self._sticker_end.setValue(99999.0)
-        for spn in (self._sticker_start, self._sticker_end):
-            spn.setSuffix("s")
-            spn.setStyleSheet("QDoubleSpinBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;padding:3px 5px;font-size:10px;}")
-            spn.setToolTip("贴纸仅在此时间区间内显示/导出；出点留最大值表示到片尾")
-            spn.valueChanged.connect(self._on_sticker_param_live)
-        self._add_setting_row(cst.layout(), "入点", self._sticker_start)
-        self._add_setting_row(cst.layout(), "出点", self._sticker_end)
-        add_custom = QPushButton("📁 导入贴纸")
-        add_custom.setStyleSheet("QPushButton{background:#22c55e;color:#fff;border:none;border-radius:4px;padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#16a34a;}")
-        add_custom.clicked.connect(self._import_sticker)
-        cst.layout().addWidget(add_custom)
-        l.addWidget(cst)
-
-        bns = QHBoxLayout()
-        apply_s = QPushButton("✅ 更新到画布")
-        apply_s.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:4px;padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
-        apply_s.setToolTip("把当前大小/位置/旋转写到选中贴纸，并刷新预览")
-        apply_s.clicked.connect(self._apply_sticker)
-        bns.addWidget(apply_s)
-        clear_s = QPushButton("🗑 清除贴纸")
-        clear_s.setStyleSheet("QPushButton{background:#ef4444;color:#fff;border:none;border-radius:4px;padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#dc2626;}")
-        clear_s.clicked.connect(self._clear_stickers)
-        bns.addWidget(clear_s)
-        l.addLayout(bns)
-
-        self._sticker_list = QListWidget()
-        self._sticker_list.setMaximumHeight(100)
-        self._sticker_list.setStyleSheet("QListWidget{background:#0a0a0a;color:#ccc;border:1px solid #222;border-radius:4px;font-size:10px;}")
-        self._sticker_list.currentRowChanged.connect(self._on_sticker_list_selected)
-        l.addWidget(self._sticker_list)
-
-        l.addStretch()
-        s.setWidget(c)
-        o = QVBoxLayout(t)
-        o.setContentsMargins(0,0,0,0)
-        o.addWidget(s)
-
-        self._active_stickers = []
-        return t
-
-    def _create_left_panel(self) -> QWidget:
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame#importCard {
-                background-color: #121212; border: 1px solid #252525; border-radius: 12px;
-            }
-        """)
-        card.setObjectName("importCard")
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        title_bar = QFrame()
-        title_bar.setStyleSheet("background-color: transparent; border-bottom: 1px solid #1e1e1e;")
-        title_bar.setFixedHeight(36)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(12, 0, 12, 0)
-        title_label = QLabel("📁 导入栏")
-        title_label.setStyleSheet("color: #999999; font-size: 11px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        layout.addWidget(title_bar)
-        
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(12, 12, 12, 12)
-        body_layout.setSpacing(10)
-        
-        import_btn = QPushButton("🎬 导入视频")
-        import_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e6bde; color: white; border: none;
-                border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600;
-            }
-            QPushButton:hover { background-color: #1557b0; }
-        """)
-        import_btn.clicked.connect(self._import_video)
-        body_layout.addWidget(import_btn)
-        
-        drag_hint = QLabel("或拖拽文件到此处")
-        drag_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        drag_hint.setStyleSheet("color: #555555; font-size: 11px; padding: 4px;")
-        body_layout.addWidget(drag_hint)
-        
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background-color: #1e1e1e; max-height: 1px;")
-        body_layout.addWidget(sep)
-        
-        fmt_label = QLabel("MP4 · AVI · MOV · MKV · WebM")
-        fmt_label.setStyleSheet("color: #555555; font-size: 10px;")
-        fmt_label.setWordWrap(True)
-        body_layout.addWidget(fmt_label)
-        
-        # ── 素材预览区域 ──
-        preview_sep = QFrame()
-        preview_sep.setFrameShape(QFrame.Shape.HLine)
-        preview_sep.setStyleSheet("background-color: #1e1e1e; max-height: 1px;")
-        body_layout.addWidget(preview_sep)
-        preview_title = QLabel("👁 素材预览")
-        preview_title.setStyleSheet("color: #999999; font-size: 12px; font-weight: 600;")
-        body_layout.addWidget(preview_title)
-        self._import_preview_label = QLabel("暂无预览")
-        self._import_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._import_preview_label.setMinimumHeight(120)
-        self._import_preview_label.setStyleSheet("""
-            QLabel {
-                background-color: #0a0a0a; border: 1px dashed #333;
-                border-radius: 6px; color: #555; font-size: 11px;
-            }
-        """)
-        body_layout.addWidget(self._import_preview_label)
-        
-        assets_label = QLabel("素材库")
-        assets_label.setStyleSheet("color: #999999; font-size: 12px; font-weight: 600; margin-top: 6px;")
-        body_layout.addWidget(assets_label)
-        
-        assets_list = QListWidget()
-        assets_list.setStyleSheet("""
-            QListWidget {
-                background-color: #0a0a0a; border: 1px solid #1e1e1e; border-radius: 8px;
-                color: #cccccc; font-size: 12px;
-            }
-            QListWidget::item { padding: 6px 10px; border-bottom: 1px solid #151515; }
-            QListWidget::item:hover { background-color: #1a1a1a; color: #ffffff; }
-        """)
-        assets_list.addItems(["📹 视频素材", "🎵 音频素材", "🖼 图片素材", "📝 字幕素材"])
-        body_layout.addWidget(assets_list)
-        
-        layout.addWidget(body, 1)
-        return card
-    
-    def _create_timeline_panel(self) -> QWidget:
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame#timelineCard {
-                background-color: #121212; border: 1px solid #252525; border-radius: 12px;
-            }
-        """)
-        card.setObjectName("timelineCard")
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        title_bar = QFrame()
-        title_bar.setStyleSheet("background-color: transparent; border-bottom: 1px solid #1e1e1e;")
-        title_bar.setFixedHeight(36)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(8, 4, 8, 4)
-        title_layout.setSpacing(4)
-        
-        add_track_btn = QPushButton("➕ 轨道")
-        add_track_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        add_track_btn.clicked.connect(lambda _: self._timeline_widget.add_track("新轨道", "video"))
-        title_layout.addWidget(add_track_btn)
-        
-        zoom_out_btn = QPushButton("−")
-        zoom_out_btn.setFixedWidth(22)
-        zoom_out_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:3px;padding:2px 4px;font-size:11px;font-weight:bold;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        zoom_out_btn.clicked.connect(lambda _: self._set_timeline_zoom(max(10, self._timeline_widget._zoom - 25)))
-        zoom_out_btn.setToolTip("缩小")
-        title_layout.addWidget(zoom_out_btn)
-        
-        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self._zoom_slider.setRange(10, 3000)
-        self._zoom_slider.setValue(100)
-        self._zoom_slider.setFixedWidth(120)
-        self._zoom_slider.setToolTip("时间线缩放 10%~3000%；Ctrl+滚轮也可缩放")
-        self._zoom_slider.setStyleSheet("""
-            QSlider::groove:horizontal{background:#222;height:3px;border-radius:2px;}
-            QSlider::handle:horizontal{background:#1e6bde;width:10px;height:10px;border-radius:5px;margin:-3px 0;}
-            QSlider::handle:horizontal:hover{background:#3b82f6;}
-            QSlider::sub-page:horizontal{background:#1e6bde;height:3px;border-radius:2px;}
-        """)
-        self._zoom_slider.valueChanged.connect(lambda v: self._set_timeline_zoom(v))
-        title_layout.addWidget(self._zoom_slider)
-        
-        zoom_in_btn = QPushButton("+")
-        zoom_in_btn.setFixedWidth(22)
-        zoom_in_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:3px;padding:2px 4px;font-size:11px;font-weight:bold;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        zoom_in_btn.clicked.connect(lambda _: self._set_timeline_zoom(min(3000, self._timeline_widget._zoom + 25)))
-        zoom_in_btn.setToolTip("放大")
-        title_layout.addWidget(zoom_in_btn)
-        
-        self._zoom_label = QLabel("100%")
-        self._zoom_label.setStyleSheet("color:#1e6bde;font-size:10px;font-weight:600;min-width:36px;")
-        self._zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_layout.addWidget(self._zoom_label)
-
-        zoom_fit_btn = QPushButton("⧉")
-        zoom_fit_btn.setFixedWidth(24)
-        zoom_fit_btn.setStyleSheet(
-            "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:3px;"
-            "padding:2px 4px;font-size:11px;}QPushButton:hover{background:#3a3a3a;color:#fff;}"
-        )
-        zoom_fit_btn.setToolTip("适应窗口（Ctrl+0）")
-        zoom_fit_btn.clicked.connect(self._zoom_timeline_to_fit)
-        title_layout.addWidget(zoom_fit_btn)
-
-        self._razor_btn = QPushButton("✂")
-        self._razor_btn.setFixedWidth(24)
-        self._razor_btn.setCheckable(True)
-        self._razor_btn.setStyleSheet(
-            "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:3px;"
-            "padding:2px 4px;font-size:11px;}QPushButton:hover{background:#3a3a3a;color:#fff;}"
-            "QPushButton:checked{background:#c0392b;color:#fff;border:1px solid #e74c3c;}"
-        )
-        self._razor_btn.setToolTip("刀片工具（C 切换）：悬停切开线，点击切开；Ctrl+K 在播放头切开")
-        self._razor_btn.clicked.connect(self._toggle_razor_tool)
-        title_layout.addWidget(self._razor_btn)
-        
-        sep0 = QFrame()
-        sep0.setStyleSheet("background-color:#333;min-width:1px;max-width:1px;")
-        sep0.setFixedSize(1, 20)
-        title_layout.addWidget(sep0)
-        
-        rew_btn = QPushButton("⏮")
-        rew_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:11px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        rew_btn.clicked.connect(self._rewind)
-        rew_btn.setToolTip("后退10秒")
-        title_layout.addWidget(rew_btn)
-        
-        self._pp_btn = QPushButton("▶")
-        self._pp_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:1px solid #1e6bde;border-radius:4px;padding:3px 10px;font-size:12px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
-        self._pp_btn.clicked.connect(self._play_pause)
-        self._pp_btn.setToolTip("播放/暂停")
-        title_layout.addWidget(self._pp_btn)
-        
-        ff_btn = QPushButton("⏭")
-        ff_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:11px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        ff_btn.clicked.connect(self._fast_forward)
-        ff_btn.setToolTip("快进10秒")
-        title_layout.addWidget(ff_btn)
-        
-        # ── 倍速控制 ──
-        speed_lbl = QLabel("⚡")
-        speed_lbl.setStyleSheet("color:#888;font-size:11px;min-width:16px;")
-        title_layout.addWidget(speed_lbl)
-        self._playback_speed_combo = QComboBox()
-        self._playback_speed_combo.addItems(["0.5x", "1x", "1.5x", "2x"])
-        self._playback_speed_combo.setCurrentIndex(1)
-        self._playback_speed_combo.setFixedWidth(58)
-        self._playback_speed_combo.setStyleSheet("QComboBox{background:#0a0a0a;color:#fff;border:1px solid #333;border-radius:4px;padding:2px 4px;font-size:10px;}QComboBox:hover{border-color:#1e6bde;}")
-        self._playback_speed_combo.currentTextChanged.connect(self._on_playback_speed_changed)
-        self._playback_speed_combo.setToolTip("播放倍速")
-        title_layout.addWidget(self._playback_speed_combo)
-        
-        sep1 = QFrame()
-        sep1.setStyleSheet("background-color:#333;min-width:1px;max-width:1px;")
-        sep1.setFixedSize(1, 20)
-        title_layout.addWidget(sep1)
-        
-        self._edit_agent_toggle_btn = QPushButton("🤖 剪辑 Agent")
-        self._edit_agent_toggle_btn.setCheckable(True)
-        self._edit_agent_toggle_btn.setStyleSheet("QPushButton{background:#22c55e;color:#fff;border:1px solid #16a34a;border-radius:4px;padding:3px 8px;font-size:10px;font-weight:500;}QPushButton:checked{background:#1e6bde;border-color:#1e6bde;}QPushButton:hover{background:#16a34a;}")
-        self._edit_agent_toggle_btn.clicked.connect(self._toggle_edit_agent_panel)
-        title_layout.addWidget(self._edit_agent_toggle_btn)
-        
-        title_layout.addStretch()
-        
-        snap_btn = QPushButton("📌 吸附")
-        snap_btn.setCheckable(True)
-        snap_btn.setChecked(True)  # 默认开启，与 TimelineWidget._snap_enabled 一致
-        snap_btn.setToolTip("吸附到播放头与相邻片缘（按像素阈值，放大后更精细；按住 Alt 临时关闭）")
-        snap_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:checked{background:#1e6bde;color:#fff;border-color:#1e6bde;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        snap_btn.toggled.connect(self._on_snap_toggled)
-        title_layout.addWidget(snap_btn)
-        self._snap_btn = snap_btn
-
-        ripple_btn = QPushButton("🌊 波纹删")
-        ripple_btn.setCheckable(True)
-        ripple_btn.setChecked(bool(getattr(self, "_ripple_delete_enabled", True)))
-        ripple_btn.setToolTip("开启：删除后后方片段前移闭合空隙；关闭：普通删除留白")
-        ripple_btn.setStyleSheet(
-            "QPushButton{background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;"
-            "padding:3px 8px;font-size:10px;}"
-            "QPushButton:checked{background:#0d9488;color:#fff;border-color:#0d9488;}"
-            "QPushButton:hover{background:#3a3a3a;color:#fff;}"
-        )
-        ripple_btn.toggled.connect(self._on_ripple_delete_toggled)
-        title_layout.addWidget(ripple_btn)
-        self._ripple_btn = ripple_btn
-
-        kf_btn = QPushButton("◆ 关键帧")
-        kf_btn.setToolTip("在播放头为当前片段添加关键帧（不透明度/音量/缩放）")
-        kf_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ddd;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        kf_btn.clicked.connect(self._on_add_keyframe_clicked)
-        title_layout.addWidget(kf_btn)
-        del_kf_btn = QPushButton("⌫ 删关键帧")
-        del_kf_btn.setToolTip("删除当前播放头附近的关键帧")
-        del_kf_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ddd;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
-        del_kf_btn.clicked.connect(self._on_delete_keyframe_near_playhead)
-        title_layout.addWidget(del_kf_btn)
-        
-        layout.addWidget(title_bar)
-        
-        body = QWidget()
-        body_lo = QVBoxLayout(body)
-        body_lo.setContentsMargins(8, 8, 8, 8)
-        
-        self._timeline_widget = TimelineWidget()
-        self._timeline_widget._snap_enabled = True
-        self._snap_enabled = True
-        self._timeline_widget.clip_selected.connect(self._on_clip_selected)
-        # 补短 P1#8：监听关键帧点击 - 落到具体 keyframe 数据上
-        self._timeline_widget.clip_keyframe_clicked.connect(self._on_keyframe_clicked)
-        # 连接拖放导入信号
-        self._timeline_widget.files_dropped.connect(self._on_files_dropped)
-        self._timeline_widget.clip_context_action.connect(self._on_timeline_clip_context)
-        self._timeline_widget.playhead_moved.connect(self._on_timeline_playhead_moved)
-        self._timeline_widget.clip_trim_committed.connect(self._on_clip_trim_committed)
-        self._timeline_widget.razor_cut_at.connect(self._on_razor_cut_at)
-        self._timeline_widget.razor_mode_changed.connect(self._on_razor_mode_changed)
-        self._timeline_widget._track_volume_changed_cb = self._on_timeline_track_volume
-        # Esc：优先取消拖拽/trim，其次退出刀片（时间线焦点；不抢模态对话框）
-        try:
-            self._razor_esc_shortcut = QShortcut(
-                QKeySequence(Qt.Key.Key_Escape), self._timeline_widget
-            )
-            self._razor_esc_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            self._razor_esc_shortcut.setEnabled(True)
-            self._razor_esc_shortcut.activated.connect(self._on_timeline_escape)
-        except Exception as e:
-            logger.debug("注册 Esc 时间线快捷键失败: %s", e)
-        body_lo.addWidget(self._timeline_widget, 3)
-
-        layout.addWidget(body, 1)
-        return card
-    
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     def _import_video(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择视频文件", "",
@@ -2071,7 +1245,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                         "preview_manager_is_none": self._preview_manager is None,
                     },
                 )
-                print(f"导入素材成功: {asset_info['name']}")
+                logger.info(f"导入素材成功: {asset_info['name']}")
                 # _load_video → 加片 → 已 open + 刷首帧；勿再 force/open（会清空缓存+帧数探针）
                 self._load_video(asset_info["path"])
                 self._video_source = asset_info["path"]
@@ -2092,7 +1266,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     {"error": repr(e), "error_type": type(e).__name__},
                 )
                 QMessageBox.warning(self, "导入失败", f"导入视频失败: {str(e)}")
-                print(f"导入视频失败: {e}")
+                logger.error(f'导入视频失败: {e}')
 
     def _update_import_preview(self, file_path):
         """更新导入栏素材预览（优先复用 PreviewManager 首帧，避免再起 ffmpeg 抢盘）。"""
@@ -2197,7 +1371,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 qimage = self._overlay_stickers_on_qimage(qimage)
                 qimage = self._overlay_transform_handles_on_qimage(qimage)
         except Exception as e:
-            print(f"字幕/贴纸叠加失败: {e}")
+            logger.error(f'字幕/贴纸叠加失败: {e}')
         self._present_preview_frame_cpu(qimage)
 
     def _present_preview_frame(self, qimage):
@@ -3206,7 +2380,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 except Exception:
                     self._proj_size_label.setText("预估: --")
         except Exception as e:
-            print(f"刷新导出信息失败: {e}")
+            logger.error(f'刷新导出信息失败: {e}')
 
 
     def _apply_filter_tab(self):
@@ -3236,7 +2410,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._ensure_media_audio_output()
         
         # 先加片（时长探测可轻量 open）；再统一 open+首帧，避免 import 路径多次关开 capture
-        print(f"加载视频: {file_path}")
+        logger.info(f'加载视频: {file_path}')
         self._suppress_add_clip_preview = True
         try:
             self._add_clip_to_timeline(file_path)
@@ -3258,13 +2432,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     hasattr(initial_frame, "isNull") and initial_frame.isNull()
                 ):
                     self._on_preview_frame(initial_frame)
-                    print(f"PreviewManager成功加载视频: {file_path}")
+                    logger.info(f'PreviewManager成功加载视频: {file_path}')
                 else:
                     self._force_show_first_video_frame()
             else:
                 self._force_show_first_video_frame()
         except Exception as e:
-            print(f"PreviewManager加载视频失败: {e}")
+            logger.error(f'PreviewManager加载视频失败: {e}')
             try:
                 self._force_show_first_video_frame()
             except Exception:
@@ -3277,7 +2451,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._current_clip = clip_data
         if not clip_data:
             return
-        print(f"选择片段: {clip_data.get('id')}")
+        logger.info(f"选择片段: {clip_data.get('id')}")
         self._sync_volume_slider_from_clip(clip_data)
         self._sync_pro_sliders_from_clip(clip_data)
         self._refresh_export_project_info()
@@ -3453,7 +2627,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
 
     def _on_media_error(self, error, error_string):
         """QMediaPlayer错误回调"""
-        print(f"媒体播放错误: {error_string}")
+        logger.error(f'媒体播放错误: {error_string}')
         self._audio_pending_play = False
         if not getattr(self, "_timeline_playing", False):
             self._preview_label.setText(f"播放失败: {error_string}")
@@ -3586,7 +2760,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         """
         clip = next((c for c in self._clips if c.get("id") == clip_id), None)
         if clip is None and clip_id not in getattr(self, "_clip_id_to_widget", {}):
-            print(f"[P1#8] add_keyframes_to_clip 失败: 找不到 clip_id={clip_id}")
+            logger.error(f'[P1#8] add_keyframes_to_clip 失败: 找不到 clip_id={clip_id}')
             return False
         before = list((clip or {}).get("keyframes") or [])
         merged = [dict(k) for k in (keyframes or []) if isinstance(k, dict)]
@@ -3736,7 +2910,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             self._refresh_preview_with_effects()
             self._notify_edit(f"关键帧 {prop}={value} @ {t:.2f}s")
         except Exception as e:
-            print(f"关键帧点击处理异常: {e}")
+            logger.error(f'关键帧点击处理异常: {e}')
 
     def set_clip_speed(self, clip_id, speed: float):
         """设置片段播放速度（预览时钟与导出 setpts）。"""
@@ -3944,7 +3118,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             sc_redo2.setContext(Qt.ShortcutContext.ApplicationShortcut)
             sc_redo2.activated.connect(self._redo)
         except Exception as e:
-            print(f"[P0#4] 快捷键注册失败: {e}")
+            logger.error(f'[P0#4] 快捷键注册失败: {e}')
 
     def _update_undo_redo_state(self):
         """
@@ -3966,7 +3140,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     "重做 (Ctrl+Y / Ctrl+Shift+Z)" if can_redo else "无可重做操作"
                 )
         except Exception as e:
-            print(f"[P0#4] 状态更新失败: {e}")
+            logger.error(f'[P0#4] 状态更新失败: {e}')
 
     def get_undo_redo_toast(self) -> str:
         """获取最近一次撤销/重做的轻量提示(供 status bar / 主窗口显示)"""
@@ -4135,6 +3309,31 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 if self._current_clip and self._current_clip.get("id") == new_clip.get("id"):
                     self._current_clip = None
 
+        elif atype == "add_clip":
+            # 添加片段（AI剪辑/画布入轨/素材拖入）的撤销支持
+            clip = action.get("clip")
+            audio_clip = action.get("audio_clip")
+            if mode == 'undo':
+                # 撤销添加：移除视频片段 + 联动音频片段
+                if audio_clip:
+                    self._clips = [c for c in self._clips if c.get("id") != audio_clip.get("id")]
+                    self._timeline_remove_clip_widget(audio_clip.get("id"))
+                if clip:
+                    self._clips = [c for c in self._clips if c.get("id") != clip.get("id")]
+                    self._timeline_remove_clip_widget(clip.get("id"))
+                    if self._current_clip and self._current_clip.get("id") == clip.get("id"):
+                        self._current_clip = None
+            else:
+                # 重做添加：重新加入视频片段 + 联动音频片段
+                if clip and clip not in self._clips:
+                    self._clips.append(clip)
+                if clip:
+                    self._timeline_add_clip_widget(clip)
+                    self._current_clip = clip
+                if audio_clip and audio_clip not in self._clips:
+                    self._clips.append(audio_clip)
+                    self._timeline_add_clip_widget(audio_clip)
+
         elif atype == "edit_clip":
             clip_id = action.get("clip_id")
             fields = action.get("after") if mode == "do" else action.get("before")
@@ -4186,16 +3385,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         if index == 0:
             self._kernel_mode = "auto"
             editor_scheduler.set_selection_mode("auto")
-            print("✅ 切换到自动选择内核（按任务自主选择轻量/专业）")
+            logger.info('✅ 切换到自动选择内核（按任务自主选择轻量/专业）')
         elif index == 1:
             self._kernel_mode = "light"
             editor_scheduler.set_selection_mode("lightweight")
-            print("✅ 切换到轻量内核（快速预览模式）")
+            logger.info('✅ 切换到轻量内核（快速预览模式）')
         else:
             success = editor_scheduler.set_selection_mode("professional")
             if success:
                 self._kernel_mode = "pro"
-                print("✅ 切换到专业内核（完整功能模式）")
+                logger.info('✅ 切换到专业内核（完整功能模式）')
             else:
                 self._kernel_combo.blockSignals(True)
                 self._kernel_combo.setCurrentIndex(0)
@@ -4830,10 +4029,10 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             if added:
                 tip = "、".join(added[:3]) + (f" 等{len(added)}个" if len(added) > 3 else "")
                 self._notify_edit(f"已加入时间线: {tip}" + (f" ({src})" if src else ""))
-                print(f"✅ Agent 素材已添加到时间线: {tip}")
+                logger.info(f'✅ Agent 素材已添加到时间线: {tip}')
             if failed:
                 msg = f"{len(failed)} 个素材未能加入时间线（文件不存在）: {', '.join(failed[:3])}"
-                print(f"⚠️ {msg}")
+                logger.info(f'⚠️ {msg}')
                 try:
                     self._notify_edit(msg)
                 except Exception:
@@ -4843,10 +4042,23 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         file_path = data.get("file_path", "") if isinstance(data, dict) else str(data)
         if file_path and os.path.exists(file_path):
             self._add_clip_to_timeline(file_path)
+            if isinstance(data, dict):
+                try:
+                    from app.core.editor_canvas_link import extra_from_material_payload, stamp_clip
+                except ImportError:
+                    from core.editor_canvas_link import extra_from_material_payload, stamp_clip  # type: ignore
+                extra = extra_from_material_payload(data)
+                if extra:
+                    for c in reversed(getattr(self, "_clips", []) or []):
+                        if (c.get("path") or "") == file_path:
+                            stamp_clip(c, extra)
+                            if extra.get("canvas_title"):
+                                c["name"] = extra["canvas_title"]
+                            break
             title = data.get("title", "") if isinstance(data, dict) else ""
             tip = title or os.path.basename(file_path)
             self._notify_edit(f"已加入时间线: {tip}" + (f" ({src})" if src else ""))
-            print(f"✅ 素材已添加到时间线: {os.path.basename(file_path)}")
+            logger.info(f'✅ 素材已添加到时间线: {os.path.basename(file_path)}')
             # 画布回流：可选开启线性补帧（非神经网络）
             if isinstance(data, dict) and data.get("enable_interpolation"):
                 try:
@@ -4861,7 +4073,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     logger.debug("开启线性补帧失败: %s", e)
         else:
             msg = f"无法添加素材（文件不存在）: {file_path or '(空路径)'}"
-            print(f"⚠️ {msg}")
+            logger.info(f'⚠️ {msg}')
             try:
                 QMessageBox.warning(self, "添加失败", msg)
             except Exception:
@@ -4893,7 +4105,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             from core.canvas_bridge import push_editor_to_canvas, get_canvas_bridge  # type: ignore
         get_canvas_bridge().start()
         title = clip.get("name") or clip.get("title") or os.path.basename(path)
-        res = push_editor_to_canvas(path, title=str(title), source="editor")
+        try:
+            from app.core.editor_canvas_link import outbox_fields_from_clip
+        except ImportError:
+            from core.editor_canvas_link import outbox_fields_from_clip  # type: ignore
+        extra = outbox_fields_from_clip(clip if isinstance(clip, dict) else {})
+        res = push_editor_to_canvas(path, title=str(title), source="editor", extra=extra)
         if res.get("success"):
             self._notify_edit(res.get("message") or "已推送到画布")
             self._record_ai_tool_history(res.get("message") or "发送到画布")
@@ -4901,19 +4118,33 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 self,
                 "已发送到画布",
                 (res.get("message") or "成功")
-                + "\n请打开「AI 画布」，在右下角「来自剪辑」下载或导入。",
+                + "\n打开「AI 画布」后会自动落成源文件节点；也可在右下角「来自剪辑」下载。",
             )
         else:
             QMessageBox.warning(self, "发送失败", res.get("message") or "未知错误")
+
+    def _on_canvas_roundtrip_suggest(self):
+        """AI 剪辑 ↔ 画布：勾选建议后才推送，不改时间线。"""
+        res = self.agent_suggest_canvas_roundtrip(open_ui=True)
+        if res.get("cancelled"):
+            return
+        pushed = int(res.get("pushed") or 0)
+        if pushed:
+            QMessageBox.information(self, "已推送到画布", res.get("message") or f"已推送 {pushed} 条")
+            return
+        suggestions = res.get("suggestions") or []
+        writes = [x for x in suggestions if x.get("action") in ("send_to_canvas", "refresh_canvas")]
+        if not writes:
+            QMessageBox.information(self, "AI 联动", "时间线没有可推送到画布的视频片段")
 
     def _on_files_dropped(self, file_paths):
         """处理时间线拖放导入的文件列表"""
         for file_path in file_paths:
             if os.path.exists(file_path):
                 self._add_clip_to_timeline(file_path)
-                print(f"✅ 拖放导入成功: {os.path.basename(file_path)}")
+                logger.info(f'✅ 拖放导入成功: {os.path.basename(file_path)}')
             else:
-                print(f"⚠️ 无法导入: {file_path}")
+                logger.info(f'⚠️ 无法导入: {file_path}')
 
     # ─── 字幕 CRUD（实现见 editor_subtitle_panel） ───
     def _refresh_subtitle_list(self):
@@ -4979,9 +4210,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         from app.modules.lego.editor_subtitle_panel import export_subtitles
         export_subtitles(self)
 
-    def _generate_ai_subtitles(self):
-        from app.modules.lego.editor_subtitle_panel import generate_ai_subtitles
-        generate_ai_subtitles(self)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
     def _on_subtitle_generated(self, count: int):
         """主线程回调：字幕生成完成后刷新UI"""
@@ -5000,19 +4229,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
 
     # _on_ai_fail / _on_ai_progress 已迁移到 ai_agent_panel.py（AiAgentPanelMixin）
 
-    def _emit_ai_progress(self, value, message):
-        """从后台线程安全地发射进度信号"""
-        try:
-            self.ai_progress_signal.emit(value, message)
-        except Exception as _e:
-            logger.warning("操作异常（已忽略）: %s", _e)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-    def _emit_ai_fail(self, message):
-        """从后台线程安全地发射失败信号"""
-        try:
-            self.ai_fail_signal.emit(message)
-        except Exception as _e:
-            logger.warning("操作异常（已忽略）: %s", _e)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
     def _fallback_subtitle_generation(self, audio_path):
         """已废弃：禁止生成与对白无关的占位字幕。"""
@@ -5025,7 +4244,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._workflow_manager = get_workflow_manager()
         self._workflow_manager.workflow_completed.connect(self._on_workflow_completed)
         self._workflow_manager.step_completed.connect(self._on_workflow_step_completed)
-        print("✅ EditorModule 已连接到工作流管理器")
+        logger.info('✅ EditorModule 已连接到工作流管理器')
     
     def _on_workflow_completed(self, context):
         """工作流完成回调"""
@@ -5046,67 +4265,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     self._add_clip_to_timeline(clip["input_path"])
     
     # ===== 数据闭环集成 =====
-    def connect_to_data_analyzer(self):
-        """连接到数据分析器"""
-        from .data_analyzer import get_data_analyzer
-        self._data_analyzer = get_data_analyzer()
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def get_recommendations(self):
-        """获取推荐策略"""
-        if hasattr(self, '_data_analyzer'):
-            return self._data_analyzer.get_recommendations("douyin")
-        return {}
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def record_edit_action(self, action_type, data):
-        """记录编辑操作（用于数据回流）"""
-        if hasattr(self, '_data_analyzer'):
-            record = {
-                "timestamp": datetime.now().isoformat(),
-                "action_type": action_type,
-                "data": data,
-                "clip_count": len(self._clips)
-            }
-            self._data_analyzer._record_workflow(record)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
     # ===== AI能力增强 =====
-    def enhance_with_ai(self):
-        """使用AI增强视频"""
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        
-        video_path = self._clips[0]['path']
-        
-        from app.core.ai_engine import AIEngine
-        ai_engine = AIEngine.get_instance()
-        
-        result = ai_engine.enhance_video(video_path)
-        
-        if result.get("success"):
-            enhanced_path = result.get("output_path")
-            if enhanced_path and os.path.exists(enhanced_path):
-                self._load_video(enhanced_path)
-                QMessageBox.information(self, "AI增强完成", "视频已完成AI增强")
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def smart_cut_with_ai(self):
-        """AI智能剪辑"""
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        
-        video_path = self._clips[0]['path']
-        
-        from app.core.ai_engine import AIEngine
-        ai_engine = AIEngine.get_instance()
-        
-        result = ai_engine.smart_cut(video_path, duration=60)
-        
-        if result.get("success"):
-            clips = result.get("clips", [])
-            for clip in clips:
-                if clip.get("path"):
-                    self._add_clip_to_timeline(clip["path"])
-            QMessageBox.information(self, "AI剪辑完成", f"已生成 {len(clips)} 个片段")
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
     # ===== 时间线批量操作 =====
     def batch_add_clips(self, file_paths):
@@ -5193,7 +4361,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 deb.stop()
             self._notify_edit("已自动保存")
         except Exception as e:
-            print(f"自动保存失败: {e}")
+            logger.error(f'自动保存失败: {e}')
 
     def _maybe_restore_autosave(self):
         """空工程时询问是否恢复自动保存。"""
@@ -5228,7 +4396,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             try:
                 QMessageBox.warning(self, "恢复自动保存", f"询问失败：{e}")
             except Exception:
-                print(f"autosave 恢复询问失败: {e}")
+                logger.error(f'autosave 恢复询问失败: {e}')
 
     def _on_clip_trim_committed(self, clip_data):
         """片段拖拽/裁剪松手：同步内核、撤销栈并标记脏"""
@@ -5269,7 +4437,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     steps.extend(link_steps)
                     self._sync_linked_av_timing(clip, before=before)
                 except Exception as e:
-                    print(f"linked AV sync failed: {e}")
+                    logger.info(f'linked AV sync failed: {e}')
             if steps:
                 self._record_action({"type": "compound", "steps": steps})
             if items:
@@ -5282,7 +4450,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 self._sync_timeline_widget_state()
                 self._refresh_preview_to_current_clip()
             except Exception as e:
-                print(f"batch move sync failed: {e}")
+                logger.info(f'batch move sync failed: {e}')
             self._notify_edit(f"已批量移动 {len(steps)} 个片段")
             return
 
@@ -5328,14 +4496,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         try:
             self._sync_linked_av_timing(clip_data, before=before)
         except Exception as e:
-            print(f"linked AV sync failed: {e}")
+            logger.info(f'linked AV sync failed: {e}')
         self._touch_project_dirty()
         try:
             self._sync_kernel_timeline()
             self._sync_timeline_widget_state()
             self._refresh_preview_to_current_clip()
         except Exception as e:
-            print(f"trim commit sync failed: {e}")
+            logger.info(f'trim commit sync failed: {e}')
         self._notify_edit("片段已调整")
     
     def import_project(self, project_path):
@@ -5377,7 +4545,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             self._apply_sequence_format_to_export_combos()
             self._refresh_preview_aspect_badge()
         except Exception as e:
-            print(f"导入工程画幅失败: {e}")
+            logger.error(f'导入工程画幅失败: {e}')
             self._sequence_format = SequenceFormat.default()
             _sequence_needs_infer = True
         try:
@@ -5432,7 +4600,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         try:
             self._heal_linked_av_duration_mismatch()
         except Exception as e:
-            print(f"联动音画时长修复失败: {e}")
+            logger.error(f'联动音画时长修复失败: {e}')
 
         # 无 sequence / resolution 的旧工程：按首个视频片推断画幅
         if _sequence_needs_infer:
@@ -5442,7 +4610,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     self._apply_sequence_format_to_preview()
                     self._refresh_preview_aspect_badge()
             except Exception as e:
-                print(f"推断工程画幅失败: {e}")
+                logger.error(f'推断工程画幅失败: {e}')
 
         # 恢复字幕
         try:
@@ -5458,7 +4626,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 sm.subtitle_styles = merged
             self._refresh_subtitle_list()
         except Exception as e:
-            print(f"导入字幕失败: {e}")
+            logger.error(f'导入字幕失败: {e}')
 
         # 恢复贴纸
         try:
@@ -5466,7 +4634,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             self._active_stickers = [dict(s) for s in raw_stk if isinstance(s, dict)]
             self._refresh_sticker_list_ui()
         except Exception as e:
-            print(f"导入贴纸失败: {e}")
+            logger.error(f'导入贴纸失败: {e}')
             self._active_stickers = []
 
         # 主选优先视频片（避免首条是联动音频时预览走偏）
@@ -5683,7 +4851,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             try:
                 real_timeline_manager.add_clip(tl["id"], tid, clip_info)
             except Exception as e:
-                print(f"同步片段到内核失败: {e}")
+                logger.error(f'同步片段到内核失败: {e}')
         try:
             real_timeline_manager._recalculate_duration(tl)
         except Exception as _e:
@@ -6110,72 +5278,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     player.setSource(QUrl.fromLocalFile(src))
                 player.setPosition(int(max(0.0, source_t) * 1000))
         except Exception as e:
-            print(f"预览片段刷新失败: {e}")
+            logger.error(f'预览片段刷新失败: {e}')
             self._preview_seg_key = None
             try:
                 self._force_show_first_video_frame()
             except Exception:
                 pass
 
-    def _create_character_tab(self) -> QWidget:
-        """
-        「角色」面板 — 剪辑模块内的临时角色管理
-        读取 DramaStructure 中的角色列表，允许用户给角色打「优先保留/忽略」标签
-        调整后写回 AnalysisCache（仅作用于当前视频，不跨视频复用）
-        """
-        t = QWidget()
-        s = QScrollArea()
-        s.setWidgetResizable(True)
-        s.setStyleSheet("QScrollArea{background:#121212;border:none;}")
-        c = QWidget()
-        l = QVBoxLayout(c)
-        l.setContentsMargins(8, 8, 8, 8)
-        l.setSpacing(6)
-
-        # 顶部标题 & 缓存状态
-        st = self._sect("👥 角色（剪辑内临时标记）")
-        st_lo = st.layout()
-        info_row = QHBoxLayout()
-        self._char_status_label = QLabel("等待视频分析...")
-        self._char_status_label.setStyleSheet("color:#888888;font-size:11px;")
-        info_row.addWidget(self._char_status_label)
-        info_row.addStretch()
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setStyleSheet(
-            "QPushButton{background:#1e6bde;color:#ffffff;border-radius:4px;padding:4px 10px;font-size:11px;}"
-            "QPushButton:hover{background:#2d7ae8;}"
-            "QPushButton:pressed{background:#1a5dc4;}"
-        )
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.clicked.connect(self._refresh_character_panel)
-        info_row.addWidget(refresh_btn)
-        st_lo.addLayout(info_row)
-        hint = QLabel("提示：角色仅作用于当前视频，调整后重新生成剪辑方案会生效。\n关闭程序后偏好保留（同视频下次打开仍然保留）。")
-        hint.setStyleSheet("color:#666666;font-size:10px;")
-        hint.setWordWrap(True)
-        st_lo.addWidget(hint)
-
-        # 角色列表容器（动态生成）
-        self._char_list_container = QWidget()
-        self._char_list_layout = QVBoxLayout(self._char_list_container)
-        self._char_list_layout.setContentsMargins(0, 0, 0, 0)
-        self._char_list_layout.setSpacing(6)
-        self._char_list_layout.addStretch()
-        l.addWidget(self._char_list_container, 1)
-
-        s.setWidget(c)
-        outer = QVBoxLayout(t)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(s)
-
-        # 首次刷新（如果已有缓存则立即显示）
-        try:
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(300, self._refresh_character_panel)
-        except Exception as _e:
-            logger.warning("操作异常（已忽略）: %s", _e)
-        return t
-
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     @staticmethod
     def _safe_set_text(label, text: str):
         """安全设置 QLabel 文本，防止 C++ 对象已被删除时崩溃"""
@@ -6184,747 +5294,22 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         except (RuntimeError, AttributeError) as _e:
             logger.warning("操作异常（已忽略）: %s", _e)
 
-    def _refresh_character_panel(self):
-        """刷新角色列表（从 AnalysisCache 读取）"""
-        # 安全检查：对象可能已被 Qt 销毁
-        try:
-            _ = self._char_status_label.isVisible()
-        except (RuntimeError, AttributeError):
-            return
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        try:
-            from .character_cache import AnalysisCache
-        except Exception:
-            self._safe_set_text(self._char_status_label, "角色缓存不可用")
-            return
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        # 清理旧 UI
-        try:
-            while self._char_list_layout.count() > 0:
-                item = self._char_list_layout.takeAt(0)
-                w = item.widget()
-                if w:
-                    w.setParent(None)
-        except (RuntimeError, AttributeError):
-            return
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        video_path = getattr(self, "_video_source", None)
-        if not video_path:
-            self._safe_set_text(self._char_status_label, "尚未导入视频")
-            try:
-                self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError) as _e:
-                logger.warning("操作异常（已忽略）: %s", _e)
-            return
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        try:
-            cache = AnalysisCache()
-            drama = cache.get_drama(video_path)
-            prefs = cache.get_character_prefs(video_path)
-        except Exception as e:
-            self._safe_set_text(self._char_status_label, f"读取缓存异常: {e}")
-            try:
-                self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError) as _e:
-                logger.warning("操作异常（已忽略）: %s", _e)
-            return
+    # [Mixin] 已迁移至 editor_ai_process_mixin.py
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        if drama is None or not getattr(drama, "characters", None):
-            self._safe_set_text(self._char_status_label, "未检测到角色 — 请先运行「AI 智能剪辑」分析视频")
-            try:
-                empty = QLabel("分析完成后，角色将出现在这里供你标记。\n\n"
-                              "• 点「忽略」：剪辑时会降低该角色镜头的优先级\n"
-                              "• 点「优先保留」：剪辑时会提升该角色镜头的重要性\n"
-                              "• 权重滑块：精细调整影响幅度")
-                empty.setStyleSheet("color:#666666;font-size:11px;padding:16px;"
-                                  "background:#1a1a1a;border-radius:6px;")
-                empty.setWordWrap(True)
-                self._char_list_layout.addWidget(empty)
-                self._char_list_layout.addStretch()
-            except (RuntimeError, AttributeError) as _e:
-                logger.warning("操作异常（已忽略）: %s", _e)
-            return
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        # 统计每个角色的出场次数（粗略：按 scenes 统计）
-        scenes = getattr(drama, "scenes", []) or []
-        char_appear = {}
-        for sc in scenes:
-            for name in (getattr(sc, "characters", None) or []):
-                char_appear[name] = char_appear.get(name, 0) + 1
-
-        total_chars = len(drama.characters)
-        active_pref_count = sum(1 for p in prefs.values() if p is not None and hasattr(p, "__dict__") or (isinstance(p, dict) and p))
-
-        self._safe_set_text(
-            self._char_status_label,
-            f"本视频共识别 {total_chars} 个角色 · 已标记 {len(prefs)} 个偏好"
-        )
-
-        # 为每个角色构建一行 UI
-        for ch in drama.characters:
-            name = str(getattr(ch, "name", "未知"))
-            role_type = str(getattr(ch, "role_type", ""))
-            traits = getattr(ch, "personality_traits", []) or []
-
-            pref_obj = prefs.get(name)
-            if pref_obj is not None:
-                if hasattr(pref_obj, "keep"):
-                    keep_default = bool(pref_obj.keep)
-                    weight_default = float(getattr(pref_obj, "weight", 1.0))
-                elif isinstance(pref_obj, dict):
-                    keep_default = bool(pref_obj.get("keep", True))
-                    weight_default = float(pref_obj.get("weight", 1.0))
-                else:
-                    keep_default = True
-                    weight_default = 1.0
-            else:
-                keep_default = True
-                weight_default = 1.0
-
-            row = QFrame()
-            row.setStyleSheet(
-                "QFrame{background:#1a1a1a;border:1px solid #252525;border-radius:6px;}"
-            )
-            row_layout = QVBoxLayout(row)
-            row_layout.setContentsMargins(10, 8, 10, 8)
-            row_layout.setSpacing(6)
-
-            # 顶部：角色名 + 类型标签 + 勾选框
-            top_row = QHBoxLayout()
-            label = QLabel(f"🎭 {name}")
-            label.setStyleSheet("color:#ffffff;font-size:13px;font-weight:600;")
-            top_row.addWidget(label)
-
-            if role_type:
-                tag = QLabel(role_type)
-                tag.setStyleSheet("background:#1e6bde;color:#ffffff;font-size:10px;"
-                                 "padding:2px 6px;border-radius:4px;")
-                top_row.addWidget(tag)
-
-            appear_count = char_appear.get(name, 0)
-            count_label = QLabel(f"出现 {appear_count} 个场景")
-            count_label.setStyleSheet("color:#888888;font-size:10px;")
-            top_row.addWidget(count_label)
-            top_row.addStretch()
-
-            keep_check = QCheckBox("优先保留")
-            keep_check.setChecked(keep_default)
-            keep_check.setStyleSheet(
-                "QCheckBox{color:#ffffff;font-size:11px;spacing:4px;}"
-                "QCheckBox::indicator{width:14px;height:14px;border-radius:3px;"
-                "border:2px solid #555555;background:#121212;}"
-                "QCheckBox::indicator:checked{background:#22c55e;border:2px solid #22c55e;}"
-            )
-            top_row.addWidget(keep_check)
-            row_layout.addLayout(top_row)
-
-            # 标签
-            if traits:
-                t_row = QHBoxLayout()
-                for t in list(traits)[:5]:
-                    tl = QLabel(str(t))
-                    tl.setStyleSheet(
-                        "background:#252525;color:#aaaaaa;font-size:10px;"
-                        "padding:2px 6px;border-radius:4px;"
-                    )
-                    t_row.addWidget(tl)
-                t_row.addStretch()
-                row_layout.addLayout(t_row)
-
-            # 权重滑块
-            slider_row = QHBoxLayout()
-            sl_label = QLabel("影响权重")
-            sl_label.setStyleSheet("color:#888888;font-size:10px;")
-            slider_row.addWidget(sl_label)
-
-            slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(50, 200)  # 50% ~ 200%
-            slider.setValue(int(round(weight_default * 100)))
-            slider.setStyleSheet(
-                "QSlider::groove:horizontal{height:4px;background:#333333;border-radius:2px;}"
-                "QSlider::handle:horizontal{background:#1e6bde;width:12px;height:12px;"
-                "margin:-4px 0;border-radius:6px;}"
-                "QSlider::handle:horizontal:hover{background:#3b82f6;}"
-            )
-            slider_row.addWidget(slider, 1)
-
-            pct_label = QLabel(f"{int(round(weight_default * 100))}%")
-            pct_label.setStyleSheet("color:#aaaaaa;font-size:10px;min-width:32px;qproperty-alignment:AlignRight;")
-            slider_row.addWidget(pct_label)
-            row_layout.addLayout(slider_row)
-
-            # 绑定：勾选/滑动 → 写回缓存
-            self._bind_character_row_events(
-                name=name,
-                keep_check=keep_check,
-                slider=slider,
-                pct_label=pct_label,
-            )
-
-            self._char_list_layout.addWidget(row)
-
-        self._char_list_layout.addStretch()
-
-    def _bind_character_row_events(self, name: str, keep_check: QCheckBox,
-                                   slider, pct_label):
-        """绑定角色行的交互事件"""
-        def _on_keep_changed(checked):
-            self._write_character_pref(name, bool(checked), slider.value() / 100.0)
-
-        def _on_weight_changed(val):
-            pct_label.setText(f"{val}%")
-            self._write_character_pref(name, keep_check.isChecked(), val / 100.0)
-
-        keep_check.toggled.connect(_on_keep_changed)
-        slider.valueChanged.connect(_on_weight_changed)
-
-    def _write_character_pref(self, name: str, keep: bool, weight: float):
-        """写回角色偏好到 AnalysisCache"""
-        try:
-            from .character_cache import AnalysisCache
-            cache = AnalysisCache()
-            video_path = getattr(self, "_video_source", None)
-            if not video_path:
-                return
-            cache.set_character_pref(video_path, name, keep=keep, weight=float(weight))
-        except Exception as e:
-            print(f"   ⚠️ 角色偏好写入失败: {e}")
-
-    def _create_ai_tools_tab(self) -> QWidget:
-        from app.modules.lego.editor_ai_panel import build_ai_panel_tab
-        return build_ai_panel_tab(self)
-
-    def _record_ai_tool_history(self, text: str):
-        """把 AI 工具处理结果写入「处理历史」列表（此前控件创建后从未写入，永远是空的）"""
-        history_list = getattr(self, "_ai_history_list", None)
-        if history_list is None:
-            return
-        try:
-            from datetime import datetime
-            history_list.insertItem(0, f"[{datetime.now().strftime('%H:%M:%S')}] {text}")
-            while history_list.count() > 50:
-                history_list.takeItem(history_list.count() - 1)
-        except Exception:
-            pass
-
-    def _funclip_process(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        clip_path = self._clips[0]['path']
-        output_dir = "短剧AI剪辑输出"
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.basename(clip_path).rsplit('.', 1)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_funclip.mp4")
-        msg = QMessageBox(self)
-        msg.setWindowTitle("FunClip")
-        msg.setText("正在使用场景检测自动分段...")
-        msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
-        msg.show()
-        QApplication.processEvents()
-        def process():
-            try:
-                import cv2
-                cap = cv2.VideoCapture(clip_path)
-                fps = cap.get(cv2.CAP_PROP_FPS) or 30
-                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                prev_frame = None
-                scene_changes = []
-                for i in range(0, frame_count, int(fps)):
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    gray = cv2.resize(gray, (320, 180))
-                    if prev_frame is not None:
-                        diff = np.mean(np.abs(gray.astype(float) - prev_frame.astype(float)))
-                        if diff > 15:
-                            scene_changes.append(i / fps)
-                    prev_frame = gray
-                cap.release()
-                full_duration = frame_count / fps
-                scene_changes = [0.0] + scene_changes + [full_duration]
-                segments = [(scene_changes[i], scene_changes[i + 1]) 
-                            for i in range(len(scene_changes) - 1)]
-                segments = [(s, e) for s, e in segments if e - s > 2.0]
-                segments = segments[:10]
-                if not segments:
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "FunClip", "未检测到有效场景（空结果）。请换有镜头切换的素材。")
-                    ))
-                    return
-                seg_list_path = os.path.join(output_dir, f"{base_name}_segments.txt")
-                with open(seg_list_path, 'w', encoding='utf-8') as f:
-                    for s, e in segments:
-                        f.write(f"file '{clip_path}'\ninpoint {s}\noutpoint {e}\n")
-                ffres = subprocess.run([
-                    self._get_ffmpeg(), "-y", "-f", "concat", "-safe", "0",
-                    "-segment_time_metadata", "1",
-                    "-i", seg_list_path,
-                    "-vf", "select=concatdec_select,setpts=PTS-STARTPTS",
-                    "-c:v", "libx264", "-preset", "fast",
-                    "-an", output_path
-                ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if ffres.returncode != 0 or not os.path.isfile(output_path):
-                    err = (ffres.stderr or "")[-500:]
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "FunClip", f"导出失败:\n{err or '输出文件不存在，请检查 FFmpeg'}")
-                    ))
-                else:
-                    # 修复：此前只弹「完成」提示，成片从不加入时间线，用户还要
-                    # 手动去输出目录导入——体验割裂。这里直接加进时间线；
-                    # 同时如实提示输出无音轨（拼接用的是 concatdec select 视频
-                    # 滤镜，未做音频对应拼接，故用 -an 去掉了音轨，不是缺陷
-                    # 遗漏，但必须让用户知道不是"完整成片"）。
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        self._add_clip_to_timeline(output_path),
-                        self._record_ai_tool_history(f"FunClip 场景检测完成 → {os.path.basename(output_path)}"),
-                        QMessageBox.information(self, "FunClip",
-                            f"场景检测完成，已添加到时间线！\n输出: {output_path}\n\n"
-                            f"⚠️ 该成片仅保留视频画面，不含原始音轨")
-                    ))
-            except ImportError:
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "提示", "请安装cv2: pip install opencv-python")
-                ))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "失败", f"处理失败: {err}")
-                ))
-        t = threading.Thread(target=process, daemon=True)
-        t.start()
-
-    def _refresh_ollama_diagnose_ui(self):
-        """把 Ollama diagnose() 摘要显示在 AI 页。"""
-        label = getattr(self, "_ollama_status_label", None)
-        if label is None:
-            return
-        try:
-            from app.modules.lego.ollama_client import ollama_client
-            report = ollama_client.diagnose()
-            self._last_ollama_report = report
-            if report.get("service_running"):
-                models = ollama_client.list_models()
-                n = len(models or [])
-                label.setText(f"● 运行中 · {report.get('base_url','')} · 模型 {n} 个")
-                label.setStyleSheet("color:#22c55e;font-size:10px;font-weight:600;")
-                if n == 0:
-                    label.setText(
-                        f"● 运行中但无模型 · {report.get('base_url','')} · 请 ollama pull <模型>"
-                    )
-                    label.setStyleSheet("color:#f59e0b;font-size:10px;font-weight:600;")
-            elif not report.get("installed"):
-                label.setText("● 未安装 · " + (report.get("suggestion") or "请安装 Ollama")[:80])
-                label.setStyleSheet("color:#ef4444;font-size:10px;")
-            else:
-                err = report.get("error") or "服务未运行"
-                label.setText(f"● 未运行 · {err}")
-                label.setStyleSheet("color:#ef4444;font-size:10px;")
-            tip = ollama_client.format_diagnose_report(report)
-            label.setToolTip(tip)
-        except Exception as e:
-            label.setText(f"● 诊断失败: {e}")
-            label.setStyleSheet("color:#f59e0b;font-size:10px;")
-
-    def _show_ollama_diagnose_detail(self):
-        """弹窗展示完整 diagnose() 文案。"""
-        try:
-            from app.modules.lego.ollama_client import ollama_client
-            msg = ollama_client.diagnose_user_message()
-        except Exception as e:
-            msg = f"诊断失败: {e}"
-        QMessageBox.information(self, "Ollama 诊断", msg)
-
-    def _autoclip_process(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        clip_path = self._clips[0]['path']
-        output_dir = "短剧AI剪辑输出"
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.basename(clip_path).rsplit('.', 1)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_highlight.mp4")
-        msg = QMessageBox(self)
-        msg.setWindowTitle("AutoClip")
-        msg.setText("正在分析高光片段...")
-        msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
-        msg.show()
-        QApplication.processEvents()
-        def process():
-            try:
-                import cv2
-                cap = cv2.VideoCapture(clip_path)
-                fps = cap.get(cv2.CAP_PROP_FPS) or 30
-                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                scene_scores = []
-                window = int(fps * 2)
-                step = int(fps * 0.5)
-                for start in range(0, frame_count, step):
-                    end = min(start + window, frame_count)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, start)
-                    motion_sum = 0
-                    prev = None
-                    frame_num = 0
-                    for pos in range(start, end, 2):
-                        ret, frm = cap.read()
-                        if not ret:
-                            break
-                        g = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
-                        g = cv2.resize(g, (160, 90))
-                        if prev is not None:
-                            motion_sum += np.mean(np.abs(g.astype(float) - prev.astype(float)))
-                        prev = g
-                        frame_num += 1
-                    if frame_num > 0:
-                        score = motion_sum / frame_num
-                        scene_scores.append((start / fps, min(end / fps, frame_count / fps), score))
-                cap.release()
-                scene_scores.sort(key=lambda x: x[2], reverse=True)
-                best = scene_scores[:8]
-                best.sort(key=lambda x: x[0])
-                clip_list = os.path.join(output_dir, f"{base_name}_best.txt")
-                with open(clip_list, 'w', encoding='utf-8') as f:
-                    for s, e, sc in best:
-                        f.write(f"file '{clip_path}'\ninpoint {s}\noutpoint {e}\n")
-                if not best:
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "失败", "未检测到有效高光片段（视频过短或无法解码）")
-                    ))
-                    return
-                ffres = subprocess.run([
-                    self._get_ffmpeg(), "-y", "-f", "concat", "-safe", "0",
-                    "-segment_time_metadata", "1",
-                    "-i", clip_list,
-                    "-vf", "select=concatdec_select,setpts=PTS-STARTPTS",
-                    "-c:v", "libx264", "-preset", "fast",
-                    output_path
-                ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if ffres.returncode == 0 and os.path.exists(output_path):
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        self._add_clip_to_timeline(output_path),
-                        self._record_ai_tool_history(f"AutoClip 高光检测完成 → {os.path.basename(output_path)}"),
-                        QMessageBox.information(self, "AutoClip", f"高光检测完成，已添加到时间线！输出: {output_path}")
-                    ))
-                else:
-                    err = (ffres.stderr or "")[-500:]
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "失败", f"高光片段合成失败:\n{err}")
-                    ))
-            except ImportError:
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "提示", "请安装cv2: pip install opencv-python")
-                ))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "失败", f"处理失败: {err}")
-                ))
-        t = threading.Thread(target=process, daemon=True)
-        t.start()
-
-    def _videofusion_process(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        clip_path = self._clips[0]['path']
-        output_dir = "短剧AI剪辑输出"
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.basename(clip_path).rsplit('.', 1)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_enhanced.mp4")
-        msg = QMessageBox(self)
-        msg.setWindowTitle("VideoFusion")
-        msg.setText("正在增强画质...")
-        msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
-        msg.show()
-        QApplication.processEvents()
-        def process():
-            try:
-                filters = [
-                    "unsharp=5:5:1.0:5:5:0.0",
-                    "hqdn3d=4:3:6:4",
-                    "format=yuv420p"
-                ]
-                filter_str = ",".join(filters)
-                result = subprocess.run([
-                    self._get_ffmpeg(), "-y", "-i", clip_path,
-                    "-vf", filter_str,
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", "18", "-c:a", "aac", "-b:a", "192k",
-                    output_path
-                ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if result.returncode == 0:
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        self._add_clip_to_timeline(output_path),
-                        self._record_ai_tool_history(f"Fusion 画质增强完成 → {os.path.basename(output_path)}"),
-                        QMessageBox.information(self, "VideoFusion", f"画质增强完成，已添加到时间线！输出: {output_path}")
-                    ))
-                else:
-                    err = result.stderr
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "失败", f"增强失败: {err}")
-                    ))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "失败", f"处理失败: {err}")
-                ))
-        t = threading.Thread(target=process, daemon=True)
-        t.start()
-
-    def _lora_edit_process(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        clip_path = self._clips[0]['path']
-        output_dir = "短剧AI剪辑输出"
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.basename(clip_path).rsplit('.', 1)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_stylized.mp4")
-        msg = QMessageBox(self)
-        msg.setWindowTitle("风格化（滤镜近似）")
-        msg.setText("正在应用风格化效果（FFmpeg 调色滤镜近似，非 LoRA/神经网络风格迁移）...")
-        msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
-        msg.show()
-        QApplication.processEvents()
-        def process():
-            try:
-                filters = [
-                    "eq=brightness=0.05:contrast=1.1:saturation=1.3",
-                    "colorbalance=rs=0.1:gs=-0.05:bs=-0.1",
-                    "hue=h=5",
-                    "vignette=PI/4",
-                    "unsharp=3:3:0.8",
-                ]
-                filter_str = ",".join(filters)
-                result = subprocess.run([
-                    self._get_ffmpeg(), "-y", "-i", clip_path,
-                    "-vf", filter_str,
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", "20", "-c:a", "copy",
-                    output_path
-                ], capture_output=True, text=True, timeout=300,
-                   creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if result.returncode == 0 and os.path.exists(output_path):
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        self._add_clip_to_timeline(output_path),
-                        self._record_ai_tool_history(f"风格化完成 → {os.path.basename(output_path)}"),
-                        QMessageBox.information(self, "完成", f"风格化完成，已添加到时间线！输出: {output_path}")
-                    ))
-                else:
-                    err = (result.stderr or "")[-500:]
-                    QTimer.singleShot(0, lambda: (
-                        msg.close(),
-                        QMessageBox.warning(self, "失败", f"处理失败: {err}")
-                    ))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: (
-                    msg.close(),
-                    QMessageBox.warning(self, "失败", f"处理失败: {err}")
-                ))
-        t = threading.Thread(target=process, daemon=True)
-        t.start()
-    
-    def _create_params_tab(self) -> QWidget:
-        t = QWidget()
-        s = QScrollArea()
-        s.setWidgetResizable(True)
-        s.setStyleSheet("QScrollArea{background:#121212;border:none;}")
-        c = QWidget()
-        l = QVBoxLayout(c)
-        l.setContentsMargins(8, 8, 8, 8)
-        l.setSpacing(6)
-        
-        pi = self._sect("📊 项目信息")
-        pi_lo = pi.layout()
-        self._proj_res_label = QLabel("分辨率: --")
-        self._proj_res_label.setStyleSheet("color:#1e6bde;font-size:10px;font-weight:600;")
-        pi_lo.addWidget(self._proj_res_label)
-        dur_row = QHBoxLayout()
-        self._proj_dur_label = QLabel("时长: --")
-        self._proj_dur_label.setStyleSheet("color:#888;font-size:10px;")
-        dur_row.addWidget(self._proj_dur_label)
-        self._proj_size_label = QLabel("预估: --")
-        self._proj_size_label.setStyleSheet("color:#888;font-size:10px;")
-        dur_row.addWidget(self._proj_size_label)
-        dur_row.addStretch()
-        pi_lo.addLayout(dur_row)
-        l.addWidget(pi)
-        
-        mo = self._sect("🎯 输出模式")
-        self._output_mode_var = QComboBox()
-        # M2：漫剧竖屏预设置顶，并真正改分辨率/比例（此前仅展示文案）
-        self._output_mode_var.addItems([
-            "漫剧竖屏快切",
-            "自定义参数",
-            "30秒爆款引流",
-            "90秒剧情解说",
-            "8分钟挂车长视频",
-            "B站横屏长视频",
-        ])
-        self._output_mode_var.setStyleSheet("QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;padding:4px 8px;font-size:10px;}QComboBox:hover{border-color:#333;}")
-        mo.layout().addWidget(self._output_mode_var)
-        drama_btn = QPushButton("📱 一键漫剧竖屏 1080×1920")
-        drama_btn.setStyleSheet(
-            "QPushButton{background:#1a3a2a;color:#7ee787;border:1px solid #2f5139;"
-            "border-radius:4px;padding:6px;font-size:10px;font-weight:600;}"
-            "QPushButton:hover{background:#238636;color:#fff;}"
-        )
-        drama_btn.setToolTip("抖音/快手/小红书竖屏：9:16 · 1080x1920 · 30fps · 导出等比填充黑边")
-        drama_btn.clicked.connect(self._apply_manju_portrait_preset)
-        mo.layout().addWidget(drama_btn)
-        landscape_btn = QPushButton("🖥️ 一键横屏 1920×1080")
-        landscape_btn.setStyleSheet(
-            "QPushButton{background:#1a2744;color:#79c0ff;border:1px solid #1f6feb;"
-            "border-radius:4px;padding:6px;font-size:10px;font-weight:600;}"
-            "QPushButton:hover{background:#1f6feb;color:#fff;}"
-        )
-        landscape_btn.setToolTip("B站/横屏：16:9 · 1920x1080 · 30fps · 导出等比填充黑边")
-        landscape_btn.clicked.connect(self._apply_landscape_preset)
-        mo.layout().addWidget(landscape_btn)
-        l.addWidget(mo)
-        
-        vo = self._sect("🎬 视频参数")
-        vo_lo = vo.layout()
-        self._platform_var = QComboBox()
-        self._platform_var.addItems(["抖音", "快手", "视频号", "B站", "小红书", "默认"])
-        self._resolution_var = QComboBox()
-        self._resolution_var.addItems([
-            "1080x1920", "720x1280", "1920x1080", "1280x720", "1080x1080", "3840x2160",
-        ])
-        self._aspect_var = QComboBox()
-        self._aspect_var.addItems(["9:16", "16:9", "1:1", "4:3"])
-        self._fit_mode_var = QComboBox()
-        self._fit_mode_var.addItem("等比黑边", "contain")
-        self._fit_mode_var.addItem("裁切铺满", "cover")
-        self._fit_mode_var.setToolTip(
-            "素材相对工程画幅：黑边=完整可见；裁切=铺满画幅（可能切边）。预览与导出同步。"
-        )
-        self._fps_var = QComboBox()
-        self._fps_var.addItems(["30fps", "60fps", "24fps", "25fps", "50fps"])
-        self._codec_var = QComboBox()
-        self._codec_var.addItems(["H.264", "H.265", "VP9", "AV1"])
-        self._format_var = QComboBox()
-        self._format_var.addItems(["MP4", "MKV", "AVI", "MOV"])
-        self._bitrate_var = QComboBox()
-        self._bitrate_var.addItems(["3000k", "2000k", "5000k", "1M", "10M"])
-        self._bitrate_control_var = QComboBox()
-        self._bitrate_control_var.addItems(["CBR", "VBR", "CRF"])
-        self._bitrate_control_var.setToolTip(
-            "CBR=恒定码率（按上方比特率）；VBR=可变码率（上方比特率为目标均值）；"
-            "CRF=恒定质量（忽略比特率，按下方质量档位控制体积/画质）"
-        )
-        self._quality_var = QComboBox()
-        self._quality_var.addItems(["高", "中", "低"])
-        self._quality_var.setToolTip("画质档位：CRF 模式下直接决定质量；其他模式下影响编码预设")
-        self._gop_var = QSpinBox()
-        self._gop_var.setRange(1, 300)
-        self._gop_var.setValue(30)
-        self._gop_var.setToolTip("关键帧间隔（GOP），越小 seek 越快但体积越大，直播/短视频常用等于帧率")
-        _cmb_ss = (
-            "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;"
-            "padding:3px 6px;font-size:10px;}"
-        )
-        for cmb in (
-            self._platform_var, self._resolution_var, self._aspect_var, self._fit_mode_var,
-            self._fps_var, self._codec_var, self._format_var, self._bitrate_var,
-            self._bitrate_control_var, self._quality_var,
-        ):
-            cmb.setStyleSheet(_cmb_ss)
-        self._gop_var.setStyleSheet("QSpinBox{background:#0a0a0a;color:#fff;border:1px solid #222;border-radius:4px;padding:3px 5px;font-size:10px;}")
-        self._add_cmb_row(vo_lo, "平台", self._platform_var)
-        self._add_cmb_row(vo_lo, "分辨率", self._resolution_var)
-        self._add_cmb_row(vo_lo, "比例", self._aspect_var)
-        self._add_cmb_row(vo_lo, "适配", self._fit_mode_var)
-        self._add_cmb_row(vo_lo, "帧率", self._fps_var)
-        self._add_cmb_row(vo_lo, "编码", self._codec_var)
-        self._add_cmb_row(vo_lo, "格式", self._format_var)
-        self._add_cmb_row(vo_lo, "比特率", self._bitrate_var)
-        self._add_cmb_row(vo_lo, "码控", self._bitrate_control_var)
-        self._add_cmb_row(vo_lo, "质量", self._quality_var)
-        self._add_setting_row(vo_lo, "GOP", self._gop_var)
-        # M2：平台 / 输出模式联动预设；避免改平台时互相打架用 blockSignals
-        self._platform_var.currentTextChanged.connect(self._on_export_platform_changed)
-        self._output_mode_var.currentTextChanged.connect(self._on_export_output_mode_changed)
-        self._aspect_var.currentTextChanged.connect(self._on_export_aspect_or_resolution_changed)
-        self._resolution_var.currentTextChanged.connect(self._on_export_aspect_or_resolution_changed)
-        self._fit_mode_var.currentIndexChanged.connect(self._on_export_fit_mode_changed)
-        self._format_var.currentTextChanged.connect(self._on_export_format_changed)
-        QTimer.singleShot(0, self._apply_manju_portrait_preset)
-        l.addWidget(vo)
-        
-        au = self._sect("🔊 音频参数")
-        au_lo = au.layout()
-        self._audio_codec_var = QComboBox(); self._audio_codec_var.addItems(["AAC", "MP3", "WAV"])
-        self._audio_channel_var = QComboBox(); self._audio_channel_var.addItems(["立体声", "单声道"])
-        self._audio_sample_var = QComboBox(); self._audio_sample_var.addItems(["44100", "48000", "22050"])
-        self._audio_bitrate_var = QComboBox(); self._audio_bitrate_var.addItems(["128k", "192k", "256k", "320k"])
-        for cmb in (
-            self._audio_codec_var, self._audio_channel_var,
-            self._audio_sample_var, self._audio_bitrate_var,
-        ):
-            cmb.setStyleSheet(_cmb_ss)
-        self._add_cmb_row(au_lo, "编码", self._audio_codec_var)
-        self._add_cmb_row(au_lo, "通道", self._audio_channel_var)
-        self._add_cmb_row(au_lo, "采样率", self._audio_sample_var)
-        self._add_cmb_row(au_lo, "比特率", self._audio_bitrate_var)
-        l.addWidget(au)
-        
-        self._hw_section = self._sect("⚡ 硬件加速")
-        gpu_name = ""
-        gpu_available = False
-        try:
-            from app.core.gpu_acceleration import get_gpu_detector
-            gpu = get_gpu_detector().detect_gpu()
-            if gpu.gpu_type.value != "none":
-                gpu_name = gpu.name
-                gpu_available = True
-        except (ImportError, OSError) as _e:
-            logger.warning("操作异常（已忽略）: %s", _e)
-        label_text = f"启用硬件加速 ({gpu_name})" if gpu_name else "启用硬件加速 (NVENC)"
-        self._hardware_accel_var = QCheckBox(label_text)
-        self._hardware_accel_var.setStyleSheet("color:#888;font-size:10px;")
-        self._hardware_accel_var.setChecked(gpu_available)
-        self._hw_section.layout().addWidget(self._hardware_accel_var)
-        l.addWidget(self._hw_section)
-        self._hw_section.setVisible(True)
-        
-        exp_btn = QPushButton("💾 开始导出")
-        exp_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:6px;padding:8px;font-size:12px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
-        exp_btn.clicked.connect(self._export_video)
-        l.addWidget(exp_btn)
-        QTimer.singleShot(0, self._refresh_export_project_info)
-        
-        l.addStretch()
-        s.setWidget(c)
-        o = QVBoxLayout(t)
-        o.setContentsMargins(0, 0, 0, 0)
-        o.addWidget(s)
-        return t
-
+    # [Mixin] 已迁移至 editor_ai_process_mixin.py
+    # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     # ────────────── M2 漫剧导出预设 ──────────────
 
     _DRAMA_PLATFORM_PRESETS = {
@@ -7169,29 +5554,48 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         except Exception:
             pass
 
-    def _apply_manju_portrait_preset(self) -> None:
-        """一键漫剧竖屏：抖音系 9:16 / 1080x1920。"""
-        self._apply_export_video_preset(
-            platform="抖音",
-            resolution="1080x1920",
-            aspect="9:16",
-            bitrate="5000k",
-            fps="30fps",
-            output_mode="漫剧竖屏快切",
-        )
-        self._notify_edit("已套用漫剧竖屏：1080×1920 · 9:16（导出等比+黑边）")
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-    def _apply_landscape_preset(self) -> None:
-        """一键横屏：B站系 16:9 / 1920x1080。"""
-        self._apply_export_video_preset(
-            platform="B站",
-            resolution="1920x1080",
-            aspect="16:9",
-            bitrate="5000k",
-            fps="30fps",
-            output_mode="B站横屏长视频",
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
+
+    def _export_chapters_csv(self) -> None:
+        from app.core.chapter_markers import chapter_marker_manager
+
+        chapters = chapter_marker_manager.list_all()
+        if not chapters:
+            QMessageBox.information(self, "章节 CSV", "还没有章节标记，未写出文件。")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出章节 CSV", "chapters.csv", "CSV (*.csv)"
         )
-        self._notify_edit("已套用横屏：1920×1080 · 16:9（导出等比+黑边）")
+        if not path:
+            return
+        text = chapter_marker_manager.export_csv()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        QMessageBox.information(self, "章节 CSV", f"已导出 {len(chapters)} 条:\n{path}")
+
+    def _export_chapters_ffmetadata(self) -> None:
+        from app.core.chapter_markers import chapter_marker_manager
+
+        chapters = chapter_marker_manager.list_all()
+        if not chapters:
+            QMessageBox.information(self, "章节元数据", "还没有章节标记，未写出文件。")
+            return
+        dur = 0.0
+        for c in self._clips or []:
+            end = float(c.get("start_time") or 0) + float(c.get("duration") or 0)
+            if end > dur:
+                dur = end
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出 FFmpeg 章节", "chapters.ffmeta", "FFmpeg metadata (*.ffmeta *.txt)"
+        )
+        if not path:
+            return
+        text = chapter_marker_manager.export_ffmetadata(duration=dur or None)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        QMessageBox.information(self, "章节元数据", f"已导出 {len(chapters)} 条:\n{path}")
 
     def _on_export_platform_changed(self, platform: str) -> None:
         preset = self._DRAMA_PLATFORM_PRESETS.get(platform)
@@ -7271,7 +5675,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
     def _notify_edit(self, msg: str) -> None:
         """轻量反馈：状态栏 + toast，避免每次剪辑都弹模态框"""
         self._undo_redo_toast = msg
-        print(f"[剪辑] {msg}")
+        logger.info(f'[剪辑] {msg}')
         try:
             win = self.window()
             if win is not None and hasattr(win, "statusBar"):
@@ -7668,7 +6072,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                     pm.update_preview(source_t, effects=effects)
                     self._video_source = src
         except Exception as e:
-            print(f"时间线帧渲染失败: {e}")
+            logger.error(f'时间线帧渲染失败: {e}')
 
         # >>> FROZEN:playback-av:main-audio BEGIN
         # 主视频内嵌音：墙钟为画面主时钟；QMediaPlayer 只出声（勿再挂 VideoOutput）
@@ -7814,72 +6218,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             return None
         return self._place_bgr_on_sequence_canvas(arr)
 
-    def _try_render_plugin_transition(self, timeline_t: float, video_hits, pm):
-        """
-        片尾转场窗内：解出/入两帧，走 ITransitionPlugin / apply()。
-        成功返回 BGR；否则 None（回退叠层 + dissolve 近似）。
-        """
-        candidates = list(video_hits or [])
-        # 也检查即将结束、尚在转场窗内的片（下片可能尚未命中）
-        for c in getattr(self, "_clips", None) or []:
-            if str(c.get("type", "")).lower() == "audio":
-                continue
-            tr = self._clip_outgoing_transition(c)
-            if not tr:
-                continue
-            st = float(c.get("start_time", 0) or 0)
-            end = st + float(c.get("duration", 0) or 0)
-            fade = float(tr.get("duration", 0.5) or 0.5)
-            if end - fade <= timeline_t <= end + 0.02:
-                if c not in candidates:
-                    candidates.append(c)
-        for clip in candidates:
-            tr = self._clip_outgoing_transition(clip)
-            if not tr:
-                continue
-            fade = float(tr.get("duration", 0.5) or 0.5)
-            if fade <= 0.05:
-                continue
-            st = float(clip.get("start_time", 0) or 0)
-            end = st + float(clip.get("duration", 0) or 0)
-            if not (end - fade <= timeline_t <= end + 0.02):
-                continue
-            nxt = self._find_next_clip_same_track(clip)
-            if not nxt:
-                continue
-            # 允许邻接或轻微重叠
-            nst = float(nxt.get("start_time", 0) or 0)
-            if nst > end + 0.15:
-                continue
-            progress = (timeline_t - (end - fade)) / fade
-            progress = max(0.0, min(1.0, progress))
-            plugin_id = tr.get("plugin_id") or tr.get("type") or tr.get("name")
-            try:
-                from app.core.transition_plugin_registry import (
-                    apply_frames, resolve_plugin_id, easing_from_curve,
-                )
-            except Exception:
-                from core.transition_plugin_registry import (
-                    apply_frames, resolve_plugin_id, easing_from_curve,
-                )
-            pid = resolve_plugin_id(str(plugin_id or "")) or str(plugin_id or "")
-            if not pid:
-                continue
-            a = self._decode_clip_bgr_at(clip, min(timeline_t, end - 1e-3), pm)
-            b = self._decode_clip_bgr_at(nxt, max(timeline_t, nst), pm)
-            if a is None or b is None:
-                continue
-            params = {
-                "duration": fade,
-                "easing": easing_from_curve(str(tr.get("curve") or "线性")),
-                "direction": tr.get("direction") or "right",
-            }
-            mixed = apply_frames(pid, a, b, progress, params)
-            if mixed is None:
-                continue
-            return mixed
-        return None
-
+    # [Mixin] 已迁移至 editor_ai_process_mixin.py
     def _crossfade_opacity(self, clip, timeline_t: float, video_hits) -> float:
         """邻片重叠 / 片缘转场窗：无插件双帧时的 dissolve 近似。"""
         st = float(clip.get("start_time", 0) or 0)
@@ -8136,7 +6475,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             self._preview_manager.playing_speed = rate
         if getattr(self, "_timeline_playing", False):
             self._rebasing_playback_clock(float(getattr(self, "_playhead_position", 0) or 0))
-        print(f"播放倍速切换为: {speed_text}")
+        logger.info(f'播放倍速切换为: {speed_text}')
     
     def _reverse_play(self):
         """ """
@@ -8273,7 +6612,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         self._playhead_position = position
         self._current_time = position
         self._update_time_display()
-        print(f"播放头移动到 {position}s")
+        logger.info(f'播放头移动到 {position}s')
     
     # 媒体播放器事件处理
     def _on_playback_state_changed(self, state):
@@ -8539,70 +6878,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         if tw is not None:
             tw.set_playhead_position(new_t)
 
-    def _nudge_selected_clip_frames(self, frames: int):
-        """Shift+←/→：选中片段（支持多选）按帧平移。"""
-        tw = getattr(self, "_timeline_widget", None)
-        clips = []
-        if tw is not None and hasattr(tw, "get_selected_clips"):
-            clips = list(tw.get_selected_clips() or [])
-        if not clips:
-            clip = getattr(self, "_current_clip", None)
-            if clip:
-                clips = [clip]
-        if not clips:
-            return
-        step = self._edit_frame_duration() * int(frames)
-        if len(clips) == 1:
-            clip = clips[0]
-            before = {
-                "id": clip.get("id"),
-                "start_time": float(clip.get("start_time", 0) or 0),
-                "duration": float(clip.get("duration", 0) or 0),
-                "in_point": float(clip.get("in_point", 0) or 0),
-                "out_point": float(clip.get("out_point", 0) or 0),
-                "track": int(clip.get("track", 0) or 0),
-            }
-            clip["start_time"] = max(0.0, float(clip.get("start_time", 0) or 0) + step)
-            if tw is not None:
-                for w in tw.all_clip_widgets():
-                    if w.clip_data.get("id") == clip.get("id"):
-                        tw.position_clip_widget(w)
-                        break
-            payload = dict(clip)
-            payload["_edit_before"] = before
-            try:
-                self._on_clip_trim_committed(payload)
-            except Exception:
-                self._sync_timeline_widget_state()
-            return
-        # 多选：一条 compound
-        items = []
-        for clip in clips:
-            st0 = float(clip.get("start_time", 0) or 0)
-            before = {
-                "id": clip.get("id"),
-                "start_time": st0,
-                "duration": float(clip.get("duration", 0) or 0),
-                "in_point": float(clip.get("in_point", 0) or 0),
-                "out_point": float(clip.get("out_point", 0) or 0),
-                "track": int(clip.get("track", 0) or 0),
-            }
-            clip["start_time"] = max(0.0, st0 + step)
-            after = {
-                "start_time": float(clip["start_time"]),
-                "track": int(clip.get("track", 0) or 0),
-                "duration": float(clip.get("duration", 0) or 0),
-                "in_point": float(clip.get("in_point", 0) or 0),
-                "out_point": float(clip.get("out_point", 0) or 0),
-            }
-            items.append({"clip_id": clip.get("id"), "before": before, "after": after, "clip": clip})
-            if tw is not None:
-                for w in tw.all_clip_widgets():
-                    if w.clip_data.get("id") == clip.get("id"):
-                        tw.position_clip_widget(w)
-                        break
-        self._on_clip_trim_committed({"_batch_move": True, "items": items})
-    
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # 视频翻转/倒放
     def _reverse_video(self):
         """视频倒放"""
@@ -8871,94 +7147,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 self._audio_manager.adjust_audio_volume(t['id'], out)
         self._notify_edit(f"总控音量 {int(vol * 100)}%")
 
-    def _apply_fade_effects(self):
-        """应用音频页整套设置：淡入淡出 + 均衡器 + 降噪 + 压缩器 + 混响（一次 ffmpeg 调用）。"""
-        src = self._get_active_audio_path()
-        if not src or not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "请先在时间线导入音频/视频素材")
-            return
-
-        def _spn_val(attr, default=0):
-            row = getattr(self, attr, None)
-            w = row.findChild(QSpinBox) if row is not None else None
-            return w.value() if w is not None else default
-
-        def _slr_val(attr, default=0):
-            row = getattr(self, attr, None)
-            w = row.findChild(QSlider) if row is not None else None
-            return w.value() if w is not None else default
-
-        def _cmb_val(attr, default="无"):
-            row = getattr(self, attr, None)
-            w = row.findChild(QComboBox) if row is not None else None
-            return w.currentText() if w is not None else default
-
-        fade_in_ms = _spn_val("_fade_in_row", 0)
-        fade_out_ms = _spn_val("_fade_out_row", 0)
-        eq_low = _slr_val("_eq_low_row", 0)
-        eq_mid = _slr_val("_eq_mid_row", 0)
-        eq_high = _slr_val("_eq_high_row", 0)
-        denoise_on = bool(getattr(self, "_denoise_chk", None) and self._denoise_chk.isChecked())
-        denoise_strength = _slr_val("_denoise_strength_row", 50)
-        comp_on = bool(getattr(self, "_compressor_chk", None) and self._compressor_chk.isChecked())
-        comp_ratio = _slr_val("_compressor_ratio_row", 50)
-        reverb = _cmb_val("_reverb_row", "无")
-
-        dur = float(self._get_video_duration(src) or 0)
-        af_parts = []
-        if fade_in_ms > 0:
-            af_parts.append(f"afade=t=in:st=0:d={fade_in_ms / 1000.0:.3f}")
-        if fade_out_ms > 0:
-            fo_s = fade_out_ms / 1000.0
-            st = max(0.0, (dur - fo_s)) if dur > 0 else 0.0
-            af_parts.append(f"afade=t=out:st={st:.3f}:d={fo_s:.3f}")
-        if eq_low:
-            af_parts.append(f"equalizer=f=100:width_type=o:width=2:g={eq_low}")
-        if eq_mid:
-            af_parts.append(f"equalizer=f=1000:width_type=o:width=1:g={eq_mid}")
-        if eq_high:
-            af_parts.append(f"equalizer=f=8000:width_type=o:width=2:g={eq_high}")
-        if denoise_on:
-            nr = max(0.01, min(97.0, 3.0 + denoise_strength / 100.0 * 94.0))
-            af_parts.append(f"afftdn=nr={nr:.2f}")
-        if comp_on:
-            ratio = max(1.0, min(20.0, 1.0 + comp_ratio / 100.0 * 19.0))
-            af_parts.append(f"acompressor=threshold=-20dB:ratio={ratio:.2f}:attack=5:release=50")
-        reverb_map = {
-            "小房间": "aecho=0.8:0.5:40:0.25",
-            "中厅": "aecho=0.8:0.6:60|100:0.3|0.2",
-            "大教堂": "aecho=0.8:0.7:100|200|300:0.4|0.3|0.2",
-            "板式": "aecho=0.8:0.5:20:0.3",
-            "弹簧": "aecho=0.8:0.6:30|60:0.35|0.25",
-        }
-        if reverb in reverb_map:
-            af_parts.append(reverb_map[reverb])
-
-        if not af_parts:
-            QMessageBox.information(self, "提示", "未设置任何音频效果（淡入淡出/均衡器/降噪/压缩器/混响均为默认值）")
-            return
-
-        dst = self._output_path(src, '_audiofx')
-        ffmpeg = self._get_ffmpeg()
-        try:
-            result = subprocess.run([
-                ffmpeg, '-y', '-i', src,
-                '-af', ",".join(af_parts),
-                '-q:a', '2', dst
-            ], capture_output=True, text=True)
-            if result.returncode != 0 or not os.path.exists(dst):
-                QMessageBox.warning(self, "失败", f"音频效果处理失败:\n{(result.stderr or '')[-500:]}")
-                return
-            self._add_to_clips(dst, 'audio')
-            QMessageBox.information(
-                self, "完成",
-                f"已应用音频效果（淡入{fade_in_ms}ms/淡出{fade_out_ms}ms"
-                f"{'/降噪' if denoise_on else ''}{'/压缩' if comp_on else ''}"
-                f"{'/混响:' + reverb if reverb in reverb_map else ''}）:\n{dst}",
-            )
-        except Exception as e:
-            QMessageBox.warning(self, "失败", f"处理失败: {e}")
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     def _delete_clip_by_id(self, clip_id, ripple: bool = True):
         """按片段 ID 删除；默认波纹；视频片连带删除同起点联动音频（一次撤销）。"""
         if not clip_id:
@@ -9059,7 +7248,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 for track in current.get("tracks", []):
                     real_timeline_manager.delete_clip(current["id"], track["id"], clip_id)
         except Exception as e:
-            print(f"删除内核时间线片段失败: {e}")
+            logger.error(f'删除内核时间线片段失败: {e}')
         payload = {"clip": deleted_clip, "ripple_shifts": ripple_shifts}
         if record:
             self._record_action({"type": "delete", **payload})
@@ -9070,77 +7259,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             self._notify_edit("已删除片段" + ("（波纹）" if ripple else ""))
         return payload
 
-    def _sync_timeline_widget_state(self):
-        """同步片段元数据到 ClipWidget，并按 start_time 重新定位。"""
-        if not hasattr(self, '_timeline_widget'):
-            return
-        tw = self._timeline_widget
-        # 合缝等路径会 deepcopy 替换 _clips；镜像到时间线并刷新活引用
-        tw._clips = list(self._clips)
-        try:
-            if hasattr(tw, "refresh_load_spans"):
-                tw.refresh_load_spans(self._clips)
-            if hasattr(tw, "update_in_out_markers"):
-                tw.update_in_out_markers(
-                    getattr(self, "_sequence_in_point", None),
-                    getattr(self, "_sequence_out_point", None),
-                )
-        except Exception as e:
-            logger.debug("同步标尺 I/O / 负载线失败: %s", e)
-        cur_id = None
-        if isinstance(getattr(self, "_current_clip", None), dict):
-            cur_id = self._current_clip.get("id")
-        if cur_id:
-            self._current_clip = next(
-                (c for c in self._clips if c.get("id") == cur_id),
-                self._current_clip,
-            )
-        if isinstance(getattr(tw, "_current_clip", None), dict):
-            tid = tw._current_clip.get("id")
-            if tid:
-                tw._current_clip = next(
-                    (c for c in self._clips if c.get("id") == tid),
-                    tw._current_clip,
-                )
-        if hasattr(tw, "all_clip_widgets"):
-            for widget in tw.all_clip_widgets():
-                clip_id = widget.clip_data.get("id")
-                for clip in self._clips:
-                    if clip.get("id") == clip_id:
-                        widget.clip_data = clip
-                        if hasattr(widget, "set_keyframes"):
-                            widget.set_keyframes(clip.get("keyframes") or [])
-                        # 若轨变更则 reparent
-                        ti = int(clip.get("track", 0) or 0)
-                        if hasattr(tw, "reparent_clip_to_track"):
-                            tw.reparent_clip_to_track(widget, ti)
-                        else:
-                            tw.position_clip_widget(widget)
-                        widget.update()
-                        break
-            if hasattr(tw, "relayout_clips"):
-                tw.relayout_clips()
-            if hasattr(tw, "_apply_selection_visual"):
-                tw._apply_selection_visual()
-        else:
-            for track in getattr(tw, '_tracks', []):
-                layout = track.get("content_layout")
-                if not layout:
-                    continue
-                for i in range(layout.count()):
-                    widget = layout.itemAt(i).widget()
-                    if widget is not None and hasattr(widget, "clip_data"):
-                        clip_id = widget.clip_data.get("id")
-                        for clip in self._clips:
-                            if clip.get("id") == clip_id:
-                                widget.clip_data = clip
-                                duration = float(clip.get("duration", 10))
-                                width = int(duration * 20 * (tw._zoom / 100))
-                                widget.setFixedWidth(max(80, width))
-                                widget.update()
-                                break
-        tw.update()
-    
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     def _optimize_workflow(self):
         """ """
         if self._clips:
@@ -9153,466 +7272,26 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 "saturation": self._saturation_slider.value(),
                 "hue": self._hue_slider.value()
             }
-            result = video_processor.optimize_workflow(clip_path, platform, video_adjust_params)
+            from .modules import video_processor as _video_processor
+            result = _video_processor.optimize_workflow(clip_path, platform, video_adjust_params)
             QMessageBox.information(self, "智能剪辑", f"智能剪辑工作流已启动!{result}")
         else:
             _clear_msgbox("操作提示", "请先导入视频")
     
-    def _top0_smart_clip(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        
-        clip_path = self._clips[0]['path']
-        platform = self._platform_var.currentText() if hasattr(self, '_platform_var') else "抖音"
-        
-        # 显示进度对话框
-        from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog("正在分析视频内容...", "取消", 0, 100, self)
-        progress.setWindowTitle("TOP 0级AI智能剪辑")
-        progress.setModal(True)
-        progress.show()
-        
-        def update_progress(value, message):
-            progress.setValue(int(value))
-            progress.setLabelText(message)
-        
-        try:
-            # 通过统一内核调度器执行TOP 0级智能剪辑
-            try:
-                from app.core.editor_scheduler import editor_scheduler
-            except ImportError:
-                from core.editor_scheduler import editor_scheduler
-
-            result = editor_scheduler.smart_clip(
-                video_path=clip_path,
-                target_platform=platform,
-                video_style="高光剪辑",
-                target_duration=60.0,
-                progress_callback=update_progress
-            )
-            
-            progress.setValue(100)
-            progress.close()
-            
-            if result["success"]:
-                # 显示结果
-                output_count = len(result["output_videos"])
-                msg = f"✅ TOP 0级智能剪辑完成!\n\n"
-                msg += f"📊 分析结果:\n"
-                msg += f"   • 标题: {result['analysis']['title']}\n"
-                msg += f"   • 类型: {result['analysis']['genre']}\n"
-                msg += f"   • 角色: {', '.join(result['analysis']['characters'][:3])}\n\n"
-                msg += f"🎬 生成视频: {output_count} 个\n"
-                
-                for i, video in enumerate(result["output_videos"][:3], 1):
-                    msg += f"   {i}. {video['title']} ({video['duration']:.1f}s)\n"
-                
-                if output_count > 3:
-                    msg += f"   ... 还有 {output_count - 3} 个片段\n"
-                
-                msg += f"\n📁 输出目录:\n{os.path.dirname(result['output_videos'][0]['path'])}"
-                
-                QMessageBox.information(self, "智能剪辑完成", msg)
-                
-                # 将生成的视频添加到素材库
-                for video in result["output_videos"]:
-                    self._add_clip_to_timeline(video["path"])
-            else:
-                error_msg = "剪辑失败:\n" + "\n".join([e.get("error", "未知错误") for e in result["errors"]])
-                QMessageBox.warning(self, "剪辑失败", error_msg)
-                
-        except Exception as e:
-            progress.close()
-            QMessageBox.critical(self, "剪辑错误", f"TOP 0级剪辑出错:\n{str(e)}")
-    
-    
-    def _predict_viral(self):
-        """ """
-        if not self._clips:
-            _clear_msgbox("操作提示", "请先导入视频")
-            return
-        
-        viral_engine = self._ensure_viral_engine()
-        if not viral_engine:
-            _clear_msgbox("引擎未就绪", "爆款优化引擎未加载,请检查依赖安装")
-            return
-        
-        clip_path = self._clips[0]['path']
-        platform_text = self._platform_var.currentText() if hasattr(self, '_platform_var') else "抖音"
-        
-        # 映射平台名称
-        platform_map = {
-            "抖音": Platform.DOUYIN,
-            "快手": Platform.KUAISHOU,
-            "小红书": Platform.XIAOHONGSHU,
-            "B站": Platform.BILIBILI,
-            "视频号": Platform.WECHAT
-        }
-        platform = platform_map.get(platform_text, Platform.DOUYIN)
-        
-        # 显示进度对话框
-        from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog("正在分析视频爆款潜力...", "取消", 0, 100, self)
-        progress.setWindowTitle("🔥 爆款预测分析")
-        progress.setModal(True)
-        progress.show()
-        
-        try:
-            # 获取视频信息并构建特征
-            progress.setValue(20)
-            progress.setLabelText("正在提取视频特征...")
-            
-            # 这里简化处理,实际应该从AI分析结果中提取特征
-            features = VideoFeatures(
-                duration=self._total_duration if hasattr(self, '_total_duration') else 60.0,
-                scene_count=12,
-                avg_scene_duration=5.0,
-                dialogue_density=0.7,
-                emotion_variance=0.6,
-                conflict_intensity=0.75,
-                hook_quality=70,
-                climax_position=0.7,
-                has_cliffhanger=True,
-                visual_attractiveness=75,
-                audio_quality=80,
-                subtitle_quality=70
-            )
-            
-            progress.setValue(50)
-            progress.setLabelText("正在预测表现...")
-            
-            # 预测表现
-            prediction = viral_engine.predict_performance(features, platform)
-            
-            progress.setValue(70)
-            progress.setLabelText("正在生成优化建议...")
-            
-            # 生成优化建议
-            suggestions = viral_engine.generate_optimization_suggestions(features, platform)
-            
-            progress.setValue(90)
-            progress.setLabelText("正在分析爆款基因...")
-            
-            # 获取爆款基因
-            viral_genes = viral_engine.analyze_viral_genes("甜宠")
-            
-            progress.setValue(100)
-            progress.close()
-            
-            # 构建结果显示
-            result_text = f"""
-🎯 视频爆款潜力分析
-
-📱 目标平台: {platform.value}
-
-📊 表现预测:
-   • 3秒完播率: {prediction.to_dict()['3秒完播率']}
-   • 整体完播率: {prediction.to_dict()['整体完播率']}
-   • 点赞率: {prediction.to_dict()['点赞率']}
-   • 评论率: {prediction.to_dict()['评论率']}
-   • 分享率: {prediction.to_dict()['分享率']}
-   • 爆款概率: {prediction.to_dict()['爆款概率']}
-   • 预估播放量: {prediction.to_dict()['预估播放量']}
-
-💡 优化建议 (按优先级排序):
-"""
-            
-            for i, suggestion in enumerate(suggestions[:3], 1):
-                result_text += f"""
-   {i}. {suggestion.factor.value} (优先级: {suggestion.priority})
-      当前得分: {suggestion.current_score:.0f}/100 -> 目标: {suggestion.target_score:.0f}/100
-      建议: {suggestion.suggestion.replace(chr(10), chr(10) + '      ')}
-      预期改善: {suggestion.expected_improvement}
-"""
-            
-            result_text += f"""
-🧬 推荐爆款基因:
-"""
-            
-            for i, gene in enumerate(viral_genes[:3], 1):
-                result_text += f"""
-   {i}. {gene.pattern_name} (经验成功率: {gene.success_rate:.1%})
-      {gene.description}
-      关键要素: {', '.join(gene.key_elements)}
-"""
-            # 如实说明：以上"成功率"/预测数据来自行业经验规则库和启发式模型，
-            # 不是本软件对真实播放数据的统计结果，仅供参考
-            result_text += "\n⚠️ 以上预测和成功率均为启发式估算，非真实平台数据统计，仅供参考\n"
-            
-            # 显示结果对话框
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
-            dialog = QDialog(self)
-            dialog.setWindowTitle("🔥 爆款预测结果")
-            dialog.setMinimumSize(600, 500)
-            
-            layout = QVBoxLayout(dialog)
-            
-            text_edit = QTextEdit()
-            text_edit.setPlainText(result_text)
-            text_edit.setReadOnly(True)
-            layout.addWidget(text_edit)
-            
-            close_btn = QPushButton("关闭")
-            close_btn.clicked.connect(dialog.accept)
-            layout.addWidget(close_btn)
-            
-            dialog.exec()
-            
-        except Exception as e:
-            progress.close()
-            QMessageBox.critical(self, "分析错误", f"爆款预测出错:\n{str(e)}")
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 画中画 (Picture-in-Picture)
     # ═══════════════════════════════════════════════════════════════
-    def _apply_pip(self):
-        """画中画：将一个视频叠加到另一个视频上"""
-        if len(self._clips) < 2:
-            QMessageBox.warning(self, "提示", "画中画需要至少2个素材，请先在时间线导入主视频和叠加视频")
-            return
-
-        main_src = self._clips[0]['path']
-        overlay_src = self._clips[1]['path']
-
-        if not os.path.exists(main_src) or not os.path.exists(overlay_src):
-            QMessageBox.warning(self, "提示", "素材文件不存在")
-            return
-
-        dst = self._output_path(main_src, '_pip').replace('.mp3', '.mp4')
-        ffmpeg = self._get_ffmpeg()
-
-        QMessageBox.information(self, "画中画", "正在合成画中画效果...")
-
-        def do_pip():
-            try:
-                x_pos = self._pip_x.value() if hasattr(self, '_pip_x') else 75
-                y_pos = self._pip_y.value() if hasattr(self, '_pip_y') else 80
-                size_pct = self._pip_size.value() if hasattr(self, '_pip_size') else 30
-                border_w = self._pip_border.value() if hasattr(self, '_pip_border') else 2
-
-                # 构建 FFmpeg overlay 滤镜
-                # overlay=W*x/100-w/2:H*y/100-h/2
-                overlay_filter = (
-                    f"[1:v]scale=iw*{size_pct/100}:ih*{size_pct/100}"
-                )
-                if border_w > 0:
-                    overlay_filter += f",pad=iw+{border_w*2}:ih+{border_w*2}:{border_w}:{border_w}:white"
-
-                overlay_filter += (
-                    f"[pip];"
-                    f"[0:v][pip]overlay="
-                    f"(main_w-overlay_w)*{x_pos/100}:"
-                    f"(main_h-overlay_h)*{y_pos/100}"
-                )
-
-                cmd = [
-                    ffmpeg, '-y',
-                    '-i', main_src,
-                    '-i', overlay_src,
-                    '-filter_complex', overlay_filter,
-                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-                    '-c:a', 'copy',
-                    '-shortest', dst
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if result.returncode == 0:
-                    QTimer.singleShot(0, lambda: (
-                        self._add_to_clips(dst, 'video'),
-                        QMessageBox.information(self, "完成", f"画中画合成完成:\n{dst}")
-                    ))
-                else:
-                    err = result.stderr[-500:]
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"合成失败:\n{err}"))
-            except subprocess.TimeoutExpired:
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", "处理超时（5分钟）"))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"处理出错: {err}"))
-
-        threading.Thread(target=do_pip, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 智能抠像 (Chroma Key)
     # ═══════════════════════════════════════════════════════════════
-    def _apply_chroma_key(self):
-        """智能抠像：去除绿幕/蓝幕/自定义颜色背景"""
-        if not self._clips:
-            QMessageBox.warning(self, "提示", "请先导入视频素材")
-            return
-
-        src = self._clips[0]['path']
-        if not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "视频文件不存在")
-            return
-
-        dst = self._output_path(src, '_chromakey').replace('.mp3', '.mp4')
-        ffmpeg = self._get_ffmpeg()
-
-        tolerance = (self._chroma_tol.value() if hasattr(self, '_chroma_tol') else 30) / 100.0
-        softness = (self._chroma_soft.value() if hasattr(self, '_chroma_soft') else 5) / 100.0
-        color_mode = self._chroma_color.currentText() if hasattr(self, '_chroma_color') else "绿色"
-
-        color_map = {"绿色": "0x00FF00", "蓝色": "0x0000FF", "自定义": "0x00FF00"}
-        color_hex = color_map.get(color_mode, "0x00FF00")
-
-        QMessageBox.information(self, "智能抠像", "正在处理抠像...")
-
-        def do_chroma():
-            try:
-                # FFmpeg chromakey filter
-                chroma_filter = (
-                    f"chromakey={color_hex}:"
-                    f"similarity={tolerance:.2f}:"
-                    f"blend={softness:.2f}"
-                )
-                cmd = [
-                    ffmpeg, '-y', '-i', src,
-                    '-vf', chroma_filter,
-                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-                    '-c:a', 'copy', dst
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if result.returncode == 0:
-                    QTimer.singleShot(0, lambda: (
-                        self._add_to_clips(dst, 'video'),
-                        QMessageBox.information(self, "完成", f"抠像完成:\n{dst}")
-                    ))
-                else:
-                    err = result.stderr[-500:]
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"抠像失败:\n{err}"))
-            except subprocess.TimeoutExpired:
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", "处理超时"))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"处理出错: {err}"))
-
-        threading.Thread(target=do_chroma, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 曲线变速 (Speed Ramping)
     # ═══════════════════════════════════════════════════════════════
-    def _apply_speed_ramp(self):
-        """曲线变速：优先走 core.speed_ramping；UI 回调回主线程（A3）。"""
-        if not self._clips:
-            QMessageBox.warning(self, "提示", "请先导入视频素材")
-            return
-
-        clip = self._current_clip
-        if not clip or self._is_export_audio_clip(clip):
-            video_clips = [
-                c for c in self._clips
-                if c.get("path") and not self._is_export_audio_clip(c)
-            ]
-            clip = video_clips[0] if video_clips else None
-        if not clip:
-            QMessageBox.warning(self, "提示", "没有可用的视频片段")
-            return
-
-        src = clip.get("path", "")
-        if not src or not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "视频文件不存在")
-            return
-
-        dst = self._output_path(src, '_speedramp').replace('.mp3', '.mp4')
-        preset = self._speed_preset.currentText() if hasattr(self, '_speed_preset') else "无"
-        speed_factor = (self._speed_factor.value() if hasattr(self, '_speed_factor') else 100) / 100.0
-
-        if preset == "无" and abs(speed_factor - 1.0) < 1e-6:
-            QMessageBox.warning(self, "提示", "请选择变速预设或调整速度因子")
-            return
-
-        self._notify_edit(f"曲线变速处理中: {preset}…")
-
-        preset_map = {
-            "缓入": "ramp_in",
-            "缓出": "ramp_out",
-            "缓入缓出": "fast_slow_fast",
-            "卡点变速": "bullet_time",
-        }
-
-        def _done(ok: bool, path: str, err: str = "", *, speed=None, ramp_dict=None):
-            if ok and path and os.path.exists(path):
-                if ramp_dict is not None:
-                    clip["speed_ramp"] = ramp_dict
-                if speed is not None:
-                    try:
-                        self.set_clip_speed(clip.get("id"), float(speed))
-                    except Exception:
-                        clip["speed"] = float(speed)
-                self._add_to_clips(path, 'video')
-                QMessageBox.information(self, "完成", f"变速成片已加入时间线:\n{path}")
-            else:
-                QMessageBox.warning(self, "失败", err or "变速失败")
-
-        def do_speed():
-            err = ""
-            ramp_dict = None
-            speed_val = None
-            try:
-                from app.core.speed_ramping import (
-                    SpeedRamp, SpeedEasing,
-                    apply_speed_ramp_ffmpeg, reverse_clip_ffmpeg,
-                )
-                video_duration = float(self._get_video_duration(src) or 0) or 10.0
-                ok = False
-                if preset == "倒放":
-                    ok = reverse_clip_ffmpeg(src, dst)
-                    err = "" if ok else "倒放失败"
-                elif preset in preset_map:
-                    ramp = SpeedRamp.preset_preset(preset_map[preset])
-                    easing_map = {
-                        "线性": SpeedEasing.LINEAR,
-                        "缓入": SpeedEasing.EASE_IN,
-                        "缓出": SpeedEasing.EASE_OUT,
-                        "缓入缓出": SpeedEasing.EASE_IN_OUT,
-                        "阶梯": SpeedEasing.STEP,
-                    }
-                    ui_easing = easing_map.get(
-                        self._speed_easing.currentText() if hasattr(self, "_speed_easing") else "线性"
-                    )
-                    if ui_easing is not None:
-                        # UI「缓动」下拉覆盖预设默认曲线（卡点变速用阶跃形，保留原样更稳）
-                        if preset != "卡点变速":
-                            for kf in ramp.keyframes[1:]:
-                                kf.easing = ui_easing
-                    # 关键帧时间按片段时长归一化到绝对秒
-                    for kf in ramp.keyframes:
-                        kf.time = float(kf.time) * video_duration
-                    ok = apply_speed_ramp_ffmpeg(src, dst, ramp, total_duration=video_duration)
-                    if ok:
-                        ramp_dict = ramp.to_dict()
-                    err = "" if ok else "曲线变速渲染失败（可改用固定倍率「应用变速」）"
-                else:
-                    # 固定倍率：写入片段 speed（预览）并导出成片
-                    factor = {
-                        "0.25x慢放": 0.25,
-                        "0.5x慢放": 0.5,
-                        "2x快放": 2.0,
-                        "4x快放": 4.0,
-                    }.get(preset, speed_factor)
-                    ramp = SpeedRamp(enabled=True)
-                    ramp.add_keyframe(0.0, float(factor), SpeedEasing.LINEAR)
-                    ramp.add_keyframe(video_duration, float(factor), SpeedEasing.LINEAR)
-                    ok = apply_speed_ramp_ffmpeg(src, dst, ramp, total_duration=video_duration)
-                    if ok:
-                        speed_val = float(factor)
-                        ramp_dict = ramp.to_dict()
-                    err = "" if ok else "固定倍率导出失败"
-                QTimer.singleShot(
-                    0,
-                    lambda ok=ok, err=err, rd=ramp_dict, sv=speed_val: _done(
-                        ok, dst if ok else "", err, speed=sv, ramp_dict=rd
-                    ),
-                )
-            except Exception as e:
-                QTimer.singleShot(0, lambda msg=str(e): _done(False, "", msg))
-
-        threading.Thread(target=do_speed, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     def _build_speed_easing_expr(self, preset, duration, easing):
         """兼容旧调用；新路径优先 SpeedRamp 预设。"""
         if preset == "缓入":
@@ -9655,227 +7334,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
     # ═══════════════════════════════════════════════════════════════
     # RGB 曲线调色 (Curves Color Grading)
     # ═══════════════════════════════════════════════════════════════
-    def _apply_curves(self):
-        """RGB曲线调色：通过FFmpeg curves滤镜实现暗部/中间调/亮部调整"""
-        if not self._clips:
-            QMessageBox.warning(self, "提示", "请先导入视频素材")
-            return
-
-        src = self._clips[0]['path']
-        if not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "视频文件不存在")
-            return
-
-        dst = self._output_path(src, '_curves').replace('.mp3', '.mp4')
-        ffmpeg = self._get_ffmpeg()
-
-        channel = self._curve_channel.currentText() if hasattr(self, '_curve_channel') else "RGB"
-        shadows = (self._curve_shadows.value() if hasattr(self, '_curve_shadows') else 0) / 100.0
-        midtones = (self._curve_midtones.value() if hasattr(self, '_curve_midtones') else 0) / 100.0
-        highlights = (self._curve_highlights.value() if hasattr(self, '_curve_highlights') else 0) / 100.0
-
-        QMessageBox.information(self, "曲线调色", f"正在应用 {channel} 曲线...")
-
-        def do_curves():
-            try:
-                # 构建 FFmpeg curves 滤镜参数
-                # curves=preset=lighter|darker|strong_contrast, 或自定义
-                # 映射 shadows/midtones/highlights 到 master 曲线
-                # 暗部: 0~0.33, 中间调: 0.33~0.67, 亮部: 0.67~1.0
-
-                if abs(shadows) < 0.01 and abs(midtones) < 0.01 and abs(highlights) < 0.01:
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "提示", "请先调整曲线参数"))
-                    return
-
-                # 构建 curves 字符串：格式为 "master='0/0 0.25/X 0.5/Y 0.75/Z 1/1'"
-                # X = 0.25 + shadows*0.3, Y = 0.5 + midtones*0.3, Z = 0.75 + highlights*0.3
-                p1 = max(0.0, min(1.0, 0.25 + shadows * 0.3))
-                p2 = max(0.0, min(1.0, 0.50 + midtones * 0.3))
-                p3 = max(0.0, min(1.0, 0.75 + highlights * 0.3))
-
-                chan_map = {"RGB": "master", "红色": "red", "绿色": "green", "蓝色": "blue"}
-                chan_name = chan_map.get(channel, "master")
-
-                curves_str = f"{chan_name}='0/0 0.25/{p1:.2f} 0.5/{p2:.2f} 0.75/{p3:.2f} 1/1'"
-
-                cmd = [
-                    ffmpeg, '-y', '-i', src,
-                    '-vf', f'curves={curves_str}',
-                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-                    '-c:a', 'copy', dst
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-                if result.returncode == 0:
-                    QTimer.singleShot(0, lambda: (
-                        self._add_to_clips(dst, 'video'),
-                        QMessageBox.information(self, "完成", f"曲线调色完成:\n{dst}")
-                    ))
-                else:
-                    err = result.stderr[-500:]
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"曲线调色失败:\n{err}"))
-            except subprocess.TimeoutExpired:
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", "处理超时"))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"处理出错: {err}"))
-
-        threading.Thread(target=do_curves, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 音乐踩点 (Beat Detection)
     # ═══════════════════════════════════════════════════════════════
-    def _detect_beats(self):
-        """音乐踩点：自动检测BGM节拍点"""
-        src = self._get_active_audio_path()
-        if not src or not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "请先在时间线导入音频/视频素材")
-            return
-
-        sensitivity = self._beat_sensitivity.value() if hasattr(self, '_beat_sensitivity') else 5
-        self._beat_list.clear()
-        self._beat_list.addItem("🥁 正在分析音频节拍...")
-        QApplication.processEvents()
-
-        def _set_beat_lines(lines):
-            self._beat_list.clear()
-            for line in lines:
-                self._beat_list.addItem(line)
-
-        def do_detect():
-            lines = []
-            try:
-                # 尝试使用 BGMBeatDetector
-                try:
-                    import numpy as np
-                    from app.core.audio_processor import BGMBeatDetector
-
-                    import soundfile as sf
-                    data, sr = sf.read(src)
-                    if len(data.shape) > 1:
-                        data = np.mean(data, axis=1)
-
-                    detector = BGMBeatDetector()
-                    beats = detector.detect_beats(data, sr)
-
-                    if beats:
-                        from datetime import timedelta
-                        for i, beat in enumerate(beats):
-                            # 灵敏度过滤：只显示强度足够的节拍
-                            threshold = sensitivity / 10.0
-                            if beat.intensity >= threshold:
-                                ts = str(timedelta(seconds=int(beat.time)))
-                                ms = f".{int(beat.time * 100) % 100:02d}"
-                                intensity_bar = "█" * int(beat.intensity * 10)
-                                lines.append(
-                                    f"第{i+1}拍 | {ts}{ms} | {intensity_bar} ({beat.intensity:.1%})"
-                                )
-                        lines.append(f"━━ 共检测到 {len(beats)} 个节拍点 ━━")
-                    else:
-                        lines.append("⚠ 未检测到明显节拍，请尝试调整灵敏度")
-                    QTimer.singleShot(0, lambda ls=list(lines): _set_beat_lines(ls))
-                    return
-                except ImportError as e:
-                    # 回退到 FFmpeg 基于能量的节拍检测
-                    lines = ["使用FFmpeg检测节拍..."]
-                    QTimer.singleShot(0, lambda ls=list(lines): _set_beat_lines(ls))
-
-                    ffmpeg = self._get_ffmpeg()
-                    # 用 silencedetect 找出音量峰值
-                    result = subprocess.run(
-                        [ffmpeg, '-y', '-i', src,
-                         '-af', f'asplit[a][b];[a]volume=1[b];[b]ametadata=print:key=lavfi.astats.Overall.RMS_level',
-                         '-f', 'null', '-'],
-                        capture_output=True, text=True, timeout=60,
-                        creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0
-                    )
-                    lines.append("⚠ 需要安装 numpy/soundfile 库以启用完整节拍检测")
-                    lines.append("提示: pip install numpy soundfile")
-                    QTimer.singleShot(0, lambda ls=list(lines): _set_beat_lines(ls))
-            except Exception as e:
-                err = f"❌ 检测失败: {str(e)[:80]}"
-                QTimer.singleShot(0, lambda ls=[err]: _set_beat_lines(ls))
-
-        threading.Thread(target=do_detect, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 运动跟踪 (Motion Tracking)
     # ═══════════════════════════════════════════════════════════════
-    def _apply_motion_track(self):
-        """运动跟踪：通过FFmpeg vidstabdetect 分析视频运动"""
-        if not self._clips:
-            QMessageBox.warning(self, "提示", "请先导入视频素材")
-            return
-
-        src = self._clips[0]['path']
-        if not os.path.exists(src):
-            QMessageBox.warning(self, "提示", "视频文件不存在")
-            return
-
-        dst = self._output_path(src, '_tracked').replace('.mp3', '.mp4')
-        track_type = self._track_type.currentText() if hasattr(self, '_track_type') else "平移跟踪"
-
-        QMessageBox.information(self, "运动跟踪", f"正在分析视频运动: {track_type}...")
-
-        def do_track():
-            try:
-                import tempfile
-                ffmpeg = self._get_ffmpeg()
-
-                # 第1步: 生成运动检测数据
-                trf_file = tempfile.NamedTemporaryFile(suffix='.trf', delete=False).name
-                detect_cmd = [
-                    ffmpeg, '-y', '-i', src,
-                    '-vf', 'vidstabdetect=result=' + trf_file.replace('\\', '/') + ':shakiness=5:accuracy=15',
-                    '-f', 'null', '-'
-                ]
-                subprocess.run(detect_cmd, capture_output=True, text=True, timeout=120,
-                               creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-
-                # 第2步: 根据跟踪类型应用稳定/变换
-                if os.path.exists(trf_file) and os.path.getsize(trf_file) > 10:
-                    track_filter = "vidstabtransform"
-                    if track_type == "透视跟踪":
-                        track_filter += "=optzoom=1:maxangle=10:crop=black"
-                    else:
-                        track_filter += "=smoothing=10:crop=black"
-
-                    cmd = [
-                        ffmpeg, '-y', '-i', src,
-                        '-vf', f'{track_filter}:input={trf_file.replace(chr(92), "/")}',
-                        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-                        '-c:a', 'copy', dst
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                            creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == 'win32' else 0)
-
-                    try:
-                        os.unlink(trf_file)
-                    except Exception as _e:
-                        logger.warning("操作异常（已忽略）: %s", _e)
-
-                    if result.returncode == 0:
-                        QTimer.singleShot(0, lambda: (
-                            self._add_to_clips(dst, 'video'),
-                            QMessageBox.information(self, "完成", f"运动跟踪完成:\n{dst}")
-                        ))
-                    else:
-                        err = result.stderr[-500:]
-                        QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"跟踪失败:\n{err}"))
-                else:
-                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", "未能检测到足够的运动数据，请尝试其他视频"))
-                    try:
-                        os.unlink(trf_file)
-                    except Exception as _e:
-                        logger.warning("操作异常（已忽略）: %s", _e)
-            except subprocess.TimeoutExpired:
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", "处理超时"))
-            except Exception as e:
-                err = str(e)
-                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "失败", f"处理出错: {err}"))
-
-        threading.Thread(target=do_track, daemon=True).start()
-
+    # [Mixin] 已迁移至 editor_effects_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # 贴纸系统 (Sticker System) — 预览叠加 + 导出烧录
     # ═══════════════════════════════════════════════════════════════
@@ -10068,1679 +7536,99 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
     # ------------------------------------------------------------------
     # 剪辑 Agent 与工具栏真实操作补齐
     # ------------------------------------------------------------------
-    def _create_edit_agent_panel(self) -> QWidget:
-        """创建剪辑 Agent 对话面板（嵌入右侧工具栏标签页）。"""
-        panel = QWidget()
-        panel.setObjectName("editAgentPanel")
-        panel.setStyleSheet("""
-            QWidget#editAgentPanel{background:#0f1117;}
-            QLabel{color:#c9d1d9;background:transparent;border:none;}
-        """)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        head = QHBoxLayout()
-        title = QLabel("剪辑 Agent")
-        title.setStyleSheet("color:#fff;font-size:12px;font-weight:700;")
-        head.addWidget(title)
-        head.addStretch()
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        # 模式切换：Plan 模式 / 执行模式
-        mode_label = QLabel("模式")
-        mode_label.setStyleSheet("color:#8b949e;font-size:11px;")
-        head.addWidget(mode_label)
-        self._agent_mode_combo = QComboBox()
-        self._agent_mode_combo.addItem("协作 B", "collaborative")
-        self._agent_mode_combo.addItem("Plan", "plan")
-        self._agent_mode_combo.addItem("自主 C", "autonomous")
-        self._agent_mode_combo.setMinimumWidth(100)
-        self._agent_mode_combo.setToolTip(
-            "Plan：只规划不改时间线；协作 B：只读自动、删除需确认；自主 C：白名单自动执行（付费生成不重试）"
-        )
-        self._agent_mode_combo.setStyleSheet("""
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:3px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:16px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
-            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
-        """)
-        head.addWidget(self._agent_mode_combo)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        model_label = QLabel("模型")
-        model_label.setStyleSheet("color:#8b949e;font-size:11px;")
-        head.addWidget(model_label)
+    # [Mixin] _subscribe_provider_activated 已迁移至 editor_agent_runtime_mixin.py
 
-        self._edit_agent_model_combo = QComboBox()
-        self._edit_agent_model_combo.setMinimumWidth(260)
-        self._edit_agent_model_combo.setStyleSheet("""
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:4px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:18px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;
-                padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{
-                background:#1f2937;
-            }
-            QComboBox QAbstractItemView::item:selected{
-                background:#238636;color:#ffffff;
-            }
-            QComboBox QAbstractItemView::item:disabled{
-                color:#484f58;background:transparent;
-                padding:4px 10px;min-height:22px;
-            }
-        """)
-        head.addWidget(self._edit_agent_model_combo)
+    # [Mixin] _on_provider_activated_event 已迁移至 editor_agent_runtime_mixin.py
 
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setStyleSheet("QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#30363d;}")
-        refresh_btn.clicked.connect(self._refresh_edit_agent_models)
-        head.addWidget(refresh_btn)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        self._agent_active_hint = QLabel("")
-        self._agent_active_hint.setStyleSheet("color:#3fb950;font-size:11px;padding-left:4px;")
-        head.addWidget(self._agent_active_hint)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        close_btn = QPushButton("收起")
-        close_btn.setStyleSheet("QPushButton{background:#2a1f24;color:#ffb4bd;border:1px solid #5c222b;border-radius:6px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#5c222b;color:#fff;}")
-        close_btn.clicked.connect(self._close_agent_tab)
-        head.addWidget(close_btn)
-        layout.addLayout(head)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        # 多集上下文（Dify 式应用变量，写入 MemoryStore）
-        proj_row = QHBoxLayout()
-        proj_row.setSpacing(6)
-        _pl = "color:#8b949e;font-size:11px;"
-        _pe = "QLineEdit{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}"
-        for text in ("剧名",):
-            lb = QLabel(text)
-            lb.setStyleSheet(_pl)
-            proj_row.addWidget(lb)
-        self._agent_drama_edit = QLineEdit()
-        self._agent_drama_edit.setPlaceholderText("漫剧名（写入多集记忆）")
-        self._agent_drama_edit.setStyleSheet(_pe)
-        proj_row.addWidget(self._agent_drama_edit, 2)
-        lb_ep = QLabel("集数")
-        lb_ep.setStyleSheet(_pl)
-        proj_row.addWidget(lb_ep)
-        self._agent_episode_edit = QLineEdit()
-        self._agent_episode_edit.setPlaceholderText("如 03")
-        self._agent_episode_edit.setMaximumWidth(72)
-        self._agent_episode_edit.setStyleSheet(_pe)
-        proj_row.addWidget(self._agent_episode_edit)
-        lb_pf = QLabel("平台")
-        lb_pf.setStyleSheet(_pl)
-        proj_row.addWidget(lb_pf)
-        self._agent_platform_edit = QLineEdit()
-        self._agent_platform_edit.setPlaceholderText("douyin")
-        self._agent_platform_edit.setMaximumWidth(90)
-        self._agent_platform_edit.setStyleSheet(_pe)
-        proj_row.addWidget(self._agent_platform_edit)
-        save_ctx_btn = QPushButton("保存上下文")
-        save_ctx_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
-            "border-radius:6px;padding:4px 10px;font-size:11px;}"
-            "QPushButton:hover{background:#30363d;}"
-        )
-        save_ctx_btn.clicked.connect(self._save_agent_project_context)
-        proj_row.addWidget(save_ctx_btn)
-        layout.addLayout(proj_row)
-        self._load_agent_project_context_fields()
-        self._subscribe_provider_activated()
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _list_local_ollama_models 已迁移至 editor_agent_runtime_mixin.py
 
-        # ── 内容区 QScrollArea（确保内容超出时可滚动）──
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea{background:transparent;border:none;}
-            QScrollBar:vertical{background:#0f1117;width:8px;border:none;}
-            QScrollBar::handle:vertical{background:#30363d;border-radius:4px;min-height:30px;}
-            QScrollBar::handle:vertical:hover{background:#484f58;}
-            QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
-            QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:none;}
-        """)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 4, 0, 4)
-        scroll_layout.setSpacing(8)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        # ── 左右脑神经链接：🧠 大脑状态条（实时显示神经元/突触/激活统计）──
-        self._agent_brain_status_label = QLabel("🧠 大脑初始化中...")
-        self._agent_brain_status_label.setStyleSheet(
-            "QLabel{background:#1a1030;color:#d2a8ff;border:1px solid #3b1f6f;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
-        self._agent_brain_status_label.setWordWrap(True)
-        scroll_layout.addWidget(self._agent_brain_status_label)
-        # 启动时首次刷新 + 定时器周期刷新（每 5 秒）
-        QTimer.singleShot(0, self._refresh_agent_brain_status)
-        self._agent_brain_refresh_timer = QTimer(self)
-        self._agent_brain_refresh_timer.setInterval(5000)
-        self._agent_brain_refresh_timer.timeout.connect(self._refresh_agent_brain_status)
-        self._agent_brain_refresh_timer.start()
-
-        self._edit_agent_chat = QTextEdit()
-        self._edit_agent_chat.setReadOnly(True)
-        self._edit_agent_chat.setFixedHeight(72)
-        self._edit_agent_chat.setPlaceholderText("Agent 状态和执行结果会显示在这里。")
-        self._edit_agent_chat.setStyleSheet("QTextEdit{background:#0d1117;color:#9fb3c8;border:1px solid #21262d;border-radius:8px;padding:6px;font-size:11px;}")
-        scroll_layout.addWidget(self._edit_agent_chat)
-
-        # ── 新增 1：执行参数配置卡（P0 痛点1+8）──
-        self._build_agent_config_card(scroll_layout)
-
-        # ── 新增 2：进度卡（P0 痛点2）──
-        self._build_agent_progress_card(scroll_layout)
-
-        # ── 新增 3：预览问题卡（P1 痛点5）──
-        self._build_agent_preview_card(scroll_layout)
-
-        # ── 新增 4：打分结果卡（P1 痛点3）──
-        self._build_agent_score_card(scroll_layout)
-
-        # ── 新增 5：剪辑脚本卡（P1 痛点4+6）──
-        self._build_agent_script_card(scroll_layout)
-
-        # Plan 模式规划显示区域（默认隐藏）
-        self._agent_plan_card = QFrame()
-        self._agent_plan_card.setStyleSheet("QFrame{background:#0d1f12;border:1px solid #1f4d2a;border-radius:8px;}")
-        self._agent_plan_card.setVisible(False)
-        plan_layout = QVBoxLayout(self._agent_plan_card)
-        plan_layout.setContentsMargins(10, 8, 10, 10)
-        plan_layout.setSpacing(6)
-
-        plan_header = QHBoxLayout()
-        plan_title = QLabel("📋 执行规划")
-        plan_title.setStyleSheet("color:#7ee787;font-size:12px;font-weight:700;")
-        plan_header.addWidget(plan_title)
-        plan_header.addStretch()
-        plan_layout.addLayout(plan_header)
-
-        self._agent_plan_view = QTextEdit()
-        self._agent_plan_view.setReadOnly(True)
-        self._agent_plan_view.setMinimumHeight(80)
-        self._agent_plan_view.setMaximumHeight(160)
-        self._agent_plan_view.setStyleSheet("QTextEdit{background:#0a1a0e;color:#9fb3c8;border:1px solid #1f4d2a;border-radius:6px;padding:6px;font-size:11px;}")
-        plan_layout.addWidget(self._agent_plan_view)
-
-        plan_btn_row = QHBoxLayout()
-        plan_btn_row.setSpacing(6)
-        self._agent_plan_confirm_btn = QPushButton("✅ 确认执行")
-        self._agent_plan_confirm_btn.setStyleSheet("QPushButton{background:#238636;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:600;}QPushButton:hover{background:#2ea043;}")
-        self._agent_plan_confirm_btn.clicked.connect(self._confirm_agent_plan)
-        plan_btn_row.addWidget(self._agent_plan_confirm_btn)
-
-        self._agent_plan_cancel_btn = QPushButton("取消")
-        self._agent_plan_cancel_btn.setStyleSheet("QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 14px;font-size:11px;}QPushButton:hover{background:#30363d;}")
-        self._agent_plan_cancel_btn.clicked.connect(self._cancel_agent_plan)
-        plan_btn_row.addWidget(self._agent_plan_cancel_btn)
-        plan_btn_row.addStretch()
-        plan_layout.addLayout(plan_btn_row)
-
-        scroll_layout.addWidget(self._agent_plan_card)
-
-        interaction_card = QFrame()
-        interaction_card.setStyleSheet("QFrame{background:#111722;border:1px solid #263244;border-radius:10px;}")
-        interaction_layout = QVBoxLayout(interaction_card)
-        interaction_layout.setContentsMargins(10, 10, 10, 10)
-        interaction_layout.setSpacing(8)
-
-        interaction_title = QLabel("输入剪辑指令")
-        interaction_title.setStyleSheet("color:#e6edf3;font-size:12px;font-weight:700;")
-        interaction_layout.addWidget(interaction_title)
-
-        quick_row = QHBoxLayout()
-        quick_row.setSpacing(6)
-        quick_prompts = [
-            ("分析当前片段", "分析当前选中片段，给出可执行的剪辑建议"),
-            ("一键切分", "把当前片段按播放头位置切成两段"),
-            ("电影滤镜", "给当前片段添加电影感滤镜，强度 70%"),
-            ("淡入转场", "给当前片段添加 0.5 秒淡入转场"),
-        ]
-        for label, prompt in quick_prompts:
-            btn = QPushButton(label)
-            btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:12px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#1e6bde;color:#fff;border-color:#1e6bde;}")
-            btn.clicked.connect(lambda _, text=prompt: self._fill_edit_agent_prompt(text))
-            quick_row.addWidget(btn)
-        quick_row.addStretch()
-        interaction_layout.addLayout(quick_row)
-
-        # 全链路一键执行按钮（Agent 全量双向闭环：生成→预览→打分→精剪→成片）
-        pipeline_row = QHBoxLayout()
-        pipeline_row.setSpacing(6)
-        pipeline_btn = QPushButton("🚀 全链路执行（生成→预览→打分→精剪→成片）")
-        pipeline_btn.setObjectName("edit_agent_pipeline_btn")
-        pipeline_btn.setProperty("waiting_preview", False)
-        pipeline_btn.setStyleSheet("QPushButton{background:#1f2a3d;color:#7ee787;border:1px solid #2f5139;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;}QPushButton:hover{background:#238636;color:#fff;border-color:#238636;}")
-        pipeline_btn.clicked.connect(self._on_run_full_pipeline)
-        self._edit_agent_pipeline_btn = pipeline_btn  # 保存引用
-        pipeline_row.addWidget(pipeline_btn)
-        pipeline_row.addStretch()
-        interaction_layout.addLayout(pipeline_row)
-
-        input_row = QHBoxLayout()
-        self._edit_agent_input = QLineEdit()
-        self._edit_agent_input.setPlaceholderText("例如：把当前片段切成两段，给第一段加电影滤镜，并添加淡入转场")
-        self._edit_agent_input.setStyleSheet("QLineEdit{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:8px;font-size:12px;}")
-        self._edit_agent_input.returnPressed.connect(self._send_edit_agent_message)
-        input_row.addWidget(self._edit_agent_input, 1)
-
-        self._edit_agent_send_btn = QPushButton("发送")
-        self._edit_agent_send_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
-        self._edit_agent_send_btn.clicked.connect(self._send_edit_agent_message)
-        input_row.addWidget(self._edit_agent_send_btn)
-
-        self._edit_agent_stop_btn = QPushButton("终止")
-        self._edit_agent_stop_btn.setEnabled(False)
-        self._edit_agent_stop_btn.setStyleSheet("QPushButton{background:#3a1f24;color:#ffb4bd;border:1px solid #6b2530;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}QPushButton:disabled{background:#1b1f24;color:#555;border-color:#2a2f36;}QPushButton:hover:enabled{background:#5c222b;}")
-        self._edit_agent_stop_btn.clicked.connect(self._stop_edit_agent_message)
-        input_row.addWidget(self._edit_agent_stop_btn)
-
-        self._edit_agent_pause_btn = QPushButton("暂停")
-        self._edit_agent_pause_btn.setToolTip("暂停任务；点「继续」后才会再跑")
-        self._edit_agent_pause_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
-        self._edit_agent_pause_btn.clicked.connect(self._pause_edit_agent_task)
-        input_row.addWidget(self._edit_agent_pause_btn)
-
-        self._edit_agent_resume_btn = QPushButton("继续")
-        self._edit_agent_resume_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
-        self._edit_agent_resume_btn.clicked.connect(self._resume_edit_agent_task)
-        input_row.addWidget(self._edit_agent_resume_btn)
-
-        self._edit_agent_replan_btn = QPushButton("重规划")
-        self._edit_agent_replan_btn.setToolTip("切到 Plan 并用上一条指令重新规划")
-        self._edit_agent_replan_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
-        self._edit_agent_replan_btn.clicked.connect(self._replan_edit_agent_task)
-        input_row.addWidget(self._edit_agent_replan_btn)
-        interaction_layout.addLayout(input_row)
-        scroll_layout.addWidget(interaction_card)
-
-        # 设置 scrollArea 的 content 并加入主布局
-        scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area, 1)
-
-        self._edit_agent_worker = None
-        self._edit_agent_stream_buffer = ""
-        self._edit_agent_inbox = []
-        self._refresh_edit_agent_models()
-        self._append_agent_message("Agent", "已就绪。下方输入剪辑需求或点击快捷指令。")
-
-        # 注册统一调用层 handler，传入 EditorModule lazy 引用
-        try:
-            from app.core.capability_dispatcher import capability_dispatcher
-            from app.core.capability_handlers import register_builtin_handlers
-            register_builtin_handlers(capability_dispatcher, editor_module_ref=lambda: self)
-        except Exception as e:
-            logger.warning(f"[Agent] 注册 CapabilityDispatcher 失败: {e}")
-
-        # 画布 HTTP 共享同一 Agent / 拓展面
-        try:
-            from app.core.project_agent_host import bind_editor_module
-            bind_editor_module(self)
-        except Exception as e:
-            logger.debug("bind project_agent_host: %s", e)
-
-        # 监听反馈可用事件，刷新面板指示
-        try:
-            from app.modules.lego.core import EventType
-            from app.core.agent_feedback_bridge import agent_feedback_bridge
-            agent_feedback_bridge.event_bus  # 触发订阅
-            self._event_bus.on(EventType.AGENT_FEEDBACK_AVAILABLE, self._on_agent_feedback)
-        except Exception as e:
-            logger.warning(f"[Agent] 反馈桥初始化失败: {e}")
-
-        # 监听全链路暂停等待预览确认事件
-        try:
-            self._event_bus.on(EventType.CUSTOM, self._on_pipeline_event)
-        except Exception as e:
-            logger.warning(f"[Agent] 全链路事件监听初始化失败: {e}")
-
-        return panel
-
-    def _toggle_edit_agent_panel(self, checked=None):
-        """切换到剪辑 Agent 标签页（嵌入右侧工具栏，不再使用浮动面板）。"""
-        tabs = getattr(self, '_tools_tabs', None)
-        if tabs is None:
-            QTimer.singleShot(100, lambda: self._toggle_edit_agent_panel(checked))
-            return
-        agent_idx = getattr(self, '_agent_tab_index', -1)
-        if agent_idx < 0:
-            return
-        tabs.setCurrentIndex(agent_idx)
-        # 懒挂载：切页会触发 _on_tools_tab_changed；若信号被挡住则手动确保
-        self._on_tools_tab_changed(agent_idx)
-        if hasattr(self, '_edit_agent_toggle_btn'):
-            self._edit_agent_toggle_btn.setChecked(True)
-            self._edit_agent_toggle_btn.setText("🤖 Agent")
-
-    def _close_agent_tab(self):
-        """收起 Agent 标签页，切回上一个标签。"""
-        tabs = getattr(self, '_tools_tabs', None)
-        if tabs is None:
-            return
-        agent_idx = getattr(self, '_agent_tab_index', -1)
-        # 切回"属性"标签页
-        if agent_idx > 0:
-            tabs.setCurrentIndex(0)
-        if hasattr(self, '_edit_agent_toggle_btn'):
-            self._edit_agent_toggle_btn.setChecked(False)
-            self._edit_agent_toggle_btn.setText("🤖 剪辑 Agent")
-
-    def _position_edit_agent_panel(self):
-        """将剪辑 Agent 浮动面板定位到编辑器右上区域，不挤占时间线轨道高度。"""
-        panel = getattr(self, '_edit_agent_panel', None)
-        if panel is None:
-            return
-
-        panel_width = min(560, max(420, int(self.width() * 0.38)))
-        panel_height = min(300, max(220, int(self.height() * 0.32)))
-        panel.resize(panel_width, panel_height)
-
-        # 固定在编辑器右上角，避免跟随轨道标题按钮落到时间线主体上。
-        anchor = self.mapToGlobal(QPoint(self.width() - panel_width - 16, 64))
-
-        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
-        available = screen.availableGeometry() if screen else None
-        if available is None:
-            panel.move(anchor)
-            return
-
-        x = min(max(anchor.x(), available.left() + 8), available.right() - panel_width - 8)
-        y = min(max(anchor.y(), available.top() + 8), available.bottom() - panel_height - 8)
-        panel.move(x, y)
-
-    def _subscribe_provider_activated(self):
-        """模型管理激活变化时刷新 Agent 下拉。"""
-        if getattr(self, "_provider_activated_hooked", False):
-            return
-        try:
-            from .core import EventBus, EventType
-            bus = EventBus.get_instance()
-            bus.on(EventType.PROVIDER_ACTIVATED, self._on_provider_activated_event)
-            self._provider_activated_hooked = True
-        except Exception as e:
-            logger.debug("[Agent] 订阅 PROVIDER_ACTIVATED 失败: %s", e)
-
-    def _on_provider_activated_event(self, event):
-        try:
-            self._refresh_edit_agent_models()
-        except Exception as e:
-            logger.debug("[Agent] 激活事件刷新模型失败: %s", e)
-
-    def _load_agent_project_context_fields(self):
-        try:
-            from app.core.memory_store import memory_store
-            ctx = memory_store.get_project_context() or {}
-            if getattr(self, "_agent_drama_edit", None) is not None:
-                self._agent_drama_edit.setText(str(ctx.get("drama_title") or ""))
-            if getattr(self, "_agent_episode_edit", None) is not None:
-                self._agent_episode_edit.setText(str(ctx.get("episode") or ""))
-            if getattr(self, "_agent_platform_edit", None) is not None:
-                self._agent_platform_edit.setText(str(ctx.get("platform") or ""))
-        except Exception:
-            pass
-
-    def _save_agent_project_context(self):
-        try:
-            from app.core.memory_store import memory_store
-            title = self._agent_drama_edit.text().strip() if getattr(self, "_agent_drama_edit", None) else ""
-            episode = self._agent_episode_edit.text().strip() if getattr(self, "_agent_episode_edit", None) else ""
-            platform = self._agent_platform_edit.text().strip() if getattr(self, "_agent_platform_edit", None) else ""
-            memory_store.set_project_context(
-                drama_title=title,
-                episode=episode,
-                platform=platform,
-                notes="",
-            )
-            self._append_agent_message(
-                "系统",
-                f"已保存多集上下文：{title or '（无剧名）'} / 第{episode or '?'}集 / {platform or '未指定平台'}",
-            )
-        except Exception as e:
-            QMessageBox.warning(self, "多集上下文", f"保存失败: {e}")
-
-    def _persist_agent_project_context_silent(self):
-        """发送指令前静默把输入框写入记忆，避免用户忘点保存。"""
-        try:
-            from app.core.memory_store import memory_store
-            title = ""
-            episode = ""
-            platform = ""
-            if getattr(self, "_agent_drama_edit", None) is not None:
-                title = self._agent_drama_edit.text().strip()
-            if getattr(self, "_agent_episode_edit", None) is not None:
-                episode = self._agent_episode_edit.text().strip()
-            if getattr(self, "_agent_platform_edit", None) is not None:
-                platform = self._agent_platform_edit.text().strip()
-            if title or episode or platform:
-                memory_store.set_project_context(
-                    drama_title=title,
-                    episode=episode,
-                    platform=platform,
-                )
-        except Exception:
-            pass
-
-    def _refresh_edit_agent_models(self):
-        """加载可用 Provider 到 Agent 模型框；按 provider 分组 + 可读名 + 激活优先。"""
-        combo = getattr(self, '_edit_agent_model_combo', None)
-        if combo is None:
-            return
-        combo.clear()
-        try:
-            from app.modules.lego.model_config import (
-                PROVIDERS,
-                ensure_active_provider_sensible,
-                load_active_provider,
-                model_display_name,
-            )
-            ensure_active_provider_sensible()
-        except Exception:
-            PROVIDERS = {}
-            model_display_name = lambda p, m: m or "自动"  # noqa: E731
-            load_active_provider = lambda: ""  # noqa: E731
-
-        try:
-            from app.core.ai_engine import ai_engine
-            available = set(ai_engine.get_available_providers() or [])
-        except Exception:
-            available = set()
-
-        try:
-            from app.modules.lego.cloud_api import cloud_api_service
-        except Exception:
-            cloud_api_service = None
-
-        active = ""
-        try:
-            active = load_active_provider() or ""
-        except Exception:
-            active = ""
-
-        # ── 收集所有可用条目 ──
-        # 按 provider 分组：provider -> list[(model, configured)]
-        groups: dict[str, list[tuple[str, bool]]] = {}
-        provider_meta: dict[str, dict] = {}
-
-        for provider, cfg in PROVIDERS.items():
-            name = cfg.get("name", provider)
-            icon = cfg.get("icon", "")
-            is_local = bool(cfg.get("is_local"))
-            configured = False
-            if is_local:
-                configured = provider in available
-            elif cloud_api_service is not None:
-                try:
-                    configured = bool(cloud_api_service.is_configured(provider))
-                except Exception:
-                    configured = provider in available
-
-            models = list(cfg.get("models") or [])
-            if provider == "ollama":
-                models = self._list_local_ollama_models() or (["auto"] if configured else [])
-            if not configured and not models:
-                continue
-            if not models:
-                models = [""]
-
-            valid_models = []
-            for model in models:
-                if not is_local and not configured:
-                    continue
-                valid_models.append((model, configured))
-
-            if valid_models:
-                groups[provider] = valid_models
-                provider_meta[provider] = {
-                    "name": name,
-                    "icon": icon,
-                    "is_local": is_local,
-                    "configured": configured,
-                }
-
-        # ── 排序：激活 provider 最前，其余按已配置优先 ──
-        provider_order = sorted(
-            groups.keys(),
-            key=lambda p: (
-                0 if p == active else 1,
-                0 if provider_meta[p]["configured"] or p in available else 1,
-                p,
-            ),
-        )
-
-        select_idx = 0
-        first_item_after_separators = 0
-
-        for pi, provider in enumerate(provider_order):
-            meta = provider_meta[provider]
-            p_name = meta["name"]
-            p_icon = meta["icon"]
-            p_local = meta["is_local"]
-            p_configured = meta["configured"] or provider in available
-            is_active_p = provider == active
-
-            # provider 分组标签（带 icon 和可用性）
-            suffix = "✓" if p_configured else "✗"
-            local_tag = " 🖥️" if p_local else ""
-            header_text = f"{p_icon} {p_name}{local_tag}  [{suffix}]"
-            if pi > 0:
-                combo.insertSeparator(combo.count())
-            # 不可点击的分组标题：用 QComboBox 的 setItemData 标记后在 currentIndexChanged 过滤太麻烦，
-            # 简单做法：加一个带灰色样式的条目 + separator
-            header_idx = combo.count()
-            combo.addItem(header_text, ("__header__", provider))
-            cmodel = combo.model()
-            if cmodel is not None:
-                hitem = cmodel.item(header_idx)
-                if hitem is not None:
-                    hitem.setEnabled(False)
-
-            for model_id, _cfg in groups[provider]:
-                # 用可读名
-                mid = "" if model_id == "auto" else model_id
-                display = model_display_name(provider, mid) if mid else "自动"
-                # 完整 label：[激活星] 可读名  [原始 ID]  [可用标记]
-                raw_hint = f"（{mid}）" if mid and mid != display else ""
-                active_tag = "★ " if is_active_p and not mid else ""
-                ok_tag = " ✓" if p_configured else ""
-                label = f"  {active_tag}{display}{raw_hint}{ok_tag}"
-                combo.addItem(label, (provider, mid))
-
-                # 选第一个匹配激活项
-                if is_active_p and mid == "":
-                    if select_idx == 0:
-                        select_idx = combo.count() - 1
-                elif is_active_p and mid and provider == active:
-                    if select_idx == 0:
-                        select_idx = combo.count() - 1
-
-        if combo.count() == 0:
-            combo.addItem("自动降级 / 可用模型", ("", ""))
-        else:
-            combo.setCurrentIndex(min(select_idx, combo.count() - 1))
-
-        hint = getattr(self, "_agent_active_hint", None)
-        if hint is not None:
-            try:
-                name = (PROVIDERS.get(active) or {}).get("name") or active or "未激活"
-                hint.setText(f"激活:{name}")
-            except Exception:
-                hint.setText("")
-
-    def _list_local_ollama_models(self) -> List[str]:
-        """读取本地 Ollama 模型列表；失败时返回空列表并保留自动模式。"""
-        try:
-            from app.core.ai_engine import ai_engine
-            client = getattr(ai_engine, "_ollama_client", None)
-            if not client:
-                return []
-            models = client.list_models()
-            result = []
-            for item in models:
-                if isinstance(item, dict):
-                    result.append(item.get("name") or item.get("model") or "")
-                else:
-                    result.append(getattr(item, "name", getattr(item, "model", str(item))))
-            return [m for m in result if m]
-        except Exception as e:
-            print(f"读取 Ollama 模型失败: {e}")
-            return []
-
-    def _append_agent_message(self, role: str, text: str):
-        """向 Agent 对话框追加消息。"""
-        chat = getattr(self, '_edit_agent_chat', None)
-        if chat is None:
-            return
-        chat.append(f"{role}: {text}")
-        chat.verticalScrollBar().setValue(chat.verticalScrollBar().maximum())
-
-    def _refresh_agent_brain_status(self):
-        """刷新 🧠 大脑状态条：显示神经元总数、左右脑分布、突触数与最强链路。
-
-        - 失败时静默降级为占位文本，不影响 Agent 面板其它功能
-        - 数据来自 AgentBrain.get_brain_status()，无副作用
-        """
-        label = getattr(self, '_agent_brain_status_label', None)
-        if label is None:
-            return
-        try:
-            from app.core.agent_brain import agent_brain
-            status = agent_brain.get_brain_status()
-            total_n = status.get("total_neurons", 0)
-            right_n = status.get("right_brain_count", 0)
-            left_n = status.get("left_brain_count", 0)
-            cc_n = status.get("cc_count", 0)
-            total_s = status.get("total_synapses", 0)
-            active = status.get("active_neurons", []) or []
-            top_syns = status.get("top_synapses", []) or []
-
-            # 拼装主状态行
-            main = (f"🧠 神经元 {total_n} | 🌐 左脑 {left_n} / 右脑 {right_n} / 胼胝体 {cc_n}"
-                    f" | 🔗 突触 {total_s} | ⚡ 激活 {len(active)}")
-            # 拼装最强链路（最多 2 条，避免占屏）
-            links = []
-            for s in top_syns[:2]:
-                pre = s.get("pre", "")
-                post = s.get("post", "")
-                w = s.get("weight", 0.0)
-                try:
-                    w_pct = int(float(w) * 100)
-                except (TypeError, ValueError):
-                    w_pct = 0
-                links.append(f"{pre}→{post}({w_pct}%)")
-            link_text = " | 强链路: " + " / ".join(links) if links else ""
-            label.setText(main + link_text)
-        except Exception as e:
-            # 静默降级，避免阻塞 UI 刷新定时器
-            label.setText(f"🧠 大脑状态不可用: {e}")
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
     # ═══════════════════════════════════════════════════════════════════════
     # Agent 新增：配置卡 / 进度卡 / 预览问题卡 / 打分卡 / 脚本卡 构建方法
     # ═══════════════════════════════════════════════════════════════════════
 
-    # Agent 全链路 6+ 主阶段映射（用于进度条）
-    _PIPELINE_STAGES = [
-        ("routing",           "🔀", "智能业务分流",   5),
-        ("generation",        "🎬", "AI 视频生成",    25),
-        ("import_parsing",    "📥", "素材解析",        25),
-        ("preview",           "🔍", "预览校验",        40),
-        ("scoring",           "📊", "五维打分",        55),
-        ("scripting",         "📝", "剪辑脚本",        70),
-        ("editing",           "✂️", "精剪成片",        85),
-        ("done",              "✅", "完成",           100),
-    ]
+    # [Mixin] _PIPELINE_STAGES 已迁移至 editor_agent_runtime_mixin.py
 
-    def _stage_progress(self, stage: str) -> int:
-        """把 stage 字符串映射到 0-100 进度槽位。"""
-        for s, _, _, pct in self._PIPELINE_STAGES:
-            if s == stage:
-                return pct
-        if stage == "waiting_for_preview_confirmation":
-            return 40
-        if stage == "error":
-            return 0
-        return 0
+    # [Mixin] _stage_progress 已迁移至 editor_agent_runtime_mixin.py
 
-    def _stage_label(self, stage: str) -> str:
-        """把 stage 字符串映射为带 emoji 的标签文本。"""
-        for s, emoji, label, _ in self._PIPELINE_STAGES:
-            if s == stage:
-                return f"{emoji} {label}"
-        if stage == "waiting_for_preview_confirmation":
-            return "⏸️ 等待预览确认"
-        if stage == "error":
-            return "❌ 执行失败"
-        return "⚙️ 执行中"
+    # [Mixin] _stage_label 已迁移至 editor_agent_runtime_mixin.py
 
     # ───────────────── 配置卡（P0 痛点1+8） ─────────────────
 
-    def _build_agent_config_card(self, parent_layout: QVBoxLayout):
-        """构造参数配置卡（平台 / 目标时长 / 单段时长 / Provider 选择）。"""
-        card = QFrame()
-        card.setObjectName("agentConfigCard")
-        card.setStyleSheet("""
-            QFrame#agentConfigCard{background:#111722;border:1px solid #263244;border-radius:10px;}
-            QLabel{color:#8b949e;font-size:11px;}
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:4px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:18px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
-            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
-            QDoubleSpinBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}
-        """)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(6)
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _get_pipeline_params 已迁移至 editor_agent_runtime_mixin.py
 
-        head = QHBoxLayout()
-        t = QLabel("⚙️ 全链路执行参数")
-        t.setStyleSheet("color:#e6edf3;font-size:12px;font-weight:700;")
-        head.addWidget(t)
-        head.addStretch()
-        toggle = QPushButton("收起")
-        toggle.setFixedHeight(24)
-        toggle.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
-            "border-radius:6px;padding:2px 10px;font-size:11px;}"
-            "QPushButton:hover{background:#30363d;}"
-        )
-        head.addWidget(toggle)
-        lay.addLayout(head)
-
-        body = QWidget()
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(0, 0, 0, 0)
-        body_lay.setSpacing(6)
-
-        grid = QGridLayout()
-        grid.setSpacing(6)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-
-        # Row 1：平台 + 目标时长
-        lbl1 = QLabel("平台")
-        self._agent_platform_combo = QComboBox()
-        self._agent_platform_combo.addItem("抖音", "douyin")
-        self._agent_platform_combo.addItem("快手", "kuaishou")
-        self._agent_platform_combo.addItem("B站", "bilibili")
-        self._agent_platform_combo.addItem("小红书", "xiaohongshu")
-        self._agent_platform_combo.setCurrentIndex(0)
-        grid.addWidget(lbl1, 0, 0)
-        grid.addWidget(self._agent_platform_combo, 0, 1)
-
-        lbl2 = QLabel("目标时长")
-        self._agent_duration_combo = QComboBox()
-        self._agent_duration_combo.addItem("15秒", 15.0)
-        self._agent_duration_combo.addItem("30秒", 30.0)
-        self._agent_duration_combo.addItem("60秒", 60.0)
-        self._agent_duration_combo.addItem("90秒", 90.0)
-        self._agent_duration_combo.setCurrentIndex(1)  # 默认30秒
-        grid.addWidget(lbl2, 0, 2)
-        grid.addWidget(self._agent_duration_combo, 0, 3)
-
-        # Row 2：单段时长 + Provider
-        lbl3 = QLabel("单段时长")
-        self._agent_clip_duration_spin = QDoubleSpinBox()
-        self._agent_clip_duration_spin.setRange(0.5, 10.0)
-        self._agent_clip_duration_spin.setSingleStep(0.5)
-        self._agent_clip_duration_spin.setValue(5.0)
-        self._agent_clip_duration_spin.setSuffix(" 秒")
-        grid.addWidget(lbl3, 1, 0)
-        grid.addWidget(self._agent_clip_duration_spin, 1, 1)
-
-        lbl4 = QLabel("Provider")
-        self._agent_provider_combo = QComboBox()
-        self._agent_provider_combo.addItem("Auto（自动）", "auto")
-        self._agent_provider_combo.addItem("Seedance", "seedance")
-        self._agent_provider_combo.addItem("CogVideo", "cogvideo")
-        self._agent_provider_combo.addItem("本地占位", "local")
-        self._agent_provider_combo.setCurrentIndex(0)
-        grid.addWidget(lbl4, 1, 2)
-        grid.addWidget(self._agent_provider_combo, 1, 3)
-        body_lay.addLayout(grid)
-
-        # Provider 状态警告
-        self._agent_provider_status_lbl = QLabel("")
-        self._agent_provider_status_lbl.setStyleSheet("color:#7ee787;font-size:10px;")
-        self._agent_provider_status_lbl.setWordWrap(True)
-        body_lay.addWidget(self._agent_provider_status_lbl)
-        self._agent_provider_combo.currentIndexChanged.connect(self._refresh_provider_status)
-        lay.addWidget(body)
-
-        def _toggle_config():
-            visible = body.isVisible()
-            body.setVisible(not visible)
-            toggle.setText("展开" if visible else "收起")
-
-        toggle.clicked.connect(_toggle_config)
-
-        parent_layout.addWidget(card)
-
-        # 首次加载时刷新 provider 状态
-        QTimer.singleShot(300, self._refresh_provider_status)
-
-    def _get_pipeline_params(self) -> Dict[str, Any]:
-        """从配置卡收集 pipeline.run_full 参数（UI 层只读）。"""
-        p = getattr(self, "_agent_platform_combo", None)
-        d = getattr(self, "_agent_duration_combo", None)
-        c = getattr(self, "_agent_clip_duration_spin", None)
-        pv = getattr(self, "_agent_provider_combo", None)
-        return {
-            "platform": p.currentData() if p else "douyin",
-            "target_duration": float(d.currentData() if d else 30.0),
-            "clip_duration": float(c.value() if c else 5.0),
-            "provider": pv.currentData() if pv else "auto",
-        }
-
-    def _refresh_provider_status(self):
-        """刷新 provider 可用性状态标签（只读查询，不修改 client）。"""
-        lbl = getattr(self, "_agent_provider_status_lbl", None)
-        if lbl is None:
-            return
-        try:
-            from app.core.ai.video_generation_client import video_generation_client
-            chosen = self._agent_provider_combo.currentData() if hasattr(self, "_agent_provider_combo") else "auto"
-            providers = video_generation_client.list_providers()
-            # 注意：list_providers 返回 dict 列表，不是对象
-            cloud_ok = False
-            cloud_names = []
-            for p in providers:
-                pid = p.get("id", "")
-                if pid in ("seedance", "cogvideo") and p.get("available", False):
-                    cloud_ok = True
-                    cloud_names.append(pid.upper())
-            if chosen == "auto":
-                if cloud_ok:
-                    lbl.setText(f"✔ 云端可用: {', '.join(cloud_names)}")
-                    lbl.setStyleSheet("color:#7ee787;font-size:10px;")
-                else:
-                    lbl.setText("⚠ 云端 Provider 全部不可用，将回退本地色块占位生成")
-                    lbl.setStyleSheet("color:#ff7b72;font-size:10px;font-weight:700;")
-            elif chosen == "local":
-                lbl.setText("使用本地占位色块生成（无需网络）")
-                lbl.setStyleSheet("color:#7ee787;font-size:10px;")
-            else:
-                chosen_obj = next((x for x in providers if x.get("id") == chosen), None)
-                if chosen_obj and chosen_obj.get("available", False):
-                    lbl.setText(f"✔ {chosen.upper()} 可用")
-                    lbl.setStyleSheet("color:#7ee787;font-size:10px;")
-                else:
-                    lbl.setText(f"⚠ {chosen.upper()} 不可用，将回退本地色块")
-                    lbl.setStyleSheet("color:#ff7b72;font-size:10px;font-weight:700;")
-        except Exception as e:
-            logger.debug(f"[Agent] provider 状态刷新失败: {e}")
-            lbl.setText("")
+    # [Mixin] _refresh_provider_status 已迁移至 editor_agent_runtime_mixin.py
 
     # ───────────────── 进度卡（P0 痛点2） ─────────────────
 
-    def _build_agent_progress_card(self, parent_layout: QVBoxLayout):
-        """构造执行进度卡（阶段进度条 + stage 标签 + 细节）。"""
-        card = QFrame()
-        card.setObjectName("agentProgressCard")
-        card.setStyleSheet("""
-            QFrame#agentProgressCard{background:#0d1117;border:1px solid #21262d;border-radius:10px;}
-            QProgressBar{background:#161b22;border:1px solid #30363d;border-radius:4px;text-align:center;height:8px;}
-            QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #1f6feb,stop:1 #7ee787);border-radius:4px;}
-            QLabel#stageMain{color:#e6edf3;font-size:12px;font-weight:700;}
-            QLabel#stageDetail{color:#8b949e;font-size:11px;}
-        """)
-        card.setVisible(False)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(4)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        head = QHBoxLayout()
-        head.setSpacing(6)
-        self._agent_stage_label = QLabel("")
-        self._agent_stage_label.setObjectName("stageMain")
-        head.addWidget(self._agent_stage_label)
-        head.addStretch()
-        lay.addLayout(head)
+    # [Mixin] _update_pipeline_stage 已迁移至 editor_agent_runtime_mixin.py
 
-        self._agent_stage_bar = QProgressBar()
-        self._agent_stage_bar.setRange(0, 100)
-        self._agent_stage_bar.setValue(0)
-        self._agent_stage_bar.setTextVisible(False)
-        self._agent_stage_bar.setFixedHeight(8)
-        lay.addWidget(self._agent_stage_bar)
-
-        self._agent_stage_detail = QLabel("")
-        self._agent_stage_detail.setObjectName("stageDetail")
-        self._agent_stage_detail.setWordWrap(True)
-        self._agent_stage_detail.setMaximumHeight(40)
-        lay.addWidget(self._agent_stage_detail)
-
-        self._agent_progress_card = card
-        parent_layout.addWidget(card)
-
-    def _update_pipeline_stage(self, stage: str, message: str = ""):
-        """根据 stage 更新进度卡（UI 层只渲染，不参与调度）。"""
-        card = getattr(self, "_agent_progress_card", None)
-        bar = getattr(self, "_agent_stage_bar", None)
-        lbl = getattr(self, "_agent_stage_label", None)
-        det = getattr(self, "_agent_stage_detail", None)
-        if card is None or bar is None or lbl is None:
-            return
-        card.setVisible(True)
-        pct = self._stage_progress(stage)
-        if pct > 0:
-            # 允许进度条只前进不回退
-            if pct >= bar.value():
-                bar.setValue(pct)
-        lbl.setText(self._stage_label(stage))
-        if det is not None and message:
-            det.setText(message[:120])
-
-    def _finalize_pipeline_stage(self, success: bool, error: str = "", degraded: bool = False):
-        """完成时把进度条置 100%（或失败为红色；降级为琥珀色文案）。"""
-        bar = getattr(self, "_agent_stage_bar", None)
-        lbl = getattr(self, "_agent_stage_label", None)
-        det = getattr(self, "_agent_stage_detail", None)
-        if bar is None:
-            return
-        if success and not degraded:
-            bar.setValue(100)
-            if lbl:
-                lbl.setText("✅ 执行完成")
-            if det:
-                det.setText(error or "")
-        elif success and degraded:
-            bar.setValue(100)
-            if lbl:
-                lbl.setText("⚠️ 降级完成（无成片）")
-            if det:
-                det.setText((error or "仅有脚本/中间结果")[:120])
-        else:
-            bar.setStyleSheet("QProgressBar{background:#161b22;border:1px solid #30363d;border-radius:4px;height:8px;}"
-                              "QProgressBar::chunk{background:#ff7b72;border-radius:4px;}")
-            bar.setValue(100)
-            if lbl:
-                lbl.setText("❌ 执行失败")
-            if det:
-                det.setText(error[:120] if error else "")
+    # [Mixin] _finalize_pipeline_stage 已迁移至 editor_agent_runtime_mixin.py
 
     # ───────────────── 预览问题卡（P1 痛点5 保守版） ─────────────────
 
-    def _build_agent_preview_card(self, parent_layout: QVBoxLayout):
-        """构造预览问题卡（保守版：只显示失败片段 clip_id）。"""
-        card = QFrame()
-        card.setObjectName("agentPreviewCard")
-        card.setStyleSheet("QFrame#agentPreviewCard{background:#1b1405;border:1px solid #8b6914;border-radius:10px;}")
-        card.setVisible(False)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(4)
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        head = QHBoxLayout()
-        t = QLabel("⏸ 预览问题片段")
-        t.setStyleSheet("color:#f0b429;font-size:12px;font-weight:700;")
-        head.addWidget(t)
-        head.addStretch()
-        self._agent_preview_count_lbl = QLabel("")
-        self._agent_preview_count_lbl.setStyleSheet("color:#8b949e;font-size:10px;")
-        head.addWidget(self._agent_preview_count_lbl)
-        lay.addLayout(head)
-
-        self._agent_preview_list = QListWidget()
-        self._agent_preview_list.setFixedHeight(80)
-        self._agent_preview_list.setStyleSheet(
-            "QListWidget{background:#0f1117;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;font-size:11px;}"
-            "QListWidget::item{padding:3px 6px;}")
-        lay.addWidget(self._agent_preview_list)
-
-        self._agent_preview_card = card
-        parent_layout.addWidget(card)
-
-    def _render_preview_issues(self, failed_clips: List[Dict[str, Any]]):
-        """渲染预览失败片段列表（保守版：clip_id）。"""
-        lst = getattr(self, "_agent_preview_list", None)
-        card = getattr(self, "_agent_preview_card", None)
-        clbl = getattr(self, "_agent_preview_count_lbl", None)
-        if lst is None or card is None:
-            return
-        lst.clear()
-        if not failed_clips:
-            card.setVisible(False)
-            return
-        for c in failed_clips:
-            cid = c.get("clip_id") or c.get("id", "?")
-            path = c.get("path", "")
-            short_path = os.path.basename(path) if path else ""
-            text = f"🔴 {cid}   {short_path}"
-            it = QListWidgetItem(text)
-            it.setData(Qt.ItemDataRole.UserRole, c)
-            lst.addItem(it)
-        if clbl:
-            clbl.setText(f"共 {len(failed_clips)} 个片段")
-        card.setVisible(True)
+    # [Mixin] _render_preview_issues 已迁移至 editor_agent_runtime_mixin.py
 
     # ───────────────── 打分结果卡（P1 痛点3） ─────────────────
 
-    def _build_agent_score_card(self, parent_layout: QVBoxLayout):
-        """构造五维打分结果卡。"""
-        card = QFrame()
-        card.setObjectName("agentScoreCard")
-        card.setStyleSheet("QFrame#agentScoreCard{background:#0d1217;border:1px solid #1f4d7a;border-radius:10px;}")
-        card.setVisible(False)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(4)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        head = QHBoxLayout()
-        t = QLabel("📊 五维打分结果")
-        t.setStyleSheet("color:#58a6ff;font-size:12px;font-weight:700;")
-        head.addWidget(t)
-        head.addStretch()
-        lay.addLayout(head)
-
-        self._agent_score_list = QListWidget()
-        self._agent_score_list.setFixedHeight(110)
-        self._agent_score_list.setStyleSheet(
-            "QListWidget{background:#0f1117;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;font-size:11px;}"
-            "QListWidget::item{padding:4px 8px;}")
-        lay.addWidget(self._agent_score_list)
-
-        self._agent_score_card = card
-        parent_layout.addWidget(card)
-
-    def _render_score_results(self, scored_results: List[Dict[str, Any]]):
-        """把五维打分结果渲染到打分卡。"""
-        lst = getattr(self, "_agent_score_list", None)
-        card = getattr(self, "_agent_score_card", None)
-        if lst is None or card is None:
-            return
-        lst.clear()
-        if not scored_results:
-            card.setVisible(False)
-            return
-        grade_color = {"S": "#ffd700", "A": "#7ee787", "B": "#d29922", "C": "#fb8500", "D": "#ff7b72"}
-        for idx, sc in enumerate(scored_results, 1):
-            grade = sc.get("grade", "C")
-            color = grade_color.get(grade, "#c9d1d9")
-            score = sc.get("weighted_score", 0.0)
-            cid = sc.get("clip_id", f"#{idx}")
-            drop = sc.get("should_drop", False)
-            dims = sc.get("dimensions", {}) or {}
-            q = dims.get("画面质量", dims.get("visual_quality", 0))
-            n = dims.get("高光叙事价值", dims.get("narrative_highlight",
-                  dims.get("narrative_value", 0)))
-            s_ = dims.get("文案匹配度", dims.get("copy_match", 0))
-            b = dims.get("BGM适配度", dims.get("bgm_match",
-                  dims.get("bgm_fit", 0)))
-            d_ = dims.get("镜头时长合理性", dims.get("shot_duration",
-                   dims.get("duration_reasonable", 0)))
-            drop_tag = "  ⚠️ 已剔除" if drop else ""
-            # 修复：缺 quality_scores 时各维度用固定 70 分基线填充（避免误判 D
-            # 级），但此前 UI 完全不标注，用户会把基线分当成真实 AI 质检结果。
-            estimated = sc.get("estimated_dims") or []
-            est_tag = f'  <span style="color:#d29922;">（{len(estimated)}/5维为估算基线）</span>' if estimated else ""
-            html = (f'<span style="color:{color};font-weight:800;">[{grade}]</span> '
-                    f'<span style="color:#e6edf3;">镜头{idx} {cid}</span>  '
-                    f'<span style="color:{color};font-weight:700;">{score:.1f}分</span>  '
-                    f'<span style="color:#8b949e;">(画面{q:.0f}/叙事{n:.0f}/文案{s_:.0f}/BGM{b:.0f}/时长{d_:.0f})</span>'
-                    f'<span style="color:#ff7b72;">{drop_tag}</span>{est_tag}')
-            it = QListWidgetItem()
-            it.setData(Qt.ItemDataRole.UserRole, sc)
-            lbl = QLabel(html)
-            lbl.setStyleSheet("background:transparent;")
-            lbl.setTextFormat(Qt.TextFormat.RichText)
-            lst.addItem(it)
-            lst.setItemWidget(it, lbl)
-            it.setSizeHint(lbl.sizeHint())
-        card.setVisible(True)
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
     # ───────────────── 脚本结果卡（P1 痛点4+6） ─────────────────
 
-    def _build_agent_script_card(self, parent_layout: QVBoxLayout):
-        """构造剪辑脚本结果卡（HTML 渲染 + 复制/导出/一键手动精剪）。"""
-        card = QFrame()
-        card.setObjectName("agentScriptCard")
-        card.setStyleSheet("QFrame#agentScriptCard{background:#101810;border:1px solid #1f4d2a;border-radius:10px;}")
-        card.setVisible(False)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(6)
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        head = QHBoxLayout()
-        t = QLabel("📝 剪辑创意脚本")
-        t.setStyleSheet("color:#7ee787;font-size:12px;font-weight:700;")
-        head.addWidget(t)
-        head.addStretch()
+    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
-        self._agent_copy_script_btn = QPushButton("📋 复制")
-        self._agent_copy_script_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 10px;font-size:10px;}"
-            "QPushButton:hover{background:#1e6bde;color:#fff;}")
-        self._agent_copy_script_btn.clicked.connect(self._on_copy_script_clicked)
-        head.addWidget(self._agent_copy_script_btn)
-
-        self._agent_export_script_btn = QPushButton("📁 导出")
-        self._agent_export_script_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 10px;font-size:10px;}"
-            "QPushButton:hover{background:#1e6bde;color:#fff;}")
-        self._agent_export_script_btn.clicked.connect(self._on_export_script_clicked)
-        head.addWidget(self._agent_export_script_btn)
-        lay.addLayout(head)
-
-        self._agent_script_view = QTextEdit()
-        self._agent_script_view.setReadOnly(True)
-        self._agent_script_view.setFixedHeight(130)
-        self._agent_script_view.setStyleSheet(
-            "QTextEdit{background:#0a1a0e;color:#9fb3c8;border:1px solid #1f4d2a;border-radius:6px;padding:6px;font-size:11px;}")
-        lay.addWidget(self._agent_script_view)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        self._agent_manual_edit_btn = QPushButton("▶ 一键手动精剪")
-        self._agent_manual_edit_btn.setStyleSheet(
-            "QPushButton{background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:8px;padding:5px 14px;font-size:11px;font-weight:700;}"
-            "QPushButton:hover{background:#388bfd;}"
-            "QPushButton:disabled{background:#1b1f24;color:#555;border-color:#2a2f36;}")
-        self._agent_manual_edit_btn.clicked.connect(self._on_manual_edit_clicked)
-        btn_row.addWidget(self._agent_manual_edit_btn)
-        lay.addLayout(btn_row)
-
-        self._agent_script_card = card
-        parent_layout.addWidget(card)
-        self._last_editing_script: Optional[Dict[str, Any]] = None
-
-    def _render_editing_script(self, script: Optional[Dict[str, Any]]):
-        """渲染剪辑脚本到脚本卡。"""
-        view = getattr(self, "_agent_script_view", None)
-        card = getattr(self, "_agent_script_card", None)
-        if view is None or card is None:
-            return
-        if not script:
-            card.setVisible(False)
-            return
-        self._last_editing_script = script
-        platform = script.get("platform", "-")
-        target_dur = script.get("target_duration", "-")
-        pacing = script.get("pacing", "-")
-        clip_order = script.get("clip_order", []) or []
-        transitions = script.get("transitions", {}) or {}
-        beat_pts = script.get("beat_points", []) or []
-        bgm = script.get("bgm_style", script.get("bgm", ""))
-        dropped = script.get("dropped_clips", []) or []
-        rationale = script.get("rationale", "")
-
-        # 镜头序列
-        seq_html = []
-        for i, item in enumerate(clip_order, 1):
-            cid = item.get("clip_id") or item.get("id", f"#{i}")
-            dur = item.get("duration", "")
-            grade = item.get("grade", "")
-            tr = transitions.get(cid, transitions.get(str(i-1), ""))
-            color = {"S": "#ffd700", "A": "#7ee787", "B": "#d29922", "C": "#fb8500", "D": "#ff7b72"}.get(grade, "#58a6ff")
-            grade_tag = f' <span style="color:{color};font-weight:700;">[{grade}]</span>' if grade else ""
-            dur_tag = f' <span style="color:#8b949e;">{dur}s</span>' if dur else ""
-            tr_tag = f' <span style="color:#d29922;">→ {tr}</span>' if tr and i < len(clip_order) else ""
-            seq_html.append(f'<span style="color:#e6edf3;">{i}. {cid}</span>{grade_tag}{dur_tag}{tr_tag}')
-        seq_text = "<br>".join(seq_html) or '<span style="color:#8b949e;">(空)</span>'
-
-        # 卡点
-        beat_text = ", ".join([f"{b:.1f}s" for b in beat_pts]) if beat_pts else '<span style="color:#8b949e;">(无)</span>'
-        # 剔除
-        dropped_text = ", ".join(dropped) if dropped else '<span style="color:#8b949e;">(无)</span>'
-
-        html = f"""
-        <div style="font-family:微软雅黑;font-size:11px;line-height:1.5;">
-          <div><b style="color:#7ee787;">平台：</b>{platform} &nbsp;
-               <b style="color:#7ee787;">时长：</b>{target_dur}s &nbsp;
-               <b style="color:#7ee787;">节奏：</b>{pacing}</div>
-          {'<div><b style="color:#7ee787;">创意说明：</b><span style="color:#9fb3c8;">'+rationale+'</span></div>' if rationale else ''}
-          <div><b style="color:#7ee787;">镜头顺序（{len(clip_order)}）：</b></div>
-          <div style="padding:4px 0;">{seq_text}</div>
-          <div><b style="color:#7ee787;">卡点：</b><span style="color:#9fb3c8;">{beat_text}</span></div>
-          <div><b style="color:#7ee787;">配乐风格：</b><span style="color:#9fb3c8;">{bgm or '未选择'}</span></div>
-          <div><b style="color:#ff7b72;">已剔除镜头：</b><span style="color:#ff7b72;">{dropped_text}</span></div>
-        </div>
-        """
-        view.setHtml(html)
-        card.setVisible(True)
-
-    def _on_copy_script_clicked(self):
-        """复制当前剪辑脚本为 JSON 到剪贴板。"""
-        script = getattr(self, "_last_editing_script", None)
-        if not script:
-            QMessageBox.information(self, "复制脚本", "暂无可用的剪辑脚本。")
-            return
-        try:
-            import json
-            text = json.dumps(script, ensure_ascii=False, indent=2)
-            QApplication.clipboard().setText(text)
-            self._append_agent_message("系统", "剪辑脚本 JSON 已复制到剪贴板。")
-        except Exception as e:
-            QMessageBox.warning(self, "复制失败", str(e))
-
-    def _on_export_script_clicked(self):
-        """导出当前剪辑脚本到 JSON 文件（父窗口传 self，符合 PyQt6 弹窗铁律）。"""
-        script = getattr(self, "_last_editing_script", None)
-        if not script:
-            QMessageBox.information(self, "导出脚本", "暂无可用的剪辑脚本。")
-            return
-        try:
-            import json
-            path, _ = QFileDialog.getSaveFileName(
-                self, "导出剪辑脚本", "editing_script.json", "JSON Files (*.json)"
-            )
-            if not path:
-                return
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(script, f, ensure_ascii=False, indent=2)
-            self._append_agent_message("系统", f"剪辑脚本已导出：{path}")
-        except OSError as e:
-            QMessageBox.warning(self, "导出失败", str(e))
-
-    def _on_manual_edit_clicked(self):
-        """一键手动精剪：调用既有 pipeline.execute_editing 能力。"""
-        script = getattr(self, "_last_editing_script", None)
-        if not script:
-            QMessageBox.information(self, "手动精剪", "暂无可用的剪辑脚本。")
-            return
-        btn = getattr(self, "_agent_manual_edit_btn", None)
-        if btn is not None:
-            btn.setEnabled(False)
-        try:
-            self._append_agent_message("Agent", "▶ 开始手动精剪（应用转场/字幕/配乐）...")
-            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
-            res = capability_dispatcher.invoke(CapabilityRequest(
-                capability_id="pipeline.execute_editing",
-                params={"editing_script": script, "session_id": ""},
-                caller="agent_manual_edit",
-            ))
-            if res.success:
-                out = res.output or {}
-                final = out.get("final_video_path", "")
-                if final and os.path.exists(final):
-                    self._append_agent_message("Agent", f"✅ 手动精剪完成！成片：\n{final}")
-                else:
-                    msg = out.get("message", "已执行精剪")
-                    self._append_agent_message("Agent", f"✅ 精剪执行完成：{msg}")
-            else:
-                self._append_agent_message("Agent", f"❌ 精剪执行失败：{res.error}")
-        except Exception as e:
-            logger.exception("[Agent] 手动精剪按钮异常")
-            self._append_agent_message("Agent", f"❌ 精剪执行异常: {e}")
-        finally:
-            if btn is not None:
-                btn.setEnabled(True)
+    # [Mixin] _on_manual_edit_clicked 已迁移至 editor_agent_runtime_mixin.py
 
     # ═══════════════════════════════════════════════════════════════════════
 
-    def _fill_edit_agent_prompt(self, text: str):
-        """把快捷剪辑指令填入输入框，方便用户确认后发送。"""
-        edit = getattr(self, '_edit_agent_input', None)
-        if edit is None:
-            return
-        edit.setText(text)
-        edit.setFocus()
-        edit.selectAll()
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-    def _send_edit_agent_message(self):
-        """发送剪辑 Agent 指令并启动后台模型请求。"""
-        if getattr(self, '_edit_agent_worker', None) and self._edit_agent_worker.isRunning():
-            user_text = self._edit_agent_input.text().strip()
-            if user_text:
-                inbox = getattr(self, "_edit_agent_inbox", None)
-                if inbox is None:
-                    self._edit_agent_inbox = []
-                    inbox = self._edit_agent_inbox
-                inbox.append(user_text)
-                self._edit_agent_input.clear()
-                self._append_agent_message("系统", f"已排队（串行）：{user_text[:80]}")
-            else:
-                QMessageBox.information(self, "剪辑 Agent", "Agent 正在处理中，可点「暂停/终止」或等待完成后自动发送队列。")
-            return
-        user_text = self._edit_agent_input.text().strip()
-        if not user_text:
-            QMessageBox.warning(self, "剪辑 Agent", "请输入剪辑指令")
-            return
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        from app.core.agent_context import compress_messages
-        from app.core.agent_session import agent_sessions
-        from app.core.agent_task_store import agent_tasks
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        ok_round, err_round = agent_sessions.begin_model_round("editor")
-        if not ok_round:
-            QMessageBox.warning(self, "剪辑 Agent", err_round)
-            return
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        provider, model = self._get_selected_edit_agent_model()
-        self._persist_agent_project_context_silent()
-        messages = compress_messages(self._build_edit_agent_messages(user_text))
-        task = agent_tasks.create(
-            session_id="editor",
-            goal=user_text,
-            mode=self._get_agent_session_mode(),
-            source="editor",
-        )
-        self._edit_agent_task_id = task.get("id")
-        try:
-            agent_tasks.transition(task["id"], "running")
-        except Exception:
-            pass
-        self._append_agent_message("你", user_text)
-        using = provider or "自动降级"
-        if model:
-            using = f"{using}/{model}"
-        self._append_agent_message("Agent", f"正在用 {using} 分析并生成剪辑指令...")
-        self._edit_agent_input.clear()
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        self._edit_agent_stream_buffer = ""
-        self._edit_agent_last_user_text = user_text
-        worker = EditingAgentWorker(provider, model, messages, self)
-        worker.chunk_ready.connect(self._on_edit_agent_chunk)
-        worker.result_ready.connect(lambda raw, text=user_text: self._on_edit_agent_result(text, raw))
-        worker.error_ready.connect(self._on_edit_agent_error)
-        worker.stopped_ready.connect(self._on_edit_agent_stopped)
-        worker.finished.connect(self._on_edit_agent_finished)
-        self._edit_agent_worker = worker
-        self._edit_agent_send_btn.setEnabled(False)
-        self._edit_agent_stop_btn.setEnabled(True)
-        worker.start()
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-    def _pause_edit_agent_task(self):
-        from app.core.agent_session import agent_sessions
-        from app.core.agent_task_store import agent_tasks
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-        agent_sessions.pause("editor")
-        tid = getattr(self, "_edit_agent_task_id", "") or ""
-        if tid:
-            try:
-                agent_tasks.transition(tid, "paused", pausedReason="user")
-            except Exception:
-                pass
-        worker = getattr(self, "_edit_agent_worker", None)
-        if worker and worker.isRunning():
-            worker.request_stop()
-        stop_btn = getattr(self, "_edit_agent_stop_btn", None)
-        if stop_btn is not None:
-            stop_btn.setEnabled(False)
-        self._append_agent_message("系统", "任务已暂停。点「继续」解除暂停后再发送。")
+    # [Mixin] 已迁移至 editor_agent_runtime_mixin.py
 
-    def _resume_edit_agent_task(self):
-        from app.core.agent_session import agent_sessions
-        from app.core.agent_task_store import agent_tasks
-
-        agent_sessions.resume("editor")
-        tid = getattr(self, "_edit_agent_task_id", "") or ""
-        if tid:
-            try:
-                agent_tasks.transition(tid, "running")
-            except Exception:
-                pass
-        self._append_agent_message("系统", "已继续。可以发送下一条或等待队列。")
-
-    def _replan_edit_agent_task(self):
-        combo = getattr(self, "_agent_mode_combo", None)
-        if combo is not None:
-            idx = combo.findData("plan")
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-        last = getattr(self, "_edit_agent_last_user_text", "") or ""
-        if last:
-            self._fill_edit_agent_prompt(last)
-        self._append_agent_message("系统", "已切 Plan。确认输入后发送以重新规划。")
-
-    def _stop_edit_agent_message(self):
-        """终止当前剪辑 Agent 输出。"""
-        from app.core.agent_session import agent_sessions
-        from app.core.agent_task_store import agent_tasks
-
-        agent_sessions.stop("editor")
-        tid = getattr(self, "_edit_agent_task_id", "") or ""
-        if tid:
-            try:
-                agent_tasks.transition(tid, "stopped")
-            except Exception:
-                pass
-        worker = getattr(self, '_edit_agent_worker', None)
-        if worker and worker.isRunning():
-            worker.request_stop()
-            self._append_agent_message("系统", "已请求终止当前输出。")
-        stop_btn = getattr(self, "_edit_agent_stop_btn", None)
-        if stop_btn is not None:
-            stop_btn.setEnabled(False)
-
-    def _get_selected_edit_agent_model(self):
-        """获取当前 Agent 模型选择；空时回退到模型管理激活项。"""
-        combo = getattr(self, '_edit_agent_model_combo', None)
-        if combo is not None:
-            data = combo.currentData()
-            if isinstance(data, tuple) and len(data) == 2 and data[0]:
-                return data
-        try:
-            from app.modules.lego.model_config import load_active_provider
-            active = load_active_provider() or ""
-            if active:
-                return active, ""
-        except Exception:
-            pass
-        return "", ""
-
-    def _build_edit_agent_messages(self, user_text: str) -> List[Dict[str, str]]:
-        """构建剪辑 Agent 专用提示词，要求模型返回可执行 JSON 指令。"""
-        from app.core.agent_action_registry import (
-            build_agent_actions_help_block,
-            list_editor_capabilities_for_prompt,
-        )
-
-        context = self._get_agent_timeline_context()
-        extensions_info = self._get_agent_extensions_context()
-        from app.core.agent_policy import mode_prompt_block
-
-        is_plan_mode = self._is_agent_plan_mode()
-        agent_mode = self._get_agent_session_mode()
-        caps_info = list_editor_capabilities_for_prompt()
-
-        system_prompt = (
-            "你是拾光剪影的 AI 剪辑助手，也是一位友善的对话伙伴。"
-            "你可以像普通 AI 助手一样自由对话，自然回答剪辑技巧、项目功能、视频创作等任何问题，"
-            "文字内容不限格式，直接回复即可，不要套 JSON。\n\n"
-            "只有当用户提出明确的剪辑操作需求（切分、删除、滤镜、转场、特效、字幕、轨等）时，"
-            "才输出可执行的 JSON 指令数组，且不要附带多余解释文字。\n"
-            f"{build_agent_actions_help_block()}"
-            + mode_prompt_block(agent_mode)
-            + "时间单位是秒，clip_index 从 0 开始。"
-            "add_effect 参数示例: {\"effect_type\":\"filter\",\"params\":{\"filter_name\":\"电影\",\"intensity\":0.7}}。"
-            "add_transition 参数示例: {\"transition_type\":\"fade\",\"duration\":0.5,\"clip_index\":0}。"
-            "call_extension 用于调用拓展中心的插件/Skill/MCP 工具，参数示例: "
-            "{\"extension_id\":\"技能ID\",\"tool_id\":\"工具ID\",\"params\":{\"key\":\"value\"}}。"
-            "call_model 参数示例: {\"provider\":\"deepseek\",\"messages\":[{\"role\":\"user\",\"content\":\"...\"}],\"model\":\"...\"}。"
-            "start_workflow 参数示例: {\"drama_info\":{\"title\":\"...\",\"platform\":\"douyin\"}}。"
-            "account_optimize 参数示例: {\"platform\":\"douyin\",\"features\":{...}}。"
-        )
-
-        # Plan 模式要求先规划
-        if is_plan_mode:
-            system_prompt += (
-                "\n\n当前为 Plan 模式：你必须先返回执行规划，格式为 JSON 对象："
-                "{\"plan\":[\"步骤1\",\"步骤2\",...],\"commands\":[{...指令...}]}。"
-                "plan 是给用户看的人类可读步骤列表，commands 是实际要执行的指令数组。"
-                "用户确认后才会执行 commands。"
-            )
-        else:
-            system_prompt += "\n\n直接返回 JSON 指令数组。"
-
-        # 注入长期记忆 + 待处理反馈
-        try:
-            from app.core.memory_store import memory_store
-            from app.core.agent_feedback_bridge import agent_feedback_bridge
-            mem_ctx = memory_store.get_agent_context(top_k=5)
-            pending = agent_feedback_bridge.get_pending_feedback(limit=3)
-            if mem_ctx:
-                system_prompt += mem_ctx
-            if pending:
-                summaries = [f.get("summary", agent_feedback_bridge._brief(f)) for f in pending]
-                system_prompt += "\n\n[近期发布反馈]\n" + "\n".join(f"- {s}" for s in summaries)
-                system_prompt += "\n请在生成剪辑指令时考虑以上反馈。"
-                agent_feedback_bridge.mark_feedback_consumed(
-                    [f.get("feedback_id") for f in pending if f.get("feedback_id")]
-                )
-        except Exception as e:
-            logger.debug(f"[Agent] 注入记忆失败: {e}")
-
-        # 注入拓展中心可用工具 + Dispatcher 能力（OpenTake 式「可枚举工具面」）
-        ext_prompt = ""
-        if extensions_info:
-            # 截断过长列表，避免撑爆上下文
-            slim = extensions_info[:40]
-            ext_prompt = f"\n\n拓展中心可用工具:\n{json.dumps(slim, ensure_ascii=False, indent=2)}"
-        caps_prompt = ""
-        if caps_info:
-            caps_prompt = (
-                f"\n\n已注册剪辑相关 capability（供理解，对话仍用上面 action）:\n"
-                f"{json.dumps(caps_info, ensure_ascii=False, indent=2)}"
-            )
-
-        user_prompt = (
-            f"用户剪辑指令: {user_text}\n\n"
-            f"当前时间线状态:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
-            f"{caps_prompt}"
-            f"{ext_prompt}"
-        )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-    def _is_agent_plan_mode(self) -> bool:
-        """判断当前是否为 Plan 模式。"""
-        return self._get_agent_session_mode() == "plan"
-
-    def _get_agent_session_mode(self) -> str:
-        from app.core.agent_policy import normalize_mode
-
-        combo = getattr(self, "_agent_mode_combo", None)
-        if combo is None:
-            return "collaborative"
-        return normalize_mode(combo.currentData())
-
-    def _get_agent_extensions_context(self) -> List[Dict[str, Any]]:
-        """收集拓展中心可用工具，供 Agent 调用。"""
-        tools = []
-        try:
-            from app.core.extension_base import get_extensions_registry
-            registry = get_extensions_registry()
-            for ext in registry.list_all():
-                if not ext.is_enabled and not ext.is_available:
-                    continue
-                ext_tools = ext.get_tools() or []
-                for t in ext_tools:
-                    tools.append({
-                        "extension_id": ext.info.id,
-                        "extension_name": ext.info.name,
-                        "extension_type": ext.extension_type.value,
-                        "tool_id": t.id,
-                        "tool_name": t.name,
-                        "description": t.description,
-                    })
-        except Exception as e:
-            logger.debug(f"收集拓展中心工具失败: {e}")
-
-        # 补充 SkillEngine 中的技能（兼容直接注册的 Skill）
-        try:
-            # 触发外部 skill 注册（幂等：仅首次实际扫描 app/skills/external/，
-            # 后续调用直接返回 0）。修复 Agent 面板看不到外部 skill 的问题：
-            # 外部 skill 注册原本只在 extensions_module._refresh_skill_list 触发，
-            # 若用户未打开拓展中心标签页，Agent 调用 list_all() 会拿不到外部 skill。
-            try:
-                from app.skills.external_loader import ensure_external_skills_registered
-                ensure_external_skills_registered()
-            except Exception as ext_e:
-                logger.debug(f"外部 skill 注册失败（不影响内置 skill）: {ext_e}")
-            from .skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                tools.append({
-                    "extension_id": skill.skill_id,
-                    "extension_name": skill.skill_name,
-                    "extension_type": "skill",
-                    "tool_id": skill.skill_id,
-                    "tool_name": skill.skill_name,
-                    "description": getattr(skill, "skill_description", ""),
-                })
-        except Exception as e:
-            logger.debug(f"收集 SkillEngine 技能失败: {e}")
-
-        # 补充 PluginManager 管理的传统插件（修复 Agent 看不到传统插件的问题：
-        # 原逻辑只收集 ExtensionsRegistry 和 SkillEngine，短剧筛选/AI特效等
-        # PluginManager 管理的插件对 Agent 不可见，模型无法生成 call_extension 指令）
-        try:
-            # _ensure_plugin_manager 内置 lazy load（首次调用初始化，后续直接返回）
-            plugin_mgr = self._ensure_plugin_manager()
-            if plugin_mgr is not None:
-                for plugin in plugin_mgr.list_plugins(enabled_only=True):
-                    plugin_id = getattr(plugin, "id", None)
-                    if not plugin_id:
-                        continue
-                    tools.append({
-                        "extension_id": plugin_id,
-                        "extension_name": getattr(plugin, "name", plugin_id),
-                        "extension_type": "plugin",
-                        "tool_id": plugin_id,
-                        "tool_name": getattr(plugin, "name", plugin_id),
-                        "description": getattr(plugin, "description", ""),
-                    })
-        except Exception as e:
-            logger.debug(f"收集 PluginManager 插件失败: {e}")
-
-        return tools
-
-    def _get_agent_timeline_context(self) -> Dict[str, Any]:
-        """整理当前时间线上下文（OpenTake get_timeline 风格：可自省、可决策）。"""
-        clips = []
-        track_ids = set()
-        total_end = 0.0
-        for index, clip in enumerate(getattr(self, '_clips', [])):
-            start = float(clip.get("start_time", 0) or 0)
-            duration = float(clip.get("duration", 0) or 0)
-            end = start + duration
-            if end > total_end:
-                total_end = end
-            track = clip.get("track", 0)
-            try:
-                track_ids.add(int(track))
-            except (TypeError, ValueError):
-                track_ids.add(track)
-            path = clip.get("path") or ""
-            clips.append({
-                "clip_index": index,
-                "id": clip.get("id"),
-                "name": clip.get("name") or (path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""),
-                "path": path,
-                "start_time": start,
-                "duration": duration,
-                "end_time": end,
-                "in_point": clip.get("in_point", 0),
-                "out_point": clip.get("out_point"),
-                "track": track,
-                "volume": clip.get("volume"),
-                "speed": clip.get("speed", 1.0),
-                "effects": clip.get("effects", {}),
-                "transition": clip.get("transition"),
-                "has_keyframes": bool(clip.get("keyframes")),
-            })
-
-        # 同轨空隙摘要（供去静音/吸附决策，不改数据）
-        gaps = []
-        by_track: Dict[Any, list] = {}
-        for c in clips:
-            by_track.setdefault(c["track"], []).append(c)
-        for track, items in by_track.items():
-            items = sorted(items, key=lambda x: x["start_time"])
-            for i in range(len(items) - 1):
-                gap_start = items[i]["end_time"]
-                gap_end = items[i + 1]["start_time"]
-                if gap_end - gap_start > 0.05:
-                    gaps.append({
-                        "track": track,
-                        "t_in": round(gap_start, 3),
-                        "t_out": round(gap_end, 3),
-                        "duration": round(gap_end - gap_start, 3),
-                    })
-
-        return {
-            "clip_count": len(clips),
-            "track_count": len(track_ids),
-            "tracks": sorted(track_ids, key=lambda x: (isinstance(x, str), x)),
-            "timeline_duration": round(total_end, 3),
-            "gap_count": len(gaps),
-            "gaps": gaps[:20],
-            "selected_clip_id": getattr(self, '_current_clip', None).get("id") if getattr(self, '_current_clip', None) else None,
-            "playhead_position": getattr(self, '_playhead_position', 0),
-            "clips": clips,
-        }
-
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
     # ═══════════════════════════════════════════════════════════════
     # Agent 公开接口（P0-A：EditorCapabilityHandlers 调用的公开方法）
     # 这些方法包装同名私有方法，增加 try/except 保护，避免 handler 直接依赖私有实现
@@ -11754,6 +7642,39 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             logger.warning(f"[Agent] agent_get_timeline_context 失败: {e}")
             return {"error": str(e), "clip_count": 0, "clips": []}
 
+    def agent_send_selected_to_canvas(self, clip_id: str = "") -> Dict[str, Any]:
+        """把选中（或指定）视频片段推到画布 outbox；不改时间线。"""
+        clip = None
+        if clip_id:
+            clip = next((c for c in getattr(self, "_clips", []) if c.get("id") == clip_id), None)
+        if clip is None:
+            targets = self._property_target_clips() if hasattr(self, "_property_target_clips") else []
+            clip = targets[0] if targets else None
+        if not isinstance(clip, dict):
+            return {"success": False, "message": "请先在时间线选中一个片段"}
+        path = clip.get("path") or clip.get("file_path") or ""
+        if not path or not os.path.exists(path):
+            return {"success": False, "message": f"片段文件不存在: {path or '(空)'}"}
+        try:
+            from app.core.canvas_bridge import push_editor_to_canvas, get_canvas_bridge
+            from app.core.editor_canvas_link import outbox_fields_from_clip
+        except ImportError:
+            from core.canvas_bridge import push_editor_to_canvas, get_canvas_bridge  # type: ignore
+            from core.editor_canvas_link import outbox_fields_from_clip  # type: ignore
+        get_canvas_bridge().start()
+        title = clip.get("name") or clip.get("title") or os.path.basename(path)
+        res = push_editor_to_canvas(
+            path,
+            title=str(title),
+            source="editor",
+            extra=outbox_fields_from_clip(clip),
+        )
+        if res.get("success"):
+            self._notify_edit(res.get("message") or "已推送到画布")
+            self._record_ai_tool_history(res.get("message") or "发送到画布")
+        return res if isinstance(res, dict) else {"success": False, "message": str(res)}
+
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
     def agent_ripple_delete_range(
         self,
         t_in: float,
@@ -11793,69 +7714,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 "message": f"波纹删除失败（非假成功）: {e}",
             }
 
-    def agent_suggest_cleanup(self, *, open_ui: bool = True) -> Dict[str, Any]:
-        """
-        M5：去水词/静音「建议 + 确认」——默认弹勾选对话框，不静默写 _clips，不走 run_full。
-
-        open_ui=False 时仅返回建议 JSON（供 Agent 展示），不改时间线。
-        """
-        try:
-            from app.modules.lego.editor_subtitle_panel import (
-                build_editor_cleanup_plan,
-                run_cleanup_checklist_flow,
-                suggest_cleanup_intervals_payload,
-            )
-            plan, err = build_editor_cleanup_plan(self)
-            if err:
-                return {
-                    "action": "suggest_cleanup",
-                    "success": False,
-                    "message": err,
-                    "intervals": [],
-                    "awaiting_confirm": False,
-                }
-            payload = suggest_cleanup_intervals_payload(plan)
-            if not open_ui:
-                return {
-                    "action": "suggest_cleanup",
-                    "success": True,
-                    "message": f"建议 {len(payload)} 段，待确认后执行（未改时间线）",
-                    "intervals": payload,
-                    "awaiting_confirm": True,
-                    "suggested_count": len(payload),
-                    "total_duration": float(plan.total_duration),
-                    "is_dense_dialogue": bool(plan.is_dense_dialogue),
-                }
-            flow = run_cleanup_checklist_flow(self, plan)
-            return {
-                "action": "suggest_cleanup",
-                "success": bool(flow.get("success")),
-                "cancelled": bool(flow.get("cancelled")),
-                "message": flow.get("message", ""),
-                "intervals": flow.get("intervals") or payload,
-                "suggested_count": flow.get("suggested_count", len(payload)),
-                "selected_count": flow.get("selected_count", 0),
-                "awaiting_confirm": False,
-            }
-        except Exception as e:
-            logger.exception(f"[Agent] agent_suggest_cleanup 失败: {e}")
-            return {
-                "action": "suggest_cleanup",
-                "success": False,
-                "message": f"建议去水词失败（非假成功）: {e}",
-                "intervals": [],
-            }
-
-    def _on_edit_agent_chunk(self, chunk: str):
-        """缓存模型流式输出。"""
-        # 顶层 try/except 兜底（P0 闪退修复）：
-        # 本槽由 QThread.chunk_ready 信号高频触发（每个 token 一次），
-        # 若 _edit_agent_stream_buffer 未初始化或主窗口切换中属性已销毁，
-        # 会 AttributeError 穿透到信号分发器导致主线程崩溃。
-        try:
-            self._edit_agent_stream_buffer = getattr(self, '_edit_agent_stream_buffer', "") + chunk
-        except Exception as e:
-            logger.warning(f"[Agent] _on_edit_agent_chunk 处理失败: {e}")
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _on_edit_agent_chunk 已迁移至 editor_agent_runtime_mixin.py
 
     def _on_edit_agent_result(self, user_text: str, raw: str):
         """处理模型输出并应用剪辑指令（Plan 模式下先展示规划等待确认）。"""
@@ -11940,42 +7800,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             logger.debug(f"Plan 解析失败: {e}")
             return [], []
 
-    def _show_agent_plan(self, plan_steps: List[str], commands: List[Any], user_text: str):
-        """展示 Plan 模式规划，等待用户确认。"""
-        self._pending_plan_commands = commands
-        self._pending_plan_user_text = user_text
-        # 格式化规划步骤
-        plan_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(plan_steps)])
-        self._agent_plan_view.setPlainText(plan_text)
-        self._agent_plan_card.setVisible(True)
+    # [Mixin] _show_agent_plan 已迁移至 editor_agent_runtime_mixin.py
 
-    def _confirm_agent_plan(self):
-        """用户确认执行 Plan 规划。"""
-        commands = getattr(self, '_pending_plan_commands', [])
-        if not commands:
-            self._append_agent_message("系统", "没有可执行的指令。")
-            self._agent_plan_card.setVisible(False)
-            return
-        self._append_agent_message("系统", "开始执行规划...")
-        results = self._apply_agent_commands_to_editor(commands)
-        summary = self._format_agent_command_summary(results)
-        self._append_agent_message("系统", summary or "规划已处理。")
-        self._agent_plan_card.setVisible(False)
-        self._pending_plan_commands = []
-        self._pending_plan_user_text = ""
+    # [Mixin] _confirm_agent_plan 已迁移至 editor_agent_runtime_mixin.py
 
-    def _cancel_agent_plan(self):
-        """用户取消 Plan 规划。"""
-        self._agent_plan_card.setVisible(False)
-        self._pending_plan_commands = []
-        self._pending_plan_user_text = ""
-        self._append_agent_message("系统", "规划已取消。")
+    # [Mixin] _cancel_agent_plan 已迁移至 editor_agent_runtime_mixin.py
 
-    def _on_agent_feedback(self, event):
-        """收到反馈时在 Agent 面板显示提示（非侵入）"""
-        summary = (event.data or {}).get("summary", "")
-        if summary:
-            self._append_agent_message("系统", f"📦 收到新反馈: {summary}（下次指令将自动参考）")
+    # [Mixin] _on_agent_feedback 已迁移至 editor_agent_runtime_mixin.py
 
     def _on_edit_agent_error(self, error: str):
         """模型调用失败时回退到本地规则解析。"""
@@ -12014,36 +7845,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             except Exception:
                 pass
 
-    def _on_edit_agent_stopped(self):
-        """Agent 被用户终止。"""
-        # 顶层 try/except 兜底（P0 闪退修复）：
-        # 用户点终止按钮触发，若 Agent 面板已销毁访问 QTextEdit 会 RuntimeError。
-        try:
-            self._append_agent_message("系统", "当前 Agent 输出已终止。")
-        except Exception as e:
-            logger.warning(f"[Agent] _on_edit_agent_stopped 处理失败: {e}")
+    # [Mixin] _on_edit_agent_stopped 已迁移至 editor_agent_runtime_mixin.py
 
-    def _on_edit_agent_finished(self):
-        """恢复 Agent 按钮状态。"""
-        # 顶层 try/except 兜底（P0 闪退修复）：
-        # finished 是 QThread 内置信号，无论成功/失败/异常 100% 必触发。
-        # 若用户已切换模块按钮可能已 deleteLater，访问会 RuntimeError 崩溃。
-        try:
-            send_btn = getattr(self, '_edit_agent_send_btn', None)
-            stop_btn = getattr(self, '_edit_agent_stop_btn', None)
-            if send_btn is not None:
-                send_btn.setEnabled(True)
-            if stop_btn is not None:
-                stop_btn.setEnabled(False)
-            inbox = getattr(self, "_edit_agent_inbox", None) or []
-            if inbox:
-                nxt = inbox.pop(0)
-                self._edit_agent_inbox = inbox
-                self._edit_agent_input.setText(nxt)
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, self._send_edit_agent_message)
-        except Exception as e:
-            logger.warning(f"[Agent] _on_edit_agent_finished 处理失败: {e}")
+    # [Mixin] _on_edit_agent_finished 已迁移至 editor_agent_runtime_mixin.py
 
     # ────────────── AgentBrain 学习机制（P0 激活）──────────────
     def _agent_brain_learn(self, success: bool, user_text: str = "", error: str = ""):
@@ -12116,192 +7920,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
         return matched if matched else ["pipeline.execute_editing"]
 
     # ────────────── Agent 全链路事件处理 ──────────────
-    def _on_pipeline_event(self, event):
-        """监听全链路相关事件，更新 Agent 面板状态。"""
-        try:
-            data = event.data if hasattr(event, "data") else event
-            if not isinstance(data, dict):
-                return
-            subtype = data.get("subtype", "")
-            if subtype == "pipeline_waiting_preview":
-                self._handle_waiting_preview(data)
-            elif subtype == "pipeline_progress":
-                self._handle_pipeline_progress(data)
-            elif subtype == "pipeline_done":
-                self._handle_pipeline_done(data)
-            elif subtype == "video_generation_done":
-                self._handle_video_generation_done(data)
-        except Exception as e:
-            logger.debug(f"[Agent] 处理全链路事件失败: {e}")
+    # [Mixin] _on_pipeline_event 已迁移至 editor_agent_runtime_mixin.py
 
-    def _handle_video_generation_done(self, data: Dict):
-        """检测是否使用了本地占位色块回退，如有则提醒用户。"""
-        lbl = getattr(self, "_agent_provider_status_lbl", None)
-        if lbl is None:
-            return
-        try:
-            paths = data.get("paths", []) or []
-            if not paths:
-                return
-            # 判断文件名前缀是否为 gen_*（本地占位生成）
-            import os as _os
-            all_local = all(_os.path.basename(str(p)).startswith("gen_") for p in paths)
-            if all_local:
-                existing = lbl.text()
-                note = "⚠ 本次生成使用了本地占位色块（云端 provider 不可用）"
-                if note not in existing:
-                    new_text = (existing + "\n" + note) if existing.strip() else note
-                    lbl.setText(new_text)
-                    lbl.setStyleSheet("color:#ff7b72;font-size:10px;font-weight:700;")
-                self._append_agent_message("系统", note)
-        except Exception as e:
-            logger.debug(f"[Agent] 处理生成回退提示失败: {e}")
+    # [Mixin] _handle_video_generation_done 已迁移至 editor_agent_runtime_mixin.py
 
-    def _handle_waiting_preview(self, data: Dict):
-        """处理等待预览确认事件：更新按钮状态、提示 + 渲染预览问题卡。"""
-        status = data.get("status", {})
-        failed_count = status.get("by_status", {}).get("failed", 0)
-        total = status.get("total", 0)
+    # [Mixin] _handle_waiting_preview 已迁移至 editor_agent_runtime_mixin.py
 
-        # ── 新增：渲染预览问题片段列表（保守版） ──
-        try:
-            from app.core.preview_validation_loop import (
-                preview_validation_loop, PreviewStatus
-            )
-            failed_clips = preview_validation_loop.get_clips_by_status(
-                PreviewStatus.FAILED
-            )
-            self._render_preview_issues(failed_clips)
-        except Exception as e:
-            logger.debug(f"[Agent] 渲染预览问题列表失败: {e}")
+    # [Mixin] _handle_pipeline_progress 已迁移至 editor_agent_runtime_mixin.py
 
-        # ── 新增：进度卡停在 waiting_for_preview_confirmation ──
-        self._update_pipeline_stage(
-            "waiting_for_preview_confirmation",
-            f"{failed_count}/{total} 个片段需要人工确认"
-        )
-
-        self._append_agent_message(
-            "Agent",
-            f"⏸️ 全链路已暂停：预览发现 {failed_count}/{total} 个片段有问题。\n"
-            f"请在时间线上调整后，点击下方【✅ 确认预览并继续】按钮继续执行。",
-        )
-        # 切换按钮状态
-        pipeline_btn = getattr(self, "_edit_agent_pipeline_btn", None)
-        if pipeline_btn:
-            pipeline_btn.setText("✅ 确认预览并继续")
-            pipeline_btn.setStyleSheet(
-                "QPushButton{background:#1f6feb;color:#fff;border:1px solid #388bfd;"
-                "border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;}"
-                "QPushButton:hover{background:#388bfd;}"
-            )
-            pipeline_btn.setProperty("waiting_preview", True)
-
-    def _handle_pipeline_progress(self, data: Dict):
-        """处理全链路进度更新事件。"""
-        stage = data.get("stage", "")
-        message = data.get("message", "")
-        # ── 新增：刷新进度卡 ──
-        self._update_pipeline_stage(stage, message)
-        # 保留原有 emoji 消息追加逻辑
-        if not message:
-            return
-        if stage == "routing":
-            self._append_agent_message("Agent", f"🔀 {message}")
-        elif stage == "generation":
-            self._append_agent_message("Agent", f"🎬 {message}")
-        elif stage == "import_parsing":
-            self._append_agent_message("Agent", f"📥 {message}")
-        elif stage == "preview":
-            self._append_agent_message("Agent", f"🔍 {message}")
-        elif stage == "scoring":
-            self._append_agent_message("Agent", f"📊 {message}")
-        elif stage == "scripting":
-            self._append_agent_message("Agent", f"📝 {message}")
-        elif stage == "editing":
-            self._append_agent_message("Agent", f"✂️ {message}")
-        elif stage == "done":
-            self._append_agent_message("Agent", f"✅ {message}")
-
-    def _handle_pipeline_done(self, data: Dict):
-        """处理全链路完成事件：重置按钮状态 + 渲染打分/脚本卡 + 进度完成。"""
-        result = data.get("result", {})
-        success = result.get("success", False)
-        error = result.get("error", "")
-
-        # ── 新增：进度卡最终状态 ──
-        degraded = bool(result.get("degraded")) or (
-            result.get("success")
-            and not result.get("final_video_path")
-            and bool(result.get("editing_script"))
-        )
-        self._finalize_pipeline_stage(
-            bool(result.get("success")),
-            result.get("error") or "",
-            degraded=degraded,
-        )
-
-        # ── 新增：渲染五维打分结果卡（从 session 对象取 scored_results） ──
-        try:
-            session_id = result.get("session_id", "")
-            scored = []
-            if session_id:
-                from app.core.agent_pipeline_orchestrator import (
-                    agent_pipeline_orchestrator
-                )
-                session = agent_pipeline_orchestrator.get_session(session_id)
-                if session is not None and getattr(session, "scored_results", None):
-                    scored = session.scored_results
-            self._render_score_results(scored)
-        except Exception as e:
-            logger.debug(f"[Agent] 渲染打分卡失败: {e}")
-
-        # ── 新增：渲染剪辑脚本卡（事件载荷已有 editing_script） ──
-        try:
-            editing_script = result.get("editing_script") or {}
-            self._render_editing_script(editing_script if editing_script else None)
-        except Exception as e:
-            logger.debug(f"[Agent] 渲染脚本卡失败: {e}")
-
-        if result.get("success"):
-            final_path = result.get("final_video_path", "")
-            degraded = bool(result.get("degraded")) or (
-                not final_path and bool(result.get("editing_script"))
-            )
-            if final_path and not degraded:
-                self._append_agent_message(
-                    "Agent", f"🎉 全链路执行成功！成片已输出：\n{final_path}")
-            elif degraded:
-                reason = result.get("error") or "未产出成片文件"
-                self._append_agent_message(
-                    "Agent",
-                    f"⚠️ 全链路降级完成（非完整成片成功）：{reason}\n"
-                    "若有脚本，可点【▶ 一键手动精剪】导出；请勿当作已自动成片。",
-                )
-            else:
-                self._append_agent_message(
-                    "Agent",
-                    "⚠️ 标记成功但无成片路径（状态异常）。请检查日志，勿当作导出完成。",
-                )
-        else:
-            self._append_agent_message(
-                "Agent",
-                f"❌ 全链路执行失败（非假成功）：{result.get('error', '未知错误')}",
-            )
-        # 恢复按钮为初始状态
-        self._reset_pipeline_button()
-
-    def _reset_pipeline_button(self):
-        """重置全链路按钮状态。"""
-        pipeline_btn = getattr(self, "_edit_agent_pipeline_btn", None)
-        if pipeline_btn:
-            pipeline_btn.setText("🚀 全链路执行（生成→预览→打分→精剪→成片）")
-            pipeline_btn.setStyleSheet(
-                "QPushButton{background:#1f2a3d;color:#7ee787;border:1px solid #2f5139;"
-                "border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;}"
-                "QPushButton:hover{background:#238636;color:#fff;border-color:#238636;}"
-            )
-            pipeline_btn.setProperty("waiting_preview", False)
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _reset_pipeline_button 已迁移至 editor_agent_runtime_mixin.py
 
     def _parse_agent_commands(self, user_text: str, raw: str) -> List[Any]:
         """解析模型 JSON；失败时回退到 LLMEditor 的离线规则。"""
@@ -12343,7 +7971,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             result = llm_editor.parse(user_text, use_ai=False, timeline_context=self._get_agent_timeline_context())
             return result.commands if result.success else []
         except Exception as e:
-            print(f"剪辑 Agent 指令解析失败: {e}")
+            logger.error(f'剪辑 Agent 指令解析失败: {e}')
             return []
 
     # _apply_agent_commands_to_editor / _apply_agent_command 已迁移到 ai_agent_panel.py（AiAgentPanelMixin）
@@ -12370,310 +7998,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             logger.warning(f"[Agent] dispatch {cap_id} 失败: {e}")
             return {"action": cap_id, "success": False, "message": str(e)}
 
-    def _agent_call_extension(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Agent 调用拓展中心 —— 优先走统一调用层，失败时回退原逻辑"""
-        # 优先走统一调用层
-        try:
-            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
-            result = capability_dispatcher.invoke(CapabilityRequest(
-                capability_id="ext.run_extension",
-                params=params,
-                caller="agent",
-                agent_mode=self._get_agent_session_mode() if hasattr(self, "_get_agent_session_mode") else "",
-                approved=True,
-            ))
-            if result.success:
-                output = result.output.get("result") if result.output else None
-                msg = self._format_extension_result(output)
-                return {"action": "call_extension", "success": True,
-                        "message": msg if msg else "调用成功"}
-            # dispatcher 失败则继续走原逻辑
-        except Exception as e:
-            logger.debug(f"[Agent] dispatcher 调用失败，回退原逻辑: {e}")
-
-        # 原逻辑 fallback（保留向后兼容）
-        ext_id = params.get("extension_id") or params.get("extensionId")
-        tool_id = params.get("tool_id") or params.get("toolId") or ext_id
-        call_params = params.get("params") or {}
-        if not ext_id:
-            return {"action": "call_extension", "success": False, "message": "缺少 extension_id 参数"}
-
-        # 优先从 ExtensionsRegistry 查找
-        try:
-            from app.core.extension_base import get_extensions_registry
-            registry = get_extensions_registry()
-            ext = registry.get(ext_id)
-            if ext is not None:
-                if not ext.is_available:
-                    if not ext.initialize():
-                        return {"action": "call_extension", "success": False,
-                                "message": f"扩展 {ext.info.name} 初始化失败: {ext.error}"}
-                result = ext.run(tool_id, **call_params)
-                msg = self._format_extension_result(result)
-                return {"action": "call_extension", "success": True,
-                        "message": f"已调用 {ext.info.name}.{tool_id}: {msg}"}
-        except Exception as e:
-            logger.warning(f"Agent 调用 ExtensionsRegistry 失败: {e}")
-
-        # 回退到 SkillEngine
-        try:
-            from .skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                if skill.skill_id == ext_id:
-                    from .extensions_context import ExtensionsContext
-                    ctx = ExtensionsContext(inputs=call_params)
-                    result = skill.execute(ctx)
-                    msg = self._format_extension_result(result)
-                    return {"action": "call_extension", "success": True,
-                            "message": f"已执行技能 {skill.skill_name}: {msg}"}
-        except Exception as e:
-            logger.warning(f"Agent 调用 SkillEngine 失败: {e}")
-
-        # 回退到 PluginManager（传统插件：短剧筛选、AI特效工坊等）
-        # 修复 Agent 看不到 PluginManager 管理的传统插件问题：
-        # 原逻辑只走 ExtensionsRegistry + SkillEngine，传统插件无法被调用
-        try:
-            plugin_mgr = self._ensure_plugin_manager()
-            if plugin_mgr is not None:
-                plugin = plugin_mgr.get_plugin(ext_id)
-                if plugin is not None and getattr(plugin, "enabled", False):
-                    # PluginManager.run_plugin 内部已 try/except，失败返回 None
-                    result = plugin_mgr.run_plugin(ext_id, **call_params)
-                    msg = self._format_extension_result(result)
-                    return {"action": "call_extension", "success": True,
-                            "message": f"已调用插件 {getattr(plugin, 'name', ext_id)}: {msg}"}
-        except Exception as e:
-            logger.warning(f"Agent 调用 PluginManager 失败: {e}")
-
-        return {"action": "call_extension", "success": False,
-                "message": f"未找到扩展: {ext_id}"}
-
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
     # ────────────── Agent 全链路闭环入口 ──────────────
-    def _on_run_full_pipeline(self):
-        """
-        全链路一键执行入口（按钮点击）。
-        根据当前按钮状态决定是「启动新流程」还是「继续等待中的流程」。
-        """
-        pipeline_btn = getattr(self, "_edit_agent_pipeline_btn", None)
-        waiting_preview = False
-        if pipeline_btn is not None:
-            waiting_preview = pipeline_btn.property("waiting_preview") or False
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _on_full_pipeline_done 已迁移至 editor_agent_runtime_mixin.py
 
-        if waiting_preview:
-            # 场景：预览暂停中，用户点击确认 → 以 auto_preview_pass=True 重新执行，跳过预览阻塞
-            self._append_agent_message("Agent", "✅ 用户已确认预览，继续执行后续流程...")
-            brief = ""
-            inp = getattr(self, "_edit_agent_input", None)
-            if inp is not None:
-                brief = inp.text().strip()
-            try:
-                from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
-
-                send_btn = getattr(self, "_edit_agent_send_btn", None)
-                if send_btn is not None:
-                    send_btn.setEnabled(False)
-
-                def _cb(result):
-                    try:
-                        QTimer.singleShot(0, lambda: self._on_full_pipeline_done(result))
-                    except Exception:
-                        logger.exception("[Agent] 全链路继续回调切主线程失败")
-
-                capability_dispatcher.invoke_async(CapabilityRequest(
-                    capability_id="pipeline.run_full",
-                    params={
-                        "materials": [],  # 已在之前的会话中处理，此处沿用
-                        "creative_brief": brief,
-                        **self._get_pipeline_params(),
-                        "auto_preview_pass": True,  # 关键：跳过预览阻塞
-                    },
-                    caller="agent",
-                ), callback=_cb)
-            except Exception as e:
-                logger.exception("[Agent] 全链路继续执行失败")
-                self._append_agent_message("Agent", f"❌ 继续执行失败: {e}")
-                send_btn = getattr(self, "_edit_agent_send_btn", None)
-                if send_btn is not None:
-                    send_btn.setEnabled(True)
-            return
-
-        # ── 正常启动新流程 ──
-        # 收集导入栏素材（self._clips）
-        materials = []
-        for c in getattr(self, "_clips", []):
-            path = c.get("path", "")
-            if path:
-                materials.append({
-                    "path": path,
-                    "type": c.get("type", "video"),
-                    "duration": float(c.get("duration", 5.0) or 5.0),
-                    "name": c.get("name", ""),
-                })
-        # 创意简报：优先取 Agent 输入框文本
-        brief = ""
-        inp = getattr(self, "_edit_agent_input", None)
-        if inp is not None:
-            brief = inp.text().strip()
-
-        # ── 前置校验：无素材 + 无简报 → 友好提示 ──
-        if not materials and not brief:
-            self._append_agent_message(
-                "Agent",
-                "⚠️ 无法启动全链路执行：\n"
-                "• 导入栏没有素材\n"
-                "• Agent 输入框为空\n\n"
-                "请选择以下任一方式后重试：\n"
-                "1. 导入视频/图片素材（走 AI 素材剪辑业务线）\n"
-                "2. 在输入框描述创意构思（走 AI 视频生成业务线）"
-            )
-            return
-
-        # 左右脑协同联想：此前 correlate()/right_brain_think()/left_brain_think() 只有定义没有
-        # 调用方，是完全不影响任何实际决策的死代码。这里在启动前跑一次，把联想到的能力
-        # 展示给用户，让「左右脑协同」名副其实（仅展示，不改变实际路由/参数逻辑）。
-        if brief:
-            try:
-                from app.core.agent_brain import agent_brain
-                plan = agent_brain.correlate(brief)
-                right = plan.get("right_brain_plan") or []
-                left = plan.get("left_brain_plan") or []
-                if right or left:
-                    self._append_agent_message(
-                        "Agent",
-                        f"🧠 联想：右脑(创意) {right or '无'} · 左脑(逻辑) {left or '无'}",
-                    )
-            except Exception as e:
-                logger.debug(f"[Agent] 左右脑联想失败: {e}")
-
-        try:
-            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
-            self._append_agent_message(
-                "Agent", f"🚀 启动全链路执行（素材 {len(materials)} 个，简报: {brief[:30] or '无'}）...")
-            # 防重复点击
-            send_btn = getattr(self, "_edit_agent_send_btn", None)
-            if send_btn is not None:
-                send_btn.setEnabled(False)
-
-            def _cb(result):
-                # worker 线程回调 → 通过 QTimer 切回主线程刷新 UI
-                try:
-                    QTimer.singleShot(0, lambda: self._on_full_pipeline_done(result))
-                except Exception:
-                    logger.exception("[Agent] 全链路回调切主线程失败")
-
-            capability_dispatcher.invoke_async(CapabilityRequest(
-                capability_id="pipeline.run_full",
-                params={
-                    "materials": materials,
-                    "creative_brief": brief,
-                    **self._get_pipeline_params(),
-                    "auto_preview_pass": False,  # 默认：等待人工确认
-                },
-                caller="agent",
-            ), callback=_cb)
-        except Exception as e:
-            logger.exception("[Agent] 全链路启动失败")
-            self._append_agent_message("Agent", f"❌ 全链路启动失败: {e}")
-            send_btn = getattr(self, "_edit_agent_send_btn", None)
-            if send_btn is not None:
-                send_btn.setEnabled(True)
-
-    def _on_full_pipeline_done(self, result):
-        """全链路执行完成回调（主线程刷新 UI）。"""
-        send_btn = getattr(self, "_edit_agent_send_btn", None)
-        if send_btn is not None:
-            send_btn.setEnabled(True)
-        if result.success:
-            out = result.output or {}
-            final_path = out.get("final_video_path", "")
-            route = (out.get("route") or {}).get("route", "")
-            scored = out.get("scored_count", 0)
-            degraded = bool(out.get("degraded")) or (
-                not final_path and bool(out.get("editing_script"))
-            )
-            if final_path and not degraded:
-                msg = (f"✅ 全链路完成｜分流:{route} 打分镜头:{scored}｜成片:\n{final_path}")
-            elif degraded:
-                reason = out.get("error") or "未产出成片文件，仅有脚本/中间结果"
-                msg = (
-                    f"⚠️ 全链路降级完成（非成片成功）｜分流:{route} 打分:{scored}\n"
-                    f"{reason}\n请用脚本卡【▶ 一键手动精剪】导出，勿当作已自动成片。"
-                )
-            else:
-                msg = (
-                    f"⚠️ 标记成功但无成片路径｜分流:{route} 打分:{scored}（请查日志）"
-                )
-            self._append_agent_message("Agent", msg)
-        else:
-            self._append_agent_message(
-                "Agent", f"❌ 全链路失败（非假成功）: {result.error}"
-            )
-
-    def _execute_pipeline_editing(self, editing_script: Dict[str, Any],
-                                  session_id: str = "") -> str:
-        """
-        精剪执行入口：解析剪辑脚本，应用转场、字幕、配乐，输出高质量成片。
-        被 pipeline.execute_editing 能力调用（通过 editor_module_ref）。
-        返回成片路径，失败返回空串。
-        """
-        import sys as _sys
-        import subprocess as _sp
-        import tempfile as _tf
-        import json as _json
-
-        clip_order = (editing_script or {}).get("clip_order", []) or []
-        transitions = (editing_script or {}).get("transitions", {}) or {}
-        bgm_path = (editing_script or {}).get("bgm", "")
-        # 从脚本或 _clips 中提取字幕文本（如果脚本生成了的话）
-        subtitles = (editing_script or {}).get("subtitles", []) or []
-        if not subtitles:
-            # 尝试从片段元数据中取
-            subtitles = [c.get("dialogue", "") for c in self._clips if c.get("dialogue")]
-
-        if not clip_order:
-            logger.warning("[pipeline] 精剪：clip_order 为空")
-            return ""
-
-        # 按 clip_order 顺序收集存在的片段路径和时长
-        clip_map = {c.get("id"): c for c in getattr(self, "_clips", []) if c.get("id")}
-        paths_and_durations = []
-        for cid in clip_order:
-            clip = clip_map.get(cid)
-            if clip and clip.get("path") and os.path.exists(clip["path"]):
-                duration = float(clip.get("duration", 5.0) or 5.0)
-                paths_and_durations.append({"path": clip["path"], "duration": duration, "id": cid})
-
-        if not paths_and_durations:
-            logger.warning("[pipeline] 精剪：clip_order 无可用片段路径")
-            return ""
-
-        output_dir = "短剧AI剪辑输出"
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-        except Exception as e:
-            logger.debug("创建短剧AI剪辑输出目录失败: %s", e)
-        out_path = os.path.join(
-            output_dir, f"pipeline_{session_id or int(time.time())}_final.mp4")
-
-        # 如果只有一个片段，直接应用字幕并添加静音（以适配后续可能的混音）
-        if len(paths_and_durations) == 1:
-            p = paths_and_durations[0]
-            ffmpeg = self._find_pipeline_ffmpeg()
-            if not ffmpeg:
-                return ""
-            return self._apply_single_clip_ffmpeg(ffmpeg, p["path"], p["duration"],
-                                                   subtitles[0] if subtitles else "",
-                                                   bgm_path, out_path)
-
-        # 多片段：构建复杂的 filter_complex
-        ffmpeg = self._find_pipeline_ffmpeg()
-        if not ffmpeg:
-            logger.warning("[pipeline] 未找到 ffmpeg，无法拼接成片")
-            return ""
-
-        return self._apply_multi_clip_ffmpeg(ffmpeg, paths_and_durations, transitions,
-                                              subtitles, bgm_path, out_path)
-
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
     def agent_execute_pipeline_editing(self, editing_script: Dict[str, Any],
                                         session_id: str = "") -> str:
         """Agent 公开接口：执行精修剪辑脚本并输出成片。"""
@@ -12683,243 +8013,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             logger.exception(f"[Agent] agent_execute_pipeline_editing 失败: {e}")
             return ""
 
-    def _apply_single_clip_ffmpeg(self, ffmpeg: str, input_path: str, duration: float,
-                                   subtitle_text: str, bgm_path: str, out_path: str) -> str:
-        """处理单个片段：叠加字幕，如有 BGM 则混音。"""
-        import sys as _sys
-        import subprocess as _sp
-
-        cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", input_path]
-
-        has_bgm = bgm_path and os.path.exists(bgm_path)
-        if has_bgm:
-            cmd.extend(["-i", bgm_path])
-
-        filter_complex = []
-        cmd.extend(["-filter_complex"])
-
-        # 字幕处理
-        if subtitle_text:
-            safe_text = subtitle_text.replace("'", "'\\''").replace(":", "\\:")
-            filter_complex.append(f"drawtext=text='{safe_text}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)*0.85:box=1:boxcolor=black@0.5:boxborderw=10[v]")
-            video_stream = "[v]"
-        else:
-            video_stream = "[0:v]"
-
-        # 音频处理（BGM 混音或原声）
-        if has_bgm:
-            filter_complex.append("[0:a][1:a]amix=inputs=2:duration=shortest[a]")
-            audio_stream = "[a]"
-        else:
-            audio_stream = "[0:a]"
-
-        cmd.append(";".join(filter_complex))
-        cmd.extend(["-map", video_stream, "-map", audio_stream])
-
-        cmd.extend([
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-shortest", out_path
-        ])
-
-        flags = 0x08000000 if _sys.platform == "win32" else 0
-        try:
-            proc = _sp.run(cmd, capture_output=True, timeout=300, creationflags=flags)
-            if proc.returncode == 0 and os.path.exists(out_path) \
-               and os.path.getsize(out_path) > 0:
-                logger.info(f"[pipeline] 单片段成片已输出: {out_path}")
-                return out_path
-            else:
-                err = proc.stderr.decode("utf-8", "ignore")[:200]
-                logger.warning(f"[pipeline] 单片段处理失败: {err}")
-                return ""
-        except Exception as e:
-            logger.warning(f"[pipeline] 单片段处理异常: {e}")
-            return ""
-
-    def _apply_multi_clip_ffmpeg(self, ffmpeg: str, clips: List[Dict], transitions: Dict,
-                                  subtitles: List[str], bgm_path: str, out_path: str) -> str:
-        """处理多个片段：应用 xfade 转场、字幕，并混音。"""
-        import sys as _sys
-        import subprocess as _sp
-
-        # xfade 有效转场类型映射
-        _XFADE_VALID = {
-            "fade", "fadeblack", "fadewhite", "smoothleft", "smoothright",
-            "circlecrop", "radial", "smthopen", "smthcover",
-            "wipeleft", "wiperight", "slideleft", "slideright",
-            "dissolve", "overlay",
-        }
-        _TRANSITION_MAP = {
-            "fade": "fade",
-            "cut": "fade",
-            "zoom": "fadeblack",
-            "slide": "smoothleft",
-            "dissolve": "dissolve",
-        }
-
-        # 查找系统字体 + 转义路径（FFmpeg filter 要求正斜杠 + 冒号转义）
-        _font_file = EditorModule._find_system_font()
-        if _font_file:
-            _font_file = _font_file.replace("\\", "/")
-            # FFmpeg filter 语法中冒号是保留字符，需用反斜杠转义
-            # C:/Windows/... → C\:/Windows/...
-            _font_file = _font_file.replace(":", "\\:")
-
-        def _has_audio_stream(filepath: str) -> bool:
-            """用 ffprobe 检测文件是否有音频流"""
-            try:
-                probe_cmd = [
-                    ffmpeg.replace("ffmpeg", "ffprobe"), "-v", "error",
-                    "-select_streams", "a", "-show_entries", "stream=codec_type",
-                    "-of", "csv=p=0", filepath
-                ]
-                p = _sp.run(probe_cmd, capture_output=True, timeout=10,
-                            creationflags=0x08000000 if _sys.platform == "win32" else 0)
-                return b"audio" in p.stdout
-            except Exception:
-                return False  # 检测失败默认无音频
-
-        def _build_filter_parts(enable_subtitles: bool = True,
-                                 has_audio: bool = True) -> List[str]:
-            """构建 filter_complex 滤镜链"""
-            parts = []
-            prev_v = None
-            prev_a = None
-            cum_dur = 0.0
-            prev_has_audio = has_audio  # 第一个片段是否有音频
-
-            for i, clip in enumerate(clips):
-                subtitle_text = subtitles[i] if i < len(subtitles) else ""
-                current_v = f"[{i}:v]"
-
-                # 检测当前片段是否有音频
-                clip_has_audio = clip.get("_has_audio", has_audio)
-                current_a = f"[{i}:a]" if clip_has_audio else None
-
-                # 字幕滤镜
-                if enable_subtitles and subtitle_text and _font_file:
-                    safe_text = subtitle_text.replace("'", "'\\''").replace(":", "\\:")
-                    parts.append(
-                        f"{current_v}drawtext=fontfile='{_font_file}':"
-                        f"text='{safe_text}':fontcolor=white:fontsize=36:"
-                        f"x=(w-text_w)/2:y=(h-text_h)*0.9:"
-                        f"box=1:boxcolor=black@0.4:boxborderw=8[v{i}]"
-                    )
-                    current_v = f"[v{i}]"
-
-                # 转场参数
-                clip_dur = clip["duration"]
-                raw_transition = transitions.get(clip["id"], "fade")
-                transition_type = _TRANSITION_MAP.get(raw_transition, raw_transition)
-                if transition_type not in _XFADE_VALID:
-                    transition_type = "fade"
-                transition_duration = min(0.5, clip_dur * 0.2)
-                offset = cum_dur - transition_duration if i > 0 else 0
-
-                if i == 0:
-                    prev_v = current_v
-                    prev_a = current_a if clip_has_audio else None
-                    cum_dur += clip_dur
-                    prev_has_audio = clip_has_audio
-                else:
-                    out_v = f"[xf{i}v]"
-                    parts.append(
-                        f"{prev_v}{current_v}xfade=transition={transition_type}:"
-                        f"duration={transition_duration}:offset={max(0, offset)}{out_v}"
-                    )
-                    # 仅当前后片段都有音频时才做音频转场
-                    if prev_has_audio and clip_has_audio:
-                        out_a = f"[xf{i}a]"
-                        parts.append(
-                            f"{prev_a}{current_a}acrossfade=d={transition_duration}:"
-                            f"c1=tri:c2=tri{out_a}"
-                        )
-                        prev_a = out_a
-                    elif clip_has_audio:
-                        prev_a = current_a
-                    # 如果当前片段无音频，prev_a 保持不变
-
-                    prev_v = out_v
-                    cum_dur += clip_dur - transition_duration
-                    prev_has_audio = clip_has_audio
-
-            # BGM 混音（仅当有音频流时）
-            if has_bgm and prev_a:
-                parts.append(f"{prev_a}[{len(clips)}:a]amix=inputs=2:duration=shortest[aout]")
-                final_a = "[aout]"
-            elif prev_a:
-                final_a = prev_a
-            else:
-                final_a = None  # 无音频
-
-            _build_filter_parts._final_v = prev_v
-            _build_filter_parts._final_a = final_a
-            return parts
-
-        # 输入文件
-        cmd_base = [ffmpeg, "-y", "-loglevel", "error"]
-        for c in clips:
-            cmd_base.extend(["-i", c["path"]])
-
-        has_bgm = bgm_path and os.path.exists(bgm_path)
-        if has_bgm:
-            cmd_base.extend(["-i", bgm_path])
-
-        flags = 0x08000000 if _sys.platform == "win32" else 0
-
-        # 预检测每个片段是否有音频流
-        for c in clips:
-            if "_has_audio" not in c:
-                c["_has_audio"] = _has_audio_stream(c["path"])
-
-        any_has_audio = any(c.get("_has_audio", False) for c in clips)
-
-        def _try_build(enable_subtitles: bool) -> str:
-            """尝试构建并执行 FFmpeg 命令"""
-            if not any_has_audio and not has_bgm:
-                # 全部无音频 + 无 BGM → 跳过音频处理
-                fp = _build_filter_parts(enable_subtitles=enable_subtitles, has_audio=False)
-            else:
-                fp = _build_filter_parts(enable_subtitles=enable_subtitles, has_audio=True)
-
-            cmd = list(cmd_base)
-            cmd.extend(["-filter_complex", ";".join(fp)])
-            cmd.extend(["-map", _build_filter_parts._final_v])
-            if _build_filter_parts._final_a:
-                cmd.extend(["-map", _build_filter_parts._final_a])
-            cmd.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", out_path])
-            if _build_filter_parts._final_a or has_bgm:
-                cmd.extend(["-c:a", "aac"])
-
-            try:
-                proc = _sp.run(cmd, capture_output=True, timeout=600, creationflags=flags)
-                if proc.returncode == 0 and os.path.exists(out_path) \
-                   and os.path.getsize(out_path) > 0:
-                    return out_path
-                else:
-                    err = proc.stderr.decode("utf-8", "ignore")[:300]
-                    logger.warning(f"[pipeline] FFmpeg 失败: {err}")
-                    return ""
-            except Exception as e:
-                logger.warning(f"[pipeline] FFmpeg 异常: {e}")
-                return ""
-
-        # 第一次尝试：带字幕
-        if _font_file and any(s for s in subtitles if s):
-            result = _try_build(enable_subtitles=True)
-            if result:
-                logger.info(f"[pipeline] 精剪成片已输出（带字幕）: {result}")
-                return result
-            logger.warning("[pipeline] 带字幕精剪失败，降级无字幕")
-
-        # 第二次尝试：无字幕
-        result = _try_build(enable_subtitles=False)
-        if result:
-            logger.info(f"[pipeline] 精剪成片已输出（无字幕降级）: {result}")
-        else:
-            logger.warning("[pipeline] 精剪合成失败（无字幕也失败）")
-        return result
-
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
+    # [Mixin] _create_edit_agent_panel 已迁移至 editor_agent_panel_mixin.py
     @staticmethod
     def _find_system_font() -> str:
         """查找系统可用字体文件路径（用于 drawtext 字幕渲染）。"""
@@ -13285,7 +8380,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 added.append(audio_clip)
         if added:
             self._touch_project_dirty()
-            print(f"已补全 {len(added)} 条联动音频（波形）")
+            logger.info(f'已补全 {len(added)} 条联动音频（波形）')
 
     def _resolve_media_duration(self, file_path: str) -> float:
         """媒体时长 SSOT：ffprobe / PreviewManager / OpenCV 取最大可信值。"""
@@ -13464,6 +8559,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                 "transitions": [],
             }
             self._clips.append(clip)
+            audio_clip = None  # 联动音频片段（有 timeline_widget 时才创建）
             if hasattr(self, '_timeline_widget'):
                 video_track_i = 0
                 audio_track_i = 1
@@ -13515,7 +8611,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
                         self._render_timeline_frame(float(clip.get("start_time", 0) or 0))
                 except Exception as e:
                     logger.debug("导入后首帧刷新失败: %s", e)
-            print(f"添加片段到时间线: {clip}")
+            logger.info(f'添加片段到时间线: {clip}')
+            # 记录撤销操作（AI剪辑/画布入轨/素材拖入的片段也支持 Ctrl+Z）
+            try:
+                self._record_action({
+                    "type": "add_clip",
+                    "clip": clip,
+                    "audio_clip": audio_clip,
+                })
+            except Exception:
+                logger.debug("add_clip 撤销记录失败", exc_info=True)
         except Exception as e:
             _report_video_import_debug(
                 "B",
@@ -13525,7 +8630,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             )
             logger.exception("添加片段到时间线失败")
             QMessageBox.warning(self, "添加失败", f"添加片段到时间线失败: {e}")
-            print(f"添加片段到时间线失败: {e}")
+            logger.error(f'添加片段到时间线失败: {e}')
 
     def _probe_video_duration(self, file_path: str) -> float:
         """读取视频时长，失败时返回 0 让调用方回退默认值。"""
@@ -13534,7 +8639,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin):
             info = FFmpegUtils.get_video_info(file_path)
             return float(info.duration) if info and info.duration else 0.0
         except Exception as e:
-            print(f"读取视频时长失败: {e}")
+            logger.error(f'读取视频时长失败: {e}')
             return 0.0
 
     def _next_clip_start_time(self) -> float:

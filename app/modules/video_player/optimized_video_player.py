@@ -42,10 +42,10 @@ try:
                                   QApplication)
     from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
     from PyQt6.QtMultimediaWidgets import QVideoWidget
-    print("✓ 视频播放器依赖导入成功 (PyQt6 + QtMultimedia)")
+    logger.info('✓ 视频播放器依赖导入成功 (PyQt6 + QtMultimedia)')
 except Exception as e:
-    print(f"警告: 缺少视频播放器依赖: {e}")
-    print("视频播放器将在运行时提示缺少依赖") 
+    logger.warning(f'警告: 缺少视频播放器依赖: {e}')
+    logger.info('视频播放器将在运行时提示缺少依赖')
 
 
 class FrameReaderThread(QThread): 
@@ -348,7 +348,7 @@ class OptimizedVideoPlayer(QWidget):
             self.on_play_finished()
 
     def _on_media_error(self, error, error_string): 
-        print(f"QtMultimedia 错误: {error_string}")
+        logger.error(f'QtMultimedia 错误: {error_string}')
         self._use_qt_multimedia = False
         if self.video_path:
             self._load_video_opencv(self.video_path)
@@ -394,7 +394,7 @@ class OptimizedVideoPlayer(QWidget):
                     progress = int((self.reader_thread.current_frame / self.reader_thread.total_frames) * 1000) 
                     self.progress_slider.setValue(progress) 
         except Exception as e: 
-            print(f"更新帧失败: {e}") 
+            logger.error(f'更新帧失败: {e}')
 
     def on_speed_change(self, speed_text): 
         try: 

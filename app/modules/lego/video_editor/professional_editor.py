@@ -5,7 +5,7 @@
 """
 
 from typing import Dict, List, Optional, Any
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QLabel, QSlider, QSpinBox, QComboBox
 import logging
 

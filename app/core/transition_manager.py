@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.transition_manager")
+
 class TransitionManager:
     """
     转场管理系统
@@ -33,7 +36,7 @@ class TransitionManager:
                 with open(self.transitions_db, "r", encoding="utf-8") as f:
                     self.transitions = json.load(f)
             except Exception as e:
-                print(f"加载转场数据库失败: {e}")
+                logger.error(f'加载转场数据库失败: {e}')
                 self.transitions = {}
     
     def _save_transitions(self):
@@ -43,7 +46,7 @@ class TransitionManager:
                 json.dump(self.transitions, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"保存转场数据库失败: {e}")
+            logger.error(f'保存转场数据库失败: {e}')
             return False
     
     def _init_builtin_transitions(self):
@@ -311,10 +314,10 @@ class TransitionManager:
             module_name = plugin_map.get(transition_name)
             if module_name:
                 __import__(f'plugins.{module_name}', fromlist=['Plugin'])
-            print(f"应用转场 {transition_name} 在片段 {clip_id1} 和 {clip_id2} 之间")
+            logger.info(f'应用转场 {transition_name} 在片段 {clip_id1} 和 {clip_id2} 之间')
             return True
         except Exception as e:
-            print(f"转场应用失败: {e}")
+            logger.error(f'转场应用失败: {e}')
             return False
 
     def update_transition_parameters(self, transition_instance: Dict[str, Any], **parameters) -> Dict[str, Any]:
@@ -346,7 +349,7 @@ class TransitionManager:
         """
         # 这里需要与时间线管理系统集成
         # 暂时返回True，表示移除成功
-        print(f"从片段 {clip_id1} 和 {clip_id2} 之间移除转场实例 {transition_instance_id}")
+        logger.info(f'从片段 {clip_id1} 和 {clip_id2} 之间移除转场实例 {transition_instance_id}')
         return True
     
     def save_transition_preset(self, name: str, transition_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

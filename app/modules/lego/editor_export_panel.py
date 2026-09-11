@@ -282,7 +282,7 @@ class EditorExportPanelMixin:
                         edited_temp_path = None
                         self._last_export_error = "时间线拼接失败"
                 except Exception as _e:
-                    print(f"构建剪辑后视频失败，回退原始文件: {_e}")
+                    logger.error(f'构建剪辑后视频失败，回退原始文件: {_e}')
                     self._last_export_error = f"时间线构建失败: {_e}"
                     edited_temp_path = None
             clip_path = edited_temp_path or source_clip_path
@@ -381,12 +381,12 @@ class EditorExportPanelMixin:
                         self._notify_edit("导出：字幕烧录…")
                         output_path = self._burn_subtitles_if_any(output_path)
                     except Exception as _be:
-                        print(f"字幕烧录跳过: {_be}")
+                        logger.info(f'字幕烧录跳过: {_be}')
                     try:
                         self._notify_edit("导出：贴纸烧录…")
                         output_path = self._burn_stickers_if_any(output_path)
                     except Exception as _se:
-                        print(f"贴纸烧录跳过: {_se}")
+                        logger.info(f'贴纸烧录跳过: {_se}')
                     output_size = result.get("output_size", 0) if isinstance(result, dict) else getattr(result, "output_size", 0)
                     processing_time = result.get("processing_time", 0) if isinstance(result, dict) else getattr(result, "processing_time", 0)
                     self._notify_edit("导出完成")
@@ -402,7 +402,7 @@ class EditorExportPanelMixin:
                 render_error = render_error or "统一内核导出失败"
             except Exception as e:
                 render_error = str(e)
-                print(f"统一内核导出失败: {e}")
+                logger.error(f'统一内核导出失败: {e}')
             finally:
                 if edited_temp_path and os.path.exists(edited_temp_path):
                     try:
@@ -415,7 +415,7 @@ class EditorExportPanelMixin:
                 detail = render_error or self._last_export_error
                 self._notify_edit("导出失败")
                 # 继续尝试下方回退路径，但先让用户知道内核失败原因
-                print(f"导出内核失败摘要: {detail}")
+                logger.error(f'导出内核失败摘要: {detail}')
 
             task_export_params = {
                 "output_mode": output_mode,

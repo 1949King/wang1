@@ -10,19 +10,18 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.10.0"
+__version__ = "4.10.3"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 10,
-    "patch": 0,
+    "patch": 3,
     "codename": "AI画布与Agent调度",
-    "release_date": "2026-08-13",
+    "release_date": "2026-08-19",
     "description": (
-        "V4.10.0: AI 画布（shiguang-canvas）落地页与导演台能力扩展；"
-        "Agent 能力调度层与剪辑面板拆分；账号运营迁插件；"
-        "画布预热/切换卡死修复；AIEngine 单例崩溃修复；"
-        "FFmpeg/ffprobe 路径与波形/缩略图稳定化；冻结区护航与死代码清理。"
+        "V4.10.3: 打包就绪——重写 PyInstaller spec（补 license/、"
+        "config.json、隐式依赖全量收集，修复 torch 子模块收集时序 bug）；"
+        "清理 5 个冗余虚拟环境，仅保留 .venv312。"
     ),
 }

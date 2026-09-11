@@ -25,7 +25,8 @@ import webbrowser
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox
+    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox,
+    QWidget
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon
@@ -134,12 +135,12 @@ class LicenseManager:
         # 加载现有授权
         self._load_license()
         
-        print("🔐 授权管理器初始化完成")
-        print(f"   硬件ID: {self.hardware_id}")
+        logger.info('🔐 授权管理器初始化完成')
+        logger.info(f'   硬件ID: {self.hardware_id}')
         if self.current_license:
-            print(f"   当前授权: {self.current_license.level.value} - {self.current_license.status.value}")
+            logger.info(f'   当前授权: {self.current_license.level.value} - {self.current_license.status.value}')
         else:
-            print("   当前授权: 未激活")
+            logger.info('   当前授权: 未激活')
     
     def _get_hardware_id(self) -> str:
         """获取硬件ID"""
@@ -177,10 +178,10 @@ class LicenseManager:
                 if time.time() > self.current_license.expiration_date:
                     self.current_license.status = LicenseStatus.EXPIRED
                     self._save_license()
-                    print("⚠️ 授权已过期")
+                    logger.info('⚠️ 授权已过期')
                     
         except Exception as e:
-            print(f"加载授权失败: {e}")
+            logger.error(f'加载授权失败: {e}')
     
     def _save_license(self):
         """保存授权信息"""
@@ -302,10 +303,10 @@ class LicenseManager:
         """
         if level in self.PAYMENT_LINKS:
             payment_link = self.PAYMENT_LINKS[level]
-            print(f"打开购买链接: {payment_link}")
+            logger.info(f'打开购买链接: {payment_link}')
             webbrowser.open(payment_link)
         else:
-            print(f"未找到 {level.value} 的购买链接")
+            logger.info(f'未找到 {level.value} 的购买链接')
     
     def get_license_info(self) -> Optional[Dict[str, Any]]:
         """获取授权信息"""
@@ -328,7 +329,7 @@ class LicenseManager:
         if os.path.exists(self.license_file):
             os.remove(self.license_file)
         self.current_license = None
-        print("🔄 授权已重置")
+        logger.info('🔄 授权已重置')
 
 
 class LicenseDialog(QDialog):

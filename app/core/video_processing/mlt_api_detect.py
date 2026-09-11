@@ -16,6 +16,9 @@ import os
 import sys
 import ctypes
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.video_processing.mlt_api_detect")
+
 def find_mlt_dll():
     mlt_names = ["libmlt-7.dll", "libmlt++-7.dll", "mlt-7.dll"]
     candidates = []
@@ -46,7 +49,7 @@ def find_mlt_dll():
     return None
 
 def detect_apis(dll_path):
-    print(f"\n📦 加载 MLT DLL: {dll_path}")
+    logger.info(f'\n📦 加载 MLT DLL: {dll_path}')
     dll = ctypes.CDLL(dll_path)
     
     dll_dir = os.path.dirname(dll_path)
@@ -133,36 +136,36 @@ def print_report(available, missing):
     total_avail = sum(len(v) for v in available.values())
     total_missing = sum(len(v) for v in missing.values())
     
-    print(f"\n{'='*60}")
-    print(f" MLT API 检测报告")
-    print(f"{'='*60}")
-    print(f" 可用: {total_avail} / {total_avail + total_missing}")
-    print(f" 缺失: {total_missing} / {total_avail + total_missing}")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f' MLT API 检测报告')
+    logger.info(f"{'=' * 60}")
+    logger.info(f' 可用: {total_avail} / {total_avail + total_missing}')
+    logger.info(f' 缺失: {total_missing} / {total_avail + total_missing}')
+    logger.info(f"{'=' * 60}\n")
     
     for category, apis in available.items():
         if apis:
-            print(f" ✅ {category} ({len(apis)}):")
+            logger.info(f' ✅ {category} ({len(apis)}):')
             for api in apis:
-                print(f"    {api}")
+                logger.info(f'    {api}')
     
-    print(f"\n{'='*60}")
-    print(f" 缺失 API（按模块）")
-    print(f"{'='*60}")
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f' 缺失 API（按模块）')
+    logger.info(f"{'=' * 60}")
     
     for category, apis in missing.items():
         if apis:
-            print(f" ❌ {category} ({len(apis)}):")
+            logger.info(f' ❌ {category} ({len(apis)}):')
             for api in apis:
-                print(f"    {api}")
+                logger.info(f'    {api}')
     
-    print(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
 
 def main():
     dll_path = find_mlt_dll()
     if not dll_path:
-        print("❌ 未找到 MLT DLL")
-        print("请安装 Shotcut 或设置 MLT_PATH 环境变量")
+        logger.info('❌ 未找到 MLT DLL')
+        logger.info('请安装 Shotcut 或设置 MLT_PATH 环境变量')
         return
     
     available, missing = detect_apis(dll_path)

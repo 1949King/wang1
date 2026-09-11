@@ -1,8 +1,7 @@
 """
 账号运营插件
 ============
-多平台账号矩阵、本地发布队列、爆款建议（非平台真 API）。
-入口：拓展中心 →「👤 账号运营」；不再作为主导航模块。
+接口壳。入口：拓展中心 →「👤 账号运营」；功能已卸。
 
 兼容两套加载方式:
 - 标准 Python 包: from app.plugins.account_ops_plugin import Plugin
@@ -24,7 +23,7 @@ PLUGIN_INFO = {
     "name": "账号运营",
     "version": "1.0.0",
     "author": "官方",
-    "description": "多平台账号矩阵与发布队列。默认无平台真 API；失败降级本地导出。仅拓展中心入口。",
+    "description": "插件功能已卸，仅保留接口。仅拓展中心入口。",
     "category": "operation",
     "icon": "👤",
     "entry_point": "Plugin",

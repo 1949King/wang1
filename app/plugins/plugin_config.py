@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.plugins.plugin_config")
+
 class PluginStatus(Enum):
     """插件状态"""
     DISABLED = "disabled"
@@ -89,7 +92,7 @@ class PluginConfig:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self._config = json.load(f)
         except Exception as e:
-            print(f"加载插件配置失败: {e}")
+            logger.error(f'加载插件配置失败: {e}')
     
     def _save_config(self):
         """保存配置"""
@@ -97,7 +100,7 @@ class PluginConfig:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self._config, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存插件配置失败: {e}")
+            logger.error(f'保存插件配置失败: {e}')
     
     def get_plugin_config(self, plugin_id: str) -> Dict:
         """获取插件配置"""

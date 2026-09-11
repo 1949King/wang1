@@ -37,17 +37,33 @@ class PreviewStatus(str, Enum):
     PASSED = "passed"        # 预览通过
     FAILED = "failed"        # 预览发现问题
     REGENERATED = "regenerated"  # 已局部重生成
+    REFINED = "refined"      # 已局部精剪（关键帧/转场/变速微调）
 
 
 @dataclass
 class PreviewIssue:
     """预览问题记录"""
     clip_id: str
-    issue_type: str          # gap(断层) / drift(人物漂移) / desync(音画不同步) / corrupt(崩坏) / other
+    # 生成类：gap(断层) / drift(人物漂移) / desync(音画不同步) / corrupt(崩坏) / other
+    # 精剪类：cut_point(切点突兀) / transition_hard(转场太硬) / keyframe_adjustment(关键帧微调)
+    #         speed_adjust(节奏/变速) / audio_envelope(音量包络)
+    issue_type: str
     description: str
     severity: str = "medium"  # low / medium / high
     reporter: str = "human"   # human / ai
     timestamp: float = 0.0
+
+
+# 精剪类问题 → 能力路由（生成类问题走 request_regenerate，精剪类走 request_refine）
+_FINE_EDIT_ROUTES: Dict[str, str] = {
+    "cut_point": "editor.add_transition",        # 切点突兀 → 加转场缓冲
+    "transition_hard": "editor.add_transition",  # 转场太硬 → 换缓动转场
+    "keyframe_adjustment": "editor.set_keyframes",  # 关键帧微调
+    "set_keyframes": "editor.set_keyframes",      # 批量关键帧别名
+    "speed_adjust": "editor.set_clip_properties",  # 节奏/变速
+    "change_speed": "editor.set_clip_properties",  # 变速别名
+    "audio_envelope": "editor.set_keyframes",     # 音量包络（经关键帧通道）
+}
 
 
 class PreviewValidationLoop:
@@ -242,6 +258,77 @@ class PreviewValidationLoop:
         except Exception as e:
             logger.exception(f"[PreviewValidationLoop] 重生成异常")
             return None
+
+    def is_fine_edit_issue(self, issue_type: str) -> bool:
+        """判断是否为精剪类问题（可局部微调，无需重生成）。"""
+        return issue_type in _FINE_EDIT_ROUTES
+
+    def resolve_refine_capability(self, issue_type: str) -> Optional[str]:
+        """精剪类问题 → 能力 id；非精剪类返回 None。"""
+        return _FINE_EDIT_ROUTES.get(issue_type)
+
+    def request_refine(self, clip_id: str, issue_type: str,
+                       params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        精剪类问题局部微调（不重生成视频，直接改时间线片段属性/关键帧/转场）。
+
+        参数：
+            clip_id: 目标片段 id
+            issue_type: 精剪类 problem type（见 _FINE_EDIT_ROUTES）
+            params: 透传给能力的参数，如 {"transition_type": "fade", "duration": 0.5}
+                    或 {"keyframes": [{"time": 1.0, "prop": "opacity", "value": 0.5, "easing": "ease_in_out"}]}
+        返回：
+            能力输出 dict 或 None（非精剪类问题 / 能力缺失 / 片段不存在）
+        """
+        capability_id = self.resolve_refine_capability(issue_type)
+        if not capability_id:
+            logger.info(f"[PreviewValidationLoop] issue_type={issue_type} 非精剪类，跳过 request_refine")
+            return None
+
+        with self._lock_rw:
+            entry = self._registry.get(clip_id)
+            if not entry:
+                logger.warning(f"[PreviewValidationLoop] 未找到片段 {clip_id}")
+                return None
+
+        # 组装参数：确保 clip_id 传入（能力内部再解析），preview 来源标记
+        req_params: Dict[str, Any] = dict(params or {})
+        req_params.setdefault("clip_id", clip_id)
+
+        try:
+            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
+            result = capability_dispatcher.invoke(CapabilityRequest(
+                capability_id=capability_id,
+                params=req_params,
+                caller="preview_validation",
+                approved=True,
+            ))
+        except Exception as e:
+            logger.exception(f"[PreviewValidationLoop] 精剪能力调用异常")
+            return None
+
+        if not result.success:
+            logger.warning(f"[PreviewValidationLoop] 精剪失败: {result.error or '未知错误'}")
+            return None
+
+        # 标记已精剪，广播局部精剪完成事件
+        with self._lock_rw:
+            if clip_id in self._registry:
+                self._registry[clip_id]["status"] = PreviewStatus.REFINED
+        try:
+            from app.modules.lego.core import EventBus, EventType
+            EventBus.get_instance().emit(
+                EventType.CUSTOM,
+                {"subtype": "preview_clip_refined", "clip_id": clip_id,
+                 "capability_id": capability_id, "issue_type": issue_type},
+                source="PreviewValidationLoop",
+            )
+        except Exception as e:
+            logger.debug(f"[PreviewValidationLoop] emit 精剪事件失败: {e}")
+
+        logger.info(f"[PreviewValidationLoop] 片段 {clip_id} 已精剪 (capability={capability_id})")
+        return {"clip_id": clip_id, "capability_id": capability_id,
+                "issue_type": issue_type, "output": result.output}
 
     def mark_preview_passed(self, clip_id: str) -> bool:
         """标记片段预览通过"""

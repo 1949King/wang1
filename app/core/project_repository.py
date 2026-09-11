@@ -8,6 +8,9 @@ from typing import Dict, List, Optional, Any
 from .base_repository import BaseRepository
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.project_repository")
+
 class ProjectRepository(BaseRepository):
     """项目数据持久化"""
 
@@ -81,7 +84,7 @@ class ProjectRepository(BaseRepository):
                 project["versions"].append(version_info)
                 return self._save_data() and backup_path
         except Exception as e:
-            print(f"备份项目失败: {e}")
+            logger.error(f'备份项目失败: {e}')
             return None
 
     def restore_project(self, project_id: str, version_id: str) -> bool:
@@ -103,7 +106,7 @@ class ProjectRepository(BaseRepository):
                             self._data[project_id]["updated_at"] = datetime.now().isoformat()
                             return self._save_data()
                     except Exception as e:
-                        print(f"恢复项目失败: {e}")
+                        logger.error(f'恢复项目失败: {e}')
         return False
 
     def update_project(self, project_id: str, updates: Dict[str, Any]) -> bool:

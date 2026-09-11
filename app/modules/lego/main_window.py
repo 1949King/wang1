@@ -542,7 +542,7 @@ class MainWindow(QMainWindow):
         logger.info("延迟加载缓存已清理")
     
     def _setup_ui(self):
-        self.setWindowTitle(f"拾光剪影 v{__version__} - AI短剧编辑器")
+        self.setWindowTitle(f"拾光剪影 v{__version__}")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         self._restore_window_geometry()

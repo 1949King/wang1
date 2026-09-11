@@ -14,6 +14,8 @@ import bpy
 from mathutils import Vector
 
 SRC_CANDIDATES = [
+    r"c:\Users\Administrator\Desktop\BodyChan - BodyKun  Posable Drawing Figures (1).blend",
+    r"c:\Users\Administrator\Downloads\BodyChan - BodyKun  Posable Drawing Figures (1).blend",
     r"c:\Users\Administrator\Downloads\BodyChan - BodyKun  Posable Drawing Figures.blend",
     os.path.join(os.path.dirname(__file__), "..", "vendor", "shiguang-canvas", "models-src", "vinchau-bodychan-bodykun.blend"),
 ]
@@ -78,28 +80,6 @@ def body_meshes(arm_name: str):
     return out
 
 
-def ensure_grey_material():
-    name = "VinchauClay"
-    mat = bpy.data.materials.get(name)
-    if mat:
-        return mat
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-    if bsdf:
-        bsdf.inputs["Base Color"].default_value = (0.78, 0.78, 0.76, 1)
-        bsdf.inputs["Roughness"].default_value = 0.72
-        bsdf.inputs["Metallic"].default_value = 0.03
-    return mat
-
-
-def assign_clay(meshes):
-    mat = ensure_grey_material()
-    for o in meshes:
-        o.data.materials.clear()
-        o.data.materials.append(mat)
-
-
 def rename_def_bones(arm_obj):
     bones = arm_obj.data.bones
     for old, new in BONE_RENAME:
@@ -145,7 +125,7 @@ def export_character(arm_name: str, out_path: str):
     print(f"\n=== {arm_name} meshes={len(meshes)} -> {out_path}")
 
     rest_pose(arm)
-    assign_clay(meshes)
+    # 保留 vinchau 原材质；导演台不要再刷成程序化灰白网格
     rename_def_bones(arm)
 
     h = mesh_height(meshes)

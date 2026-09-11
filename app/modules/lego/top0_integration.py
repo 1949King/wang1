@@ -24,6 +24,9 @@ from .professional_video_engine import (
 )
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.top0_integration")
+
 class Top0VideoProcessor:
     """
     TOP 0级视频处理器
@@ -33,7 +36,7 @@ class Top0VideoProcessor:
     
     def __init__(self):
         """初始化处理器"""
-        print("🚀 初始化TOP 0级视频处理器...")
+        logger.info('🚀 初始化TOP 0级视频处理器...')
         
         # 初始化AI理解引擎
         self.drama_engine = DramaUnderstandingEngine(
@@ -45,7 +48,7 @@ class Top0VideoProcessor:
         # 初始化专业剪辑引擎
         self.video_engine = ProfessionalVideoEngine(max_workers=4)
         
-        print("✅ TOP 0级处理器初始化完成")
+        logger.info('✅ TOP 0级处理器初始化完成')
     
     def smart_clip(self,
                    video_path: str,
@@ -72,12 +75,12 @@ class Top0VideoProcessor:
         Returns:
             Dict: 包含剪辑结果和元数据
         """
-        print(f"\n{'='*70}")
-        print(f"🎬 TOP 0级智能剪辑")
-        print(f"   视频: {os.path.basename(video_path)}")
-        print(f"   平台: {target_platform}")
-        print(f"   风格: {video_style}")
-        print(f"{'='*70}\n")
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f'🎬 TOP 0级智能剪辑')
+        logger.info(f'   视频: {os.path.basename(video_path)}')
+        logger.info(f'   平台: {target_platform}')
+        logger.info(f'   风格: {video_style}')
+        logger.info(f"{'=' * 70}\n")
         
         result = {
             "success": False,
@@ -193,16 +196,16 @@ class Top0VideoProcessor:
                 progress_callback(100, "剪辑完成!")
             
             # 输出统计
-            print(f"\n{'='*70}")
-            print(f"✅ 智能剪辑完成!")
-            print(f"   成功: {len(result['output_videos'])} 个片段")
-            print(f"   失败: {len(result['errors'])} 个片段")
-            print(f"   输出目录: {output_dir}")
-            print(f"{'='*70}\n")
+            logger.info(f"\n{'=' * 70}")
+            logger.info(f'✅ 智能剪辑完成!')
+            logger.info(f"   成功: {len(result['output_videos'])} 个片段")
+            logger.error(f"   失败: {len(result['errors'])} 个片段")
+            logger.info(f'   输出目录: {output_dir}')
+            logger.info(f"{'=' * 70}\n")
             
         except Exception as e:
             result["errors"].append({"error": str(e)})
-            print(f"\n❌ 智能剪辑失败: {e}")
+            logger.error(f'\n❌ 智能剪辑失败: {e}')
         
         return result
     
@@ -223,7 +226,7 @@ class Top0VideoProcessor:
         Returns:
             List[Dict]: 每个视频的处理结果
         """
-        print(f"\n🚀 批量智能剪辑: {len(video_paths)} 个视频")
+        logger.info(f'\n🚀 批量智能剪辑: {len(video_paths)} 个视频')
         
         results = []
         total = len(video_paths)
@@ -248,9 +251,9 @@ class Top0VideoProcessor:
         
         # 统计
         success_count = sum(1 for r in results if r["success"])
-        print(f"\n📊 批量处理完成:")
-        print(f"   成功: {success_count}/{total}")
-        print(f"   失败: {total - success_count}/{total}")
+        logger.info(f'\n📊 批量处理完成:')
+        logger.info(f'   成功: {success_count}/{total}')
+        logger.error(f'   失败: {total - success_count}/{total}')
         
         return results
     
@@ -264,7 +267,7 @@ class Top0VideoProcessor:
         Returns:
             Dict: 分析结果
         """
-        print(f"\n🔍 分析视频: {os.path.basename(video_path)}")
+        logger.info(f'\n🔍 分析视频: {os.path.basename(video_path)}')
         
         drama = self.drama_engine.analyze_video(video_path)
         strategy = self.drama_engine.generate_editing_strategy(drama)
@@ -313,9 +316,9 @@ class Top0VideoProcessor:
     
     def shutdown(self):
         """关闭处理器"""
-        print("\n🛑 关闭TOP 0级处理器...")
+        logger.info('\n🛑 关闭TOP 0级处理器...')
         self.video_engine.shutdown()
-        print("✅ 处理器已关闭")
+        logger.info('✅ 处理器已关闭')
 
 
 # 与现有系统的集成

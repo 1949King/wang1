@@ -41,6 +41,24 @@ def test_plan_allows_query():
     d = decide(tool_id="queryNodes", mode=MODE_PLAN)
     assert d.action == DECISION_ALLOW
     assert d.effect == EFFECT_READ
+    d2 = decide(tool_id="queryTimeline", mode=MODE_PLAN)
+    assert d2.action == DECISION_ALLOW
+    d3 = decide(tool_id="editor.suggest_canvas_roundtrip", mode=MODE_PLAN)
+    assert d3.action == DECISION_ALLOW
+
+
+def test_send_to_canvas_needs_confirm_in_collaborative():
+    d = decide(tool_id="editor.send_selected_to_canvas", mode=MODE_COLLABORATIVE)
+    assert d.action == DECISION_REQUIRE_APPROVAL
+
+
+def test_collaborative_batch_generate_needs_approval():
+    d = decide(tool_id="batchGenerate", mode=MODE_COLLABORATIVE)
+    assert d.action == DECISION_REQUIRE_APPROVAL
+    d2 = decide(tool_id="batchGenerate", mode=MODE_COLLABORATIVE, approved=True)
+    assert d2.action == DECISION_ALLOW
+    d3 = decide(tool_id="canvas_breakdown", mode=MODE_PLAN)
+    assert d3.action == DECISION_DENY
 
 
 def test_collaborative_write_needs_approval():

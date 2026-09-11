@@ -88,7 +88,7 @@ def burn_subtitles_if_any(editor, video_path: str) -> str:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if r.returncode != 0 and use_ass:
             # libass 不可用时回退 SRT
-            print(f"ASS 烧录失败，回退 SRT: {(r.stderr or '')[-400:]}")
+            logger.error(f"ASS 烧录失败，回退 SRT: {(r.stderr or '')[-400:]}")
             sm.export_subtitles(srt_path, format="srt")
             esc2 = srt_path.replace("\\", "/").replace(":", "\\:")
             cmd = [
@@ -106,9 +106,9 @@ def burn_subtitles_if_any(editor, video_path: str) -> str:
                 return out_path
             return video_path
         if r.returncode != 0:
-            print(f"字幕烧录失败: {(r.stderr or '')[-500:]}")
+            logger.error(f"字幕烧录失败: {(r.stderr or '')[-500:]}")
     except Exception as e:
-        print(f"字幕烧录失败: {e}")
+        logger.error(f'字幕烧录失败: {e}')
     finally:
         for p in (ass_path, srt_path):
             try:
@@ -271,7 +271,7 @@ def burn_stickers_if_any(editor, video_path: str) -> str:
                 return out_path
             return video_path
         err = (r.stderr or b"").decode("utf-8", "ignore")[-400:]
-        print(f"贴纸烧录失败: {err}")
+        logger.error(f'贴纸烧录失败: {err}')
         try:
             if os.path.exists(out_path):
                 os.remove(out_path)
@@ -279,7 +279,7 @@ def burn_stickers_if_any(editor, video_path: str) -> str:
             logger.debug("贴纸烧录失败后清理临时文件异常: %s", e)
         return video_path
     except Exception as e:
-        print(f"贴纸烧录失败: {e}")
+        logger.error(f'贴纸烧录失败: {e}')
         return video_path
     finally:
         for p in temp_pngs:

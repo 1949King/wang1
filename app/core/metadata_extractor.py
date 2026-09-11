@@ -3,6 +3,9 @@ import subprocess
 from typing import Dict, Any, Optional
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.metadata_extractor")
+
 class MetadataExtractor:
     """元数据提取器"""
 
@@ -21,7 +24,7 @@ class MetadataExtractor:
                 ffprobe_data = json.loads(result.stdout)
                 metadata["ffprobe"] = ffprobe_data
         except Exception as e:
-            print(f"提取元数据失败: {e}")
+            logger.error(f'提取元数据失败: {e}')
 
         return metadata
 
@@ -59,7 +62,7 @@ class MetadataExtractor:
                                 "bit_rate": stream.get("bit_rate")
                             }
         except Exception as e:
-            print(f"分析素材失败: {e}")
+            logger.error(f'分析素材失败: {e}')
 
         return analysis
 
@@ -84,7 +87,7 @@ class MetadataExtractor:
                             "bit_rate": stream.get("bit_rate")
                         }
         except Exception as e:
-            print(f"获取视频信息失败: {e}")
+            logger.error(f'获取视频信息失败: {e}')
         return None
 
     @staticmethod
@@ -107,5 +110,5 @@ class MetadataExtractor:
                             "bit_rate": stream.get("bit_rate")
                         }
         except Exception as e:
-            print(f"获取音频信息失败: {e}")
+            logger.error(f'获取音频信息失败: {e}')
         return None

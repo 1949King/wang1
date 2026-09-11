@@ -21,6 +21,9 @@ from .professional_video_engine import ProfessionalVideoEngine, VideoTask
 from .drama_understanding_engine import DramaStructure, EmotionalTone, SceneType
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.smart_editing_engine")
+
 class TransitionType(Enum):
     """转场类型"""
     CUT = "硬切"                    # 快速切换，适合紧张场景
@@ -167,9 +170,9 @@ class SmartEditingEngine:
         # 角色偏好缓存：{角色名: {"keep": bool, "weight": float, "note": str}}
         # 通过 self.load_character_prefs(video_path) 从缓存读取
         self._character_prefs: Dict[str, Dict] = {}
-        print("🎬 智能剪辑引擎初始化完成")
-        print(f"   已加载 {len(SmartEditingEngine.SUBTITLE_STYLES)} 种字幕样式")
-        print(f"   已加载 {len(SmartEditingEngine.EMOTION_TRANSITION_MAP)} 种情绪转场规则")
+        logger.info('🎬 智能剪辑引擎初始化完成')
+        logger.info(f'   已加载 {len(SmartEditingEngine.SUBTITLE_STYLES)} 种字幕样式')
+        logger.info(f'   已加载 {len(SmartEditingEngine.EMOTION_TRANSITION_MAP)} 种情绪转场规则')
     
     def load_character_prefs(self, video_path: str) -> Dict[str, Dict]:
         """
@@ -195,10 +198,10 @@ class SmartEditingEngine:
                 }
             self._character_prefs = prefs
             if prefs:
-                print(f"   📋 已加载 {len(prefs)} 个角色偏好")
+                logger.info(f'   📋 已加载 {len(prefs)} 个角色偏好')
             return prefs
         except Exception as e:
-            print(f"   ⚠️ 读取角色偏好失败: {e}")
+            logger.error(f'   ⚠️ 读取角色偏好失败: {e}')
             self._character_prefs = {}
             return {}
     
@@ -213,7 +216,7 @@ class SmartEditingEngine:
                 self.load_character_prefs(video_path)
             return ok
         except Exception as e:
-            print(f"   ⚠️ 设置角色偏好失败: {e}")
+            logger.error(f'   ⚠️ 设置角色偏好失败: {e}')
             return False
     
     def smart_shot_reordering(self, drama: DramaStructure, 
@@ -230,11 +233,11 @@ class SmartEditingEngine:
         Returns:
             EditingSequence: 优化后的剪辑序列
         """
-        print("\n🎬 开始智能分镜重组...")
+        logger.info('\n🎬 开始智能分镜重组...')
         
         # Step 1: 提取所有镜头
         shots = self._extract_shots(drama)
-        print(f"   提取了 {len(shots)} 个镜头")
+        logger.info(f'   提取了 {len(shots)} 个镜头')
         
         # Step 2: 根据剧情重要性排序
         shots = self._sort_by_importance(shots)
@@ -257,8 +260,8 @@ class SmartEditingEngine:
             pacing=pacing
         )
         
-        print(f"   ✓ 重组完成: {len(shots)} 个镜头, 总时长 {total_duration:.1f}s")
-        print(f"   节奏: {pacing}")
+        logger.info(f'   ✓ 重组完成: {len(shots)} 个镜头, 总时长 {total_duration:.1f}s')
+        logger.info(f'   节奏: {pacing}')
         
         return sequence
     
@@ -567,15 +570,15 @@ class SmartEditingEngine:
         Returns:
             str: 输出视频路径
         """
-        print("\n🎵 开始自动卡点剪辑...")
+        logger.info('\n🎵 开始自动卡点剪辑...')
         
         # 分析音乐节拍
         beats = self._analyze_music_beats(audio_path)
-        print(f"   检测到 {len(beats)} 个节拍点")
+        logger.info(f'   检测到 {len(beats)} 个节拍点')
         
         # 根据模式选择节拍点
         selected_beats = self._select_beats_by_pattern(beats, pattern)
-        print(f"   选择 {len(selected_beats)} 个剪辑点")
+        logger.info(f'   选择 {len(selected_beats)} 个剪辑点')
         
         # 根据节拍点剪辑视频
         if output_path is None:
@@ -585,7 +588,7 @@ class SmartEditingEngine:
         # 执行剪辑
         result = self._cut_by_beats(video_path, selected_beats, output_path)
         
-        print(f"   ✓ 卡点剪辑完成: {output_path}")
+        logger.info(f'   ✓ 卡点剪辑完成: {output_path}')
         return output_path
     
     def _analyze_music_beats(self, audio_path: str) -> List[float]:
@@ -607,7 +610,7 @@ class SmartEditingEngine:
             # librosa 不可用时回退到默认节拍
             return [i * 0.5 for i in range(120)]
         except Exception as e:
-            print(f"[SmartEditing] 节拍分析异常: {e}")
+            logger.error(f'[SmartEditing] 节拍分析异常: {e}')
             return [i * 0.5 for i in range(120)]
     
     def _select_beats_by_pattern(self, beats: List[float], 

@@ -12,6 +12,9 @@ from datetime import datetime
 import json
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.voice_generator")
+
 class VoiceStyle(Enum):
     """配音风格"""
     CALM = "calm"
@@ -246,7 +249,7 @@ class AIVoiceGenerator:
                 return result
                 
             except Exception as e:
-                print(f"生成配音失败: {e}")
+                logger.error(f'生成配音失败: {e}')
                 return VoiceGenerationResult(
                     request_id=str(time.time()),
                     audio_data=None,
@@ -463,7 +466,7 @@ class AIVoiceGenerator:
             
             return True
         except Exception as e:
-            print(f"导出声线配置失败: {e}")
+            logger.error(f'导出声线配置失败: {e}')
             return False
 
 
@@ -563,7 +566,7 @@ class EffectRecommendationEngine:
                 return sorted_recommendations[:10]
                 
             except Exception as e:
-                print(f"推荐特效失败: {e}")
+                logger.error(f'推荐特效失败: {e}')
                 return []
     
     def get_effect_recommendations(self, **kwargs) -> List[Dict[str, Any]]:

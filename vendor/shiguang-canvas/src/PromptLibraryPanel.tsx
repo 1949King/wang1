@@ -112,7 +112,7 @@ export default function PromptLibraryPanel({
       if (typeof window !== "undefined" && "requestIdleCallback" in window) {
         idleId = window.requestIdleCallback(runBg, { timeout: 2500 });
       } else {
-        timer = window.setTimeout(runBg, 600);
+        timer = setTimeout(runBg, 600);
       }
     });
     return () => {

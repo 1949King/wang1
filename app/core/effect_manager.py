@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.effect_manager")
+
 class EffectManager:
     """
     特效管理系统
@@ -33,7 +36,7 @@ class EffectManager:
                 with open(self.effects_db, "r", encoding="utf-8") as f:
                     self.effects = json.load(f)
             except Exception as e:
-                print(f"加载特效数据库失败: {e}")
+                logger.error(f'加载特效数据库失败: {e}')
                 self.effects = {}
     
     def _save_effects(self):
@@ -43,7 +46,7 @@ class EffectManager:
                 json.dump(self.effects, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"保存特效数据库失败: {e}")
+            logger.error(f'保存特效数据库失败: {e}')
             return False
     
     def _init_builtin_effects(self):
@@ -280,7 +283,7 @@ class EffectManager:
             preview.setdefault("vignette", float(params.get("intensity", 0.5) or 0.5))
         effect_instance["_preview_params"] = preview
         self._applied_effects.setdefault(str(clip_id), []).append(effect_instance)
-        print(f"应用特效 {name} 到片段 {clip_id}: {preview}")
+        logger.info(f'应用特效 {name} 到片段 {clip_id}: {preview}')
         return True
     
     def update_effect_parameters(self, effect_instance: Dict[str, Any], **parameters) -> Dict[str, Any]:
@@ -311,7 +314,7 @@ class EffectManager:
         """
         # 这里需要与时间线管理系统集成
         # 暂时返回True，表示移除成功
-        print(f"从片段 {clip_id} 移除特效实例 {effect_instance_id}")
+        logger.info(f'从片段 {clip_id} 移除特效实例 {effect_instance_id}')
         return True
     
     def save_effect_preset(self, name: str, effect_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

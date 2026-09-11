@@ -10,6 +10,9 @@ import gc
 from typing import Callable, Optional
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.thread_pool")
+
 class ThreadPool:
     """线程池管理类"""
     
@@ -50,7 +53,7 @@ class ThreadPool:
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"线程池工作线程错误: {e}")
+                logger.error(f'线程池工作线程错误: {e}')
     
     def submit(self, task: Callable):
         """提交任务到线程池"""

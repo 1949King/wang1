@@ -26,6 +26,9 @@ except ImportError:
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.data_collector")
+
 class DataCollector:
     """数据采集器"""
     
@@ -92,7 +95,7 @@ class DataCollector:
         
         # 跳转到平台登录页面
         if platform in platform_login_urls:
-            print(f"打开{platform}登录页面进行数据采集...")
+            logger.info(f'打开{platform}登录页面进行数据采集...')
             webbrowser.open(platform_login_urls[platform])
             # 等待用户登录
             await asyncio.sleep(5)  # 给用户一些时间登录
@@ -103,7 +106,7 @@ class DataCollector:
             if data:
                 return data
         except Exception as e:
-            print(f"API采集失败: {e}")
+            logger.error(f'API采集失败: {e}')
         
         # 根据平台的反爬虫强度选择采集方式
         if platform in strict_anti_crawler_platforms:
@@ -113,7 +116,7 @@ class DataCollector:
                 if data:
                     return data
             except Exception as e:
-                print(f"浏览器采集失败: {e}")
+                logger.error(f'浏览器采集失败: {e}')
             
             # 浏览器自动化失败后尝试使用爬虫
             try:
@@ -121,7 +124,7 @@ class DataCollector:
                 if data:
                     return data
             except Exception as e:
-                print(f"爬虫采集失败: {e}")
+                logger.error(f'爬虫采集失败: {e}')
         else:
             # 反爬虫宽松的平台，优先使用爬虫
             try:
@@ -129,7 +132,7 @@ class DataCollector:
                 if data:
                     return data
             except Exception as e:
-                print(f"爬虫采集失败: {e}")
+                logger.error(f'爬虫采集失败: {e}')
             
             # 爬虫失败后尝试使用浏览器自动化
             try:
@@ -137,7 +140,7 @@ class DataCollector:
                 if data:
                     return data
             except Exception as e:
-                print(f"浏览器采集失败: {e}")
+                logger.error(f'浏览器采集失败: {e}')
         
         raise Exception("所有采集方式都失败了")
     
@@ -204,7 +207,7 @@ class BaseAdapter:
                 if response.status_code == 200:
                     return response.json()
         except Exception as e:
-            print(f"请求失败: {e}")
+            logger.error(f'请求失败: {e}')
         return None
     
     def _random_delay(self, min_seconds: float = 1.0, max_seconds: float = 3.0):

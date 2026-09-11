@@ -57,6 +57,9 @@ from app.core.chapter_markers import (
 from app.core.timeline_dsl import Timeline, validate_timeline, convert_from_v1
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.editing_capabilities")
+
 # 能力摘要
 CAPABILITY_SUMMARY = {
     "ripple_edit": True,
@@ -85,6 +88,8 @@ CAPABILITY_SUMMARY = {
     "chapter_markers": True,
     "chapter_export_youtube": True,
     "chapter_export_edl": True,
+    "chapter_export_csv": True,
+    "chapter_export_ffmetadata": True,
     "timeline_dsl": True,
 }
 
@@ -106,29 +111,29 @@ def get_capability_report() -> dict:
 def print_capability_report():
     """打印能力报告 (CLI)"""
     report = get_capability_report()
-    print("=" * 60)
-    print("  AI 短剧编辑器 能力清单 (对标 Shotcut/OpenShot)")
-    print("=" * 60)
-    print(f"  转场数量:   {report['stats']['transitions']} 种")
-    print(f"  标题模板:   {report['stats']['title_templates']} 种")
-    print(f"  快捷键:     {report['stats']['shortcuts']} 个")
-    print(f"  遮罩预设:   {report['stats']['mask_presets']} 种")
-    print(f"  语言:       {report['stats']['locales']} 种")
-    print("=" * 60)
-    print("  ✓ Ripple 编辑 (insert/overwrite/lift/ripple_delete)")
-    print("  ✓ Slip/Slide 编辑")
-    print("  ✓ 快捷键系统 (可视化编辑 + 导入导出)")
-    print("  ✓ 自动备份 (定时 + 多版本 + 崩溃恢复)")
-    print("  ✓ Speed Ramping (速度曲线 + 关键帧 + 5 种预设)")
-    print("  ✓ 冻结帧 + 倒放")
-    print("  ✓ 自动更新 (24h 周期检查)")
-    print("  ✓ 音频波形生成 (PyAV 提取 + 缓存)")
-    print("  ✓ LUT 加载 (.cube/.3dl + 内置预设)")
-    print("  ✓ 逐帧导航 (时间码/帧号互转)")
-    print("  ✓ 遮罩系统 (5 种形状 + 文件 + 色度键)")
-    print("  ✓ 标题模板 (短剧/电影/动画/卡拉OK)")
-    print("  ✓ 音频示波器 (波形/频谱/响度/峰值/相位)")
-    print("  ✓ 国际化 i18n (中/英 + 用户扩展)")
-    print("  ✓ 章节标记 (YouTube/EDL 导出)")
-    print("  ✓ 时间轴 JSON-DSL (前后端数据契约)")
-    print("=" * 60)
+    logger.info('=' * 60)
+    logger.info('  AI 短剧编辑器 能力清单 (对标 Shotcut/OpenShot)')
+    logger.info('=' * 60)
+    logger.info(f"  转场数量:   {report['stats']['transitions']} 种")
+    logger.info(f"  标题模板:   {report['stats']['title_templates']} 种")
+    logger.info(f"  快捷键:     {report['stats']['shortcuts']} 个")
+    logger.info(f"  遮罩预设:   {report['stats']['mask_presets']} 种")
+    logger.info(f"  语言:       {report['stats']['locales']} 种")
+    logger.info('=' * 60)
+    logger.info('  ✓ Ripple 编辑 (insert/overwrite/lift/ripple_delete)')
+    logger.info('  ✓ Slip/Slide 编辑')
+    logger.info('  ✓ 快捷键系统 (可视化编辑 + 导入导出)')
+    logger.info('  ✓ 自动备份 (定时 + 多版本 + 崩溃恢复)')
+    logger.info('  ✓ Speed Ramping (速度曲线 + 关键帧 + 5 种预设)')
+    logger.info('  ✓ 冻结帧 + 倒放')
+    logger.info('  ✓ 自动更新 (24h 周期检查)')
+    logger.info('  ✓ 音频波形生成 (PyAV 提取 + 缓存)')
+    logger.info('  ✓ LUT 加载 (.cube/.3dl + 内置预设)')
+    logger.info('  ✓ 逐帧导航 (时间码/帧号互转)')
+    logger.info('  ✓ 遮罩系统 (5 种形状 + 文件 + 色度键)')
+    logger.info('  ✓ 标题模板 (短剧/电影/动画/卡拉OK)')
+    logger.info('  ✓ 音频示波器 (波形/频谱/响度/峰值/相位)')
+    logger.info('  ✓ 国际化 i18n (中/英 + 用户扩展)')
+    logger.info('  ✓ 章节标记 (YouTube/EDL 导出)')
+    logger.info('  ✓ 时间轴 JSON-DSL (前后端数据契约)')
+    logger.info('=' * 60)

@@ -1,3 +1,155 @@
+## 已修复（2026-08-19 · AI剪辑/画布入轨片段不可撤销）
+
+**现象**：通过 FunClip/AutoClip/LLM裁剪/画布「发送到剪辑」/素材库拖入进入时间线的片段，按 Ctrl+Z 无反应，无法撤销。
+
+**根因**：`_add_clip_to_timeline()`（第 ~13,749 行）成功添加片段后不调用 `_record_action()`，而 `_apply_action()` 也没有 `"add_clip"` 类型分支。项目其他操作（delete/split/paste/edit_clip）全有撤销支持，唯独「加片段」这条路漏了。
+
+**修复**：
+- `_apply_action()` 新增 `"add_clip"` 分支：undo 时移除视频片段 + 联动音频片段（含控件）；redo 时加回来。
+- `_add_clip_to_timeline()` 成功后调用 `_record_action({"type": "add_clip", "clip": clip, "audio_clip": audio_clip})`。
+- `audio_clip` 初始化为 `None`，仅在 `_timeline_widget` 可用时才赋值，避免 NameError。
+
+**验证**：`py_compile` 通过；`frozen_zone_guard.py` 45 锁完好；未触碰冻结符号。
+
+涉及：`editor_module.py`（`_apply_action` / `_add_clip_to_timeline`）
+
+---
+
+## 已修复（2026-08-19 · 导演台人偶又变回旧素模）
+
+**现象**：用桌面 `BodyChan - BodyKun Posable Drawing Figures (1).blend` 替换后，3D 导演台又像早期胶囊/程序化网格人偶。
+
+**根因**：运行时重写 UV 贴生成等高线；`/models/*.glb` 曾 `immutable` 7 天缓存；dispose 释放了 GLB 模板共享几何。
+
+**修复**：保留 vinchau 原网格材质；GLB URL 带 `?v=bodykun-v5`；dispose 跳过模板网格。重启后进导演台。
+
+---
+
+## 已完善（2026-08-19 · 第 6 波：AI 剪辑差异化 + 剪辑↔画布打通）
+
+相对剪映类产品：时间线与导演台共用身份，Agent 能读轨、建议送到画布做变体，确认后才推送。
+
+| ID | 行为 |
+|----|------|
+| A6.1 | `GET /host/timeline-snapshot`：画布顶栏「剪辑 N 片」；Agent `queryTimeline` 只读 |
+| A6.2 | 画布入轨带 `node_id` → `_clips.canvas_node_id`；快照回写节点 `editorStatus=in_timeline` |
+| A6.3 | 剪辑「发送到画布」后 React 自动落 `source` 节点（仍保留右下角下载） |
+| A6.4 | AI 面板「联动建议」勾选后才 `push_editor_to_canvas`；不改时间线 |
+
+涉及：`editor_canvas_link.py` · `canvas_bridge.py` · `editor_module.py` · `capability_handlers.py` · `vendor/shiguang-canvas`
+
+---
+
+## 已完善（2026-08-19 · 第 5 波：产品收口 + 画布数字人）
+
+北极星锁四轨：**剪辑体验 · 画布体验 · AI 剪辑/智能体 · 画布数字人**。运营/筛选仍为接口壳。
+
+| ID | 行为 |
+|----|------|
+| D5.1 | 新节点 `digitalHuman`：面板 / 右键 / 空态可添加；工程保存不丢 kind |
+| D5.2 | 「生成配音」走 `/host/generate-audio`；可上传或绑定形象图 |
+| D5.3 | 入轨发送配音 + 形象；「口型成片」无模型时诚实失败，不写假视频 |
+
+涉及：`vendor/shiguang-canvas` · `docs/knowledge/00-overview.md` · `15-long-term-iteration.md`
+
+---
+
+## 已完善（2026-08-19 · 第 4 波：无损 trim / 高光 grab / 节拍切开）
+
+开源清单筛落后接到活路径：建议勾选才写 `_clips`。未恢复短剧/账号功能，未加 MCP，未换 tldraw。
+
+| ID | 行为 |
+|----|------|
+| L4.1 | `lossless_trim.py`：关键帧对齐 copy，失败或偏离过大则重编码并标明 |
+| L4.2 | FunClip/AutoClip 改顺序 `grab` + silencedetect 切开；封面 JPEG 旁路生成 |
+| L4.3 | 节拍检测后「每 4/8 拍」勾选切开；空拍点不造假 |
+| L4.4 | 章节 CSV / ffmetadata 导出；无章节诚实失败 |
+
+涉及：`lossless_trim.py` · `highlight_detect.py` · `beat_split.py` · `chapter_markers.py` · `editor_module.py`
+
+---
+
+## 已完善（2026-08-19 · 短剧筛选/账号运营卸空为接口壳）
+
+产品决定：两插件**功能代码卸空**，商店条目与 EventBus / capability 名保留。未改冻结宿主 `plugins_module` 打开逻辑，未改 `plugin-store-catalog` 条目列表。
+
+| 项 | 现状 |
+|----|------|
+| 短剧筛选 | `drama_finder_plugin` 占位页；`fetch_dramas` / 热榜返回空；`DramaFinderWidget._selected` + `drama_send_to_editor` 仍在 |
+| 账号运营 | `AccountOpsModule` 占位页；`account.collect_data` / `optimize_strategy` / `publish` 固定 `success=False` |
+| 商店 | `drama-finder`、`account-ops` 的 `local_path` 仍指向真实目录 |
+
+涉及：`app/plugins/drama_finder_plugin/` · `account_ops_plugin/` · `account_ops_module.py` · `account_skills.py` · `capability_handlers.py`
+
+---
+
+## 已完善（2026-08-19 · 第 2/3 波：长对白冒烟 + 建议勾选写入）
+
+活路径剪辑 + 画布 Agent。**未拆** `editor_module` UI 构建；未加 MCP。
+
+| ID | 行为 |
+|----|------|
+| N2.1 | `app/tests/test_long_dialogue_smoke.py`：scrub 80ms/busy-drop 约定仍在；密集对白只执行勾选子集 |
+| N2.2 | FunClip/AutoClip 出建议清单，勾选后才拼接入轨；Fusion/风格化确认后入轨，失败检查成片文件 |
+| A3.1 | 协作 B：Agent 写轨指令走勾选清单；取消/未勾选不改 `_clips` |
+| A3.2 | 画布 `/generate` `/breakdown` `/batch` 与远程 `batchGenerate` 确认后才触发 |
+
+涉及：`suggest_checklist.py` · `ai_agent_panel.py` · `editor_module.py` · `AgentPanel.tsx` · `agent_policy.py`
+
+---
+
+## 已完善（2026-08-19 · 导演台 M0：落盘 / 隔离 / 诚实生图 / 连线接续）
+
+活路径 `vendor/shiguang-canvas`，未改冻结区。
+
+| ID | 行为 |
+|----|------|
+| M0.1 | 叠卡/截图/保存前把 `data:` 媒体 POST 到 `/host/upload-asset`，工程只存 inbox URL |
+| M0.2 | `buildNodeTypes` 包单节点 Error Boundary，坏卡不白屏整布 |
+| M0.3 | 连线松手在空白处弹出「接到新节点」菜单 |
+| M0.4 | 生图失败不再写占位图并标成功；状态条与视频节点一样报失败 |
+
+涉及：`bridge.ts` · `stores/persist-media.ts` · `store.ts` · `App.tsx` · `CanvasShell.tsx` · `CanvasContextMenu.tsx` · `plugins/node-registry.ts`
+
+---
+
+## 已完善（2026-08-18 · 姿势预设还原纠偏）
+
+| 根因 | 修复 |
+|------|------|
+| `applyPose` 对预设再跑 `resolveChainPose`（累加非幂等） | 默认不再二次 chain；动作采样仍自带 chain |
+| 坐/蹲/跪只弯腿不降髋 | `POSE_ROOT_OFFSET_Y` 降根高度 |
+| 抱臂/叉腰/挥手等角度按胶囊硬套 BodyKun | 重校肩肘侧举，避免穿脖/僵尸臂 |
+
+---
+
+## 已完善（2026-08-18 · 分段 IK/FK 拖肢）
+
+| 部位 | 行为 |
+|------|------|
+| 手 / 脚（腕踝） | 整肢 IK |
+| 大腿 / 小腿 / 上臂 / 前臂（髋膝肩肘） | **单关节 FK**，不再整肢重解 |
+| 头 / 胸 / 腰 | 局部朝向 IK |
+
+高亮仅当前节（FK）或整肢（IK）。
+
+## 已完善（2026-08-18 · 蹲起/深倚运动学 + 直觉拖肢）
+
+| 项 | 说明 |
+|----|------|
+| 下蹲起身 | 髋后坐→膝屈→躯干前倾配平→蹬伸；去掉深蹲后仰；加深 root 下沉 |
+| 深侧倚靠 | 单侧深倚 + 承重腿/虚点腿 + 撑墙臂，不再左右来回晃 |
+| 拖肢交互 | 取消「框选→双击解锁」；关节模式点住手脚头胸腰即可拖 |
+
+## 已完善（2026-08-18 · 3D 导演台入画 / 胸腰 IK）
+
+| 项 | 说明 |
+|----|------|
+| 入画 | 默认相机更近、首帧 `fitDirectorFraming`、`overflow:hidden`、缩放夹紧；F = 适配全身 |
+| 胸腰 | 禁止 abdomen 绑 Hips；胸/腰/头不挂 TransformControls；躯干 IK 增益收小并钉住根高度 |
+
+---
+
 ## 已完善（2026-08-14 · 导演台 / 3D 快捷指令）
 
 画布与 3D 导演台增加 **Ctrl+K 指令面板**（亦可 `/`、`?`）：可搜索执行保存/生成/入轨/姿势等，并显示对应快捷键。
@@ -44,6 +196,18 @@
 | 计时日志 | `canvas WebEngineView created in …ms` |
 
 涉及：`character_management_module.py` · `vendor/shiguang-canvas/src/CanvasShell.tsx`（未改冻结区）。
+
+## 已完善（2026-08-18 · 3D 导演台体验维持：启动/稳定性，不改功能）
+
+| 项 | 说明 |
+|----|------|
+| Persist | `Stage3D` 场景写入 localStorage 防抖 ~420ms，卸载时 flush，减拖姿卡顿 |
+| GLB | `riggedHumanoid` 缓存「外观+归一化」模板；多 actor clone；失败清缓存并重试 1 次；进台/空闲 `preloadBodyFigures` |
+| 渲染 | Bloom=0 走 `renderer.render`；拖姿跳过 emissive 全树遍历 |
+| 静态 | `canvas_runtime` 对 `/models/*.glb` 1 天缓存（非 immutable）；URL 带 `?v=`；dispose 不释放 GLB 模板几何 |
+| 宿主 | 画布 `loadFinished` 失败自动重试 1 次 |
+
+涉及：`Stage3D.tsx` · `riggedHumanoid.ts` · `App.tsx` · `app/core/canvas_runtime.py` · `app/core/canvas_bridge.py` · `character_management_module.py`
 
 ## 已完善（2026-08-13 · 剪辑首次打开加速 P0）
 
@@ -280,7 +444,7 @@
 | 桥接 | `app/core/canvas_bridge.py` :18765 — `/ingest`、`/inject.js`、「发送到剪辑」、`/host/*` 模型同步、`/editor_outbox` 剪辑→画布 |
 | Agent | `app/core/canvas_agent_runtime.py`：进入画布自动预热 + 注入；工具栏「连接 Agent」→ :17371 |
 | 模型池 | `GET /host/ai-config-patch` → `shiguang-*`；专用 **`shiguang-aigc`**；**模型管理**广场卡片合并 AIGC 下拉 +「🎨 AIGC」目录页 |
-| 双向 | 画布→剪辑：`MATERIAL_TO_TIMELINE`；剪辑→画布：AI 页「发送选中片段到画布」→ `TIMELINE_TO_CANVAS` / outbox |
+| **双向** | 画布→剪辑：`MATERIAL_TO_TIMELINE`（带 `canvas_node_id`）；剪辑→画布：outbox + React 自动落源节点；`GET /host/timeline-snapshot` |
 | 慢启动 | 白屏「正在启动…」多为冷启动 Vite；跑 `scripts/setup_infinite_canvas.ps1`（含 `npm run build`）后应秒开 |
 | 角色库 | `CharacterStore` 保留；侧栏编辑 + `generated_assets` 挂载；工具栏偏好同步到 bridge prefs |
 | 入轨 | `MATERIAL_TO_TIMELINE`；静图经 ffmpeg 转 3s still.mp4 |

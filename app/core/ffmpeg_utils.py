@@ -51,6 +51,17 @@ def find_ffmpeg() -> Optional[str]:
                     candidates.append(exe)
 
     # 2. 项目内置（支持从 app/core/ 和 app/ 目录调用）
+    # PyInstaller 打包后，资源解压在 sys._MEIPASS 下，优先从这里找
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        for relative in (
+            "thirdparty/ffmpeg/bin/ffmpeg.exe",
+            "thirdparty/ffmpeg/ffmpeg.exe",
+        ):
+            builtin = os.path.normpath(os.path.join(meipass, relative))
+            if os.path.isfile(builtin):
+                candidates.append(builtin)
+
     here = os.path.dirname(os.path.abspath(__file__))
     # 尝试从 app/core/ 向上两层到项目根目录
     project_root = os.path.normpath(os.path.join(here, "..", ".."))

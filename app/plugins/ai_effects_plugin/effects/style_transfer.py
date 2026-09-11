@@ -119,7 +119,7 @@ class StyleTransferEffect:
         os.makedirs(models_path, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        print(f"[风格迁移] 初始化完成，GPU: {'启用' if gpu_enabled else '禁用'}")
+        logger.info(f"[风格迁移] 初始化完成，GPU: {('启用' if gpu_enabled else '禁用')}")
     
     def load_model(self) -> bool:
         """加载风格迁移模型 — 接入神经网络引擎"""
@@ -127,18 +127,18 @@ class StyleTransferEffect:
             from app.core.neural.style_transfer import StyleTransferEngine
             self._neural_engine = StyleTransferEngine()
             if self._neural_engine.load():
-                print("[风格迁移] 神经网络引擎就绪")
+                logger.info('[风格迁移] 神经网络引擎就绪')
                 self._model = "neural"
                 return True
             self._model = "fallback"
-            print("[风格迁移] 神经网络引擎不可用，将使用传统算法")
+            logger.info('[风格迁移] 神经网络引擎不可用，将使用传统算法')
             return True
         except ImportError as e:
-            print(f"[风格迁移] 神经网络模块未安装: {e}")
+            logger.info(f'[风格迁移] 神经网络模块未安装: {e}')
             self._model = "fallback"
             return True
         except Exception as e:
-            print(f"[风格迁移] 模型加载失败: {e}")
+            logger.error(f'[风格迁移] 模型加载失败: {e}')
             return False
     
     def unload_model(self) -> None:
@@ -155,7 +155,7 @@ class StyleTransferEffect:
             except Exception as e:
                 logger.debug(f"清理GPU缓存时失败: {e}")
 
-            print("[风格迁移] 模型已卸载")
+            logger.info('[风格迁移] 模型已卸载')
     
     def apply(self, frame_data: Any, 
               style_name: str = 'cyberpunk',
@@ -187,7 +187,7 @@ class StyleTransferEffect:
         style_config = self.STYLE_PRESETS[style_name]
         self._current_style = style_name
         
-        print(f"[风格迁移] 应用风格: {style_config['name']} (强度: {strength})")
+        logger.info(f"[风格迁移] 应用风格: {style_config['name']} (强度: {strength})")
         
         # 应用风格迁移效果
         result = self._transfer_style(input_image, style_config, strength, preserve_color)

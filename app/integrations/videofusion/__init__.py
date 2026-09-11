@@ -5,6 +5,9 @@ import subprocess
 import sys
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.integrations.videofusion")
+
 class VideoFusionIntegration:
     """VideoFusion集成类，提供视频修复和增强功能"""
 
@@ -15,9 +18,9 @@ class VideoFusionIntegration:
     def initialize(self):
         try:
             self.initialized = True
-            print("VideoFusion初始化成功")
+            logger.info('VideoFusion初始化成功')
         except Exception as e:
-            print(f"VideoFusion初始化失败: {e}")
+            logger.error(f'VideoFusion初始化失败: {e}')
             self.initialized = False
 
     def enhance_video(self, video_path, **kwargs):
@@ -91,7 +94,7 @@ class VideoFusionIntegration:
             return {"success": False, "error": result.stderr}
 
         except Exception as e:
-            print(f"视频增强失败: {e}")
+            logger.error(f'视频增强失败: {e}')
             return {"success": False, "error": str(e)}
 
     def convert_format(self, video_path, **kwargs):
@@ -123,7 +126,7 @@ class VideoFusionIntegration:
             return {"success": False, "error": result.stderr}
 
         except Exception as e:
-            print(f"格式转换失败: {e}")
+            logger.error(f'格式转换失败: {e}')
             return {"success": False, "error": str(e)}
 
     def batch_process(self, video_paths, **kwargs):
@@ -138,7 +141,7 @@ class VideoFusionIntegration:
 
             results = []
             for i, video_path in enumerate(video_paths):
-                print(f"处理视频 {i + 1}/{len(video_paths)}: {video_path}")
+                logger.info(f'处理视频 {i + 1}/{len(video_paths)}: {video_path}')
                 base_name = os.path.basename(video_path)
                 name_without_ext = os.path.splitext(base_name)[0]
                 output_path = os.path.join(output_dir, f"{name_without_ext}_processed.{output_format}")
@@ -157,7 +160,7 @@ class VideoFusionIntegration:
                 "successful_processes": sum(1 for r in results if r.get("success", False))
             }
         except Exception as e:
-            print(f"批量处理失败: {e}")
+            logger.error(f'批量处理失败: {e}')
             return {"success": False, "error": str(e)}
 
     def _adjust_aspect_ratio(self, video_path, aspect_ratio, output_path):

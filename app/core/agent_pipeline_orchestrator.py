@@ -46,6 +46,7 @@ class PipelineSession:
     degraded: bool = False                                 # C：仅有脚本/无成片时为 True
     error: Optional[str] = None
     stage: str = "idle"                                    # 当前阶段
+    executed_path: List[str] = field(default_factory=list) # 真实执行经过的 capability 序列（供 Hebbian 精确强化）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -136,6 +137,7 @@ class AgentPipelineOrchestrator:
                 materials=materials, creative_brief=creative_brief, request_id=session_id,
             )
             session.route = route_result.to_dict()
+            session.executed_path.append("pipeline.route")
             self._emit_progress(session, f"分流完成：{route_result.route.value}")
 
             # ── 第二步：执行对应业务线，产出统一片段列表 ──
@@ -148,6 +150,9 @@ class AgentPipelineOrchestrator:
                     target_duration=target_duration, clip_duration=clip_duration,
                     provider=provider, session_id=session_id,
                 )
+                # 仅当真实产出片段时才追加生成步骤到学习路径
+                if unified_clips:
+                    session.executed_path.append("pipeline.generate")
                 session.generation_result = {
                     "clip_count": len(unified_clips),
                     "clips": [c.to_dict() if hasattr(c, "to_dict") else c for c in unified_clips],
@@ -159,6 +164,9 @@ class AgentPipelineOrchestrator:
                     materials=materials, session_id=session_id,
                 )
                 session.imported_clips = unified_clips
+                # 素材剪辑线：解析即真实服务（与生成线对应，供学习路径精确化）
+                if unified_clips:
+                    session.executed_path.append("pipeline.route_editing")
 
             if not unified_clips:
                 session.success = False
@@ -170,6 +178,7 @@ class AgentPipelineOrchestrator:
             session.stage = "preview"
             self._emit_progress(session, "片段进入剪辑模块预览校验...")
             self._run_preview_validation(unified_clips, auto_preview_pass, session_id)
+            session.executed_path.append("pipeline.preview_validate")
             from app.core.preview_validation_loop import preview_validation_loop
             session.preview_status = preview_validation_loop.get_preview_status()
 
@@ -198,6 +207,7 @@ class AgentPipelineOrchestrator:
             session.stage = "scoring"
             self._emit_progress(session, "五维量化打分中...")
             session.scored_results = self._run_scoring(unified_clips)
+            session.executed_path.append("pipeline.score")
 
             # ── 第五步：生成剪辑创意脚本 ──
             session.stage = "scripting"
@@ -205,11 +215,15 @@ class AgentPipelineOrchestrator:
             session.editing_script = self._run_script_generation(
                 session.scored_results, target_duration, platform, session_id,
             )
+            if session.editing_script is not None:
+                session.executed_path.append("pipeline.generate_script")
 
             # ── 第六步：精修剪辑 + 成片 ──
             session.stage = "editing"
             self._emit_progress(session, "执行精修剪辑...")
             session.final_video_path = self._run_editing(session, session_id)
+            if session.final_video_path:
+                session.executed_path.append("pipeline.execute_editing")
 
             if session.final_video_path:
                 session.success = True
@@ -543,25 +557,31 @@ class AgentPipelineOrchestrator:
             logger.debug(f"[AgentPipelineOrchestrator] emit done 失败: {e}")
 
         # ── 左右脑神经链接：强化链路突触（Hebbian 学习）──
+        # 优先用【真实执行路径】强化（走到哪记到哪），空则回退到按 route 的预设路径，
+        # 避免中途失败时仍整体强化预设链路导致学习信号失真。
         try:
             from app.core.agent_brain import agent_brain
-            route = (session.route or {}).get("route", "")
-            path = ["pipeline.route"]
-            if route == "generation":
-                path.extend([
-                    "pipeline.generate",
-                    "pipeline.preview_validate",
-                    "pipeline.score",
-                    "pipeline.generate_script",
-                    "pipeline.execute_editing",
-                ])
+            real_path = list(session.executed_path)
+            if len(real_path) >= 2:
+                path = real_path
             else:
-                path.extend([
-                    "pipeline.preview_validate",
-                    "pipeline.score",
-                    "pipeline.generate_script",
-                    "pipeline.execute_editing",
-                ])
+                route = (session.route or {}).get("route", "")
+                path = ["pipeline.route"]
+                if route == "generation":
+                    path.extend([
+                        "pipeline.generate",
+                        "pipeline.preview_validate",
+                        "pipeline.score",
+                        "pipeline.generate_script",
+                        "pipeline.execute_editing",
+                    ])
+                else:
+                    path.extend([
+                        "pipeline.preview_validate",
+                        "pipeline.score",
+                        "pipeline.generate_script",
+                        "pipeline.execute_editing",
+                    ])
             agent_brain.reinforce_path(path, success=bool(session.success))
         except Exception as e:
             logger.debug(f"[AgentBrain] 链路强化失败: {e}")

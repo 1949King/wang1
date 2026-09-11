@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.project_manager")
+
 class ProjectManager:
     """
     项目管理系统
@@ -90,7 +93,7 @@ class ProjectManager:
             self.current_project = project_info
             return project_info
         except Exception as e:
-            print(f"加载项目失败: {e}")
+            logger.error(f'加载项目失败: {e}')
             return None
     
     def save_project(self, project_info: Optional[Dict[str, Any]] = None) -> bool:
@@ -126,7 +129,7 @@ class ProjectManager:
             
             return True
         except Exception as e:
-            print(f"保存项目失败: {e}")
+            logger.error(f'保存项目失败: {e}')
             return False
     
     def autosave(self) -> bool:
@@ -166,7 +169,7 @@ class ProjectManager:
                             project_info = json.load(f)
                         projects.append(project_info)
                     except Exception as e:
-                        print(f"读取项目信息失败: {e}")
+                        logger.error(f'读取项目信息失败: {e}')
         
         # 按最后修改时间排序
         projects.sort(key=lambda x: x.get("last_modified", ""), reverse=True)
@@ -194,7 +197,7 @@ class ProjectManager:
                 self.current_project = None
             return True
         except Exception as e:
-            print(f"删除项目失败: {e}")
+            logger.error(f'删除项目失败: {e}')
             return False
     
     def export_project(self, project_id: str, output_path: str) -> bool:
@@ -223,7 +226,7 @@ class ProjectManager:
                         zipf.write(file_path, arcname)
             return True
         except Exception as e:
-            print(f"导出项目失败: {e}")
+            logger.error(f'导出项目失败: {e}')
             return False
     
     def import_project(self, zip_path: str) -> Optional[Dict[str, Any]]:
@@ -286,7 +289,7 @@ class ProjectManager:
                 self.current_project = project_info
                 return project_info
         except Exception as e:
-            print(f"导入项目失败: {e}")
+            logger.error(f'导入项目失败: {e}')
             return None
 
 

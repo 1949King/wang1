@@ -13,10 +13,6 @@
 /** 当前 schema 版本号 — 任何 writeProjectBundle 都会写这个值 */
 export const CURRENT_SCHEMA_VERSION = 3 as const;
 
-/** V1 → V2：最老版本可能缺失的字段 */
-type _V1Edge = { source: string; target: string; data?: unknown };
-type _V2Edge = { source: string; target: string; data?: { type?: string; [k: string]: unknown } };
-
 /** 简化的连线类型，用于 V2→V3 迁移 */
 export type MigrateEdge = {
   id?: string;

@@ -120,7 +120,7 @@ class AiAgentPanelMixin:
                 self._on_ai_clip_fallback(video_path, prompt)
             return
 
-        print(f"▶ [LLM] 开始智能剪辑, 提示词: {prompt}")
+        logger.info(f'▶ [LLM] 开始智能剪辑, 提示词: {prompt}')
         if hasattr(self, "_ai_task_label"):
             self._ai_task_label.setText("任务: LLM 智能裁剪中...")
             self._ai_task_label.setStyleSheet("color:#f59e0b;font-size:10px;font-weight:600;")
@@ -174,7 +174,7 @@ class AiAgentPanelMixin:
         传统 AIClipAlgorithm 路径（cv2/audio 分析）
         当 Ollama 不可用或 prompt 为空时使用。
         """
-        print(f"▶ 开始智能剪辑(传统), 提示词: {prompt}")
+        logger.info(f'▶ 开始智能剪辑(传统), 提示词: {prompt}')
 
         try:
             msg_box = QMessageBox(self)
@@ -206,7 +206,7 @@ class AiAgentPanelMixin:
 
         except Exception as e:
             QMessageBox.warning(self, "处理失败", f"智能剪辑失败: {str(e)}")
-            print(f"智能剪辑失败: {e}")
+            logger.error(f'智能剪辑失败: {e}')
 
     def _on_ai_fail(self, message: str):
         """主线程回调：字幕生成失败"""
@@ -284,12 +284,67 @@ class AiAgentPanelMixin:
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def _apply_agent_commands_to_editor(self, commands: List[Any]) -> List[Dict[str, Any]]:
-        """将 Agent 指令落到当前剪辑模块的真实时间线数据上（白名单 + 危险确认）。"""
-        results: List[Dict[str, Any]] = []
-        allow_dangerous = self._confirm_dangerous_agent_commands(commands)
+    def _select_agent_commands_for_apply(self, commands: List[Any]) -> List[Any]:
+        """B：建议清单勾选后才改时间线；C 仍自动执行白名单；取消则不写轨。"""
+        try:
+            from app.core.agent_policy import MODE_AUTONOMOUS, normalize_mode
+            from app.modules.lego.suggest_checklist import (
+                format_agent_command_label,
+                merge_checked_commands,
+                partition_agent_commands,
+                pick_checked_indices,
+            )
+        except Exception:
+            return list(commands)
+        combo = getattr(self, "_agent_mode_combo", None)
+        mode = normalize_mode(combo.currentData() if combo is not None else "collaborative")
+        if mode == MODE_AUTONOMOUS:
+            return list(commands)
+        reads, writes = partition_agent_commands(commands)
+        if not writes:
+            return list(reads)
+        labels = [format_agent_command_label(c, i + 1) for i, c in enumerate(writes)]
+        picked = pick_checked_indices(
+            self,
+            title="确认后写入时间线",
+            hint=(
+                f"Agent 建议 {len(writes)} 条会改时间线的指令。"
+                "勾选后点「执行选中」才写入；未勾选的不会执行。可事后 Ctrl+Z 撤销。"
+            ),
+            labels=labels,
+            default_checked=True,
+            ok_text="执行选中",
+        )
+        if picked is None:
+            return list(reads)
+        return merge_checked_commands(reads, writes, picked)
 
-        for command in commands:
+    def _apply_agent_commands_to_editor(self, commands: List[Any]) -> List[Dict[str, Any]]:
+        """将 Agent 指令落到当前剪辑模块的真实时间线数据上（白名单 + 勾选确认）。"""
+        results: List[Dict[str, Any]] = []
+        to_run = self._select_agent_commands_for_apply(commands)
+        if not to_run:
+            return [{
+                "action": "suggest_list",
+                "success": False,
+                "skipped": True,
+                "message": "已取消或未勾选，未改时间线",
+            }]
+        selected_ids = {id(c) for c in to_run}
+        skipped_unselected = [c for c in commands if id(c) not in selected_ids]
+        for command in skipped_unselected:
+            action = getattr(command, "action", "unknown")
+            if action in ("answer", "info"):
+                continue
+            results.append({
+                "action": action,
+                "success": False,
+                "skipped": True,
+                "message": f"未勾选，跳过「{action}」",
+            })
+        allow_dangerous = True
+
+        for command in to_run:
             action = getattr(command, "action", "unknown")
             try:
                 if action not in _AGENT_ALLOWED_ACTIONS:
@@ -349,6 +404,34 @@ class AiAgentPanelMixin:
                 res["message"] = f"{res.get('message', '完成')}（可撤销）"
             return res
         return {"action": action, "success": False, "message": "波纹删除无结果"}
+
+    def _agent_read_media(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """读素材元信息（get_media / inspect_media）：返回完整结构化信息，不截断。"""
+        import json
+        # clip_index / clip_id 均支持：解析为 clip_id 再交给 capability
+        clip = self._resolve_agent_clip(params)
+        p = dict(params)
+        if clip and clip.get("id"):
+            p.setdefault("clip_id", clip.get("id"))
+        try:
+            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
+            result = capability_dispatcher.invoke(CapabilityRequest(
+                capability_id="editor.inspect_media",
+                params=p,
+                caller="agent",
+                agent_mode=self._get_agent_session_mode() if hasattr(self, "_get_agent_session_mode") else "",
+                approved=True,
+            ))
+        except Exception as e:
+            return {"action": action, "success": False, "message": f"读取素材失败: {e}"}
+        if not result.success:
+            return {"action": action, "success": False, "message": result.error or "读取素材失败"}
+        payload = result.output or {}
+        return {
+            "action": action,
+            "success": True,
+            "message": f"素材元信息：{json.dumps(payload, ensure_ascii=False)}",
+        }
 
     def _apply_agent_command(self, command) -> Dict[str, Any]:
         """执行单条 Agent 指令（调用方已做白名单/危险确认）。"""
@@ -464,6 +547,71 @@ class AiAgentPanelMixin:
             return self._agent_dispatch("canvas.open", params)
         if action == "canvas_sync_models":
             return self._agent_dispatch("canvas.sync_models", params)
+        if action in ("get_media", "inspect_media"):
+            return self._agent_read_media(action, params)
+        if action == "move_clip":
+            clip = self._resolve_agent_clip(params)
+            if not clip:
+                return {"action": action, "success": False, "message": "未找到要移动的片段"}
+            if params.get("new_start_time") is None:
+                return {"action": action, "success": False, "message": "move_clip 需要 new_start_time（秒）"}
+            try:
+                new_start = float(params["new_start_time"])
+            except (TypeError, ValueError):
+                return {"action": action, "success": False, "message": "new_start_time 参数无效"}
+            if not self.move_clip(clip.get("id"), new_start):
+                return {"action": action, "success": False, "message": "移动片段失败（片段可能不在时间线）"}
+            return {"action": action, "success": True, "message": f"已移动片段到 {new_start:.2f}s"}
+        if action == "change_speed":
+            clip = self._resolve_agent_clip(params)
+            if not clip:
+                return {"action": action, "success": False, "message": "未找到要变速的片段"}
+            applied: Dict[str, Any] = {}
+            if params.get("speed") is not None:
+                try:
+                    speed = float(params["speed"])
+                except (TypeError, ValueError):
+                    return {"action": action, "success": False, "message": "speed 参数无效"}
+                if not self.set_clip_speed(clip.get("id"), speed):
+                    return {"action": action, "success": False, "message": "设置速度失败（片段可能不在时间线）"}
+                applied["speed"] = speed
+            if "reverse" in params:
+                clip["reverse"] = bool(params["reverse"])
+                self._sync_kernel_timeline()
+                self._refresh_preview_with_effects()
+                applied["reverse"] = bool(params["reverse"])
+            if not applied:
+                return {"action": action, "success": False, "message": "change_speed 需要 speed 或 reverse 参数"}
+            return {"action": action, "success": True, "message": "变速/倒放已应用"}
+        if action in ("add_keyframe", "set_keyframes"):
+            clip = self._resolve_agent_clip(params)
+            if not clip:
+                return {"action": action, "success": False, "message": "未找到要写关键帧的片段"}
+            # 支持批量 list，也兼容单点（time/prop/value 直接挂 params）
+            raw_keyframes = params.get("keyframes")
+            if not isinstance(raw_keyframes, list):
+                raw_keyframes = [params]
+            normalized: List[Dict[str, Any]] = []
+            try:
+                for kf in raw_keyframes:
+                    if not isinstance(kf, dict):
+                        continue
+                    prop = kf.get("prop") or kf.get("property") or kf.get("name")
+                    if prop is None:
+                        continue
+                    normalized.append({
+                        "prop": str(prop),
+                        "time_offset": float(kf.get("time_offset", kf.get("time", 0.0))),
+                        "value": kf.get("value", 0.0),
+                        "easing": str(kf.get("easing") or kf.get("interpolation") or "linear"),
+                    })
+            except (TypeError, ValueError):
+                return {"action": action, "success": False, "message": "关键帧参数无效：time/value 需为数值"}
+            if not normalized:
+                return {"action": action, "success": False, "message": "关键帧参数无效：缺少 prop/value"}
+            if not self.add_keyframes_to_clip(clip.get("id"), normalized):
+                return {"action": action, "success": False, "message": "写入关键帧失败（片段可能不在时间线）"}
+            return {"action": action, "success": True, "message": f"已写入 {len(normalized)} 个关键帧"}
         # 正常不应到达（外层白名单）；仍给诚实文案
         return {
             "action": action,

@@ -8,7 +8,7 @@
 
 | 文档 | 用途 |
 |------|------|
-| [00-overview.md](00-overview.md) | 产品北极星、7 阶段闭环、优先级 |
+| [00-overview.md](00-overview.md) | 产品北极星、四条专注轨、优先级 |
 | [01-glossary.md](01-glossary.md) | 领域术语表 |
 | [02-architecture.md](02-architecture.md) | 分层架构、启动链路、双内核 |
 | [03-editor-pipeline.md](03-editor-pipeline.md) | 导入→时间线→预览→播放→导出 |
@@ -22,8 +22,9 @@
 | [11-opentake-gap.md](11-opentake-gap.md) | OpenTake/OTIO/选模/画布对照:只学不换壳 |
 | [12-otio-clip-fields.md](12-otio-clip-fields.md) | OTIO 概念 ↔ `_clips` 字段对照(不换真相源) |
 | [14-canvas-strategy.md](14-canvas-strategy.md) | 自研导演台画布 vs infinite-canvas / LibTV 策略 |
-| [15-long-term-iteration.md](15-long-term-iteration.md) | **长期迭代计划**(P/N/A 轨 + 当前自动执行波) |
+| [15-long-term-iteration.md](15-long-term-iteration.md) | **长期迭代计划**(N 剪辑 / P 画布 / A Agent / D 数字人) |
 | [16-aigc-canvas-gap.md](16-aigc-canvas-gap.md) | 主流 AIGC 画布借鉴清单 ↔ 落地状态 |
+| [comfyui-local-inference-plan.md](../comfyui-local-inference-plan.md) | ComfyUI 兼容与内置方案:workflow 粘贴即用 + 内置透明引擎 + AI 伙伴减负(方案未实施) |
 | [sources/MANIFEST.md](sources/MANIFEST.md) | 全库 Markdown 源清单(自动生成) |
 | [catalog.json](catalog.json) | 机器可读目录(自动生成) |
 
@@ -85,6 +86,7 @@ app/modules/lego/account_ops_module.py
 app/modules/lego/drama_send_to_editor.py
 app/modules/lego/character_management_module.py
 app/core/canvas_bridge.py
+app/core/editor_canvas_link.py
 app/core/canvas_runtime.py
 app/core/canvas_agent_runtime.py
 app/core/project_agent_host.py
@@ -94,7 +96,7 @@ app/core/agent_task_store.py
 app/core/agent_runtime.py
 app/plugins/drama_finder_plugin/
 app/plugins/account_ops_plugin/
-vendor/shiguang-canvas/   # 默认画布引擎;3D 导演台
+vendor/shiguang-canvas/   # 默认画布引擎;3D 导演台;数字人节点
 vendor/infinite-canvas/   # scripts/setup_infinite_canvas.ps1
 ```
 
@@ -102,4 +104,4 @@ vendor/infinite-canvas/   # scripts/setup_infinite_canvas.ps1
 
 自研拓展:`.cube` LUT 导入 · `transition_plugin_registry`(`ITransitionPlugin`).
 
-知识库最近全量对照代码复核:**2026-08-13**(3D 群像/正面、账号运营插件、素材库本机化).
+知识库最近全量对照代码复核:**2026-08-19**(AI 剪辑差异化 + 剪辑↔画布 round-trip)。

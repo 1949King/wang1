@@ -187,7 +187,7 @@ def prebake_overlay_clips_for_export(
                 rotation_keyframes=item.get("_rot_kfs") or None,
             )
         except Exception as e:
-            print(f"叠轨关键帧分段失败，回退静态: {e}")
+            logger.error(f'叠轨关键帧分段失败，回退静态: {e}')
             neu = dict(item)
             neu.pop("_prebake_transform", None)
             out.append(neu)
@@ -262,7 +262,7 @@ def finalize_multitrack_export(
                     baked_temps.append(it["_trim_temp"])
             ok_ov = overlay_timeline_videos(current, overlays, ov_out, ffmpeg_path, (bw, bh))
             if not ok_ov:
-                print("叠轨连续表达式失败，回退分段静态")
+                logger.error('叠轨连续表达式失败，回退分段静态')
                 for it in overlays_raw:
                     if it.get("_x_kfs") or it.get("_y_kfs") or it.get("_sc_kfs") or it.get("_rot_kfs"):
                         it["_prebake_transform"] = True
@@ -295,7 +295,7 @@ def finalize_multitrack_export(
                     logger.debug("删除叠轨失败临时文件失败: %s", e)
         except Exception as e:
             warnings.append(f"叠轨跳过: {e}")
-            print(f"叠轨导出跳过: {e}")
+            logger.info(f'叠轨导出跳过: {e}')
         finally:
             for tp in baked_temps:
                 try:
@@ -337,7 +337,7 @@ def finalize_multitrack_export(
                 logger.debug("删除混音失败临时文件失败: %s", e)
         except Exception as e:
             warnings.append(f"音频轨跳过: {e}")
-            print(f"音频轨导出跳过: {e}")
+            logger.info(f'音频轨导出跳过: {e}')
 
     if warnings:
         notify("；".join(warnings))
@@ -456,7 +456,7 @@ def build_edited_video(editor, output_path: str) -> bool:
                         if len(filtered_segments) >= 2:
                             transitions.append({"type": "淡入淡出", "duration": 0.1})
                 except Exception as e:
-                    print(f"生成空隙黑场失败: {e}")
+                    logger.error(f'生成空隙黑场失败: {e}')
 
             if out_p - in_p <= 0.01:
                 continue
@@ -501,7 +501,7 @@ def build_edited_video(editor, output_path: str) -> bool:
                         tmp_segments.append(sseg)
                         final_seg = sseg
                 except Exception as e:
-                    print(f"变速烘焙失败: {e}")
+                    logger.error(f'变速烘焙失败: {e}')
             # 音量（片段 × 轨道）；若有 volume 关键帧则交给 transform 烘焙
             vol = float(clip.get("volume", 1.0) or 1.0) * editor._track_volume_for_clip(clip)
             vol_kfs = collect_clip_keyframes(clip, "volume")
@@ -522,7 +522,7 @@ def build_edited_video(editor, output_path: str) -> bool:
                         tmp_segments.append(vseg)
                         final_seg = vseg
                 except Exception as e:
-                    print(f"音量烘焙失败: {e}")
+                    logger.error(f'音量烘焙失败: {e}')
 
             # 缩放 / 不透明度（静态 + 关键帧）→ 成片
             scale = 1.0
@@ -598,7 +598,7 @@ def build_edited_video(editor, output_path: str) -> bool:
                     tmp_segments.append(tseg)
                     final_seg = tseg
                 else:
-                    print("变换/关键帧烘焙跳过（保持原片）")
+                    logger.info('变换/关键帧烘焙跳过（保持原片）')
 
             filtered_segments.append(final_seg)
             seg_dur = (out_p - in_p) / max(0.05, speed)

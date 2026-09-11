@@ -3,6 +3,9 @@ import traceback
 import os
 from datetime import datetime
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.utils.error_handling")
+
 # ===================== 崩溃容错与异常处理 =====================
 def setup_exception_handler():
     """设置全局异常处理器"""
@@ -24,10 +27,10 @@ def setup_exception_handler():
                 f.write("\n" + "="*80 + "\n")
         except Exception as e:
             # 日志写入失败时至少打印到 stderr，避免异常信息完全丢失
-            print(f"[CRASH] 全局异常处理器写入日志失败: {e}", file=sys.stderr)
+            logger.error(f'[CRASH] 全局异常处理器写入日志失败: {e}')
         
         # 打印错误信息
-        print(f"\n未捕获的异常: {exc_type.__name__}: {exc_value}")
+        logger.error(f'\n未捕获的异常: {exc_type.__name__}: {exc_value}')
         traceback.print_tb(exc_traceback)
     
     # 设置全局异常处理器

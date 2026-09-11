@@ -12,6 +12,9 @@ from enum import Enum
 # 导入插件系统核心接口
 import sys
 import os
+import logging
+logger = logging.getLogger("AI短剧编辑器.plugins.ai_effects_plugin.main")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 try:
@@ -136,20 +139,20 @@ class Plugin(IEffectPlugin):
             os.makedirs(models_path, exist_ok=True)
             os.makedirs(cache_dir, exist_ok=True)
             
-            print(f"[AI特效] 初始化中... GPU加速: {'开启' if gpu_enabled else '关闭'}")
-            print(f"[AI特效] 模型路径: {models_path}")
-            print(f"[AI特效] 缓存路径: {cache_dir}")
+            logger.info(f"[AI特效] 初始化中... GPU加速: {('开启' if gpu_enabled else '关闭')}")
+            logger.info(f'[AI特效] 模型路径: {models_path}')
+            logger.info(f'[AI特效] 缓存路径: {cache_dir}')
             
             # 初始化所有特效处理器（懒导入）
             self._init_effect_processors(models_path, gpu_enabled, cache_dir)
             
             self._initialized = True
-            print("[AI特效] ✅ 初始化完成")
+            logger.info('[AI特效] ✅ 初始化完成')
             return True
             
         except Exception as e:
             self._last_error = str(e)
-            print(f"[AI特效] ❌ 初始化失败: {str(e)}")
+            logger.error(f'[AI特效] ❌ 初始化失败: {str(e)}')
             return False
     
     def _init_effect_processors(self, models_path: str, gpu_enabled: bool, cache_dir: str):
@@ -176,7 +179,7 @@ class Plugin(IEffectPlugin):
                 )
             except Exception as e:
                 errors.append(f"{effect_type.value}: {e}")
-                print(f"[AI特效] 特效 {effect_type.value} 加载失败: {e}")
+                logger.error(f'[AI特效] 特效 {effect_type.value} 加载失败: {e}')
         if errors and not self._effects:
             raise RuntimeError("全部特效子模块加载失败: " + "; ".join(errors))
         if errors:
@@ -190,7 +193,7 @@ class Plugin(IEffectPlugin):
             bool: 是否成功关闭
         """
         try:
-            print("[AI特效] 正在关闭...")
+            logger.info('[AI特效] 正在关闭...')
             
             # 卸载所有模型
             for effect_type, processor in self._effects.items():
@@ -198,9 +201,9 @@ class Plugin(IEffectPlugin):
                     try:
                         processor.unload_model()
                         self._models_loaded[effect_type] = False
-                        print(f"[AI特效] 已卸载 {effect_type.value} 模型")
+                        logger.info(f'[AI特效] 已卸载 {effect_type.value} 模型')
                     except Exception as e:
-                        print(f"[AI特效] 卸载 {effect_type.value} 失败: {e}")
+                        logger.error(f'[AI特效] 卸载 {effect_type.value} 失败: {e}')
             
             # 清空状态
             self._effects.clear()
@@ -209,11 +212,11 @@ class Plugin(IEffectPlugin):
             self._callbacks.clear()
             self._initialized = False
             
-            print("[AI特效] ✅ 已关闭")
+            logger.info('[AI特效] ✅ 已关闭')
             return True
             
         except Exception as e:
-            print(f"[AI特效] ❌ 关闭失败: {str(e)}")
+            logger.error(f'[AI特效] ❌ 关闭失败: {str(e)}')
             return False
     
     def get_ui_config(self) -> Dict[str, Any]:
@@ -492,11 +495,11 @@ class Plugin(IEffectPlugin):
             
             # 确保模型已加载
             if not self._models_loaded.get(self._current_effect, False):
-                print(f"[AI特效] 正在加载 {self._current_effect.value} 模型...")
+                logger.info(f'[AI特效] 正在加载 {self._current_effect.value} 模型...')
                 success = processor.load_model()
                 if success:
                     self._models_loaded[self._current_effect] = True
-                    print(f"[AI特效] ✅ {self._current_effect.value} 模型加载完成")
+                    logger.info(f'[AI特效] ✅ {self._current_effect.value} 模型加载完成')
                 else:
                     raise RuntimeError(f"{self._current_effect.value} 模型加载失败")
             
@@ -507,7 +510,7 @@ class Plugin(IEffectPlugin):
             return result
             
         except Exception as e:
-            print(f"[AI特效] ❌ 应用特效失败: {str(e)}")
+            logger.error(f'[AI特效] ❌ 应用特效失败: {str(e)}')
             import traceback
             traceback.print_exc()
             # 修复：此前失败只打印+原样返回输入帧，调用方（UI 线程）拿到"结果"后
@@ -759,19 +762,20 @@ class Plugin(IEffectPlugin):
     
     def on_enable(self) -> None:
         """插件启用回调"""
-        print("[AI特效] 插件已启用 🎨")
+        logger.info('[AI特效] 插件已启用 🎨')
     
     def on_disable(self) -> None:
         """插件禁用回调"""
-        print("[AI特效] 插件已禁用")
+        logger.info('[AI特效] 插件已禁用')
         # 可选：卸载所有模型以释放显存
         for effect_type in list(self._models_loaded.keys()):
             if self._models_loaded[effect_type]:
                 try:
                     self._effects[effect_type].unload_model()
                     self._models_loaded[effect_type] = False
-                except:
-                    pass
+                except Exception as e:
+                    # 卸载模型失败不应中断禁用流程，记录日志便于排查
+                    logger.warning('[AI特效] 卸载模型失败: %s', e)
     
     def validate(self) -> bool:
         """验证插件配置和环境依赖"""
@@ -784,13 +788,13 @@ class Plugin(IEffectPlugin):
             # 检查PyTorch（可选但推荐）
             try:
                 import torch
-                print(f"[AI特效] PyTorch版本: {torch.__version__}, CUDA可用: {torch.cuda.is_available()}")
+                logger.info(f'[AI特效] PyTorch版本: {torch.__version__}, CUDA可用: {torch.cuda.is_available()}')
             except ImportError:
-                print("[AI特效] ⚠️ PyTorch未安装，部分功能将使用CPU模式")
+                logger.info('[AI特效] ⚠️ PyTorch未安装，部分功能将使用CPU模式')
             
             return True
         except ImportError as e:
-            print(f"[AI特效] ❌ 依赖检查失败: {e}")
+            logger.error(f'[AI特效] ❌ 依赖检查失败: {e}')
             return False
     
     def get_supported_effects(self) -> List[Dict[str, str]]:
@@ -823,7 +827,9 @@ class Plugin(IEffectPlugin):
                     self._models_loaded[et] = True
                 return success
             return True
-        except:
+        except Exception as e:
+            # 未知特效类型或加载异常均视为预加载失败，记录日志便于排查
+            logger.warning('[AI特效] 预加载模型失败: %s', e)
             return False
     
     def register_callback(self, event: str, callback: Callable) -> None:

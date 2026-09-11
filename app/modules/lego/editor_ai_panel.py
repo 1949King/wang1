@@ -45,11 +45,13 @@ class _AiPanelHost(Protocol):
     def _on_ai_clip(self) -> None: ...
     def _funclip_process(self) -> None: ...
     def _autoclip_process(self) -> None: ...
+    def _lossless_trim_selected(self) -> None: ...
     def _videofusion_process(self) -> None: ...
     def _lora_edit_process(self) -> None: ...
     def _generate_ai_subtitles(self) -> None: ...
     def _enhance_audio(self) -> None: ...
     def _on_send_clip_to_canvas(self) -> None: ...
+    def _on_canvas_roundtrip_suggest(self) -> None: ...
 
 
 def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
@@ -174,9 +176,10 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
     # 调色滤镜组合、loudnorm+压缩，并无 LoRA 或声源分离。改成不虚标能力的
     # 文案（具体实现说明见各自弹窗）。
     tools = [
-        ("🎬 FunClip", "场景检测\n自动分段", "#1e6bde", self._funclip_process),
-        ("⚡ AutoClip", "高光识别\n多镜头组接", "#4caf50", self._autoclip_process),
-        ("✨ Fusion", "视频修复\n画质增强", "#ff9800", self._videofusion_process),
+        ("🎬 FunClip", "场景建议\n勾选后入轨", "#1e6bde", self._funclip_process),
+        ("⚡ AutoClip", "高光建议\n勾选后入轨", "#4caf50", self._autoclip_process),
+        ("✂ 无损裁切", "入出点 copy\n确认后入轨", "#64748b", self._lossless_trim_selected),
+        ("✨ Fusion", "FFmpeg 锐化\n确认后入轨", "#ff9800", self._videofusion_process),
         ("🎨 风格化", "调色滤镜\n（非LoRA/AI迁移）", "#9c27b0", self._lora_edit_process),
         ("📝 字幕AI", "语音识别\n自动字幕", "#22c55e", self._generate_ai_subtitles),
         ("🔊 音频增强", "响度/压缩\n（非人声分离）", "#6366f1", self._enhance_audio),
@@ -200,7 +203,7 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
 
     canvas_sec = self._sect("🎨 AI 画布联动")
     canvas_lo = canvas_sec.layout()
-    canvas_hint = QLabel("把当前选中片段推到 AI 画布（右下角「来自剪辑」可下载导入）")
+    canvas_hint = QLabel("选中片段会落到画布源节点（带 clip_id）。AI 联动建议只出清单，勾选后才推送。")
     canvas_hint.setStyleSheet("color:#888;font-size:10px;")
     canvas_hint.setWordWrap(True)
     canvas_lo.addWidget(canvas_hint)
@@ -211,6 +214,13 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
     )
     to_canvas_btn.clicked.connect(self._on_send_clip_to_canvas)
     canvas_lo.addWidget(to_canvas_btn)
+    roundtrip_btn = QPushButton("AI 联动建议（勾选后推画布）")
+    roundtrip_btn.setStyleSheet(
+        "QPushButton{background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;"
+        "padding:8px;font-size:11px;}QPushButton:hover{background:#1e293b;}"
+    )
+    roundtrip_btn.clicked.connect(self._on_canvas_roundtrip_suggest)
+    canvas_lo.addWidget(roundtrip_btn)
     l.addWidget(canvas_sec)
 
     hs = self._sect("📋 处理历史")

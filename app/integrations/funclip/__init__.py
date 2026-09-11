@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger("AI短剧编辑器.integrations.funclip")
+
 # FunClip 集成模块
 
 class FunClipIntegration:
@@ -20,9 +23,9 @@ class FunClipIntegration:
             # 加载Whisper模型用于语音识别
             self.whisper_model = whisper.load_model("base")
             self.initialized = True
-            print("FunClip初始化成功")
+            logger.info('FunClip初始化成功')
         except Exception as e:
-            print(f"FunClip初始化失败: {e}")
+            logger.error(f'FunClip初始化失败: {e}')
             self.initialized = False
     
     def auto_edit(self, video_path, **kwargs):
@@ -99,7 +102,7 @@ class FunClipIntegration:
                 "subtitles": subtitles
             }
         except Exception as e:
-            print(f"自动剪辑失败: {e}")
+            logger.error(f'自动剪辑失败: {e}')
             return {
                 "success": False,
                 "error": str(e)

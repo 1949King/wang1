@@ -413,7 +413,9 @@ sequenceDiagram
 - AI 引擎路由策略：云端 API 优先 → Ollama 本地回退 → FFmpeg 占位
 - `llm_clipper`：输入视频+提示词，输出剪辑段落（时间区间+理由）
 
-### 十二、账号矩阵发布流程（account.\*） ⚠️ 待修正：MatrixPublishSkill 与 PublishContentSkill 画成并行，实际独立
+### 十二、账号矩阵发布流程（account.\*） — **2026-08-19 功能已卸**
+
+能力 id 仍注册：`account.collect_data` / `account.optimize_strategy` / `account.publish`，一律 `success=False`（「插件功能已卸，仅保留接口」）。下列原流程图仅作历史对照。
 
 ```mermaid
 graph TB

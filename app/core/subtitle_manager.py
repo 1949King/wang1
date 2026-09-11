@@ -2,6 +2,9 @@ import os
 import re
 import numpy as np
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.subtitle_manager")
+
 class SubtitleManager:
     def __init__(self):
         self.subtitles = []
@@ -171,7 +174,7 @@ class SubtitleManager:
             for sub in imported:
                 self.subtitles.append(sub)
         except Exception as e:
-            print(f"导入字幕失败: {e}")
+            logger.error(f'导入字幕失败: {e}')
         return imported
 
     def _parse_srt(self, content):
@@ -214,7 +217,7 @@ class SubtitleManager:
                     f.write(f"{i}\n{st} --> {et}\n{sub['text']}\n\n")
             return True
         except Exception as e:
-            print(f"导出字幕失败: {e}")
+            logger.error(f'导出字幕失败: {e}')
             return False
 
     def _sec_to_ass(self, sec: float) -> str:
@@ -369,7 +372,7 @@ class SubtitleManager:
                 f.write("\n".join(lines) + "\n")
             return True
         except Exception as e:
-            print(f"导出 ASS 字幕失败: {e}")
+            logger.error(f'导出 ASS 字幕失败: {e}')
             return False
 
     def _build_ass_anim_tag(self, anim_in, anim_out, dur_ms, px, py, total_dur_ms) -> str:

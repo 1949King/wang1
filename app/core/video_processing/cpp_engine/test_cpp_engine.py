@@ -25,6 +25,9 @@ from app.core.video_processing.cpp_engine.performance_optimizer import (
 )
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.video_processing.cpp_engine.test_cpp_engine")
+
 class TestCppEngine(unittest.TestCase):
     """C++ 引擎测试"""
     
@@ -37,7 +40,7 @@ class TestCppEngine(unittest.TestCase):
     
     def test_engine_availability(self):
         """测试引擎可用性"""
-        print(f"\nC++ 引擎可用: {self.engine_available}")
+        logger.info(f'\nC++ 引擎可用: {self.engine_available}')
         self.assertIsInstance(self.engine_available, bool)
     
     @unittest.skipUnless(is_cpp_engine_available(), "C++ 引擎不可用")
@@ -49,16 +52,16 @@ class TestCppEngine(unittest.TestCase):
         if os.path.exists(test_video):
             info = self.engine.analyze_video(test_video)
             self.assertIsNotNone(info)
-            print(f"\n视频信息:")
-            print(f"  分辨率: {info.width}x{info.height}")
-            print(f"  帧率: {info.fps}")
-            print(f"  时长: {info.duration}秒")
+            logger.info(f'\n视频信息:')
+            logger.info(f'  分辨率: {info.width}x{info.height}')
+            logger.info(f'  帧率: {info.fps}')
+            logger.info(f'  时长: {info.duration}秒')
     
     @unittest.skipUnless(is_cpp_engine_available(), "C++ 引擎不可用")
     def test_gpu_detection(self):
         """测试 GPU 检测"""
         gpu_encoder = self.engine.get_gpu_encoder()
-        print(f"\nGPU 编码器: {gpu_encoder}")
+        logger.info(f'\nGPU 编码器: {gpu_encoder}')
         self.assertIsInstance(gpu_encoder, str)
     
     def test_performance_optimizer(self):
@@ -68,29 +71,29 @@ class TestCppEngine(unittest.TestCase):
         
         # 获取系统资源
         resources = optimizer.get_system_resources()
-        print(f"\n系统资源:")
-        print(f"  CPU 核心数: {resources.cpu_count}")
-        print(f"  CPU 使用率: {resources.cpu_usage}%")
-        print(f"  内存总量: {resources.memory_total:.0f} MB")
-        print(f"  内存使用: {resources.memory_used:.0f} MB")
-        print(f"  GPU 可用: {resources.gpu_available}")
+        logger.info(f'\n系统资源:')
+        logger.info(f'  CPU 核心数: {resources.cpu_count}')
+        logger.info(f'  CPU 使用率: {resources.cpu_usage}%')
+        logger.info(f'  内存总量: {resources.memory_total:.0f} MB')
+        logger.info(f'  内存使用: {resources.memory_used:.0f} MB')
+        logger.info(f'  GPU 可用: {resources.gpu_available}')
         if resources.gpu_name:
-            print(f"  GPU 名称: {resources.gpu_name}")
+            logger.info(f'  GPU 名称: {resources.gpu_name}')
         
         # 获取最优配置
         config = optimizer.get_optimal_config()
-        print(f"\n最优配置:")
-        print(f"  线程数: {config.thread_count}")
-        print(f"  GPU 启用: {config.gpu_enabled}")
-        print(f"  GPU 编码器: {config.gpu_encoder}")
-        print(f"  缓存大小: {config.cache_size_mb} MB")
-        print(f"  批量大小: {config.batch_size}")
-        print(f"  质量预设: {config.quality_preset}")
+        logger.info(f'\n最优配置:')
+        logger.info(f'  线程数: {config.thread_count}')
+        logger.info(f'  GPU 启用: {config.gpu_enabled}')
+        logger.info(f'  GPU 编码器: {config.gpu_encoder}')
+        logger.info(f'  缓存大小: {config.cache_size_mb} MB')
+        logger.info(f'  批量大小: {config.batch_size}')
+        logger.info(f'  质量预设: {config.quality_preset}')
         
         # 获取性能报告
         report = optimizer.get_performance_report()
-        print(f"\n性能报告:")
-        print(f"  建议: {report['recommendations']}")
+        logger.info(f'\n性能报告:')
+        logger.info(f"  建议: {report['recommendations']}")
 
 
 class TestPerformanceOptimizer(unittest.TestCase):
@@ -107,10 +110,10 @@ class TestPerformanceOptimizer(unittest.TestCase):
             resolution=(3840, 2160)
         )
         
-        print(f"\n4K 导出配置:")
-        print(f"  质量预设: {config.quality_preset}")
-        print(f"  线程数: {config.thread_count}")
-        print(f"  批量大小: {config.batch_size}")
+        logger.info(f'\n4K 导出配置:')
+        logger.info(f'  质量预设: {config.quality_preset}')
+        logger.info(f'  线程数: {config.thread_count}')
+        logger.info(f'  批量大小: {config.batch_size}')
         
         self.assertEqual(config.quality_preset, "medium")
     
@@ -121,9 +124,9 @@ class TestPerformanceOptimizer(unittest.TestCase):
             resolution=(1920, 1080)
         )
         
-        print(f"\n1080p 导出配置:")
-        print(f"  质量预设: {config.quality_preset}")
-        print(f"  线程数: {config.thread_count}")
+        logger.info(f'\n1080p 导出配置:')
+        logger.info(f'  质量预设: {config.quality_preset}')
+        logger.info(f'  线程数: {config.thread_count}')
         
         self.assertEqual(config.quality_preset, "fast")
     
@@ -138,17 +141,17 @@ class TestPerformanceOptimizer(unittest.TestCase):
             config=config
         )
         
-        print(f"\n处理时间估算:")
-        print(f"  1080p 30 秒视频: {estimated_time:.1f} 秒")
+        logger.info(f'\n处理时间估算:')
+        logger.info(f'  1080p 30 秒视频: {estimated_time:.1f} 秒')
         
         self.assertGreater(estimated_time, 0)
 
 
 def run_tests():
     """运行测试"""
-    print("=" * 60)
-    print("Py+C++ 混合内核测试")
-    print("=" * 60)
+    logger.info('=' * 60)
+    logger.info('Py+C++ 混合内核测试')
+    logger.info('=' * 60)
     
     # 创建测试套件
     loader = unittest.TestLoader()
@@ -163,12 +166,12 @@ def run_tests():
     result = runner.run(suite)
     
     # 输出结果
-    print("\n" + "=" * 60)
-    print(f"测试结果: {result.testsRun} 个测试")
-    print(f"成功: {result.testsRun - len(result.failures) - len(result.errors)}")
-    print(f"失败: {len(result.failures)}")
-    print(f"错误: {len(result.errors)}")
-    print("=" * 60)
+    logger.info('\n' + '=' * 60)
+    logger.info(f'测试结果: {result.testsRun} 个测试')
+    logger.error(f'成功: {result.testsRun - len(result.failures) - len(result.errors)}')
+    logger.error(f'失败: {len(result.failures)}')
+    logger.error(f'错误: {len(result.errors)}')
+    logger.info('=' * 60)
     
     return result.wasSuccessful()
 

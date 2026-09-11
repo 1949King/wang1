@@ -83,7 +83,7 @@ def plugin_get_video_info(video_path, ffmpeg_executable):
         size_mb = round(os.path.getsize(video_path) / (1024*1024), 2)
         return f"{total_sec}s | {size_mb}MB"
     except Exception as e:
-        print(f"获取视频信息失败: {e}")
+        logger.error(f'获取视频信息失败: {e}')
         try:
             # 至少返回文件大小
             size_mb = round(os.path.getsize(video_path) / (1024*1024), 2)
@@ -116,11 +116,11 @@ def plugin_video_clip(input_path, output_path, start_time, duration, speed=1.0, 
         # 修复：此前不检查 returncode，ffmpeg 报错也会 return True（假成功）
         if result.returncode != 0 or not os.path.exists(output_path):
             stderr = (result.stderr or b"").decode("utf-8", errors="ignore")[-500:]
-            print(f"视频剪辑失败: ffmpeg 返回码 {result.returncode}\n{stderr}")
+            logger.error(f'视频剪辑失败: ffmpeg 返回码 {result.returncode}\n{stderr}')
             return False
         return True
     except Exception as e:
-        print(f"视频剪辑失败: {e}")
+        logger.error(f'视频剪辑失败: {e}')
         return False
 
 @register_plugin("视频合并", "视频处理")
@@ -156,11 +156,11 @@ def plugin_video_merge(input_files, output_path, gpu_encoder="libx264", ffmpeg_e
         # 修复：此前不检查 returncode，ffmpeg 报错也会 return True（假成功）
         if result.returncode != 0 or not os.path.exists(output_path):
             stderr = (result.stderr or b"").decode("utf-8", errors="ignore")[-500:]
-            print(f"视频合并失败: ffmpeg 返回码 {result.returncode}\n{stderr}")
+            logger.error(f'视频合并失败: ffmpeg 返回码 {result.returncode}\n{stderr}')
             return False
         return True
     except Exception as e:
-        print(f"视频合并失败: {e}")
+        logger.error(f'视频合并失败: {e}')
         return False
 
 # 插件管理类
@@ -180,7 +180,7 @@ class PluginManager:
                 plugin_name = os.path.basename(plugin_file).replace(".py", "")
                 self.installed_plugins[plugin_name] = plugin_file
             except Exception as e:
-                print(f"加载插件失败: {e}")
+                logger.error(f'加载插件失败: {e}')
     
     def install_plugin(self, plugin_name, plugin_code):
         """安装新插件（通过安全沙箱执行）"""
@@ -323,7 +323,7 @@ class PluginManager:
             
             return True
         except Exception as e:
-            print(f"卸载插件失败: {e}")
+            logger.error(f'卸载插件失败: {e}')
             return False
     
     def update_plugin(self, plugin_name, plugin_code):
@@ -334,7 +334,7 @@ class PluginManager:
             # 再安装新插件
             return self.install_plugin(plugin_name, plugin_code)
         except Exception as e:
-            print(f"更新插件失败: {e}")
+            logger.error(f'更新插件失败: {e}')
             return False
     
     def get_plugin_info(self, plugin_name):
@@ -359,4 +359,4 @@ class PluginManager:
 try:
     from .full_video_editor import FullVideoEditorPlugin
 except ImportError:
-    print("警告: 无法导入FullVideoEditorPlugin")
+    logger.warning('警告: 无法导入FullVideoEditorPlugin')

@@ -29,6 +29,17 @@ from .base_module import BaseModule
 logger = logging.getLogger(__name__)
 
 
+def _safe_import_core(name):
+    """按分层约定引入 core 层检测能力；缺失时返回 None，避免设置页崩溃"""
+    try:
+        return __import__("app.core." + name, fromlist=["*"])
+    except Exception:
+        try:
+            return __import__("core." + name, fromlist=["*"])
+        except Exception:
+            return None
+
+
 class ModernLineEdit(QLineEdit):
     """现代化输入框"""
     
@@ -1332,7 +1343,7 @@ class SettingsModule(BaseModule):
                 email_verification_service.save_config(config)
                 smtp_saved = True
         except Exception as e:
-            print(f"[Settings] SMTP 保存失败: {e}")
+            logger.error(f'[Settings] SMTP 保存失败: {e}')
 
         # ── 第4步：发射 settings_changed 信号，通知外部监听者 ──
         self.settings_changed.emit("all", {
@@ -2551,6 +2562,24 @@ class SettingsModule(BaseModule):
         out.addStretch()
 
         # ═══════════════════════════════════════════════════════
+        # 4b. 一键环境诊断（复用 core 检测能力，只读不改配置）
+        # ═══════════════════════════════════════════════════════
+        diag_btn = QPushButton("🧰  一键环境诊断")
+        diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        diag_btn.setStyleSheet(
+            "QPushButton {"
+            "  background-color: #1a2a4a; color: #6c9fff; border: 1px solid #2a3a5a;"
+            "  border-radius: 10px; padding: 10px 18px; font-size: 13px; font-weight: 600;"
+            "}"
+            "QPushButton:hover { background-color: #223a5a; color: #8fb4ff; }"
+        )
+        diag_btn.clicked.connect(lambda: EnvironmentDiagnosticDialog(
+            self._get_diagnostic_anchor()
+        ).exec())
+        out.addWidget(diag_btn)
+        out.addSpacing(8)
+
+        # ═══════════════════════════════════════════════════════
         # 4. 版权
         # ═══════════════════════════════════════════════════════
         copyright_lbl = QLabel("© 2026 拾光剪影 · 保留所有权利")
@@ -2559,6 +2588,203 @@ class SettingsModule(BaseModule):
         out.addWidget(copyright_lbl)
 
         return widget
+
+    def _get_diagnostic_anchor(self):
+        """返回环境诊断对话框的安全父窗口（当前模块所在顶层窗口，未找到则 None）"""
+        w = self.window()
+        return w if w is not None and w is not self else self
+
+
+class EnvironmentDiagnosticDialog(QDialog):
+    """一键环境诊断对话框 — 只读检测 FFmpeg / FFprobe / 硬件加速 / AI Provider
+
+    复用 core 层既有检测能力（FFmpegTool、HardwareDetector、AIEngine.get_available_providers），
+    不重复实现检测逻辑；结果仅供展示与引导，不修改任何配置。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🧰 环境诊断")
+        self.setMinimumSize(560, 460)
+        self.setStyleSheet("background-color: #0f1115; color: #d0d4df;")
+        self._build_ui()
+        self._run_diagnostics()
+
+    def _build_ui(self):
+        lo = QVBoxLayout(self)
+        lo.setContentsMargins(24, 20, 24, 16)
+        lo.setSpacing(10)
+
+        title = QLabel("🧰 环境诊断")
+        title.setStyleSheet("font-size: 20px; font-weight: 900; color: #6c9fff; background: transparent;")
+        lo.addWidget(title)
+
+        tip = QLabel("检测视频剪辑与 AI 生成所需的关键依赖，只读不修改配置。")
+        tip.setStyleSheet("color: #8a8fa0; font-size: 12px; background: transparent;")
+        tip.setWordWrap(True)
+        lo.addWidget(tip)
+        lo.addSpacing(6)
+
+        # 诊断条目容器
+        self._rows: List = []
+        for key, label in [
+            ("ffmpeg", "FFmpeg 视频处理"),
+            ("ffprobe", "FFprobe 媒体探测"),
+            ("gpu", "GPU 硬件加速"),
+            ("ai", "AI 能力（本地/云端模型）"),
+        ]:
+            row = QFrame()
+            row.setStyleSheet("QFrame { background-color: #161a22; border: 1px solid #232833; border-radius: 10px; }")
+            rlo = QHBoxLayout(row)
+            rlo.setContentsMargins(16, 12, 16, 12)
+            icon = QLabel("⏳")
+            icon.setStyleSheet("font-size: 16px; background: transparent;")
+            name = QLabel(label)
+            name.setStyleSheet("color: #c8ccd8; font-size: 13px; font-weight: 600; background: transparent;")
+            detail = QLabel("检测中…")
+            detail.setWordWrap(True)
+            detail.setStyleSheet("color: #8a8fa0; font-size: 11px; background: transparent;")
+            rlo.addWidget(icon)
+            rlo.addWidget(name, 1)
+            rlo.addWidget(detail, 2)
+            lo.addWidget(row)
+            self._rows.append({"key": key, "icon": icon, "detail": detail})
+
+        lo.addStretch()
+
+        hint = QLabel("若某项显示异常，可到对应配置页补齐后重试；或点击下方 \"重新检测\"。")
+        hint.setStyleSheet("color: #606878; font-size: 11px; background: transparent;")
+        hint.setWordWrap(True)
+        lo.addWidget(hint)
+
+        btn_row = QHBoxLayout()
+        recheck_btn = QPushButton("🔄 重新检测")
+        recheck_btn.clicked.connect(self._run_diagnostics)
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(recheck_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        lo.addLayout(btn_row)
+
+        self._summary = QLabel("")
+        self._summary.setStyleSheet("color: #404860; font-size: 12px; font-weight: 600; background: transparent;")
+        self._summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lo.addWidget(self._summary)
+
+    # ── 核心：驱动 core 层检测并渲染结果 ──
+    def _run_diagnostics(self):
+        for row in self._rows:
+            row["icon"].setText("⏳")
+            row["detail"].setText("检测中…")
+
+        rm = _safe_import_core("render_manager")
+        ai_mod = _safe_import_core("ai_engine")
+
+        # 1. FFmpeg / FFprobe
+        ffmpeg_path = ""
+        if rm and hasattr(rm, "FFmpegTool"):
+            try:
+                ffmpeg_path = rm.FFmpegTool.find_ffmpeg() or ""
+            except Exception as e:
+                logger.debug("检测 ffmpeg 路径失败: %s", e)
+        if ffmpeg_path:
+            self._set_row("ffmpeg", "✅", f"已就绪：{ffmpeg_path}")
+        else:
+            self._set_row("ffmpeg", "❌", "未找到 ffmpeg，导出视频将不可用。请安装 FFmpeg 或配置其路径。")
+
+        ffprobe_path = ""
+        if rm and hasattr(rm, "FFmpegTool"):
+            try:
+                ffprobe_path = rm.FFmpegTool.find_ffprobe() or ""
+            except Exception as e:
+                logger.debug("检测 ffprobe 路径失败: %s", e)
+        if ffprobe_path:
+            self._set_row("ffprobe", "✅", f"已就绪：{ffprobe_path}")
+        else:
+            self._set_row("ffprobe", "❌", "未找到 ffprobe，媒体信息探测功能将受限。")
+
+        # 2. GPU 硬件加速
+        if rm and hasattr(rm, "HardwareDetector"):
+            try:
+                hw = rm.HardwareDetector.detect()
+                if hw.get("has_gpu"):
+                    enc = hw.get("available_encoders") or []
+                    self._set_row("gpu", "✅", f"已启用硬件加速（{hw.get('gpu_vendor', 'gpu')}）· 可用编码器: {', '.join(enc) if enc else '软件编码'}")
+                elif hw.get("available_encoders"):
+                    self._set_row("gpu", "⚡", f"软件编码（无独立 GPU 加速卡），但可用编码器: {', '.join(hw['available_encoders'])}")
+                else:
+                    self._set_row("gpu", "ℹ️", "未检测到 GPU 硬件加速，将使用 CPU 软件编码（较慢但兼容性最好）。")
+            except Exception as e:
+                logger.debug("检测 GPU 失败: %s", e)
+                self._set_row("gpu", "⚠️", "硬件加速检测失败，将回退软件编码。")
+        else:
+            self._set_row("gpu", "ℹ️", "检测模块不可用，无法读取硬件信息。")
+
+        # 3. AI 能力
+        if ai_mod:
+            try:
+                engine = ai_mod.AIEngine()
+                providers = engine.get_available_providers()
+                # 分离本地 / 云端便于展示
+                labels = ", ".join(providers) if providers else "无"
+                local = [p for p in providers if p == "ollama"]
+                cloud = [p for p in providers if p != "ollama"]
+                note = ""
+                if local and not cloud:
+                    note = "（仅本地 Ollama）"
+                elif cloud and not local:
+                    note = "（云端模型）"
+                elif local and cloud:
+                    note = "（本地 + 云端）"
+                status = "✅" if providers else "❌"
+                self._set_row("ai", status, f"可用模型: {labels}{note}" if providers else "未配置可用模型 — 请到模型设置中配置。")
+            except Exception as e:
+                logger.error("检测 AI 能力失败: %s", e, exc_info=True)
+                self._set_row("ai", "⚠️", f"AI 能力检测失败：{e}")
+        else:
+            self._set_row("ai", "ℹ️", "AI 引擎模块不可用。")
+
+        # 汇总
+        ok = sum(1 for r in self._rows if r["icon"].text() == "✅")
+        warn = sum(1 for r in self._rows if r["icon"].text() in ("⚠️", "⚡", "ℹ️"))
+        bad = sum(1 for r in self._rows if r["icon"].text() == "❌")
+        total = len(self._rows)
+        if bad == 0:
+            self._summary.setText(f"检测完成：{ok}/{total} 正常 · {warn} 项提示 · 环境基本可用")
+            self._summary.setStyleSheet("color: #3fb28a; background: transparent; font-size: 12px; font-weight: 600;")
+        else:
+            self._summary.setText(f"检测完成：{ok}/{total} 正常 · {bad} 项缺失（可能导致导出或 AI 功能异常）")
+            self._summary.setStyleSheet("color: #e0655a; background: transparent; font-size: 12px; font-weight: 600;")
+
+    def _set_row(self, key: str, icon: str, detail: str):
+        """按 key 更新某一行诊断条目的图标与详情"""
+        for row in self._rows:
+            if row["key"] == key:
+                row["icon"].setText(icon)
+                row["detail"].setText(detail)
+                return
+
+    # ── 启动时自动检测封装（供启动流程复用）──
+    @staticmethod
+    def startup_check(parent=None) -> bool:
+        """启动时快速检测关键依赖；仅对严重缺失（无 FFmpeg）弹一次性提示。返回 True 表示环境基本可用。"""
+        rm = _safe_import_core("render_manager")
+        if not rm or not hasattr(rm, "FFmpegTool"):
+            return True
+        try:
+            ffmpeg_path = rm.FFmpegTool.find_ffmpeg()
+            if not ffmpeg_path:
+                QMessageBox.warning(
+                    parent,
+                    "环境提示",
+                    "未检测到 FFmpeg，导出视频功能将不可用。\n\n"
+                    "建议在设置 → 关于 → 一键环境诊断中查看详情，或安装 FFmpeg 后重试。",
+                )
+                return False
+        except Exception as e:
+            logger.debug("启动时 FFmpeg 检测失败（不阻塞启动）: %s", e)
+        return True
 
 
 

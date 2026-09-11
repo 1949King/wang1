@@ -131,10 +131,10 @@ class FFmpegUtils:
     def _safe_print(msg: str) -> None:
         """Windows GBK 控制台下避免 emoji/特殊字符导致引擎初始化失败。"""
         try:
-            print(msg)
+            logger.info(msg)
         except Exception:
             try:
-                print(msg.encode("ascii", "replace").decode("ascii"))
+                logger.info(msg.encode('ascii', 'replace').decode('ascii'))
             except Exception as e:
                 logger.debug("备用打印失败: %s", e)
     
@@ -368,7 +368,7 @@ class FFmpegUtils:
             )
             
         except Exception as e:
-            print(f"获取视频信息失败: {e}")
+            logger.error(f'获取视频信息失败: {e}')
             return None
 
 
@@ -401,10 +401,10 @@ class ProfessionalVideoEngine:
         self.hardware_support = self._detect_hardware_support()
         
         try:
-            print(f"[OK] ProfessionalVideoEngine init")
-            print(f"   - FFmpeg: {self.ffmpeg_path}")
-            print(f"   - workers: {max_workers}")
-            print(f"   - HW: {self.hardware_support}")
+            logger.info(f'[OK] ProfessionalVideoEngine init')
+            logger.info(f'   - FFmpeg: {self.ffmpeg_path}')
+            logger.info(f'   - workers: {max_workers}')
+            logger.info(f'   - HW: {self.hardware_support}')
         except Exception as e:
             logger.debug("引擎初始化信息打印失败: %s", e)
     
@@ -536,8 +536,8 @@ class ProfessionalVideoEngine:
             base, ext = os.path.splitext(video_path)
             output_path = f"{base}_cut_{start_time:.0f}_{end_time:.0f}{ext}"
         
-        print(f"\n✂️ 无损剪辑: {os.path.basename(video_path)}")
-        print(f"   时间段: {start_time:.2f}s - {end_time:.2f}s")
+        logger.info(f'\n✂️ 无损剪辑: {os.path.basename(video_path)}')
+        logger.info(f'   时间段: {start_time:.2f}s - {end_time:.2f}s')
         
         try:
             # 获取视频信息
@@ -575,8 +575,8 @@ class ProfessionalVideoEngine:
             
             if success:
                 output_info = FFmpegUtils.get_video_info(output_path)
-                print(f"   [OK] 剪辑完成: {processing_time:.2f}s")
-                print(f"   输出: {output_path}")
+                logger.info(f'   [OK] 剪辑完成: {processing_time:.2f}s')
+                logger.info(f'   输出: {output_path}')
                 
                 return TaskResult(
                     task_id=task_id,
@@ -587,7 +587,7 @@ class ProfessionalVideoEngine:
                     output_info=output_info
                 )
             else:
-                print(f"   [FAIL] 剪辑失败: {error}")
+                logger.error(f'   [FAIL] 剪辑失败: {error}')
                 return TaskResult(
                     task_id=task_id,
                     success=False,
@@ -639,9 +639,9 @@ class ProfessionalVideoEngine:
         if settings is None:
             settings = self.get_optimal_settings()
         
-        print(f"\n🎬 重新编码剪辑: {os.path.basename(video_path)}")
-        print(f"   时间段: {start_time:.2f}s - {end_time:.2f}s")
-        print(f"   编码器: {settings.video_codec.value}")
+        logger.info(f'\n🎬 重新编码剪辑: {os.path.basename(video_path)}')
+        logger.info(f'   时间段: {start_time:.2f}s - {end_time:.2f}s')
+        logger.info(f'   编码器: {settings.video_codec.value}')
         
         try:
             video_info = FFmpegUtils.get_video_info(video_path)
@@ -715,8 +715,8 @@ class ProfessionalVideoEngine:
             
             if success:
                 output_info = FFmpegUtils.get_video_info(output_path)
-                print(f"   [OK] 剪辑完成: {processing_time:.2f}s")
-                print(f"   输出: {output_path}")
+                logger.info(f'   [OK] 剪辑完成: {processing_time:.2f}s')
+                logger.info(f'   输出: {output_path}')
                 
                 return TaskResult(
                     task_id=task_id,
@@ -727,7 +727,7 @@ class ProfessionalVideoEngine:
                     output_info=output_info
                 )
             else:
-                print(f"   [FAIL] 剪辑失败: {error}")
+                logger.error(f'   [FAIL] 剪辑失败: {error}')
                 return TaskResult(
                     task_id=task_id,
                     success=False,
@@ -771,7 +771,7 @@ class ProfessionalVideoEngine:
         if settings is None:
             settings = self.get_optimal_settings()
         
-        print(f"\n🔗 合并视频: {len(video_paths)}个文件")
+        logger.info(f'\n🔗 合并视频: {len(video_paths)}个文件')
         
         try:
             # 创建临时文件列表
@@ -835,7 +835,7 @@ class ProfessionalVideoEngine:
             
             if success:
                 output_info = FFmpegUtils.get_video_info(output_path)
-                print(f"   [OK] 合并完成: {processing_time:.2f}s")
+                logger.info(f'   [OK] 合并完成: {processing_time:.2f}s')
                 
                 return TaskResult(
                     task_id=task_id,
@@ -846,7 +846,7 @@ class ProfessionalVideoEngine:
                     output_info=output_info
                 )
             else:
-                print(f"   [FAIL] 合并失败: {error}")
+                logger.error(f'   [FAIL] 合并失败: {error}')
                 return TaskResult(
                     task_id=task_id,
                     success=False,
@@ -887,7 +887,7 @@ class ProfessionalVideoEngine:
         start_process = time.time()
         task_id = f"subtitles_{int(start_process * 1000)}"
         
-        print(f"\n📝 添加字幕: {os.path.basename(video_path)}")
+        logger.info(f'\n📝 添加字幕: {os.path.basename(video_path)}')
         
         try:
             # 默认样式
@@ -923,7 +923,7 @@ class ProfessionalVideoEngine:
             processing_time = time.time() - start_process
             
             if success:
-                print(f"   [OK] 字幕添加完成: {processing_time:.2f}s")
+                logger.info(f'   [OK] 字幕添加完成: {processing_time:.2f}s')
                 return TaskResult(
                     task_id=task_id,
                     success=True,
@@ -933,7 +933,7 @@ class ProfessionalVideoEngine:
                     output_info=None
                 )
             else:
-                print(f"   [FAIL] 字幕添加失败: {error}")
+                logger.error(f'   [FAIL] 字幕添加失败: {error}')
                 return TaskResult(
                     task_id=task_id,
                     success=False,
@@ -967,8 +967,8 @@ class ProfessionalVideoEngine:
         Returns:
             List[TaskResult]: 任务结果列表
         """
-        print(f"\n🚀 开始批量处理: {len(tasks)}个任务")
-        print(f"   并行工作线程: {self.max_workers}")
+        logger.info(f'\n🚀 开始批量处理: {len(tasks)}个任务')
+        logger.info(f'   并行工作线程: {self.max_workers}')
         
         results = []
         completed = 0
@@ -1040,17 +1040,17 @@ class ProfessionalVideoEngine:
         
         # 统计结果
         success_count = sum(1 for r in results if r.success)
-        print(f"\n📊 批量处理完成:")
-        print(f"   成功: {success_count}/{len(tasks)}")
-        print(f"   失败: {len(tasks) - success_count}/{len(tasks)}")
+        logger.info(f'\n📊 批量处理完成:')
+        logger.info(f'   成功: {success_count}/{len(tasks)}')
+        logger.error(f'   失败: {len(tasks) - success_count}/{len(tasks)}')
         
         return results
     
     def shutdown(self):
         """关闭引擎"""
-        print("\n🛑 关闭ProfessionalVideoEngine...")
+        logger.info('\n🛑 关闭ProfessionalVideoEngine...')
         self.executor.shutdown(wait=True)
-        print("   [OK] 引擎已关闭")
+        logger.info('   [OK] 引擎已关闭')
 
 
 # 使用示例

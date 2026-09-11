@@ -155,6 +155,10 @@ class AgentPipelineRouter:
                 if mtype in ("video", "image", "audio", "text"):
                     usable.append({**m, "type": mtype})
                 continue
+            # 有路径：仅「可识别类型」视为可用，unknown 类型直接过滤，
+            # 避免未知素材被误判为可用而错误触发剪辑业务线
+            if mtype not in ("video", "image", "audio", "text"):
+                continue
             # 有路径：检查存在性（容错，不存在也保留但标记）
             entry = {**m, "type": mtype, "exists": os.path.exists(path)}
             usable.append(entry)

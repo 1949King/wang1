@@ -8,6 +8,9 @@ import queue
 import threading
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.utils.thread_pool")
+
 class ThreadPool:
     """轻量级线程池 (原 modules.py:98-135)"""
     def __init__(self, max_workers=4):
@@ -32,7 +35,7 @@ class ThreadPool:
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"线程池工作线程错误: {e}")
+                logger.error(f'线程池工作线程错误: {e}')
 
     def submit(self, task):
         self.tasks.put(task)

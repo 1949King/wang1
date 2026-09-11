@@ -69,6 +69,7 @@ class EventType(Enum):
     MATERIAL_TO_TIMELINE = "material_to_timeline"  # 素材库 → 时间线拖拽推送
     TIMELINE_TO_CANVAS = "timeline_to_canvas"  # 剪辑选中片段 → AI 画布 outbox
     PROVIDER_ACTIVATED = "provider_activated"  # 模型管理激活 Provider（Agent/画布刷新选模）
+    CANVAS_TAURI_CLOSED = "canvas_tauri_closed"  # Tauri 桌面画布窗口关闭 → 主程序清理 canvas_runtime
 
     CUSTOM = "custom"
 

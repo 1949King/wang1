@@ -21,7 +21,7 @@ from datetime import datetime
 logger = logging.getLogger("AI短剧编辑器.autobackup")
 
 
-class AutoBackupManager(QObject if False else object):
+class AutoBackupManager(object):
     """
     自动备份管理器 (单例)
 

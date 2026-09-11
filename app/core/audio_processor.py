@@ -11,6 +11,9 @@ from threading import RLock
 import os
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.audio_processor")
+
 class AudioEffectType(Enum):
     """音频效果类型"""
     BGM_BEAT = "bgm_beat"
@@ -146,7 +149,7 @@ class BGMBeatDetector:
                 return self._beats
                 
             except Exception as e:
-                print(f"节拍检测失败: {e}")
+                logger.error(f'节拍检测失败: {e}')
                 return []
     
     def get_beats(self) -> List[BeatPoint]:
@@ -224,7 +227,7 @@ class VoiceCleanup:
                 return result
                 
             except Exception as e:
-                print(f"去除口水音失败: {e}")
+                logger.error(f'去除口水音失败: {e}')
                 return audio_data
 
 
@@ -288,7 +291,7 @@ class VoiceChanger:
             try:
                 profile = self._profiles.get(profile_name)
                 if not profile:
-                    print(f"声线配置不存在: {profile_name}")
+                    logger.info(f'声线配置不存在: {profile_name}')
                     return audio_data
                 
                 result = audio_data.copy().astype(np.float64)
@@ -342,7 +345,7 @@ class VoiceChanger:
                 return np.clip(result, -1.0, 1.0).astype(np.float32)
                 
             except Exception as e:
-                print(f"声线变声失败: {e}")
+                logger.error(f'声线变声失败: {e}')
                 return audio_data
     
     def _apply_band_eq(self, audio_data: np.ndarray, sample_rate: int,
@@ -453,7 +456,7 @@ class VoiceDucking:
                 return voice, ducked_bgm
                 
             except Exception as e:
-                print(f"人声闪避失败: {e}")
+                logger.error(f'人声闪避失败: {e}')
                 return voice_audio, bgm_audio
 
 

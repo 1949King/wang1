@@ -12,6 +12,7 @@ MLT DLL 来源: 安装 Shotcut 后，MLT DLL 位于:
   C:/Program Files/Shotcut/mlt++.dll
 """
 import os
+import sys
 import ctypes
 import logging
 from ctypes import c_char_p, c_int, c_int64, c_double, c_void_p, POINTER, byref, create_string_buffer
@@ -1422,8 +1423,9 @@ class MltTimeline:
                 if "max_volume" in line:
                     try:
                         volume_data.append(float(line.split('=')[1].strip()))
-                    except:
-                        pass
+                    except (ValueError, IndexError):
+                        # 个别 volumedetect 输出行无 "=" 分隔或无法转浮点，跳过
+                        logger.debug(f"无法解析音量行: {line.strip()}")
             
             # 简单的高光检测算法：基于时间分割和能量评分
             segment_duration = 5.0  # 每5秒一个片段
@@ -1659,12 +1661,13 @@ def is_video_engine_cpp_available() -> bool:
     try:
         from .cpp_engine import is_cpp_engine_available
         return is_cpp_engine_available()
-    except (ImportError, ValueError):
-        pass
+    except (ImportError, ValueError) as e:
+        logger.debug(f"[MLTEngineCpp] 包内相对导入 cpp_engine 失败: {e}")
     try:
         from cpp_engine import is_cpp_engine_available as _cpp_avail
         return _cpp_avail()
-    except ImportError:
+    except ImportError as e:
+        logger.debug(f"[MLTEngineCpp] 独立导入 cpp_engine 失败: {e}")
         return False
 
 

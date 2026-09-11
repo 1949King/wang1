@@ -20,12 +20,104 @@ export const easeOutBack = (t: number): number => {
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 };
 
-/** 变更此值会强制 Stage3D 重建旧场景中的人模网格 */
-export const RIG_MESH_STYLE = "bodykun-v4";
+/* 以下缓动函数对齐后端 app/core/keyframe_animation.py 的 EasingType 枚举，
+ * 便于后端点单动作把带 easing/bezier 的关键帧推到画布时语义一致。 */
+/** ease_in：二次加速 */
+export const easeIn = (t: number): number => t * t;
+/** ease_out：二次减速 */
+export const easeOut = (t: number): number => t * (2 - t);
+/** ease_in_out：smoothstep 缓入缓出 */
+export const easeInOut = (t: number): number => t * t * (3 - 2 * t);
+/** cubic_ease_in：三次加速 */
+export const easeCubicIn = (t: number): number => t * t * t;
+/** cubic_ease_out：三次减速 */
+export const easeCubicOut = (t: number): number => 1 - Math.pow(1 - t, 3);
+/** back：easeInBack（超出再回弹） */
+export const easeInBack = (t: number): number => {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return c3 * t * t * t - c1 * t * t;
+};
+/** bounce：easeOutBounce */
+export const easeOutBounce = (t: number): number => {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (t < 1 / d1) return n1 * t * t;
+  if (t < 2 / d1) return n1 * (t - 1.5 / d1) ** 2 + 0.75;
+  if (t < 2.5 / d1) return n1 * (t - 2.25 / d1) ** 2 + 0.9375;
+  return n1 * (t - 2.625 / d1) ** 2 + 0.984375;
+};
+/** elastic：easeOutElastic */
+export const easeOutElastic = (t: number): number => {
+  if (t === 0 || t === 1) return t;
+  const c4 = (2 * Math.PI) / 3;
+  return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+};
+
+/* ── 缓动命名 + 映射（对齐后端 app/core/keyframe_animation.py 的 EasingType） ──
+ * 后端 EasingType：linear / ease_in / ease_out / ease_in_out / bounce /
+ * elastic / back / cubic_ease_in / cubic_ease_out / cubic_ease_in_out。 */
+export type EasingName =
+  | "linear"
+  | "ease_in"
+  | "ease_out"
+  | "ease_in_out"
+  | "bounce"
+  | "elastic"
+  | "back"
+  | "cubic_ease_in"
+  | "cubic_ease_out"
+  | "cubic_ease_in_out";
+
+/** EasingName → 缓动函数（语义与后端 _apply_easing 一致） */
+export const EASING_FNS: Record<EasingName, (t: number) => number> = {
+  linear: easeLinear,
+  ease_in: easeIn,
+  ease_out: easeOut,
+  ease_in_out: easeInOut,
+  bounce: easeOutBounce,
+  elastic: easeOutElastic,
+  back: easeInBack,
+  cubic_ease_in: easeCubicIn,
+  cubic_ease_out: easeCubicOut,
+  cubic_ease_in_out: easeInOutCubic,
+};
+
+/** 缓动中文标签，供 UI 下拉展示 */
+export const EASING_LABELS: Record<EasingName, string> = {
+  linear: "线性",
+  ease_in: "缓入",
+  ease_out: "缓出",
+  ease_in_out: "缓入缓出",
+  bounce: "弹跳",
+  elastic: "弹性",
+  back: "回弹",
+  cubic_ease_in: "三次缓入",
+  cubic_ease_out: "三次缓出",
+  cubic_ease_in_out: "三次缓入缓出",
+};
+
+/** 缓动枚举顺序（供 UI 下拉按固定顺序渲染） */
+export const EASING_NAMES: EasingName[] = [
+  "linear",
+  "ease_in",
+  "ease_out",
+  "ease_in_out",
+  "bounce",
+  "elastic",
+  "back",
+  "cubic_ease_in",
+  "cubic_ease_out",
+  "cubic_ease_in_out",
+];
+
+/** 变更此值会强制 Stage3D 重建旧场景中的人模网格，并让 GLB URL 换查询串以绕过 WebView 长缓存 */
+export const RIG_MESH_STYLE = "bodykun-v6-20260907";
 
 /** 女体用 BodyChan，其余体型用 BodyKun（儿童/胖瘦靠 heightScale） */
 export function bodyFigureUrl(variant: HumanVariant = "male_std"): string {
-  return variant === "female_std" ? "/models/bodychan.glb" : "/models/bodykun.glb";
+  const file = variant === "female_std" ? "bodychan.glb" : "bodykun.glb";
+  return `/models/${file}?v=${RIG_MESH_STYLE}`;
 }
 
 /** 体型预设 ID */
@@ -194,9 +286,13 @@ const JOINT = "#111111";
 export type JointPose = {
   spineX: number;
   spineY: number;
+  spineZ: number;
   abdomenX: number;
+  abdomenY: number;
+  abdomenZ: number;
   headX: number;
   headY: number;
+  headZ: number;
   lShoulderX: number;
   lShoulderZ: number;
   lElbowX: number;
@@ -216,11 +312,15 @@ export type JointPose = {
 };
 
 export const JOINT_LABELS: { key: keyof JointPose; label: string; min: number; max: number }[] = [
-  { key: "spineX", label: "胸俯仰", min: -40, max: 40 },
-  { key: "spineY", label: "胸扭转", min: -50, max: 50 },
-  { key: "abdomenX", label: "腹俯仰", min: -35, max: 35 },
-  { key: "headX", label: "头俯仰", min: -45, max: 45 },
-  { key: "headY", label: "头左右", min: -70, max: 70 },
+  { key: "abdomenX", label: "身体前倾", min: -35, max: 35 },
+  { key: "abdomenY", label: "身体转身", min: -60, max: 60 },
+  { key: "abdomenZ", label: "身体侧倾", min: -40, max: 40 },
+  { key: "spineX", label: "躯干前倾", min: -40, max: 40 },
+  { key: "spineY", label: "躯干扭转", min: -50, max: 50 },
+  { key: "spineZ", label: "躯干侧倾", min: -40, max: 40 },
+  { key: "headX", label: "头部前倾", min: -45, max: 45 },
+  { key: "headY", label: "头部转身", min: -70, max: 70 },
+  { key: "headZ", label: "头部侧倾", min: -40, max: 40 },
   { key: "lShoulderX", label: "左臂前后", min: -170, max: 80 },
   { key: "lShoulderZ", label: "左臂侧举", min: -20, max: 170 },
   { key: "lElbowX", label: "左肘", min: 0, max: 145 },
@@ -239,30 +339,37 @@ export const JOINT_LABELS: { key: keyof JointPose; label: string; min: number; m
   { key: "rAnkleX", label: "右踝", min: -40, max: 40 },
 ];
 
+/** 默认（中立）姿态：26 个关节角全 0。链式联动 / 姿势预设都以此为基线。 */
+const DEFAULT_POSE: JointPose = {
+  spineX: 0,
+  spineY: 0,
+  spineZ: 0,
+  abdomenX: 0,
+  abdomenY: 0,
+  abdomenZ: 0,
+  headX: 0,
+  headY: 0,
+  headZ: 0,
+  lShoulderX: 0,
+  lShoulderZ: 0,
+  lElbowX: 0,
+  lWristX: 0,
+  rShoulderX: 0,
+  rShoulderZ: 0,
+  rElbowX: 0,
+  rWristX: 0,
+  lHipX: 0,
+  lHipZ: 0,
+  lKneeX: 0,
+  lAnkleX: 0,
+  rHipX: 0,
+  rHipZ: 0,
+  rKneeX: 0,
+  rAnkleX: 0,
+};
+
 export function defaultPose(): JointPose {
-  return {
-    spineX: 0,
-    spineY: 0,
-    abdomenX: 0,
-    headX: 0,
-    headY: 0,
-    lShoulderX: 6,
-    lShoulderZ: 14,
-    lElbowX: 10,
-    lWristX: 0,
-    rShoulderX: 6,
-    rShoulderZ: -14,
-    rElbowX: 10,
-    rWristX: 0,
-    lHipX: 3,
-    lHipZ: 4,
-    lKneeX: 6,
-    lAnkleX: 0,
-    rHipX: 3,
-    rHipZ: -4,
-    rKneeX: 6,
-    rAnkleX: 0,
-  };
+  return { ...DEFAULT_POSE };
 }
 
 export type PosePresetId =
@@ -291,7 +398,10 @@ export type PosePresetId =
   | "block"
   | "throw"
   | "crouch"
-  | "step_turn";
+  | "step_turn"
+  | "tpose"
+  | "walk"
+  | "kneel";
 
 export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<JointPose> }[] = [
   { id: "idle", label: "站立", pose: defaultPose() },
@@ -300,10 +410,11 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "挥手",
     pose: {
       ...defaultPose(),
-      rShoulderZ: -120,
-      rShoulderX: -25,
-      rElbowX: 35,
-      headY: -12,
+      rShoulderZ: -95,
+      rShoulderX: -35,
+      rElbowX: 42,
+      headY: -10,
+      spineY: 6,
     },
   },
   {
@@ -311,12 +422,13 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "思考",
     pose: {
       ...defaultPose(),
-      rShoulderX: -75,
-      rElbowX: 105,
-      rWristX: 20,
-      headX: 10,
-      headY: 16,
-      spineX: 5,
+      rShoulderX: -70,
+      rShoulderZ: -25,
+      rElbowX: 100,
+      rWristX: 15,
+      headX: 12,
+      headY: 18,
+      spineX: 4,
     },
   },
   {
@@ -324,10 +436,11 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "指向",
     pose: {
       ...defaultPose(),
-      rShoulderX: -85,
-      rShoulderZ: -18,
-      rElbowX: 8,
-      headY: -10,
+      rShoulderX: -80,
+      rShoulderZ: -22,
+      rElbowX: 12,
+      headY: -12,
+      spineY: -6,
     },
   },
   {
@@ -335,10 +448,13 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "叉腰",
     pose: {
       ...defaultPose(),
-      lShoulderZ: 58,
-      lElbowX: 98,
-      rShoulderZ: -58,
-      rElbowX: 98,
+      lShoulderX: 12,
+      lShoulderZ: 52,
+      lElbowX: 88,
+      rShoulderX: 12,
+      rShoulderZ: -52,
+      rElbowX: 88,
+      spineX: 2,
     },
   },
   {
@@ -346,11 +462,15 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "抱臂",
     pose: {
       ...defaultPose(),
-      lShoulderX: -58,
-      lElbowX: 115,
-      rShoulderX: -58,
-      rElbowX: 115,
-      spineX: 4,
+      // 先侧举再屈肘交叉，避免只抬肩导致前臂穿进脖子
+      lShoulderX: -40,
+      lShoulderZ: 42,
+      lElbowX: 100,
+      rShoulderX: -40,
+      rShoulderZ: -42,
+      rElbowX: 100,
+      spineX: 3,
+      headX: 2,
     },
   },
   {
@@ -358,14 +478,18 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "坐姿",
     pose: {
       ...defaultPose(),
-      abdomenX: 10,
-      spineX: 6,
-      lHipX: 72,
-      lKneeX: 90,
-      rHipX: 72,
-      rKneeX: 90,
-      lShoulderX: -18,
-      rShoulderX: -18,
+      abdomenX: 8,
+      spineX: 4,
+      lHipX: 70,
+      lKneeX: 98,
+      rHipX: 70,
+      rKneeX: 98,
+      lAnkleX: 10,
+      rAnkleX: 10,
+      lShoulderX: -14,
+      rShoulderX: -14,
+      lElbowX: 28,
+      rElbowX: 28,
     },
   },
   {
@@ -373,15 +497,20 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "戒备",
     pose: {
       ...defaultPose(),
-      spineX: -8,
-      spineY: 12,
-      lShoulderX: -100,
-      lElbowX: 75,
-      rShoulderX: -72,
-      rElbowX: 58,
-      lHipX: 28,
-      rHipX: -18,
-      headX: -4,
+      spineX: -4,
+      spineY: 10,
+      lShoulderX: -85,
+      lShoulderZ: 28,
+      lElbowX: 70,
+      rShoulderX: -65,
+      rShoulderZ: -22,
+      rElbowX: 55,
+      lHipX: 22,
+      rHipX: -12,
+      lKneeX: 18,
+      rKneeX: 12,
+      headX: -2,
+      headY: 8,
     },
   },
   {
@@ -389,11 +518,13 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "鞠躬",
     pose: {
       ...defaultPose(),
-      abdomenX: 28,
-      spineX: 28,
-      headX: 22,
-      lShoulderX: 12,
-      rShoulderX: 12,
+      abdomenX: 32,
+      spineX: 22,
+      headX: 18,
+      lShoulderX: 8,
+      rShoulderX: 8,
+      lHipX: 8,
+      rHipX: 8,
     },
   },
   {
@@ -401,17 +532,17 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "飞踢",
     pose: {
       ...defaultPose(),
-      spineX: -12,
-      abdomenX: -8,
-      lShoulderX: -40,
-      lShoulderZ: 50,
-      rShoulderX: -90,
-      rElbowX: 40,
-      lHipX: -20,
-      lKneeX: 95,
-      rHipX: 70,
-      rKneeX: 20,
-      headX: -8,
+      spineX: -8,
+      abdomenX: -4,
+      lShoulderX: -35,
+      lShoulderZ: 40,
+      rShoulderX: -70,
+      rElbowX: 35,
+      lHipX: -12,
+      lKneeX: 70,
+      rHipX: 62,
+      rKneeX: 28,
+      headX: -6,
     },
   },
   {
@@ -477,14 +608,24 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "靠墙",
     pose: {
       ...defaultPose(),
-      spineX: -18,
-      abdomenX: -8,
-      rShoulderX: -6,
-      rShoulderZ: -22,
-      rElbowX: 65,
-      lShoulderX: 8,
-      lHipX: 6,
-      rHipX: -4,
+      // 背靠墙：轻度后仰 + 一腿承重一腿虚点，一手撑墙
+      spineX: -12,
+      abdomenX: -6,
+      spineZ: 8,
+      abdomenZ: 6,
+      rHipX: 4,
+      rHipZ: -8,
+      lHipX: 16,
+      lHipZ: 6,
+      lKneeX: 22,
+      rKneeX: 6,
+      rShoulderX: -22,
+      rShoulderZ: -30,
+      rElbowX: 70,
+      lShoulderX: 6,
+      lElbowX: 18,
+      headX: 4,
+      headY: 6,
     },
   },
   {
@@ -638,15 +779,21 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
     label: "蹲姿",
     pose: {
       ...defaultPose(),
-      lHipX: 52,
-      lKneeX: 95,
-      rHipX: 52,
-      rKneeX: 95,
-      abdomenX: 12,
-      spineX: 8,
-      lShoulderX: -10,
-      rShoulderX: -10,
-      headX: 8,
+      lHipX: 72,
+      lKneeX: 110,
+      rHipX: 72,
+      rKneeX: 110,
+      lAnkleX: 22,
+      rAnkleX: 22,
+      abdomenX: 18,
+      spineX: 12,
+      headX: 4,
+      lShoulderX: -30,
+      rShoulderX: -30,
+      lShoulderZ: 14,
+      rShoulderZ: -14,
+      lElbowX: 42,
+      rElbowX: 42,
     },
   },
   {
@@ -663,6 +810,52 @@ export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<Join
       rShoulderZ: -18,
       lHipX: 14,
       rHipX: -10,
+    },
+  },
+  {
+    id: "tpose",
+    label: "T型",
+    pose: {
+      ...defaultPose(),
+      lShoulderZ: 90,
+      rShoulderZ: -90,
+      lElbowX: 0,
+      rElbowX: 0,
+    },
+  },
+  {
+    id: "kneel",
+    label: "单膝跪",
+    pose: {
+      ...defaultPose(),
+      lHipX: 55,
+      lKneeX: 105,
+      lAnkleX: -8,
+      rHipX: 12,
+      rKneeX: 95,
+      rAnkleX: 5,
+      abdomenX: 6,
+      spineX: 4,
+      lShoulderX: -10,
+      rShoulderX: -10,
+      headX: 2,
+    },
+  },
+  {
+    id: "walk",
+    label: "行走",
+    pose: {
+      ...defaultPose(),
+      lHipX: 24,
+      rHipX: -18,
+      lKneeX: 14,
+      rKneeX: 32,
+      lShoulderX: -18,
+      rShoulderX: 14,
+      lElbowX: 18,
+      rElbowX: 18,
+      spineX: 3,
+      spineY: 4,
     },
   },
 ];
@@ -953,42 +1146,308 @@ export const MOTION_WAVE_HELLO: MotionPreset = {
   ],
 };
 
-/** 下蹲起身：髋膝大幅弯曲 → 逐步伸展（2s 完整蹲起周期） */
+/** 下蹲起身：髋后坐 → 膝屈 → 躯干前倾配平 → 蹬伸起身（符合深蹲力学，不后仰） */
 export const MOTION_SQUAT_RISE: MotionPreset = {
   id: "squat_rise",
   label: "下蹲起身",
-  duration: 2000,
+  duration: 2400,
   easeFn: easeInOutCubic,
   keyframes: [
-    { t: 0,    pose: { lHipX: -8, lKneeX: 4,  rHipX: -8, rKneeX: 4,  abdomenX: -2, spineX: 2 } },
-    { t: 400,  pose: { lHipX: 15, lKneeX: 45, rHipX: 15, rKneeX: 45, abdomenX: 8,  spineX: -3 } },
-    { t: 800,  pose: { lHipX: 45, lKneeX: 95, rHipX: 45, rKneeX: 95, abdomenX: 20, spineX: -12 } },
-    { t: 1200, pose: { lHipX: 45, lKneeX: 95, rHipX: 45, rKneeX: 95, abdomenX: 20, spineX: -12 } },
-    { t: 1600, pose: { lHipX: 15, lKneeX: 45, rHipX: 15, rKneeX: 45, abdomenX: 8,  spineX: -3 } },
-    { t: 2000, pose: { lHipX: -8, lKneeX: 4,  rHipX: -8, rKneeX: 4,  abdomenX: -2, spineX: 2 } },
+    // 站立微屈（预备）
+    {
+      t: 0,
+      pose: {
+        lHipX: 4,
+        rHipX: 4,
+        lKneeX: 6,
+        rKneeX: 6,
+        lAnkleX: 2,
+        rAnkleX: 2,
+        abdomenX: 2,
+        spineX: 2,
+        headX: 0,
+        lShoulderX: -8,
+        rShoulderX: -8,
+        lElbowX: 12,
+        rElbowX: 12,
+      },
+    },
+    // 下坐：髋膝同步，躯干略前倾，手臂前伸配平
+    {
+      t: 500,
+      pose: {
+        lHipX: 38,
+        rHipX: 38,
+        lKneeX: 62,
+        rKneeX: 62,
+        lAnkleX: 14,
+        rAnkleX: 14,
+        abdomenX: 14,
+        spineX: 10,
+        headX: 4,
+        lShoulderX: -28,
+        rShoulderX: -28,
+        lShoulderZ: 12,
+        rShoulderZ: -12,
+        lElbowX: 38,
+        rElbowX: 38,
+      },
+    },
+    // 深蹲底部：大腿近水平，胸仍前倾（禁止后仰），重心压脚跟
+    {
+      t: 1000,
+      pose: {
+        lHipX: 78,
+        rHipX: 78,
+        lKneeX: 118,
+        rKneeX: 118,
+        lAnkleX: 26,
+        rAnkleX: 26,
+        abdomenX: 20,
+        spineX: 14,
+        headX: 6,
+        lShoulderX: -36,
+        rShoulderX: -36,
+        lShoulderZ: 16,
+        rShoulderZ: -16,
+        lElbowX: 48,
+        rElbowX: 48,
+      },
+    },
+    // 稍作停留再起
+    {
+      t: 1300,
+      pose: {
+        lHipX: 78,
+        rHipX: 78,
+        lKneeX: 118,
+        rKneeX: 118,
+        lAnkleX: 26,
+        rAnkleX: 26,
+        abdomenX: 20,
+        spineX: 14,
+        headX: 6,
+        lShoulderX: -36,
+        rShoulderX: -36,
+        lShoulderZ: 16,
+        rShoulderZ: -16,
+        lElbowX: 48,
+        rElbowX: 48,
+      },
+    },
+    // 蹬伸过半：髋先伸、膝跟进
+    {
+      t: 1800,
+      pose: {
+        lHipX: 32,
+        rHipX: 32,
+        lKneeX: 52,
+        rKneeX: 52,
+        lAnkleX: 12,
+        rAnkleX: 12,
+        abdomenX: 10,
+        spineX: 8,
+        headX: 2,
+        lShoulderX: -22,
+        rShoulderX: -22,
+        lShoulderZ: 10,
+        rShoulderZ: -10,
+        lElbowX: 30,
+        rElbowX: 30,
+      },
+    },
+    // 回站
+    {
+      t: 2400,
+      pose: {
+        lHipX: 4,
+        rHipX: 4,
+        lKneeX: 6,
+        rKneeX: 6,
+        lAnkleX: 2,
+        rAnkleX: 2,
+        abdomenX: 2,
+        spineX: 2,
+        headX: 0,
+        lShoulderX: -8,
+        rShoulderX: -8,
+        lElbowX: 12,
+        rElbowX: 12,
+      },
+    },
   ],
   rootOffset: [
-    { t: 0,    pos: [0, 0, 0] },
-    { t: 400,  pos: [0, -0.12, 0] },
-    { t: 800,  pos: [0, -0.28, 0] },
-    { t: 1200, pos: [0, -0.28, 0] },
-    { t: 1600, pos: [0, -0.12, 0] },
-    { t: 2000, pos: [0, 0, 0] },
+    { t: 0, pos: [0, 0, 0] },
+    { t: 500, pos: [0, -0.16, 0.04] },
+    { t: 1000, pos: [0, -0.42, 0.06] },
+    { t: 1300, pos: [0, -0.42, 0.06] },
+    { t: 1800, pos: [0, -0.14, 0.03] },
+    { t: 2400, pos: [0, 0, 0] },
   ],
 };
 
-/** 侧身倚靠：全身倾向一侧 + 重心转移 + 肩放松下垂（循环摆动 ≈ 5s） */
+/** 深侧倚：重心压到一侧腿，躯干侧倾靠「墙」，对侧腿放松，慢呼吸微动（不再左右来回晃） */
 export const MOTION_LEAN_SIDE: MotionPreset = {
   id: "lean_side",
-  label: "侧身倚靠",
-  duration: 5000,
+  label: "深侧倚靠",
+  duration: 5600,
   easeFn: easeInOutSine,
   keyframes: [
-    { t: 0,    pose: { lHipZ: 0,  rHipZ: 0,  spineY: 0,  spineX: 0,  lShoulderZ: 0, rShoulderZ: 0 } },
-    { t: 1250, pose: { lHipZ: 8,  rHipZ: -12,spineY: -6, spineX: 2,  lShoulderZ: 10, rShoulderZ: -8 } },
-    { t: 2500, pose: { lHipZ: 0,  rHipZ: 0,  spineY: 0,  spineX: 0,  lShoulderZ: 0, rShoulderZ: 0 } },
-    { t: 3750, pose: { lHipZ: -12, rHipZ: 8,  spineY: 6,  spineX: 2,  lShoulderZ: -8, rShoulderZ: 10 } },
-    { t: 5000, pose: { lHipZ: 0,  rHipZ: 0,  spineY: 0,  spineX: 0,  lShoulderZ: 0, rShoulderZ: 0 } },
+    // 直立
+    {
+      t: 0,
+      pose: {
+        abdomenZ: 0,
+        spineZ: 0,
+        spineY: 0,
+        spineX: 0,
+        lHipX: 0,
+        rHipX: 0,
+        lHipZ: 0,
+        rHipZ: 0,
+        lKneeX: 4,
+        rKneeX: 4,
+        lShoulderZ: 0,
+        rShoulderZ: 0,
+        lShoulderX: 0,
+        rShoulderX: 0,
+        lElbowX: 8,
+        rElbowX: 8,
+        headY: 0,
+        headX: 0,
+      },
+    },
+    // 开始把重心挪到右腿，躯干向右靠
+    {
+      t: 900,
+      pose: {
+        abdomenZ: 10,
+        spineZ: 12,
+        spineY: -4,
+        spineX: -6,
+        rHipX: 6,
+        rHipZ: -10,
+        lHipX: 18,
+        lHipZ: 8,
+        rKneeX: 8,
+        lKneeX: 28,
+        rShoulderX: -18,
+        rShoulderZ: -28,
+        rElbowX: 52,
+        lShoulderX: 6,
+        lShoulderZ: 8,
+        lElbowX: 22,
+        headY: 8,
+        headX: 2,
+      },
+    },
+    // 深倚到位：右侧承重 + 右臂撑墙，左腿虚点地
+    {
+      t: 1800,
+      pose: {
+        abdomenZ: 16,
+        spineZ: 18,
+        spineY: -6,
+        spineX: -10,
+        rHipX: 8,
+        rHipZ: -14,
+        lHipX: 28,
+        lHipZ: 12,
+        rKneeX: 10,
+        lKneeX: 42,
+        rAnkleX: 4,
+        lAnkleX: 12,
+        rShoulderX: -28,
+        rShoulderZ: -36,
+        rElbowX: 72,
+        lShoulderX: 10,
+        lShoulderZ: 12,
+        lElbowX: 30,
+        headY: 10,
+        headX: 4,
+      },
+    },
+    // 维持深倚，轻微呼吸起伏
+    {
+      t: 3200,
+      pose: {
+        abdomenZ: 15,
+        spineZ: 17,
+        spineY: -5,
+        spineX: -9,
+        rHipX: 7,
+        rHipZ: -13,
+        lHipX: 26,
+        lHipZ: 11,
+        rKneeX: 9,
+        lKneeX: 40,
+        rAnkleX: 4,
+        lAnkleX: 11,
+        rShoulderX: -26,
+        rShoulderZ: -34,
+        rElbowX: 68,
+        lShoulderX: 8,
+        lShoulderZ: 10,
+        lElbowX: 28,
+        headY: 9,
+        headX: 3,
+      },
+    },
+    // 慢慢回正
+    {
+      t: 4600,
+      pose: {
+        abdomenZ: 6,
+        spineZ: 7,
+        spineY: -2,
+        spineX: -4,
+        rHipX: 4,
+        rHipZ: -5,
+        lHipX: 10,
+        lHipZ: 4,
+        rKneeX: 6,
+        lKneeX: 14,
+        rShoulderX: -10,
+        rShoulderZ: -14,
+        rElbowX: 28,
+        lShoulderX: 4,
+        lShoulderZ: 4,
+        lElbowX: 14,
+        headY: 3,
+        headX: 1,
+      },
+    },
+    {
+      t: 5600,
+      pose: {
+        abdomenZ: 0,
+        spineZ: 0,
+        spineY: 0,
+        spineX: 0,
+        lHipX: 0,
+        rHipX: 0,
+        lHipZ: 0,
+        rHipZ: 0,
+        lKneeX: 4,
+        rKneeX: 4,
+        lShoulderZ: 0,
+        rShoulderZ: 0,
+        lShoulderX: 0,
+        rShoulderX: 0,
+        lElbowX: 8,
+        rElbowX: 8,
+        headY: 0,
+        headX: 0,
+      },
+    },
+  ],
+  rootOffset: [
+    { t: 0, pos: [0, 0, 0] },
+    { t: 900, pos: [0.06, -0.02, 0] },
+    { t: 1800, pos: [0.12, -0.05, -0.02] },
+    { t: 3200, pos: [0.11, -0.04, -0.02] },
+    { t: 4600, pos: [0.04, -0.01, 0] },
+    { t: 5600, pos: [0, 0, 0] },
   ],
 };
 
@@ -1015,7 +1474,8 @@ export function sampleCompositeMotion(
     const cycleT = motionCycleTime(m, timeMs);
     const sampled = sampleMotion(m, timeMs);
     for (const k of Object.keys(sampled) as (keyof JointPose)[]) {
-      pose[k] = (pose[k] ?? 0) + sampled[k] - (defaultPose()[k] ?? 0);
+      // DEFAULT_POSE 全为 0，sampled 已是相对偏移，直接累加即可，省去每 motion 一次 defaultPose() 分配
+      pose[k] = (pose[k] ?? 0) + sampled[k];
     }
     const ro = sampleRootOffset(m, cycleT);
     rootOffset[0] += ro[0];
@@ -1479,15 +1939,16 @@ export function makeRiggedHumanoid(
   spine.add(chestBadge);
 
   // —— 颈 + 头 ——
+  // 颈关节（旋转支点，挂在 spine 下；颈部视觉网格也挂 spine，避免转头时脖子跟着转）
   const neckJoint = jointBall(0.045);
   neckJoint.position.y = P.shoulderPadY + 0.3;
   spine.add(neckJoint);
+  const neck = taperedCylinderPart(0.048, 0.042, 0.06, body);
+  neck.position.y = P.shoulderPadY + 0.37;
+  spine.add(neck);
   const head = new THREE.Group();
   head.position.y = P.shoulderPadY + 0.34;
   spine.add(head);
-  const neck = taperedCylinderPart(0.048, 0.042, 0.06, body);
-  neck.position.y = 0.03;
-  head.add(neck);
   const skullHalf = P.skullW / 2;
   const skull = ellipsoidHeadPart(P.skullW, body);
   skull.position.y = skullHalf * 1.15;
@@ -1693,28 +2154,51 @@ export function makeRiggedHumanoid(
   // 保存当前姿势，供 GLB 加载完成后重新应用
   root.userData._lastPose = pose || defaultPose();
 
+  // 删除胶囊素模：创建后立即隐藏所有胶囊网格，不再作为可见模型或失败回退；
+  // bones（Group 节点）保留，供关节拾取 / 姿势驱动使用。frontMarker 方向箭头除外。
+  root.traverse((ch) => {
+    const m = ch as THREE.Mesh;
+    if (m.isMesh && !m.userData.frontMarker) m.visible = false;
+  });
+
   // 异步加载 BodyKun/BodyChan：灰白素体 + 黑网格 + 关节球，保留现有 JointPose
   attachGLBToHumanoid(root, bodyFigureUrl(variant));
 
   return root;
 }
 
-export function applyPose(root: THREE.Object3D, pose: JointPose) {
+export function applyPose(
+  root: THREE.Object3D,
+  pose: JointPose,
+  opts?: { /** 默认 false：预设/拖肢按作者角度直出；动作采样已自带 chain 时勿再套 */ chain?: boolean },
+) {
   // 保存最新姿势，供异步加载的 GLB 骨架使用
   root.userData._lastPose = pose;
 
-  // 统一姿势管线：default + 链式联动 + 防穿模 → 应用到所有骨架通道
-  const resolvedPose = resolveClampPose(resolveChainPose(mergePose(defaultPose(), pose)));
+  const merged = mergePose(defaultPose(), pose);
+  // resolveChainPose 是累加型、非幂等：对已写好的预设再套一次会把坐姿/抱臂等拧坏
+  const resolved =
+    opts?.chain === true
+      ? resolveClampPose(resolveChainPose(merged))
+      : resolveClampPose(merged);
+  applyPoseResolved(root, resolved);
+}
 
+/**
+ * 直接应用已过 chain + clamp 的姿态（供采样器/关键帧等已解析路径调用）。
+ * 避免对同一姿态重复执行链式联动与防穿模——resolveChainPose 的规则是累加增量、
+ * 非幂等，二次执行会把肩→肘、髋→膝、胸→头等联动放大，导致动作比预设更夸张。
+ */
+export function applyPoseResolved(root: THREE.Object3D, resolvedPose: JointPose) {
   // —— capsule 骨架（原有 21 关节）——
   const bones = root.userData.bones as BoneMap | undefined;
   if (bones) {
     const p = resolvedPose;
     const neg = (v: number) => -v;
 
-    bones.abdomen.rotation.set(deg(neg(p.abdomenX)), 0, 0);
-    bones.spine.rotation.set(deg(neg(p.spineX)), deg(p.spineY), 0);
-    bones.head.rotation.set(deg(neg(p.headX)), deg(p.headY), 0);
+    bones.abdomen.rotation.set(deg(neg(p.abdomenX)), deg(p.abdomenY), deg(p.abdomenZ));
+    bones.spine.rotation.set(deg(neg(p.spineX)), deg(p.spineY), deg(p.spineZ));
+    bones.head.rotation.set(deg(neg(p.headX)), deg(p.headY), deg(p.headZ));
 
     bones.lShoulder.rotation.set(deg(neg(p.lShoulderX)), 0, deg(p.lShoulderZ));
     bones.lElbow.rotation.set(deg(neg(p.lElbowX)), 0, 0);
@@ -1785,14 +2269,15 @@ export function resolveClampPose(pose: JointPose): JointPose {
   // —— 规则 2：上臂穿躯干（仅轻微内摆 + 贴身）——
   // 触发条件：shoulderX 在 -15~15°（小幅内摆，还没抬起）
   //         + shoulderZ 极贴身
-  // 渐进抬升：用户把 shoulderZ 从 0 滑到 20° 时，实际值从 20° 连续降到原值，
-  // 避免滑条拖到 0° 时上臂突然"弹开"的视觉跳变
+  // 渐进抬升：用户把 shoulderZ 从 0 滑到 20° 时，实际值从 5° 连续降到原值，
+  // 避免滑条拖到 0° 时上臂突然"弹开"的视觉跳变；下限 5° 足够防穿模，
+  // 又允许手臂自然下垂贴身（不八字张开）
   const pushShoulderOutSmooth = (shX: number, shZ: number, sign: 1 | -1): number => {
     if (shX < -15 || shX > 15) return shZ;
     const absZ = Math.abs(shZ);
     if (absZ >= 20) return shZ;
-    // 渐进 ramp：absZ=0 → 输出 20°；absZ=10 → max(10, 15) = 15°；absZ=20 → 不推
-    const floor = 20 - absZ * 0.5;
+    // 渐进 ramp：absZ=0 → 输出 5°；absZ=10 → max(10, 2.5) = 10°；absZ=20 → 不推
+    const floor = 5 - absZ * 0.25;
     const outAbs = Math.max(absZ, floor);
     return sign * outAbs;
   };
@@ -1803,20 +2288,15 @@ export function resolveClampPose(pose: JointPose): JointPose {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
- * 链式联动约束 / Kinematic Chain
+ * 链式联动约束 / Kinematic Chain（仅同一肢体链内）
  *
- * 让"主动关节"驱动"被动关节"产生自然的联动偏移。
- * 目标：用户只调肩，肘自动微弯；只调髋，膝自动微屈。
- * 消除"这边乱动那边乱动"的独立关节观感。
+ * 只保留"同一条肢体内部"的联动，让主动关节带动相邻关节：
+ *   肩 → 肘、髋 → 膝、肘 → 腕、膝 → 踝。
  *
- * 规则：
- *   1. 肩大幅上举/侧举 → 肘自动微弯 5~15°（举手时不会笔直像僵尸）
- *   2. 髋大幅前屈 → 膝自动微屈 8~20°（走路抬腿时自然屈膝）
- *   3. 胸扭转 → 头微幅跟随（系数 0.3，保留独立控制能力）
- *   4. 腹俯仰 → 胸微幅反向补偿（保持上半身整体姿态协调）
+ * 已移除跨部位联动（胸→头、腹→胸、腿→对侧臂、头→胸、重心补偿），
+ * 避免手动摆姿势时拖动躯干/头导致其他部位跟着动，保证关节独立可控。
  *
  * 注意：所有联动都是**叠加小偏移量**，不覆盖用户显式设置的值。
- * 显式设置的关节值仍为主导，chain 只是"锦上添花"的自然化微调。
  * ───────────────────────────────────────────────────────────────────── */
 export function resolveChainPose(pose: JointPose, strength = 1.0): JointPose {
   const p: JointPose = { ...pose };
@@ -1845,31 +2325,6 @@ export function resolveChainPose(pose: JointPose, strength = 1.0): JointPose {
   };
   p.lKneeX = legChain(p.lHipX, p.lKneeX);
   p.rKneeX = legChain(p.rHipX, p.rKneeX);
-
-  // —— 规则 3：胸扭转 → 头跟随（系数 0.3）——
-  // 如果胸扭得很多但头没动，头自动跟进一点
-  const spineToHead = p.spineY * 0.3 * s;
-  // 头已有独立值时只补差值（最多 10°）
-  const headFollowDelta = Math.max(-10, Math.min(10, spineToHead));
-  p.headY += headFollowDelta;
-  p.headY = Math.max(-70, Math.min(70, p.headY));
-
-  // —— 规则 4：腹俯仰 → 胸反向补偿 ——
-  // 腹大幅前弯时，胸微幅反向，保持整体不塌
-  if (p.abdomenX > 15) {
-    const comp = (p.abdomenX - 15) * 0.25 * s;
-    p.spineX += comp;
-    p.spineX = Math.max(-40, Math.min(40, p.spineX));
-  }
-
-  // —— 规则 5：走路对侧联动（lHip ↔ rShoulder 反相）——
-  // 如果一只髋前屈，对侧肩自动前摆一点，模拟走路时的自然摆臂
-  const walkCompensate = (hipX: number, oppositeShoulderX: number): number => {
-    const swing = Math.max(0, Math.abs(hipX) - 25) * 0.15 * s;
-    return oppositeShoulderX + swing;
-  };
-  p.lShoulderX = walkCompensate(p.rHipX, p.lShoulderX);
-  p.rShoulderX = walkCompensate(p.lHipX, p.rShoulderX);
 
   // —— 规则 6：肘 → 腕 联动 ——
   // 肘大幅弯曲时，手腕自然微调跟随（防手硬直）
@@ -1901,9 +2356,10 @@ export function resolveChainPose(pose: JointPose, strength = 1.0): JointPose {
 
   // —— 规则 9：头大幅俯仰 → 胸微幅补偿 ——
   // 点头太深时胸微微跟进，仰头太深时胸微微后弯
-  const headLimit = 22;
+  // 注意：阈值提高、系数降低，避免"拖头带动躯干"的突兀感
+  const headLimit = 30;
   if (Math.abs(p.headX) > headLimit) {
-    const extra = (p.headX - Math.sign(p.headX) * headLimit) * 0.22 * s;
+    const extra = (p.headX - Math.sign(p.headX) * headLimit) * 0.12 * s;
     p.spineX += extra;
   }
 
@@ -1939,15 +2395,50 @@ export function lerpPose(
   return r;
 }
 
+/** 姿势关键帧：在 { t, pose } 基础上扩展 easing / interpolation / bezier 控制点，
+ *  对齐后端 app/core/keyframe_animation.py 的 Keyframe 结构。 */
+export type PoseKeyframe = {
+  t: number;
+  pose: JointPose;
+  /** 本帧 → 下一帧 段的缓动（默认 ease_in_out，柔和连续） */
+  easing?: EasingName;
+  /** 插值方式：linear（默认）/ bezier / step */
+  interpolation?: "linear" | "bezier" | "step";
+  /** 贝塞尔控制点 [x, y]；对齐后端 _apply_bezier：仅取 y，x 语义占位 */
+  bezierC1?: [number, number];
+  bezierC2?: [number, number];
+};
+
+/** 由 EasingName 解析缓动函数（未知名回退线性） */
+export function resolveEasingFn(easing?: EasingName): (t: number) => number {
+  return (easing && EASING_FNS[easing]) || easeLinear;
+}
+
+/** 单值三次贝塞尔插值（对齐后端 _apply_bezier：控制点仅取 y 分量） */
+function bezierValue(
+  t: number,
+  v0: number,
+  v1: number,
+  c0: [number, number],
+  c1: [number, number],
+): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const mt3 = mt2 * mt;
+  return mt3 * v0 + 3 * mt2 * t * c0[1] + 3 * mt * t2 * c1[1] + t3 * v1;
+}
+
 /**
  * 在关键帧序列里按时间戳取插值姿势。
- * 默认用 easeInOutCubic 缓动，让姿势切换呈自然曲线而非匀速。
- * 输出自动过 resolveChainPose + resolveClampPose，保证链式联动 + 防穿模。
+ * 每个关键帧可携带 easing（段缓动）/ interpolation（bezier/step）/ bezier 控制点，
+ * 未指定 easing 时回退 defaultEaseFn；输出自动过 resolveChainPose + resolveClampPose。
  */
 export function sampleKeyframes(
-  keyframes: { t: number; pose: JointPose }[],
+  keyframes: PoseKeyframe[],
   timeMs: number,
-  easeFn: (t: number) => number = easeInOutCubic,
+  defaultEaseFn: (t: number) => number = easeInOutCubic,
 ): JointPose {
   if (!keyframes.length) return defaultPose();
   if (keyframes.length === 1) return resolveChainPose(resolveClampPose(keyframes[0].pose));
@@ -1960,8 +2451,20 @@ export function sampleKeyframes(
     const a = sorted[i];
     const b = sorted[i + 1];
     if (timeMs >= a.t && timeMs <= b.t) {
-      const t = (timeMs - a.t) / (b.t - a.t);
-      const raw = lerpPose(a.pose, b.pose, t, easeFn);
+      const rawT = (timeMs - a.t) / (b.t - a.t);
+      const easeFn = a.easing ? resolveEasingFn(a.easing) : defaultEaseFn;
+      let raw: JointPose;
+      if (a.interpolation === "step") {
+        raw = a.pose;
+      } else if (a.interpolation === "bezier" && a.bezierC1 && a.bezierC2) {
+        const k = easeFn(Math.max(0, Math.min(1, rawT)));
+        raw = {} as JointPose;
+        for (const key of Object.keys(a.pose) as (keyof JointPose)[]) {
+          raw[key] = bezierValue(k, a.pose[key], b.pose[key], a.bezierC1, a.bezierC2);
+        }
+      } else {
+        raw = lerpPose(a.pose, b.pose, rawT, easeFn);
+      }
       return resolveChainPose(resolveClampPose(raw));
     }
   }
@@ -1972,6 +2475,14 @@ export function applyPreset(id: PosePresetId): JointPose {
   const hit = POSE_PRESETS.find((p) => p.id === id);
   return mergePose(defaultPose(), hit?.pose || {});
 }
+
+/** 坐/蹲/跪等需要降髋，否则腿弯了人还站着高，看起来像漂浮或腿折进肚子 */
+export const POSE_ROOT_OFFSET_Y: Partial<Record<PosePresetId, number>> = {
+  sit: -0.42,
+  crouch: -0.45,
+  kneel: -0.28,
+  jump_kick: 0.12,
+};
 
 /** 群像站位：在世界 XZ 平面排布 */
 export type FormationId = "line" | "arc" | "circle" | "face" | "triangle";
@@ -2110,11 +2621,16 @@ function collectSkinBones(scene: THREE.Object3D): THREE.Object3D[] {
 }
 
 function boneNameTail(name: string): string {
-  return (name || "").replace(/^(mixamorig|mixamo):?[\s_-]?/i, "").toLowerCase();
+  // 去掉 mixamorig 前缀 + 小数点 + 统一小写，兼容 Mixamo（LeftArm / DEF-thigh.L）
+  // 与 BodyChan/BodyKun（DEF-spine001 / DEF-thighL，无点）两种命名
+  return (name || "")
+    .replace(/^(mixamorig|mixamo):?[\s_-]?/i, "")
+    .replace(/\./g, "")
+    .toLowerCase();
 }
 
 function findGLBBoneExact(scene: THREE.Object3D, keyword: string): THREE.Object3D | null {
-  const key = keyword.toLowerCase();
+  const key = boneNameTail(keyword);
   for (const bone of collectSkinBones(scene)) {
     if (boneNameTail(bone.name) === key) return bone;
   }
@@ -2136,7 +2652,7 @@ function pickGLBBone(scene: THREE.Object3D, aliases: string[]): THREE.Object3D |
 }
 
 function findGLBBone(scene: THREE.Object3D, keyword: string): THREE.Object3D | null {
-  const key = keyword.toLowerCase();
+  const key = boneNameTail(keyword);
   let exact: THREE.Object3D | null = null;
   let fuzzy: THREE.Object3D | null = null;
   scene.traverse((obj) => {
@@ -2151,10 +2667,14 @@ function findGLBBone(scene: THREE.Object3D, keyword: string): THREE.Object3D | n
 
 function buildGLBBoneMap(scene: THREE.Object3D): GLBBoneMap {
   const B: GLBBoneMap = {};
-  B.hips = pickGLBBone(scene, ["Hips", "DEF-spine", "hips", "torso"]);
-  B.abdomen = pickGLBBone(scene, ["Spine", "DEF-spine.001", "spine.001"]);
+  B.hips = pickGLBBone(scene, ["Hips", "hips", "pelvis", "root"]);
+  B.abdomen = pickGLBBone(scene, ["Spine", "DEF-spine.001", "spine.001", "abdomen", "waist"]);
   B.spine = pickGLBBone(scene, ["Spine1", "DEF-spine.002", "spine.002"]);
   B.spine2 = pickGLBBone(scene, ["Spine2", "DEF-spine.003", "spine.003", "chest"]);
+  // 若腹部骨缺失或误绑到 hips，退到胸椎链，避免腰 IK 拧髋
+  if (!B.abdomen || B.abdomen === B.hips) {
+    B.abdomen = B.spine || B.spine2 || B.abdomen;
+  }
   B.neck = pickGLBBone(scene, ["Neck", "DEF-spine.004", "DEF-neck", "neck"]);
   B.head = pickGLBBone(scene, ["Head", "DEF-spine.006", "DEF-head", "head"]);
   B.lShoulder = pickGLBBone(scene, ["LeftShoulder", "DEF-shoulder.L", "shoulder.L"]);
@@ -2197,7 +2717,9 @@ export function inferBoneRegion(name: string): string | null {
   if (/neck/.test(n)) return "head";
   if (/torso|chest|bust|trunk/.test(n)) return "spine";
   if (/tummy|abdomen|waist|core/.test(n)) return "abdomen";
-  if (/hip|pelvis/.test(n)) return "abdomen";
+  // 骨盆网格按腰部点选，但姿态骨禁止绑到 Hips（见 bindHumanoidPickData）
+  if (/pelvis|waist/.test(n)) return "abdomen";
+  if (/hip/.test(n) && !/whip/.test(n)) return "hip";
   if (/upperarm|upper_arm|deltoid/.test(n)) return "shoulder";
   if (/forearm|lowerarm|lower_arm/.test(n)) return "elbow";
   if (/hand|wrist|finger|index|pinky|ring|thumb|palm|mid_/.test(n)) return "wrist";
@@ -2386,7 +2908,8 @@ export function bindHumanoidPickData(root: THREE.Object3D) {
     for (const [k, b] of Object.entries(cap)) assign(k, b);
   }
   if (gl) {
-    assign("abdomen", gl.abdomen || gl.hips);
+    // 禁止把 hips 当成 abdomen：TransformControls/点选挂到骨盆会整身离地，地面像被拖变形
+    assign("abdomen", gl.abdomen || gl.spine || gl.spine2);
     assign("spine", gl.spine2 || gl.spine);
     assign("head", gl.head || gl.neck);
     assign("lShoulder", gl.lShoulder || gl.lArm);
@@ -2427,19 +2950,73 @@ export function boneKeyToRegion(key: string): string | null {
   return null;
 }
 
+/** 手/脚/头/胸/腰（及同链肩肘髋膝）需：框选整模 → 双击解锁 → 再拖 */
+export function needsJointUnlock(boneKey: string): boolean {
+  const r = boneKeyToRegion(boneKey);
+  return (
+    r === "wrist" ||
+    r === "ankle" ||
+    r === "head" ||
+    r === "spine" ||
+    r === "abdomen" ||
+    r === "shoulder" ||
+    r === "elbow" ||
+    r === "hip" ||
+    r === "knee"
+  );
+}
+
+export function sameUnlockChain(a: string, b: string): boolean {
+  const ca = chainIdForBone(a);
+  const cb = chainIdForBone(b);
+  return Boolean(ca && ca === cb);
+}
+
+/** 胸/腰/头只用 IK，挂 TransformControls 易把骨盆连带拧飞 */
+export function isIkOnlyUnlockBone(boneKey: string): boolean {
+  const r = boneKeyToRegion(boneKey);
+  return r === "spine" || r === "abdomen" || r === "head";
+}
+
+/** 拖拽模式：末端整肢 IK；中间/近端单关节 FK；头胸腰看向 */
+export type LimbDragMode = "chainIk" | "segmentFk" | "look";
+
+export function limbDragMode(boneKey: string): LimbDragMode {
+  const r = boneKeyToRegion(boneKey);
+  if (r === "head" || r === "spine" || r === "abdomen") return "look";
+  if (r === "wrist" || r === "ankle") return "chainIk";
+  if (r === "shoulder" || r === "elbow" || r === "hip" || r === "knee") return "segmentFk";
+  return "chainIk";
+}
+
+/** 高亮范围：FK 只亮当前节；IK 亮整条肢 */
+export function highlightBonesFor(boneKey: string): string[] {
+  if (limbDragMode(boneKey) === "segmentFk") return [boneKey];
+  return chainBonesFor(boneKey);
+}
+
 function worldPos(obj: THREE.Object3D, out = new THREE.Vector3()) {
   return obj.getWorldPosition(out);
 }
 
+/** 关节角 min/max 查找表（由 JOINT_LABELS 派生），避免 IK 每帧线性 find */
+const JOINT_LIMITS: Record<keyof JointPose, { min: number; max: number }> = JOINT_LABELS.reduce(
+  (acc, j) => {
+    acc[j.key] = { min: j.min, max: j.max };
+    return acc;
+  },
+  {} as Record<keyof JointPose, { min: number; max: number }>,
+);
+
 function clampJoint(key: keyof JointPose, value: number): number {
-  const meta = JOINT_LABELS.find((j) => j.key === key);
+  const meta = JOINT_LIMITS[key];
   if (!meta) return value;
   return Math.max(meta.min, Math.min(meta.max, value));
 }
 
 /**
  * 2 骨 IK：目标点 → 肩/髋朝向 + 肘/膝弯曲，写成 JointPose 补丁。
- * 拉手/脚会带动整条肢体；头/胸则看向目标。
+ * 仅用于腕/踝等末端（整肢）；中间节请用 solveSegmentFk。
  */
 export function solveChainIk(
   root: THREE.Object3D,
@@ -2460,18 +3037,25 @@ export function solveChainIk(
     dir.normalize();
     return {
       headY: clampJoint("headY", rad2deg(Math.atan2(dir.x, dir.z))),
-      headX: clampJoint("headX", rad2deg(Math.atan2(-dir.y, Math.hypot(dir.x, dir.z)))),
+      // headX 在 applyPose 中会取反（neg），此处用 +dir.y 才能让头朝目标方向俯仰（修正旧版上下反向）
+      headX: clampJoint("headX", rad2deg(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)))),
     };
   }
 
   if (chain === "torso") {
-    const origin = bones.abdomen ? worldPos(bones.abdomen) : worldPos(root).add(new THREE.Vector3(0, 1.0, 0));
+    // 胸/腰只转胸椎与轻度腹弯，不碰髋骨；增益收小，避免脚离地/地面「变形」错觉
+    const origin = bones.spine
+      ? worldPos(bones.spine)
+      : bones.abdomen
+        ? worldPos(bones.abdomen)
+        : worldPos(root).add(new THREE.Vector3(0, 1.15, 0));
     const dir = target.clone().sub(origin).applyQuaternion(qInv);
     if (dir.lengthSq() < 1e-6) return {};
     dir.normalize();
-    const x = clampJoint("spineX", rad2deg(Math.atan2(-dir.y, dir.z)) * 0.45);
-    const y = clampJoint("spineY", rad2deg(Math.atan2(dir.x, dir.z)) * 0.45);
-    return { spineX: x, spineY: y, abdomenX: clampJoint("abdomenX", x * 0.6) };
+    const x = clampJoint("spineX", rad2deg(Math.atan2(-dir.y, dir.z)) * 0.28);
+    const y = clampJoint("spineY", rad2deg(Math.atan2(dir.x, dir.z)) * 0.28);
+    const abdomenX = clampJoint("abdomenX", Math.max(-18, Math.min(18, x * 0.4)));
+    return { spineX: x, spineY: y, abdomenX };
   }
 
   const isArm = chain === "lArm" || chain === "rArm";
@@ -2535,6 +3119,93 @@ export function solveChainIk(
   };
 }
 
+/**
+ * 单关节 FK：只改点中的那一节（大腿/小腿/上臂/前臂），不整肢重解。
+ * 肩/髋：朝向目标；肘/膝：铰链弯曲使远端指向目标。
+ */
+export function solveSegmentFk(
+  root: THREE.Object3D,
+  boneKey: string,
+  target: THREE.Vector3,
+  _pose: JointPose,
+): Partial<JointPose> {
+  const region = boneKeyToRegion(boneKey);
+  if (!region) return {};
+  const bones = getPoseBones(root);
+  const qInv = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const rad2deg = (r: number) => (r * 180) / Math.PI;
+  const left = boneKey.startsWith("l");
+  const mixamo = isMixamoLateral(root);
+
+  if (region === "shoulder" || region === "hip") {
+    const bone = bones[boneKey];
+    if (!bone) return {};
+    const o = worldPos(bone);
+    const dir = target.clone().sub(o).applyQuaternion(qInv);
+    if (dir.lengthSq() < 1e-8) return {};
+    dir.normalize();
+    const rawPitch = rad2deg(Math.atan2(dir.z, -dir.y));
+    const pitch = region === "shoulder" ? -rawPitch : rawPitch;
+    const roll = rad2deg(
+      Math.atan2(mixamo ? dir.x : -dir.x, Math.max(1e-4, Math.hypot(dir.y, dir.z))),
+    );
+    if (region === "shoulder") {
+      if (left) {
+        return {
+          lShoulderX: clampJoint("lShoulderX", pitch),
+          lShoulderZ: clampJoint("lShoulderZ", roll),
+        };
+      }
+      return {
+        rShoulderX: clampJoint("rShoulderX", pitch),
+        rShoulderZ: clampJoint("rShoulderZ", roll),
+      };
+    }
+    if (left) {
+      return {
+        lHipX: clampJoint("lHipX", pitch),
+        lHipZ: clampJoint("lHipZ", roll),
+      };
+    }
+    return {
+      rHipX: clampJoint("rHipX", pitch),
+      rHipZ: clampJoint("rHipZ", roll),
+    };
+  }
+
+  if (region === "elbow" || region === "knee") {
+    const proxKey =
+      region === "elbow"
+        ? left
+          ? "lShoulder"
+          : "rShoulder"
+        : left
+          ? "lHip"
+          : "rHip";
+    const mid = bones[boneKey];
+    const prox = bones[proxKey];
+    if (!mid) return {};
+    const b = worldPos(mid);
+    const a = prox ? worldPos(prox) : b.clone().add(new THREE.Vector3(0, 0.3, 0));
+    const ba = a.clone().sub(b).normalize();
+    const bc = target.clone().sub(b);
+    if (bc.lengthSq() < 1e-8) return {};
+    bc.normalize();
+    const cos = Math.max(-1, Math.min(1, ba.dot(bc)));
+    // 伸直 ≈ 180° → bend 0；完全折叠 → bend 大
+    const bend = clampJoint(
+      region === "elbow" ? (left ? "lElbowX" : "rElbowX") : left ? "lKneeX" : "rKneeX",
+      rad2deg(Math.PI - Math.acos(cos)),
+    );
+    if (region === "elbow") {
+      return left ? { lElbowX: bend } : { rElbowX: bend };
+    }
+    return left ? { lKneeX: bend } : { rKneeX: bend };
+  }
+
+  return {};
+}
+
 function recordGLBTPose(bones: GLBBoneMap): Record<string, THREE.Quaternion> {
   const identity: Record<string, THREE.Quaternion> = {};
   for (const [key, bone] of Object.entries(bones)) {
@@ -2575,31 +3246,9 @@ export function applyPoseToGLB(
   pose: JointPose,
   identity: Record<string, THREE.Quaternion>,
 ): void {
-  const p = resolveClampPose(mergePose(defaultPose(), pose));
-  const neg = (v: number) => -v;
-
-  applyBoneDelta(bones.abdomen, identity, "abdomen", neg(p.abdomenX), 0, 0);
-  applyBoneDelta(bones.spine2 || bones.spine, identity, bones.spine2 ? "spine2" : "spine", neg(p.spineX), p.spineY, 0);
-  applyBoneDelta(bones.head, identity, "head", neg(p.headX), p.headY, 0);
-
-  applyBoneDelta(bones.lShoulder, identity, "lShoulder", 0, 0, p.lShoulderZ * 0.35);
-  applyBoneDelta(bones.lArm, identity, "lArm", neg(p.lShoulderX), 0, p.lShoulderZ);
-  // BodyKun 前臂/小腿 rest 未镜像，+X 才是屈肘/屈膝（朝腹侧）；肩/髋仍用 neg X = 抬起
-  applyBoneDelta(bones.lForeArm, identity, "lForeArm", p.lElbowX, 0, 0);
-  applyBoneDelta(bones.lWrist, identity, "lWrist", p.lWristX, 0, 0);
-
-  applyBoneDelta(bones.rShoulder, identity, "rShoulder", 0, 0, p.rShoulderZ * 0.35);
-  applyBoneDelta(bones.rArm, identity, "rArm", neg(p.rShoulderX), 0, p.rShoulderZ);
-  applyBoneDelta(bones.rForeArm, identity, "rForeArm", p.rElbowX, 0, 0);
-  applyBoneDelta(bones.rWrist, identity, "rWrist", p.rWristX, 0, 0);
-
-  applyBoneDelta(bones.lHip, identity, "lHip", neg(p.lHipX), 0, p.lHipZ);
-  applyBoneDelta(bones.lKnee, identity, "lKnee", p.lKneeX, 0, 0);
-  applyBoneDelta(bones.lAnkle, identity, "lAnkle", p.lAnkleX, 0, 0);
-
-  applyBoneDelta(bones.rHip, identity, "rHip", neg(p.rHipX), 0, p.rHipZ);
-  applyBoneDelta(bones.rKnee, identity, "rKnee", p.rKneeX, 0, 0);
-  applyBoneDelta(bones.rAnkle, identity, "rAnkle", p.rAnkleX, 0, 0);
+  // 统一入口：预设已是终态，不再二次 chain（避免坐姿/抱臂被拧坏）
+  const resolved = resolveClampPose(mergePose(defaultPose(), pose));
+  applyPoseToGLBResolved(bones, resolved, identity);
 }
 
 /**
@@ -2615,9 +3264,18 @@ export function applyPoseToGLBResolved(
   const p = pose;
   const neg = (v: number) => -v;
 
-  applyBoneDelta(bones.abdomen, identity, "abdomen", neg(p.abdomenX), 0, 0);
-  applyBoneDelta(bones.spine2 || bones.spine, identity, bones.spine2 ? "spine2" : "spine", neg(p.spineX), p.spineY, 0);
-  applyBoneDelta(bones.head, identity, "head", neg(p.headX), p.headY, 0);
+  // 腰部绝不能打到 Hips，否则脚离地、地面像被拽变形
+  const abdomenBone =
+    bones.abdomen && bones.abdomen !== bones.hips
+      ? bones.abdomen
+      : bones.spine && bones.spine !== bones.hips
+        ? bones.spine
+        : bones.spine2;
+  applyBoneDelta(abdomenBone, identity, "abdomen", neg(p.abdomenX), p.abdomenY, p.abdomenZ);
+  applyBoneDelta(bones.spine2 || bones.spine, identity, bones.spine2 ? "spine2" : "spine", neg(p.spineX), p.spineY, p.spineZ);
+  // neck 承担头部旋转的一半，让脖子蒙皮平滑过渡，避免头转脖子不跟导致"颈子凸出断裂"
+  applyBoneDelta(bones.neck, identity, "neck", neg(p.headX) * 0.5, p.headY * 0.5, p.headZ * 0.5);
+  applyBoneDelta(bones.head, identity, "head", neg(p.headX) * 0.5, p.headY * 0.5, p.headZ * 0.5);
 
   applyBoneDelta(bones.lShoulder, identity, "lShoulder", 0, 0, p.lShoulderZ * 0.35);
   applyBoneDelta(bones.lArm, identity, "lArm", neg(p.lShoulderX), 0, p.lShoulderZ);
@@ -2644,147 +3302,74 @@ function getGLTFLoader(): GLTFLoader {
   return _sharedGLTFLoader;
 }
 
-let _bodyGridTex: THREE.CanvasTexture | null = null;
-
-/** BodyKun 风格：灰白底 + 环绕等高线（经纬网格），不要 mesh 线框。 */
-function getBodyGridTexture(): THREE.CanvasTexture {
-  if (_bodyGridTex) return _bodyGridTex;
-  const s = 1024;
-  const canvas = document.createElement("canvas");
-  canvas.width = s;
-  canvas.height = s;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#c9c9c4";
-  ctx.fillRect(0, 0, s, s);
-  const meridians = 8;
-  const parallels = 12;
-  for (let i = 0; i <= meridians; i++) {
-    ctx.beginPath();
-    ctx.strokeStyle = "#161618";
-    ctx.lineWidth = i === 0 || i === meridians / 2 || i === meridians ? 3.4 : 1.5;
-    const x = (i / meridians) * s + 0.5;
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, s);
-    ctx.stroke();
-  }
-  for (let i = 0; i <= parallels; i++) {
-    ctx.beginPath();
-    ctx.strokeStyle = "#161618";
-    ctx.lineWidth = i === 0 || i === parallels / 2 || i === parallels ? 3.4 : 1.5;
-    const y = (i / parallels) * s + 0.5;
-    ctx.moveTo(0, y);
-    ctx.lineTo(s, y);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.anisotropy = 8;
-  tex.needsUpdate = true;
-  _bodyGridTex = tex;
-  return tex;
-}
-
-function rewriteGeometryUVs(geometry: THREE.BufferGeometry, spherical: boolean) {
-  geometry.computeBoundingBox();
-  const bb = geometry.boundingBox;
-  if (!bb) return;
-  const size = new THREE.Vector3();
-  bb.getSize(size);
-  const pos = geometry.attributes.position;
-  const n = pos.count;
-  const uv = new Float32Array(n * 2);
-  let axis: 0 | 1 | 2 = 1;
-  if (size.x >= size.y && size.x >= size.z) axis = 0;
-  else if (size.z >= size.y && size.z >= size.x) axis = 2;
-  const minA = axis === 0 ? bb.min.x : axis === 1 ? bb.min.y : bb.min.z;
-  const maxA = axis === 0 ? bb.max.x : axis === 1 ? bb.max.y : bb.max.z;
-  const span = Math.max(1e-6, maxA - minA);
-  const cx0 = (bb.min.x + bb.max.x) * 0.5;
-  const cy0 = (bb.min.y + bb.max.y) * 0.5;
-  const cz0 = (bb.min.z + bb.max.z) * 0.5;
-  for (let i = 0; i < n; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    if (spherical) {
-      const dx = x - cx0;
-      const dy = y - cy0;
-      const dz = z - cz0;
-      const r = Math.hypot(dx, dy, dz) || 1;
-      uv[i * 2] = Math.atan2(dx, dz) / (Math.PI * 2) + 0.5;
-      uv[i * 2 + 1] = Math.acos(Math.max(-1, Math.min(1, dy / r))) / Math.PI;
-    } else {
-      let along: number;
-      let cx: number;
-      let cy: number;
-      if (axis === 1) {
-        along = y;
-        cx = x;
-        cy = z;
-      } else if (axis === 0) {
-        along = x;
-        cx = y;
-        cy = z;
-      } else {
-        along = z;
-        cx = x;
-        cy = y;
-      }
-      uv[i * 2] = Math.atan2(cx, cy) / (Math.PI * 2) + 0.5;
-      uv[i * 2 + 1] = (along - minA) / span;
-    }
-  }
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-}
-
-/** 把 GLB 外观统一成参考图：哑光灰白 + 环绕等高线 + 深灰关节球。 */
-function applyBodyKunLook(scene: THREE.Object3D) {
-  const grid = getBodyGridTexture();
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: "#c8c8c3",
-    map: grid,
-    roughness: 0.74,
-    metalness: 0.03,
-  });
-  const jointMat = new THREE.MeshStandardMaterial({
-    color: "#5e5e5a",
-    roughness: 0.38,
-    metalness: 0.18,
-  });
-  const size = new THREE.Vector3();
+/**
+ * 保留 vinchau BodyKun/BodyChan 原材质与分段网格。
+ * 旧版会重写 UV 并贴生成等高线，把真实绘制人偶刷成早期程序化素模。
+ */
+function prepareBodyFigureMeshes(scene: THREE.Object3D) {
   scene.traverse((obj) => {
     const m = obj as THREE.Mesh;
-    if (!m.isMesh || !m.geometry) return;
-    m.geometry = m.geometry.clone();
-    m.geometry.computeBoundingBox();
-    const bb = m.geometry.boundingBox;
-    if (!bb) return;
-    bb.getSize(size);
-    const max = Math.max(size.x, size.y, size.z);
-    const min = Math.min(size.x, size.y, size.z);
-    const spherical = max > 1e-6 && min / max > 0.68;
-    const isJoint = spherical && max < 0.12;
-    if (!isJoint) rewriteGeometryUVs(m.geometry, spherical);
-    m.material = isJoint ? jointMat : bodyMat;
+    if (!m.isMesh) return;
+    m.userData.sharedTemplate = true;
     m.castShadow = true;
     m.receiveShadow = true;
   });
 }
 
-/** 缓存原始 GLTF scene（URL → 未处理的原始 Object3D），每次使用时 clone 独立副本 */
+/** 缓存原始 GLTF scene（URL → 未处理的原始 Object3D） */
 const _glbSceneCache = new Map<string, Promise<THREE.Object3D>>();
+/** 缓存已归一化缩放的模板；多 actor 只 clone */
+const _glbProcessedCache = new Map<string, Promise<THREE.Object3D>>();
 
 function loadRawGLBScene(url: string): Promise<THREE.Object3D> {
   const cached = _glbSceneCache.get(url);
   if (cached) return cached;
   const task = new Promise<THREE.Object3D>((resolve, reject) => {
     getGLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+  }).catch((err) => {
+    _glbSceneCache.delete(url);
+    throw err;
   });
   _glbSceneCache.set(url, task);
+  return task;
+}
+
+function loadProcessedGLBTemplate(url: string): Promise<THREE.Object3D> {
+  const hit = _glbProcessedCache.get(url);
+  if (hit) return hit;
+  const task = loadRawGLBScene(url)
+    .then((rawScene) => {
+      const scene = cloneSkinned(rawScene);
+      scene.name = "glb_tpl_" + (url.split("/").pop()?.replace(/\.glb$/i, "") ?? "");
+      scene.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (!m.isMesh || !m.material) return;
+        m.material = Array.isArray(m.material)
+          ? m.material.map((x) => x.clone())
+          : m.material.clone();
+        m.castShadow = true;
+        m.receiveShadow = true;
+      });
+      prepareBodyFigureMeshes(scene);
+
+      const TARGET_HEIGHT = 1.815;
+      const fitBox = new THREE.Box3().setFromObject(scene);
+      const fitSize = new THREE.Vector3();
+      fitBox.getSize(fitSize);
+      if (fitSize.y > 1e-6) {
+        scene.scale.setScalar(TARGET_HEIGHT / fitSize.y);
+      }
+      scene.updateMatrixWorld(true);
+      fitBox.setFromObject(scene);
+      scene.position.y -= fitBox.min.y;
+      scene.updateMatrixWorld(true);
+      return scene;
+    })
+    .catch((err) => {
+      _glbProcessedCache.delete(url);
+      throw err;
+    });
+  _glbProcessedCache.set(url, task);
   return task;
 }
 
@@ -2794,58 +3379,38 @@ export type LoadGLBOptions = {
   scale?: number;
 };
 
+/** 空闲时预热 BodyKun/BodyChan，缩短首次进 3D 的等待 */
+export function preloadBodyFigures(variants: Array<"male_std" | "female_std"> = ["male_std", "female_std"]): void {
+  for (const v of variants) {
+    void loadProcessedGLBTemplate(bodyFigureUrl(v)).catch(() => {
+      /* 预热失败不影响功能 */
+    });
+  }
+}
+
 export function loadGLBRiggedHumanoid(
   url: string,
   options?: LoadGLBOptions,
 ): Promise<THREE.Group> {
-  return loadRawGLBScene(url).then((rawScene) => {
-    // 每次 clone 独立副本，避免多 actor 共享同一场景对象
-    // SkeletonUtils.clone 会重绑 SkinnedMesh.skeleton，普通 clone 会导致旋转骨骼 mesh 不动
-    const scene = cloneSkinned(rawScene);
+  return loadProcessedGLBTemplate(url).then((template) => {
+    const scene = cloneSkinned(template);
     scene.name = "glb_scene_" + (url.split("/").pop()?.replace(/\.glb$/i, "") ?? "");
-    scene.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh || !m.material) return;
-      m.material = Array.isArray(m.material) ? m.material.map((x) => x.clone()) : m.material.clone();
-      m.castShadow = true;
-      m.receiveShadow = true;
-    });
+    const extraScale = options?.scale ?? 1.0;
+    if (extraScale !== 1.0) {
+      scene.scale.multiplyScalar(extraScale);
+      scene.updateMatrixWorld(true);
+      const fitBox = new THREE.Box3().setFromObject(scene);
+      scene.position.y -= fitBox.min.y;
+    }
 
     const boneMap = buildGLBBoneMap(scene);
     const identity = recordGLBTPose(boneMap);
-    scene.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh) return;
-      m.castShadow = true;
-      m.receiveShadow = true;
-    });
 
     const root = new THREE.Group();
     root.add(scene);
-
-    const hipsBone = boneMap.hips;
-    if (hipsBone) {
-      const wp = new THREE.Vector3();
-      hipsBone.getWorldPosition(wp);
-      scene.position.y = 0.92 - wp.y;
-    }
-
-    scene.scale.setScalar(options?.scale ?? 1.0);
-
     root.userData.glBones = boneMap;
     root.userData.glBonesIdentity = identity;
     root.userData.sourceUrl = url;
-
-    const foundCount = Object.values(boneMap).filter(Boolean).length;
-    let skinned = 0;
-    let skelBones = 0;
-    scene.traverse((obj) => {
-      const mesh = obj as THREE.SkinnedMesh;
-      if (!mesh.isSkinnedMesh || !mesh.skeleton) return;
-      skinned += 1;
-      skelBones += mesh.skeleton.bones.length;
-    });
-    console.log("[RiggedHumanoid] GLB cloned:", { url, foundBones: foundCount, skinned, skelBones });
 
     return root;
   });
@@ -2867,43 +3432,52 @@ export function attachGLBToHumanoid(
   if (root.userData.glbLoaded || root.userData._glb_attaching) return;
   root.userData._glb_attaching = true;
 
-  loadGLBRiggedHumanoid(url, options)
-    .then((glbRoot) => {
+  const tryAttach = (attempt: number) => {
+    loadGLBRiggedHumanoid(url, options)
+      .then((glbRoot) => {
       const glbScene = glbRoot.children[0];
       if (!glbScene) {
         root.userData._glb_attaching = false;
         return;
       }
-      let tries = 0;
-      const finish = () => {
-        if (root.userData._disposed) return;
-        if (!root.parent && tries++ < 60) {
-          requestAnimationFrame(finish);
-          return;
-        }
-        if (!root.parent) {
-          root.userData._glb_attaching = false;
-          return;
-        }
-        root.children.forEach((ch) => {
-          if (ch !== glbScene) ch.visible = false;
-        });
-        root.add(glbScene);
-        root.userData.glBones = glbRoot.userData.glBones;
-        root.userData.glBonesIdentity = glbRoot.userData.glBonesIdentity;
-        root.userData.glbLoaded = true;
-        bindHumanoidPickData(root);
-        applyPose(root, root.userData._lastPose || defaultPose());
-        console.log("[RiggedHumanoid] GLB attached:", url, {
-          foundBones: Object.values(root.userData.glBones as object[]).filter(Boolean).length,
-        });
-      };
-      finish();
+      if (root.userData._disposed) {
+        root.userData._glb_attaching = false;
+        return;
+      }
+      root.children.forEach((ch) => {
+        if (ch !== glbScene) ch.visible = false;
+      });
+      root.add(glbScene);
+      root.userData.glBones = glbRoot.userData.glBones;
+      root.userData.glBonesIdentity = glbRoot.userData.glBonesIdentity;
+      root.userData.glbLoaded = true;
+      root.userData._glb_attaching = false;
+      bindHumanoidPickData(root);
+      applyPose(root, root.userData._lastPose || defaultPose());
+      console.log("[RiggedHumanoid] GLB attached:", url, {
+        foundBones: Object.values(root.userData.glBones as object[]).filter(Boolean).length,
+      });
     })
-    .catch((err) => {
-      console.warn("[RiggedHumanoid] GLB attach failed, keeping capsule:", err?.message || err);
+      .catch((err) => {
+      if (root.userData._disposed) {
+        root.userData._glb_attaching = false;
+        return;
+      }
+      if (attempt < 1) {
+        setTimeout(() => tryAttach(attempt + 1), 450);
+        return;
+      }
+      // 已移除胶囊素模 fallback：GLB 加载失败时不再回退显示几何拼装素模，
+      // 只隐藏胶囊骨架网格（bones 仍保留，供拾取/姿势驱动使用）。
+      root.traverse((ch) => {
+        const m = ch as THREE.Mesh;
+        if (m.isMesh) m.visible = false;
+      });
+      console.warn("[RiggedHumanoid] GLB attach failed, capsule fallback removed:", err?.message || err);
       root.userData._glb_attaching = false;
     });
+  };
+  tryAttach(0);
 }
 
 /* END GLUE */

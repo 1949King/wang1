@@ -15,6 +15,9 @@ import threading
 from .base_block import LegoBlock, BlockMeta, BlockState
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.block_loader")
+
 @dataclass
 class BlockInfo:
     name: str
@@ -84,7 +87,7 @@ class BlockRegistry:
             
             return True
         except Exception as e:
-            print(f"注册积木失败: {e}")
+            logger.error(f'注册积木失败: {e}')
             return False
     
     def unregister(self, name: str) -> bool:
@@ -156,7 +159,7 @@ class BlockLoader:
                         with self._lock:
                             self._block_infos[info.name] = info
                 except Exception as e:
-                    print(f"扫描积木失败 {file}: {e}")
+                    logger.error(f'扫描积木失败 {file}: {e}')
         
         return discovered
     
@@ -192,7 +195,7 @@ class BlockLoader:
             
             return None
         except Exception as e:
-            print(f"提取积木信息失败: {e}")
+            logger.error(f'提取积木信息失败: {e}')
             return None
     
     def load_block(self, name: str) -> Optional[Type[LegoBlock]]:
@@ -223,7 +226,7 @@ class BlockLoader:
             
             return None
         except Exception as e:
-            print(f"加载积木失败 {name}: {e}")
+            logger.error(f'加载积木失败 {name}: {e}')
             return None
     
     def load_all_blocks(self) -> Dict[str, Type[LegoBlock]]:
@@ -255,7 +258,7 @@ class BlockLoader:
             
             return False
         except Exception as e:
-            print(f"安装积木失败: {e}")
+            logger.error(f'安装积木失败: {e}')
             return False
     
     def uninstall_block(self, name: str) -> bool:
@@ -271,7 +274,7 @@ class BlockLoader:
             
             return self.unload_block(name)
         except Exception as e:
-            print(f"卸载积木失败: {e}")
+            logger.error(f'卸载积木失败: {e}')
             return False
     
     def get_block_info(self, name: str) -> Optional[BlockInfo]:

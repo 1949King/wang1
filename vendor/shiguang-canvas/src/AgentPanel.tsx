@@ -17,6 +17,7 @@ import {
   sendAgentReply,
   controlAgentSession,
   breakdownStoryboard,
+  fetchTimelineSnapshot,
   type AgentEventEnvelope,
   type ChatModelProvider,
   type ProjectTool,
@@ -53,10 +54,12 @@ type Props = {
   onClose: () => void;
   onRequestGenerate: () => void;
   onRequestBreakdown?: () => void;
+  onRequestBatchGenerate?: () => void;
 };
 
 const QUICK = [
   { id: "gen", label: "生成选中", text: "/generate" },
+  { id: "batch", label: "批量生成", text: "/batch" },
   { id: "shot", label: "+镜头", text: "/add shot" },
   { id: "sync", label: "同步模型", text: "/sync" },
   { id: "status", label: "状态", text: "/status" },
@@ -82,6 +85,7 @@ export default function AgentPanel({
   onClose,
   onRequestGenerate,
   onRequestBreakdown,
+  onRequestBatchGenerate,
 }: Props) {
   const [tab, setTab] = useState<Tab>("chat");
   const [mcpOn, setMcpOn] = useState(false);
@@ -377,6 +381,13 @@ export default function AgentPanel({
           onRequestGenerate();
           break;
         }
+        case "batchGenerate":
+        case "runBatchGenerate":
+        case "canvas_batch_generate": {
+          if (!onRequestBatchGenerate) throw new Error("当前画布未接线批量生成");
+          onRequestBatchGenerate();
+          break;
+        }
         case "setNodeImage": {
           const id = String(params.id || "");
           const url = String(params.url || "");
@@ -398,6 +409,18 @@ export default function AgentPanel({
           const sid = useCanvasStore.getState().selectedId;
           canvasNodeId = sid || "";
           break;
+        }
+        case "queryTimeline": {
+          const snap = await fetchTimelineSnapshot();
+          await reply(true, {
+            clip_count: snap.clip_count || (snap.clips || []).length,
+            clips: snap.clips || [],
+            gaps: snap.gaps || [],
+            suggestions: snap.suggestions || [],
+            message: snap.message || "",
+          });
+          push("system", `✅ queryTimeline → ${snap.clip_count || 0} 个片段`);
+          return;
         }
         case "queryNodes":
         case "canvas_query": {
@@ -708,13 +731,37 @@ export default function AgentPanel({
       return true;
     }
     if (cmd === "generate") {
+      const ok = await askConfirm("确认生成", "将调用 AIGC 生成选中节点（消耗模型额度）。确认后才执行。");
+      if (!ok) {
+        push("assistant", "已取消生成，未改画布");
+        return true;
+      }
       onRequestGenerate();
       push("assistant", "已触发生成选中节点");
       return true;
     }
     if (cmd === "breakdown") {
+      const ok = await askConfirm("确认拉片", "将按当前剧本拆镜并写入画布节点。确认后才执行。");
+      if (!ok) {
+        push("assistant", "已取消拉片，未改画布");
+        return true;
+      }
       onRequestBreakdown?.();
       push("assistant", "已触发一键拉片");
+      return true;
+    }
+    if (cmd === "batch") {
+      const ok = await askConfirm("确认批量生成", "将串行生成全部镜头/图/视频节点（消耗模型额度）。确认后才执行。");
+      if (!ok) {
+        push("assistant", "已取消批量生成");
+        return true;
+      }
+      if (!onRequestBatchGenerate) {
+        push("assistant", "当前画布未接线批量生成");
+        return true;
+      }
+      onRequestBatchGenerate();
+      push("assistant", "已触发批量生成");
       return true;
     }
     if (cmd === "tools") {
@@ -1032,9 +1079,14 @@ export default function AgentPanel({
             const primarySel = nodes.find((n) => n.id === selectedId);
             const showNodes = selNodes.length > 0 ? selNodes : primarySel ? [primarySel] : [];
             const totalNodes = nodes.length;
-            const withImg = nodes.filter(
-              (n) => (n.data as NodeData).kind && ("imageUrl" in (n.data as NodeData) && (n.data as NodeData).imageUrl || "videoUrl" in (n.data as NodeData) && (n.data as NodeData).videoUrl || "posterUrl" in (n.data as NodeData) && (n.data as NodeData).posterUrl),
-            ).length;
+            const withImg = nodes.filter((n) => {
+              const d = n.data as NodeData;
+              const hasImg =
+                ("imageUrl" in d && Boolean(d.imageUrl)) ||
+                ("videoUrl" in d && Boolean(d.videoUrl)) ||
+                ("posterUrl" in d && Boolean(d.posterUrl));
+              return Boolean(d.kind) && hasImg;
+            }).length;
             const kindCount: Record<string, number> = {};
             nodes.forEach((n) => {
               const k = (n.data as NodeData).kind || "?";

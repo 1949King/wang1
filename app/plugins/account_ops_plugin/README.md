@@ -1,2 +1,3 @@
-# 账号运营插件 — 与短剧筛选同级，仅拓展中心入口
-# UI 实现仍在 app/modules/lego/account_ops_module.py（复用，不重写时间线）
+# 账号运营（接口壳）
+
+功能代码已卸。保留商店 id `account-ops`、IPlugin、拓展中心入口，以及 Agent `account.*` 能力名（调用诚实失败）。

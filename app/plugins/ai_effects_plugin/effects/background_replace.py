@@ -51,7 +51,7 @@ class BackgroundReplaceEffect:
         os.makedirs(models_path, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        print(f"[背景替换] 初始化完成")
+        logger.info(f'[背景替换] 初始化完成')
     
     def load_model(self) -> bool:
         """加载分割模型 — 接入神经网络引擎"""
@@ -59,18 +59,18 @@ class BackgroundReplaceEffect:
             from app.core.neural.background_replace import BackgroundReplaceEngine
             self._neural_engine = BackgroundReplaceEngine()
             if self._neural_engine.load(model="modnet"):
-                print("[背景替换] 神经网络分割引擎就绪")
+                logger.info('[背景替换] 神经网络分割引擎就绪')
                 self._model = "neural"
                 return True
             self._model = "fallback"
-            print("[背景替换] 神经网络引擎不可用，将使用传统算法")
+            logger.info('[背景替换] 神经网络引擎不可用，将使用传统算法')
             return True
         except ImportError as e:
-            print(f"[背景替换] 神经网络模块未安装: {e}")
+            logger.info(f'[背景替换] 神经网络模块未安装: {e}')
             self._model = "fallback"
             return True
         except Exception as e:
-            print(f"[背景替换] 模型加载失败: {e}")
+            logger.error(f'[背景替换] 模型加载失败: {e}')
             return False
     
     def unload_model(self) -> None:
@@ -86,7 +86,7 @@ class BackgroundReplaceEffect:
             except Exception as e:
                 logger.debug(f"清理GPU缓存时失败: {e}")
 
-            print("[背景替换] 模型已卸载")
+            logger.info('[背景替换] 模型已卸载')
     
     def replace_background(self, 
                          frame_data: Any,
@@ -118,7 +118,7 @@ class BackgroundReplaceEffect:
         image = self._to_numpy(frame_data)
         h, w = image.shape[:2]
         
-        print(f"[背景替换] 处理中... 类型: {background_type}, 尺寸: {w}x{h}")
+        logger.info(f'[背景替换] 处理中... 类型: {background_type}, 尺寸: {w}x{h}')
         
         # 1. 获取前景掩码（模拟分割结果）
         mask = self._segment_foreground(image)
@@ -175,7 +175,7 @@ class BackgroundReplaceEffect:
             return mask_result
             
         except Exception as e:
-            print(f"[背景分割] GrabCut失败，使用备用方法: {e}")
+            logger.error(f'[背景分割] GrabCut失败，使用备用方法: {e}')
             # 备用方案：基于颜色的简单分割
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
             lower = np.array([0, 0, 200])

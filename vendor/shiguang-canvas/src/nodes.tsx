@@ -373,6 +373,93 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
   );
 }, nodePropsEqual);
 
+/** L1 导演参数面板 — 生成卡内嵌（spec §7.2：画质/时长/运动幅度/相似度，提示词走下方 EditableText） */
+function DirectorL1Panel({ nodeId, d }: {
+  nodeId: string;
+  d: Extract<NodeData, { kind: "video" }>;
+}) {
+  const set = (patch: Record<string, unknown>) =>
+    useCanvasStore.getState().updateNodeData(nodeId, patch);
+
+  const qualityOptions = [
+    { key: "draft", label: "草稿" },
+    { key: "standard", label: "标准" },
+    { key: "fine", label: "精修" },
+    { key: "cinema", label: "电影级" },
+  ] as const;
+  const motionOptions = [
+    { key: 30, label: "小" },
+    { key: 60, label: "中" },
+    { key: 90, label: "大" },
+  ] as const;
+
+  const currentQuality = d.qualityTier ?? "standard";
+  const currentMotion = d.motionStrength ?? 60;
+  const currentConsistency = d.consistency ?? 75;
+  const currentDuration = d.duration ?? 5;
+
+  return (
+    <div className="sg-l1-panel nodrag">
+      <div className="sg-l1-row">
+        <span className="sg-l1-label">画质</span>
+        <div className="sg-l1-seg">
+          {qualityOptions.map((q) => (
+            <button
+              key={q.key}
+              type="button"
+              className={`sg-l1-seg-btn${currentQuality === q.key ? " active" : ""}`}
+              onClick={() => set({ qualityTier: q.key })}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="sg-l1-row">
+        <span className="sg-l1-label">时长</span>
+        <input
+          type="range"
+          min={2}
+          max={30}
+          step={1}
+          value={currentDuration}
+          onChange={(e) => set({ duration: Number(e.target.value) })}
+          className="sg-l1-range"
+        />
+        <span className="sg-l1-val">{currentDuration}s</span>
+      </div>
+      <div className="sg-l1-row">
+        <span className="sg-l1-label">运动</span>
+        <div className="sg-l1-seg">
+          {motionOptions.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              className={`sg-l1-seg-btn${currentMotion === m.key ? " active" : ""}`}
+              onClick={() => set({ motionStrength: m.key })}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="sg-l1-row">
+        <span className="sg-l1-label">相似度</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={currentConsistency}
+          onChange={(e) => set({ consistency: Number(e.target.value) })}
+          className="sg-l1-range"
+        />
+        <span className="sg-l1-val">{currentConsistency}%</span>
+      </div>
+    </div>
+  );
+}
+
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "video" }>;
   const stackCount = d.videos?.length || (d.videoUrl ? 1 : 0);
@@ -399,21 +486,16 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
         {d.lastFrameUrl ? <img className="frame-thumb" src={d.lastFrameUrl} alt="尾帧" /> : null}
         {d.isReference || d.refVideoUrl ? <span className="ref-vid-badge">参考</span> : null}
       </div>
-      {(d.motionStrength != null || d.consistency != null) ? (
+      {!d.isReference ? (
+        <DirectorL1Panel nodeId={id} d={d} />
+      ) : null}
+      {d.firstFrameWeight != null || d.lastFrameWeight != null ? (
         <div className="sg-video-tags">
-          {d.motionStrength != null && <span className="sg-shot-tag">动{d.motionStrength}</span>}
-          {d.consistency != null && <span className="sg-shot-tag">稳{d.consistency}</span>}
           {d.firstFrameWeight != null && <span className="sg-shot-tag">首帧{d.firstFrameWeight}</span>}
           {d.lastFrameWeight != null && <span className="sg-shot-tag">尾帧{d.lastFrameWeight}</span>}
         </div>
       ) : null}
-      {(d.duration || d.seed != null) ? (
-        <div className="sg-meta-tiny">
-          {d.duration ? `${d.duration}s` : ""}
-          {d.duration && d.seed != null ? " · " : ""}
-          {d.seed != null ? `seed:${d.seed}` : ""}
-        </div>
-      ) : null}
+      {d.seed != null ? <div className="sg-meta-tiny">seed:{d.seed}</div> : null}
       <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
         placeholder="双击输入生视频提示词…" />
     </Shell>

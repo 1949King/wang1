@@ -204,17 +204,28 @@ class GPUDetector:
         return None
     
     def _parse_memory(self, memory_str: str) -> int:
-        """解析内存字符串"""
+        """解析显存字符串。
+
+        兼容十进制单位（GB/MB/KB）与 nvidia-smi 默认的二进制单位（GiB/MiB/KiB），
+        统一换算为 MB 返回；无法识别时视为 0。
+        """
         try:
-            memory_str = memory_str.upper()
-            if 'GB' in memory_str:
-                return int(float(memory_str.replace('GB', '').strip()) * 1024)
-            elif 'MB' in memory_str:
-                return int(float(memory_str.replace('MB', '').strip()))
-            elif 'KB' in memory_str:
-                return int(float(memory_str.replace('KB', '').strip()) / 1024)
-            else:
-                return int(memory_str)
+            import re
+            text = memory_str.upper().replace(" ", "")
+            match = re.search(r"(\d+(?:\.\d+)?)(TIB|GIB|MIB|KIB|TB|GB|MB|KB)", text)
+            if not match:
+                return int(float(text))
+            value = float(match.group(1))
+            unit = match.group(2)
+            if unit in ("TIB", "TB"):
+                return int(value * 1024 * 1024)
+            if unit in ("GIB", "GB"):
+                return int(value * 1024)
+            if unit in ("MIB", "MB"):
+                return int(value)
+            if unit in ("KIB", "KB"):
+                return int(value / 1024)
+            return int(value)
         except Exception as e:
             logger.debug(f"[GPUAcceleration] 获取GPU显存失败: {e}")
             return 0

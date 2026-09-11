@@ -2,9 +2,10 @@
 
 ## Project Overview
 
-A PyQt6-based desktop application(**拾光剪影**)for editing and publishing short drama videos with AI assistance.
+A PyQt6-based desktop application(**拾光剪影**)focused on short-drama **editing** and **AI canvas** (agent + digital human). Publishing/finder plugins are interface shells only.
 
-**完整知识库(优先阅读)**: [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
+**现行技术文档(单一事实源·优先阅读)**: [`docs/现行技术文档.md`](docs/现行技术文档.md)
+**完整知识库(分页)**: [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
 
 ## Tech Stack
 
@@ -24,7 +25,7 @@ A PyQt6-based desktop application(**拾光剪影**)for editing and publishing sh
 | **双内核** | `EditorScheduler`: PyAV light vs FFmpeg/MLT pro |
 | **时间线** | Timeline canvas; truth source = `EditorModule._clips` |
 | **素材库** | Asset library |
-| **短剧筛选** | Drama finder plugin only(`drama_finder_plugin` + crawler);UI via **extensions** |
+| **短剧筛选** | Plugin shell `drama_finder_plugin` (no crawler); UI via **extensions** |
 | **拓展中心** | Registry id=`extensions`(migrated from `plugins`) |
 | **B0–B2** | `text_frame_map` / `edit_commands` / `filler_silence_detect` |
 | **账号矩阵** | Multi-account publishing |
@@ -34,7 +35,9 @@ A PyQt6-based desktop application(**拾光剪影**)for editing and publishing sh
 | **SkillEngine** | Skill orchestration |
 | **墙钟播放** | Wall-clock playhead (not `+=0.033`) |
 | **3D 导演台** | Canvas Three.js stage (`dummy13-v3`); front = +Z; solo/group templates |
-| **账号运营** | Plugin `account_ops_plugin` via **extensions** (not a nav module id) |
+| **数字人** | Canvas node `digitalHuman`: portrait + line + TTS; talking-head video only with a real model |
+| **剪辑画布联动** | Round-trip ids between `_clips` and canvas nodes; outbox auto-creates source nodes |
+| **账号运营** | Plugin shell `account_ops_plugin` via **extensions** (capabilities honest-fail) |
 | **联动音频片** | Auto audio-track twin of imported video; skip in BGM sync |
 
 ## Directory Structure
@@ -63,7 +66,7 @@ scripts/
 
 ## Rules
 
-1. Read [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md) before coding
+1. Read [`docs/现行技术文档.md`](docs/现行技术文档.md)（单一事实源）before coding；细节查 [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
 2. Understand existing business logic before adding features
 3. Make minimal changes — don't break existing functionality
 4. Layer separation: UI renders, core processes data, main window dispatches

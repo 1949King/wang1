@@ -6,7 +6,7 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QLineEdit, QListWidget, QListWidgetItem,
@@ -599,35 +599,31 @@ class HelpModule(BaseModule):
 
     def _drama(self):
         self._clear(); self._title("🎭 短剧筛选（插件）")
-        self._text("短剧筛选已改为**仅插件入口**，不再作为独立导航模块。")
+        self._text("短剧筛选仅保留插件入口与回流接口，榜单/爬虫功能已卸。")
         self._subtitle("如何打开")
-        self._bullet(["打开「插件中心」→ 启用「🎭 短剧筛选」插件",
-                      "或在插件中心运行该插件以打开筛选面板",
-                      "爬虫引擎已打包在插件内：plugins/drama_finder_plugin/crawler/"])
-        self._subtitle("能力")
-        self._bullet(["多平台榜单：抖音/快手/B站等（Playwright / TikHub / Web 兜底）",
-                      "多维筛选：平台 × 类型 × 分类 × 关键字 × 排序",
-                      "双数据源：真实爬取优先，失败回退静态/模拟并提示",
-                      "约每 5 分钟自动刷新；可查看数据源健康状态"])
-        self._tip("若顶部提示「数据为模拟」，请检查 Playwright/Chromium 或 TikHub Token")
+        self._bullet(["「拓展中心」顶部或商店中的「🎭 短剧筛选」",
+                      "EventBus：MODULE_ACTIVATED{target:extensions, action:drama_finder}",
+                      "「发送到剪辑」仍可用：自行指定本地成片"])
+        self._subtitle("已卸")
+        self._bullet(["Playwright / TikHub 真爬",
+                      "静态假榜单与卡片墙",
+                      "自动抓剧进时间线"])
+        self._tip("无选中条目时发送到剪辑会诚实失败，可选手选本地视频。")
         self._cl.addStretch()
 
     def _account(self):
         self._clear(); self._title("👤 账号运营（拓展中心插件）")
-        self._text("账号运营已从主导航迁出，与短剧筛选同级：在「拓展中心」打开。"
-                    "Agent 的 account.* 能力仍可用。无平台真 API 时，发布多为本地队列/导出。")
+        self._text("账号运营已从主导航迁出，现为拓展中心插件壳。"
+                    "发布队列 / 爆款卡 / 矩阵上传已卸；Agent 的 account.* 会诚实失败。")
         self._subtitle("怎么打开")
         self._bullet(["左侧导航「拓展中心」→ 顶部「👤 账号运营」",
-                      "或首页快捷「账号运营」（会跳到拓展中心并打开界面）",
+                      "或首页快捷「账号运营」（会跳到拓展中心并打开占位页）",
                       "插件目录：app/plugins/account_ops_plugin/"])
-        self._subtitle("平台与绑定")
-        self._bullet(["8 大平台：抖音/快手/视频号/小红书/B站/微博/头条/西瓜",
-                      "绑定账号后本地管理；勿把样例数据当成平台真粉丝数"])
-        self._subtitle("发布与数据")
-        self._bullet(["矩阵/快速发布：有 Integrator 则尝试上传，否则本地队列或导出",
-                      "「汇总本地发布日志」不联网拉平台数据",
-                      "爆款建议读本地运营目录 + viral 引擎，非平台真播放 API"])
-        self._tip("精剪与导出仍在「剪辑」；运营扩展按需打开即可。")
+        self._subtitle("仍保留的接口")
+        self._bullet(["商店 id：account-ops",
+                      "EventBus：action=account_ops",
+                      "能力名：account.collect_data / account.optimize_strategy / account.publish（失败可见）"])
+        self._tip("精剪与导出仍在「剪辑」。")
         self._cl.addStretch()
 
     def _materials(self):
@@ -753,22 +749,20 @@ class HelpModule(BaseModule):
 
     def _ai_canvas(self):
         self._clear(); self._title("🎨 AI画布")
-        self._text("左侧导航「AI 画布」默认加载开源 infinite-canvas（vendor/infinite-canvas）。"
-                    "顶栏「画布引擎」下拉可随时切换为自研「拾光导演台」（LibTV 向节点画布，"
-                    "vendor/shiguang-canvas），切换会重启画布服务。生成结果经 bridge 送回时间线。")
+        self._text("左侧导航「AI 画布」加载自研「拾光导演台」（LibTV 向节点画布，"
+                    "vendor/shiguang-canvas）。生成结果经 bridge 送回时间线。")
         self._subtitle("首次使用前置条件")
         self._bullet(["需要 PyQt6-WebEngine：未安装时画布区域会显示红字错误，按提示"
                       "`.venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0` 装好后完全重启软件",
-                      "infinite-canvas（默认）：`scripts/setup_infinite_canvas.ps1`（clone + npm install + build，有 dist 则秒开 :3001）",
                       "自研导演台：`cd vendor/shiguang-canvas && npm install && npm run build`（有 dist 则秒开 :3011）",
-                      "生图：infinite-canvas 画布内选模型生成；导演台左侧选 AIGC 模型 →「生成选中节点」（走宿主代理）；无 Key/失败时用占位图仍可入轨"])
+                      "生图：导演台左侧选 AIGC 模型 →「生成选中节点」（走宿主代理）；无 Key/失败时用占位图仍可入轨"])
         self._subtitle("界面说明")
         self._bullet(["主区域：嵌入式画布，生图/生视频、拖拽排版",
                       "左侧「角色库」（可展开/收起）：新增角色、填写外貌/性格/台词等字段，持久化保存，供生成时挂载参考",
                       "右下角「拾光剪影」浮动面板：",
                       "　- 发送到剪辑：把画布上选中的生成结果推送到时间线（EventBus 回流，不是文件复制）",
                       "　- 同步模型：把模型广场里配置好的 Key 同步给画布内部调用",
-                      "　- 连接 Agent：可选，拉起本地 17371 端口给外部 Agent/Codex 接入（`codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp`）",
+                      "　- 连接 Agent：可选，拉起本地 17371 端口给外部 Agent/Codex 接入（`codex mcp add canvas-agent -- npx -y @basketikun/canvas-agent mcp`）",
                       "插帧选项是线性插值补帧，不是 RIFE 等神经网络补帧，追求丝滑请用剪辑模块里的专业补帧功能"])
         self._subtitle("外部云端画布备选（浏览器直达，非本软件内置）")
         self._text("若需要体验更完整的商业「导演台 / Agent 画布」，可打开下列官网试用；"
@@ -776,14 +770,14 @@ class HelpModule(BaseModule):
                     "这些站点与本软件无关，需单独注册账号，费用与隐私政策以对方为准。")
         self._link_row("LibTV（liblib.tv）", "https://www.liblib.tv/", "导演台 / 画布生图生视频")
         self._link_row("TapNow", "https://tapnow.ai/", "Agentic Creative Canvas")
-        self._tip("完整说明与链接亦见左侧「🌐 外部画布备选」；内置 AI 画布仍走 infinite-canvas，成片精剪请回「剪辑」模块。")
+        self._tip("完整说明与链接亦见左侧「🌐 外部画布备选」；内置 AI 画布为自研拾光导演台，成片精剪请回「剪辑」模块。")
         self._cl.addStretch()
 
     def _canvas_alternatives(self):
         """LibTV / TapNow 等外部云端画布 — 浏览器直达备选，非内置。"""
         self._clear()
         self._title("🌐 外部画布备选")
-        self._text("本软件内置的是开源 infinite-canvas（左侧「AI 画布」）。"
+        self._text("本软件内置的是自研拾光导演台（左侧「AI 画布」）。"
                     "若你想对照或临时使用商业云端「导演台 / Agent 画布」体验，可点下方按钮在系统浏览器中打开官网。"
                     "它们不是本软件的一部分，也不走本地 bridge 自动入轨。")
         self._subtitle("推荐备选（点击「打开」跳转浏览器）")

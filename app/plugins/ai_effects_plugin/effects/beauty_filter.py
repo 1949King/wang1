@@ -10,6 +10,9 @@ import cv2
 from typing import Any, Dict, Optional, Tuple
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.plugins.ai_effects_plugin.effects.beauty_filter")
+
 class BeautyFilterEffect:
     """
     智能美颜处理器
@@ -37,37 +40,37 @@ class BeautyFilterEffect:
         os.makedirs(models_path, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        print("[智能美颜] 初始化完成")
+        logger.info('[智能美颜] 初始化完成')
     
     def load_model(self) -> bool:
         """加载人脸检测和关键点模型"""
         try:
-            print("[智能美颜] 加载人脸检测模型...")
+            logger.info('[智能美颜] 加载人脸检测模型...')
             
             # 加载OpenCV的DNN人脸检测器或Haar级联分类器
             # 这里使用Haar级联作为后备方案（更轻量）
             haar_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             if os.path.exists(haar_path):
                 self._face_detector = cv2.CascadeClassifier(haar_path)
-                print("  ✓ Haar级联分类器已加载")
+                logger.info('  ✓ Haar级联分类器已加载')
             else:
-                print(f"  ⚠️ 未找到Haar模型: {haar_path}")
+                logger.info(f'  ⚠️ 未找到Haar模型: {haar_path}')
             
             # 模拟加载关键点检测器（生产环境应使用dlib或mediapipe）
             self._landmark_detector = "loaded"
             
-            print("[智能美颜] ✅ 模型就绪")
+            logger.info('[智能美颜] ✅ 模型就绪')
             return True
             
         except Exception as e:
-            print(f"[智能美颜] ❌ 模型加载失败: {e}")
+            logger.error(f'[智能美颜] ❌ 模型加载失败: {e}')
             return False
     
     def unload_model(self) -> None:
         """卸载模型"""
         self._face_detector = None
         self._landmark_detector = None
-        print("[智能美颜] 模型已卸载")
+        logger.info('[智能美颜] 模型已卸载')
     
     def beautify(self,
                 frame_data: Any,
@@ -96,17 +99,16 @@ class BeautyFilterEffect:
         image = self._to_numpy(frame_data).copy()
         h, w = image.shape[:2]
         
-        print(f"[智能美颜] 处理中... 磨皮:{smoothing_level:.1f} "
-              f"美白:{whitening_level:.1f} 瘦脸:{face_slimming:.1f} 大眼:{eye_enlargement:.1f}")
+        logger.info(f'[智能美颜] 处理中... 磨皮:{smoothing_level:.1f} 美白:{whitening_level:.1f} 瘦脸:{face_slimming:.1f} 大眼:{eye_enlargement:.1f}')
         
         # 1. 人脸检测
         faces = self._detect_faces(image)
         
         if len(faces) == 0:
-            print("[智能美颜] ⚠️ 未检测到人脸，返回原图")
+            logger.info('[智能美颜] ⚠️ 未检测到人脸，返回原图')
             return image
         
-        print(f"[智能美颜] 检测到 {len(faces)} 个人脸")
+        logger.info(f'[智能美颜] 检测到 {len(faces)} 个人脸')
         
         result = image.copy()
         

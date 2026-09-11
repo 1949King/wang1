@@ -6,8 +6,9 @@ AI功能整合模块
 """
 
 from typing import Dict, List, Optional, Any
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit, QProgressBar, QComboBox, QSlider, QTabWidget
+from PyQt6.QtCore import QObject, pyqtSignal, QThread, Qt
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit, QProgressBar, QComboBox, QSlider, QTabWidget, QSpinBox, QApplication
+import os
 import logging
 import json
 import time

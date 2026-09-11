@@ -163,6 +163,9 @@ export function LibTvPaneContextMenu({
       <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "node", kind: "director" })}>
         <span className="ctx-ico">🎥</span> 3D 导演台节点 <span className="badge-new">NEW</span>
       </button>
+      <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "node", kind: "digitalHuman" })}>
+        <span className="ctx-ico">🧑</span> 数字人 <span className="badge-new">NEW</span>
+      </button>
       <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "stage3d" })}>
         <span className="ctx-ico">▦</span> 打开导演台页
       </button>

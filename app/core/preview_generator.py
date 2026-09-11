@@ -3,6 +3,9 @@ import subprocess
 from typing import Optional
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.preview_generator")
+
 class PreviewGenerator:
     """预览生成器"""
 
@@ -24,9 +27,9 @@ class PreviewGenerator:
             if result.returncode == 0:
                 return preview_path
         except subprocess.TimeoutExpired:
-            print(f"生成预览超时: {asset_path}")
+            logger.info(f'生成预览超时: {asset_path}')
         except Exception as e:
-            print(f"生成预览失败: {e}")
+            logger.error(f'生成预览失败: {e}')
 
         return None
 
@@ -47,9 +50,9 @@ class PreviewGenerator:
             if result.returncode == 0:
                 return thumbnail_path
         except subprocess.TimeoutExpired:
-            print(f"生成缩略图超时: {asset_path}")
+            logger.info(f'生成缩略图超时: {asset_path}')
         except Exception as e:
-            print(f"生成缩略图失败: {e}")
+            logger.error(f'生成缩略图失败: {e}')
 
         return None
 

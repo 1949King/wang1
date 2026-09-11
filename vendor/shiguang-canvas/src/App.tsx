@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Node } from "@xyflow/react";
 import { useCanvasStore, type NodeData } from "./store";
+import { useEditorCanvasLink } from "./hooks/useEditorCanvasLink";
 import CanvasShell from "./CanvasShell";
 import { NodeActionsContext } from "./nodes";
 import { registerBuiltinNodes } from "./registerBuiltinNodes";
@@ -16,6 +17,7 @@ import {
   dataUrlToBlob,
   expandAssetMentions,
   expandCharacterMentions,
+  ensureTauriBridgeCredentials,
   fetchPrefs,
   generateImageViaHost,
   generateVideoViaHost,
@@ -32,7 +34,6 @@ import {
   listAudioModels,
   listMusicModels,
   listChatModels,
-  placeholderImageDataUrl,
   sendBlobToEditor,
   syncModelPool,
   type BridgePrefs,
@@ -120,6 +121,39 @@ export default function App() {
     };
   }, []);
 
+  // 画布首屏后再空闲预热 3D 分包 + Body 图，切导演台时少等
+  useEffect(() => {
+    const w = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const run = () => {
+      void import("./Stage3D");
+      void import("./riggedHumanoid")
+        .then((m) => {
+          try {
+            m.preloadBodyFigures();
+          } catch {
+            /* 预热失败不影响功能 */
+          }
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    };
+    let idleId = 0;
+    let timer = 0;
+    if (typeof w.requestIdleCallback === "function") {
+      idleId = w.requestIdleCallback(run, { timeout: 2500 });
+    } else {
+      timer = window.setTimeout(run, 900);
+    }
+    return () => {
+      if (idleId && typeof w.cancelIdleCallback === "function") w.cancelIdleCallback(idleId);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
   // 启动引导：确保工作区存在并跳到画布视图
   useEffect(() => {
     // 1) ensureWorkspace 负责：迁移 legacy 数据 → 创建默认项目 → 打开首个项目
@@ -190,6 +224,7 @@ export default function App() {
   const loadProjectBundle = useCanvasStore((s) => s.loadProjectBundle);
   const addCaptureToCanvas = useCanvasStore((s) => s.addCaptureToCanvas);
   const addStudioNode = useCanvasStore((s) => s.addStudioNode);
+  const { clipCount: editorClipCount } = useEditorCanvasLink();
 
   const [prefs, setPrefs] = useState<BridgePrefs>({});
   const [imageModels, setImageModels] = useState<ImageModelOption[]>([]);
@@ -285,9 +320,21 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    installInjectScript();
-    fetchPrefs().then(setPrefs);
-    refreshModels();
+    // Tauri 桌面模式：先从 Rust 端拿到 Python 后端凭据（token / URL）写入 window，
+    // 之后 bridgeToken() / BRIDGE 才能正确返回后端实际地址。
+    // Qt WebEngine 模式：ensureTauriBridgeCredentials 是 no-op，回退到 inject.js 注入路径。
+    ensureTauriBridgeCredentials().finally(() => {
+      // 仅 Qt WebEngine 嵌入模式需要 inject.js（注入浮动面板 + Qt WebChannel 通信）。
+      // Tauri 独立窗口已有自己的 UI 和桥接，跳过避免注入无用 DOM 和 Qt 依赖。
+      const isTauri =
+        typeof window !== "undefined" &&
+        ("__TAURI__" in window || "__TAURI_INTERNALS__" in window);
+      if (!isTauri) {
+        installInjectScript();
+      }
+      fetchPrefs().then(setPrefs);
+      refreshModels();
+    });
     const t = setInterval(() => {
       fetchPrefs().then(setPrefs);
       refreshModels();
@@ -320,6 +367,9 @@ export default function App() {
       } else if (d.kind === "image") {
         imageUrl = d.imageUrl || "";
         promptSnippet = d.prompt || "";
+      } else if (d.kind === "digitalHuman") {
+        imageUrl = d.imageUrl || "";
+        promptSnippet = d.line || d.prompt || "";
       } else if (d.kind === "director" || d.kind === "panorama") {
         imageUrl = d.imageUrl || "";
         promptSnippet = d.prompt || "";
@@ -611,6 +661,33 @@ export default function App() {
       return { ok: false, message: res.message || "生音频不可用，请上传音频" };
     }
 
+    if (data.kind === "digitalHuman") {
+      const line = (data.line || "").trim();
+      if (!line) {
+        return { ok: false, message: "请先填写台词" };
+      }
+      const { channel_id, model } = resolveModel(selectedAudioModelKey);
+      const prompt = data.characterName?.trim()
+        ? `${data.characterName.trim()}：${line}`
+        : line;
+      const res = await generateAudioViaHost({
+        prompt,
+        model,
+        channel_id,
+      });
+      if (res.ok && res.audio_url) {
+        setNodeAudio(node.id, res.audio_url);
+        return {
+          ok: true,
+          message: `${res.message || "配音已生成"}（口型成片未接入，请入轨配音+形象图）`,
+        };
+      }
+      return {
+        ok: false,
+        message: res.message || "配音失败。口型成片未配置形象驱动模型，不会假写视频。",
+      };
+    }
+
     if (data.kind === "music") {
       if (data.audioUrl) {
         return { ok: true, message: "音乐节点已有文件；再次生成将覆盖" };
@@ -671,6 +748,7 @@ export default function App() {
       });
       if (res.ok && res.video_url) {
         setNodeVideo(node.id, res.video_url, data.posterUrl || data.firstFrameUrl);
+        useCanvasStore.getState().reviewNode(node.id);
         return { ok: true, message: res.message || "视频生成成功" };
       }
       return { ok: false, message: res.message || "生视频失败（未写入假结果）" };
@@ -693,13 +771,10 @@ export default function App() {
       for (const u of urls) {
         if (u) setNodeImage(node.id, u);
       }
+      useCanvasStore.getState().reviewNode(node.id);
       return { ok: true, message: res.message || "生成成功" };
     }
-    const url = placeholderImageDataUrl(
-      `[占位] ${fullPrompt}\n${res.message || ""}`,
-    );
-    setNodeImage(node.id, url);
-    return { ok: false, message: `${res.message || "生图失败"} — 占位兜底` };
+    return { ok: false, message: res.message || "生图失败（未写入占位图）" };
   };
 
   const generateImageAtKey = async (
@@ -917,7 +992,7 @@ export default function App() {
 
   const onGenerate = async () => {
     if (!selected || !selectedData) {
-      setStatus("请先选中镜头/图片/视频/生成器/音频/导演台/动画节点");
+      setStatus("请先选中镜头/图片/视频/生成器/音频/导演台/动画/数字人节点");
       return;
     }
     if (
@@ -929,7 +1004,8 @@ export default function App() {
       selectedData.kind !== "music" &&
       selectedData.kind !== "director" &&
       selectedData.kind !== "animation" &&
-      selectedData.kind !== "panorama"
+      selectedData.kind !== "panorama" &&
+      selectedData.kind !== "digitalHuman"
     ) {
       setStatus("当前节点不支持生成");
       return;
@@ -946,11 +1022,11 @@ export default function App() {
         : "正在调用 AIGC…",
     );
     try {
-      const { message } = await generateForNode(selected, selectedData);
+      const { ok, message } = await generateForNode(selected, selectedData);
       useCanvasStore.getState().updateNodeData(selected.id, {
-        status: "success",
-        progress: 100,
-        errorMessage: "",
+        status: ok ? "success" : "failed",
+        progress: ok ? 100 : 0,
+        errorMessage: ok ? "" : String(message || "生成失败").slice(0, 200),
       });
       setStatus(message);
     } catch (e) {
@@ -959,13 +1035,7 @@ export default function App() {
         status: "failed",
         errorMessage: errMsg.slice(0, 200),
       });
-      if (selectedData.kind === "video" || selectedData.kind === "audio") {
-        setStatus(`生成异常: ${e}`);
-      } else {
-        const url = placeholderImageDataUrl(String(buildPrompt()));
-        setNodeImage(selected.id, url);
-        setStatus(`生图异常: ${e} — 已用占位图`);
-      }
+      setStatus(`生成异常: ${e}`);
     } finally {
       setGenerating(false);
     }
@@ -1082,7 +1152,7 @@ export default function App() {
   };
 
   const nodeImageUrl = (data: NodeData) => {
-    if (data.kind === "shot" || data.kind === "image" || data.kind === "director" || data.kind === "panorama") {
+    if (data.kind === "shot" || data.kind === "image" || data.kind === "director" || data.kind === "panorama" || data.kind === "digitalHuman") {
       return data.imageUrl || "";
     }
     if (data.kind === "animation") return data.sheetUrl || "";
@@ -1101,6 +1171,7 @@ export default function App() {
       const title =
         ("title" in selectedData ? selectedData.title : "") ||
         `${selectedData.kind}_${selected.id}`;
+      const link = { node_id: selected.id, kind: selectedData.kind };
 
       if (selectedData.kind === "video" && selectedData.videoUrl) {
         const resp = await fetch(selectedData.videoUrl);
@@ -1108,6 +1179,7 @@ export default function App() {
         const msg = await sendBlobToEditor(blob, `${title}.mp4`, prefs, {
           title,
           duration_sec: Number(selectedData.duration) || 0,
+          ...link,
         });
         setStatus(msg);
         return;
@@ -1117,8 +1189,39 @@ export default function App() {
         const resp = await fetch(selectedData.audioUrl);
         const blob = await resp.blob();
         const ext = blob.type.includes("mpeg") || blob.type.includes("mp3") ? "mp3" : "wav";
-        const msg = await sendBlobToEditor(blob, `${title}.${ext}`, prefs, { title });
+        const msg = await sendBlobToEditor(blob, `${title}.${ext}`, prefs, { title, ...link });
         setStatus(msg);
+        return;
+      }
+
+      if (selectedData.kind === "digitalHuman") {
+        if (selectedData.videoUrl) {
+          const resp = await fetch(selectedData.videoUrl);
+          const blob = await resp.blob();
+          const msg = await sendBlobToEditor(blob, `${title}.mp4`, prefs, { title, ...link });
+          setStatus(msg);
+          return;
+        }
+        const parts: string[] = [];
+        if (selectedData.audioUrl) {
+          const resp = await fetch(selectedData.audioUrl);
+          const blob = await resp.blob();
+          const ext = blob.type.includes("mpeg") || blob.type.includes("mp3") ? "mp3" : "wav";
+          parts.push(
+            await sendBlobToEditor(blob, `${title}.${ext}`, prefs, { title: `${title}·配音`, ...link }),
+          );
+        }
+        if (selectedData.imageUrl) {
+          const blob = await dataUrlToBlob(selectedData.imageUrl);
+          parts.push(
+            await sendBlobToEditor(blob, `${title}.png`, prefs, { title: `${title}·形象`, ...link }),
+          );
+        }
+        if (!parts.length) {
+          setStatus("请先上传形象或生成配音");
+          return;
+        }
+        setStatus(parts.join("；"));
         return;
       }
 
@@ -1141,6 +1244,7 @@ export default function App() {
       const msg = await sendBlobToEditor(blob, `${title}.png`, prefs, {
         title,
         duration_sec: dur,
+        ...link,
       });
       setStatus(msg);
     } catch (e) {
@@ -1152,6 +1256,8 @@ export default function App() {
     const list = nodes.filter((n) => {
       const d = n.data as NodeData;
       if (d.kind === "video" && d.videoUrl) return true;
+      if (d.kind === "digitalHuman") return Boolean(d.videoUrl || d.audioUrl || d.imageUrl);
+      if ((d.kind === "audio" || d.kind === "music") && d.audioUrl) return true;
       return Boolean(nodeImageUrl(d));
     });
     if (!list.length) {
@@ -1167,13 +1273,24 @@ export default function App() {
       try {
         const title = ("title" in d ? d.title : "") || `${d.kind}_${n.id}`;
         const prefix = String(i + 1).padStart(2, "0");
+        const link = { node_id: n.id, kind: d.kind };
         if (d.kind === "video" && d.videoUrl) {
           const resp = await fetch(d.videoUrl);
           const blob = await resp.blob();
           await sendBlobToEditor(blob, `${prefix}_${title}.mp4`, prefs, {
             title,
             duration_sec: Number(d.duration) || 0,
+            ...link,
           });
+        } else if (d.kind === "digitalHuman" && d.audioUrl) {
+          const resp = await fetch(d.audioUrl);
+          const blob = await resp.blob();
+          const ext = blob.type.includes("mpeg") || blob.type.includes("mp3") ? "mp3" : "wav";
+          await sendBlobToEditor(blob, `${prefix}_${title}.${ext}`, prefs, { title: `${title}·配音`, ...link });
+          if (d.imageUrl) {
+            const imgBlob = await dataUrlToBlob(d.imageUrl);
+            await sendBlobToEditor(imgBlob, `${prefix}_${title}.png`, prefs, { title: `${title}·形象`, ...link });
+          }
         } else {
           const imageUrl = nodeImageUrl(d);
           const blob = await dataUrlToBlob(imageUrl);
@@ -1181,6 +1298,7 @@ export default function App() {
           await sendBlobToEditor(blob, `${prefix}_${title}.png`, prefs, {
             title,
             duration_sec: dur,
+            ...link,
           });
         }
         ok += 1;
@@ -1360,11 +1478,11 @@ export default function App() {
     setGenerating(true);
     setStatus(`重试生成：${(data as { title?: string }).title || nodeId}…`);
     try {
-      const { message } = await generateForNode(node, data);
+      const { ok, message } = await generateForNode(node, data);
       useCanvasStore.getState().updateNodeData(nodeId, {
-        status: "success",
-        progress: 100,
-        errorMessage: "",
+        status: ok ? "success" : "failed",
+        progress: ok ? 100 : 0,
+        errorMessage: ok ? "" : String(message || "生成失败").slice(0, 200),
       });
       setStatus(message);
     } catch (e) {
@@ -1373,11 +1491,7 @@ export default function App() {
         status: "failed",
         errorMessage: errMsg.slice(0, 200),
       });
-      if (kind === "video" || kind === "audio") {
-        setStatus(`重试异常: ${e}`);
-      } else {
-        setStatus(`重试异常: ${e}`);
-      }
+      setStatus(`重试异常: ${e}`);
     } finally {
       setGenerating(false);
     }
@@ -1391,6 +1505,7 @@ export default function App() {
       status={status}
       prefs={prefs}
       generating={generating}
+      editorClipCount={editorClipCount}
       breaking={breaking}
       imageModels={imageModels}
       selectedModelKey={selectedModelKey}
@@ -1583,6 +1698,7 @@ export default function App() {
               try {
                 const hintParts = [meta.resolution ? meta.resolution : ""];
                 if (meta.referenceImage) hintParts.push(`含参考图「${meta.referenceActor || "角色"}」`);
+                if (meta.referenceVideoUrl) hintParts.push("含动作参考视频（motion-ref）");
                 setStatus(`正在通过 ${model} 生成首尾帧视频…${hintParts.filter(Boolean).join(" · ")}`);
                 const res = await generateVideoViaHost({
                   prompt: defaultPrompt,
@@ -1592,6 +1708,7 @@ export default function App() {
                   first_frame: firstFrame,
                   last_frame: lastFrame,
                   reference_image: meta.referenceImage || "",
+                  reference_video: meta.referenceVideoUrl || "",
                 });
                 if (res.ok && res.video_url) {
                   addStudioNode("video", {

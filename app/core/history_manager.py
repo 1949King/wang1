@@ -4,7 +4,10 @@
 
 import json
 import copy
+import logging
 from typing import Dict, Any, Optional, Callable, List
+
+logger = logging.getLogger("AI短剧编辑器.history_manager")
 
 
 class HistoryAction:

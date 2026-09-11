@@ -759,61 +759,80 @@ class AuthService:
         return ok
     
     def try_auto_login(self) -> bool:
-        """尝试自动登录"""
-        session_file = Path(__file__).parent.parent.parent / "data" / "session.json"
-        if not session_file.exists():
-            return False
-        
+        """尝试自动登录（优先加密会话，兼容旧明文 session.json）"""
+        data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+
+        data = None
         try:
-            with open(session_file, 'r') as f:
-                data = json.load(f)
-            session_id = data.get('session_id')
-            if not session_id:
-                return False
-            
-            user_id = self._db.validate_session(session_id)
-            if not user_id:
-                return False
-            
-            user = self._db.get_user_by_id(user_id)
-            if not user:
-                return False
-            
-            self._session_id = session_id
-            self._current_user = user
-            return True
+            from ...core import secure_store
+            # 优先读取加密会话, 失败回退旧明文
+            data = secure_store.load_secure_json(str(data_dir / "session.enc.json"))
+            if data is None:
+                data = secure_store.load_secure_json(str(data_dir / "session.json"))
         except Exception as e:
-            logger.warning(f"自动登录失败: {e}")
+            logger.warning(f"读取会话失败，尝试明文兜底: {e}")
+
+        # 明文/降级兜底 (secure_store 导入异常时)
+        if data is None:
+            session_file = data_dir / "session.json"
+            if session_file.exists():
+                try:
+                    with open(session_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception as e:
+                    logger.warning(f"自动登录失败: {e}")
+                    return False
+
+        if not data:
             return False
+
+        session_id = data.get('session_id')
+        if not session_id:
+            return False
+
+        user_id = self._db.validate_session(session_id)
+        if not user_id:
+            return False
+
+        user = self._db.get_user_by_id(user_id)
+        if not user:
+            return False
+
+        self._session_id = session_id
+        self._current_user = user
+        return True
     
     def save_session(self):
-        """保存会话到文件（加密存储）"""
+        """保存会话到文件（优先加密 .enc.json，降级明文）"""
         if not self._session_id:
             return
         
-        session_file = Path(__file__).parent.parent.parent / "data" / "session.json"
+        data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+        session_enc = data_dir / "session.enc.json"
+        session_file = data_dir / "session.json"
         session_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            from ....app.core.secure_store import SecureStore
-            store = SecureStore()
-            store.save('session', {'session_id': self._session_id})
-        except Exception:
-            # 降级：直接写JSON
-            with open(session_file, 'w') as f:
-                json.dump({'session_id': self._session_id}, f)
+            from ...core import secure_store
+            if secure_store.save_secure_json(str(session_enc), {'session_id': self._session_id}):
+                return
+        except Exception as e:
+            logger.warning(f"会话加密保存失败，降级明文: {e}")
+        
+        # 降级：直接写JSON (cryptography 不可用或加密层异常时)
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump({'session_id': self._session_id}, f)
     
     def clear_session(self):
-        """清除会话文件"""
-        session_file = Path(__file__).parent.parent.parent / "data" / "session.json"
-        if session_file.exists():
-            session_file.unlink()
-        try:
-            from ....app.core.secure_store import SecureStore
-            store = SecureStore()
-            store.delete('session')
-        except Exception as e:
-            logger.debug(f"删除SecureStore会话失败: {e}")
+        """清除会话文件（加密与明文同时清理）"""
+        data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+        for name in ("session.enc.json", "session.json"):
+            session_file = data_dir / name
+            if session_file.exists():
+                try:
+                    session_file.unlink()
+                except Exception as e:
+                    logger.debug(f"删除会话文件失败 {session_file}: {e}")
 
 
 auth_service = AuthService()

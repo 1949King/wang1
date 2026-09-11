@@ -14,6 +14,7 @@ const WRITE: Set<ToolEffect> = new Set([
 const CANVAS: Record<string, { effect: ToolEffect; paid: boolean }> = {
   queryNodes: { effect: "read", paid: false },
   canvas_query: { effect: "read", paid: false },
+  queryTimeline: { effect: "read", paid: false },
   selectNode: { effect: "read", paid: false },
   canvas_select: { effect: "read", paid: false },
   addNode: { effect: "canvas_write", paid: false },
@@ -34,6 +35,15 @@ const CANVAS: Record<string, { effect: ToolEffect; paid: boolean }> = {
   redo: { effect: "canvas_write", paid: false },
   canvas_redo: { effect: "canvas_write", paid: false },
   runGenerate: { effect: "media_write", paid: true },
+  batchGenerate: { effect: "media_write", paid: true },
+  runBatchGenerate: { effect: "media_write", paid: true },
+  canvas_batch_generate: { effect: "media_write", paid: true },
+  breakdown: { effect: "canvas_write", paid: false },
+  applyStoryboard: { effect: "canvas_write", paid: false },
+  storyboardBreakdown: { effect: "canvas_write", paid: false },
+  canvas_breakdown: { effect: "canvas_write", paid: false },
+  fillStoryboardCell: { effect: "canvas_write", paid: false },
+  canvas_fill_storyboard_cell: { effect: "canvas_write", paid: false },
 };
 
 const MODE_KEY = "shiguang-canvas:agent-mode";

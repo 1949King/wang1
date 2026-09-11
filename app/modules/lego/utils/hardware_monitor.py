@@ -7,6 +7,9 @@ B1 第一刀: 抽取 modules.py:1032-1102 HardwareDetector + PerformanceMonitor
 import time
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.utils.hardware_monitor")
+
 class HardwareDetector:
     """硬件探测器 (原 modules.py:1032-1070)"""
     def detect_hardware(self):
@@ -28,7 +31,7 @@ class HardwareDetector:
                 "cache_size": min(total_memory * 1024 * 1024 * 1024 // 4, 4 * 1024 * 1024 * 1024)
             }
         except Exception as e:
-            print(f"硬件检测失败: {e}")
+            logger.error(f'硬件检测失败: {e}')
             return {
                 "cpu_count": 4, "cpu_freq": 2500, "total_memory": 8, "total_disk": 100,
                 "max_threads": 4, "max_batch_size": 8, "cache_size": 2 * 1024 * 1024 * 1024
@@ -55,10 +58,10 @@ class PerformanceMonitor:
                 "disk_usage": disk_usage,
                 "uptime": time.time() - self.start_time
             }
-            print(f"性能指标: CPU={cpu_usage}%, 内存={memory_usage}%, 磁盘={disk_usage}%")
+            logger.info(f'性能指标: CPU={cpu_usage}%, 内存={memory_usage}%, 磁盘={disk_usage}%')
             return self.metrics
         except Exception as e:
-            print(f"性能监控失败: {e}")
+            logger.error(f'性能监控失败: {e}')
             return {}
 
 

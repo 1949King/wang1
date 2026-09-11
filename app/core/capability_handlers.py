@@ -8,7 +8,7 @@ handler 分类：
   - ModelCapabilityHandlers: 模型模块（chat/chat_with_fallback/list_models）
   - ExtensionCapabilityHandlers: 拓展模块（run_extension/run_skill/list_tools）
   - WorkflowCapabilityHandlers: 多任务调度（start_workflow/submit_batch）
-  - AccountCapabilityHandlers: 账号运营（collect_data/optimize_strategy/publish）
+  - AccountCapabilityHandlers: 账号运营（collect_data/optimize_strategy/publish；功能已卸，诚实失败）
 """
 from __future__ import annotations
 import logging
@@ -76,6 +76,16 @@ class CanvasCapabilityHandlers:
                 "warnings": warns,
                 "message": msg,
             },
+            error=None,
+        )
+
+    def list_actions(self, req: CapabilityRequest) -> CapabilityResult:
+        """输出统一画布动作清单（单一事实来源，供前端 AgentPanel 消费）。"""
+        from app.core.agent_action_registry import build_canvas_actions_list
+        return CapabilityResult(
+            req.request_id,
+            True,
+            output={"actions": build_canvas_actions_list()},
             error=None,
         )
 
@@ -148,6 +158,144 @@ class EditorCapabilityHandlers:
         ctx = editor.agent_get_timeline_context()
         return CapabilityResult(req.request_id, True, output=ctx)
 
+    def inspect_media(self, req: CapabilityRequest) -> CapabilityResult:
+        """读取素材元信息：基础元数据（含分辨率/FPS）；deep=true 追加场景语义+音频情绪。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clips = list(getattr(editor, "_clips", []) or [])
+        clip_id = req.params.get("clip_id") or req.params.get("id")
+        if clip_id:
+            clips = [c for c in clips if (c or {}).get("id") == clip_id]
+            if not clips:
+                return CapabilityResult(req.request_id, False, error=f"未找到片段 {clip_id}")
+        if not clips:
+            current = getattr(editor, "_current_clip", None)
+            clips = [current] if isinstance(current, dict) else []
+        if not clips:
+            return CapabilityResult(req.request_id, False, error="时间线暂无片段")
+        deep = bool(req.params.get("deep", False))
+        media = [self._inspect_single_clip(c, deep) for c in clips if isinstance(c, dict)]
+        return CapabilityResult(req.request_id, True, output={"count": len(media), "media": media})
+
+    def _inspect_single_clip(self, clip: Dict[str, Any], deep: bool) -> Dict[str, Any]:
+        """单片段元信息整理（不含 UI 写入，仅读）。"""
+        import os
+        path = clip.get("path") or clip.get("file_path") or ""
+        info = {
+            "id": clip.get("id"),
+            "name": clip.get("name") or (os.path.basename(path) if path else ""),
+            "path": path,
+            "start_time": clip.get("start_time", 0),
+            "duration": clip.get("duration", 0),
+            "end_time": float(clip.get("start_time", 0) or 0) + float(clip.get("duration", 0) or 0),
+            "track": clip.get("track", 0),
+            "in_point": clip.get("in_point", 0),
+            "out_point": clip.get("out_point"),
+            "speed": clip.get("speed", 1.0),
+            "has_keyframes": bool(clip.get("keyframes")),
+            "keyframe_count": len(clip.get("keyframes") or []),
+        }
+        if path and os.path.isfile(path):
+            resolution, fps = self._probe_resolution_fps(path)
+            info["resolution"] = resolution
+            info["fps"] = fps
+        if deep and path and os.path.isfile(path):
+            info["scenes"] = self._analyze_scenes(path)
+            info["audio_emotion"] = self._analyze_audio_emotion(path)
+        return info
+
+    @staticmethod
+    def _probe_resolution_fps(path: str) -> tuple:
+        """用 ffprobe 读首条视频流的宽高与 FPS；失败返回 (None, None)。"""
+        import os
+        import subprocess
+        import sys
+        if not path or not os.path.isfile(path):
+            return None, None
+        try:
+            from app.core.ffmpeg_utils import find_ffprobe
+        except ImportError:
+            from core.ffmpeg_utils import find_ffprobe  # type: ignore
+        probe = find_ffprobe() or "ffprobe"
+        try:
+            r = subprocess.run(
+                [probe, "-v", "quiet", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height,avg_frame_rate",
+                 "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except Exception:
+            return None, None
+        if r.returncode != 0:
+            return None, None
+        fields = r.stdout.strip().split()
+        if len(fields) < 3:
+            return None, None
+        try:
+            width, height = int(fields[0]), int(fields[1])
+        except (ValueError, IndexError):
+            return None, None
+        fps = None
+        try:
+            num, den = fields[2].split("/")
+            den_f = float(den)
+            fps = round(float(num) / den_f, 3) if den_f else None
+        except (ValueError, ZeroDivisionError):
+            fps = None
+        return f"{width}x{height}", fps
+
+    @staticmethod
+    def _analyze_scenes(path: str) -> list:
+        """用 SceneAnalyzer 做镜头/场景检测（PySceneDetect 优先，缺库降级）。"""
+        try:
+            from app.core.ai_editing_assistant import SceneAnalyzer
+        except ImportError:
+            from core.ai_editing_assistant import SceneAnalyzer  # type: ignore
+        try:
+            scenes = SceneAnalyzer().analyze_scenes(video_path=path)
+        except Exception:
+            return []
+        out = []
+        for s in scenes:
+            out.append({
+                "start_time": round(float(s.start_time), 3),
+                "end_time": round(float(s.end_time), 3),
+                "duration": round(float(s.end_time) - float(s.start_time), 3),
+                "scene_type": getattr(s.scene_type, "value", str(s.scene_type)),
+                "emotion": getattr(s.emotion, "value", str(s.emotion)),
+                "confidence": round(float(getattr(s, "confidence", 0) or 0), 3),
+                "description": getattr(s, "description", "") or "",
+            })
+        return out
+
+    @staticmethod
+    def _analyze_audio_emotion(path: str) -> dict:
+        """用 AudioEmotionAnalyzer 提取音频情绪曲线摘要（librosa 缺失时诚实降级）。"""
+        try:
+            from app.core.ai.audio_emotion_analyzer import AudioEmotionAnalyzer, EMOTION_DIMS
+        except ImportError:
+            from core.ai.audio_emotion_analyzer import AudioEmotionAnalyzer, EMOTION_DIMS  # type: ignore
+        try:
+            analyzer = AudioEmotionAnalyzer()
+            if not analyzer.available:
+                return {"available": False, "reason": "librosa 未安装"}
+            _times, vectors = analyzer.analyze_full_curve(path)
+            if vectors is None or getattr(vectors, "size", 0) == 0:
+                return {"available": True, "curve": []}
+            mean = vectors.mean(axis=0)
+            dominant = int(mean.argmax()) if mean.size else -1
+            return {
+                "available": True,
+                "dims": list(EMOTION_DIMS),
+                "average": {str(EMOTION_DIMS[i]): round(float(mean[i]), 3)
+                            for i in range(min(len(EMOTION_DIMS), int(mean.size)))},
+                "dominant": EMOTION_DIMS[dominant] if 0 <= dominant < len(EMOTION_DIMS) else None,
+            }
+        except Exception:
+            return {"available": False, "reason": "音频情绪分析失败"}
+
     def ripple_delete_range(self, req: CapabilityRequest) -> CapabilityResult:
         """波纹删除时间线区间 [t_in, t_out)（接 B1，可撤销）"""
         editor = self._get_editor()
@@ -188,6 +336,94 @@ class EditorCapabilityHandlers:
             req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
             error=None if ok else msg,
         )
+
+    def send_selected_to_canvas(self, req: CapabilityRequest) -> CapabilityResult:
+        """选中片段 → 画布 outbox（确认后执行）。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clip_id = str(req.params.get("clip_id") or req.params.get("id") or "")
+        res = editor.agent_send_selected_to_canvas(clip_id)
+        ok = bool(isinstance(res, dict) and res.get("success"))
+        msg = res.get("message", "") if isinstance(res, dict) else str(res)
+        return CapabilityResult(
+            req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
+            error=None if ok else msg,
+        )
+
+    def suggest_canvas_roundtrip(self, req: CapabilityRequest) -> CapabilityResult:
+        """AI 建议哪些片送到画布；默认只出清单。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        open_ui = bool(req.params.get("open_ui", False))
+        res = editor.agent_suggest_canvas_roundtrip(open_ui=open_ui)
+        ok = bool(isinstance(res, dict) and res.get("success"))
+        if isinstance(res, dict) and res.get("suggestions"):
+            ok = True
+        msg = res.get("message", "") if isinstance(res, dict) else str(res)
+        return CapabilityResult(
+            req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
+            error=None if ok else msg,
+        )
+
+    def set_clip_properties(self, req: CapabilityRequest) -> CapabilityResult:
+        """设置片段标量属性：speed（变速）走 set_clip_speed，reverse（倒放）写片 dict 并同步。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clip_id = req.params.get("clip_id") or req.params.get("id")
+        clip = next((c for c in editor._clips if c.get("id") == clip_id), None)
+        if not clip:
+            return CapabilityResult(req.request_id, False, error=f"未找到片段 {clip_id}")
+        applied: Dict[str, Any] = {}
+        # 变速：交给公开 set_clip_speed（含 clamp/撤销/预览刷新）
+        if req.params.get("speed") is not None:
+            try:
+                editor.set_clip_speed(clip_id, float(req.params["speed"]))
+                applied["speed"] = float(req.params["speed"])
+            except (TypeError, ValueError) as e:
+                return CapabilityResult(req.request_id, False, error=f"变速参数无效: {e}")
+        # 倒放：写片段 dict，同步内核时间线并刷新预览
+        if "reverse" in req.params:
+            clip["reverse"] = bool(req.params["reverse"])
+            applied["reverse"] = bool(req.params["reverse"])
+            editor._sync_kernel_timeline()
+            editor._refresh_preview_with_effects()
+        return CapabilityResult(req.request_id, True, output={"clip_id": clip_id, **applied})
+
+    def set_keyframes(self, req: CapabilityRequest) -> CapabilityResult:
+        """批量写入关键帧（含插值/缓动），归一化字段后复用 EditorModule.add_keyframes_to_clip。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clip_id = req.params.get("clip_id") or req.params.get("id")
+        clip = next((c for c in editor._clips if c.get("id") == clip_id), None)
+        if not clip:
+            return CapabilityResult(req.request_id, False, error=f"未找到片段 {clip_id}")
+        # 支持批量 list，也兼容单点（time/prop/value 直接挂 params）
+        raw_keyframes = req.params.get("keyframes")
+        if not isinstance(raw_keyframes, list):
+            raw_keyframes = [req.params]
+        normalized: List[Dict[str, Any]] = []
+        for kf in raw_keyframes:
+            if not isinstance(kf, dict):
+                continue
+            prop = kf.get("prop") or kf.get("property") or kf.get("name")
+            if prop is None:
+                continue
+            normalized.append({
+                "prop": str(prop),
+                "time_offset": float(kf.get("time_offset", kf.get("time", 0.0))),
+                "value": kf.get("value", 0.0),
+                "easing": str(kf.get("easing") or kf.get("interpolation") or "linear"),
+            })
+        if not normalized:
+            return CapabilityResult(req.request_id, False, error="关键帧参数无效：缺少 prop/value")
+        ok = editor.add_keyframes_to_clip(clip_id, normalized)
+        if not ok:
+            return CapabilityResult(req.request_id, False, error="写入关键帧失败（片段可能不在时间线）")
+        return CapabilityResult(req.request_id, True, output={"clip_id": clip_id, "count": len(normalized)})
 
 
 # ────────────── 模型能力 handlers ──────────────
@@ -365,47 +601,20 @@ class WorkflowCapabilityHandlers:
 
 
 # ────────────── 账号运营 handlers ──────────────
+_ACCOUNT_UNLOADED = "插件功能已卸，仅保留接口"
+
+
 class AccountCapabilityHandlers:
-    """账号运营 handlers —— 通过 SkillEngine 调用 account_skills"""
+    """账号运营 handlers —— 能力 id 仍注册，执行诚实失败。"""
 
     def collect_data(self, req: CapabilityRequest) -> CapabilityResult:
-        """采集账号数据"""
-        from app.modules.lego.skill_engine import skill_engine
-        result = skill_engine.execute_skill("account_data_collect",
-                                            inputs=req.params.get("inputs", {}))
-        return CapabilityResult(req.request_id, bool(result.get("success")),
-                                output=result, error=result.get("error"))
+        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
 
     def optimize_strategy(self, req: CapabilityRequest) -> CapabilityResult:
-        """调用 viral_optimization_engine 生成优化建议"""
-        try:
-            from app.modules.lego.viral_optimization_engine import (
-                ViralOptimizationEngine, Platform, VideoFeatures,
-            )
-            engine = ViralOptimizationEngine()
-            platform = req.params.get("platform", "douyin")
-            platform_enum = getattr(Platform, platform.upper(), Platform.DOUYIN)
-            features = VideoFeatures(**req.params.get("features", {}))
-            suggestions = engine.generate_optimization_suggestions(features, platform_enum)
-            return CapabilityResult(req.request_id, True, output={"suggestions": suggestions})
-        except Exception as e:
-            return CapabilityResult(req.request_id, False, error=str(e))
+        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
 
     def publish(self, req: CapabilityRequest) -> CapabilityResult:
-        """发布作品
-
-        真实注册的发布类 Skill 是 `publish_content`（单条内容发布）和
-        `matrix_publish`（批量矩阵发布），历史遗留默认值 `account_publish`
-        在 account_skills.py 中从未存在，任何未显式传 skill_id 的调用都必
-        然 100% 失败。默认改为单条发布；批量场景需显式传
-        `params={"skill_id": "matrix_publish", ...}`。
-        """
-        from app.modules.lego.skill_engine import skill_engine
-        skill_id = req.params.get("skill_id", "publish_content")
-        result = skill_engine.execute_skill(skill_id, inputs=req.params.get("inputs", {}))
-        return CapabilityResult(req.request_id, bool(result.get("success")),
-                                output=result, error=result.get("error"))
-
+        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
 
 # ────────────── Agent 全链路闭环 handlers ──────────────
 class PipelineCapabilityHandlers:
@@ -613,6 +822,8 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         canvas_handlers.open, "打开 AI 画布模块")
     dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
+    dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,
+                        canvas_handlers.list_actions, "输出统一画布动作清单（单一事实来源）")
 
     # 剪辑模块
     dispatcher.register("editor.split_clip", CapabilityCategory.EDITOR,
@@ -623,10 +834,22 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         editor_handlers.add_transition, "添加转场")
     dispatcher.register("editor.get_timeline_context", CapabilityCategory.EDITOR,
                         editor_handlers.get_timeline_context, "获取时间线上下文")
+    dispatcher.register("editor.inspect_media", CapabilityCategory.EDITOR,
+                        editor_handlers.inspect_media, "读取素材元信息（分辨率/场景/音频情绪）")
+    dispatcher.register("editor.get_media", CapabilityCategory.EDITOR,
+                        editor_handlers.inspect_media, "读取素材元信息（inspect_media 别名）")
+    dispatcher.register("editor.set_clip_properties", CapabilityCategory.EDITOR,
+                        editor_handlers.set_clip_properties, "设置片段属性（变速/倒放等）")
+    dispatcher.register("editor.set_keyframes", CapabilityCategory.EDITOR,
+                        editor_handlers.set_keyframes, "批量写入关键帧（含插值/缓动）")
     dispatcher.register("editor.ripple_delete_range", CapabilityCategory.EDITOR,
                         editor_handlers.ripple_delete_range, "波纹删除时间线区间")
     dispatcher.register("editor.suggest_cleanup", CapabilityCategory.EDITOR,
                         editor_handlers.suggest_cleanup, "建议去水词/静音并确认后执行")
+    dispatcher.register("editor.send_selected_to_canvas", CapabilityCategory.EDITOR,
+                        editor_handlers.send_selected_to_canvas, "选中片段推到 AI 画布")
+    dispatcher.register("editor.suggest_canvas_roundtrip", CapabilityCategory.EDITOR,
+                        editor_handlers.suggest_canvas_roundtrip, "建议哪些片送到画布做变体")
 
     # 多任务调度
     dispatcher.register("workflow.start", CapabilityCategory.WORKFLOW,

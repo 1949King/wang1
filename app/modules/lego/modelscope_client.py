@@ -18,7 +18,7 @@ ModelScope 模型下载与管理，支持从魔搭社区下载开源模型到本
 
 import os
 import threading
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Dict, List, Callable, Any
 from dataclasses import dataclass
 import logging
 

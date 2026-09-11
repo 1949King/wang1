@@ -12,6 +12,9 @@ from datetime import datetime
 import json
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.music_recommendation")
+
 class MusicGenre(Enum):
     """音乐类型"""
     POP = "pop"
@@ -323,7 +326,7 @@ class MusicRecommendationEngine:
                 return recommendations
                 
             except Exception as e:
-                print(f"推荐音乐失败: {e}")
+                logger.error(f'推荐音乐失败: {e}')
                 return []
     
     def _match_mood(self, tracks: List[MusicTrack], emotion: str) -> List[MusicTrack]:
@@ -562,7 +565,7 @@ class MusicRecommendationEngine:
             
             return True
         except Exception as e:
-            print(f"导出音乐库失败: {e}")
+            logger.error(f'导出音乐库失败: {e}')
             return False
 
 
@@ -624,7 +627,7 @@ class MusicAutoSync:
                 }
                 
             except Exception as e:
-                print(f"自动同步失败: {e}")
+                logger.error(f'自动同步失败: {e}')
                 return {
                     "total_scenes": len(video_scenes),
                     "synced_scenes": 0,

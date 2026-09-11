@@ -24,6 +24,9 @@ from .core import EventBus, EventType
 from .video_processor import VideoProcessor, ExportSettings
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.ai_clip_flow")
+
 @dataclass
 class AutoClipSettings:
     """AutoClip设置"""
@@ -812,7 +815,7 @@ class AIClipFlowModule(QWidget):
                     "emotional_arc": drama.emotional_arc_analysis.get("arc_type", "未知"),
                 }
             except Exception as ai_err:
-                print(f"[AIClipFlow] AI引擎分析异常(将使用基础分析): {ai_err}")
+                logger.error(f'[AIClipFlow] AI引擎分析异常(将使用基础分析): {ai_err}')
             # 1.4 病毒传播基因检测
             try:
                 from app.core.ai.viral_detector import ViralDetector
@@ -846,7 +849,7 @@ class AIClipFlowModule(QWidget):
                 else:
                     viral_result = None
             except Exception as viral_err:
-                print(f"[AIClipFlow] 病毒检测异常: {viral_err}")
+                logger.error(f'[AIClipFlow] 病毒检测异常: {viral_err}')
             # 1.5 汇总结果
             results["autoclip"] = current_output
             results["drama"] = drama
@@ -903,7 +906,7 @@ class AIClipFlowModule(QWidget):
             progress.setLabelText("\n".join(summary_lines))
         except Exception as e:
             import traceback
-            print(f"[AIClipFlow] AutoClip失败: {traceback.format_exc()}")
+            logger.error(f'[AIClipFlow] AutoClip失败: {traceback.format_exc()}')
             # 回退到基础分析
             try:
                 info = vp.get_info(current_output)
@@ -1162,7 +1165,7 @@ class AIClipFlowModule(QWidget):
                         ai_title += chunk
                 ai_title = ai_title.strip().strip('"\'')
             except Exception as e:
-                print(f"[AIClipFlow] AI 标题生成失败: {e}")
+                logger.error(f'[AIClipFlow] AI 标题生成失败: {e}')
                 ai_title = ""  # 回退到默认标题
             # 智能话题标签（基于品类+主题+病毒基因）
             ai_hashtags = list(ct.hashtags) if ct.hashtags else []

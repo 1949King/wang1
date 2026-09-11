@@ -63,7 +63,7 @@ class SuperResolutionEffect:
         os.makedirs(models_path, exist_ok=True)
         os.makedirs(cache_dir, exist_ok=True)
         
-        print(f"[超分辨率] 初始化完成，GPU: {'启用' if gpu_enabled else '禁用'}")
+        logger.info(f"[超分辨率] 初始化完成，GPU: {('启用' if gpu_enabled else '禁用')}")
     
     def load_model(self) -> bool:
         """加载SR模型
@@ -77,16 +77,16 @@ class SuperResolutionEffect:
             import torch
 
             self._device = torch.device('cuda' if self.gpu_enabled and torch.cuda.is_available() else 'cpu')
-            print(f"[超分辨率] 使用设备: {self._device}")
+            logger.info(f'[超分辨率] 使用设备: {self._device}')
 
             for scale in [2, 3, 4]:
                 self._models[scale] = f"interp_{scale}x"
 
-            print("[超分辨率] ⚠️ 未接入神经网络模型，使用 OpenCV 经典插值（非深度学习超分）")
+            logger.info('[超分辨率] ⚠️ 未接入神经网络模型，使用 OpenCV 经典插值（非深度学习超分）')
             return True
 
         except Exception as e:
-            print(f"[超分辨率] ❌ 初始化失败: {e}")
+            logger.error(f'[超分辨率] ❌ 初始化失败: {e}')
             return False
     
     def unload_model(self) -> None:
@@ -100,7 +100,7 @@ class SuperResolutionEffect:
         except Exception as e:
             logger.debug(f"清理GPU缓存时失败: {e}")
 
-        print("[超分辨率] 所有模型已卸载")
+        logger.info('[超分辨率] 所有模型已卸载')
     
     def enhance(self, 
                frame_data: Any,
@@ -132,8 +132,8 @@ class SuperResolutionEffect:
         self._current_scale = scale_factor
         target_h, target_w = orig_h * scale_factor, orig_w * scale_factor
         
-        print(f"[超分辨率] 放大 {scale_factor}x: {orig_w}x{orig_h} → {target_w}x{target_h}")
-        print(f"[超分辨率] 质量模式: {self.QUALITY_MODES.get(quality_mode, {}).get('name', 'unknown')}")
+        logger.info(f'[超分辨率] 放大 {scale_factor}x: {orig_w}x{orig_h} → {target_w}x{target_h}')
+        logger.info(f"[超分辨率] 质量模式: {self.QUALITY_MODES.get(quality_mode, {}).get('name', 'unknown')}")
         
         # 1. 如果有降噪需求，先执行降噪
         if denoise_strength > 0:

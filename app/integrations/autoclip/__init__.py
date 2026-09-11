@@ -1,5 +1,8 @@
 # AutoClip 集成模块
 import logging
+import os
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +27,9 @@ class AutoClipIntegration:
             from bs4 import BeautifulSoup
             
             self.initialized = True
-            print("AutoClip初始化成功")
+            logger.info('AutoClip初始化成功')
         except Exception as e:
-            print(f"AutoClip初始化失败: {e}")
+            logger.error(f'AutoClip初始化失败: {e}')
             self.initialized = False
     
     def extract_highlights(self, video_path, **kwargs):
@@ -109,7 +112,7 @@ class AutoClipIntegration:
                 }
                 
         except Exception as e:
-            print(f"提取高光片段失败: {e}")
+            logger.error(f'提取高光片段失败: {e}')
             return {
                 "success": False,
                 "error": str(e)
@@ -142,7 +145,7 @@ class AutoClipIntegration:
             # 处理每个视频
             results = []
             for i, video_path in enumerate(video_paths):
-                print(f"处理视频 {i+1}/{len(video_paths)}: {video_path}")
+                logger.info(f'处理视频 {i + 1}/{len(video_paths)}: {video_path}')
                 
                 # 生成输出路径
                 base_name = os.path.basename(video_path)
@@ -172,7 +175,7 @@ class AutoClipIntegration:
             }
             
         except Exception as e:
-            print(f"批量处理失败: {e}")
+            logger.error(f'批量处理失败: {e}')
             return {
                 "success": False,
                 "error": str(e)
@@ -240,7 +243,7 @@ class AutoClipIntegration:
                 }
                 
         except Exception as e:
-            print(f"自动编辑失败: {e}")
+            logger.error(f'自动编辑失败: {e}')
             return {
                 "success": False,
                 "error": str(e)
@@ -287,7 +290,7 @@ class AutoClipIntegration:
             }
             
         except Exception as e:
-            print(f"格式转换失败: {e}")
+            logger.error(f'格式转换失败: {e}')
             return {
                 "success": False,
                 "error": str(e)
@@ -497,10 +500,10 @@ class AutoClipIntegration:
             ], capture_output=True, text=True, timeout=120,
                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
             if result.returncode == 0 and os.path.exists(temp_video_path):
-                print(f"视频下载成功: {temp_video_path}")
+                logger.info(f'视频下载成功: {temp_video_path}')
                 return temp_video_path
         except Exception as e:
-            print(f"yt-dlp下载失败: {e}")
+            logger.error(f'yt-dlp下载失败: {e}')
         try:
             import requests
             resp = requests.get(url, stream=True, timeout=30, headers={
@@ -510,11 +513,11 @@ class AutoClipIntegration:
                 with open(temp_video_path, 'wb') as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
-                print(f"视频直链下载成功: {temp_video_path}")
+                logger.info(f'视频直链下载成功: {temp_video_path}')
                 return temp_video_path
         except Exception as e:
-            print(f"HTTP下载失败: {e}")
-        print(f"无法解析平台链接: {url}")
+            logger.error(f'HTTP下载失败: {e}')
+        logger.info(f'无法解析平台链接: {url}')
         return url
 
 # 创建AutoClip实例

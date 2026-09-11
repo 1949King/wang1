@@ -1,4 +1,4 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import {
   type Edge,
   type Node,
@@ -14,15 +14,13 @@ import { defaultDataForRegistryType } from "./plugins/infinite-compat";
 import {
   migrateBundle,
   isProjectBundleLike,
-  migrateEdgesForCanvas,
   CURRENT_SCHEMA_VERSION,
 } from "./stores/schema-migrations";
 import {
   PROJECT_KEY,
   PROJECT_KEY_OLD,
   TEMPLATES_KEY,
-  PROJECTS_KEY,
-  PROJECT_BUNDLE_PREFIX,
+  FLOW_NODE_TYPES,
   uid,
   readProjectsIndex,
   writeProjectsIndex,
@@ -34,19 +32,22 @@ import {
   pickActiveCanvas,
   patchActiveCanvas,
   readBundleWithActiveCanvas,
-  snapshotToBundle,
 } from "./stores/project-storage";
+import { persistMediaUrl, reviewCanvasNodeViaHost } from "./bridge";
+import { persistNodesCopy, applyUrlMapToNodes } from "./stores/persist-media";
+import { BUILTIN_TEMPLATES } from "./stores/templates";
+import { upgradeSchemaV2toV3, collectAiVersions } from "./stores/migrations";
 import {
   cloneGraph,
   pushGraphHistory,
   popGraphPast,
   popGraphFuture,
-  getGraphPast,
-  getGraphFuture,
   getClipboard,
   setClipboard,
 } from "./stores/history-store";
 import type { GraphSnap, ClipboardPayload } from "./stores/history-store";
+import { stackReducer, ensureStack } from "./magnetic/CardStack";
+import type { CardStackData, CardStatus } from "./magnetic/types";
 import {
   type EdgeType,
   type NodeStatus,
@@ -73,6 +74,8 @@ import {
   type StoryboardData,
   type StoryboardCell,
   type DirectorData,
+  type DirectorCardData,
+  type DigitalHumanData,
   type AnimationData,
   type AnimationAction,
   type PanoramaData,
@@ -90,7 +93,7 @@ import {
   defaultStoryboardCells,
   ANIMATION_ACTION_LABELS,
   animationGrid,
-  CharacterEntry,
+  type CharacterEntry,
 } from "./stores/node-factory";
 
 /** re-export 给外部模块用（保持 import 路径不变） */
@@ -101,7 +104,8 @@ export type {
   ShotData, ScriptData, ImageData, VideoData, PromptData, TextData,
   ConfigData, GeneratorData, GroupData, AudioData, MusicData, NodeData,
   MarkdownData, ShotlistData, ShotlistRow, StoryboardData, StoryboardCell,
-  DirectorData, AnimationData, AnimationAction, PanoramaData, NoteData, SourceData,
+  DirectorData, DigitalHumanData, AnimationData, AnimationAction, PanoramaData, NoteData, SourceData,
+  DirectorCardData,
   CharacterEntry,
 };
 export {
@@ -200,223 +204,19 @@ export type ProjectBundle = {
   };
 };
 
-/**
- * 旧工程（v1/v2）升级到 v3 连线 schema：
- * — 内部委托 schema-migrations.ts 的 migrateEdgesForCanvas，保持幂等
- * — 所有调用方（openProject / switchCanvas / duplicateCanvas / loadProject / loadProjectBundle）的
- *   签名不变，仅内部实现统一走迁移层
- */
-function upgradeSchemaV2toV3(nodes: Node[], edges: Edge[]): Edge[] {
-  return migrateEdgesForCanvas(nodes as any, edges as any) as Edge[];
-}
 
-// ════════════════════════════════════════════════════════════════════════
-// 预装场景模板（BUILTIN_TEMPLATES）— 零学习成本起点
-// 节点 id 固定（edges source/target 要引用），不用 makeNode 的随机 uid
-// ════════════════════════════════════════════════════════════════════════
-
-type BuiltinTemplate = {
-  id: string;                     // "builtin:xxx" 前缀区分
+/** WS4#2 相机路径规划：后端 /host/storyboard-camera-plan 返回的机位计划（结构对齐 Stage3D.StageCamera） */
+export type StageCameraPlanShot = {
+  id: string;
   name: string;
-  description: string;            // 一句话说明用途（降学习成本）
-  nodes: Node[];
-  edges: Edge[];
+  position: [number, number, number];
+  lookAt: [number, number, number];
+  fov: number;
+  shotSize?: string;
+  movement?: string;
+  pathPoints?: { pos: [number, number, number]; look: [number, number, number] }[];
+  pathDuration?: number;
 };
-
-function _edge(src: string, tgt: string, type?: string): Edge {
-  return {
-    id: `e_${src}_${tgt}`,
-    source: src,
-    target: tgt,
-    type: type || "default",
-    animated: false,
-    style: { stroke: "#64748b" },
-  };
-}
-
-export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
-  // ── 模板 1：竖屏短剧 3 场分镜 ──
-  {
-    id: "builtin:shorts-drama",
-    name: "竖屏短剧 · 3 场分镜",
-    description: "剧本 → 3 个镜头，一键填写 prompt 开始生图/生视频",
-    nodes: [
-      {
-        id: "s1", type: "script", position: { x: 60, y: 160 },
-        data: { kind: "script", title: "剧本 · 第一场", content: "主角推门进入空荡的房间……" } as any,
-      },
-      {
-        id: "sh1", type: "shot", position: { x: 320, y: 60 },
-        data: { kind: "shot", title: "镜 01 · 推门", shotSize: "中景", duration: 3, prompt: "竖屏 9:16，电影感推镜，冷色调" } as any,
-      },
-      {
-        id: "sh2", type: "shot", position: { x: 320, y: 200 },
-        data: { kind: "shot", title: "镜 02 · 环顾", shotSize: "全景", duration: 4, prompt: "竖屏 9:16，缓慢环视运镜" } as any,
-      },
-      {
-        id: "sh3", type: "shot", position: { x: 320, y: 340 },
-        data: { kind: "shot", title: "镜 03 · 特写", shotSize: "特写", duration: 2, prompt: "竖屏 9:16，人物面部特写，暖光" } as any,
-      },
-      {
-        id: "cfg1", type: "config", position: { x: 620, y: 160 },
-        data: { kind: "config", title: "生成配置", generationMode: "image", count: 4, prompt: "" } as any,
-      },
-    ],
-    edges: [_edge("s1", "sh1"), _edge("s1", "sh2"), _edge("s1", "sh3"), _edge("sh1", "cfg1"), _edge("sh2", "cfg1"), _edge("sh3", "cfg1")],
-  },
-
-  // ── 模板 2：产品展示分镜 ──
-  {
-    id: "builtin:product-showcase",
-    name: "产品展示 · 卖点 3 镜",
-    description: "Prompt → 3 个产品角度镜头，突出卖点/质感/使用场景",
-    nodes: [
-      {
-        id: "p1", type: "prompt", position: { x: 60, y: 180 },
-        data: { kind: "prompt", title: "风格提示", text: "高端质感，浅景深，棚拍，4K" } as any,
-      },
-      {
-        id: "ps1", type: "shot", position: { x: 320, y: 40 },
-        data: { kind: "shot", title: "产品 · 正面特写", shotSize: "特写", duration: 3, prompt: "产品正面，微距，水滴细节" } as any,
-      },
-      {
-        id: "ps2", type: "shot", position: { x: 320, y: 200 },
-        data: { kind: "shot", title: "产品 · 侧面", shotSize: "中景", duration: 3, prompt: "产品 45° 侧面，阴影光" } as any,
-      },
-      {
-        id: "ps3", type: "shot", position: { x: 320, y: 360 },
-        data: { kind: "shot", title: "产品 · 使用场景", shotSize: "全景", duration: 5, prompt: "模特使用场景，生活化" } as any,
-      },
-      {
-        id: "g1", type: "generator", position: { x: 620, y: 180 },
-        data: { kind: "generator", title: "批量生成器", mode: "image", count: 6, prompt: "" } as any,
-      },
-    ],
-    edges: [_edge("p1", "ps1"), _edge("p1", "ps2"), _edge("p1", "ps3"), _edge("ps1", "g1"), _edge("ps2", "g1"), _edge("ps3", "g1")],
-  },
-
-  // ── 模板 3：情绪板 / Moodboard ──
-  {
-    id: "builtin:moodboard",
-    name: "情绪板 · 视觉预演",
-    description: "4 张参考图 + 说明文字，快速对齐团队视觉调性",
-    nodes: [
-      {
-        id: "gp", type: "group", position: { x: 40, y: 40 },
-        data: { kind: "group", title: "情绪板 · 都市夜景" } as any,
-        style: { width: 520, height: 380, zIndex: -1 },
-      },
-      {
-        id: "m1", type: "image", position: { x: 70, y: 80 },
-        data: { kind: "image", title: "参考 · 霓虹 1", prompt: "赛博朋克霓虹灯" } as any,
-      },
-      {
-        id: "m2", type: "image", position: { x: 270, y: 80 },
-        data: { kind: "image", title: "参考 · 霓虹 2", prompt: "雨夜城市街道" } as any,
-      },
-      {
-        id: "m3", type: "image", position: { x: 70, y: 240 },
-        data: { kind: "image", title: "参考 · 光影", prompt: "窗格光影投射" } as any,
-      },
-      {
-        id: "m4", type: "image", position: { x: 270, y: 240 },
-        data: { kind: "image", title: "参考 · 氛围", prompt: "烟雾 + 蓝光" } as any,
-      },
-      {
-        id: "mt", type: "text", position: { x: 580, y: 160 },
-        data: { kind: "text", title: "调性说明", content: "整体冷蓝调 + 霓虹粉点缀，雨夜氛围……", fontSize: 14 } as any,
-      },
-    ],
-    edges: [],
-  },
-
-  // ── 模板 4：MV 节奏分镜 ──
-  {
-    id: "builtin:mv-beatboard",
-    name: "MV · 7 拍节奏板",
-    description: "7 个紧凑镜头（2-4s），贴合 BGM 节拍的情绪流",
-    nodes: [
-      {
-        id: "mv1", type: "shot", position: { x: 40, y: 80 },
-        data: { kind: "shot", title: "Beat 1 · 开场", shotSize: "特写", duration: 2, prompt: "歌手近景特写，聚光" } as any,
-      },
-      {
-        id: "mv2", type: "shot", position: { x: 190, y: 80 },
-        data: { kind: "shot", title: "Beat 2 · 转身", shotSize: "中景", duration: 3, prompt: "转身甩头，动感" } as any,
-      },
-      {
-        id: "mv3", type: "shot", position: { x: 340, y: 80 },
-        data: { kind: "shot", title: "Beat 3 · 全景", shotSize: "全景", duration: 4, prompt: "舞台全景，观众欢呼" } as any,
-      },
-      {
-        id: "mv4", type: "shot", position: { x: 490, y: 80 },
-        data: { kind: "shot", title: "Beat 4 · 乐器", shotSize: "特写", duration: 2, prompt: "吉他手手指特写" } as any,
-      },
-      {
-        id: "mv5", type: "shot", position: { x: 640, y: 80 },
-        data: { kind: "shot", title: "Beat 5 · 仰拍", shotSize: "仰拍", duration: 3, prompt: "从舞台向上仰拍歌手" } as any,
-      },
-      {
-        id: "mv6", type: "shot", position: { x: 790, y: 80 },
-        data: { kind: "shot", title: "Beat 6 · 甩镜", shotSize: "中景", duration: 3, prompt: "快速甩镜到主唱" } as any,
-      },
-      {
-        id: "mv7", type: "shot", position: { x: 940, y: 80 },
-        data: { kind: "shot", title: "Beat 7 · 高潮", shotSize: "特写", duration: 2, prompt: "副歌最高潮表情" } as any,
-      },
-      {
-        id: "mva", type: "audio", position: { x: 490, y: 220 },
-        data: { kind: "audio", title: "BGM · 导入音频文件" } as any,
-      },
-    ],
-    edges: [_edge("mv1", "mv2"), _edge("mv2", "mv3"), _edge("mv3", "mv4"), _edge("mv4", "mv5"), _edge("mv5", "mv6"), _edge("mv6", "mv7")],
-  },
-
-  // ── 模板 5：AI 生图快速卡 ──
-  {
-    id: "builtin:quick-image-card",
-    name: "快速生图卡",
-    description: "配置 → Prompt → Image → Generator，最短路径跑通生图",
-    nodes: [
-      {
-        id: "qc", type: "config", position: { x: 60, y: 180 },
-        data: { kind: "config", title: "配置", generationMode: "image", count: 4, prompt: "" } as any,
-      },
-      {
-        id: "qp", type: "prompt", position: { x: 300, y: 180 },
-        data: { kind: "prompt", title: "Prompt", text: "一个戴帽子的女孩，站在秋天的枫叶树下" } as any,
-      },
-      {
-        id: "qi", type: "image", position: { x: 540, y: 180 },
-        data: { kind: "image", title: "预览图", prompt: "" } as any,
-      },
-      {
-        id: "qg", type: "generator", position: { x: 780, y: 180 },
-        data: { kind: "generator", title: "生成器", mode: "image", count: 4, prompt: "" } as any,
-      },
-    ],
-    edges: [_edge("qc", "qp"), _edge("qp", "qi"), _edge("qi", "qg")],
-  },
-];
-
-// ════════════════════════════════════════════════════════════════════════
-// S6 版本锁定：收集项目内用到的 provider/model 快照
-// ════════════════════════════════════════════════════════════════════════
-
-/** 从节点列表中收集出现过的 AI model → provider 映射 */
-function collectAiVersions(nodes: Node[]): ProjectBundle["aiVersions"] {
-  const providers: Record<string, string> = {};
-  for (const n of nodes) {
-    const d = (n.data || {}) as Record<string, any>;
-    const model = d.model as string | undefined;
-    const provider = (d.provider || "") as string;
-    if (model) {
-      providers[provider || "default"] = model;
-    }
-  }
-  if (Object.keys(providers).length === 0) return undefined;
-  return { providers };
-}
 
 type Store = {
   nodes: Node[];
@@ -427,6 +227,8 @@ type Store = {
   episode: string;
   viewMode: ViewMode;
   canvasLayoutMode: CanvasLayoutMode;
+  /** 磁吸模式开关：开启后拖拽节点时产生磁吸效果 */
+  magneticMode: boolean;
   /** 脏版本号：任何节点/连线变动 +1，用于触发 auto-save 的 useEffect 依赖 */
   dirtyVersion: number;
   /** 3D 导演台场景快照（saveProject 时打包，loadProject 时恢复） */
@@ -442,6 +244,7 @@ type Store = {
   setMeta: (dramaTitle: string, episode: string) => void;
   setViewMode: (m: ViewMode) => void;
   setCanvasLayoutMode: (m: CanvasLayoutMode) => void;
+  setMagneticMode: (on: boolean) => void;
   openDirectorForNode: (nodeId: string) => void;
   clearDirectorTarget: () => void;
 
@@ -449,9 +252,21 @@ type Store = {
   setSelected: (id: string | null) => void;
   updateSelectedData: (patch: Record<string, unknown>) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  // 层叠系统（磁吸层 CardStack 状态入口）
+  pushLayer: (nodeId: string, params: Record<string, unknown>) => void;
+  removeLayer: (nodeId: string, layerId: string) => void;
+  activateLayer: (nodeId: string, layerId: string) => void;
+  hybridLayers: (nodeId: string, layerIdA: string, layerIdB: string, weightA: number) => void;
+  setLayerStatus: (
+    nodeId: string,
+    layerId: string,
+    patch: { status: CardStatus; issues?: string[]; qualityScore?: number },
+  ) => void;
+  /** 生成完成后触发 AI 审阅（走 /host/canvas-ai-review），回写层叠状态与质检分 */
+  reviewNode: (nodeId: string) => void;
 
   // ===== Node CRUD + Workflow Generators =====
-  addNode: (type: NodeData["kind"], pos?: { x: number; y: number }) => void;
+  addNode: (type: NodeData["kind"], pos?: { x: number; y: number }) => string;
   addRegistryNode: (type: string, pos?: { x: number; y: number }) => void;
   addVideoReference: (
     url: string,
@@ -459,6 +274,8 @@ type Store = {
   ) => void;
   addStoryboardGrid: (count?: 9 | 25) => void;
   applyStoryboard: (shots: StoryboardShot[], scriptTitle?: string) => void;
+  /** 导演卡拆解：把分镜结果追加为导演卡的下游镜头节点（非破坏，保留画布既有内容） */
+  breakdownDirectorCard: (directorId: string, shots: StoryboardShot[]) => void;
   addThreeView: () => void;
   addVariants: (axis?: "表情" | "服装" | "背景", count?: number) => void;
   addCaptureToCanvas: (
@@ -474,7 +291,7 @@ type Store = {
     },
   ) => void;
   addStudioNode: (
-    kind: "image" | "video" | "prompt",
+    kind: "image" | "video" | "prompt" | "audio" | "source",
     data: Record<string, unknown>,
   ) => void;
 
@@ -486,7 +303,7 @@ type Store = {
   pasteClipboard: (pos?: { x: number; y: number }) => void;
   selectAll: () => void;
   clearSelection: () => void;
-  alignSelected: (mode: "left" | "center" | "top" | "middle" | "distribute-h") => void;
+  alignSelected: (mode: "left" | "center" | "right" | "top" | "middle" | "bottom" | "distribute-h" | "distribute-v") => void;
   groupSelected: () => void;
 
   // ===== History (Undo/Redo) =====
@@ -562,7 +379,153 @@ type Store = {
   // ===== 3D Stage Snapshot Sync =====
   setStage3dSnapshot: (snapshot: unknown) => void;
   getStage3dSnapshot: () => unknown | undefined;
+
+  // ===== WS4#2 相机路径规划：AI 分镜机位 → Stage3D 实时视口 =====
+  /** 递增序号：触发 Stage3D 消费 pendingStage3dCameras（仅序号变化才应用，避免重复） */
+  stage3dApplySeq: number;
+  /** 待 Stage3D 应用的机位计划（消费后置空，防止切回导演台时覆盖手动机位） */
+  pendingStage3dCameras: StageCameraPlanShot[] | null;
+  applyStage3dCameraPlan: (cameras: StageCameraPlanShot[]) => void;
+  consumeStage3dCameraPlan: () => void;
+
+  // ===== Canvas View Preferences =====
+  showGrid: boolean;
+  smoothLine: boolean;
+  setShowGrid: (v: boolean) => void;
+  setSmoothLine: (v: boolean) => void;
 };
+
+type ProjectSaveSnap = {
+  activeProjectId: string | null;
+  activeProjectName: string;
+  activeCanvasId: string | null;
+  activeCanvasName: string;
+  dramaTitle: string;
+  episode: string;
+  nodes: Node[];
+  edges: Edge[];
+  stage3d: unknown;
+  silent?: boolean;
+};
+
+let saveChain: Promise<void> = Promise.resolve();
+
+function scheduleReplaceMediaUrl(
+  set: (fn: (state: Store) => Partial<Store>) => void,
+  url?: string,
+) {
+  if (!url || !url.startsWith("data:") || url.length < 4096) return;
+  void persistMediaUrl(url).then((next) => {
+    if (next === url) return;
+    set((state) => {
+      const nodes = applyUrlMapToNodes(state.nodes, new Map([[url, next]]));
+      return nodes === state.nodes ? {} : { nodes };
+    });
+  });
+}
+
+async function persistAndWriteSnapshot(
+  snap: ProjectSaveSnap,
+  get: () => Store,
+  set: (partial: Partial<Store>) => void,
+) {
+  const { nodes: persisted, map } = await persistNodesCopy(snap.nodes);
+  const nowISO = new Date().toISOString();
+  const stillHere = () =>
+    snap.activeProjectId
+      ? get().activeProjectId === snap.activeProjectId
+      : !get().activeProjectId;
+
+  const applyLiveUrls = (extra?: Partial<Store>) => {
+    if (!stillHere()) return;
+    const mapped = applyUrlMapToNodes(get().nodes, map);
+    const patch: Partial<Store> = { ...(extra || {}) };
+    if (mapped !== get().nodes) patch.nodes = mapped;
+    if (Object.keys(patch).length) set(patch);
+  };
+
+  if (snap.activeProjectId) {
+    const existing = readProjectBundle(snap.activeProjectId);
+    const canvasId = snap.activeCanvasId || existing?.activeCanvasId || uid("canvas");
+    const canvasName = snap.activeCanvasName || "画布 1";
+    const snapshot: CanvasSnapshot = {
+      id: canvasId,
+      name: canvasName,
+      nodes: persisted,
+      edges: snap.edges,
+      savedAt: nowISO,
+    };
+    const base: ProjectBundle = existing || {
+      version: CURRENT_SCHEMA_VERSION,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      id: snap.activeProjectId,
+      name: snap.activeProjectName || "未命名工作区",
+      dramaTitle: snap.dramaTitle,
+      episode: snap.episode,
+      nodes: persisted,
+      edges: snap.edges,
+      savedAt: nowISO,
+      stage3d: snap.stage3d,
+      aiVersions: collectAiVersions(persisted),
+    };
+    const bundle = patchActiveCanvas(
+      {
+        ...base,
+        dramaTitle: snap.dramaTitle,
+        episode: snap.episode,
+        stage3d: snap.stage3d,
+        aiVersions: collectAiVersions(persisted) || base.aiVersions,
+      },
+      snapshot,
+    );
+    bundle.name = snap.activeProjectName || bundle.name || "未命名工作区";
+    try {
+      writeProjectBundle(bundle);
+      const idx = readProjectsIndex();
+      const others = idx.filter((m) => m.id !== snap.activeProjectId);
+      writeProjectsIndex([
+        {
+          id: snap.activeProjectId,
+          name: bundle.name,
+          savedAt: nowISO,
+          nodeCount: persisted.length,
+        },
+        ...others,
+      ]);
+      const extra: Partial<Store> = {};
+      if (stillHere() && !get().activeCanvasId) {
+        extra.activeCanvasId = canvasId;
+        extra.activeCanvasName = canvasName;
+      }
+      if (!snap.silent) extra.status = `已保存「${bundle.name}」· ${canvasName}`;
+      applyLiveUrls(extra);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : `保存失败: ${e}`;
+      if (stillHere()) set({ status: msg });
+    }
+    return;
+  }
+
+  const payload = {
+    version: CURRENT_SCHEMA_VERSION,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    dramaTitle: snap.dramaTitle,
+    episode: snap.episode,
+    nodes: persisted,
+    edges: snap.edges,
+    savedAt: nowISO,
+  };
+  try {
+    localStorage.setItem(PROJECT_KEY, JSON.stringify(payload));
+    applyLiveUrls(snap.silent ? undefined : { status: "工程已保存（v3 schema）" });
+  } catch (e) {
+    const msg =
+      e instanceof DOMException && e.name === "QuotaExceededError"
+        ? "本地配额不足，请用「导出 JSON」备份后清理叠卡大图"
+        : `保存失败: ${e}`;
+    if (stillHere()) set({ status: msg });
+  }
+}
 
 export const useCanvasStore = create<Store>((set, get) => ({
   nodes: [
@@ -577,12 +540,17 @@ export const useCanvasStore = create<Store>((set, get) => ({
   episode: "",
   viewMode: "home",
   canvasLayoutMode: "flow",
+  magneticMode: true,
   directorTargetNodeId: null,
+  stage3dApplySeq: 0,
+  pendingStage3dCameras: null,
   activeProjectId: null,
   activeProjectName: "未命名工作区",
   activeCanvasId: null,
   activeCanvasName: "画布 1",
   dirtyVersion: 0,
+  showGrid: true,
+  smoothLine: true,
   onNodesChange: (changes) =>
     set((state) => ({
       nodes: applyNodeChanges(changes, state.nodes),
@@ -632,6 +600,9 @@ export const useCanvasStore = create<Store>((set, get) => ({
   },
   clearDirectorTarget: () => set({ directorTargetNodeId: null }),
   setCanvasLayoutMode: (canvasLayoutMode) => set({ canvasLayoutMode }),
+  setMagneticMode: (magneticMode) => set({ magneticMode }),
+  setShowGrid: (showGrid) => set({ showGrid }),
+  setSmoothLine: (smoothLine) => set({ smoothLine }),
   setSelected: (selectedId) => set({ selectedId }),
   updateSelectedData: (patch) => {
     const id = get().selectedId;
@@ -646,6 +617,123 @@ export const useCanvasStore = create<Store>((set, get) => ({
       dirtyVersion: state.dirtyVersion + 1,
     }));
   },
+  // ===== 层叠系统 =====
+  pushLayer: (nodeId, params) => {
+    set((state) => {
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const current = (n.data.stack as CardStackData) || { layers: [], activeLayerId: "" };
+        const newStack = stackReducer(current, { type: "push", params });
+        return { ...n, data: { ...n.data, stack: newStack } };
+      });
+      return { nodes, dirtyVersion: state.dirtyVersion + 1 };
+    });
+  },
+  removeLayer: (nodeId, layerId) => {
+    set((state) => {
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const current = (n.data.stack as CardStackData) || { layers: [], activeLayerId: "" };
+        const newStack = stackReducer(current, { type: "remove", layerId });
+        return { ...n, data: { ...n.data, stack: newStack } };
+      });
+      return { nodes, dirtyVersion: state.dirtyVersion + 1 };
+    });
+  },
+  activateLayer: (nodeId, layerId) => {
+    set((state) => {
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const current = (n.data.stack as CardStackData) || { layers: [], activeLayerId: "" };
+        const newStack = stackReducer(current, { type: "activate", layerId });
+        const activeLayer = newStack.layers.find((l) => l.id === layerId);
+        const newData = activeLayer ? { ...n.data, ...activeLayer.params, stack: newStack } : { ...n.data, stack: newStack };
+        return { ...n, data: newData };
+      });
+      return { nodes, dirtyVersion: state.dirtyVersion + 1 };
+    });
+  },
+  hybridLayers: (nodeId, layerIdA, layerIdB, weightA) => {
+    set((state) => {
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const current = (n.data.stack as CardStackData) || { layers: [], activeLayerId: "" };
+        const newStack = stackReducer(current, { type: "hybrid", layerIdA, layerIdB, weightA });
+        return { ...n, data: { ...n.data, stack: newStack } };
+      });
+      return { nodes, dirtyVersion: state.dirtyVersion + 1 };
+    });
+  },
+  setLayerStatus: (nodeId, layerId, patch) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const current = (n.data.stack as CardStackData) || { layers: [], activeLayerId: "" };
+        const newStack = stackReducer(current, {
+          type: "set_status",
+          layerId,
+          status: patch.status,
+          issues: patch.issues,
+          qualityScore: patch.qualityScore,
+        });
+        return { ...n, data: { ...n.data, stack: newStack } };
+      }),
+      dirtyVersion: state.dirtyVersion + 1,
+    }));
+  },
+  reviewNode: (nodeId) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const data = node.data as NodeData;
+    // 仅对能产出成片的节点做质检（shot/image/video），其余类型不触发
+    if (data.kind !== "shot" && data.kind !== "image" && data.kind !== "video") return;
+    const loose = node.data as Record<string, unknown>;
+    // 无层叠时先用当前节点数据补一层（承载审阅状态），保证旧节点无 stack 也能显示徽标
+    const existing = (loose.stack as CardStackData | undefined);
+    if (!existing || existing.layers.length === 0) {
+      get().updateNodeData(nodeId, { stack: ensureStack(loose) });
+    }
+    const fresh = get().nodes.find((n) => n.id === nodeId);
+    const stack =
+      ((fresh?.data as Record<string, unknown>).stack as CardStackData | undefined) ||
+      ensureStack(loose);
+    const activeLayer = stack.layers.find((l) => l.id === stack.activeLayerId) || stack.layers[0];
+    if (!activeLayer) return;
+    const layerId = activeLayer.id;
+    // 先置为「审阅中」
+    get().setLayerStatus(nodeId, layerId, { status: "pending_review" });
+    // 组装审阅载荷（quality_scores 当前为空，后端按 70 基线打分并标注为估算）
+    const imageUrl = typeof loose.imageUrl === "string" ? loose.imageUrl : "";
+    const videoUrl = typeof loose.videoUrl === "string" ? loose.videoUrl : "";
+    const posterUrl = typeof loose.posterUrl === "string" ? loose.posterUrl : "";
+    const path = imageUrl || videoUrl || posterUrl;
+    const duration = typeof loose.duration === "number" ? loose.duration : 0;
+    const qualityScores = loose.qualityScores as Record<string, number | null> | undefined;
+    reviewCanvasNodeViaHost({
+      clip_id: nodeId,
+      node_id: nodeId,
+      path,
+      duration,
+      quality_scores: qualityScores || {},
+    })
+      .then((res) => {
+        // 后端失败或非预期返回：回退到「已完成」，不阻塞成片
+        if (!res.ok || !res.review) {
+          get().setLayerStatus(nodeId, layerId, { status: "success" });
+          return;
+        }
+        // 后端 0-100 分 → 前端 0~1 评分；D 级(<60) 视为有问题，其余视为通过
+        get().setLayerStatus(nodeId, layerId, {
+          status: res.status === "issues-found" ? "review_issues" : "review_passed",
+          qualityScore:
+            typeof res.quality_score === "number" ? res.quality_score / 100 : undefined,
+          issues: res.status === "issues-found" ? res.review.suggestions || [] : [],
+        });
+      })
+      .catch(() => {
+        get().setLayerStatus(nodeId, layerId, { status: "success" });
+      });
+  },
   addNode: (type, pos) => {
     pushGraphHistory(get);
     const position = pos || {
@@ -659,6 +747,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
       status: `已添加「${type}」节点`,
       dirtyVersion: state.dirtyVersion + 1,
     }));
+    return node.id;
   },
   addRegistryNode: (type, pos) => {
     pushGraphHistory(get);
@@ -796,6 +885,56 @@ export const useCanvasStore = create<Store>((set, get) => ({
       status: `拉片完成：${shotNodes.length} 个分镜节点`,
       dirtyVersion: state.dirtyVersion + 1,
     }));
+  },
+  breakdownDirectorCard: (directorId, shots) => {
+    const list = Array.isArray(shots) ? shots : [];
+    const directorNode = get().nodes.find((n) => n.id === directorId);
+    if (!directorNode) return;
+    if (!list.length) {
+      set({ status: "拆解结果为空" });
+      get().updateNodeData(directorId, { status: "failed", errorMessage: "拆解结果为空" });
+      return;
+    }
+    pushGraphHistory(get);
+    const baseX = directorNode.position.x;
+    const baseY = directorNode.position.y;
+    const cols = list.length > 12 ? 5 : 3;
+    const shotNodes: Node[] = [];
+    const edges: Edge[] = [];
+    list.forEach((s, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const child = makeNode(
+        "shot",
+        { x: baseX + 360 + col * 230, y: baseY + row * 200 },
+        {
+          title: `镜 ${String(i + 1).padStart(2, "0")}`,
+          shotSize: s.shot || "中景",
+          duration: Number(s.duration) || 3,
+          dialogue: s.dialogue || "",
+          prompt: s.description || `分镜 ${i + 1}`,
+        } as Partial<ShotData>,
+      );
+      shotNodes.push(child);
+      edges.push({
+        id: uid("e"),
+        source: directorId,
+        target: child.id,
+        ...defaultEdgeOptions,
+      });
+    });
+    set((state) => ({
+      nodes: [...state.nodes, ...shotNodes],
+      edges: [...state.edges, ...edges],
+      selectedId: shotNodes[0]?.id || directorId,
+      status: `导演卡拆解完成：${shotNodes.length} 个分镜节点`,
+      dirtyVersion: state.dirtyVersion + 1,
+    }));
+    get().updateNodeData(directorId, {
+      status: "success",
+      errorMessage: "",
+      lastBreakdown: { shots: shotNodes.length },
+    });
   },
   addThreeView: () => {
     pushGraphHistory(get);
@@ -1117,6 +1256,27 @@ export const useCanvasStore = create<Store>((set, get) => ({
         ...n,
         position: { ...n.position, x: first + step * i },
       }));
+    } else if (mode === "right") {
+      const x = Math.max(...next.map((n) => n.position.x + (n.measured?.width || 180)));
+      next = next.map((n) => ({
+        ...n,
+        position: { ...n.position, x: x - (n.measured?.width || 180) },
+      }));
+    } else if (mode === "bottom") {
+      const y = Math.max(...next.map((n) => n.position.y + (n.measured?.height || 120)));
+      next = next.map((n) => ({
+        ...n,
+        position: { ...n.position, y: y - (n.measured?.height || 120) },
+      }));
+    } else if (mode === "distribute-v") {
+      const sorted = [...next].sort((a, b) => a.position.y - b.position.y);
+      const first = sorted[0].position.y;
+      const last = sorted[sorted.length - 1].position.y;
+      const step = (last - first) / Math.max(sorted.length - 1, 1);
+      next = sorted.map((n, i) => ({
+        ...n,
+        position: { ...n.position, y: first + step * i },
+      }));
     }
     const map = new Map(next.map((n) => [n.id, n]));
     set((state) => ({
@@ -1130,84 +1290,23 @@ export const useCanvasStore = create<Store>((set, get) => ({
   },
   saveProject: (opts) => {
     const s = get();
-    const nowISO = new Date().toISOString();
-    // 多项目路径：有 activeProjectId 就写入 bundle 并更新索引
-    if (s.activeProjectId) {
-      const existing = readProjectBundle(s.activeProjectId);
-      const canvasId = s.activeCanvasId || existing?.activeCanvasId || uid("canvas");
-      const canvasName = s.activeCanvasName || "画布 1";
-      const snapshot: CanvasSnapshot = {
-        id: canvasId,
-        name: canvasName,
-        nodes: s.nodes,
-        edges: s.edges,
-        savedAt: nowISO,
-      };
-      const base: ProjectBundle = existing || {
-        version: CURRENT_SCHEMA_VERSION,
-        schemaVersion: CURRENT_SCHEMA_VERSION,
-        id: s.activeProjectId,
-        name: s.activeProjectName || "未命名工作区",
-        dramaTitle: s.dramaTitle,
-        episode: s.episode,
-        nodes: s.nodes,
-        edges: s.edges,
-        savedAt: nowISO,
-        stage3d: get().getStage3dSnapshot?.(),
-        aiVersions: collectAiVersions(s.nodes),
-      };
-      const bundle = patchActiveCanvas(
-        {
-          ...base,
-          dramaTitle: s.dramaTitle,
-          episode: s.episode,
-          stage3d: get().getStage3dSnapshot?.(),
-          aiVersions: collectAiVersions(s.nodes) || base.aiVersions,
-        },
-        snapshot,
-      );
-      bundle.name = s.activeProjectName || bundle.name || "未命名工作区";
-      try {
-        writeProjectBundle(bundle);
-        const idx = readProjectsIndex();
-        const others = idx.filter((m) => m.id !== s.activeProjectId);
-        const meta: ProjectMeta = {
-          id: s.activeProjectId,
-          name: bundle.name,
-          savedAt: nowISO,
-          nodeCount: s.nodes.length,
-        };
-        writeProjectsIndex([meta, ...others]);
-        if (!s.activeCanvasId) {
-          set({ activeCanvasId: canvasId, activeCanvasName: canvasName });
-        }
-        if (!opts?.silent) set({ status: `已保存「${bundle.name}」· ${canvasName}` });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : `保存失败: ${e}`;
-        set({ status: msg });
-      }
-      return;
-    }
-    // 旧版单项目路径（兜底）
-    const payload = {
-      version: CURRENT_SCHEMA_VERSION,
-      schemaVersion: CURRENT_SCHEMA_VERSION,
+    const snap: ProjectSaveSnap = {
+      activeProjectId: s.activeProjectId,
+      activeProjectName: s.activeProjectName,
+      activeCanvasId: s.activeCanvasId,
+      activeCanvasName: s.activeCanvasName,
       dramaTitle: s.dramaTitle,
       episode: s.episode,
       nodes: s.nodes,
       edges: s.edges,
-      savedAt: nowISO,
+      stage3d: s.getStage3dSnapshot?.(),
+      silent: opts?.silent,
     };
-    try {
-      localStorage.setItem(PROJECT_KEY, JSON.stringify(payload));
-      if (!opts?.silent) set({ status: "工程已保存（v3 schema）" });
-    } catch (e) {
-      const msg =
-        e instanceof DOMException && e.name === "QuotaExceededError"
-          ? "本地配额不足，请用「导出JSON」备份后清理叠卡大图"
-          : `保存失败: ${e}`;
-      set({ status: msg });
-    }
+    saveChain = saveChain
+      .then(() => persistAndWriteSnapshot(snap, get, set))
+      .catch((e) => {
+        set({ status: e instanceof Error ? e.message : `保存失败: ${e}` });
+      });
   },
   loadProject: () => {
     // 多项目路径：有 activeProjectId 直接读 bundle
@@ -1237,7 +1336,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
     try {
       const rawData = JSON.parse(raw);
       const migrated = migrateBundle(rawData);
-      const nodes = Array.isArray(migrated?.nodes) ? migrated.nodes : [];
+      const nodes: Node[] = Array.isArray(migrated?.nodes) ? (migrated.nodes as Node[]) : [];
       const known = FLOW_NODE_TYPES;
       const safeNodes = nodes.filter((n: Node) => {
         if (!n) return false;
@@ -1245,7 +1344,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
         if (t.includes(":")) return true;
         return known.has(t);
       });
-      const upgradedEdges = Array.isArray(migrated?.edges) ? migrated.edges : [];
+      const upgradedEdges: Edge[] = Array.isArray(migrated?.edges) ? (migrated.edges as Edge[]) : [];
       if (migratedFromOld && migrated) {
         localStorage.setItem(PROJECT_KEY, JSON.stringify(migrated));
         localStorage.removeItem(PROJECT_KEY_OLD);
@@ -1628,7 +1727,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
       if (isBundle) {
         // 走完整 schema 迁移链（幂等），覆盖 V1/V2/V3 所有老版本
         const migrated = migrateBundle(raw);
-        const nodes = Array.isArray(migrated?.nodes) ? migrated.nodes : [];
+        const nodes: Node[] = Array.isArray(migrated?.nodes) ? (migrated.nodes as Node[]) : [];
         const id = uid("proj");
         const now = new Date().toISOString();
         const bundle: ProjectBundle = {
@@ -1639,7 +1738,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
           dramaTitle: migrated?.dramaTitle || "",
           episode: migrated?.episode || "",
           nodes,
-          edges: Array.isArray(migrated?.edges) ? migrated.edges : [],
+          edges: Array.isArray(migrated?.edges) ? (migrated.edges as Edge[]) : [],
           savedAt: now,
           stage3d: migrated?.stage3d,
         };
@@ -1776,7 +1875,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
         if (data.kind === "video") {
           return { ...n, data: { ...data, posterUrl: imageUrl } };
         }
-        if (data.kind === "director" || data.kind === "panorama") {
+        if (data.kind === "director" || data.kind === "panorama" || data.kind === "digitalHuman") {
           return { ...n, data: { ...data, imageUrl, status: "success" } };
         }
         if (data.kind === "source" && data.mediaType === "image") {
@@ -1789,6 +1888,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
       }),
       dirtyVersion: state.dirtyVersion + 1,
     }));
+    scheduleReplaceMediaUrl(set, imageUrl);
   },
   setPrimaryImage: (id, imageId) => {
     set((state) => ({
@@ -1819,6 +1919,8 @@ export const useCanvasStore = create<Store>((set, get) => ({
       }),
       dirtyVersion: state.dirtyVersion + 1,
     }));
+    scheduleReplaceMediaUrl(set, videoUrl);
+    if (posterUrl) scheduleReplaceMediaUrl(set, posterUrl);
   },
   setPrimaryVideo: (id, videoId) => {
     set((state) => ({
@@ -1846,11 +1948,12 @@ export const useCanvasStore = create<Store>((set, get) => ({
       nodes: state.nodes.map((n) => {
         if (n.id !== id) return n;
         const data = n.data as NodeData;
-        if (data.kind !== "audio") return n;
+        if (data.kind !== "audio" && data.kind !== "music" && data.kind !== "digitalHuman") return n;
         return { ...n, data: { ...data, audioUrl } };
       }),
       dirtyVersion: state.dirtyVersion + 1,
     }));
+    scheduleReplaceMediaUrl(set, audioUrl);
   },
   groupSelected: () => {
     const selected = get().nodes.filter((n) => n.selected && (n.data as NodeData).kind !== "group");
@@ -1921,7 +2024,6 @@ export const useCanvasStore = create<Store>((set, get) => ({
       }
     }
     // schema 安全处理：过滤未知节点类型 + 自动补齐连线 data.type
-    const known = FLOW_NODE_TYPES;
     const rawNodes = Array.isArray(bundle.nodes) ? bundle.nodes : [];
     const safeNodes = filterFlowNodes(rawNodes);
     const rawEdges = Array.isArray(bundle.edges) ? bundle.edges : [];
@@ -1974,6 +2076,15 @@ export const useCanvasStore = create<Store>((set, get) => ({
     set({ stage3dSnapshot: snapshot });
   },
   getStage3dSnapshot: () => get().stage3dSnapshot,
+  applyStage3dCameraPlan: (cameras) => {
+    set((state) => ({
+      pendingStage3dCameras: cameras,
+      stage3dApplySeq: state.stage3dApplySeq + 1,
+      viewMode: "stage3d",
+      status: `已生成 ${cameras.length} 个机位，正在应用到 3D 导演台`,
+    }));
+  },
+  consumeStage3dCameraPlan: () => set({ pendingStage3dCameras: null }),
 
   // ===== Character Library（对接 Python CharacterStore）=====
   characters: [] as CharacterEntry[],
@@ -2119,6 +2230,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
         : `3D 截图已入画布：${baseTitle}${shotMeta?.focalLength ? ` @ ${shotMeta.focalLength}mm` : ""}`,
       dirtyVersion: state.dirtyVersion + 1,
     }));
+    scheduleReplaceMediaUrl(set, imageUrl);
   },
   addStudioNode: (kind, data) => {
     pushGraphHistory(get);

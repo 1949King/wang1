@@ -12,6 +12,9 @@ from datetime import datetime
 import json
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.subtitle_generator")
+
 class SubtitleFormat(Enum):
     """字幕格式"""
     SRT = "srt"
@@ -137,13 +140,13 @@ class WhisperTranscriber:
                 try:
                     from core.ai.whisper_asr import is_available, transcribe, get_backend
                 except Exception as e:
-                    print(f"whisper_asr 不可用: {e}")
+                    logger.info(f'whisper_asr 不可用: {e}')
                     if progress_callback:
                         progress_callback(100, "语音识别模块不可用")
                     return []
 
             if not is_available():
-                print("Whisper 未安装（请 pip install faster-whisper）")
+                logger.info('Whisper 未安装（请 pip install faster-whisper）')
                 if progress_callback:
                     progress_callback(100, "未安装 Whisper")
                 return []
@@ -175,7 +178,7 @@ class WhisperTranscriber:
                     progress_callback(100, f"转写完成 ({len(segments)} 条)")
                 return segments
             except Exception as e:
-                print(f"语音转写失败: {e}")
+                logger.error(f'语音转写失败: {e}')
                 if progress_callback:
                     progress_callback(100, f"转写失败: {e}")
                 return []
@@ -389,7 +392,7 @@ class SubtitleGenerator:
                 return segments
                 
             except Exception as e:
-                print(f"生成字幕失败: {e}")
+                logger.error(f'生成字幕失败: {e}')
                 return []
     
     def export_subtitles(self, segments: List[SubtitleSegment],

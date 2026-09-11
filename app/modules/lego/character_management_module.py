@@ -1,9 +1,9 @@
 """
 角色 / AI 画布模块
 =================
-原「角色管理」主界面已替换为镶嵌的 infinite-canvas。
+原「角色管理」主界面已替换为镶嵌的自研拾光导演台画布。
 
-- 主视图：vendor/infinite-canvas（WebEngine）生图/生视频
+- 主视图：vendor/shiguang-canvas（WebEngine）生图/生视频
 - 角色库：CharacterStore 仍持久化；侧栏「角色库」编辑 + 生成资产挂载
 - 回流：canvas_bridge → EventBus MATERIAL_TO_TIMELINE → 剪辑
 - 插帧：可选开启线性补帧（非神经网络）
@@ -475,7 +475,7 @@ class CharacterEditorPanel(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# 主模块 UI —— infinite-canvas 镶嵌（替换原列表式角色管理主界面）
+# 主模块 UI —— 自研拾光导演台画布镶嵌（替换原列表式角色管理主界面）
 # ---------------------------------------------------------------------------
 
 WEBENGINE_AVAILABLE = False
@@ -512,7 +512,7 @@ _probe_webengine()
 
 
 class CharacterManagementModule(BaseModule):
-    """角色 / AI 画布模块：镶嵌 infinite-canvas，生成物回流剪辑。"""
+    """角色 / AI 画布模块：镶嵌自研拾光导演台画布，生成物回流剪辑。"""
 
     module_id = "characters"
     module_name = "AI 画布"
@@ -532,10 +532,10 @@ class CharacterManagementModule(BaseModule):
         self._status_label = None
         self._interp_check = None
         self._char_combo = None
-        self._engine_combo = None
         self._library_panel = None
         self._bridge_started = False
         self._pending_canvas_url = ""
+        self._canvas_load_retries = 0
         self._agent_btn = None
         self._agent_connected = False
         super().__init__()
@@ -574,19 +574,6 @@ class CharacterManagementModule(BaseModule):
         self._interp_check.setStyleSheet("color:#ccc;")
         self._interp_check.setToolTip("非神经网络：帧差 + 线性混合（ai_interpolation）")
         header.addWidget(self._interp_check)
-
-        # 画布引擎：默认拾光导演台；infinite 需明确确认（默认「否」防误切）
-        self._engine_combo = QComboBox()
-        self._engine_combo.setMinimumWidth(170)
-        self._engine_combo.setStyleSheet(
-            "QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;padding:4px 8px;border-radius:4px;}"
-        )
-        self._engine_combo.addItem("🎛 拾光导演台", "shiguang")
-        self._engine_combo.addItem("📐 infinite-canvas（较重）", "infinite")
-        self._engine_combo.setToolTip(
-            "默认拾光导演台（轻）。infinite-canvas 体积更大，切换需确认并会重启服务。"
-        )
-        header.addWidget(self._engine_combo)
 
         start_btn = QPushButton("启动画布")
         start_btn.setStyleSheet(self._btn_style("#1e6bde"))
@@ -701,7 +688,7 @@ class CharacterManagementModule(BaseModule):
             "「连接 Agent」拉起本机 :17371 工具通道（Codex/MCP），不会在 3D 场景出现人物；"
             "不再进模块自动预热 Agent，避免卡住。"
             "模型 Key 来自模型广场。插帧为线性补帧，非 RIFE。"
-            "可选 Codex: codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp"
+            "可选 Codex: codex mcp add canvas-agent -- npx -y @basketikun/canvas-agent mcp"
         )
         tip.setStyleSheet("color:#666;font-size:11px;")
         tip.setWordWrap(True)
@@ -710,10 +697,6 @@ class CharacterManagementModule(BaseModule):
         self._char_combo.currentIndexChanged.connect(lambda *_: self._sync_bridge_prefs())
         self._interp_check.toggled.connect(lambda *_: self._sync_bridge_prefs())
 
-        # 画布引擎同步 + 切换回调
-        self._sync_engine_combo()
-        self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
-
         # 延迟启动桥与探测画布；定期刷新 Agent 按钮状态
         QTimer.singleShot(200, self._bootstrap)
         self._agent_poll = QTimer(self)
@@ -721,101 +704,6 @@ class CharacterManagementModule(BaseModule):
         self._agent_poll.timeout.connect(self._poll_agent_btn_state)
         self._agent_poll.start()
         QTimer.singleShot(1500, self._poll_agent_btn_state)
-
-    def _sync_engine_combo(self):
-        """下拉框与当前生效引擎对齐（不触发切换回调）。"""
-        if self._engine_combo is None:
-            return
-        try:
-            from app.core.canvas_runtime import active_canvas_engine
-        except ImportError:
-            from core.canvas_runtime import active_canvas_engine  # type: ignore
-        eng = active_canvas_engine()
-        self._engine_combo.blockSignals(True)
-        idx = self._engine_combo.findData(eng)
-        if idx >= 0:
-            self._engine_combo.setCurrentIndex(idx)
-        self._engine_combo.blockSignals(False)
-
-    def _on_engine_changed(self, index: int):
-        """用户切换画布引擎：停旧服务 → 切环境变量 → 重启并加载新画布。"""
-        if self._engine_combo is None:
-            return
-        eng = str(self._engine_combo.itemData(index) or "")
-        try:
-            from app.core.canvas_runtime import active_canvas_engine, set_active_canvas_engine
-        except ImportError:
-            from core.canvas_runtime import active_canvas_engine, set_active_canvas_engine  # type: ignore
-        if not eng or eng == active_canvas_engine():
-            return
-
-        # 确认：切换会重启画布
-        label = "拾光导演台（自研）" if eng == "shiguang" else "infinite-canvas（开源）"
-        if not self._confirm_switch_engine(label):
-            # 取消则回退到原引擎
-            self._sync_engine_combo()
-            return
-
-        self._manual_canvas_start = True
-        self._set_status(f"正在切换画布到 {label}（重启服务）…")
-        try:
-            set_active_canvas_engine(eng)
-        except Exception as e:
-            self._set_status(f"切换失败: {e}")
-            self._sync_engine_combo()
-            return
-
-        # 延迟到新 runtime 就绪后加载
-        QTimer.singleShot(0, self._restart_canvas_with_engine)
-
-    def _confirm_switch_engine(self, label: str) -> bool:
-        """切换画布引擎确认弹窗（绑定父窗口，符合 PyQt6 弹窗铁律）。"""
-        ret = QMessageBox.question(
-            self,
-            "切换画布引擎",
-            f"将切换到 {label}，当前画布服务会重启。\n\n"
-            + (
-                "提示：infinite-canvas 首包更大，首开通常更慢。\n\n"
-                if "infinite" in label.lower()
-                else ""
-            )
-            + "是否继续？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            # 切到 infinite 时默认「否」，减少误切
-            QMessageBox.StandardButton.No
-            if "infinite" in label.lower()
-            else QMessageBox.StandardButton.Yes,
-        )
-        return ret == QMessageBox.StandardButton.Yes
-
-    def _restart_canvas_with_engine(self):
-        """按新引擎重启画布并加载（在 set_active_canvas_engine 之后调用）。"""
-        try:
-            from app.core.canvas_runtime import get_canvas_runtime
-        except ImportError:
-            from core.canvas_runtime import get_canvas_runtime  # type: ignore
-        rt = get_canvas_runtime()
-        self._ensure_bridge()
-        # 先清空 WebView，避免用户以为「切换没反应」
-        if self._ensure_web_view() and self._web is not None:
-            try:
-                self._web.setHtml(
-                    "<html><body style='background:#0a0a0a;color:#888;"
-                    "font-family:sans-serif;display:flex;align-items:center;"
-                    "justify-content:center;height:100vh;margin:0'>"
-                    "正在切换画布引擎…</body></html>"
-                )
-            except Exception:
-                pass
-
-        def work():
-            def progress(msg: str):
-                self._ui_status.emit(msg)
-
-            ok, msg = rt.ensure_started(wait_seconds=45.0, on_progress=progress)
-            self._ui_canvas_started.emit(ok, msg, rt.url if ok else "")
-
-        threading.Thread(target=work, daemon=True, name="CanvasEngineSwitch").start()
 
     def _btn_style(self, bg: str) -> str:
         return (
@@ -1009,6 +897,8 @@ class CharacterManagementModule(BaseModule):
         try:
             self._web.loadStarted.connect(self._on_web_load_started)
             self._web.loadFinished.connect(self._on_web_load_finished)
+            # 渲染进程/GPU 子进程崩溃时兜底：黑屏但服务仍在，靠普通 load() 不一定能救回
+            self._web.page().renderProcessTerminated.connect(self._on_render_process_terminated)
         except Exception as e:
             logger.debug("web load signals connect failed: %s", e)
         if self._web_placeholder is not None:
@@ -1023,15 +913,6 @@ class CharacterManagementModule(BaseModule):
         return True
 
     def _bootstrap(self):
-        # 未显式指定时锁在 shiguang，避免误用重引擎
-        try:
-            from app.core.canvas_runtime import active_canvas_engine, set_active_canvas_engine
-        except ImportError:
-            from core.canvas_runtime import active_canvas_engine, set_active_canvas_engine  # type: ignore
-        if not (os.environ.get("SHIGUANG_CANVAS_ENGINE") or "").strip():
-            set_active_canvas_engine("shiguang")
-            self._sync_engine_combo()
-
         self._ensure_bridge()
         self._sync_bridge_prefs()
         try:
@@ -1044,8 +925,7 @@ class CharacterManagementModule(BaseModule):
             self._set_status(f"已连接 {rt.url}")
             QTimer.singleShot(800, self._maybe_inject_existing_agent)
             return
-        eng = active_canvas_engine()
-        eng_label = "拾光导演台（自研）" if eng == "shiguang" else "infinite-canvas（开源）"
+        eng_label = "拾光导演台（自研）"
         self._set_status(f"正在预热 {eng_label}（有 dist 则秒开）…")
 
         def progress(msg: str):
@@ -1129,7 +1009,7 @@ class CharacterManagementModule(BaseModule):
                 sep = "&" if "?" in url else "?"
                 url = f"{url}{sep}token={tok}"
         except Exception:
-            pass
+            logger.debug("canvas session token attach failed", exc_info=True)
         self._pending_canvas_url = url
         if not self._ensure_web_view():
             import webbrowser
@@ -1146,11 +1026,73 @@ class CharacterManagementModule(BaseModule):
     def _on_web_load_finished(self, ok: bool):
         url = self._pending_canvas_url or ""
         if ok:
+            self._canvas_load_retries = 0
             self._set_status(f"画布已就绪 {url}" if url else "画布已就绪")
             logger.info("canvas page loadFinished ok url=%s", url)
-        else:
-            self._set_status(f"画布页面加载失败（请点「刷新」或「启动画布」） {url}")
-            logger.warning("canvas page loadFinished FAIL url=%s", url)
+            return
+        retries = int(getattr(self, "_canvas_load_retries", 0) or 0)
+        if retries < 1 and url and self._web is not None:
+            self._canvas_load_retries = retries + 1
+            self._set_status(f"画布加载失败，正在重试… {url}")
+            logger.warning("canvas page loadFinished FAIL, retrying once url=%s", url)
+            QTimer.singleShot(600, lambda u=url: self._retry_load_canvas(u))
+            return
+        self._set_status(f"画布页面加载失败（请点「刷新」或「启动画布」） {url}")
+        logger.warning("canvas page loadFinished FAIL url=%s", url)
+
+    def _on_render_process_terminated(self, status, exit_code):
+        """画布渲染进程 / GPU 子进程被杀时的兜底重载。
+
+        点击节点后整页黑屏、但「画布已连接」仍在，通常是 Chromium 子进程崩溃；
+        对崩溃类状态做带退避的自动 reload，普通/导航类状态忽略。
+        """
+        # 崩溃类终止状态（Crashed=2 / Killed=3），避免普通导航也误重载
+        try:
+            from PyQt6.QtWebEngineCore import QWebEnginePage
+            crashed = status in (
+                QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus,
+                QWebEnginePage.RenderProcessTerminationStatus.KilledTerminationStatus,
+            )
+        except Exception:
+            crashed = int(status or 0) > 0
+        if not crashed:
+            return
+
+        logger.warning(
+            "canvas render process terminated status=%s exit=%s, preparing auto-reload",
+            status, exit_code,
+        )
+        url = getattr(self, "_pending_canvas_url", "") or ""
+        if not url or self._web is None:
+            self._set_status("画布渲染进程异常，请点「刷新」重载")
+            return
+
+        # 60s 窗口内连续崩溃 ≥3 次则停止自动重载，防止崩溃循环拖死应用
+        now = time.time()
+        window_start = float(getattr(self, "_render_crash_window_start", 0.0) or 0.0)
+        crash_count = int(getattr(self, "_render_crash_count", 0) or 0)
+        if now - window_start > 60.0:
+            window_start = now
+            crash_count = 0
+        if crash_count >= 3:
+            self._set_status("画布渲染进程反复崩溃，已停止自动重载（请重启应用）")
+            logger.error("canvas render process kept crashing, auto-reload stopped")
+            return
+        self._render_crash_window_start = window_start
+        self._render_crash_count = crash_count + 1
+
+        delay = 800 * (2 ** crash_count)  # 0.8s / 1.6s / 3.2s 逐次退避
+        logger.info("auto-reloading canvas in %dms (attempt %d)", delay, crash_count + 1)
+        QTimer.singleShot(delay, lambda u=url: self._retry_load_canvas(u))
+
+    def _retry_load_canvas(self, url: str):
+        if not url or self._web is None:
+            return
+        if url != getattr(self, "_pending_canvas_url", ""):
+            return
+        from PyQt6.QtCore import QUrl
+        logger.info("retrying canvas url=%s", url)
+        self._web.load(QUrl(url))
 
     def _set_status(self, text: str):
         if self._status_label is not None:
@@ -1163,7 +1105,7 @@ class CharacterManagementModule(BaseModule):
             from app.core.canvas_runtime import active_canvas_engine
         except ImportError:
             from core.canvas_runtime import active_canvas_engine  # type: ignore
-        eng_label = "拾光导演台" if active_canvas_engine() == "shiguang" else "infinite-canvas"
+        eng_label = "拾光导演台"
         self._set_status(f"正在启动 {eng_label}…")
         try:
             from app.core.canvas_runtime import get_canvas_runtime
@@ -1172,6 +1114,14 @@ class CharacterManagementModule(BaseModule):
 
         def work():
             rt = get_canvas_runtime()
+            # engine=tauri 时把 Python 后端 session token 注入 canvas_runtime，
+            # 由 _start_tauri_process 通过环境变量传给 Tauri 子进程。
+            # engine=shiguang 时此调用不影响原 inject.js 注入流程。
+            try:
+                from app.core.canvas_bridge import session_token
+                rt.set_bridge_credentials(session_token())
+            except Exception as e:
+                logger.warning("set_bridge_credentials failed: %s", e)
 
             def progress(msg: str):
                 self._ui_status.emit(msg)
@@ -1200,6 +1150,7 @@ class CharacterManagementModule(BaseModule):
             from core.canvas_runtime import get_canvas_runtime  # type: ignore
         rt = get_canvas_runtime()
         if rt.is_ready():
+            self._canvas_load_retries = 0
             self._load_canvas(rt.url)
             self._set_status(f"已刷新 {rt.url}")
         else:

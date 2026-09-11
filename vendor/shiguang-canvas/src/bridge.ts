@@ -1,6 +1,8 @@
 /** 与拾光剪影 canvas_bridge (:18765) 对接 */
 
-export const BRIDGE = "http://127.0.0.1:18765";
+// 默认后端地址（兼容 Qt WebEngine 嵌入场景）；Tauri 模式下由
+// ensureTauriBridgeCredentials() 通过 invoke 拿到 Python 后端实际端口后覆盖。
+export let BRIDGE = "http://127.0.0.1:18765";
 const CONFIG_KEY = "infinite-canvas:ai_config_store";
 
 export type BridgePrefs = {
@@ -24,6 +26,33 @@ function tokenFromQuery(): string {
     return new URLSearchParams(location.search).get("token") || "";
   } catch {
     return "";
+  }
+}
+
+/**
+ * Tauri 桌面环境下从 Rust 端拉取 Python 后端的本会话凭据并写入 window 全局变量，
+ * 同时重新赋值 BRIDGE 为后端实际 URL。Qt WebEngine 嵌入场景下此函数 no-op。
+ *
+ * libtv/App.tsx 启动时需 await 此函数，之后 bridgeToken() / BRIDGE 才可用。
+ */
+export async function ensureTauriBridgeCredentials(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const isTauri = "__TAURI__" in window || "__TAURI_INTERNALS__" in window;
+  if (!isTauri) return;
+  try {
+    // 动态 import 避免非 Tauri 环境引入 @tauri-apps/api 失败
+    const { invoke } = await import("@tauri-apps/api/core");
+    const [token, url] = await Promise.all([
+      invoke<string>("get_bridge_token").catch(() => ""),
+      invoke<string>("get_bridge_url").catch(() => ""),
+    ]);
+    if (token) (window as any).__SHIGUANG_BRIDGE_TOKEN = token;
+    if (url) {
+      (window as any).__SHIGUANG_BRIDGE_URL = url;
+      BRIDGE = url;
+    }
+  } catch (error) {
+    console.warn("[libtv/bridge] ensureTauriBridgeCredentials failed:", error);
   }
 }
 
@@ -200,6 +229,191 @@ export async function generateImageViaHost(opts: {
       ? `批量生图 ${images.length}/${count}`
       : lastMsg || "批量生图失败",
     fallback_placeholder: !okAny,
+  };
+}
+
+/** 经 canvas_bridge 调五维评分器做 AI 审阅，返回卡片质量分数与 passed/issues-found 状态 */
+export async function reviewCanvasNodeViaHost(opts: {
+  clip_id?: string;
+  node_id?: string;
+  path?: string;
+  duration?: number;
+  quality_scores?: Record<string, number | null>;
+}): Promise<{
+  ok: boolean;
+  status?: "passed" | "issues-found";
+  quality_score?: number;
+  review?: {
+    clip_id: string;
+    dimensions: Record<string, number>;
+    weighted_score: number;
+    grade: string;
+    should_drop: boolean;
+    suggestions: string[];
+    estimated_dims: string[];
+    is_fully_estimated: boolean;
+  };
+  message?: string;
+}> {
+  const token = bridgeToken();
+  const res = await fetch(
+    `${BRIDGE}/host/canvas-ai-review?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({
+        clip_id: opts.clip_id || "",
+        node_id: opts.node_id || "",
+        path: opts.path || "",
+        duration: opts.duration ?? 0,
+        quality_scores: opts.quality_scores || {},
+      }),
+    },
+  );
+  try {
+    return await res.json();
+  } catch {
+    return { ok: false, message: `HTTP ${res.status}` };
+  }
+}
+
+/** 经 canvas_bridge 执行 ComfyUI 工作流（粘贴即用；dry_run 演练模式引擎缺位仍走通解析→落箱链路） */
+export async function runComfyUIWorkflowViaHost(
+  workflowJson: unknown,
+  dryRun: boolean = false,
+): Promise<{
+  ok: boolean;
+  dry_run?: boolean;
+  raw_format?: string;
+  node_ids?: string[];
+  class_types?: string[];
+  errors?: string[];
+  warnings?: string[];
+  missing_nodes?: string[];
+  engine_available?: boolean;
+  engine_running?: boolean;
+  inbox_dir?: string;
+  prompt_id?: string;
+  images?: unknown[];
+  paths?: string[];
+  urls?: string[];
+  message?: string;
+  error?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/comfyui/run?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ workflow_json: workflowJson, dry_run: dryRun }),
+      },
+    );
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `执行 ComfyUI 工作流失败: ${e}` };
+  }
+}
+
+export type ComfyEngineStatus = {
+  engine_dir: string;
+  engine_valid: boolean;
+  process_alive: boolean;
+  host: string;
+  port: number;
+  diagnose: {
+    available: boolean;
+    base_url: string;
+    error: string;
+    suggestion: string;
+  };
+};
+
+/** 查询内置 ComfyUI 引擎状态（含未安装诊断 / 安装指引）；失败返回 null */
+export async function getComfyEngineStatus(): Promise<ComfyEngineStatus | null> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/comfyui/status?token=${encodeURIComponent(token)}`,
+      { headers: authHeaders() },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { ok?: boolean; status?: ComfyEngineStatus };
+    return data.ok ? (data.status ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ComfyImportOutcome = {
+  ok: boolean;              // dry-run 解析是否成功
+  engineMissing: boolean;   // 引擎未安装（需弹诊断）
+  message: string;          // 状态栏简短文案
+  detail?: string;          // 引擎未安装时的安装指引（供醒目展示）
+};
+
+/** 判断已解析 JSON 是否为 ComfyUI workflow（UI 的 nodes 数组 或 graph 的 class_type 对象） */
+export function isComfyWorkflowJson(json: unknown): boolean {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return false;
+  const o = json as Record<string, unknown>;
+  if (Array.isArray(o.nodes)) return true;
+  return Object.values(o).some(
+    (v) => v && typeof v === "object" && "class_type" in (v as Record<string, unknown>),
+  );
+}
+
+/** 判断剪贴板文本是否为 ComfyUI workflow JSON（仅同步解析，用于粘贴拦截判定） */
+export function isComfyWorkflowText(text: string): boolean {
+  const trimmed = (text || "").trim();
+  if (!trimmed || trimmed[0] !== "{") return false;
+  try {
+    return isComfyWorkflowJson(JSON.parse(trimmed));
+  } catch {
+    return false;
+  }
+}
+
+/** 导入 ComfyUI 工作流（dry-run 演练解析）。返回结构化结果，含引擎未安装诊断。 */
+export async function importComfyWorkflowText(text: string): Promise<ComfyImportOutcome> {
+  const trimmed = (text || "").trim();
+  if (!trimmed) {
+    return { ok: false, engineMissing: false, message: "剪贴板为空，请先在 ComfyUI 中复制工作流" };
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(trimmed);
+  } catch {
+    return { ok: false, engineMissing: false, message: "剪贴板内容不是有效 JSON，无法识别为 ComfyUI 工作流" };
+  }
+  if (!isComfyWorkflowJson(json)) {
+    return {
+      ok: false,
+      engineMissing: false,
+      message: "剪贴板内容不是 ComfyUI 工作流（缺少 nodes 数组或 class_type 结构）",
+    };
+  }
+  const res = await runComfyUIWorkflowViaHost(json, true);
+  if (res.ok) {
+    const types = [...new Set(res.class_types || [])];
+    const typeText = types.length ? `；节点类型：${types.slice(0, 6).join("、")}` : "";
+    const engineMissing = res.engine_available === false;
+    let detail: string | undefined;
+    if (engineMissing) {
+      const st = await getComfyEngineStatus();
+      detail = st?.diagnose?.suggestion || "未检测到内置 ComfyUI 引擎，暂时无法真正生成图片";
+    }
+    return {
+      ok: true,
+      engineMissing,
+      message: `ComfyUI 工作流已解析（dry-run）${res.message ? ` · ${res.message}` : ""}${typeText}`,
+      detail,
+    };
+  }
+  return {
+    ok: false,
+    engineMissing: false,
+    message: `ComfyUI 工作流解析失败：${res.error || res.message || "未知错误"}`,
   };
 }
 
@@ -586,6 +800,8 @@ export async function generateVideoViaHost(opts: {
   duration?: number;
   size?: string;
   reference_image?: string;
+  /** 参考视频（motion-ref 模式 A）：inbox URL / data URL / 本地路径，后端统一落盘并做能力探测 */
+  reference_video?: string;
   first_frame?: string;
   last_frame?: string;
 }): Promise<{
@@ -596,6 +812,8 @@ export async function generateVideoViaHost(opts: {
   model?: string;
   channel_id?: string;
   channel_name?: string;
+  supports_motion_ref?: boolean;
+  reference_video_url?: string;
 }> {
   const token = bridgeToken();
   const res = await fetch(
@@ -610,8 +828,53 @@ export async function generateVideoViaHost(opts: {
         duration: opts.duration ?? 5,
         size: opts.size || "1280x720",
         reference_image: opts.reference_image || "",
+        reference_video: opts.reference_video || "",
         first_frame: opts.first_frame || "",
         last_frame: opts.last_frame || "",
+      }),
+    },
+  );
+  try {
+    return await res.json();
+  } catch {
+    return { ok: false, message: `HTTP ${res.status}` };
+  }
+}
+
+// ── 模式 B 姿态解析（视频 → 关键点 JSON 子进程） ──
+
+export async function poseExtractViaHost(opts: {
+  /** 参考视频：inbox URL / 本地路径 */
+  video: string;
+  /** 采样步长（1=逐帧） */
+  sample_step?: number;
+  /** 最多采样帧数 */
+  max_frames?: number;
+  /** 模型精度档 0/1/2 */
+  model_complexity?: number;
+  /** 子进程超时（秒） */
+  timeout?: number;
+}): Promise<{
+  ok: boolean;
+  message?: string;
+  frame_count?: number;
+  duration?: number;
+  fps?: number;
+  json_url?: string;
+  json_path?: string;
+}> {
+  const token = bridgeToken();
+  const res = await fetch(
+    `${BRIDGE}/host/pose-extract?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({
+        video: opts.video,
+        sample_step: opts.sample_step ?? 1,
+        max_frames: opts.max_frames ?? 300,
+        model_complexity: opts.model_complexity ?? 1,
+        timeout: opts.timeout ?? 180,
       }),
     },
   );
@@ -644,6 +907,7 @@ export type BatchStatusResult = {
   ok: boolean;
   job_id?: string;
   status?: "running" | "done" | "failed";
+  message?: string;
   total?: number;
   done?: number;
   failed?: number;
@@ -855,6 +1119,50 @@ export async function breakdownStoryboard(script: string): Promise<{
   }
 }
 
+/** 相机路径规划结果：镜像后端 StageCamera 结构 + 运镜 pathPoints */
+export type CameraPlanShot = {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  lookAt: [number, number, number];
+  fov: number;
+  shotSize?: string;
+  movement?: string;
+  pathPoints?: { pos: [number, number, number]; look: [number, number, number] }[];
+  pathDuration?: number;
+};
+
+/** WS4#2 AI 分镜自动摆机位：分镜表 / 剧本 → 相机路径规划（经画布桥） */
+export async function planStoryboardCameras(input: {
+  shots?: StoryboardShot[];
+  script?: string;
+  use_llm?: boolean;
+}): Promise<{
+  ok: boolean;
+  cameras: CameraPlanShot[];
+  count?: number;
+  message?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/storyboard-camera-plan?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          shots: input.shots,
+          script: input.script || "",
+          use_llm: input.use_llm || false,
+        }),
+      },
+    );
+    return await res.json();
+  } catch {
+    return { ok: false, cameras: [], message: "网络异常" };
+  }
+}
+
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -890,6 +1198,48 @@ export async function uploadAssetToHost(file: File): Promise<{
   } catch (e) {
     return { ok: false, message: `上传失败: ${e}` };
   }
+}
+
+const persistInflight = new Map<string, Promise<string>>();
+
+function mimeToExt(mime: string): string {
+  if (mime.includes("png")) return "png";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("gif")) return "gif";
+  if (mime.includes("mp4")) return "mp4";
+  if (mime.includes("webm")) return "webm";
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
+  return "bin";
+}
+
+/** dataURL → 宿主 inbox URL；非 data / 过小 / 上传失败则原样返回 */
+export async function persistMediaUrl(url: string): Promise<string> {
+  if (!url || typeof url !== "string") return url;
+  if (!url.startsWith("data:") || url.length < 4096) return url;
+  const hit = persistInflight.get(url);
+  if (hit) return hit;
+  const job = (async () => {
+    try {
+      const blob = await dataUrlToBlob(url);
+      const ext = mimeToExt(blob.type || "");
+      const file = new File(
+        [blob],
+        `canvas_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}.${ext}`,
+        { type: blob.type || "application/octet-stream" },
+      );
+      const up = await uploadAssetToHost(file);
+      if (up.ok && up.url) return up.url;
+    } catch {
+      /* 桥不可用时保留 dataURL */
+    }
+    return url;
+  })().finally(() => {
+    persistInflight.delete(url);
+  });
+  persistInflight.set(url, job);
+  return job;
 }
 
 /** 优先宿主落盘；失败时回退 dataURL（仅小文件） */
@@ -1033,7 +1383,7 @@ export async function sendBlobToEditor(
   blob: Blob,
   filename: string,
   prefs: BridgePrefs,
-  opts?: { duration_sec?: number; title?: string },
+  opts?: { duration_sec?: number; title?: string; node_id?: string; kind?: string },
 ): Promise<string> {
   const q = new URLSearchParams({
     filename,
@@ -1046,6 +1396,8 @@ export async function sendBlobToEditor(
   if (opts?.duration_sec && opts.duration_sec > 0) {
     q.set("duration_sec", String(opts.duration_sec));
   }
+  if (opts?.node_id) q.set("node_id", opts.node_id);
+  if (opts?.kind) q.set("kind", opts.kind);
   const res = await fetch(`${BRIDGE}/ingest?${q}`, {
     method: "POST",
     body: blob,
@@ -1055,12 +1407,72 @@ export async function sendBlobToEditor(
   return data.message || (data.success ? "已发送到剪辑" : "发送失败");
 }
 
+export type EditorOutboxItem = {
+  id: string;
+  title?: string;
+  filename?: string;
+  ext?: string;
+  url: string;
+  clip_id?: string;
+  canvas_node_id?: string;
+  kind?: string;
+  in_point?: number;
+  out_point?: number;
+  start_time?: number;
+  duration?: number;
+};
+
+export async function fetchEditorOutbox(): Promise<EditorOutboxItem[]> {
+  try {
+    const res = await fetch(`${BRIDGE}/editor_outbox`);
+    const data = await res.json();
+    return Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
+export type TimelineSnapshotClip = {
+  id?: string;
+  name?: string;
+  path?: string;
+  type?: string;
+  start_time?: number;
+  duration?: number;
+  end_time?: number;
+  canvas_node_id?: string;
+  canvas_kind?: string;
+};
+
+export type TimelineSnapshot = {
+  ok?: boolean;
+  clip_count?: number;
+  clips?: TimelineSnapshotClip[];
+  gaps?: unknown[];
+  suggestions?: unknown[];
+  message?: string;
+};
+
+export async function fetchTimelineSnapshot(): Promise<TimelineSnapshot> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/timeline-snapshot?token=${encodeURIComponent(token)}`,
+      { headers: authHeaders() },
+    );
+    return await res.json();
+  } catch {
+    return { ok: false, clips: [], clip_count: 0 };
+  }
+}
+
 export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const res = await fetch(dataUrl);
   return await res.blob();
 }
 
 export function placeholderImageDataUrl(prompt: string, w = 512, h = 288): string {
+  /* M0.4 生图失败不再写入此占位图；保留函数以免旧调用方编译失败 */
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;

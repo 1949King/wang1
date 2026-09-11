@@ -25,6 +25,8 @@ import {
 import { MarkdownNode, ShotlistNode, StoryboardNode } from "./storyNodes";
 import {
   DirectorNode,
+  DirectorCardNode,
+  DigitalHumanNode,
   AnimationNode,
   PanoramaNode,
   NoteNode,
@@ -49,6 +51,8 @@ export const BUILTIN_NODE_META: Record<string, { title: string; icon: ReactNode;
   shotlist:  { title: "分镜表",   icon: "📋", desc: "AI-Canvas 对齐 · 可编辑镜号表", defaultSize: { width: 720, height: 360 } },
   storyboard:{ title: "宫格分镜", icon: "▦", desc: "AI-Canvas 对齐 · 交互宫格裁出", defaultSize: { width: 420, height: 360 } },
   director:  { title: "3D 导演台", icon: "🎥", desc: "自研 Stage3D · 截图回写本节点", defaultSize: { width: 320, height: 280 } },
+  directorCard: { title: "导演卡", icon: "🎬", desc: "剧本输入 → 自动拆解分镜", defaultSize: { width: 320, height: 240 } },
+  digitalHuman: { title: "数字人", icon: "🧑", desc: "形象 + 台词 TTS；口型成片未接模型则诚实失败", defaultSize: { width: 320, height: 360 } },
   animation: { title: "逐帧动画", icon: "🎞️", desc: "AI-Canvas 对齐 · Sprite Sheet", defaultSize: { width: 340, height: 300 } },
   panorama:  { title: "全景",     icon: "🌐", desc: "AI-Canvas 对齐 · 等距柱状环视", defaultSize: { width: 360, height: 260 } },
   note:      { title: "画布笔记", icon: "📌", desc: "AI-Canvas 对齐 · 文字/形状标注", defaultSize: { width: 240, height: 160 } },
@@ -73,6 +77,8 @@ const BUILTIN_NODES: BuiltinNode[] = [
   { type: "shotlist",  Component: ShotlistNode },
   { type: "storyboard", Component: StoryboardNode },
   { type: "director",  Component: DirectorNode },
+  { type: "directorCard", Component: DirectorCardNode },
+  { type: "digitalHuman", Component: DigitalHumanNode },
   { type: "animation", Component: AnimationNode },
   { type: "panorama",  Component: PanoramaNode },
   { type: "note",      Component: NoteNode },

@@ -8,18 +8,60 @@
 - 章节树形结构 (子章节)
 - 导出 YouTube 章节格式
 - 导出 EDL 章节格式
-- 缩略图自动抓取
+- 导出 CSV / FFmpeg ffmetadata 章节
 """
+from __future__ import annotations
+
 import os
 import json
 import logging
 import subprocess
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
 logger = logging.getLogger("AI短剧编辑器.chapter_markers")
+
+
+def chapters_to_csv(chapters: Sequence[ChapterMarker]) -> str:
+    lines = ["time_sec,title,description"]
+    for c in sorted(chapters, key=lambda x: float(x.time)):
+        title = (c.title or "").replace('"', '""')
+        desc = (c.description or "").replace('"', '""')
+        lines.append(f'{c.time:.3f},"{title}","{desc}"')
+    return "\n".join(lines)
+
+
+def chapters_to_ffmetadata(
+    chapters: Sequence[ChapterMarker],
+    duration: Optional[float] = None,
+) -> str:
+    """FFmpeg ffmetadata 章节块；时间单位毫秒。"""
+    ordered = sorted(chapters, key=lambda x: float(x.time))
+    lines = [";FFMETADATA1"]
+    if not ordered:
+        return "\n".join(lines)
+    ends: List[float] = []
+    for i, c in enumerate(ordered):
+        if i + 1 < len(ordered):
+            ends.append(float(ordered[i + 1].time))
+        elif duration is not None:
+            ends.append(float(duration))
+        else:
+            ends.append(float(c.time) + 1.0)
+    for c, end in zip(ordered, ends):
+        start_ms = int(round(float(c.time) * 1000))
+        end_ms = int(round(float(end) * 1000))
+        if end_ms <= start_ms:
+            end_ms = start_ms + 1
+        title = (c.title or "").replace("=", "\\=").replace(";", "\\;")
+        lines.append("[CHAPTER]")
+        lines.append("TIMEBASE=1/1000")
+        lines.append(f"START={start_ms}")
+        lines.append(f"END={end_ms}")
+        lines.append(f"title={title}")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -205,6 +247,12 @@ class ChapterMarkerManager:
         s = int(seconds % 60)
         f = int((seconds - int(seconds)) * fps)
         return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
+
+    def export_csv(self) -> str:
+        return chapters_to_csv(self.list_all())
+
+    def export_ffmetadata(self, duration: Optional[float] = None) -> str:
+        return chapters_to_ffmetadata(self.list_all(), duration=duration)
 
     # ---- 缩略图 ----
 

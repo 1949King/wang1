@@ -3,6 +3,9 @@ import shutil
 from typing import List, Optional
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.file_operator")
+
 class FileOperator:
     """文件操作器"""
 
@@ -13,7 +16,7 @@ class FileOperator:
             shutil.copy2(source_path, target_path)
             return True
         except Exception as e:
-            print(f"复制文件失败: {e}")
+            logger.error(f'复制文件失败: {e}')
             return False
 
     @staticmethod
@@ -24,7 +27,7 @@ class FileOperator:
                 os.remove(file_path)
             return True
         except Exception as e:
-            print(f"删除文件失败: {e}")
+            logger.error(f'删除文件失败: {e}')
             return False
 
     @staticmethod
@@ -39,7 +42,7 @@ class FileOperator:
             shutil.move(source_path, target_path)
             return True
         except Exception as e:
-            print(f"移动文件失败: {e}")
+            logger.error(f'移动文件失败: {e}')
             return False
 
     @staticmethod
@@ -48,7 +51,7 @@ class FileOperator:
         try:
             return os.path.getsize(file_path)
         except Exception as e:
-            print(f"获取文件大小失败: {e}")
+            logger.error(f'获取文件大小失败: {e}')
             return 0
 
     @staticmethod
@@ -76,7 +79,7 @@ class FileOperator:
                     else:
                         files.append(file_path)
         except Exception as e:
-            print(f"列出文件失败: {e}")
+            logger.error(f'列出文件失败: {e}')
         return files
 
     @staticmethod

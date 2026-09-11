@@ -13,6 +13,9 @@ from datetime import datetime
 import json
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.ai_editing_assistant")
+
 class SuggestionType(Enum):
     """建议类型"""
     CUT = "cut"
@@ -167,7 +170,7 @@ class SceneAnalyzer:
         except ImportError:
             return []
         except Exception as e:
-            print(f"PySceneDetect失败: {e}")
+            logger.error(f'PySceneDetect失败: {e}')
             return []
 
     def _detect_with_framediff(self, video_frames: List[np.ndarray],
@@ -243,7 +246,7 @@ class SceneAnalyzer:
                 return self._scenes
                 
             except Exception as e:
-                print(f"场景分析失败: {e}")
+                logger.error(f'场景分析失败: {e}')
                 return []
     
     def _classify_scene_type(self, frames: List[np.ndarray]) -> SceneType:
@@ -400,7 +403,7 @@ class EditSuggestionEngine:
                 return self._suggestions
                 
             except Exception as e:
-                print(f"生成建议失败: {e}")
+                logger.error(f'生成建议失败: {e}')
                 return []
     
     def _create_transition_suggestion(self, scene: SceneAnalysis) -> Optional[EditSuggestion]:
@@ -516,7 +519,7 @@ class EditSuggestionEngine:
             
             return True
         except Exception as e:
-            print(f"导出建议失败: {e}")
+            logger.error(f'导出建议失败: {e}')
             return False
 
 
@@ -580,7 +583,7 @@ class AIEditingAssistant:
                 }
                 
             except Exception as e:
-                print(f"AI分析失败: {e}")
+                logger.error(f'AI分析失败: {e}')
                 return {
                     "scenes": [],
                     "suggestions": [],

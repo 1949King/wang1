@@ -241,7 +241,7 @@ class PluginManager:
             try:
                 return plugin.run(**kwargs)
             except Exception as e:
-                print(f"Error running plugin {plugin_id}: {e}")
+                logger.error(f'Error running plugin {plugin_id}: {e}')
                 return None
         return None
     
@@ -305,7 +305,7 @@ class PluginManager:
                 try:
                     plugin.initialize()
                 except Exception as e:
-                    print(f"Error initializing plugin {plugin.id}: {e}")
+                    logger.error(f'Error initializing plugin {plugin.id}: {e}')
     
     def shutdown_plugins(self):
         """关闭所有插件"""
@@ -314,7 +314,7 @@ class PluginManager:
                 try:
                     plugin.shutdown()
                 except Exception as e:
-                    print(f"Error shutting down plugin {plugin.id}: {e}")
+                    logger.error(f'Error shutting down plugin {plugin.id}: {e}')
     
     def get_plugin_categories(self):
         """获取插件分类"""

@@ -41,6 +41,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.module_registry")
+
 if TYPE_CHECKING:
     from PyQt6.QtCore import QSettings  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
 else:
@@ -192,7 +195,7 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "id": "characters",
         "name": "AI 画布",
         "icon": "🎨",
-        "description": "镶嵌 infinite-canvas：角色资产 + 生图/生视频回流剪辑",
+        "description": "镶嵌自研拾光导演台画布：角色资产 + 生图/生视频回流剪辑",
         "tier": ModuleTier.ADVANCED,
         "import_module": ".character_management_module",
         "import_class": "CharacterManagementModule",
@@ -327,7 +330,7 @@ class ModuleRegistry:
                     overrides = {k: bool(v) for k, v in rd.items()}
                 loaded_from = "QSettings"
         except Exception as e:
-            print(f"[ModuleRegistry] QSettings 读取失败: {e}")
+            logger.error(f'[ModuleRegistry] QSettings 读取失败: {e}')
 
         # ── 方式②：JSON 文件备份（兜底+补充）──
         try:
@@ -353,19 +356,19 @@ class ModuleRegistry:
                             overrides[k] = bool(v)
                     loaded_from = "merged"
         except Exception as e:
-            print(f"[ModuleRegistry] JSON 备份读取失败: {e}")
+            logger.error(f'[ModuleRegistry] JSON 备份读取失败: {e}')
 
         # ── 迁移旧模块 ID（plugins → extensions）──
         # 升级提示：用户之前可能使用旧的 "plugins" 模块 ID
         # 迁移到新的 "extensions" 模块 ID，保持用户设置不丢失
         if "plugins" in overrides and "extensions" not in overrides:
             overrides["extensions"] = overrides.pop("plugins")
-            print("[ModuleRegistry] 已迁移模块设置: plugins → extensions")
+            logger.info('[ModuleRegistry] 已迁移模块设置: plugins → extensions')
 
         # 账号运营已迁插件，丢弃导航开关残留，避免设置页出现死项
         if "account" in overrides:
             overrides.pop("account", None)
-            print("[ModuleRegistry] 已移除废弃模块开关: account（改走拓展中心插件）")
+            logger.info('[ModuleRegistry] 已移除废弃模块开关: account（改走拓展中心插件）')
 
         self._overrides = overrides
         if overrides:
@@ -373,9 +376,9 @@ class ModuleRegistry:
                 f"[ModuleRegistry] 加载了 {len(overrides)} 个功能开关覆盖 "
                 f"(来源: {loaded_from}): {list(overrides.keys())}"
             )
-            print(msg)
+            logger.info(msg)
         else:
-            print(f"[ModuleRegistry] 无功能开关覆盖（全部使用默认值）")
+            logger.info(f'[ModuleRegistry] 无功能开关覆盖（全部使用默认值）')
 
     def _save_overrides(self):
         """双保险保存开关覆盖：同时写入 QSettings 和 JSON 备份文件。
@@ -394,7 +397,7 @@ class ModuleRegistry:
             # sync() 强制立即刷盘，避免进程崩溃导致数据丢失
             settings.sync()  # type: ignore[reportUnknownMemberType]
         except Exception as e:
-            print(f"[ModuleRegistry] QSettings 保存失败: {e}")
+            logger.error(f'[ModuleRegistry] QSettings 保存失败: {e}')
 
         # ── 方式②：写入 JSON 备份文件 ──
         try:
@@ -409,13 +412,13 @@ class ModuleRegistry:
                 # indent=2 生成人类可读的格式，方便手动检查
                 json.dump(self._overrides, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[ModuleRegistry] JSON 备份保存失败: {e}")
+            logger.error(f'[ModuleRegistry] JSON 备份保存失败: {e}')
 
         msg = (
             f"[ModuleRegistry] 保存了 {len(self._overrides)} 个功能开关覆盖: "
             f"{list(self._overrides.keys())}"
         )
-        print(msg)
+        logger.info(msg)
 
     # ─── 查询接口 ────────────────────────────────────────────
 

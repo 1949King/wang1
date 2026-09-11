@@ -6,11 +6,12 @@
 
 | 优先级 | 路径 |
 |--------|------|
-| 1 | [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md) |
-| 2 | [`docs/knowledge/08-frozen-zones.md`](docs/knowledge/08-frozen-zones.md)（**已修好功能锁死**） |
-| 3 | [`CONTEXT.md`](CONTEXT.md) |
-| 4 | [`docs/P0_CAPCUT_ALIGN.md`](docs/P0_CAPCUT_ALIGN.md)（剪辑对齐范围） |
-| 5 | [`.workbuddy/memory/MEMORY.md`](.workbuddy/memory/MEMORY.md)（长期记忆） |
+| 1 | [`docs/现行技术文档.md`](docs/现行技术文档.md)（**单一事实源·后续据此开发**） |
+| 2 | [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)（分页知识库） |
+| 3 | [`docs/knowledge/08-frozen-zones.md`](docs/knowledge/08-frozen-zones.md)（**已修好功能锁死**） |
+| 4 | [`CONTEXT.md`](CONTEXT.md) |
+| 5 | [`docs/P0_CAPCUT_ALIGN.md`](docs/P0_CAPCUT_ALIGN.md)（剪辑对齐范围） |
+| 6 | [`.workbuddy/memory/MEMORY.md`](.workbuddy/memory/MEMORY.md)（长期记忆） |
 
 ## 冻结区
 

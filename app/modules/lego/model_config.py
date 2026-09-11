@@ -257,7 +257,7 @@ def model_display_name(provider: str, model_id: str) -> str:
     return model_id
 
 
-# 画布 / AIGC 专用：按 provider 追加生图·生视频·多模态模型（capability 供 infinite-canvas）
+# 画布 / AIGC 专用：按 provider 追加生图·生视频·多模态模型（capability 供自研画布）
 # 名称尽量对齐各平台 OpenAI-compatible 路由；实际可用性取决于账号开通。
 AIGC_MODELS: dict[str, list[dict[str, str]]] = {
     "chatgpt2api": [

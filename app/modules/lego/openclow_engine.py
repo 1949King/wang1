@@ -81,7 +81,7 @@ class OpenClowEngine:
             with open(accounts_file, "w", encoding="utf-8") as f:
                 json.dump(self.accounts, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存账号数据失败: {e}")
+            logger.error(f'保存账号数据失败: {e}')
     
     def add_account(self, platform: str, account_id: str, account_info: Dict) -> bool:
         """添加账号"""
@@ -96,7 +96,7 @@ class OpenClowEngine:
             self._save_accounts()
             return True
         except Exception as e:
-            print(f"添加账号失败: {e}")
+            logger.error(f'添加账号失败: {e}')
             return False
     
     def remove_account(self, platform: str, account_id: str) -> bool:
@@ -117,7 +117,7 @@ class OpenClowEngine:
     def collect_data(self, platform: str, account_id: str) -> Optional[Dict]:
         """数据采集 — 真实浏览器 + 模拟回退"""
         try:
-            print(f"开始采集{platform}账号{account_id}的数据...")
+            logger.info(f'开始采集{platform}账号{account_id}的数据...')
             
             # 优先使用真实浏览器采集
             if self._use_real_browser and self._browser:
@@ -133,7 +133,7 @@ class OpenClowEngine:
                     data_file = os.path.join(self.data_dir, f"{platform}_{account_id}_{int(time.time())}.json")
                     with open(data_file, "w", encoding="utf-8") as f:
                         json.dump(collected_data, f, ensure_ascii=False, indent=2)
-                    print(f"{platform}真实数据采集完成 (截图: {browser_data.get('screenshot')})")
+                    logger.info(f"{platform}真实数据采集完成 (截图: {browser_data.get('screenshot')})")
                     self.operation_data.append(collected_data)
                     return collected_data
             
@@ -154,10 +154,10 @@ class OpenClowEngine:
             data_file = os.path.join(self.data_dir, f"{platform}_{account_id}_{int(time.time())}.json")
             with open(data_file, "w", encoding="utf-8") as f:
                 json.dump(collected_data, f, ensure_ascii=False, indent=2)
-            print(f"{platform}模拟数据采集完成")
+            logger.info(f'{platform}模拟数据采集完成')
             return collected_data
         except Exception as e:
-            print(f"数据采集失败: {e}")
+            logger.error(f'数据采集失败: {e}')
             return None
     
     def auto_publish(
@@ -170,7 +170,7 @@ class OpenClowEngine:
         """内容自动发布 — 真实浏览器 + 本地记录"""
         try:
             publish_time = schedule_time if schedule_time else datetime.now().isoformat()
-            print(f"开始发布内容到{platform}账号{account_id}...")
+            logger.info(f'开始发布内容到{platform}账号{account_id}...')
             
             # 优先使用真实浏览器发布
             if self._use_real_browser and self._browser:
@@ -211,10 +211,10 @@ class OpenClowEngine:
             with open(publish_file, "w", encoding="utf-8") as f:
                 json.dump(publish_record, f, ensure_ascii=False, indent=2)
             
-            print(f"内容已发布到{platform} ({publish_record['source']})")
+            logger.info(f"内容已发布到{platform} ({publish_record['source']})")
             return publish_record
         except Exception as e:
-            print(f"内容发布失败: {e}")
+            logger.error(f'内容发布失败: {e}')
             return None
     
     def smart_reply(
@@ -226,7 +226,7 @@ class OpenClowEngine:
     ) -> Optional[Dict]:
         """评论智能回复"""
         try:
-            print(f"处理{platform}账号{account_id}的评论...")
+            logger.info(f'处理{platform}账号{account_id}的评论...')
             
             reply = "感谢您的评论！"
             
@@ -252,16 +252,16 @@ class OpenClowEngine:
             with open(reply_file, "w", encoding="utf-8") as f:
                 json.dump(reply_record, f, ensure_ascii=False, indent=2)
             
-            print(f"已回复{platform}账号{account_id}的评论")
+            logger.info(f'已回复{platform}账号{account_id}的评论')
             return reply_record
         except Exception as e:
-            print(f"智能回复失败: {e}")
+            logger.error(f'智能回复失败: {e}')
             return None
     
     def write_back_data(self, platform: str, account_id: str, data: Dict) -> Optional[Dict]:
         """运营数据回写"""
         try:
-            print(f"回写{platform}账号{account_id}的运营数据...")
+            logger.info(f'回写{platform}账号{account_id}的运营数据...')
             
             write_back_record = {
                 "id": f"writeback_{int(time.time())}",
@@ -277,10 +277,10 @@ class OpenClowEngine:
             with open(write_back_file, "w", encoding="utf-8") as f:
                 json.dump(write_back_record, f, ensure_ascii=False, indent=2)
             
-            print(f"{platform}账号{account_id}的运营数据回写完成")
+            logger.info(f'{platform}账号{account_id}的运营数据回写完成')
             return write_back_record
         except Exception as e:
-            print(f"数据回写失败: {e}")
+            logger.error(f'数据回写失败: {e}')
             return None
     
     def generate_operation_suggestions(
@@ -291,7 +291,7 @@ class OpenClowEngine:
     ) -> Optional[Dict]:
         """生成运营建议"""
         try:
-            print(f"为{platform}账号{account_id}生成运营建议...")
+            logger.info(f'为{platform}账号{account_id}生成运营建议...')
             
             suggestions = []
             
@@ -333,10 +333,10 @@ class OpenClowEngine:
             with open(suggestion_file, "w", encoding="utf-8") as f:
                 json.dump(suggestion_record, f, ensure_ascii=False, indent=2)
             
-            print(f"已为{platform}账号{account_id}生成运营建议")
+            logger.info(f'已为{platform}账号{account_id}生成运营建议')
             return suggestion_record
         except Exception as e:
-            print(f"生成运营建议失败: {e}")
+            logger.error(f'生成运营建议失败: {e}')
             return None
     
     def add_reply_rule(self, keyword: str, reply: str) -> Dict:

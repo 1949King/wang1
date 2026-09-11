@@ -23,8 +23,8 @@ alwaysApply: true
 | `clip-transform` | 归一化变换模型整文件 |
 | `transform-bake` | 连续/分段变换 bake |
 | `canvas-transform` | 画布缩放/旋转/平移交互 |
-| `drama-finder-ui` | 短剧筛选卡片预览 UI + 打开/嵌入链路 |
-| `plugin-store-catalog` | 商店仅真实 17 插件目录 |
+| `plugin-host-ui` | 插件宿主常驻打开/关闭（`plugins_module` 三方法；短剧功能已卸） |
+| `plugin-store-catalog` | 商店仅真实 `app/plugins` 目录 |
 
 ## 源码标记
 

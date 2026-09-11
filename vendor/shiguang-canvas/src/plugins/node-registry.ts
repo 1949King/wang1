@@ -5,8 +5,11 @@
  * React Flow 的 nodeTypes prop 通过 useNodeTypes() hook 读取。
  */
 import { create } from "zustand";
-import type { Node } from "@xyflow/react";
+import type { Node, NodeProps } from "@xyflow/react";
+import { createElement, type ComponentType } from "react";
 import type { CanvasNodeDefinition } from "./types";
+export type { CanvasNodeDefinition } from "./types";
+import { NodeErrorBoundary } from "../components/canvas/NodeErrorBoundary";
 
 const definitions = new Map<string, CanvasNodeDefinition>();
 const ownerByType = new Map<string, string>(); // type -> pluginId；内置节点用 "builtin"
@@ -58,11 +61,26 @@ export function getNodeOwnerPluginId(type: string): string {
   return ownerByType.get(type) || "builtin";
 }
 
+function wrapNodeComponent(
+  type: string,
+  Comp: ComponentType<NodeProps<Node>>,
+): ComponentType<NodeProps<Node>> {
+  function Wrapped(props: NodeProps<Node>) {
+    return createElement(
+      NodeErrorBoundary,
+      { nodeId: props.id, nodeType: type, children: createElement(Comp, props) },
+    );
+  }
+  Wrapped.displayName = `Safe(${type})`;
+  return Wrapped;
+}
+
 /** 生成传给 @xyflow/react 的 nodeTypes 对象——所有注册表节点 */
 export function buildNodeTypes(): Record<string, CanvasNodeDefinition["Component"]> {
   const out: Record<string, CanvasNodeDefinition["Component"]> = {};
   for (const [type, def] of definitions) {
-    out[type] = def.Component;
+    if (!def.Component) continue;
+    out[type] = wrapNodeComponent(type, def.Component);
   }
   return out;
 }

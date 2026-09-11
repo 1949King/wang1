@@ -11,6 +11,9 @@ from .cache_manager_refactor import CacheManager
 from .file_operator import FileOperator
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.asset_manager")
+
 class AssetManager:
     """
     素材管理系统
@@ -90,7 +93,7 @@ class AssetManager:
                         asset_info = self.import_asset(file_path, category, tags)
                         imported_assets.append(asset_info)
                     except Exception as e:
-                        print(f"导入文件失败 {file_path}: {e}")
+                        logger.error(f'导入文件失败 {file_path}: {e}')
 
         return imported_assets
 

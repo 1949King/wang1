@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Callable
 from PyQt6.QtCore import QObject, pyqtSignal
 from collections import deque
 import logging
+import os
 
 logger = logging.getLogger("AI短剧编辑器.undo_manager")
 

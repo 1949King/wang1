@@ -518,7 +518,7 @@ class BatchTaskManager:
         def progress_callback(progress, message=""):
             task.progress = progress
             if message:
-                print(f"   {task.name}: {message}")
+                logger.info(f'   {task.name}: {message}')
         
         try:
             result = processor(task.params, progress_callback)

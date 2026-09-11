@@ -6,16 +6,18 @@
 
 ## 北极星（12 周视角）
 
-**漫剧「导演台 → 分镜图 → 入轨精剪」可重复竖切**，体感接近 LibTV 工作流，剪辑地基继续涨到自评 **8.5**。
+**北极星（专注四轨）**
 
-资源配比（延续 [`06-roadmap.md`](06-roadmap.md) §E）：
+剪辑体验 · 画布体验 · AI 剪辑/智能体 · 画布数字人。其它模块（文案/多任务/拓展运营壳）不作为本阶段迭代主题。
+
+资源配比：
 
 | 轨 | 配比 | 内容 |
-|----|------|------|
-| **P 导演台** | ~45% | `vendor/shiguang-canvas` + `canvas_bridge` |
-| **N 剪辑涨分** | ~35% | A4 / 拆 `editor_module` / 冻结区回归 |
-| **A Agent** | ~15% | 白名单能力、画布动作触发、确认后执行 |
-| **C 闭环** | ~5% | 选题入轨加固、发布真回执保持 |
+|---|---|---|
+| **N 剪辑** | ~30% | 手感、建议入轨、冻结区回归 |
+| **P 画布** | ~35% | `shiguang-canvas` 节点/落盘/诚实生成 |
+| **A Agent** | ~25% | 白名单、确认后拉片/去水词/批量；**剪辑↔画布 round-trip** |
+| **D 数字人** | ~10% | 画布 `digitalHuman` 节点（TTS+形象；口型后置） |
 
 ## 硬边界（全程）
 
@@ -25,7 +27,32 @@
 - 对话框有 parent；模块间优先 EventBus
 - 改冻结区前先解冻 [`08-frozen-zones.md`](08-frozen-zones.md)
 
-## 阶段总览
+## 整仓当前波（2026-08-19）
+
+产品专注：**剪辑 + AI 画布（含数字人）+ Agent**。运营/筛选仅为接口壳。
+
+| 波 | 主题 | 出口 | 状态 |
+|----|------|------|------|
+| **第 1 波（本周）** | 导演台收口 M0 | 落盘 + 节点隔离 + 生图诚实 + 连线接续 | ✅ |
+| **第 2 波** | 剪辑涨到 8.5 | 长对白冒烟；剩余 AI 按钮假成功；**抽出 UI 构建须用户点头** | ✅ 冒烟+勾选入轨（未拆 UI） |
+| **第 3 波** | Agent 遥控器 | 确认后触发拉片/批量生图/去水词；不加 Plan/B/C | ✅ 建议清单勾选写入 |
+| **第 4 波** | 开源筛落 | 无损 trim + 高光 grab + 节拍勾选切开 | ✅ |
+| **第 5 波** | 产品收口 + 数字人节点 | 知识库锁四轨；画布 `digitalHuman` 可 TTS/形象/入轨 | ✅ |
+| **第 6 波（当前）** | AI 剪辑差异化 + 剪辑↔画布打通 | 时间线快照；入轨带 node_id；outbox 自动落源节点；联动建议勾选后推送 | ✅ |
+
+不搬 Tauri/Comfy/NLE；不解冻 `playback-av` / `canvas-transform`；不大拆 `_render_timeline_frame`。
+
+### 全模块原则（2026-08-19 代码对照）
+
+注册表活模块：home / editor / settings / help / copywriting / tasks / materials / models / characters（画布）/ extensions / performance / ai_clip_flow。插件：account_ops、ai_effects、转场调色、短剧筛选（后两者运营插件仅为接口壳）。
+
+- **editor**：唯一时间线；AI 只出建议清单，确认后走 `edit_commands` / `editor.*`
+- **characters**：继续 `shiguang-canvas`，不换 tldraw；数字人走 `digitalHuman`，素模仍走导演台
+- **ai_clip_flow**：不写 `_clips` 的平行管线，保持关或改成确认后调 editor
+- **copywriting**：脚本下游接拉片，不接一键成片
+- **开源可加（本波已接确认入轨）**：LosslessCut 无损裁、AutoClip 顺序 grab 高光、节拍 4/8 拍切开
+
+---
 
 | 阶段 | 窗口 | 主题 | 出口验收 |
 |------|------|------|----------|
@@ -89,6 +116,8 @@
 - GPU 流式预览大改  
 - 商业画布嵌入 EXE  
 - 默认开启全链路一键成片  
+- 无形象驱动模型时假写口型视频  
+- 恢复短剧筛选/账号运营功能体  
 
 ## 自动执行节奏
 
@@ -96,4 +125,24 @@
 2. 一波全部 ✅ 后把下一波标为「执行中」并继续（同会话或 handoff）  
 3. 阻塞（缺 Key / API 不支持）→ 降级路径 + 状态条诚实说明，不卡整波  
 
-**当前波：3D 导演台 BodyKun/BodyChan 灰白网格素模（`bodykun-v1`）已写入 dist。下一波候选：N1 拆 editor_module 或 A1 Agent 触发。**
+**当前波：第 6 波已收口（AI 剪辑差异化 + 剪辑↔画布 round-trip）。** 抽出 `editor_ui_builder` 仍须用户点头。口型驱动成片待真实形象驱动模型。
+
+| ID | 任务 | 验收 | 状态 |
+|----|------|------|------|
+| M0.1 | 工程媒体落盘（截图/叠卡改 inbox 引用，减 dataURL 配额） | 大工程可保存，不 QuotaExceeded 写死 | ✅ |
+| M0.2 | 单节点 Error Boundary | 坏节点不白屏整张画布 | ✅ |
+| M0.3 | 连线松开接续菜单 | 松手可选下游类型，少一次侧栏拖 | ✅ |
+| M0.4 | 生图失败诚实（去掉占位图假成功） | 状态条标明失败，与视频节点一致 | ✅ |
+| N2.1 | 长对白冒烟 | scrub 约定 + 密集对白子集不自动写轨 | ✅ |
+| N2.2 | FunClip/AutoClip 勾选入轨 | 未勾选不改 `_clips` | ✅ |
+| A3.1 | Agent 建议清单勾选写入 | 协作 B 默认；C 仍自动；不加 MCP | ✅ |
+| A3.2 | 画布拉片/生成/批量确认后触发 | `/breakdown` `/generate` `/batch` | ✅ |
+| D5.1 | 画布 `digitalHuman` 节点 | 面板/右键可添加；保存不丢 kind | ✅ |
+| D5.2 | 台词 TTS + 形象图 | `/host/generate-audio`；上传/绑定形象 | ✅ |
+| D5.3 | 入轨 + 口型诚实失败 | 配音/形象可入轨；口型成片无模型不写假视频 | ✅ |
+| A6.1 | 时间线快照 `/host/timeline-snapshot` | 画布顶栏可见片数；Agent `queryTimeline` 只读 | ✅ |
+| A6.2 | 入轨带 `canvas_node_id` | `_clips` 盖 round-trip 字段；快照回写 `editorStatus` | ✅ |
+| A6.3 | 剪辑 outbox 自动落源节点 | 不再只靠右下角下载链接 | ✅ |
+| A6.4 | AI 联动建议勾选后推画布 | `editor.suggest_canvas_roundtrip`；不改时间线 | ✅ |
+
+M0 可演示后再开 **M1**（3D 截图后露出生成、shotlist 展开后自动选中、拉片接 `use_llm`）。**N1 拆 editor_module / A1 Agent** 后置到竖切不再卡、不再假成功。

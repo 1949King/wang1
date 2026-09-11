@@ -47,6 +47,7 @@ class _AudioPanelHost(Protocol):
     def _adjust_volume(self, *_a) -> None: ...
     def _apply_fade_effects(self) -> None: ...
     def _detect_beats(self) -> None: ...
+    def _split_on_beats(self, every_n: int = 4) -> None: ...
 
 
 def build_audio_panel_tab(editor: _AudioPanelHost) -> Any:
@@ -182,6 +183,15 @@ def build_audio_panel_tab(editor: _AudioPanelHost) -> Any:
     )
     btn_detect.clicked.connect(self._detect_beats)
     bt.layout().addWidget(btn_detect)
+    beat_cut_row = QHBoxLayout()
+    b4 = QPushButton("每 4 拍切开")
+    b4.setToolTip("先检测节拍，再勾选切点；不自动加转场")
+    b4.clicked.connect(lambda: self._split_on_beats(4))
+    b8 = QPushButton("每 8 拍切开")
+    b8.clicked.connect(lambda: self._split_on_beats(8))
+    beat_cut_row.addWidget(b4)
+    beat_cut_row.addWidget(b8)
+    bt.layout().addLayout(beat_cut_row)
     self._beat_list = QListWidget()
     self._beat_list.setMaximumHeight(120)
     self._beat_list.setStyleSheet(

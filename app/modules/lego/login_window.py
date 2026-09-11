@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QStackedWidget, QFrame,
     QMessageBox, QCheckBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QHeaderView, QDialog, QSpacerItem,
-    QSizePolicy
+    QSizePolicy, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QLinearGradient

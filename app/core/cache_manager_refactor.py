@@ -29,7 +29,7 @@ class CacheManager:
                     os.remove(file_path)
             return True
         except Exception as e:
-            print(f"清理缓存失败: {e}")
+            logger.error(f'清理缓存失败: {e}')
             return False
 
     def get_cache_path(self, asset_id: str, suffix: str = "") -> str:
@@ -48,7 +48,7 @@ class CacheManager:
                     shutil.rmtree(path)
             return True
         except Exception as e:
-            print(f"删除缓存失败: {e}")
+            logger.error(f'删除缓存失败: {e}')
             return False
 
     def get_cache_size(self) -> int:

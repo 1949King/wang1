@@ -107,7 +107,7 @@ export function skillToProjectBundle(skill: WorkflowSkill) {
       id: n.id,
       type: String(n.type || (n.data as { kind?: string }).kind || "shot"),
       position: n.position || { x: 0, y: 0 },
-      data: n.data,
+      data: n.data as Record<string, unknown>,
     }));
   const edges = skill.edges.map((e, i) => ({
     id: e.id || `e_skill_${i}`,

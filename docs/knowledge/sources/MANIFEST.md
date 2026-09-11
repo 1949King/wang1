@@ -2,7 +2,7 @@
 
 > 由 `scripts/sync_knowledge.py` 自动生成。勿手改表格（会被覆盖）。
 >
-> 上次同步：`2026-08-14T05:59:07+14:00` · 共 **297** 个 Markdown
+> 上次同步：`2026-08-23T17:45:02+14:00` · 共 **305** 个 Markdown
 
 知识库入口：[INDEX.md](../INDEX.md)
 
@@ -10,27 +10,27 @@
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
-| [docs/knowledge/00-overview.md](../00-overview.md) | 3.9 | 00 — 产品概览与北极星 |
-| [docs/knowledge/01-glossary.md](../01-glossary.md) | 3.4 | 01 — 术语表（Glossary） |
-| [docs/knowledge/02-architecture.md](../02-architecture.md) | 26.7 | 02 — 架构 |
+| [docs/knowledge/00-overview.md](../00-overview.md) | 4.4 | 00 — 产品概览与北极星 |
+| [docs/knowledge/01-glossary.md](../01-glossary.md) | 3.6 | 01 — 术语表（Glossary） |
+| [docs/knowledge/02-architecture.md](../02-architecture.md) | 26.8 | 02 — 架构 |
 | [docs/knowledge/03-editor-pipeline.md](../03-editor-pipeline.md) | 4.3 | 03 — 剪辑活路径（Editor Pipeline） |
 | [docs/knowledge/04-module-map.md](../04-module-map.md) | 3.1 | 04 — 模块地图 |
-| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 97.2 | 05 — 已知问题与近期修复 |
+| [docs/knowledge/05-known-issues.md](../05-known-issues.md) | 107.3 | 已修复（2026-08-19 · AI剪辑/画布入轨片段不可撤销） |
 | [docs/knowledge/06-roadmap.md](../06-roadmap.md) | 10.4 | 06 — 路线图 |
 | [docs/knowledge/07-coding-rules.md](../07-coding-rules.md) | 1.3 | 07 — 编码规则 |
-| [docs/knowledge/08-frozen-zones.md](../08-frozen-zones.md) | 1.7 | 08 — 冻结区（已修好功能锁死） |
-| [docs/knowledge/09-tool-registry-design.md](../09-tool-registry-design.md) | 7.1 | 09 — Tool Registry 收敛设计（提案，未实施） |
-| [docs/knowledge/10-editor-module-split-plan.md](../10-editor-module-split-plan.md) | 8.0 | 10 — `editor_module.py` 拆分方案（量化分析 + 提案，未执行代码拆分） |
+| [docs/knowledge/08-frozen-zones.md](../08-frozen-zones.md) | 1.8 | 08 — 冻结区（已修好功能锁死） |
+| [docs/knowledge/09-tool-registry-design.md](../09-tool-registry-design.md) | 7.3 | 09 — Tool Registry 收敛设计（提案，未实施） |
+| [docs/knowledge/10-editor-module-split-plan.md](../10-editor-module-split-plan.md) | 17.7 | 10 — `editor_module.py` 拆分方案（量化分析 + 提案，未执行代码拆分） |
 | [docs/knowledge/11-opentake-gap.md](../11-opentake-gap.md) | 2.8 | 11 — OpenTake / OTIO / 选模 / 画布对照（只学不换壳） |
 | [docs/knowledge/12-otio-clip-fields.md](../12-otio-clip-fields.md) | 3.0 | 12 — OTIO 概念 ↔ 拾光剪影 clip 字段 |
-| [docs/knowledge/13-agent-skill-memory.md](../13-agent-skill-memory.md) | 1.9 | 13 — Agent Skill / 多集记忆（Dify 对照，不部署 Dify） |
-| [docs/knowledge/14-canvas-strategy.md](../14-canvas-strategy.md) | 4.6 | 14 — 自研导演台画布策略（替代 infinite-canvas） |
-| [docs/knowledge/15-long-term-iteration.md](../15-long-term-iteration.md) | 4.9 | 15 — 长期迭代计划（自动执行轨） |
-| [docs/knowledge/16-aigc-canvas-gap.md](../16-aigc-canvas-gap.md) | 5.8 | 16 — 主流 AIGC 画布借鉴对照（执行索引） |
-| [docs/knowledge/INDEX.md](../INDEX.md) | 4.2 | 拾光剪影 — 项目知识库 |
-| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 53.4 | 源文档清单（MANIFEST） |
+| [docs/knowledge/13-agent-skill-memory.md](../13-agent-skill-memory.md) | 2.9 | 13 — Agent Skill / 多集记忆（Dify 对照，不部署 Dify） |
+| [docs/knowledge/14-canvas-strategy.md](../14-canvas-strategy.md) | 5.7 | 14 — 自研导演台画布策略（替代 infinite-canvas） |
+| [docs/knowledge/15-long-term-iteration.md](../15-long-term-iteration.md) | 8.6 | 15 — 长期迭代计划（自动执行轨） |
+| [docs/knowledge/16-aigc-canvas-gap.md](../16-aigc-canvas-gap.md) | 8.1 | 16 — 主流 AIGC 画布借鉴对照（执行索引） |
+| [docs/knowledge/INDEX.md](../INDEX.md) | 4.5 | 拾光剪影 — 项目知识库 |
+| [docs/knowledge/sources/MANIFEST.md](../sources/MANIFEST.md) | 52.6 | 源文档清单（MANIFEST） |
 
-## 根目录方案/报告（36）
+## 根目录方案/报告（31）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -38,20 +38,16 @@
 | [AI_Agent_Skill智能剪辑原理与实现方案.md](../../AI_Agent_Skill智能剪辑原理与实现方案.md) | 43.2 | AI Agent与Skill在智能剪辑领域的应用研究 |
 | [AI智能剪辑产品分类整理.md](../../AI智能剪辑产品分类整理.md) | 30.5 | AI智能剪辑产品分类整理 |
 | [AI智能剪辑技术文献汇总.md](../../AI智能剪辑技术文献汇总.md) | 23.4 | AI智能剪辑技术文献与资源汇总 |
-| [CONTEXT.md](../../CONTEXT.md) | 3.2 | AI Short Drama Editor — Context |
+| [CONTEXT.md](../../CONTEXT.md) | 3.5 | AI Short Drama Editor — Context |
 | [DEVELOPMENT_REPORT.md](../../DEVELOPMENT_REPORT.md) | 11.5 | AI短剧编辑器 专业版开发报告 (个人开发版) |
 | [MCP_USAGE.md](../../MCP_USAGE.md) | 1.8 | 配置完成 |
 | [OPTIMIZATION_GUIDE.md](../../OPTIMIZATION_GUIDE.md) | 6.8 | AI短剧编辑器 - 完整优化方案 |
 | [PLUGIN_STANDARD.md](../../PLUGIN_STANDARD.md) | 10.2 | AI短剧编辑器插件开发规范标准 |
-| [PRODUCT_STRATEGY_2026.md](../../PRODUCT_STRATEGY_2026.md) | 8.2 | TOP 0级AI短剧剪辑软件 - 2026年产品战略 |
-| [PROJECT_TEST_REPORT.md](../../PROJECT_TEST_REPORT.md) | 6.9 | AI短剧编辑器2 - 项目整体测试报告 |
 | [README.md](../../README.md) | 0.5 | AI 视频自动剪辑软件 (本地版) |
 | [SHORTPLAY_ENGINE_DESIGN.md](../../SHORTPLAY_ENGINE_DESIGN.md) | 27.9 | ShortPlayAI Engine V1.0 - 引擎设计方案分析与实施建议 |
 | [ShortPlayAI_Engine_V1.0_专业评估与改进建议_调整版.md](../../ShortPlayAI_Engine_V1.0_专业评估与改进建议_调整版.md) | 27.4 | ShortPlayAI Engine V1.0 - 专业评估与改进建议（调整版） |
-| [TOP0_ARCHITECTURE.md](../../TOP0_ARCHITECTURE.md) | 12.7 | TOP 0级AI短剧剪辑软件 - 完整架构设计 |
 | [TOP0_IMPLEMENTATION_GUIDE.md](../../TOP0_IMPLEMENTATION_GUIDE.md) | 15.0 | TOP 0级AI短剧剪辑软件 - 完整实施指南 |
 | [debug-video-import-timeline.md](../../debug-video-import-timeline.md) | 1.6 | Debug Session: video-import-timeline |
-| [代码审查与优化建议报告_2026-07-22.md](../../代码审查与优化建议报告_2026-07-22.md) | 9.7 | 拾光剪影 — 代码审查与优化建议报告 |
 | [剪辑模块优化总结.md](../../剪辑模块优化总结.md) | 4.1 | 剪辑模块全面检查与优化总结 |
 | [功能模块清单与优化保留承诺_2026-07-22.md](../../功能模块清单与优化保留承诺_2026-07-22.md) | 7.7 | 拾光剪影 — 功能模块完整清单与优化保留承诺 |
 | [基于OpenShot开源软件二次开发可行性分析.md](../../基于OpenShot开源软件二次开发可行性分析.md) | 17.0 | 基于OpenShot开源软件二次开发可行性分析 |
@@ -68,34 +64,36 @@
 | [拾光剪影_通用加垂直剪辑可行性分析.md](../../拾光剪影_通用加垂直剪辑可行性分析.md) | 15.6 | 拾光剪影：通用剪辑+游戏垂直剪辑可行性分析 |
 | [游戏剪辑是否需要AI分析报告.md](../../游戏剪辑是否需要AI分析报告.md) | 12.1 | 游戏剪辑真的需要AI吗？真实数据告诉你答案 |
 | [用户文档.md](../../用户文档.md) | 7.2 | AI短剧编辑器用户文档 |
-| [短剧筛选模块独立方案分析.md](../../短剧筛选模块独立方案分析.md) | 12.4 | 短剧筛选模块独立方案分析 |
 | [短剧筛选模块现状分析与优化建议.md](../../短剧筛选模块现状分析与优化建议.md) | 11.5 | 短剧筛选模块现状分析与优化建议 |
 
-## docs/（19）
+## docs/（22）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [docs/API文档.md](../../docs/API文档.md) | 23.3 | ShortPlayAI Engine V1.0 API文档 |
 | [docs/Agent诊断与优化方案.md](../../docs/Agent诊断与优化方案.md) | 8.2 | Agent 诊断与优化方案 |
-| [docs/CHANGELOG.md](../../docs/CHANGELOG.md) | 14.3 | 拾光剪影 — 变更日志 |
+| [docs/CHANGELOG.md](../../docs/CHANGELOG.md) | 20.5 | 拾光剪影 — 变更日志 |
 | [docs/CODE_REVIEW_STANDARD.md](../../docs/CODE_REVIEW_STANDARD.md) | 9.7 | 拾光剪影 · 代码审查标准与流程（Code Review Standard & Process） |
 | [docs/P0_CAPCUT_ALIGN.md](../../docs/P0_CAPCUT_ALIGN.md) | 2.1 | 拾光剪影 vs 剪映：差距与分期验收 |
+| [docs/comfyui-local-inference-plan.md](../../docs/comfyui-local-inference-plan.md) | 11.8 | ComfyUI 兼容与内置方案（减负理念版） |
 | [docs/help/copywriting.md](../../docs/help/copywriting.md) | 1.1 | ✍️ 文案生成 |
 | [docs/help/editor.md](../../docs/help/editor.md) | 1.5 | 剪辑功能 |
 | [docs/help/faq.md](../../docs/help/faq.md) | 3.7 | ❓ 常见问题 (FAQ) |
 | [docs/help/performance.md](../../docs/help/performance.md) | 0.9 | 📊 性能监控 |
 | [docs/help/quick_start.md](../../docs/help/quick_start.md) | 1.4 | 🚀 快速入门 |
 | [docs/help/video_tutorials.md](../../docs/help/video_tutorials.md) | 1.1 | 🎥 视频教程 |
+| [docs/legal/用户服务协议.md](../../docs/legal/用户服务协议.md) | 3.0 | 拾光剪影 用户服务协议 |
+| [docs/legal/隐私政策.md](../../docs/legal/隐私政策.md) | 3.2 | 拾光剪影 隐私政策 |
 | [docs/sprint2_plan.md](../../docs/sprint2_plan.md) | 11.5 | Sprint 2 规划：智能剪辑引擎升级 & 进化Agent系统 |
-| [docs/代码完善实施总结_20260612.md](../../docs/代码完善实施总结_20260612.md) | 5.9 | 代码完善实施总结 (2026-06-12) |
-| [docs/发布版本说明.md](../../docs/发布版本说明.md) | 6.2 | ShortPlayAI Engine V1.0 发布版本说明 |
-| [docs/商用化改造路线图.md](../../docs/商用化改造路线图.md) | 12.7 | 拾光剪影 - 商用化改造路线图 |
+| [docs/代码完善实施总结_20260612.md](../../docs/代码完善实施总结_20260612.md) | 5.8 | 代码完善实施总结 (2026-06-12) |
+| [docs/发布版本说明.md](../../docs/发布版本说明.md) | 6.1 | ShortPlayAI Engine V1.0 发布版本说明 |
+| [docs/商用化改造路线图.md](../../docs/商用化改造路线图.md) | 8.4 | 拾光剪影 - 商用化改造路线图 |
 | [docs/开发者文档.md](../../docs/开发者文档.md) | 22.5 | ShortPlayAI Engine V1.0 开发者文档 |
 | [docs/用户手册.md](../../docs/用户手册.md) | 12.3 | ShortPlayAI Engine V1.0 用户手册 |
-| [docs/画布功能借鉴清单.md](../../docs/画布功能借鉴清单.md) | 6.3 | 主流 AI 画布功能借鉴清单（LibTV / ComfyUI / TapNow / 即梦 / InvokeAI / Krea / Runway） |
-| [docs/精简定稿方案.md](../../docs/精简定稿方案.md) | 9.1 | 拾光剪影 精简定稿方案 |
+| [docs/画布功能借鉴清单.md](../../docs/画布功能借鉴清单.md) | 5.9 | 主流 AI 画布功能借鉴清单(LibTV / ComfyUI / TapNow / 即梦 / InvokeAI / Krea / Runway) |
+| [docs/精简定稿方案.md](../../docs/精简定稿方案.md) | 8.7 | 拾光剪影 精简定稿方案 |
 
-## .workbuddy 记忆（6）
+## .workbuddy 记忆（7）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -103,17 +101,19 @@
 | [.workbuddy/memory/2026-07-12.md](../../.workbuddy/memory/2026-07-12.md) | 3.0 | 2026-07-12 — 剪辑模块可用性修复（续） |
 | [.workbuddy/memory/2026-07-13.md](../../.workbuddy/memory/2026-07-13.md) | 6.0 | 2026-07-13 工作日志 |
 | [.workbuddy/memory/2026-07-22.md](../../.workbuddy/memory/2026-07-22.md) | 8.5 | 2026-07-22 工作日志 |
-| [.workbuddy/memory/2026-08-13.md](../../.workbuddy/memory/2026-08-13.md) | 1.2 | 2026-08-13 工作日志 |
+| [.workbuddy/memory/2026-08-13.md](../../.workbuddy/memory/2026-08-13.md) | 1.3 | 2026-08-13 工作日志 |
+| [.workbuddy/memory/2026-08-19.md](../../.workbuddy/memory/2026-08-19.md) | 4.7 | 2026-08-19 工作日志 |
 | [.workbuddy/memory/MEMORY.md](../../.workbuddy/memory/MEMORY.md) | 2.2 | 拾光剪影 — 项目长期记忆（核心事实） |
 
-## app/ 内文档（56）
+## app/ 内文档（57）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [app/core/video_processing/cpp_engine/README.md](../../app/core/video_processing/cpp_engine/README.md) | 3.9 | Py+C++ 混合内核编译指南 |
 | [app/modules/lego/REFACTOR_PLAN.md](../../app/modules/lego/REFACTOR_PLAN.md) | 2.5 | AI短剧编辑器代码拆分计划 |
-| [app/plugins/account_ops_plugin/README.md](../../app/plugins/account_ops_plugin/README.md) | 0.2 | 账号运营插件 — 与短剧筛选同级，仅拓展中心入口 |
+| [app/plugins/account_ops_plugin/README.md](../../app/plugins/account_ops_plugin/README.md) | 0.2 | 账号运营（接口壳） |
 | [app/plugins/ai_effects_plugin/README.md](../../app/plugins/ai_effects_plugin/README.md) | 16.9 | AI特效制作插件 🎨 |
+| [app/plugins/drama_finder_plugin/README.md](../../app/plugins/drama_finder_plugin/README.md) | 0.2 | 短剧筛选（接口壳） |
 | [app/skills/external/AGENTS.md](../../app/skills/external/AGENTS.md) | 14.2 | 外部 Skill 与 Agent 研究手册 |
 | [app/skills/external/seedance2-skill/README-zh.md](../../app/skills/external/seedance2-skill/README-zh.md) | 1.6 | Seedance 2.0 视频提示词撰写技能 |
 | [app/skills/external/seedance2-skill/README.md](../../app/skills/external/seedance2-skill/README.md) | 1.6 | Seedance 2.0 Prompt Writing Skills |
@@ -187,7 +187,7 @@
 | [.claude/skills/write-a-skill/SKILL.md](../../.claude/skills/write-a-skill/SKILL.md) | 1.8 | Write a Skill — 创建技能 |
 | [.claude/skills/zoom-out/SKILL.md](../../.claude/skills/zoom-out/SKILL.md) | 1.5 | Zoom Out — 全局视角 |
 
-## .trae（43）
+## .trae（44）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
@@ -197,6 +197,7 @@
 | [.trae/documents/Agent面板优化方案_P0P1.md](../../.trae/documents/Agent面板优化方案_P0P1.md) | 10.3 | Agent 面板优化方案（P0 + P1 全套） |
 | [.trae/documents/导演Skill与BlenderMCP接入方案.md](../../.trae/documents/导演Skill与BlenderMCP接入方案.md) | 16.9 | 导演 Skill（全功能型）+ Blender MCP（harveyxiacn 增强版）接入方案 |
 | [.trae/documents/当前进度_20260813.md](../../.trae/documents/当前进度_20260813.md) | 1.1 | 当前进度（2026-08-13） |
+| [.trae/documents/精剪能力与Agent闭环迭代计划.md](../../.trae/documents/精剪能力与Agent闭环迭代计划.md) | 14.3 | 精剪能力与 Agent 闭环迭代计划 |
 | [.trae/documents/统一调用层架构重构计划.md](../../.trae/documents/统一调用层架构重构计划.md) | 9.1 | 统一调用层架构重构计划 |
 | [.trae/documents/项目重构改进计划.md](../../.trae/documents/项目重构改进计划.md) | 8.6 | 拾光剪影 项目重构改进计划 |
 | [.trae/rules/0.md](../../.trae/rules/0.md) | 2.5 | (无标题) |
@@ -235,111 +236,118 @@
 | [.trae/skills/superpowers/SKILL.md](../../.trae/skills/superpowers/SKILL.md) | 3.2 | Superpowers — HTML5 2D/3D 游戏引擎 |
 | [.trae/skills/sweep-ai/SKILL.md](../../.trae/skills/sweep-ai/SKILL.md) | 1.8 | Sweep AI - JetBrains IDE 智能编程助手 |
 
-## 其他（103）
+## 其他（110）
 
 | 路径 | KB | 标题 |
 |------|-----:|------|
 | [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md) | 1.5 | 代码审查清单（拾光剪影） |
 | [byox_visualizer/README_raw.md](../../byox_visualizer/README_raw.md) | 45.6 | Build your own &lt;insert-technology-here&gt; |
 | [byox_visualizer/代码讲解_剪辑模块.md](../../byox_visualizer/代码讲解_剪辑模块.md) | 6.2 | 逐行读代码 · 剪辑模块小白讲解（配合 byox 学习地图） |
-| [vendor/README.md](../../vendor/README.md) | 0.5 | vendor 前端资源 |
-| [vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md](../../vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md) | 4.4 | Design Thinking |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md) | 109.4 | React Best Practices |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md) | 3.4 | React Best Practices |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md) | 7.2 | Vercel React Best Practices |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md) | 1.6 | Sections |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md) | 0.6 | Rule Title Here |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md) | 1.8 | Do Not Put Effect Events in Dependency Arrays |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md) | 1.5 | Store Event Handlers in Refs |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md) | 1.0 | Initialize App Once, Not Per Mount |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md) | 1.1 | useEffectEvent for Stable Callback Refs |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md) | 1.1 | Prevent Waterfall Chains in API Routes |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md) | 1.2 | Check Cheap Conditions Before Async Flags |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md) | 2.2 | Defer Await Until Needed |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md) | 1.3 | Dependency-Based Parallelization |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md) | 0.7 | Promise.all() for Independent Operations |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md) | 2.5 | Strategic Suspense Boundaries |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md) | 2.4 | Prefer Statically Analyzable Paths |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md) | 2.8 | Avoid Barrel File Imports |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md) | 1.0 | Conditional Module Loading |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md) | 0.9 | Defer Non-Critical Third-Party Libraries |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md) | 0.8 | Dynamic Imports for Heavy Components |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md) | 1.2 | Preload Based on User Intent |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md) | 2.0 | Deduplicate Global Event Listeners |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md) | 2.0 | Version and Minimize localStorage Data |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md) | 1.7 | Use Passive Event Listeners for Scrolling Performance |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md) | 1.2 | Use SWR for Automatic Deduplication |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md) | 3.3 | Avoid Layout Thrashing |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md) | 2.0 | Cache Repeated Function Calls |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md) | 0.5 | Cache Property Access in Loops |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md) | 1.7 | Cache Storage API Calls |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md) | 0.8 | Combine Multiple Array Iterations |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md) | 1.2 | Early Return from Functions |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md) | 1.4 | Use flatMap to Map and Filter in One Pass |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md) | 1.0 | Hoist RegExp Creation |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md) | 0.9 | Build Index Maps for Repeated Lookups |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md) | 1.8 | Early Length Check for Array Comparisons |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md) | 2.3 | Use Loop for Min/Max Instead of Sort |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md) | 2.7 | Defer Non-Critical Work with requestIdleCallback |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md) | 0.5 | Use Set/Map for O(1) Lookups |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md) | 1.8 | Use toSorted() Instead of sort() for Immutability |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md) | 0.6 | Use Activity Component for Show/Hide |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md) | 1.2 | Animate SVG Wrapper Instead of SVG Element |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md) | 1.0 | Use Explicit Conditional Rendering |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md) | 0.8 | CSS content-visibility for Long Lists |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md) | 1.1 | Hoist Static JSX Elements |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md) | 2.3 | Prevent Hydration Mismatch Without Flickering |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md) | 0.9 | Suppress Expected Hydration Mismatches |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md) | 2.6 | Use React DOM Resource Hints |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md) | 1.9 | Use defer or async on Script Tags |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md) | 0.6 | Optimize SVG Precision |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md) | 2.1 | Use useTransition Over Manual Loading States |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md) | 1.0 | Defer State Reads to Usage Point |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md) | 0.8 | Narrow Effect Dependencies |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md) | 1.2 | Calculate Derived State During Rendering |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md) | 0.7 | Subscribe to Derived State |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md) | 3.0 | Use Functional setState Updates |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md) | 2.0 | Use Lazy State Initialization |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md) | 1.2 | Extract Default Non-primitive Parameter Value from Memoized Component to Constant |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md) | 1.2 | Extract to Memoized Components |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md) | 1.3 | Put Interaction Logic in Event Handlers |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md) | 2.2 | Don't Define Components Inside Components |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md) | 1.0 | Do not wrap a simple expression with a primitive result type in useMemo |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md) | 1.9 | Split Combined Hook Computations |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md) | 1.1 | Use Transitions for Non-Urgent Updates |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md) | 1.9 | Use useDeferredValue for Expensive Derived Renders |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md) | 1.8 | Use useRef for Transient Values |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md) | 2.0 | Use after() for Non-Blocking Operations |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md) | 2.7 | Authenticate Server Actions Like API Routes |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md) | 1.4 | Cross-Request LRU Caching |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md) | 2.2 | Per-Request Deduplication with React.cache() |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md) | 2.1 | Avoid Duplicate Serialization in RSC Props |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md) | 4.5 | Hoist Static I/O to Module Level |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md) | 1.8 | Avoid Shared Module State for Request Data |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md) | 1.6 | Parallel Data Fetching with Component Composition |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md) | 1.0 | Parallel Nested Data Fetching |
-| [vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md](../../vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md) | 1.0 | Minimize Serialization at RSC Boundaries |
-| [vendor/infinite-canvas/AGENTS.md](../../vendor/infinite-canvas/AGENTS.md) | 9.4 | AGENTS.md |
-| [vendor/infinite-canvas/CHANGELOG.md](../../vendor/infinite-canvas/CHANGELOG.md) | 18.9 | CHANGELOG |
-| [vendor/infinite-canvas/README.md](../../vendor/infinite-canvas/README.md) | 9.0 | 赞助商 |
-| [vendor/infinite-canvas/SECURITY.md](../../vendor/infinite-canvas/SECURITY.md) | 3.4 | Security Policy |
-| [vendor/infinite-canvas/canvas-agent/README.md](../../vendor/infinite-canvas/canvas-agent/README.md) | 6.3 | Infinite Canvas Agent |
-| [vendor/infinite-canvas/canvas-agent/agent-instructions.md](../../vendor/infinite-canvas/canvas-agent/agent-instructions.md) | 2.1 | Infinite Canvas Agent |
-| [vendor/infinite-canvas/canvas-agent/codex-server.md](../../vendor/infinite-canvas/canvas-agent/codex-server.md) | 93.9 | Codex App Server |
-| [vendor/infinite-canvas/docs/README.md](../../vendor/infinite-canvas/docs/README.md) | 1.5 | docs |
-| [vendor/infinite-canvas/docs/index.md](../../vendor/infinite-canvas/docs/index.md) | 1.3 | Infinite Canvas Documentation Index |
-| [vendor/infinite-canvas/docs/index.zh-CN.md](../../vendor/infinite-canvas/docs/index.zh-CN.md) | 1.3 | 无限画布文档索引 |
-| [vendor/infinite-canvas/plugins/canvas/README.md](../../vendor/infinite-canvas/plugins/canvas/README.md) | 8.0 | Infinite Canvas 画布节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/html/README.md](../../vendor/infinite-canvas/plugins/canvas/html/README.md) | 0.5 | HTML 节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/markdown/README.md](../../vendor/infinite-canvas/plugins/canvas/markdown/README.md) | 0.8 | Markdown 节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/panorama/README.md](../../vendor/infinite-canvas/plugins/canvas/panorama/README.md) | 0.6 | 3D 全景节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/registry/README.md](../../vendor/infinite-canvas/plugins/canvas/registry/README.md) | 1.9 | 官方插件注册表(集中构建 + 远程发布) |
-| [vendor/infinite-canvas/plugins/canvas/sdk/README.md](../../vendor/infinite-canvas/plugins/canvas/sdk/README.md) | 2.8 | @infinite-canvas/plugin-sdk |
-| [vendor/infinite-canvas/plugins/canvas/sticky-note/README.md](../../vendor/infinite-canvas/plugins/canvas/sticky-note/README.md) | 0.5 | 便利贴节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/svg/README.md](../../vendor/infinite-canvas/plugins/canvas/svg/README.md) | 0.5 | SVG 节点插件 |
-| [vendor/infinite-canvas/plugins/canvas/template/README.md](../../vendor/infinite-canvas/plugins/canvas/template/README.md) | 1.0 | 插件模板(TypeScript + SDK) |
-| [vendor/infinite-canvas/plugins/infinite-canvas/README.md](../../vendor/infinite-canvas/plugins/infinite-canvas/README.md) | 0.7 | Infinite Canvas Codex Plugin |
-| [vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md) | 1.8 | Infinite Canvas |
-| [vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md](../../vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md) | 1.6 | Open Infinite Canvas |
+| [dist/拾光剪影/_internal/imageio_ffmpeg/binaries/README.md](../../dist/拾光剪影/_internal/imageio_ffmpeg/binaries/README.md) | 0.0 | (无标题) |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md) | 1.5 | (无标题) |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md) | 1.5 | (无标题) |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md) | 3.5 | NCSA Open Source License |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md) | 2.7 | NumPy |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md) | 2.9 | MT19937 |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md) | 1.1 | PCG64 |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md) | 1.5 | PHILOX |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md) | 1.2 | SFC64 |
+| [dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md](../../dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md) | 0.3 | SPLITMIX64 |
+| [dist/拾光剪影/_internal/playwright/driver/README.md](../../dist/拾光剪影/_internal/playwright/driver/README.md) | 0.0 | (无标题) |
+| [dist/拾光剪影/_internal/playwright/driver/package/README.md](../../dist/拾光剪影/_internal/playwright/driver/package/README.md) | 0.1 | playwright-core |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/SKILL.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/SKILL.md) | 11.6 | Browser Automation with playwright-cli |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/element-attributes.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/element-attributes.md) | 0.6 | Inspecting Element Attributes |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/playwright-tests.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/playwright-tests.md) | 1.7 | Running Playwright Tests |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/request-mocking.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/request-mocking.md) | 2.1 | Request Mocking |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/running-code.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/running-code.md) | 5.5 | Running Custom Playwright Code |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/session-management.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/session-management.md) | 5.5 | Browser Session Management |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/spec-driven-testing.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/spec-driven-testing.md) | 11.3 | Spec-driven testing (plan → generate → heal) |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/storage-state.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/storage-state.md) | 5.1 | Storage Management |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/test-generation.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/test-generation.md) | 4.5 | Test Generation |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/tracing.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/tracing.md) | 3.4 | Tracing |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/video-recording.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/video-recording.md) | 5.3 | Video Recording |
+| [dist/拾光剪影/_internal/playwright/driver/package/lib/tools/trace/SKILL.md](../../dist/拾光剪影/_internal/playwright/driver/package/lib/tools/trace/SKILL.md) | 4.6 | Playwright Trace CLI |
+| [dist/拾光剪影/_internal/pyreadline3-3.5.6.dist-info/licenses/LICENSE.md](../../dist/拾光剪影/_internal/pyreadline3-3.5.6.dist-info/licenses/LICENSE.md) | 2.2 | LICENSE |
+| [libopenshot-audio-build/INSTALL.md](../../libopenshot-audio-build/INSTALL.md) | 4.0 | The OpenShot Audio Library |
+| [libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md](../../libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md) | 0.5 | (无标题) |
+| [libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md](../../libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md) | 1.3 | Notes on Implementation |
+| [libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md](../../libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md) | 4.2 | Sample Rate Converter |
+| [libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md](../../libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md) | 4.7 | Vorbis |
+| [libopenshot-audio-build/README.md](../../libopenshot-audio-build/README.md) | 3.2 | Build status |
+| [libopenshot-audio/INSTALL.md](../../libopenshot-audio/INSTALL.md) | 4.2 | The OpenShot Audio Library |
+| [libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md](../../libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md) | 0.5 | (无标题) |
+| [libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md](../../libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md) | 1.4 | Notes on Implementation |
+| [libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md](../../libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md) | 4.3 | Sample Rate Converter |
+| [libopenshot-audio/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md](../../libopenshot-audio/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md) | 4.8 | Vorbis |
+| [libopenshot-audio/README.md](../../libopenshot-audio/README.md) | 3.3 | Build status |
+| [vendor/AI-Canvas-tauri/.release-notes.md](../../vendor/AI-Canvas-tauri/.release-notes.md) | 2.2 | AI Canvas v0.8.5 |
+| [vendor/AI-Canvas-tauri/AGENTS.md](../../vendor/AI-Canvas-tauri/AGENTS.md) | 27.6 | AGENTS.md |
+| [vendor/AI-Canvas-tauri/README.md](../../vendor/AI-Canvas-tauri/README.md) | 7.9 | AI Canvas Tauri |
+| [vendor/AI-Canvas-tauri/doc/ADR-图片节点矢量标注层.md](../../vendor/AI-Canvas-tauri/doc/ADR-图片节点矢量标注层.md) | 2.0 | ADR：图片节点使用独立矢量标注层 |
+| [vendor/AI-Canvas-tauri/doc/ComfyUI工作流集成说明.md](../../vendor/AI-Canvas-tauri/doc/ComfyUI工作流集成说明.md) | 17.3 | ComfyUI 工作流集成说明 |
+| [vendor/AI-Canvas-tauri/doc/PointEdit包迁移实施计划.md](../../vendor/AI-Canvas-tauri/doc/PointEdit包迁移实施计划.md) | 3.9 | PointEdit 包迁移实施计划 |
+| [vendor/AI-Canvas-tauri/doc/adr/0001-agent-preset-tools.md](../../vendor/AI-Canvas-tauri/doc/adr/0001-agent-preset-tools.md) | 3.0 | ADR-0001: Agent 快捷指令采用分步调用协议 |
+| [vendor/AI-Canvas-tauri/doc/adr/0002-agent-runtime-evolution.md](../../vendor/AI-Canvas-tauri/doc/adr/0002-agent-runtime-evolution.md) | 2.3 | ADR 0002：Agent 运行时调度、恢复与扩展边界 |
+| [vendor/AI-Canvas-tauri/doc/adr/0003-director-desk-prebuilt-runtime.md](../../vendor/AI-Canvas-tauri/doc/adr/0003-director-desk-prebuilt-runtime.md) | 5.1 | ADR 0003：3D 导演台使用按需下载运行时 |
+| [vendor/AI-Canvas-tauri/doc/adr/0004-local-mcp-control-bridge.md](../../vendor/AI-Canvas-tauri/doc/adr/0004-local-mcp-control-bridge.md) | 6.0 | ADR 0004：使用会话级本地 MCP 控制桥 |
+| [vendor/AI-Canvas-tauri/doc/adr/0005-agent-comfyui-dynamic-workflows.md](../../vendor/AI-Canvas-tauri/doc/adr/0005-agent-comfyui-dynamic-workflows.md) | 6.9 | ADR 0005：允许内部助手发现并执行 ComfyUI 动态工作流 |
+| [vendor/AI-Canvas-tauri/doc/adr/0006-project-assistant-model-selection.md](../../vendor/AI-Canvas-tauri/doc/adr/0006-project-assistant-model-selection.md) | 2.9 | ADR-0006：项目默认文本模型驱动对话助手与 Agent |
+| [vendor/AI-Canvas-tauri/doc/adr/0007-project-visual-context.md](../../vendor/AI-Canvas-tauri/doc/adr/0007-project-visual-context.md) | 1.7 | ADR 0007：项目级视觉上下文与描述缓存 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-19-advanced-preset-sequences.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-19-advanced-preset-sequences.md) | 5.6 | 高级快捷指令顺序执行 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-19-agent-preset-tools.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-19-agent-preset-tools.md) | 2.6 | Agent 快捷指令工具实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-19-automated-testing-ci.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-19-automated-testing-ci.md) | 4.1 | 自动化测试与 CI 门禁 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-19-custom-model-execution-protocol.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-19-custom-model-execution-protocol.md) | 14.4 | 通用模型执行协议实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-19-provider-model-catalog.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-19-provider-model-catalog.md) | 6.7 | 厂商连接与模型目录重构 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-20-model-protocol-smart-import.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-20-model-protocol-smart-import.md) | 5.7 | 模型协议智能导入实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-20-project-library-modal.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-20-project-library-modal.md) | 6.8 | 项目库大弹窗实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-provider-config-import.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-provider-config-import.md) | 7.3 | Agent 厂商配置导入实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution-design.md) | 5.9 | Agent 运行时演进设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution.md) | 6.6 | Agent Runtime Evolution Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-on-demand-runtime.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-on-demand-runtime.md) | 8.0 | 3D 导演台按需下载运行时实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-production-runtime.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-production-runtime.md) | 3.4 | 3D 导演台生产运行方式实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-tauri-window.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-tauri-window.md) | 4.8 | 3D 导演台 Tauri 独立窗口实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-23-generated-asset-prompt-tags.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-23-generated-asset-prompt-tags.md) | 2.9 | 生成资产提示词标签 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-23-image-reference-request-mode.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-23-image-reference-request-mode.md) | 1.8 | 通用图片模型参考图请求方式设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-23-media-provider-registry.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-23-media-provider-registry.md) | 4.6 | 媒体 Provider Registry 渐进收敛方案 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-23-read-only-web-research.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-23-read-only-web-research.md) | 3.2 | 纯只读网页研究 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-24-local-mcp-control-bridge.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-24-local-mcp-control-bridge.md) | 7.8 | 本地 MCP 控制桥 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-24-project-scoped-history.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-24-project-scoped-history.md) | 5.3 | 项目级历史与结构化撤销 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library-design.md) | 2.9 | 角色库设计方案 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library.md) | 5.4 | Character Library Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-28-assistant-skill-progressive-disclosure.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-28-assistant-skill-progressive-disclosure.md) | 16.0 | 对话助手 Skill 渐进披露 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-29-domain-sub-agents.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-29-domain-sub-agents.md) | 14.1 | 用户可配置的只读领域子智能体 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-30-canvas-note-tools.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-30-canvas-note-tools.md) | 4.1 | Canvas Note Tools Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-multitrack-correctness.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-multitrack-correctness.md) | 2.5 | 视频编辑器多轨编辑正确性 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-reliable-preview.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-reliable-preview.md) | 2.0 | 视频编辑器可靠预览实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-track-state-behavior.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-track-state-behavior.md) | 2.2 | 视频编辑器轨道状态闭环 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-window.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-window.md) | 16.4 | 内置视频编辑器 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-09-controlled-spa-rendering.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-09-controlled-spa-rendering.md) | 2.9 | 受控 SPA 文档渲染 Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-09-xai-official-provider-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-09-xai-official-provider-design.md) | 2.1 | xAI / Grok 官方厂商接入设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability-design.md) | 2.3 | Agent 工具调用可观测性设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability.md) | 4.1 | Agent Tool Observability Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings-design.md) | 2.1 | 显式 Skill 确定性绑定设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings.md) | 2.9 | Explicit Skill Bindings Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale-design.md) | 2.1 | Agent 实时执行依据视图设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale.md) | 2.2 | Agent Execution Rationale Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-design.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-design.md) | 2.4 | MCP 全面控制能力设计 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-implementation.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-implementation.md) | 4.6 | MCP Complete Control Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-full-permission-phase-1.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-full-permission-phase-1.md) | 2.9 | MCP 全权限第一阶段实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-project-management-tools.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-project-management-tools.md) | 2.6 | MCP 项目管理工具实施计划 |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-assistant-model-selection.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-assistant-model-selection.md) | 2.9 | Project Assistant Model Selection Implementation Plan |
+| [vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-visual-context.md](../../vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-visual-context.md) | 1.6 | 项目模型路由与视觉上下文实施计划 |
+| [vendor/AI-Canvas-tauri/doc/对话助手-Agent能力实施方案.md](../../vendor/AI-Canvas-tauri/doc/对话助手-Agent能力实施方案.md) | 174.7 | 对话助手 Agent 能力实施方案 |
+| [vendor/AI-Canvas-tauri/doc/对话式画布助手-功能方案.md](../../vendor/AI-Canvas-tauri/doc/对话式画布助手-功能方案.md) | 92.2 | 如何用对话安全地读取和操作 AI 画布 |
+| [vendor/AI-Canvas-tauri/doc/开发指南.md](../../vendor/AI-Canvas-tauri/doc/开发指南.md) | 37.7 | 1. 环境准备 |
+| [vendor/AI-Canvas-tauri/doc/打包与发版流程.md](../../vendor/AI-Canvas-tauri/doc/打包与发版流程.md) | 13.5 | 打包与发版流程 |
+| [vendor/AI-Canvas-tauri/doc/架构说明.md](../../vendor/AI-Canvas-tauri/doc/架构说明.md) | 34.9 | AI Canvas 架构说明 |
+| [vendor/AI-Canvas-tauri/doc/预设提示词-图片.md](../../vendor/AI-Canvas-tauri/doc/预设提示词-图片.md) | 9.2 | 【用户输入】 |
+| [vendor/AI-Canvas-tauri/doc/预设提示词-文本.md](../../vendor/AI-Canvas-tauri/doc/预设提示词-文本.md) | 15.5 | 对以上的小说剧情文案进行大幅精简（目标篇幅约为原文的50*-70% |
+| [vendor/AI-Canvas-tauri/docs/plans/2026-07-20-prompt-chip-polish.md](../../vendor/AI-Canvas-tauri/docs/plans/2026-07-20-prompt-chip-polish.md) | 2.5 | Prompt Chip Polish Implementation Plan |
+| [vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-camera-studio.md](../../vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-camera-studio.md) | 3.5 | XiaoLuo Camera Studio Integration Implementation Plan |
+| [vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama-design.md](../../vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama-design.md) | 2.5 | XiaoLuo Panorama 嵌入式集成设计 |
+| [vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama.md](../../vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama.md) | 9.7 | XiaoLuo Panorama Integration Implementation Plan |
+| [vendor/AI-Canvas-tauri/docs/plans/2026-07-23-image-toolbars-design.md](../../vendor/AI-Canvas-tauri/docs/plans/2026-07-23-image-toolbars-design.md) | 2.2 | Image Toolbars Bottom Dock Implementation Plan |
+| [vendor/AI-Canvas-tauri/site/README.md](../../vendor/AI-Canvas-tauri/site/README.md) | 3.3 | AI Canvas 官网 |
+| [vendor/README.md](../../vendor/README.md) | 0.8 | vendor 前端资源 |
 | [vendor/shiguang-canvas/README.md](../../vendor/shiguang-canvas/README.md) | 1.1 | 拾光导演台（shiguang-canvas） |
 

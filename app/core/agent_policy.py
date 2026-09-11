@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Tuple
 
+from app.core.agent_action_registry import canvas_action_effect_paid
+
 # 会话模式（新对话默认 B）
 MODE_PLAN = "plan"
 MODE_COLLABORATIVE = "collaborative"
@@ -42,6 +44,8 @@ MAX_READ_RETRIES = 3
 _CAPABILITY_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "editor.get_timeline_context": (EFFECT_READ, False),
     "editor.suggest_cleanup": (EFFECT_READ, False),
+    "editor.send_selected_to_canvas": (EFFECT_CANVAS_WRITE, False),
+    "editor.suggest_canvas_roundtrip": (EFFECT_READ, False),
     "model.list_models": (EFFECT_READ, False),
     "ext.list_tools": (EFFECT_READ, False),
     "model.chat": (EFFECT_READ, True),
@@ -52,6 +56,7 @@ _CAPABILITY_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "editor.ripple_delete_range": (EFFECT_CANVAS_WRITE, False),
     "canvas.open": (EFFECT_READ, False),
     "canvas.sync_models": (EFFECT_READ, False),
+    "canvas.list_actions": (EFFECT_READ, False),
     "ext.run_extension": (EFFECT_FILE_WRITE, False),
     "ext.run_skill": (EFFECT_FILE_WRITE, False),
     "workflow.start": (EFFECT_FILE_WRITE, False),
@@ -71,41 +76,16 @@ _CAPABILITY_EFFECTS: Dict[str, Tuple[str, bool]] = {
 }
 
 # 画布前端 executeRemoteTask action → (effect, paid)
-_CANVAS_TOOL_EFFECTS: Dict[str, Tuple[str, bool]] = {
-    "queryNodes": (EFFECT_READ, False),
-    "canvas_query": (EFFECT_READ, False),
-    "selectNode": (EFFECT_READ, False),
-    "canvas_select": (EFFECT_READ, False),
-    "addNode": (EFFECT_CANVAS_WRITE, False),
-    "updateNode": (EFFECT_CANVAS_WRITE, False),
-    "connectNodes": (EFFECT_CANVAS_WRITE, False),
-    "deleteNode": (EFFECT_CANVAS_WRITE, False),
-    "setNodeImage": (EFFECT_CANVAS_WRITE, False),
-    "setNodeVideo": (EFFECT_CANVAS_WRITE, False),
-    "importImage": (EFFECT_CANVAS_WRITE, False),
-    "duplicateNode": (EFFECT_CANVAS_WRITE, False),
-    "canvas_duplicate_node": (EFFECT_CANVAS_WRITE, False),
-    "groupNodes": (EFFECT_CANVAS_WRITE, False),
-    "canvas_group": (EFFECT_CANVAS_WRITE, False),
-    "bindShotlistFrame": (EFFECT_CANVAS_WRITE, False),
-    "canvas_bind_shotlist_frame": (EFFECT_CANVAS_WRITE, False),
-    "undo": (EFFECT_CANVAS_WRITE, False),
-    "canvas_undo": (EFFECT_CANVAS_WRITE, False),
-    "redo": (EFFECT_CANVAS_WRITE, False),
-    "canvas_redo": (EFFECT_CANVAS_WRITE, False),
-    "runGenerate": (EFFECT_MEDIA_WRITE, True),
-    "breakdown": (EFFECT_CANVAS_WRITE, False),
-    "applyStoryboard": (EFFECT_CANVAS_WRITE, False),
-    "storyboardBreakdown": (EFFECT_CANVAS_WRITE, False),
-    "canvas_breakdown": (EFFECT_CANVAS_WRITE, False),
-    "fillStoryboardCell": (EFFECT_CANVAS_WRITE, False),
-    "canvas_fill_storyboard_cell": (EFFECT_CANVAS_WRITE, False),
-}
+# 由 agent_action_registry._CANVAS_ACTION_ROWS 派生，保持「同一套 Agent 单一动作清单」，
+# 避免两端各自维护一份越改越分裂。
+_CANVAS_TOOL_EFFECTS: Dict[str, Tuple[str, bool]] = canvas_action_effect_paid()
 
 # 对话 action → effect（timeline 变更视同 canvas_write）
 _EDITOR_ACTION_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "answer": (EFFECT_READ, False),
     "info": (EFFECT_READ, False),
+    "get_media": (EFFECT_READ, False),
+    "inspect_media": (EFFECT_READ, False),
     "add_track": (EFFECT_CANVAS_WRITE, False),
     "duplicate_clip": (EFFECT_CANVAS_WRITE, False),
     "trim_clip": (EFFECT_CANVAS_WRITE, False),
@@ -124,6 +104,10 @@ _EDITOR_ACTION_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "remove_clip": (EFFECT_CANVAS_WRITE, False),
     "ripple_delete": (EFFECT_CANVAS_WRITE, False),
     "ripple_delete_range": (EFFECT_CANVAS_WRITE, False),
+    "move_clip": (EFFECT_CANVAS_WRITE, False),
+    "change_speed": (EFFECT_CANVAS_WRITE, False),
+    "add_keyframe": (EFFECT_CANVAS_WRITE, False),
+    "set_keyframes": (EFFECT_CANVAS_WRITE, False),
 }
 
 _SECRET_KEYS = frozenset(

@@ -53,7 +53,7 @@ class AccountAnalyzer:
             
             return True
         except Exception as e:
-            print(f"添加视频数据失败: {e}")
+            logger.error(f'添加视频数据失败: {e}')
             return False
     
     def analyze_data(self) -> Dict[str, Any]:
@@ -115,7 +115,7 @@ class AccountAnalyzer:
                 "top_conversion_rate": top_conversion_rate
             }
         except Exception as e:
-            print(f"分析数据失败: {e}")
+            logger.error(f'分析数据失败: {e}')
             return {"error": str(e)}
     
     def generate_optimization_suggestions(self, analysis_data: Dict[str, Any]) -> str:
@@ -183,7 +183,7 @@ class AccountAnalyzer:
             
             return True
         except Exception as e:
-            print(f"导出报告失败: {e}")
+            logger.error(f'导出报告失败: {e}')
             return False
 
 

@@ -1,6 +1,6 @@
 {
   "project": "拾光剪影",
-  "generated_at": "2026-08-14T05:59:07+14:00",
+  "generated_at": "2026-08-23T17:45:02+14:00",
   "knowledge_index": "docs/knowledge/INDEX.md",
   "core_docs": [
     "docs/knowledge/00-overview.md",
@@ -38,9 +38,9 @@
     {
       "path": "app/plugins/account_ops_plugin/README.md",
       "size_kb": 0.2,
-      "title": "账号运营插件 — 与短剧筛选同级，仅拓展中心入口",
+      "title": "账号运营（接口壳）",
       "category": "app",
-      "lines": 3
+      "lines": 4
     },
     {
       "path": "app/plugins/ai_effects_plugin/README.md",
@@ -48,6 +48,13 @@
       "title": "AI特效制作插件 🎨",
       "category": "app",
       "lines": 490
+    },
+    {
+      "path": "app/plugins/drama_finder_plugin/README.md",
+      "size_kb": 0.2,
+      "title": "短剧筛选（接口壳）",
+      "category": "app",
+      "lines": 4
     },
     {
       "path": "app/skills/external/AGENTS.md",
@@ -534,10 +541,10 @@
     },
     {
       "path": "docs/CHANGELOG.md",
-      "size_kb": 14.3,
+      "size_kb": 20.5,
       "title": "拾光剪影 — 变更日志",
       "category": "docs",
-      "lines": 201
+      "lines": 269
     },
     {
       "path": "docs/CODE_REVIEW_STANDARD.md",
@@ -552,6 +559,13 @@
       "title": "拾光剪影 vs 剪映：差距与分期验收",
       "category": "docs",
       "lines": 43
+    },
+    {
+      "path": "docs/comfyui-local-inference-plan.md",
+      "size_kb": 11.8,
+      "title": "ComfyUI 兼容与内置方案（减负理念版）",
+      "category": "docs",
+      "lines": 198
     },
     {
       "path": "docs/help/copywriting.md",
@@ -596,6 +610,20 @@
       "lines": 39
     },
     {
+      "path": "docs/legal/用户服务协议.md",
+      "size_kb": 3.0,
+      "title": "拾光剪影 用户服务协议",
+      "category": "docs",
+      "lines": 55
+    },
+    {
+      "path": "docs/legal/隐私政策.md",
+      "size_kb": 3.2,
+      "title": "拾光剪影 隐私政策",
+      "category": "docs",
+      "lines": 52
+    },
+    {
       "path": "docs/sprint2_plan.md",
       "size_kb": 11.5,
       "title": "Sprint 2 规划：智能剪辑引擎升级 & 进化Agent系统",
@@ -604,24 +632,24 @@
     },
     {
       "path": "docs/代码完善实施总结_20260612.md",
-      "size_kb": 5.9,
+      "size_kb": 5.8,
       "title": "代码完善实施总结 (2026-06-12)",
       "category": "docs",
       "lines": 149
     },
     {
       "path": "docs/发布版本说明.md",
-      "size_kb": 6.2,
+      "size_kb": 6.1,
       "title": "ShortPlayAI Engine V1.0 发布版本说明",
       "category": "docs",
       "lines": 272
     },
     {
       "path": "docs/商用化改造路线图.md",
-      "size_kb": 12.7,
+      "size_kb": 8.4,
       "title": "拾光剪影 - 商用化改造路线图",
       "category": "docs",
-      "lines": 304
+      "lines": 156
     },
     {
       "path": "docs/开发者文档.md",
@@ -639,38 +667,38 @@
     },
     {
       "path": "docs/画布功能借鉴清单.md",
-      "size_kb": 6.3,
-      "title": "主流 AI 画布功能借鉴清单（LibTV / ComfyUI / TapNow / 即梦 / InvokeAI / Krea / Runway）",
+      "size_kb": 5.9,
+      "title": "主流 AI 画布功能借鉴清单(LibTV / ComfyUI / TapNow / 即梦 / InvokeAI / Krea / Runway)",
       "category": "docs",
       "lines": 97
     },
     {
       "path": "docs/精简定稿方案.md",
-      "size_kb": 9.1,
+      "size_kb": 8.7,
       "title": "拾光剪影 精简定稿方案",
       "category": "docs",
       "lines": 199
     },
     {
       "path": "docs/knowledge/00-overview.md",
-      "size_kb": 3.9,
+      "size_kb": 4.4,
       "title": "00 — 产品概览与北极星",
       "category": "knowledge",
-      "lines": 79
+      "lines": 89
     },
     {
       "path": "docs/knowledge/01-glossary.md",
-      "size_kb": 3.4,
+      "size_kb": 3.6,
       "title": "01 — 术语表（Glossary）",
       "category": "knowledge",
-      "lines": 43
+      "lines": 45
     },
     {
       "path": "docs/knowledge/02-architecture.md",
-      "size_kb": 26.7,
+      "size_kb": 26.8,
       "title": "02 — 架构",
       "category": "knowledge",
-      "lines": 659
+      "lines": 661
     },
     {
       "path": "docs/knowledge/03-editor-pipeline.md",
@@ -684,14 +712,14 @@
       "size_kb": 3.1,
       "title": "04 — 模块地图",
       "category": "knowledge",
-      "lines": 64
+      "lines": 65
     },
     {
       "path": "docs/knowledge/05-known-issues.md",
-      "size_kb": 97.2,
-      "title": "05 — 已知问题与近期修复",
+      "size_kb": 107.3,
+      "title": "已修复（2026-08-19 · AI剪辑/画布入轨片段不可撤销）",
       "category": "knowledge",
-      "lines": 1142
+      "lines": 1340
     },
     {
       "path": "docs/knowledge/06-roadmap.md",
@@ -709,24 +737,24 @@
     },
     {
       "path": "docs/knowledge/08-frozen-zones.md",
-      "size_kb": 1.7,
+      "size_kb": 1.8,
       "title": "08 — 冻结区（已修好功能锁死）",
       "category": "knowledge",
-      "lines": 41
+      "lines": 40
     },
     {
       "path": "docs/knowledge/09-tool-registry-design.md",
-      "size_kb": 7.1,
+      "size_kb": 7.3,
       "title": "09 — Tool Registry 收敛设计（提案，未实施）",
       "category": "knowledge",
       "lines": 86
     },
     {
       "path": "docs/knowledge/10-editor-module-split-plan.md",
-      "size_kb": 8.0,
+      "size_kb": 17.7,
       "title": "10 — `editor_module.py` 拆分方案（量化分析 + 提案，未执行代码拆分）",
       "category": "knowledge",
-      "lines": 81
+      "lines": 226
     },
     {
       "path": "docs/knowledge/11-opentake-gap.md",
@@ -744,45 +772,45 @@
     },
     {
       "path": "docs/knowledge/13-agent-skill-memory.md",
-      "size_kb": 1.9,
+      "size_kb": 2.9,
       "title": "13 — Agent Skill / 多集记忆（Dify 对照，不部署 Dify）",
       "category": "knowledge",
-      "lines": 39
+      "lines": 53
     },
     {
       "path": "docs/knowledge/14-canvas-strategy.md",
-      "size_kb": 4.6,
+      "size_kb": 5.7,
       "title": "14 — 自研导演台画布策略（替代 infinite-canvas）",
       "category": "knowledge",
-      "lines": 89
+      "lines": 94
     },
     {
       "path": "docs/knowledge/15-long-term-iteration.md",
-      "size_kb": 4.9,
+      "size_kb": 8.6,
       "title": "15 — 长期迭代计划（自动执行轨）",
       "category": "knowledge",
-      "lines": 100
+      "lines": 149
     },
     {
       "path": "docs/knowledge/16-aigc-canvas-gap.md",
-      "size_kb": 5.8,
+      "size_kb": 8.1,
       "title": "16 — 主流 AIGC 画布借鉴对照（执行索引）",
       "category": "knowledge",
-      "lines": 75
+      "lines": 99
     },
     {
       "path": "docs/knowledge/INDEX.md",
-      "size_kb": 4.2,
+      "size_kb": 4.5,
       "title": "拾光剪影 — 项目知识库",
       "category": "knowledge",
-      "lines": 101
+      "lines": 108
     },
     {
       "path": "docs/knowledge/sources/MANIFEST.md",
-      "size_kb": 53.4,
+      "size_kb": 52.6,
       "title": "源文档清单（MANIFEST）",
       "category": "knowledge",
-      "lines": 348
+      "lines": 354
     },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
@@ -806,697 +834,746 @@
       "lines": 135
     },
     {
-      "path": "vendor/README.md",
-      "size_kb": 0.5,
-      "title": "vendor 前端资源",
+      "path": "dist/拾光剪影/_internal/imageio_ffmpeg/binaries/README.md",
+      "size_kb": 0.0,
+      "title": "(无标题)",
       "category": "other",
-      "lines": 21
+      "lines": 2
     },
     {
-      "path": "vendor/infinite-canvas/.agents/skills/frontend-design/SKILL.md",
-      "size_kb": 4.4,
-      "title": "Design Thinking",
-      "category": "other",
-      "lines": 43
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/AGENTS.md",
-      "size_kb": 109.4,
-      "title": "React Best Practices",
-      "category": "other",
-      "lines": 3811
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/README.md",
-      "size_kb": 3.4,
-      "title": "React Best Practices",
-      "category": "other",
-      "lines": 124
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/SKILL.md",
-      "size_kb": 7.2,
-      "title": "Vercel React Best Practices",
-      "category": "other",
-      "lines": 150
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_sections.md",
-      "size_kb": 1.6,
-      "title": "Sections",
-      "category": "other",
-      "lines": 47
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/_template.md",
-      "size_kb": 0.6,
-      "title": "Rule Title Here",
-      "category": "other",
-      "lines": 29
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-effect-event-deps.md",
-      "size_kb": 1.8,
-      "title": "Do Not Put Effect Events in Dependency Arrays",
-      "category": "other",
-      "lines": 57
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-event-handler-refs.md",
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
       "size_kb": 1.5,
-      "title": "Store Event Handlers in Refs",
-      "category": "other",
-      "lines": 56
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-init-once.md",
-      "size_kb": 1.0,
-      "title": "Initialize App Once, Not Per Mount",
-      "category": "other",
-      "lines": 43
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/advanced-use-latest.md",
-      "size_kb": 1.1,
-      "title": "useEffectEvent for Stable Callback Refs",
-      "category": "other",
-      "lines": 40
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-api-routes.md",
-      "size_kb": 1.1,
-      "title": "Prevent Waterfall Chains in API Routes",
-      "category": "other",
-      "lines": 39
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-cheap-condition-before-await.md",
-      "size_kb": 1.2,
-      "title": "Check Cheap Conditions Before Async Flags",
-      "category": "other",
-      "lines": 38
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-defer-await.md",
-      "size_kb": 2.2,
-      "title": "Defer Await Until Needed",
-      "category": "other",
-      "lines": 83
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-dependencies.md",
-      "size_kb": 1.3,
-      "title": "Dependency-Based Parallelization",
-      "category": "other",
-      "lines": 52
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-parallel.md",
-      "size_kb": 0.7,
-      "title": "Promise.all() for Independent Operations",
+      "title": "(无标题)",
       "category": "other",
       "lines": 29
     },
     {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/async-suspense-boundaries.md",
-      "size_kb": 2.5,
-      "title": "Strategic Suspense Boundaries",
-      "category": "other",
-      "lines": 100
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-analyzable-paths.md",
-      "size_kb": 2.4,
-      "title": "Prefer Statically Analyzable Paths",
-      "category": "other",
-      "lines": 64
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-barrel-imports.md",
-      "size_kb": 2.8,
-      "title": "Avoid Barrel File Imports",
-      "category": "other",
-      "lines": 61
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-conditional.md",
-      "size_kb": 1.0,
-      "title": "Conditional Module Loading",
-      "category": "other",
-      "lines": 32
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-defer-third-party.md",
-      "size_kb": 0.9,
-      "title": "Defer Non-Critical Third-Party Libraries",
-      "category": "other",
-      "lines": 50
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-dynamic-imports.md",
-      "size_kb": 0.8,
-      "title": "Dynamic Imports for Heavy Components",
-      "category": "other",
-      "lines": 36
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/bundle-preload.md",
-      "size_kb": 1.2,
-      "title": "Preload Based on User Intent",
-      "category": "other",
-      "lines": 51
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-event-listeners.md",
-      "size_kb": 2.0,
-      "title": "Deduplicate Global Event Listeners",
-      "category": "other",
-      "lines": 75
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-localstorage-schema.md",
-      "size_kb": 2.0,
-      "title": "Version and Minimize localStorage Data",
-      "category": "other",
-      "lines": 72
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-passive-event-listeners.md",
-      "size_kb": 1.7,
-      "title": "Use Passive Event Listeners for Scrolling Performance",
-      "category": "other",
-      "lines": 49
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/client-swr-dedup.md",
-      "size_kb": 1.2,
-      "title": "Use SWR for Automatic Deduplication",
-      "category": "other",
-      "lines": 57
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-batch-dom-css.md",
-      "size_kb": 3.3,
-      "title": "Avoid Layout Thrashing",
-      "category": "other",
-      "lines": 108
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-function-results.md",
-      "size_kb": 2.0,
-      "title": "Cache Repeated Function Calls",
-      "category": "other",
-      "lines": 81
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-property-access.md",
-      "size_kb": 0.5,
-      "title": "Cache Property Access in Loops",
-      "category": "other",
-      "lines": 29
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-cache-storage.md",
-      "size_kb": 1.7,
-      "title": "Cache Storage API Calls",
-      "category": "other",
-      "lines": 71
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-combine-iterations.md",
-      "size_kb": 0.8,
-      "title": "Combine Multiple Array Iterations",
-      "category": "other",
-      "lines": 33
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-early-exit.md",
-      "size_kb": 1.2,
-      "title": "Early Return from Functions",
-      "category": "other",
-      "lines": 51
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-flatmap-filter.md",
-      "size_kb": 1.4,
-      "title": "Use flatMap to Map and Filter in One Pass",
-      "category": "other",
-      "lines": 61
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-hoist-regexp.md",
-      "size_kb": 1.0,
-      "title": "Hoist RegExp Creation",
-      "category": "other",
-      "lines": 46
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-index-maps.md",
-      "size_kb": 0.9,
-      "title": "Build Index Maps for Repeated Lookups",
-      "category": "other",
-      "lines": 38
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-length-check-first.md",
-      "size_kb": 1.8,
-      "title": "Early Length Check for Array Comparisons",
-      "category": "other",
-      "lines": 50
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-min-max-loop.md",
-      "size_kb": 2.3,
-      "title": "Use Loop for Min/Max Instead of Sort",
-      "category": "other",
-      "lines": 83
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-request-idle-callback.md",
-      "size_kb": 2.7,
-      "title": "Defer Non-Critical Work with requestIdleCallback",
-      "category": "other",
-      "lines": 106
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-set-map-lookups.md",
-      "size_kb": 0.5,
-      "title": "Use Set/Map for O(1) Lookups",
-      "category": "other",
-      "lines": 25
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/js-tosorted-immutable.md",
-      "size_kb": 1.8,
-      "title": "Use toSorted() Instead of sort() for Immutability",
-      "category": "other",
-      "lines": 58
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-activity.md",
-      "size_kb": 0.6,
-      "title": "Use Activity Component for Show/Hide",
-      "category": "other",
-      "lines": 27
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-animate-svg-wrapper.md",
-      "size_kb": 1.2,
-      "title": "Animate SVG Wrapper Instead of SVG Element",
-      "category": "other",
-      "lines": 48
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-conditional-render.md",
-      "size_kb": 1.0,
-      "title": "Use Explicit Conditional Rendering",
-      "category": "other",
-      "lines": 41
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-content-visibility.md",
-      "size_kb": 0.8,
-      "title": "CSS content-visibility for Long Lists",
-      "category": "other",
-      "lines": 39
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hoist-jsx.md",
-      "size_kb": 1.1,
-      "title": "Hoist Static JSX Elements",
-      "category": "other",
-      "lines": 47
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-no-flicker.md",
-      "size_kb": 2.3,
-      "title": "Prevent Hydration Mismatch Without Flickering",
-      "category": "other",
-      "lines": 83
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-hydration-suppress-warning.md",
-      "size_kb": 0.9,
-      "title": "Suppress Expected Hydration Mismatches",
-      "category": "other",
-      "lines": 31
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-resource-hints.md",
-      "size_kb": 2.6,
-      "title": "Use React DOM Resource Hints",
-      "category": "other",
-      "lines": 86
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-script-defer-async.md",
-      "size_kb": 1.9,
-      "title": "Use defer or async on Script Tags",
-      "category": "other",
-      "lines": 69
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-svg-precision.md",
-      "size_kb": 0.6,
-      "title": "Optimize SVG Precision",
-      "category": "other",
-      "lines": 29
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rendering-usetransition-loading.md",
-      "size_kb": 2.1,
-      "title": "Use useTransition Over Manual Loading States",
-      "category": "other",
-      "lines": 76
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-defer-reads.md",
-      "size_kb": 1.0,
-      "title": "Defer State Reads to Usage Point",
-      "category": "other",
-      "lines": 40
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-dependencies.md",
-      "size_kb": 0.8,
-      "title": "Narrow Effect Dependencies",
-      "category": "other",
-      "lines": 46
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state-no-effect.md",
-      "size_kb": 1.2,
-      "title": "Calculate Derived State During Rendering",
-      "category": "other",
-      "lines": 41
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-derived-state.md",
-      "size_kb": 0.7,
-      "title": "Subscribe to Derived State",
-      "category": "other",
-      "lines": 30
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-functional-setstate.md",
-      "size_kb": 3.0,
-      "title": "Use Functional setState Updates",
-      "category": "other",
-      "lines": 75
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-lazy-state-init.md",
-      "size_kb": 2.0,
-      "title": "Use Lazy State Initialization",
-      "category": "other",
-      "lines": 59
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo-with-default-value.md",
-      "size_kb": 1.2,
-      "title": "Extract Default Non-primitive Parameter Value from Memoized Component to Constant",
-      "category": "other",
-      "lines": 39
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-memo.md",
-      "size_kb": 1.2,
-      "title": "Extract to Memoized Components",
-      "category": "other",
-      "lines": 45
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-move-effect-to-event.md",
-      "size_kb": 1.3,
-      "title": "Put Interaction Logic in Event Handlers",
-      "category": "other",
-      "lines": 46
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-no-inline-components.md",
-      "size_kb": 2.2,
-      "title": "Don't Define Components Inside Components",
-      "category": "other",
-      "lines": 83
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-simple-expression-in-memo.md",
-      "size_kb": 1.0,
-      "title": "Do not wrap a simple expression with a primitive result type in useMemo",
-      "category": "other",
-      "lines": 36
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-split-combined-hooks.md",
-      "size_kb": 1.9,
-      "title": "Split Combined Hook Computations",
-      "category": "other",
-      "lines": 65
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-transitions.md",
-      "size_kb": 1.1,
-      "title": "Use Transitions for Non-Urgent Updates",
-      "category": "other",
-      "lines": 41
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-deferred-value.md",
-      "size_kb": 1.9,
-      "title": "Use useDeferredValue for Expensive Derived Renders",
-      "category": "other",
-      "lines": 60
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/rerender-use-ref-transient-values.md",
-      "size_kb": 1.8,
-      "title": "Use useRef for Transient Values",
-      "category": "other",
-      "lines": 74
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-after-nonblocking.md",
-      "size_kb": 2.0,
-      "title": "Use after() for Non-Blocking Operations",
-      "category": "other",
-      "lines": 74
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-auth-actions.md",
-      "size_kb": 2.7,
-      "title": "Authenticate Server Actions Like API Routes",
-      "category": "other",
-      "lines": 97
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-lru.md",
-      "size_kb": 1.4,
-      "title": "Cross-Request LRU Caching",
-      "category": "other",
-      "lines": 42
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-cache-react.md",
-      "size_kb": 2.2,
-      "title": "Per-Request Deduplication with React.cache()",
-      "category": "other",
-      "lines": 77
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-dedup-props.md",
-      "size_kb": 2.1,
-      "title": "Avoid Duplicate Serialization in RSC Props",
-      "category": "other",
-      "lines": 66
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-hoist-static-io.md",
-      "size_kb": 4.5,
-      "title": "Hoist Static I/O to Module Level",
-      "category": "other",
-      "lines": 150
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-no-shared-module-state.md",
-      "size_kb": 1.8,
-      "title": "Avoid Shared Module State for Request Data",
-      "category": "other",
-      "lines": 51
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-fetching.md",
-      "size_kb": 1.6,
-      "title": "Parallel Data Fetching with Component Composition",
-      "category": "other",
-      "lines": 84
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-parallel-nested-fetching.md",
-      "size_kb": 1.0,
-      "title": "Parallel Nested Data Fetching",
-      "category": "other",
-      "lines": 35
-    },
-    {
-      "path": "vendor/infinite-canvas/.agents/skills/vercel-react-best-practices/rules/server-serialization.md",
-      "size_kb": 1.0,
-      "title": "Minimize Serialization at RSC Boundaries",
-      "category": "other",
-      "lines": 39
-    },
-    {
-      "path": "vendor/infinite-canvas/AGENTS.md",
-      "size_kb": 9.4,
-      "title": "AGENTS.md",
-      "category": "other",
-      "lines": 89
-    },
-    {
-      "path": "vendor/infinite-canvas/CHANGELOG.md",
-      "size_kb": 18.9,
-      "title": "CHANGELOG",
-      "category": "other",
-      "lines": 310
-    },
-    {
-      "path": "vendor/infinite-canvas/README.md",
-      "size_kb": 9.0,
-      "title": "赞助商",
-      "category": "other",
-      "lines": 148
-    },
-    {
-      "path": "vendor/infinite-canvas/SECURITY.md",
-      "size_kb": 3.4,
-      "title": "Security Policy",
-      "category": "other",
-      "lines": 81
-    },
-    {
-      "path": "vendor/infinite-canvas/canvas-agent/README.md",
-      "size_kb": 6.3,
-      "title": "Infinite Canvas Agent",
-      "category": "other",
-      "lines": 158
-    },
-    {
-      "path": "vendor/infinite-canvas/canvas-agent/agent-instructions.md",
-      "size_kb": 2.1,
-      "title": "Infinite Canvas Agent",
-      "category": "other",
-      "lines": 14
-    },
-    {
-      "path": "vendor/infinite-canvas/canvas-agent/codex-server.md",
-      "size_kb": 93.9,
-      "title": "Codex App Server",
-      "category": "other",
-      "lines": 2175
-    },
-    {
-      "path": "vendor/infinite-canvas/docs/README.md",
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
       "size_kb": 1.5,
-      "title": "docs",
-      "category": "other",
-      "lines": 53
-    },
-    {
-      "path": "vendor/infinite-canvas/docs/index.md",
-      "size_kb": 1.3,
-      "title": "Infinite Canvas Documentation Index",
-      "category": "other",
-      "lines": 42
-    },
-    {
-      "path": "vendor/infinite-canvas/docs/index.zh-CN.md",
-      "size_kb": 1.3,
-      "title": "无限画布文档索引",
-      "category": "other",
-      "lines": 45
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/README.md",
-      "size_kb": 8.0,
-      "title": "Infinite Canvas 画布节点插件",
-      "category": "other",
-      "lines": 164
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/html/README.md",
-      "size_kb": 0.5,
-      "title": "HTML 节点插件",
-      "category": "other",
-      "lines": 18
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/markdown/README.md",
-      "size_kb": 0.8,
-      "title": "Markdown 节点插件",
-      "category": "other",
-      "lines": 24
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/panorama/README.md",
-      "size_kb": 0.6,
-      "title": "3D 全景节点插件",
-      "category": "other",
-      "lines": 18
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/registry/README.md",
-      "size_kb": 1.9,
-      "title": "官方插件注册表(集中构建 + 远程发布)",
-      "category": "other",
-      "lines": 40
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/sdk/README.md",
-      "size_kb": 2.8,
-      "title": "@infinite-canvas/plugin-sdk",
-      "category": "other",
-      "lines": 78
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/sticky-note/README.md",
-      "size_kb": 0.5,
-      "title": "便利贴节点插件",
-      "category": "other",
-      "lines": 18
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/svg/README.md",
-      "size_kb": 0.5,
-      "title": "SVG 节点插件",
-      "category": "other",
-      "lines": 18
-    },
-    {
-      "path": "vendor/infinite-canvas/plugins/canvas/template/README.md",
-      "size_kb": 1.0,
-      "title": "插件模板(TypeScript + SDK)",
+      "title": "(无标题)",
       "category": "other",
       "lines": 26
     },
     {
-      "path": "vendor/infinite-canvas/plugins/infinite-canvas/README.md",
-      "size_kb": 0.7,
-      "title": "Infinite Canvas Codex Plugin",
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md",
+      "size_kb": 3.5,
+      "title": "NCSA Open Source License",
+      "category": "other",
+      "lines": 72
+    },
+    {
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+      "size_kb": 2.7,
+      "title": "NumPy",
+      "category": "other",
+      "lines": 61
+    },
+    {
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+      "size_kb": 2.9,
+      "title": "MT19937",
+      "category": "other",
+      "lines": 61
+    },
+    {
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+      "size_kb": 1.1,
+      "title": "PCG64",
+      "category": "other",
+      "lines": 23
+    },
+    {
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+      "size_kb": 1.5,
+      "title": "PHILOX",
       "category": "other",
       "lines": 32
     },
     {
-      "path": "vendor/infinite-canvas/plugins/infinite-canvas/skills/canvas/SKILL.md",
-      "size_kb": 1.8,
-      "title": "Infinite Canvas",
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+      "size_kb": 1.2,
+      "title": "SFC64",
       "category": "other",
       "lines": 28
     },
     {
-      "path": "vendor/infinite-canvas/plugins/infinite-canvas/skills/open-canvas/SKILL.md",
-      "size_kb": 1.6,
-      "title": "Open Infinite Canvas",
+      "path": "dist/拾光剪影/_internal/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md",
+      "size_kb": 0.3,
+      "title": "SPLITMIX64",
+      "category": "other",
+      "lines": 9
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/README.md",
+      "size_kb": 0.0,
+      "title": "(无标题)",
+      "category": "other",
+      "lines": 1
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/README.md",
+      "size_kb": 0.1,
+      "title": "playwright-core",
+      "category": "other",
+      "lines": 4
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/SKILL.md",
+      "size_kb": 11.6,
+      "title": "Browser Automation with playwright-cli",
+      "category": "other",
+      "lines": 405
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/element-attributes.md",
+      "size_kb": 0.6,
+      "title": "Inspecting Element Attributes",
+      "category": "other",
+      "lines": 24
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/playwright-tests.md",
+      "size_kb": 1.7,
+      "title": "Running Playwright Tests",
+      "category": "other",
+      "lines": 40
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/request-mocking.md",
+      "size_kb": 2.1,
+      "title": "Request Mocking",
+      "category": "other",
+      "lines": 88
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/running-code.md",
+      "size_kb": 5.5,
+      "title": "Running Custom Playwright Code",
+      "category": "other",
+      "lines": 242
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/session-management.md",
+      "size_kb": 5.5,
+      "title": "Browser Session Management",
+      "category": "other",
+      "lines": 226
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/spec-driven-testing.md",
+      "size_kb": 11.3,
+      "title": "Spec-driven testing (plan → generate → heal)",
+      "category": "other",
+      "lines": 306
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/storage-state.md",
+      "size_kb": 5.1,
+      "title": "Storage Management",
+      "category": "other",
+      "lines": 276
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/test-generation.md",
+      "size_kb": 4.5,
+      "title": "Test Generation",
+      "category": "other",
+      "lines": 135
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/tracing.md",
+      "size_kb": 3.4,
+      "title": "Tracing",
+      "category": "other",
+      "lines": 140
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/cli-client/skill/references/video-recording.md",
+      "size_kb": 5.3,
+      "title": "Video Recording",
+      "category": "other",
+      "lines": 144
+    },
+    {
+      "path": "dist/拾光剪影/_internal/playwright/driver/package/lib/tools/trace/SKILL.md",
+      "size_kb": 4.6,
+      "title": "Playwright Trace CLI",
+      "category": "other",
+      "lines": 172
+    },
+    {
+      "path": "dist/拾光剪影/_internal/pyreadline3-3.5.6.dist-info/licenses/LICENSE.md",
+      "size_kb": 2.2,
+      "title": "LICENSE",
+      "category": "other",
+      "lines": 54
+    },
+    {
+      "path": "libopenshot-audio-build/INSTALL.md",
+      "size_kb": 4.0,
+      "title": "The OpenShot Audio Library",
+      "category": "other",
+      "lines": 129
+    },
+    {
+      "path": "libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md",
+      "size_kb": 0.5,
+      "title": "(无标题)",
+      "category": "other",
+      "lines": 11
+    },
+    {
+      "path": "libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md",
+      "size_kb": 1.3,
+      "title": "Notes on Implementation",
+      "category": "other",
+      "lines": 34
+    },
+    {
+      "path": "libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md",
+      "size_kb": 4.2,
+      "title": "Sample Rate Converter",
+      "category": "other",
+      "lines": 102
+    },
+    {
+      "path": "libopenshot-audio-build/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md",
+      "size_kb": 4.7,
+      "title": "Vorbis",
+      "category": "other",
+      "lines": 148
+    },
+    {
+      "path": "libopenshot-audio-build/README.md",
+      "size_kb": 3.2,
+      "title": "Build status",
+      "category": "other",
+      "lines": 73
+    },
+    {
+      "path": "libopenshot-audio/INSTALL.md",
+      "size_kb": 4.2,
+      "title": "The OpenShot Audio Library",
+      "category": "other",
+      "lines": 129
+    },
+    {
+      "path": "libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/README.md",
+      "size_kb": 0.5,
+      "title": "(无标题)",
+      "category": "other",
+      "lines": 11
+    },
+    {
+      "path": "libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/common/README.md",
+      "size_kb": 1.4,
+      "title": "Notes on Implementation",
+      "category": "other",
+      "lines": 34
+    },
+    {
+      "path": "libopenshot-audio/JuceLibraryCode/modules/juce_audio_devices/native/oboe/src/flowgraph/resampler/README.md",
+      "size_kb": 4.3,
+      "title": "Sample Rate Converter",
+      "category": "other",
+      "lines": 102
+    },
+    {
+      "path": "libopenshot-audio/JuceLibraryCode/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/README.md",
+      "size_kb": 4.8,
+      "title": "Vorbis",
+      "category": "other",
+      "lines": 148
+    },
+    {
+      "path": "libopenshot-audio/README.md",
+      "size_kb": 3.3,
+      "title": "Build status",
+      "category": "other",
+      "lines": 73
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/.release-notes.md",
+      "size_kb": 2.2,
+      "title": "AI Canvas v0.8.5",
+      "category": "other",
+      "lines": 45
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/AGENTS.md",
+      "size_kb": 27.6,
+      "title": "AGENTS.md",
+      "category": "other",
+      "lines": 386
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/README.md",
+      "size_kb": 7.9,
+      "title": "AI Canvas Tauri",
+      "category": "other",
+      "lines": 147
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/ADR-图片节点矢量标注层.md",
+      "size_kb": 2.0,
+      "title": "ADR：图片节点使用独立矢量标注层",
+      "category": "other",
+      "lines": 36
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/ComfyUI工作流集成说明.md",
+      "size_kb": 17.3,
+      "title": "ComfyUI 工作流集成说明",
+      "category": "other",
+      "lines": 250
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/PointEdit包迁移实施计划.md",
+      "size_kb": 3.9,
+      "title": "PointEdit 包迁移实施计划",
+      "category": "other",
+      "lines": 73
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0001-agent-preset-tools.md",
+      "size_kb": 3.0,
+      "title": "ADR-0001: Agent 快捷指令采用分步调用协议",
+      "category": "other",
+      "lines": 63
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0002-agent-runtime-evolution.md",
+      "size_kb": 2.3,
+      "title": "ADR 0002：Agent 运行时调度、恢复与扩展边界",
+      "category": "other",
+      "lines": 31
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0003-director-desk-prebuilt-runtime.md",
+      "size_kb": 5.1,
+      "title": "ADR 0003：3D 导演台使用按需下载运行时",
       "category": "other",
       "lines": 59
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0004-local-mcp-control-bridge.md",
+      "size_kb": 6.0,
+      "title": "ADR 0004：使用会话级本地 MCP 控制桥",
+      "category": "other",
+      "lines": 63
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0005-agent-comfyui-dynamic-workflows.md",
+      "size_kb": 6.9,
+      "title": "ADR 0005：允许内部助手发现并执行 ComfyUI 动态工作流",
+      "category": "other",
+      "lines": 76
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0006-project-assistant-model-selection.md",
+      "size_kb": 2.9,
+      "title": "ADR-0006：项目默认文本模型驱动对话助手与 Agent",
+      "category": "other",
+      "lines": 58
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/adr/0007-project-visual-context.md",
+      "size_kb": 1.7,
+      "title": "ADR 0007：项目级视觉上下文与描述缓存",
+      "category": "other",
+      "lines": 29
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-19-advanced-preset-sequences.md",
+      "size_kb": 5.6,
+      "title": "高级快捷指令顺序执行 Implementation Plan",
+      "category": "other",
+      "lines": 106
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-19-agent-preset-tools.md",
+      "size_kb": 2.6,
+      "title": "Agent 快捷指令工具实施计划",
+      "category": "other",
+      "lines": 63
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-19-automated-testing-ci.md",
+      "size_kb": 4.1,
+      "title": "自动化测试与 CI 门禁 Implementation Plan",
+      "category": "other",
+      "lines": 90
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-19-custom-model-execution-protocol.md",
+      "size_kb": 14.4,
+      "title": "通用模型执行协议实施计划",
+      "category": "other",
+      "lines": 221
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-19-provider-model-catalog.md",
+      "size_kb": 6.7,
+      "title": "厂商连接与模型目录重构 Implementation Plan",
+      "category": "other",
+      "lines": 108
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-20-model-protocol-smart-import.md",
+      "size_kb": 5.7,
+      "title": "模型协议智能导入实施计划",
+      "category": "other",
+      "lines": 92
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-20-project-library-modal.md",
+      "size_kb": 6.8,
+      "title": "项目库大弹窗实施计划",
+      "category": "other",
+      "lines": 169
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-provider-config-import.md",
+      "size_kb": 7.3,
+      "title": "Agent 厂商配置导入实施计划",
+      "category": "other",
+      "lines": 109
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution-design.md",
+      "size_kb": 5.9,
+      "title": "Agent 运行时演进设计",
+      "category": "other",
+      "lines": 88
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-agent-runtime-evolution.md",
+      "size_kb": 6.6,
+      "title": "Agent Runtime Evolution Implementation Plan",
+      "category": "other",
+      "lines": 159
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-on-demand-runtime.md",
+      "size_kb": 8.0,
+      "title": "3D 导演台按需下载运行时实施计划",
+      "category": "other",
+      "lines": 152
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-production-runtime.md",
+      "size_kb": 3.4,
+      "title": "3D 导演台生产运行方式实施计划",
+      "category": "other",
+      "lines": 68
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-21-director-desk-tauri-window.md",
+      "size_kb": 4.8,
+      "title": "3D 导演台 Tauri 独立窗口实施计划",
+      "category": "other",
+      "lines": 88
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-23-generated-asset-prompt-tags.md",
+      "size_kb": 2.9,
+      "title": "生成资产提示词标签 Implementation Plan",
+      "category": "other",
+      "lines": 79
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-23-image-reference-request-mode.md",
+      "size_kb": 1.8,
+      "title": "通用图片模型参考图请求方式设计",
+      "category": "other",
+      "lines": 21
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-23-media-provider-registry.md",
+      "size_kb": 4.6,
+      "title": "媒体 Provider Registry 渐进收敛方案",
+      "category": "other",
+      "lines": 105
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-23-read-only-web-research.md",
+      "size_kb": 3.2,
+      "title": "纯只读网页研究 Implementation Plan",
+      "category": "other",
+      "lines": 63
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-24-local-mcp-control-bridge.md",
+      "size_kb": 7.8,
+      "title": "本地 MCP 控制桥 Implementation Plan",
+      "category": "other",
+      "lines": 212
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-24-project-scoped-history.md",
+      "size_kb": 5.3,
+      "title": "项目级历史与结构化撤销 Implementation Plan",
+      "category": "other",
+      "lines": 144
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library-design.md",
+      "size_kb": 2.9,
+      "title": "角色库设计方案",
+      "category": "other",
+      "lines": 43
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-25-character-library.md",
+      "size_kb": 5.4,
+      "title": "Character Library Implementation Plan",
+      "category": "other",
+      "lines": 115
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-28-assistant-skill-progressive-disclosure.md",
+      "size_kb": 16.0,
+      "title": "对话助手 Skill 渐进披露 Implementation Plan",
+      "category": "other",
+      "lines": 331
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-29-domain-sub-agents.md",
+      "size_kb": 14.1,
+      "title": "用户可配置的只读领域子智能体 Implementation Plan",
+      "category": "other",
+      "lines": 271
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-30-canvas-note-tools.md",
+      "size_kb": 4.1,
+      "title": "Canvas Note Tools Implementation Plan",
+      "category": "other",
+      "lines": 80
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-multitrack-correctness.md",
+      "size_kb": 2.5,
+      "title": "视频编辑器多轨编辑正确性 Implementation Plan",
+      "category": "other",
+      "lines": 56
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-reliable-preview.md",
+      "size_kb": 2.0,
+      "title": "视频编辑器可靠预览实施计划",
+      "category": "other",
+      "lines": 47
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-track-state-behavior.md",
+      "size_kb": 2.2,
+      "title": "视频编辑器轨道状态闭环 Implementation Plan",
+      "category": "other",
+      "lines": 54
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-07-31-video-editor-window.md",
+      "size_kb": 16.4,
+      "title": "内置视频编辑器 Implementation Plan",
+      "category": "other",
+      "lines": 275
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-09-controlled-spa-rendering.md",
+      "size_kb": 2.9,
+      "title": "受控 SPA 文档渲染 Implementation Plan",
+      "category": "other",
+      "lines": 57
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-09-xai-official-provider-design.md",
+      "size_kb": 2.1,
+      "title": "xAI / Grok 官方厂商接入设计",
+      "category": "other",
+      "lines": 22
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability-design.md",
+      "size_kb": 2.3,
+      "title": "Agent 工具调用可观测性设计",
+      "category": "other",
+      "lines": 25
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-12-agent-tool-observability.md",
+      "size_kb": 4.1,
+      "title": "Agent Tool Observability Implementation Plan",
+      "category": "other",
+      "lines": 87
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings-design.md",
+      "size_kb": 2.1,
+      "title": "显式 Skill 确定性绑定设计",
+      "category": "other",
+      "lines": 25
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-12-explicit-skill-bindings.md",
+      "size_kb": 2.9,
+      "title": "Explicit Skill Bindings Implementation Plan",
+      "category": "other",
+      "lines": 65
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale-design.md",
+      "size_kb": 2.1,
+      "title": "Agent 实时执行依据视图设计",
+      "category": "other",
+      "lines": 25
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-agent-execution-rationale.md",
+      "size_kb": 2.2,
+      "title": "Agent Execution Rationale Implementation Plan",
+      "category": "other",
+      "lines": 48
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-design.md",
+      "size_kb": 2.4,
+      "title": "MCP 全面控制能力设计",
+      "category": "other",
+      "lines": 18
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-complete-control-implementation.md",
+      "size_kb": 4.6,
+      "title": "MCP Complete Control Implementation Plan",
+      "category": "other",
+      "lines": 103
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-full-permission-phase-1.md",
+      "size_kb": 2.9,
+      "title": "MCP 全权限第一阶段实施计划",
+      "category": "other",
+      "lines": 65
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-mcp-project-management-tools.md",
+      "size_kb": 2.6,
+      "title": "MCP 项目管理工具实施计划",
+      "category": "other",
+      "lines": 55
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-assistant-model-selection.md",
+      "size_kb": 2.9,
+      "title": "Project Assistant Model Selection Implementation Plan",
+      "category": "other",
+      "lines": 63
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/plans/2026-08-13-project-visual-context.md",
+      "size_kb": 1.6,
+      "title": "项目模型路由与视觉上下文实施计划",
+      "category": "other",
+      "lines": 38
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/对话助手-Agent能力实施方案.md",
+      "size_kb": 174.7,
+      "title": "对话助手 Agent 能力实施方案",
+      "category": "other",
+      "lines": 2406
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/对话式画布助手-功能方案.md",
+      "size_kb": 92.2,
+      "title": "如何用对话安全地读取和操作 AI 画布",
+      "category": "other",
+      "lines": 1844
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/开发指南.md",
+      "size_kb": 37.7,
+      "title": "1. 环境准备",
+      "category": "other",
+      "lines": 703
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/打包与发版流程.md",
+      "size_kb": 13.5,
+      "title": "打包与发版流程",
+      "category": "other",
+      "lines": 369
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/架构说明.md",
+      "size_kb": 34.9,
+      "title": "AI Canvas 架构说明",
+      "category": "other",
+      "lines": 501
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/预设提示词-图片.md",
+      "size_kb": 9.2,
+      "title": "【用户输入】",
+      "category": "other",
+      "lines": 131
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/doc/预设提示词-文本.md",
+      "size_kb": 15.5,
+      "title": "对以上的小说剧情文案进行大幅精简（目标篇幅约为原文的50*-70%",
+      "category": "other",
+      "lines": 268
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/docs/plans/2026-07-20-prompt-chip-polish.md",
+      "size_kb": 2.5,
+      "title": "Prompt Chip Polish Implementation Plan",
+      "category": "other",
+      "lines": 70
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-camera-studio.md",
+      "size_kb": 3.5,
+      "title": "XiaoLuo Camera Studio Integration Implementation Plan",
+      "category": "other",
+      "lines": 70
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama-design.md",
+      "size_kb": 2.5,
+      "title": "XiaoLuo Panorama 嵌入式集成设计",
+      "category": "other",
+      "lines": 24
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/docs/plans/2026-07-22-xiaoluo-panorama.md",
+      "size_kb": 9.7,
+      "title": "XiaoLuo Panorama Integration Implementation Plan",
+      "category": "other",
+      "lines": 151
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/docs/plans/2026-07-23-image-toolbars-design.md",
+      "size_kb": 2.2,
+      "title": "Image Toolbars Bottom Dock Implementation Plan",
+      "category": "other",
+      "lines": 53
+    },
+    {
+      "path": "vendor/AI-Canvas-tauri/site/README.md",
+      "size_kb": 3.3,
+      "title": "AI Canvas 官网",
+      "category": "other",
+      "lines": 69
+    },
+    {
+      "path": "vendor/README.md",
+      "size_kb": 0.8,
+      "title": "vendor 前端资源",
+      "category": "other",
+      "lines": 26
     },
     {
       "path": "vendor/shiguang-canvas/README.md",
@@ -1535,10 +1612,10 @@
     },
     {
       "path": "CONTEXT.md",
-      "size_kb": 3.2,
+      "size_kb": 3.5,
       "title": "AI Short Drama Editor — Context",
       "category": "root",
-      "lines": 84
+      "lines": 86
     },
     {
       "path": "DEVELOPMENT_REPORT.md",
@@ -1569,20 +1646,6 @@
       "lines": 440
     },
     {
-      "path": "PRODUCT_STRATEGY_2026.md",
-      "size_kb": 8.2,
-      "title": "TOP 0级AI短剧剪辑软件 - 2026年产品战略",
-      "category": "root",
-      "lines": 327
-    },
-    {
-      "path": "PROJECT_TEST_REPORT.md",
-      "size_kb": 6.9,
-      "title": "AI短剧编辑器2 - 项目整体测试报告",
-      "category": "root",
-      "lines": 251
-    },
-    {
       "path": "README.md",
       "size_kb": 0.5,
       "title": "AI 视频自动剪辑软件 (本地版)",
@@ -1604,13 +1667,6 @@
       "lines": 959
     },
     {
-      "path": "TOP0_ARCHITECTURE.md",
-      "size_kb": 12.7,
-      "title": "TOP 0级AI短剧剪辑软件 - 完整架构设计",
-      "category": "root",
-      "lines": 263
-    },
-    {
       "path": "TOP0_IMPLEMENTATION_GUIDE.md",
       "size_kb": 15.0,
       "title": "TOP 0级AI短剧剪辑软件 - 完整实施指南",
@@ -1623,13 +1679,6 @@
       "title": "Debug Session: video-import-timeline",
       "category": "root",
       "lines": 34
-    },
-    {
-      "path": "代码审查与优化建议报告_2026-07-22.md",
-      "size_kb": 9.7,
-      "title": "拾光剪影 — 代码审查与优化建议报告",
-      "category": "root",
-      "lines": 164
     },
     {
       "path": "剪辑模块优化总结.md",
@@ -1744,13 +1793,6 @@
       "lines": 225
     },
     {
-      "path": "短剧筛选模块独立方案分析.md",
-      "size_kb": 12.4,
-      "title": "短剧筛选模块独立方案分析",
-      "category": "root",
-      "lines": 379
-    },
-    {
       "path": "短剧筛选模块现状分析与优化建议.md",
       "size_kb": 11.5,
       "title": "短剧筛选模块现状分析与优化建议",
@@ -1798,6 +1840,13 @@
       "title": "当前进度（2026-08-13）",
       "category": "trae",
       "lines": 23
+    },
+    {
+      "path": ".trae/documents/精剪能力与Agent闭环迭代计划.md",
+      "size_kb": 14.3,
+      "title": "精剪能力与 Agent 闭环迭代计划",
+      "category": "trae",
+      "lines": 197
     },
     {
       "path": ".trae/documents/统一调用层架构重构计划.md",
@@ -2088,10 +2137,17 @@
     },
     {
       "path": ".workbuddy/memory/2026-08-13.md",
-      "size_kb": 1.2,
+      "size_kb": 1.3,
       "title": "2026-08-13 工作日志",
       "category": "workbuddy",
       "lines": 30
+    },
+    {
+      "path": ".workbuddy/memory/2026-08-19.md",
+      "size_kb": 4.7,
+      "title": "2026-08-19 工作日志",
+      "category": "workbuddy",
+      "lines": 73
     },
     {
       "path": ".workbuddy/memory/MEMORY.md",
@@ -2102,13 +2158,13 @@
     }
   ],
   "counts": {
-    "app": 56,
+    "app": 57,
     "claude": 15,
-    "docs": 19,
+    "docs": 22,
     "knowledge": 19,
-    "other": 103,
-    "root": 36,
-    "trae": 43,
-    "workbuddy": 6
+    "other": 110,
+    "root": 31,
+    "trae": 44,
+    "workbuddy": 7
   }
 }

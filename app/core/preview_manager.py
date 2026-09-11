@@ -769,59 +769,89 @@ class PreviewManager(QObject):
         return frame
 
     def get_first_frame(self, effects: Optional[Dict] = None) -> Optional[QImage]:
-        """可靠读取片源第 0 帧（导入/恢复工程用，避免 No Signal 假成功）。"""
+        """可靠读取片源第 0 帧（导入/恢复工程用，避免 No Signal 假成功）。
+
+        优先级：OpenCV 直接读 → 整文件重开再读 → FFmpeg CLI 回退（打包环境兜底）。
+        """
         src = getattr(self, "_video_source", None)
-        if not src or not CV2_AVAILABLE:
+        if not src:
             return None
-        cap = self._video_capture
-        if cap is None or not cap.isOpened():
-            if not self.open_video(src, preload=False):
-                return None
+        if effects is None:
+            effects = getattr(self, "_current_effects", None)
+
+        # —— 路径 1：OpenCV（含重开重试）——
+        if CV2_AVAILABLE:
             cap = self._video_capture
-        if cap is None:
-            return None
-        frame = None
+            if cap is None or not cap.isOpened():
+                if not self.open_video(src, preload=False):
+                    cap = None
+                else:
+                    cap = self._video_capture
+            if cap is not None and cap.isOpened():
+                frame = None
+                try:
+                    # POS_FRAMES + POS_MSEC 双路径；部分 H.264 首帧 seek 需预热
+                    for setter in (
+                        lambda: cap.set(cv2.CAP_PROP_POS_FRAMES, 0),
+                        lambda: cap.set(cv2.CAP_PROP_POS_MSEC, 0),
+                    ):
+                        try:
+                            setter()
+                        except Exception as e:
+                            logger.debug("首帧 seek 预热 set 失败（继续下一路径）: %s", e)
+                        cap.grab()
+                        ret, bgr = cap.read()
+                        if ret and bgr is not None:
+                            frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                            break
+                    if frame is None:
+                        # 整文件重开再读
+                        try:
+                            cap.release()
+                        except Exception as e:
+                            logger.debug("旧 capture 释放失败（继续重开路径）: %s", e)
+                        cap2 = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
+                        if cap2.isOpened():
+                            self._video_capture = cap2
+                            cap2.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            ret, bgr = cap2.read()
+                            if ret and bgr is not None:
+                                frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    if frame is not None:
+                        self._cap_next_idx = 1
+                        self._cache_raw_frame(0, frame)
+                        frame = self._resize_if_needed(frame)
+                        if effects:
+                            frame = self._apply_effects_sync(frame, effects)
+                        return self._ndarray_to_qimage(frame)
+                except Exception as e:
+                    logger.debug("get_first_frame OpenCV 路径失败: %s", e)
+
+        # —— 路径 2：FFmpeg CLI 回退（打包环境下 OpenCV 解码异常时的兜底）——
         try:
-            # POS_FRAMES + POS_MSEC 双路径；部分 H.264 首帧 seek 需预热
-            for setter in (
-                lambda: cap.set(cv2.CAP_PROP_POS_FRAMES, 0),
-                lambda: cap.set(cv2.CAP_PROP_POS_MSEC, 0),
-            ):
-                try:
-                    setter()
-                except Exception:
-                    pass
-                cap.grab()
-                ret, bgr = cap.read()
-                if ret and bgr is not None:
-                    frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                    break
-            if frame is None:
-                # 整文件重开再读
-                try:
-                    cap.release()
-                except Exception:
-                    pass
-                cap2 = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
-                if not cap2.isOpened():
-                    self._video_capture = None
-                    return None
-                self._video_capture = cap2
-                cap2.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                ret, bgr = cap2.read()
-                if ret and bgr is not None:
-                    frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            if frame is None:
-                return None
-            self._cap_next_idx = 1
-            self._cache_raw_frame(0, frame)
-            frame = self._resize_if_needed(frame)
-            if effects:
-                frame = self._apply_effects_sync(frame, effects)
-            return self._ndarray_to_qimage(frame)
+            from app.core.ffmpeg_service import ffmpeg_service
+            pixmap = ffmpeg_service.extract_frame(src, 0.0, width=0, height=720)
+            if pixmap is not None and not pixmap.isNull():
+                # QPixmap → QImage → ndarray → QImage（走统一的 resize/effects 管线）
+                img = pixmap.toImage()
+                if not img.isNull():
+                    # 转成 ndarray 以便复用 resize/effects 管线
+                    from PyQt6.QtGui import QImage as _QImage
+                    img = img.convertToFormat(_QImage.Format.Format_RGB888)
+                    w, h = img.width(), img.height()
+                    ptr = img.bits()
+                    ptr.setsize(h * w * 3)
+                    frame_arr = np.frombuffer(ptr, dtype=np.uint8).reshape((h, w, 3)).copy()
+                    self._cache_raw_frame(0, frame_arr)
+                    frame_arr = self._resize_if_needed(frame_arr)
+                    if effects:
+                        frame_arr = self._apply_effects_sync(frame_arr, effects)
+                    logger.info("get_first_frame 使用 FFmpeg CLI 回退成功: %dx%d", w, h)
+                    return self._ndarray_to_qimage(frame_arr)
         except Exception as e:
-            logger.debug("get_first_frame 失败: %s", e)
-            return None
+            logger.debug("get_first_frame FFmpeg 回退失败: %s", e)
+
+        return None
 
     def get_frame_at(self, time_sec: float, effects: Optional[Dict] = None) -> Optional[QImage]:
         if effects is None:
@@ -837,8 +867,8 @@ class PreviewManager(QObject):
         )) and getattr(self, "_video_source", None):
             try:
                 self.open_video(self._video_source, preload=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("get_frame_at 自动重开视频失败: %s", e)
         # 帧号量化：缓存按帧索引命中（浮点时间字符串 key 永远打不中预加载缓存）
         frame_idx = int(round(float(time_sec) * self._video_fps))
         if self._video_frame_count > 0:
@@ -926,6 +956,33 @@ class PreviewManager(QObject):
                             self._cap_next_idx = frame_idx + 1
                 except Exception as e:
                     logger.debug("get_frame_at 重开 capture 失败: %s", e)
+            if frame is None:
+                # OpenCV 全路径失败 → FFmpeg CLI 回退（打包环境兜底，seek 场景）
+                src = getattr(self, "_video_source", None)
+                if src:
+                    try:
+                        from app.core.ffmpeg_service import ffmpeg_service
+                        target_h = max(240, int(self._get_target_height() or 480))
+                        pixmap = ffmpeg_service.extract_frame(
+                            src, float(time_sec), width=0, height=target_h
+                        )
+                        if pixmap is not None and not pixmap.isNull():
+                            img = pixmap.toImage()
+                            if not img.isNull():
+                                from PyQt6.QtGui import QImage as _QImage
+                                img = img.convertToFormat(_QImage.Format.Format_RGB888)
+                                w, h = img.width(), img.height()
+                                ptr = img.bits()
+                                ptr.setsize(h * w * 3)
+                                frame = np.frombuffer(
+                                    ptr, dtype=np.uint8
+                                ).reshape((h, w, 3)).copy()
+                                logger.info(
+                                    "get_frame_at 使用 FFmpeg CLI 回退成功: t=%.3fs %dx%d",
+                                    time_sec, w, h
+                                )
+                    except Exception as e:
+                        logger.debug("get_frame_at FFmpeg 回退失败: %s", e)
             if frame is None:
                 return None
 

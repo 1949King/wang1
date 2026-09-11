@@ -10,6 +10,9 @@ from enum import Enum
 import time
 import math
 import copy
+import logging
+
+logger = logging.getLogger("AI短剧编辑器.keyframe_animation")
 
 
 class InterpolationType(Enum):

@@ -4,14 +4,13 @@
  * — 所有 localStorage 操作集中在此，store.ts 主体只负责调用
  */
 
-import type { Edge, Node } from "@xyflow/react";
+import type { Node } from "@xyflow/react";
 
 /** 以下类型由 store.ts 定义，这里用 import type 避免循环依赖（编译后擦除） */
 import type {
   ProjectMeta,
   ProjectBundle,
   CanvasSnapshot,
-  CanvasMeta,
 } from "../store";
 
 /** ========== localStorage key 常量 ========== */
@@ -83,8 +82,10 @@ export function deleteProjectBundle(id: string): void {
 
 /** ========== bundle 辅助函数 ========== */
 
-const FLOW_NODE_TYPES = new Set([
+/** 全部内置节点类型白名单（保存/加载工程时过滤未知节点，需与 registerBuiltinNodes.ts 保持一致） */
+export const FLOW_NODE_TYPES = new Set([
   "shot", "script", "image", "video", "prompt", "text", "config", "generator", "group", "audio",
+  "music", "markdown", "shotlist", "storyboard", "director", "digitalHuman", "animation", "panorama", "note", "source",
 ]);
 
 /** 过滤出已知节点类型（忽略未知插件节点和残留垃圾） */

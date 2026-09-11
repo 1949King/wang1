@@ -2,7 +2,7 @@
     "name": "账号运营",
     "version": "1.0.0",
     "author": "官方",
-    "description": "多平台账号矩阵、本地发布队列、爆款建议。无平台真 API 时仅本地导出/队列；仅拓展中心入口。",
+    "description": "插件功能已卸，仅保留接口。仅拓展中心入口。",
     "category": "operation",
     "icon": "👤",
     "entry_point": "Plugin",

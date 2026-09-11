@@ -8,8 +8,8 @@ AI短剧编辑器 - Qt6 主程序入口
 ├── 剪辑模块 (EditorModule) - 轨道、预览、滤镜、字幕
 ├── 文案生成模块 (CopywritingModule) - AI文案、标题、脚本
 ├── 多任务模块 (TasksModule) - 批量处理、任务队列
-├── 短剧筛选（插件 drama_finder_plugin，含 crawler）- 剧单、热度、佣金
-├── 账号运营插件 (account_ops_plugin) - 拓展中心入口；Skill 化运营
+├── 短剧筛选（插件壳 drama_finder_plugin）- 入口与回流接口，功能已卸
+├── 账号运营插件壳 (account_ops_plugin) - 拓展中心入口；account.* 诚实失败
 ├── 素材库模块 (MaterialsModule) - 视频、音频、图片管理
 ├── 插件中心模块 (PluginsModule) - 积木管理
 └── 性能监控模块 (PerformanceModule) - 系统监控
@@ -287,32 +287,31 @@ class DependencyChecker:
     @classmethod
     def print_report(cls):
         """打印依赖报告"""
-        print("\n" + "=" * 50)
-        print("依赖检查报告")
-        print("=" * 50)
-        
+        logger.info("=" * 50)
+        logger.info("依赖检查报告")
+        logger.info("=" * 50)
+
         deps = cls.check_dependencies()
-        
-        print("\n必需依赖:")
+
+        logger.info("必需依赖:")
         for package, installed in deps["required"].items():
             status = "✅" if installed else "❌"
-            print(f"  {status} {package}")
-        
-        print("\n可选依赖:")
+            logger.info(f"  {status} {package}")
+
+        logger.info("可选依赖:")
         for package, installed in deps["optional"].items():
             status = "✅" if installed else "⚠️"
-            print(f"  {status} {package}")
-        
-        ffmpeg = cls.check_ffmpeg()
-        print(f"\nFFmpeg: {'✅ 已安装' if ffmpeg else '❌ 未安装'}")
-        
+            logger.info(f"  {status} {package}")
+
+        logger.info(f"FFmpeg: {'✅ 已安装' if cls.check_ffmpeg() else '❌ 未安装'}")
+
         gpu = cls.check_gpu()
         if gpu["available"]:
-            print(f"\nGPU: ✅ {gpu['type']} - {gpu['name']}")
+            logger.info(f"GPU: ✅ {gpu['type']} - {gpu['name']}")
         else:
-            print(f"\nGPU: ⚠️ 未检测到GPU加速")
-        
-        print("=" * 50 + "\n")
+            logger.warning(f"GPU: ⚠️ 未检测到GPU加速")
+
+        logger.info("=" * 50)
 
 
 class Application:
@@ -336,39 +335,39 @@ class Application:
     
     def _check_environment(self) -> bool:
         """检查运行环境"""
-        print("\n🔍 检查运行环境...")
-        
+        logger.info("🔍 检查运行环境...")
+
         deps = DependencyChecker.check_dependencies()
-        
+
         pyqt6_installed = deps["required"].get("PyQt6", False)
         if not pyqt6_installed:
-            print(f"\n❌ 缺少必需依赖: PyQt6")
-            print("请运行: pip install PyQt6")
+            logger.error("❌ 缺少必需依赖: PyQt6")
+            logger.error("请运行: pip install PyQt6")
             return False
-        
+
         if not DependencyChecker.check_ffmpeg():
-            print("\n⚠️ FFmpeg 未安装，部分功能可能受限")
-        
+            logger.warning("⚠️ FFmpeg 未安装，部分功能可能受限")
+
         gpu = DependencyChecker.check_gpu()
         if gpu["available"]:
-            print(f"✅ GPU 加速: {gpu['type']} - {gpu['name']}")
+            logger.info(f"✅ GPU 加速: {gpu['type']} - {gpu['name']}")
         else:
-            print("⚠️ 未检测到 GPU，将使用 CPU 运行")
-        
+            logger.warning("⚠️ 未检测到 GPU，将使用 CPU 运行")
+
         return True
-    
+
     def _init_paths(self):
         """初始化路径"""
-        print("\n📁 初始化路径...")
-        
+        logger.info("📁 初始化路径...")
+
         paths = self._config.paths
         for name, path in paths.items():
             Path(path).mkdir(parents=True, exist_ok=True)
-            print(f"  ✅ {name}: {path}")
-    
+            logger.info(f"  ✅ {name}: {path}")
+
     def _init_core(self):
         """初始化核心组件"""
-        print("\n🔧 初始化核心组件...")
+        logger.info("🔧 初始化核心组件...")
 
         from .modules.lego import EventBus, MasterClock, DataBus, SkillEngine, auth_service
 
@@ -389,11 +388,11 @@ class Application:
         self._data_bus.set("config", self._config)
         self._data_bus.set("app_dir", str(APP_DIR))
 
-        print("  ✅ EventBus - 事件总线")
-        print("  ✅ MasterClock - 全局时钟")
-        print("  ✅ DataBus - 数据总线")
-        print("  ✅ SkillEngine - Skill执行引擎")
-        print("  ✅ AuthService - 认证服务")
+        logger.info("  ✅ EventBus - 事件总线")
+        logger.info("  ✅ MasterClock - 全局时钟")
+        logger.info("  ✅ DataBus - 数据总线")
+        logger.info("  ✅ SkillEngine - Skill执行引擎")
+        logger.info("  ✅ AuthService - 认证服务")
 
         # 修复 C1: 接线 5 大基础设施模块 (apm/alert/security/permission/i18n)
         # 全部包 try/except, 失败降级不阻塞启动
@@ -452,42 +451,42 @@ class Application:
     
     def _init_blocks(self):
         """初始化积木系统"""
-        print("\n🧱 初始化积木系统...")
-        
+        logger.info("🧱 初始化积木系统...")
+
         from .modules.lego import BUILTIN_BLOCKS
-        
+
         for block_class in BUILTIN_BLOCKS:
             try:
                 temp_instance = block_class()
                 meta = temp_instance.info()
-                print(f"  ✅ {meta.icon} {meta.name} v{meta.version}")
+                logger.info(f"  ✅ {meta.icon} {meta.name} v{meta.version}")
             except Exception as e:
-                print(f"  ❌ 积木加载失败: {e}")
-        
-        print(f"✅ 已加载 {len(BUILTIN_BLOCKS)} 个内置积木")
-    
+                logger.error(f"  ❌ 积木加载失败: {e}")
+
+        logger.info(f"✅ 已加载 {len(BUILTIN_BLOCKS)} 个内置积木")
+
     def _init_skills(self):
         """初始化 Skill 系统"""
-        print("\n🎯 初始化 Skill 系统...")
-        
+        logger.info("🎯 初始化 Skill 系统...")
+
         from .modules.lego import register_account_skills, register_skills
-        
+
         register_skills()
         register_account_skills()
-        print("✅ Skill 系统初始化完成")
-    
+        logger.info("✅ Skill 系统初始化完成")
+
     def _init_qt(self):
         """初始化 Qt 应用"""
-        print("\n🖥️ 初始化 Qt6 应用...")
+        logger.info("🖥️ 初始化 Qt6 应用...")
 
         # QtWebEngine 必须在 QApplication 之前导入，否则懒加载模块里会 ImportError，
         # 镶嵌页误报「未安装 PyQt6-WebEngine」。
         try:
             from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
             from PyQt6.QtWebEngineCore import QWebEngineScript  # noqa: F401
-            print("  ✅ QtWebEngine 预加载")
+            logger.info("  ✅ QtWebEngine 预加载")
         except Exception as e:
-            print(f"  ⚠️ QtWebEngine 不可用（AI 画布将外开浏览器）: {e}")
+            logger.warning(f"  ⚠️ QtWebEngine 不可用（AI 画布将外开浏览器）: {e}")
 
         from PyQt6.QtWidgets import QApplication  # type: ignore[reportMissingImports]
         from PyQt6.QtGui import QFont  # type: ignore[reportMissingImports]
@@ -685,26 +684,26 @@ class Application:
             }
         """)
         
-        print("  ✅ Qt6 应用初始化完成")
-    
+        logger.info("  ✅ Qt6 应用初始化完成")
+
     def _init_modules(self):
         """初始化功能模块 — 通过注册表按需加载（仅加载用户启用的模块）"""
-        print("\n🧩 初始化功能模块（按注册表开关）...")
-        
+        logger.info("🧩 初始化功能模块（按注册表开关）...")
+
         from .modules.lego import MainWindow  # type: ignore[import-untyped]
         from .modules.lego.module_registry import get_registry
-        
+
         mw = MainWindow()
         self._main_window = mw
-        
+
         # MainWindow.__init__() 已调用 _setup_default_modules()
         # 该方法从注册表读取启用状态，只注册已启用的模块导航按钮
         # 模块 widget 采用懒加载：首次点击时才实例化（大幅降低启动内存）
-        
+
         registry = get_registry()
         enabled = registry.enabled_modules()
-        print(f"✅ 注册表：{len(registry.all_modules())} 个定义，"
-              f"当前启用 {len(enabled)} 个，关闭 {len(registry.disabled_modules())} 个")
+        logger.info(f"✅ 注册表：{len(registry.all_modules())} 个定义，"
+                    f"当前启用 {len(enabled)} 个，关闭 {len(registry.disabled_modules())} 个")
         
         # 预加载首页模块 widget（用户看到的第一个页面）
         if mw._nav_bar.has_module("home"):
@@ -735,11 +734,24 @@ class Application:
         def on_error(event: object) -> None:
             error_msg = getattr(event, 'data', {}).get("error", "未知错误")
             logger.error(f"错误: {error_msg}")
-        
+
+        def on_canvas_tauri_closed(_event: object) -> None:
+            """Tauri 桌面画布主窗口已关闭：刷新角色管理模块状态条并记录日志。
+
+            实际进程清理已在 canvas_bridge → /host/tauri-closing 中调用
+            canvas_runtime.mark_tauri_closed() 完成，此处仅做 UI 反馈。
+            """
+            try:
+                logger.info("Tauri 画布窗口已关闭，UI 状态已刷新")
+            except Exception:
+                pass
+
         eb.on(EventType.VIDEO_LOADED, on_video_loaded)  # type: ignore[reportAttributeAccessIssue]
         eb.on(EventType.TASK_STARTED, on_task_started)  # type: ignore[reportAttributeAccessIssue]
         eb.on(EventType.TASK_COMPLETED, on_task_completed)  # type: ignore[reportAttributeAccessIssue]
         eb.on(EventType.ERROR_OCCURRED, on_error)  # type: ignore[reportAttributeAccessIssue]
+        if hasattr(EventType, "CANVAS_TAURI_CLOSED"):
+            eb.on(EventType.CANVAS_TAURI_CLOSED, on_canvas_tauri_closed)  # type: ignore[reportAttributeAccessIssue]
     
     def _show_login(self) -> bool:
         """显示登录界面"""
@@ -749,7 +761,7 @@ class Application:
         self._login_window = login_win
         
         if login_win.try_auto_login():
-            print("✅ 自动登录成功")
+            logger.info("✅ 自动登录成功")
             return True
         
         login_success = [False]
@@ -815,7 +827,10 @@ class Application:
             mw.show()  # type: ignore[reportAttributeAccessIssue]
             mw.raise_()  # type: ignore[reportAttributeAccessIssue]
             mw.activateWindow()  # type: ignore[reportAttributeAccessIssue]
-            
+
+            # 启动后环境自检（延迟执行，避免阻塞启动；仅在缺失关键依赖时提示）
+            self._schedule_startup_check(mw)
+
             auth = self._auth_service
             if auth is not None and auth.is_logged_in:  # type: ignore[reportAttributeAccessIssue]
                 user = auth.current_user  # type: ignore[reportAttributeAccessIssue]
@@ -839,6 +854,23 @@ class Application:
             logger.error(f"应用启动失败: {e}")
             traceback.print_exc()
             return 1
+
+    def _schedule_startup_check(self, parent_window) -> None:
+        """延迟执行一次启动环境自检（仅缺失关键依赖时提示用户）"""
+        try:
+            from PyQt6.QtCore import QTimer
+            from .modules.lego.settings_module import EnvironmentDiagnosticDialog
+
+            def _run():
+                try:
+                    EnvironmentDiagnosticDialog.startup_check(parent_window)
+                except Exception as e:
+                    logger.debug("启动环境自检执行异常（不阻塞启动）: %s", e)
+
+            # 延迟 1.2s，等主窗口完全进入事件循环后再提示
+            QTimer.singleShot(1200, _run)
+        except Exception as e:
+            logger.debug("启动环境自检初始化异常（不阻塞启动）: %s", e)
 
 
 def main():

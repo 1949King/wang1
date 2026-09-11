@@ -3,7 +3,7 @@
  * — 纯函数/常量，不依赖 Zustand store
  * — store.ts 通过 import 引入，并 re-export 给外部保持路径兼容
  */
-import type { Edge, Node } from "@xyflow/react";
+import type { Node } from "@xyflow/react";
 import { MarkerType } from "@xyflow/react";
 import { uid } from "./project-storage";
 
@@ -173,8 +173,9 @@ export type VideoData = {
   refVideoUrl?: string;
   refVideoName?: string;
   // === 视频生成控制 ===
+  qualityTier?: "draft" | "standard" | "fine" | "cinema"; // L1 画质档位（与 shot 一致）
   motionStrength?: number;      // 运动幅度 0-100
-  consistency?: number;         // 风格一致性 0-100
+  consistency?: number;         // 相似度 0-100
   firstFrameWeight?: number;   // 首帧权重 0-1
   lastFrameWeight?: number;    // 尾帧权重 0-1
   seed?: number;
@@ -337,6 +338,31 @@ export type DirectorData = {
   prompt?: string;
 };
 
+/** 导演卡：剧本输入 → 自动拆解角色/场景/分镜（磁吸意图画布 spec §6） */
+export type DirectorCardData = {
+  kind: "directorCard";
+  title: string;
+  script: string;
+  /** 最近一次拆解结果摘要 */
+  lastBreakdown?: { shots: number };
+  status?: NodeStatus;
+  errorMessage?: string;
+};
+
+/** 画布数字人：形象 + 台词 + TTS；口型成片未接模型时诚实失败 */
+export type DigitalHumanData = {
+  kind: "digitalHuman";
+  title: string;
+  characterName: string;
+  line: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  videoUrl?: string;
+  prompt?: string;
+  status?: NodeStatus;
+  errorMessage?: string;
+};
+
 export type AnimationAction = "idle" | "walk" | "run" | "jump" | "attack" | "hit";
 
 /** 逐帧 / Sprite Sheet 动画节点 */
@@ -345,10 +371,12 @@ export type AnimationData = {
   title: string;
   prompt: string;
   action: AnimationAction;
-  frames: 6 | 8 | 12 | 16;
+  frames: 6 | 8 | 12 | 16 | 20;
   sheetUrl?: string;
   previewMode: "sheet" | "playing";
   fps: number;
+  /** 生图模型 key（channel_id::model），用于 AI 生成 sprite sheet */
+  model?: string;
   status?: NodeStatus;
   errorMessage?: string;
 };
@@ -385,6 +413,9 @@ export type SourceData = {
   audioUrl?: string;
   content?: string;
   prompt?: string;
+  editorClipId?: string;
+  editorStatus?: "not_sent" | "sent" | "in_timeline" | "trimmed" | "deleted";
+  editorRange?: string;
 };
 
 export type NodeData =
@@ -403,6 +434,8 @@ export type NodeData =
   | ShotlistData
   | StoryboardData
   | DirectorData
+  | DirectorCardData
+  | DigitalHumanData
   | AnimationData
   | PanoramaData
   | NoteData
@@ -421,7 +454,8 @@ export function animationGrid(frames: number): { cols: number; rows: number } {
   if (frames <= 6) return { cols: 3, rows: 2 };
   if (frames <= 8) return { cols: 4, rows: 2 };
   if (frames <= 12) return { cols: 4, rows: 3 };
-  return { cols: 4, rows: 4 };
+  if (frames <= 16) return { cols: 4, rows: 4 };
+  return { cols: 5, rows: 4 };
 }
 
 export function createShotlistRow(index = 1): ShotlistRow {
@@ -456,9 +490,9 @@ export function inferEdgeType(
   targetKind: NodeData["kind"],
 ): EdgeType {
   const PROMPT_KINDS = new Set<NodeData["kind"]>(["script", "prompt", "text", "config", "markdown", "note"]);
-  const IMAGE_PRODUCERS = new Set<NodeData["kind"]>(["shot", "image", "director", "animation", "panorama", "source"]);
+  const IMAGE_PRODUCERS = new Set<NodeData["kind"]>(["shot", "image", "director", "digitalHuman", "animation", "panorama", "source"]);
   const VIDEO_PRODUCERS = new Set<NodeData["kind"]>(["video"]);
-  const AUDIO_PRODUCERS = new Set<NodeData["kind"]>(["audio"]);
+  const AUDIO_PRODUCERS = new Set<NodeData["kind"]>(["audio", "music", "digitalHuman"]);
 
   if (PROMPT_KINDS.has(sourceKind)) return "prompt";
   if (IMAGE_PRODUCERS.has(sourceKind)) return "image";
@@ -547,6 +581,9 @@ export function makeNode(
       title: "视频",
       prompt: "",
       duration: 5,
+      qualityTier: "standard",
+      motionStrength: 60,
+      consistency: 75,
       ...extra,
     } as VideoData,
     prompt: {
@@ -625,12 +662,26 @@ export function makeNode(
       prompt: "",
       ...extra,
     } as DirectorData,
+    directorCard: {
+      kind: "directorCard",
+      title: "导演卡",
+      script: "",
+      ...extra,
+    } as DirectorCardData,
+    digitalHuman: {
+      kind: "digitalHuman",
+      title: "数字人",
+      characterName: "",
+      line: "",
+      prompt: "",
+      ...extra,
+    } as DigitalHumanData,
     animation: {
       kind: "animation",
-      title: "逐帧动画",
-      prompt: "角色侧视图，白色背景，清晰轮廓",
+      title: "生成动画",
+      prompt: "2D俯视角游戏角色，保持角色造型、朝向、比例和光照一致",
       action: "walk",
-      frames: 8,
+      frames: 20,
       previewMode: "sheet",
       fps: 8,
       ...extra,
@@ -681,6 +732,12 @@ export function makeNode(
   if (type === "director") {
     node.style = { width: 320, height: 280 };
   }
+  if (type === "directorCard") {
+    node.style = { width: 320, height: 240 };
+  }
+  if (type === "digitalHuman") {
+    node.style = { width: 320, height: 360 };
+  }
   if (type === "animation") {
     node.style = { width: 340, height: 300 };
   }
@@ -712,6 +769,8 @@ export const BUILTIN_NODE_KINDS = new Set<NodeData["kind"]>([
   "shotlist",
   "storyboard",
   "director",
+  "directorCard",
+  "digitalHuman",
   "animation",
   "panorama",
   "note",

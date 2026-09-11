@@ -1,8 +1,7 @@
 """
 账号运营插件 (AccountOpsPlugin)
 ================================
-UI 复用 `modules.lego.account_ops_module.AccountOpsModule`，
-不在主导航注册；由拓展中心打开对话框。
+接口壳：IPlugin + 占位 UI。功能已卸，由拓展中心打开。
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ class Plugin(IPlugin):
 
     name: str = "账号运营"
     version: str = "1.0.0"
-    description: str = "多平台账号矩阵、发布队列与爆款建议（实验·插件）"
+    description: str = "插件功能已卸，仅保留接口"
     category: str = "运营工具"
 
     def __init__(self):
@@ -74,7 +73,7 @@ class Plugin(IPlugin):
         return {
             "name": "账号运营",
             "icon": "👤",
-            "description": "多平台账号矩阵与发布（本地队列优先）",
+            "description": "插件功能已卸，仅保留接口",
             "category": "运营工具",
             "widget_class": "AccountOpsModule",
             "params": [],
@@ -90,7 +89,7 @@ class Plugin(IPlugin):
         logger.info("[AccountOpsPlugin] 已禁用")
 
     def run(self, data=None):
-        """返回账号运营 UI 组件。"""
+        """返回账号运营占位组件。"""
         if not getattr(self, "_initialized", False):
             self.initialize(getattr(self, "_context", None) or {})
         if getattr(self, "_widget", None) is None:

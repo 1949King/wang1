@@ -9,7 +9,7 @@
 | **时间线** | 剪辑主画布；UI=`TimelineWidget`，数据=`TimelineManager` + `EditorModule._clips` |
 | **真相源** | 日常剪辑以 `EditorModule._clips` 为准（见 P0 对齐约束） |
 | **素材库** | 素材管理模块 / assets 目录 |
-| **短剧筛选** | Drama finder：仅插件 `drama_finder_plugin`（含 `crawler/`）；运行时经**拓展中心**打开 |
+| **短剧筛选** | Drama finder：插件壳 `drama_finder_plugin`（无爬虫功能）；运行时经**拓展中心**打开；`drama_send_to_editor` 回流签名保留 |
 | **拓展中心** | 注册表 id=`extensions`（原 `plugins` 已迁移）；Skill 工坊 + MCP + 旧插件兼容 |
 | **账号矩阵** | 多账号多平台发布运营 |
 | **AI剪辑** | 自动切片、转场、字幕、策略剪辑；另有编辑器 Agent 面板 |
@@ -29,7 +29,8 @@
 | **WaveformGenerator** | 音频轨峰值波形 |
 | **联动音频片** | 导入视频时自动挂到 audio 轨的同路径片段；主音由视频 QMediaPlayer 播，BGM 同步须跳过 |
 | **墙钟播放** | `QElapsedTimer` 驱动 playhead，忙则丢帧，避免 `+=0.033` 越播越拖 |
-| **3D 导演台** | 画布内 `vendor/shiguang-canvas` 的 Three.js 站位台；素模 **vinchau BodyKun/BodyChan**（CC0，BlendSwap 23521；灰白关节分割人偶，`bodykun-v3`）；点选可见网格；**拉肢 IK**（拉手带动整臂，单人/群像同一套）；**正面=+Z** |
+| **剪辑画布联动** | round-trip：入轨盖 `canvas_node_id`；剪辑回推 outbox 自动落 `source` 节点；`/host/timeline-snapshot` 给画布 Agent 读轨 |
+| **3D 导演台** | 画布内 `vendor/shiguang-canvas` 的 Three.js 站位台；素模 **vinchau BodyKun/BodyChan**（CC0）；点选可见网格；拉肢 IK；正面=+Z。摆姿截图，不是口型数字人 |
 | **群像模板** | 导演台一键生成 2–5 人（对峙/弧形/一字/围圆）；与「重排现有人模」不同 |
 | **账号运营** | 仅拓展中心插件 `account_ops_plugin`（UI 复用 `account_ops_module.py`）；非导航模块 id |
 | **CORE / ADVANCED / EXPERIMENTAL** | 模块分级：核心不可关 / 高级默认关 / 实验默认关（**例外**：`extensions` 实验级但默认开） |

@@ -5,7 +5,7 @@
 
 from PyQt6.QtWidgets import (
     QMainWindow, QToolBar, QLineEdit, QPushButton,
-    QVBoxLayout, QWidget, QProgressBar
+    QVBoxLayout, QWidget, QProgressBar, QLabel
 )
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtGui import QAction, QIcon

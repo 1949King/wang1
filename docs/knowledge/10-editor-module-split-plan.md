@@ -78,3 +78,148 @@ EditorModule 类体：12,855 行（占全文件 96.5%）
 已完成的抽出（见 [`00-overview.md`](00-overview.md)/[`02-architecture.md`](02-architecture.md)）：`clip_transform` · `editor_export` · `editor_burn` · `editor_subtitle_panel` · `text_frame_map` · `edit_commands` · `filler_silence_detect` · `ai_agent_panel`（6 对话方法）· `editor_export_panel`（8 导出方法）。
 
 本方案第一、二期完成后，应回写 `00-overview.md`"已抽出"列表与 `02-architecture.md` 的行数统计，并更新本文档「六」标注实际完成度。
+
+## 七、执行进度（2026-08-21 更新）
+
+### 阶段 1.1 — EditorAiProcessMixin（已完成）
+
+**目标**：按"第二期 AI 工具方法"分组，抽取 AI 处理类方法到独立 Mixin，避开 `playback-av` / `canvas-transform` / `clip-transform` 冻结区。
+
+**抽取方法清单（共 7 个，472 行）**：
+
+| 方法 | 原 editor_module.py 行号 | 用途 |
+|---|---|---|
+| `_run_ai_concat_after_picks` | L5407-5523 | 场景/高光建议勾选后拼接（不默认全写） |
+| `_funclip_process` | L5525-5582 | FunClip 风格 LLM 裁剪 |
+| `_autoclip_process` | L5625-5681 | AutoClip 自动剪辑 |
+| `_lossless_trim_selected` | L5683-5731 | 无损裁剪选中片段 |
+| `_videofusion_process` | L5733-5794 | VideoFusion 视频融合 |
+| `_lora_edit_process` | L5796-5859 | LoRA 风格编辑 |
+| `_try_render_plugin_transition` | L6790-6854 | 插件转场渲染（动画链路） |
+
+**变更**：
+- 新建 [editor_ai_process_mixin.py](file:///d:/拾光剪影/app/modules/lego/editor_ai_process_mixin.py)（516 行，含 7 方法 + import + docstring）
+- editor_module.py 继承列表追加 `EditorAiProcessMixin`
+- editor_module.py 顶部 import 加入 `from .editor_ai_process_mixin import EditorAiProcessMixin`（L169）
+
+**修复**：抽取脚本 `scripts/extract_ai_process_mixin.py` 使用正则定位最后一个 `from .editor_* import` 时，误匹配到 `_clear_msgbox` 函数 docstring 内的伪 import 文本，导致新 import 被插入到 docstring 中间。手动 Edit 把三行 import 移到正确位置（L167-169，紧邻其他 Mixin import），并清理重复占位注释（连续 12 行 `# [Mixin] 已迁移至...` 合并为 3 行单行注释）。
+
+**验收**：
+- ✅ `py_compile` 编译通过
+- ✅ `frozen_zone_guard.py` OK（52 locks intact，无 drift）
+- ✅ EditorModule MRO 正确：`EditorModule → BaseModule → QWidget → ... → AiAgentPanelMixin → EditorExportPanelMixin → EditorAgentPanelMixin → EditorEffectsMixin → EditorUiBuilderMixin → EditorAiProcessMixin`
+- ✅ 7 个方法全部可通过 `EditorModule.<method>` 访问，且来源为 `EditorAiProcessMixin.__dict__`
+
+**行数变化**：
+| 文件 | 抽取前 | 抽取后 | 增量 |
+|---|--:|--:|--:|
+| editor_module.py | 9882 | 9416 | -466 |
+| editor_ai_process_mixin.py | — | 516 | +516 |
+
+### 阶段 1.2 — EditorAiToolsMixin（已完成，2026-08-21）
+
+**范围**：按「纯按钮回调（无直接 `_clips` 写操作）」抽 AI 工具剩余方法，避开冻结区核心。
+
+**抽取方法清单（22 个，297 行）**：
+
+| 方法 | 原行号 | 用途 |
+|---|---|---|
+| `_ensure_viral_engine` | 719-730 | 懒加载爆款引擎 |
+| `_ensure_ai_clip_algorithm` | 732-744 | 懒加载 AI 剪辑算法 |
+| `_generate_ai_subtitles` | 4218-4220 | AI 字幕薄包装（转发 editor_subtitle_panel） |
+| `_emit_ai_progress` | 4239-4244 | 后台线程安全发射进度信号 |
+| `_emit_ai_fail` | 4246-4251 | 后台线程安全发射失败信号 |
+| `connect_to_data_analyzer` | 4285-4288 | 连接数据分析器 |
+| `get_recommendations` | 4290-4294 | 获取推荐策略 |
+| `record_edit_action` | 4296-4305 | 记录编辑操作（数据回流） |
+| `enhance_with_ai` | 4308-4325 | AI 增强视频 |
+| `smart_cut_with_ai` | 4327-4345 | AI 智能剪辑 |
+| `_bind_character_row_events` | 5366-5377 | 绑定角色行交互事件 |
+| `_write_character_pref` | 5379-5389 | 写回角色偏好到 AnalysisCache |
+| `_create_ai_tools_tab` | 5391-5393 | AI 工具标签薄包装 |
+| `_record_ai_tool_history` | 5395-5406 | 写入处理历史列表 |
+| `_refresh_ollama_diagnose_ui` | 5409-5439 | Ollama diagnose 摘要显示 |
+| `_show_ollama_diagnose_detail` | 5441-5448 | 弹窗展示完整 diagnose 文案 |
+| `_apply_manju_portrait_preset` | 5696-5706 | 一键漫剧竖屏预设 |
+| `_apply_landscape_preset` | 5708-5718 | 一键横屏预设 |
+| `_build_agent_score_card` | 8128-8153 | 构造五维打分结果卡 |
+| `_render_score_results` | 8155-8199 | 渲染五维打分结果 |
+| `_on_copy_script_clicked` | 8205-8217 | 复制剪辑脚本到剪贴板 |
+| `_on_export_script_clicked` | 8219-8236 | 导出剪辑脚本到文件 |
+
+**变更**：
+- 新建 [editor_ai_tools_mixin.py](file:///d:/拾光剪影/app/modules/lego/editor_ai_tools_mixin.py)（388 行，含 22 方法 + import + docstring）
+- editor_module.py 继承列表追加 `EditorAiToolsMixin`（L477）
+- editor_module.py 顶部 import 加入 `from .editor_ai_tools_mixin import EditorAiToolsMixin`（L170）
+- Mixin 内自带 `_clear_msgbox` 包装函数（避免循环导入，与 ai_agent_panel.py 同策略）
+- Mixin 内 try/except 降级 import `ViralOptimizationEngine`（失败时 `VIRAL_ENGINE_AVAILABLE=False`，与 editor_module 顶部保持一致）
+
+**验收**：
+- ✅ `py_compile` 编译通过
+- ✅ `frozen_zone_guard.py` OK（52 locks intact）
+- ✅ EditorModule MRO 正确，EditorAiToolsMixin 位于 MRO 末尾（object 之前）
+- ✅ 22 个方法全部可通过 `EditorModule.<method>` 访问，且来源为 `EditorAiToolsMixin.__dict__`
+- ✅ editor_module.py 内无残留定义，`self._record_ai_tool_history(...)` 等旧调用点经 MRO 正确解析
+
+### 累计已完成 Mixin（截至阶段 1.2）
+
+| Mixin | 文件 | 方法数 | 行数 |
+|---|---|--:|--:|
+| AiAgentPanelMixin | ai_agent_panel.py | 6 | 242 |
+| EditorExportPanelMixin | editor_export_panel.py | 8 | ~350 |
+| EditorAgentPanelMixin | editor_agent_panel_mixin.py | 17 | 1667 |
+| EditorEffectsMixin | editor_effects_mixin.py | 12 | 928 |
+| EditorUiBuilderMixin | editor_ui_builder_mixin.py | 10 | 1255 |
+| EditorAiProcessMixin | editor_ai_process_mixin.py | 7 | 516 |
+| **EditorAiToolsMixin** | **editor_ai_tools_mixin.py** | **22** | **388** |
+| EditorAgentRuntimeMixin | editor_agent_runtime_mixin.py | 42 | ~736 |
+| 合计 | — | 124 | ~6082 |
+
+editor_module.py 从历史峰值的 13,321 行持续缩减：阶段 1.1 后约 10,031 行，阶段 1.2 后约 9,753 行，阶段 1.3 后约 9,061 行（splitlines 计数），全程稳定低于 10,000 行硬约束。
+
+### 阶段 1.3 — EditorAgentRuntimeMixin（已完成，2026-08-21）
+
+**范围**：抽取「Agent 面板运行时 UI + 任务控制」纯回调，分两批完成——第一批 18 个（面板切换/定位、上下文持久化、进度/预览卡构建、任务暂停/恢复/重规划/停止、模型/模式读取），第二批 24 个（模型订阅/阶段映射/配置参数读取/进度卡刷新/手动精剪/Plan 模式 UI/全链路事件处理）。两批共 **42 方法 + `_PIPELINE_STAGES` 阶段映射常量，约 736 行**。
+
+**第二批 24 个方法（430 行）+ `_PIPELINE_STAGES`（11 行）**：
+
+| 方法 | 原行号 | 用途 |
+|---|---|---|
+| `_subscribe_provider_activated` / `_on_provider_activated_event` | L7529-7545 | 订阅模型激活事件并刷新下拉 |
+| `_list_local_ollama_models` | L7554-7571 | 读取本地 Ollama 模型列表 |
+| `_PIPELINE_STAGES` / `_stage_progress` / `_stage_label` | L7581-7613 | 全链路阶段 → 进度/标签映射 |
+| `_get_pipeline_params` | L7618-7629 | 收集配置卡 pipeline 参数 |
+| `_refresh_provider_status` | L7631-7668 | 刷新 provider 可用性状态标签 |
+| `_update_pipeline_stage` / `_finalize_pipeline_stage` | L7674-7718 | 进度卡更新/收尾 |
+| `_render_preview_issues` | L7724-7745 | 渲染预览失败片段列表 |
+| `_on_manual_edit_clicked` | L7761-7793 | 一键手动精剪按钮回调 |
+| `_on_edit_agent_chunk` | L7903-7912 | 缓存模型流式输出 |
+| `_show_agent_plan` / `_confirm_agent_plan` / `_cancel_agent_plan` | L7997-8026 | Plan 模式展示/确认/取消 |
+| `_on_agent_feedback` | L8028-8032 | 反馈提示显示 |
+| `_on_edit_agent_stopped` / `_on_edit_agent_finished` | L8071-8100 | 终止/完成按钮状态恢复 |
+| `_on_pipeline_event` + 4 个 `_handle_*` | L8173-8291 | 全链路事件分发与 UI 刷新 |
+| `_on_full_pipeline_done` | L8363-8392 | 全链路完成回调 |
+
+**刻意不拆（🔴 高风险，指令执行/学习闭环）**：`_on_edit_agent_result`/`_do_on_edit_agent_result`、`_parse_agent_plan`、`_on_edit_agent_error`、`_agent_brain_learn`、`_extract_related_capabilities`、`_parse_agent_commands`、`_agent_dispatch`、`agent_ripple_delete_range` 等，均涉及 `_clips` 写或 Hebbian 核心，本阶段不碰。
+
+**变更**：
+- 追加到既有 [editor_agent_runtime_mixin.py](file:///d:/拾光剪影/app/modules/lego/editor_agent_runtime_mixin.py)（373 → 856 行），补 `import os`、`QListWidgetItem`。
+- editor_module.py 删除对应方法体并替换为 `# [Mixin] ... 已迁移` 占位注释。
+
+**验收**：
+- ✅ `py_compile` 编译通过
+- ✅ `frozen_zone_guard.py` OK（52 locks intact，无 drift）
+- ✅ EditorModule 实际 import 通过；`EditorAgentRuntimeMixin` 位于 MRO 中
+- ✅ 42 个方法 + `_PIPELINE_STAGES` 均解析到 `EditorAgentRuntimeMixin.__dict__`（抽宿主后无残留定义）
+- ✅ 跨 Mixin 调用验证：`_on_pipeline_event → _handle_pipeline_done`（EditorAgentPanelMixin）、`_confirm_agent_plan → _apply_agent_commands_to_editor`（AiAgentPanelMixin）经 MRO 正确解析
+
+### 下一步建议（阶段 1.4 候选）
+
+剩余约 9,061 行，按职责分布：
+- 时间线编辑（79 方法/2249 行）— 🔴 高风险，需解冻 `clip-transform`
+- Agent 指令执行/结果回调/学习闭环（约 20 方法/600 行，如 `_agent_dispatch`/`_agent_brain_learn`/`agent_split_clip`）— 🔴 高风险，涉及 `_clips` 写 + Hebbian 核心，禁止近期拆分
+- 预览/渲染（51 方法/1966 行）— 🔴 高风险，紧邻 `playback-av` 冻结区
+- 事件回调/核心机制（129 方法/3102 行）— 🔴 高风险，禁止拆分
+
+🟢/🟡 中低风险可安全抽取的纯 UI/编排回调已基本抽尽（累计 124 方法）。剩余均属 🔴 高风险核心状态机/预览渲染/指令执行，需用户逐项解冻冻结区或架构级重构后才能动，建议单独立项评估。
+

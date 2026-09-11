@@ -16,13 +16,16 @@ from typing import List, Dict, Optional, Callable, Any
 from dataclasses import dataclass, field
 
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QColor
+from PyQt6.QtGui import QKeyEvent, QColor, QPainter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QListWidget, QListWidgetItem, QFrame,
     QStyledItemDelegate, QStyle, QStyleOptionViewItem
 )
 
+
+import logging
+logger = logging.getLogger("AI短剧编辑器.modules.lego.feature_search")
 
 # ═══════════════════════════════════════════════════════════════
 # 拼音映射表 — 覆盖本应用中出现的所有中文功能名
@@ -484,14 +487,14 @@ class FeatureSearchBar(QFrame):
             if tabs is not None:
                 tabs.setCurrentIndex(item.tab_index)
             else:
-                print(f"[FeatureSearch] ⚠️ 未找到 QTabWidget，无法切换到 tab_index={item.tab_index}")
+                logger.info(f'[FeatureSearch] ⚠️ 未找到 QTabWidget，无法切换到 tab_index={item.tab_index}')
 
         # 执行回调
         if item.callback:
             try:
                 item.callback()
             except Exception as e:
-                print(f"[FeatureSearch] 回调执行失败 '{item.name}': {e}")
+                logger.error(f"[FeatureSearch] 回调执行失败 '{item.name}': {e}")
 
         self.feature_triggered.emit(item.name)
         self._hide_popup()
@@ -579,7 +582,7 @@ def build_editor_feature_index(editor) -> FeatureIndex:
                 try:
                     action()
                 except Exception as e:
-                    print(f"[FeatureSearch] 回调执行失败: {e}")
+                    logger.error(f'[FeatureSearch] 回调执行失败: {e}')
         return _cb
 
     # ── 工具栏操作（不需要切换 tab）──

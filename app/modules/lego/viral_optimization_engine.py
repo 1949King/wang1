@@ -184,7 +184,7 @@ class ViralOptimizationEngine:
     def __init__(self):
         """初始化引擎"""
         try:
-            print(f"[ViralOptimizationEngine] ready, genes={len(self.VIRAL_GENES_LIBRARY)}")
+            logger.info(f'[ViralOptimizationEngine] ready, genes={len(self.VIRAL_GENES_LIBRARY)}')
         except Exception as e:
             logger.debug("ViralOptimizationEngine初始化日志输出失败: %s", e)
     

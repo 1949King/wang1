@@ -37,6 +37,7 @@
 | — | 全部发送到剪辑 + duration | ✅ P3.1 |
 | — | 参考图重绘 | ✅ 含**蒙版局部重绘**（`/host/inpaint`） |
 | ⭐⭐ | 3D 导演台（轻量） | ✅ 体素骨骼人·关节摆姿·**单人/群像模板**·正面=+Z·机位·FOV·截图 |
+| ⭐⭐ | 画布数字人 | ✅ 节点 `digitalHuman`：台词 TTS + 形象图入轨；口型成片无模型诚实失败 |
 | — | UI 对齐 LibTV/infinite 简洁风 | ✅ 顶栏 + 折叠面板 |
 | — | 生图工作台真页 | ✅ 提示词/模型/参考图/结果/存资产/进画布/入轨 |
 | — | 视频创作台真页 | ✅ 同上；无模型不假成功 |
@@ -66,19 +67,25 @@
 ## AI-Canvas-tauri → 自研导演台
 
 > 参考仓：[Tenney95/AI-Canvas-tauri](https://github.com/Tenney95/AI-Canvas-tauri)（对照克隆可放 `vendor/AI-Canvas-tauri`，已 gitignore）。**不整仓嵌入 Tauri**。
+>
+> 2026-08-18 对照复核（v0.8.5 本地克隆）：节点**类型在**，多数是**形状对齐**不是产品对齐。对方是独立桌面 AIGC 工作台（Comfy / Dreamina / ONNX / 嵌套 NLE / MCP / IndexedDB v19）；拾光是剪辑宿主里的导演台。
 
-| 能力 | 状态 |
-|------|------|
-| 分镜表 `shotlist` | ✅ 可编辑表 + 绑定画面 + 展开为镜头节点 |
-| 交互宫格 `storyboard` | ✅ 绑源图 / 2–5 宫格 / 单格或全部拖出 |
-| Markdown | ✅ 编辑/预览 |
-| Agent canvas_* | ✅ query / select / duplicate / group / undo·redo / bindShotlistFrame / fillStoryboardCell |
-| 3D 导演台节点 `director` | ✅ 内嵌 Stage3D；截图回写节点 + 另存镜头卡 |
-| 逐帧动画 `animation` | ✅ Sprite Sheet · 占位表 · AI 生成 · 播放预览 |
-| 全景 `panorama` | ✅ 等距柱状环视（轻量，不接 XiaoLuo） |
-| 画布笔记 `note` | ✅ 文字 / 矩形 / 椭圆 / 箭头 |
-| 源文件 `source` | ✅ 本地图/视频/音频/文本入口 |
-| 嵌套 NLE / Comfy 宿主 / Dreamina / ONNX | ❌ 明确不做（本窗口） |
+| 能力 | 状态 | 代码事实 |
+|------|------|----------|
+| 分镜表 `shotlist` | ⚠️ 部分 | 可编辑表 + 绑画面 + 展开镜头；无推 NLE / 时间码 |
+| 交互宫格 `storyboard` | ⚠️ 部分 | 绑源图 / 2–5 方阵裁格；非拖拽、无逐格生成 |
+| Markdown | ⚠️ 薄 | 标题/粗斜体/列表；无表格、围栏代码、存盘 `.md` |
+| Agent canvas_* | ⚠️ 部分 | query / select / duplicate / group / undo·redo / bindShotlistFrame / fillStoryboardCell；无 Plan/B/C、MCP、子智能体 |
+| 3D 导演台节点 `director` | ✅ 路径不同 | 拾光：全页 Stage3D 内嵌人偶 IK/FK；对方：独立窗口托管 `3d-director-desk` |
+| 逐帧动画 `animation` | ⚠️ 薄 | CSS sprite + 一张生图当 sheet；不拆帧、不导出 GIF |
+| 全景 `panorama` | ⚠️ 薄 | `background-position` 平移；不是 equirect / XiaoLuo VR |
+| 画布笔记 `note` | ⚠️ 薄 | 文字 / 矩形 / 椭圆 / 箭头 CSS；不是 Excalidraw 绘层 |
+| 源文件 `source` | ⚠️ 部分 | 本地图/视频/音频/文本入口；不自动派生下游 |
+| 嵌套 NLE / Comfy 宿主 / Dreamina / ONNX | ❌ 明确不做 | 成片入轨走剪辑模块 |
+
+**拾光相对对方更深**：分镜卡 `shot`/`script`/`prompt`、入轨 `_clips`、内嵌 Stage3D（无需另下 ~54MB 运行时）、模型广场统一 Key。
+
+**若只学体验不扩功能**：连线松开接续菜单、单节点 error boundary、工程媒体落盘（减 dataURL 配额爆）——**M0 已落地（2026-08-19）**。不要把 markdown/全景/笔记加厚成对方产品。
 
 ## 明确不做（仍有效）
 

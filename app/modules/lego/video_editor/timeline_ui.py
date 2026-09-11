@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer, QProperty
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QLabel, QPushButton, QSlider, QSpinBox, QCheckBox, QStyleOptionPainter
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsPixmapItem, QGraphicsRectItem
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QTransform
 import logging
 import math
 

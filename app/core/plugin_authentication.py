@@ -16,6 +16,9 @@ from enum import Enum
 from pathlib import Path
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.plugin_authentication")
+
 class PluginSecurityLevel(Enum):
     """插件安全级别"""
     LOW = "low"      # 低风险（仅基础功能）
@@ -104,7 +107,7 @@ class PluginAuthenticator:
                         )
                         certificates[cert.plugin_id] = cert
                 except Exception as e:
-                    print(f"加载证书失败 {file}: {e}")
+                    logger.error(f'加载证书失败 {file}: {e}')
         
         return certificates
     
@@ -248,7 +251,7 @@ class PluginTester:
                         )
                         results[result.plugin_id] = result
                 except Exception as e:
-                    print(f"加载测试结果失败 {file}: {e}")
+                    logger.error(f'加载测试结果失败 {file}: {e}')
         
         return results
     

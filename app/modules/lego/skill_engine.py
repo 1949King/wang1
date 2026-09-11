@@ -460,7 +460,7 @@ class SkillRegistry:
                 self._skills[skill_id] = skill_class
             return True
         except Exception as e:
-            print(f"注册 Skill 失败: {e}")
+            logger.error(f'注册 Skill 失败: {e}')
             return False
     
     def unregister(self, skill_id: str) -> bool:

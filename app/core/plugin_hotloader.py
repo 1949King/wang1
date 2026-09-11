@@ -34,6 +34,9 @@ from .plugin_authentication import (
 )
 
 
+import logging
+logger = logging.getLogger("AI短剧编辑器.core.plugin_hotloader")
+
 @dataclass
 class PluginEvent:
     """插件事件"""
@@ -75,7 +78,7 @@ class PluginManager:
                     self._loader.add_plugin_dir(directory)
                     
             except Exception as e:
-                print(f"加载插件配置失败: {e}")
+                logger.error(f'加载插件配置失败: {e}')
     
     def _save_config(self):
         """保存配置"""
@@ -92,7 +95,7 @@ class PluginManager:
                 json.dump(config, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
-            print(f"保存插件配置失败: {e}")
+            logger.error(f'保存插件配置失败: {e}')
     
     def _emit_event(self, event: PluginEvent):
         """触发事件"""
@@ -101,7 +104,7 @@ class PluginManager:
             try:
                 handler(event)
             except Exception as e:
-                print(f"事件处理失败 {event.event_type}: {e}")
+                logger.error(f'事件处理失败 {event.event_type}: {e}')
     
     def add_event_handler(self, event_type: str, handler: Callable):
         """添加事件处理器"""
@@ -443,7 +446,7 @@ class PluginManager:
             self.start_hot_loading()
             return True
         except Exception as e:
-            print(f"初始化插件管理器失败: {e}")
+            logger.error(f'初始化插件管理器失败: {e}')
             return False
     
     def shutdown(self) -> bool:
@@ -454,7 +457,7 @@ class PluginManager:
             self._save_config()
             return True
         except Exception as e:
-            print(f"关闭插件管理器失败: {e}")
+            logger.error(f'关闭插件管理器失败: {e}')
             return False
     
     def certify_plugin(self, plugin_id: str) -> Dict[str, Any]:
@@ -635,7 +638,7 @@ class PluginInstaller:
             
             return True
         except Exception as e:
-            print(f"安装插件失败: {e}")
+            logger.error(f'安装插件失败: {e}')
             return False
     
     def uninstall_plugin(self, plugin_id: str) -> bool:
@@ -657,7 +660,7 @@ class PluginInstaller:
             
             return True
         except Exception as e:
-            print(f"卸载插件失败: {e}")
+            logger.error(f'卸载插件失败: {e}')
             return False
     
     def install_from_package(self, package_path: str) -> bool:
@@ -680,7 +683,7 @@ class PluginInstaller:
             
             return True
         except Exception as e:
-            print(f"从包安装插件失败: {e}")
+            logger.error(f'从包安装插件失败: {e}')
             return False
     
     def _extract_plugin_info(self, package_path: str) -> Optional[PluginInfo]:
@@ -703,5 +706,5 @@ class PluginInstaller:
             
             return None
         except Exception as e:
-            print(f"提取插件信息失败: {e}")
+            logger.error(f'提取插件信息失败: {e}')
             return None
