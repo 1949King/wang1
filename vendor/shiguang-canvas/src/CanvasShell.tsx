@@ -29,6 +29,7 @@ import {
   type ComfyEngineStatus,
 } from "./bridge";
 import AppNav, { type AppRoute } from "./AppNav";
+import { CANVAS_VERSION_LABEL, CANVAS_VERSION_TITLE } from "./canvasVersion";
 import type { PromptItem } from "./promptLibrary";
 import HomeLanding from "./HomeLanding";
 import NodePalette, { buildAddNodeItems, isBuiltinNodeKind } from "./NodePalette";
@@ -39,9 +40,11 @@ import { LibTvBottomDock } from "./LibTvChrome";
 import { type NodeData, type ViewMode, type CanvasLayoutMode, type ShotData, useCanvasStore } from "./store";
 import { useMagneticDrag } from "./magnetic/useMagneticDrag";
 import { MagneticLines } from "./magnetic/MagneticLines";
-import { SnapSlotHighlight } from "./magnetic/SnapSlotHighlight";
+import { SlotGhost } from "./magnetic/SlotGhost";
+import { SnapSeam } from "./magnetic/SnapSeam";
 import { SoftConnectionLines } from "./magnetic/SoftConnectionLines";
-import { pushSoftConnection, removeSoftConnection } from "./magnetic/SoftConnection";
+import { removeSoftConnection } from "./magnetic/SoftConnection";
+import { computeBonds, bondedSidesMap } from "./magnetic/bonds";
 import type { SoftConnection } from "./magnetic/types";
 import { StackBadge } from "./magnetic/StackBadge";
 import { StatusBadge } from "./magnetic/StatusBadge";
@@ -61,6 +64,8 @@ import MultiSelectToolbar from "./components/canvas/MultiSelectToolbar";
 import ModelSelector from "./components/canvas/ModelSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { getGraphPast, getGraphFuture } from "./stores/history-store";
+import { buildNoviceNodeTypes, NoviceInspector } from "./novice";
+import type { CanvasTier } from "./store";
 
 /** 重面板按需分包：缩短首屏 JS，打开对应模式/侧栏再拉 chunk */
 const PromptLibraryPanel = lazy(() => import("./PromptLibraryPanel"));
@@ -365,6 +370,11 @@ export default function CanvasShell(props: CanvasShellProps) {
   } = props;
 
   const rfRef = useRef<ReactFlowInstance | null>(null);
+  /** 画布档位：小白模式（磁吸意图画布）/ 专业模式（节点画布） */
+  const editorTier = useCanvasStore((s) => s.editorTier);
+  const setEditorTier = useCanvasStore((s) => s.setEditorTier);
+  /** 小白模式：卡片靠磁吸建立关系，不暴露连线与专业参数 */
+  const isNovice = editorTier === "novice";
   // 从 registry 动态读 nodeTypes：内置节点 + 插件节点统一入口
   const registryVersion = useNodeRegistryVersion((s) => s.version);
   const registryNodeTypes = useMemo<NodeTypes>(() => {
@@ -375,6 +385,11 @@ export default function CanvasShell(props: CanvasShellProps) {
     }
     return out;
   }, [registryVersion]);
+  /** 小白模式卡面：内置节点统一换成矩形磁吸卡片，插件节点保留原渲染器 */
+  const shellNodeTypes = useMemo<NodeTypes>(
+    () => (isNovice ? buildNoviceNodeTypes(registryNodeTypes) : registryNodeTypes),
+    [isNovice, registryNodeTypes],
+  );
   const addNodeItems = useMemo(() => buildAddNodeItems(), [registryVersion]);
   const pickNodeByType = (type: string, pos?: { x: number; y: number }) => {
     if (isBuiltinNodeKind(type)) addNode(type, pos);
@@ -416,6 +431,7 @@ export default function CanvasShell(props: CanvasShellProps) {
     }
   });
   const setStatus = useCanvasStore((s) => s.setStatus);
+  const applyComfyWorkflow = useCanvasStore((s) => s.applyComfyWorkflow);
   const selectedId = useCanvasStore((s) => s.selectedId);
   // 角色库（Step A）— 从 store 读取
   const characters = useCanvasStore((s) => s.characters);
@@ -441,32 +457,51 @@ export default function CanvasShell(props: CanvasShellProps) {
   const showGrid = useCanvasStore((s) => s.showGrid);
 
   // ===== 磁吸拖拽 =====
-  const { onNodeDrag: magNodeDrag, onNodeDragStop: magNodeDragStop, magState, draggingId: magDraggingId } = useMagneticDrag({
-    enabled: magneticMode,
+  /** 磁吸相关能力开关：小白模式强制开启磁吸，专业模式按用户开关 */
+  const magneticActive = magneticMode || isNovice;
+  const {
+    onNodeDrag: magNodeDrag,
+    onNodeDragStart: magNodeDragStart,
+    onNodeDragStop: magNodeDragStop,
+    magState,
+    draggingId: magDraggingId,
+    bondState,
+    flash: bondFlash,
+    reflowPlan,
+  } = useMagneticDrag({
+    enabled: magneticActive,
     nodes,
   });
+
+  /** 全画布咬合关系（吸附成功的持久结果），用于渲染咬合缝 */
+  const bonds = useMemo(
+    () => (magneticActive ? computeBonds(nodes) : []),
+    [magneticActive, nodes],
+  );
+
+  /** 咬合侧隐形表（磁贴式无缝，2026-09-16 用户裁定）：贴合边透明描边+直角。
+   *  与 bonds 同源同周期计算，经 store 下发给 NoviceCard（卡片自身不重复推导）。 */
+  const bondedSides = useMemo(
+    () => (magneticActive ? bondedSidesMap(nodes) : {}),
+    [magneticActive, nodes],
+  );
+  useEffect(() => {
+    useCanvasStore.getState().setBondedSides(bondedSides);
+  }, [bondedSides]);
 
   // ===== 软连接（潜在血缘虚线，不落盘）=====
   const [softConnections, setSoftConnections] = useState<SoftConnection[]>([]);
 
-  /** 拖拽结束时：若吸附到 strong 且方向非层叠，自动生成一条软连接 */
+  /** 拖拽结束：吸附 strong = 咬合（bond）已经表达了连接关系，
+   *  2026-09-17 用户裁定「贴合即连接」——不再自动生成软连接虚线/徽章，
+   *  此前贴上还画「此节点输出」箭头属双重表达，无感化原则下废除。 */
   const onSoftDragStop = useCallback(
-    (event: React.MouseEvent, node: Node) => {
+    // 注意：React Flow 的拖拽回调传的是原生 DOM 事件（MouseEvent | TouchEvent），
+    // 不是 React.MouseEvent —— 写成 React.MouseEvent 会与 OnNodeDragStop 类型不兼容。
+    (event: MouseEvent | TouchEvent, node: Node) => {
       magNodeDragStop(event, node);
-      if (!magneticMode || !magDraggingId) return;
-      if (magState.level === "strong" && magState.targetId && magState.direction && magState.direction !== "stack") {
-        const targetNodeId = magState.targetId;
-        const softDirection = magState.direction;
-        setSoftConnections((list) =>
-          pushSoftConnection(list, {
-            sourceId: magDraggingId,
-            targetId: targetNodeId,
-            direction: softDirection,
-          }),
-        );
-      }
     },
-    [magNodeDragStop, magneticMode, magDraggingId, magState],
+    [magNodeDragStop],
   );
 
   /** 一键固化：把软连接转为正式 edge */
@@ -499,7 +534,8 @@ export default function CanvasShell(props: CanvasShellProps) {
   const renameCanvas = useCanvasStore((s) => s.renameCanvas);
   const deleteCanvas = useCanvasStore((s) => s.deleteCanvas);
 
-  const flowEdges = canvasLayoutMode === "flow" ? edges : [];
+  // 小白模式不暴露连线：关系由磁吸吸附 / 软连接虚线承载
+  const flowEdges = canvasLayoutMode === "flow" && !isNovice ? edges : [];
   const storyboardShots = useMemo(
     () =>
       nodes
@@ -607,22 +643,33 @@ export default function CanvasShell(props: CanvasShellProps) {
     return () => window.removeEventListener("shiguang:toggle-minimap", handler);
   }, []);
 
-  // 空白粘贴 ComfyUI 工作流：识别剪贴板中的 workflow JSON → dry-run 解析
+  // 空白粘贴 ComfyUI 工作流：识别剪贴板中的 workflow JSON → 解析 → 落成画布节点
   useEffect(() => {
     const onPaste = (ev: ClipboardEvent) => {
       const text = ev.clipboardData?.getData("text/plain") || "";
       if (!isComfyWorkflowText(text)) return; // 非 ComfyUI 工作流，不拦截
       ev.preventDefault();
       void importComfyWorkflowText(text).then((outcome) => {
-        setStatus(outcome.message);
+        if (!outcome.ok) {
+          setStatus(outcome.message);
+          return;
+        }
+        let json: unknown;
+        try {
+          json = JSON.parse(text.trim());
+        } catch {
+          json = null;
+        }
+        const placed = json != null ? applyComfyWorkflow(json) : 0;
+        setStatus(placed > 0 ? `已导入 ComfyUI 工作流：${placed} 个节点` : outcome.message);
         if (outcome.engineMissing && outcome.detail) {
-          window.alert(`ComfyUI 引擎未安装\n\n${outcome.detail}`);
+          window.alert(`ComfyUI 引擎未安装（节点已铺到画布，生成需引擎）\n\n${outcome.detail}`);
         }
       });
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [setStatus]);
+  }, [setStatus, applyComfyWorkflow]);
 
   useEffect(() => {
     if (!ctxMenu) return;
@@ -778,7 +825,10 @@ export default function CanvasShell(props: CanvasShellProps) {
       <AppNav
         active={navActive}
         onNavigate={(id) => setViewMode(id as ViewMode)}
-        version="v0.1.0"
+        version={CANVAS_VERSION_LABEL}
+        versionTitle={CANVAS_VERSION_TITLE}
+        tier={editorTier}
+        onTierChange={(t: CanvasTier) => setEditorTier(t)}
       />
 
       {viewMode === "home" ? (
@@ -899,21 +949,27 @@ export default function CanvasShell(props: CanvasShellProps) {
             3D 导演台
           </button>
         </div>
-        <div className="seg canvas-layout-seg" title="视图模式">
-          {(["flow", "simple", "storyboard"] as CanvasLayoutMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              className={canvasLayoutMode === m ? "on" : ""}
-              onClick={() => {
-                setCanvasLayoutMode(m);
-                if (m !== "flow") setRightCollapsed(false);
-              }}
-            >
-              {m === "flow" ? "节点" : m === "simple" ? "表单" : "分镜条"}
-            </button>
-          ))}
-        </div>
+        {isNovice ? (
+          <div className="chip" title="小白模式：拖卡片靠近就吸附成关系，拉开即解除">
+            小白模式 · 磁吸意图画布
+          </div>
+        ) : (
+          <div className="seg canvas-layout-seg" title="视图模式">
+            {(["flow", "simple", "storyboard"] as CanvasLayoutMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={canvasLayoutMode === m ? "on" : ""}
+                onClick={() => {
+                  setCanvasLayoutMode(m);
+                  if (m !== "flow") setRightCollapsed(false);
+                }}
+              >
+                {m === "flow" ? "节点" : m === "simple" ? "表单" : "分镜条"}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="spacer" />
         <div className="libtv-top-right">
           <span
@@ -1406,7 +1462,7 @@ export default function CanvasShell(props: CanvasShellProps) {
               nodes={nodes}
               edges={flowEdges}
               className={[
-                canvasLayoutMode !== "flow" ? "canvas-simple-edges-off" : "",
+                canvasLayoutMode !== "flow" && !isNovice ? "canvas-simple-edges-off" : "",
                 zoomPct < 60 ? "zoomed-out" : "",
               ].filter(Boolean).join(" ") || undefined}
               onNodesChange={onNodesChange}
@@ -1443,7 +1499,11 @@ export default function CanvasShell(props: CanvasShellProps) {
                 setZoomPct(Math.round(inst.getZoom() * 100));
               }}
               onMoveEnd={(_, vp) => setZoomPct(Math.round(vp.zoom * 100))}
-              onNodeDragStart={() => beginGraphEdit()}
+              onNodeDragStart={(e, n) => {
+                // 磁吸 Hook 需要拖拽开始时的咬合快照，之后再进入常规的图编辑事务
+                magNodeDragStart(e, n);
+                beginGraphEdit();
+              }}
               onNodeDrag={magNodeDrag}
               onNodeDragStop={onSoftDragStop}
               onPaneClick={(e) => {
@@ -1492,7 +1552,7 @@ export default function CanvasShell(props: CanvasShellProps) {
                 });
               }}
               onlyRenderVisibleElements
-              nodeTypes={registryNodeTypes}
+              nodeTypes={shellNodeTypes}
               minZoom={0.15}
               maxZoom={2.5}
               deleteKeyCode={null}
@@ -1501,7 +1561,10 @@ export default function CanvasShell(props: CanvasShellProps) {
               panOnDrag={spacePan ? true : [1]}
               panOnScroll
               zoomOnScroll
-              snapToGrid={snapGrid}
+              /* 小白模式关闭 16px 网格吸附：卡片位置会被量化成 16 的整数倍，
+                 导致「分离拉力」变成台阶式跳变、失去阻力的细腻手感。
+                 小白的对齐由磁吸贴合（gap=0）负责，不需要网格。 */
+              snapToGrid={isNovice ? false : snapGrid}
               snapGrid={[16, 16]}
               proOptions={{ hideAttribution: true }}
               colorMode="dark"
@@ -1512,23 +1575,23 @@ export default function CanvasShell(props: CanvasShellProps) {
               {showMiniMap ? <MiniMap pannable zoomable /> : null}
               <Controls />
               <CanvasToolbar />
-              {magneticMode && magState.level !== "none" ? (
+              {/* 咬合缝：吸附成功的持久提示（已吸附 / 拉伸中 / 即将断开 + 落座闪光） */}
+              {magneticActive ? (
+                <SnapSeam bonds={bonds} bondState={bondState} flash={bondFlash} />
+              ) : null}
+              {magneticActive && magState.level !== "none" ? (
                 <MagneticLines
                   nodes={nodes}
                   magState={magState}
                   draggingId={magDraggingId}
                 />
               ) : null}
-              {/* 六向槽位高亮：输入/输出/并行/分支（spec 4.3） */}
-              {magneticMode && magState.targetId && magState.direction ? (
-                <SnapSlotHighlight
-                  targetId={magState.targetId}
-                  direction={magState.direction}
-                  level={magState.level}
-                />
-              ) : null}
+              {/* 整列让位坑位预览（2026-09-18 借鉴手机主屏手感 · 第 2 条机制）：
+                  拖拽中被挡住的同行/列卡片会让开，这里预告拖拽卡将占住的坑位。
+                  仅预览，真实位移在松手时统一执行。 */}
+              {magneticActive ? <SlotGhost plan={reflowPlan} /> : null}
               {/* 软连接（潜在血缘虚线 + 一键固化） */}
-              {magneticMode ? (
+              {magneticActive ? (
                 <SoftConnectionLines
                   nodes={nodes}
                   connections={softConnections}
@@ -1785,8 +1848,11 @@ export default function CanvasShell(props: CanvasShellProps) {
             ) : null}
           </div>
 
+          {!agentPanelOpen ? (
           <aside className={`inspector${rightCollapsed ? " collapsed" : ""}`}>
-            {rightCollapsed ? null : (
+            {rightCollapsed ? null : isNovice ? (
+              <NoviceInspector />
+            ) : (
             <>
             <div className="section-title">项目</div>
             <div className="field">
@@ -3085,6 +3151,7 @@ export default function CanvasShell(props: CanvasShellProps) {
             </>
             )}
           </aside>
+          ) : null}
           {agentPanelOpen ? (
             <Suspense fallback={<PanelFallback label="Agent" />}>
               <AgentPanel

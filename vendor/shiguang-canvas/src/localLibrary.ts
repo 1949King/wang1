@@ -164,3 +164,109 @@ export function showcaseFromLibrary(limit = 6): {
   }));
   return [...fromAssets, ...fromPrompts];
 }
+
+// ════════════════════════════════════════════════════════════════════════
+//  资产自动分类（类型 + 语义细分，确定性规则、零随机）
+// ════════════════════════════════════════════════════════════════════════
+
+export type AssetTypeKind = LocalAsset["kind"]; // "image" | "video" | "text"
+
+export const ASSET_TYPE_LABEL: Record<AssetTypeKind, string> = {
+  image: "图片",
+  video: "视频",
+  text: "文本",
+};
+
+export type AssetSemantic = "character" | "scene" | "storyboard" | "cover" | "other";
+
+export const ASSET_SEMANTIC_LABEL: Record<AssetSemantic, string> = {
+  character: "角色",
+  scene: "场景",
+  storyboard: "分镜",
+  cover: "封面",
+  other: "未分类",
+};
+
+/** 语义分类规则：按优先级命中（角色 > 场景 > 分镜 > 封面），
+ *  文本匹配 title + prompt，规则可读、可预期，无随机。 */
+const SEMANTIC_RULES: { id: AssetSemantic; re: RegExp }[] = [
+  { id: "character", re: /角色|人物|人像|肖像|character|portrait|person|面部|脸部/i },
+  { id: "scene", re: /场景|环境|背景|风景|scene|environment|landscape|室内|室外/i },
+  { id: "storyboard", re: /分镜|storyboard|shot|镜头|运镜|中景|全景|特写|近景|镜\s*\d/i },
+  { id: "cover", re: /封面|海报|cover|poster|标题卡|片头/i },
+];
+
+export function semanticOfAsset(a: LocalAsset): AssetSemantic {
+  const text = `${a.title || ""} ${a.prompt || ""}`;
+  for (const r of SEMANTIC_RULES) if (r.re.test(text)) return r.id;
+  return "other";
+}
+
+export type AssetFolder = {
+  /** 叶子文件夹唯一键，如 "image/character"；文本为 "text" */
+  id: string;
+  kind: AssetTypeKind;
+  /** 文本类型没有语义层，为 null */
+  semantic: AssetSemantic | null;
+  label: string;
+  count: number;
+  items: LocalAsset[];
+};
+
+export type AssetTypeFolder = {
+  kind: AssetTypeKind;
+  label: string;
+  count: number;
+};
+
+const SEMANTIC_ORDER: AssetSemantic[] = ["character", "scene", "storyboard", "cover", "other"];
+
+/** 构建资产树：类型 → 语义（文本仅一层）。只返回 count > 0 的文件夹，避免空文件夹。 */
+export function buildAssetTree(assets: LocalAsset[]): {
+  types: AssetTypeFolder[];
+  folders: AssetFolder[];
+  foldersOfType: (kind: AssetTypeKind) => AssetFolder[];
+} {
+  const byKind: Record<AssetTypeKind, LocalAsset[]> = { image: [], video: [], text: [] };
+  for (const a of assets) byKind[a.kind].push(a);
+
+  const folders: AssetFolder[] = [];
+  for (const kind of ["image", "video", "text"] as AssetTypeKind[]) {
+    const list = byKind[kind];
+    if (kind === "text") {
+      if (list.length) {
+        folders.push({ id: "text", kind: "text", semantic: null, label: "文本", count: list.length, items: list });
+      }
+      continue;
+    }
+    const semMap = new Map<AssetSemantic, LocalAsset[]>();
+    for (const a of list) {
+      const s = semanticOfAsset(a);
+      if (!semMap.has(s)) semMap.set(s, []);
+      semMap.get(s)!.push(a);
+    }
+    for (const s of SEMANTIC_ORDER) {
+      const items = semMap.get(s) || [];
+      if (items.length) {
+        folders.push({
+          id: `${kind}/${s}`,
+          kind,
+          semantic: s,
+          label: ASSET_SEMANTIC_LABEL[s],
+          count: items.length,
+          items,
+        });
+      }
+    }
+  }
+
+  const types: AssetTypeFolder[] = (["image", "video", "text"] as AssetTypeKind[])
+    .map((kind) => ({ kind, label: ASSET_TYPE_LABEL[kind], count: byKind[kind].length }))
+    .filter((t) => t.count > 0);
+
+  return {
+    types,
+    folders,
+    foldersOfType: (kind: AssetTypeKind) => folders.filter((f) => f.kind === kind),
+  };
+}

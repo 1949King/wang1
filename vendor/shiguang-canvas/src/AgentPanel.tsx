@@ -937,44 +937,53 @@ export default function AgentPanel({
         <span className={providers.some((p) => p.configured) ? "chip-ok" : "chip-warn"}>
           {providers.find((p) => p.active)?.name || "模型管理"}
         </span>
-        <button
-          type="button"
-          className="btn"
-          title="暂停当前任务"
-          onClick={() => {
-            void controlAgentSession({ session_id: sid, action: "pause" });
-            busyRef.current = false;
-            setBusy(false);
-            push("system", "已暂停。点继续后再发送。");
-          }}
-        >
-          暂停
-        </button>
-        <button
-          type="button"
-          className="btn"
-          title="继续任务"
-          onClick={() => {
-            void controlAgentSession({ session_id: sid, action: "resume" });
-            push("system", "已继续。");
-          }}
-        >
-          继续
-        </button>
-        <button
-          type="button"
-          className="btn"
-          title="停止当前 Agent 任务"
-          onClick={() => {
-            void controlAgentSession({ session_id: sid, action: "stop" });
-            inboxRef.current = [];
-            busyRef.current = false;
-            setBusy(false);
-            push("system", "已停止跟踪（供应商若不支持远端取消，生成可能仍在跑）。");
-          }}
-        >
-          停止
-        </button>
+        {/*
+          头部瘦身（V4.34.0 · 第一步）：控制按钮**按状态显示**，不再常驻 3 个。
+          忙碌 → 「暂停 / 停止」；空闲 → 「继续」（用于暂停后恢复）。任意时刻最多 2 个，头部更清爽。
+        */}
+        {busy ? (
+          <>
+            <button
+              type="button"
+              className="btn"
+              title="暂停当前任务（点「继续」后才会再跑）"
+              onClick={() => {
+                void controlAgentSession({ session_id: sid, action: "pause" });
+                busyRef.current = false;
+                setBusy(false);
+                push("system", "已暂停。点「继续」后再发送。");
+              }}
+            >
+              暂停
+            </button>
+            <button
+              type="button"
+              className="btn"
+              title="停止当前 Agent 任务"
+              onClick={() => {
+                void controlAgentSession({ session_id: sid, action: "stop" });
+                inboxRef.current = [];
+                busyRef.current = false;
+                setBusy(false);
+                push("system", "已停止跟踪（供应商若不支持远端取消，生成可能仍在跑）。");
+              }}
+            >
+              停止
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            title="继续任务 / 处理排队中的消息"
+            onClick={() => {
+              void controlAgentSession({ session_id: sid, action: "resume" });
+              push("system", "已继续。");
+            }}
+          >
+            继续
+          </button>
+        )}
         <button type="button" className="btn" onClick={onClose} title="收起侧栏">
           收起
         </button>
@@ -1384,7 +1393,7 @@ export default function AgentPanel({
             </p>
           ) : (
             <>
-              {/* 总览卡 */}
+              {/* 总览卡（画布为单一深色主题，沿用既有 inline 配色，不动冻结区 styles.css） */}
               <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 <div className="sg-budget-card" style={{ background: "#1e293b" }}>
                   <div className="sg-budget-label">累计成本</div>

@@ -5,16 +5,16 @@
  * 拖拽节点时计算磁力，靠近目标节点产生吸附效果。
  */
 
-/** 磁吸等级 */
-export type MagneticLevel = "none" | "weak" | "medium" | "strong";
+/** 磁吸等级（2026-09-17 用户裁定：新增 instant——拖拽中边距 < instantDistance 直接 snap，不走渐进） */
+export type MagneticLevel = "none" | "weak" | "medium" | "strong" | "instant";
 
-/** 空间方向语义 */
+/** 空间方向（纯物理方位，无语义；2026-09-18 方案 A 剥离业务语义） */
 export type SpatialDirection =
-  | "left"    // 输入 / 参考
-  | "right"   // 输出 / 后续
-  | "top"     // 并行 / 对照
-  | "bottom"  // 分支 / 备注
-  | "stack";  // 层叠 / 版本
+  | "left"    // 左
+  | "right"   // 右
+  | "top"     // 上
+  | "bottom"  // 下
+  | "stack";  // 层叠
 
 /** 磁吸配置 */
 export interface MagneticConfig {
@@ -24,6 +24,8 @@ export interface MagneticConfig {
   mediumDistance: number;
   /** 强磁吸距离（px），进入即吸附（对齐 spec：25px，落座） */
   strongDistance: number;
+  /** 瞬时磁吸距离（px），进入即拖拽中直接 snap，不走渐进吸引（2026-09-17 用户裁定，对齐 Win11 磁贴手感）；默认 10 */
+  instantDistance: number;
   /** 吸引力曲线指数（越大越急促） */
   attractionCurve: number;
   /** 吸附动画 / 回弹时长（ms）（对齐 spec：200ms） */
@@ -34,6 +36,10 @@ export interface MagneticConfig {
   stretchThreshold: number;
   /** 断裂阈值（px），超过即解除磁吸关系（对齐 spec：50px） */
   breakThreshold: number;
+  /** 咬合判定容差（px）：两卡边距 ≤ 此值即视为「已吸附」，用于渲染咬合缝 */
+  bondTolerance: number;
+  /** 断裂前的给出比例：拉力超出拉伸段后，卡片只让出超出量的这个比例（制造「绷住」的阻力感） */
+  bondGiveRatio: number;
 }
 
 /** 磁吸计算结果 */
@@ -49,32 +55,26 @@ export interface MagneticResult {
 }
 
 /**
- * 方向语义标签
+ * 方向语义已剥离（2026-09-18 方案 A）
  *
- * 六向语义（对齐 spec 4.3）映射关系：
- * - left / right / top / bottom 四向为空间方位，方向决定语义
- * - 前（导演卡）与 后（历史版本）均通过「拖到卡片上」的层叠动作触发，
- *   物理上都是重叠 → 统一收敛为 stack（层叠/版本）这一方向，
- *   故实现层用 stack 承载 spec 中的「前 / 后」两个语义维度。
+ * 早期迭代曾把空间方向（left/right/top/bottom/stack）硬套上「输入/输出/对照/分支」
+ * 等业务语义（DIRECTION_SEMANTICS），但用户从未要求过这类「对照关系」——
+ * 属于过度设计。磁吸回到纯空间关系：方向只表示物理方位，吸附反馈统一为蓝色占位缝。
  */
-export const DIRECTION_SEMANTICS: Record<SpatialDirection, { label: string; color: string }> = {
-  left: { label: "输入 · 参考", color: "#22d3ee" },
-  right: { label: "输出 · 接续", color: "#4ade80" },
-  top: { label: "并行 · 对照", color: "#fbbf24" },
-  bottom: { label: "分支 · 备选", color: "#f87171" },
-  stack: { label: "前·导演卡 / 后·历史版本", color: "#c084fc" },
-};
 
-/** 默认磁吸配置（距离阈值对齐 spec：80/50/25；回弹 200ms；过冲 5px） */
+/** 默认磁吸配置（距离阈值：2026-09-17 用户裁定放大 weak 80→120、strong 25→60；新增 instant=10；medium 50 不动；吸引力曲线/过冲/回弹/拉伸/断裂全部不变） */
 export const DEFAULT_MAG_CONFIG: MagneticConfig = {
-  weakDistance: 80,
+  weakDistance: 120,
   mediumDistance: 50,
-  strongDistance: 25,
+  strongDistance: 60,
+  instantDistance: 10,
   attractionCurve: 2.0,
   snapAnimationMs: 200,
   overshootPx: 5,
   stretchThreshold: 30,
   breakThreshold: 50,
+  bondTolerance: 2,
+  bondGiveRatio: 0.28,
 };
 
 /** 卡片宽高（用于吸附位置计算；对齐 spec：240×200） */
@@ -90,17 +90,72 @@ export interface MagneticDragState {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+//  咬合 — Bond（吸附成功之后的持久贴合关系）
+// ════════════════════════════════════════════════════════════════════════
+//  说明：咬合不是「拖拽中的临时磁吸」，而是两张卡真正贴合后的结果状态。
+//  它由几何关系推导（边距 ≤ bondTolerance 且投影重叠），因此刷新后依然成立，
+//  无需落盘。画面上的表现就是「咬合缝」——那条明显的接缝色带。
+
+/** 两卡之间的咬合关系 */
+export interface Bond {
+  /** 无向键：两个 id 排序后拼接，保证同一对只出现一次 */
+  key: string;
+  aId: string;
+  bId: string;
+  /** b 相对 a 的方向（右/左/下/上） */
+  side: SpatialDirection;
+  /** 贴合缝走向：vertical = 左右贴合（缝是竖的）；horizontal = 上下贴合（缝是横的） */
+  axis: "vertical" | "horizontal";
+  /**
+   * 咬合缝的中心线（流坐标）：
+   * vertical 时 w = 0，用 (x, y, h) 描述竖线；horizontal 时 h = 0，用 (x, y, w) 描述横线。
+   * 渲染层自行决定缝的厚度（以中心线为准左右/上下各铺一半）。
+   */
+  seam: { x: number; y: number; w: number; h: number };
+}
+
+/** 咬合在拖拽分离过程中的阶段 */
+export type BondPhase = "idle" | "stretching" | "strained";
+
+/** 咬合拖拽状态 */
+export interface BondState {
+  /** 当前正在被拉扯的咬合（拖拽中且尚未断裂） */
+  bond: Bond | null;
+  phase: BondPhase;
+  /** 0~1 拉扯进度：0 = 完全贴合，1 = 到达断裂阈值 */
+  strain: number;
+  /** 是否正在施加位移压制（卡片被「粘住」） */
+  resisted: boolean;
+}
+
+/** 咬合的一次性事件（用于落座 / 断裂闪光） */
+export interface BondFlash {
+  kind: "snap" | "break";
+  bond: Bond;
+  /** 事件时间戳（performance.now()） */
+  at: number;
+}
+
+export const IDLE_BOND_STATE: BondState = {
+  bond: null,
+  phase: "idle",
+  strain: 0,
+  resisted: false,
+};
+
+/** 咬合缝的配色：稳定 / 拉伸 / 临界 / 落座闪光 / 断裂闪光 */
+export const BOND_COLORS = {
+  stretching: "#fbbf24",
+  strained: "#f87171",
+  snapFlash: "#4ade80",
+  breakFlash: "#f87171",
+  /** 缝上的白色高光，保证在深色卡面上也足够醒目 */
+  highlight: "#ffffff",
+} as const;
+
+// ════════════════════════════════════════════════════════════════════════
 //  软连接 — Soft Connection
 // ════════════════════════════════════════════════════════════════════════
-
-/** 软连接方向语义标签（复用磁吸方向，但用更口语的表达） */
-export const SOFT_CONNECTION_SEMANTICS: Record<SpatialDirection, { label: string; color: string }> = {
-  left: { label: "参考此节点", color: "#22d3ee" },
-  right: { label: "此节点输出", color: "#4ade80" },
-  top: { label: "平行对照", color: "#fbbf24" },
-  bottom: { label: "分支备选", color: "#f87171" },
-  stack: { label: "版本关系", color: "#c084fc" },
-};
 
 /** 软连接记录 — 一条待确认的血缘虚线 */
 export interface SoftConnection {

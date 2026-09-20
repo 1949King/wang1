@@ -1,17 +1,22 @@
 /**
  * 软连接可视化层
  *
- * 渲染"潜在血缘"虚线，表示两个节点可能有先后/依赖/对照关系但尚未确认。
+ * 渲染"潜在血缘"虚线，表示两个节点可能有先后/依赖关系但尚未确认。
  * 每条虚线中点有"固化"按钮，点击后通知父组件转为正式 edge。
+ *
+ * 2026-09-18 方案 A：剥离方向业务语义——虚线统一中性青色，不再按方向
+ * 渲染「参考/输出/对照/分支」等标签（软连接当前恒空，仅保留链路备用）。
  */
 
 import { memo } from "react";
 import type { Node } from "@xyflow/react";
 import {
   CARD_SIZE,
-  SOFT_CONNECTION_SEMANTICS,
   type SoftConnection,
 } from "./types";
+
+/** 软连接虚线统一色（中性青色，非方向语义色） */
+const CONN_COLOR = "#22d3ee";
 
 interface SoftConnectionLinesProps {
   nodes: Node[];
@@ -58,14 +63,12 @@ function SoftConnectionLinesImpl({
         const midX = (a.x + b.x) / 2;
         const midY = (a.y + b.y) / 2 - 8;
 
-        const sem = SOFT_CONNECTION_SEMANTICS[conn.direction];
-
         return (
           <g key={conn.id}>
             {/* 虚线 */}
             <path
               d={`M ${a.x} ${a.y} Q ${midX} ${midY} ${b.x} ${b.y}`}
-              stroke={sem.color}
+              stroke={CONN_COLOR}
               strokeWidth={1.5}
               strokeDasharray="5 5"
               fill="none"
@@ -80,7 +83,7 @@ function SoftConnectionLinesImpl({
                 onConfirm(conn);
               }}
             >
-              <circle cx={midX} cy={midY} r={11} fill={sem.color} opacity={0.85} />
+              <circle cx={midX} cy={midY} r={11} fill={CONN_COLOR} opacity={0.85} />
               <text
                 x={midX}
                 y={midY + 4}
@@ -92,18 +95,6 @@ function SoftConnectionLinesImpl({
                 ⚡
               </text>
             </g>
-
-            {/* 标签 */}
-            <text
-              x={midX}
-              y={midY - 14}
-              textAnchor="middle"
-              fontSize={9}
-              fill={sem.color}
-              opacity={0.8}
-            >
-              {sem.label}
-            </text>
           </g>
         );
       })}

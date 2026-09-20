@@ -34,11 +34,11 @@ export type CanvasNodeDefinition = {
 export type PluginRuntimeAI = {
   generateImage: (
     prompt: string,
-    opts?: { references?: string[]; model?: string; count?: number; size?: string },
+    opts?: { references?: string[]; model?: string; count?: number; size?: string; quality?: string },
   ) => Promise<string[]>;
   generateVideo: (
     prompt: string,
-    opts?: { references?: string[]; model?: string; duration?: number },
+    opts?: { references?: string[]; model?: string; duration?: number; quality?: string },
   ) => Promise<string>;
   generateText: (
     prompt: string,

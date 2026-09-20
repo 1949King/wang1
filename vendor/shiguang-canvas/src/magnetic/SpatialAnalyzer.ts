@@ -1,13 +1,16 @@
 /**
  * 空间布局分析器
  *
- * 分析画布上节点的空间分布，识别布局模式：
- * - sequence  横排序列（镜头流）
- * - parallel  并行对照（AB 测试）
- * - loop      环状循环（迭代）
- * - branch    主线+支线（备选方案）
- * - cluster   场景组（聚堆的节点集合）
+ * 分析画布上节点的空间分布，识别布局模式（纯几何，无业务语义）：
+ * - sequence  横向排列
+ * - parallel  纵向排列
+ * - loop      环状排列
+ * - branch    主线+支线布局
+ * - cluster   聚堆成组
  * - free      自由布局
+ *
+ * 2026-09-18 方案 A：剥离业务语义——原 description 文案里的「对照关系/版本对照/
+ * 备选方案/一场戏」等臆造语义猜测已移除，布局模式只描述几何形态。
  *
  * 纯函数，无 React 依赖，可独立测试。
  */
@@ -15,13 +18,13 @@
 import type { Node } from "@xyflow/react";
 import { CARD_SIZE } from "./types";
 
-/** 空间布局模式 */
+/** 空间布局模式（纯几何形态，不携带业务语义） */
 export type SpatialPattern =
-  | "sequence"    // 横排：镜头序列
-  | "parallel"    // 并行：多版本对照
-  | "loop"        // 环状：循环迭代
-  | "branch"      // 主线+支线：备选方案
-  | "cluster"     // 场景组：聚堆
+  | "sequence"    // 横向排列
+  | "parallel"    // 纵向排列
+  | "loop"        // 环状排列
+  | "branch"      // 主线+支线布局
+  | "cluster"     // 聚堆成组
   | "free";       // 自由：无模式
 
 /** 场景组 — 空间上聚在一起的节点集合 */
@@ -59,10 +62,10 @@ export function analyzeSpatialPattern(nodes: Node[]): SpatialAnalysisResult {
     const dx = Math.abs(a.position.x - b.position.x);
     const dy = Math.abs(a.position.y - b.position.y);
     if (dx > dy * 1.5) {
-      return { pattern: "sequence", clusters, description: "横向排列，可能是序列关系" };
+      return { pattern: "sequence", clusters, description: "横向排列" };
     }
     if (dy > dx * 1.5) {
-      return { pattern: "parallel", clusters, description: "纵向排列，可能是对照关系" };
+      return { pattern: "parallel", clusters, description: "纵向排列" };
     }
     return { pattern: "free", clusters, description: "两个节点" };
   }
@@ -71,11 +74,11 @@ export function analyzeSpatialPattern(nodes: Node[]): SpatialAnalysisResult {
   const pattern = detectPattern(nodes, clusters);
 
   const descriptions: Record<SpatialPattern, string> = {
-    sequence: "节点横向排列，形成镜头序列",
-    parallel: "节点纵向并行，可能是版本对照",
-    loop: "节点形成环状，可能是循环迭代",
-    branch: "有主线和支线，可能是备选方案",
-    cluster: "节点聚集成组，可能是一场戏",
+    sequence: "节点横向排列",
+    parallel: "节点纵向排列",
+    loop: "节点形成环状排列",
+    branch: "节点呈主线加支线布局",
+    cluster: "节点聚集成组",
     free: "自由布局",
   };
 
@@ -186,7 +189,7 @@ function detectPattern(nodes: Node[], clusters: SceneCluster[]): SpatialPattern 
     }
   }
 
-  // 并行对照：高度远大于宽度，且列数少
+  // 纵向排列：高度远大于宽度，且列数少
   if (height > width * 1.5) {
     return "parallel";
   }
@@ -227,7 +230,7 @@ export function autoLayoutSequence(
 }
 
 /**
- * 自动排列：按并行模式整理节点
+ * 自动排列：按纵向模式整理节点
  */
 export function autoLayoutParallel(
   nodes: Node[],

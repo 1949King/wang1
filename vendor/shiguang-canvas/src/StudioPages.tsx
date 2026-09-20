@@ -8,16 +8,24 @@ import {
   startCanvasAgent,
 } from "./bridge";
 import {
+  ASSET_SEMANTIC_LABEL,
+  ASSET_TYPE_LABEL,
+  buildAssetTree,
   deleteAsset,
   deletePrompt,
   listAssets,
   listPrompts,
   upsertPrompt,
+  type AssetSemantic,
+  type AssetTypeKind,
   type LocalAsset,
   type LocalPrompt,
 } from "./localLibrary";
 import PromptLibraryPanel from "./PromptLibraryPanel";
 import type { PromptItem } from "./promptLibrary";
+import { useCanvasStore } from "./store";
+import { readProjectsIndex } from "./stores/project-storage";
+import "./assets-folder.css";
 
 type Props = {
   route: Exclude<AppRoute, "home" | "canvas" | "stage3d" | "image" | "video">;
@@ -46,11 +54,23 @@ export default function StudioPage({
   const refresh = () => setTick((t) => t + 1);
   const prompts = useMemo(() => listPrompts(), [tick]);
   const assets = useMemo(() => listAssets(), [tick]);
+  /** 画布档位与当前档位下的工程数（两个档位各自独立工程文件） */
+  const editorTier = useCanvasStore((s) => s.editorTier);
+  const setEditorTier = useCanvasStore((s) => s.setEditorTier);
+  const tierProjectCount = useMemo(
+    () => readProjectsIndex().filter((m) => (m.tier || "pro") === editorTier).length,
+    [editorTier, tick],
+  );
   const [q, setQ] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftText, setDraftText] = useState("");
   const [promptTab, setPromptTab] = useState<"community" | "mine">("community");
   const [promptStatus, setPromptStatus] = useState("");
+  /** 资产分类导航：null = 顶层类型文件夹；{kind, semantic:null} = 语义层；{kind, semantic} = 资产列表 */
+  const [assetNav, setAssetNav] = useState<{
+    kind: AssetTypeKind;
+    semantic: AssetSemantic | null;
+  } | null>(null);
 
   const [modelInfo, setModelInfo] = useState({
     image: 0,
@@ -200,56 +220,112 @@ export default function StudioPage({
   }
 
   if (route === "assets") {
-    const filtered = assets.filter(
-      (a) => !q.trim() || a.title.includes(q) || (a.prompt || "").includes(q),
+    const tree = buildAssetTree(assets);
+    const searching = q.trim().length > 0;
+    const searchList = searching
+      ? assets.filter((a) => a.title.includes(q.trim()) || (a.prompt || "").includes(q.trim()))
+      : [];
+    const currentFolder = assetNav
+      ? tree.folders.find(
+          (f) => f.kind === assetNav.kind && (assetNav.kind === "text" || f.semantic === assetNav.semantic),
+        )
+      : undefined;
+
+    const renderFolder = (id: string, label: string, count: number, open: () => void) => (
+      <button key={id} type="button" className="asset-folder-card" onClick={open}>
+        <span className="asset-folder-ico">📁</span>
+        <span className="asset-folder-name">{label}</span>
+        <span className="asset-folder-count">{count} 项</span>
+      </button>
     );
+    const renderAssetCard = (a: LocalAsset) => (
+      <article key={a.id} className="studio-card">
+        {a.kind === "video" ? (
+          <video src={a.url} controls playsInline />
+        ) : a.kind === "image" ? (
+          <img src={a.url} alt="" />
+        ) : (
+          <div className="studio-empty">{a.prompt || a.title}</div>
+        )}
+        <div className="studio-card-meta">{a.title}</div>
+        <div className="studio-card-actions">
+          <button type="button" className="btn primary" onClick={() => onInsertAsset(a)}>
+            进画布
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              deleteAsset(a.id);
+              refresh();
+            }}
+          >
+            删除
+          </button>
+        </div>
+      </article>
+    );
+
     return (
       <main className="studio-page library">
         <aside className="studio-side">
           <h1>我的资产</h1>
-          <p className="muted">生图/视频工作台「存资产」会出现在这里</p>
+          <p className="muted">自动按「类型 + 语义」分类收纳</p>
           <div className="field">
             <label>搜索</label>
             <input value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <p className="muted">共 {assets.length} 条 · 画布节点资产约 {assetCount}</p>
+          {assetNav && !searching && (
+            <button type="button" className="btn" onClick={() => setAssetNav(null)}>
+              ← 返回分类
+            </button>
+          )}
           <button type="button" className="btn" onClick={onOpenCanvas}>
             打开画布
           </button>
         </aside>
         <section className="studio-results">
-          {filtered.length === 0 ? (
-            <div className="studio-empty">暂无本地资产</div>
-          ) : (
-            <div className="studio-grid">
-              {filtered.map((a) => (
-                <article key={a.id} className="studio-card">
-                  {a.kind === "video" ? (
-                    <video src={a.url} controls playsInline />
-                  ) : a.kind === "image" ? (
-                    <img src={a.url} alt="" />
-                  ) : (
-                    <div className="studio-empty">{a.prompt || a.title}</div>
+          {searching ? (
+            searchList.length === 0 ? (
+              <div className="studio-empty">没有匹配的资产</div>
+            ) : (
+              <div className="studio-grid">{searchList.map(renderAssetCard)}</div>
+            )
+          ) : !assetNav ? (
+            tree.types.length === 0 ? (
+              <div className="studio-empty">暂无本地资产</div>
+            ) : (
+              <>
+                <div className="asset-breadcrumb">全部分类</div>
+                <div className="asset-folder-grid">
+                  {tree.types.map((t) =>
+                    renderFolder(t.kind, t.label, t.count, () => setAssetNav({ kind: t.kind, semantic: null })),
                   )}
-                  <div className="studio-card-meta">{a.title}</div>
-                  <div className="studio-card-actions">
-                    <button type="button" className="btn primary" onClick={() => onInsertAsset(a)}>
-                      进画布
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        deleteAsset(a.id);
-                        refresh();
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+                </div>
+              </>
+            )
+          ) : assetNav.semantic === null && assetNav.kind !== "text" ? (
+            <>
+              <div className="asset-breadcrumb">全部 / {ASSET_TYPE_LABEL[assetNav.kind]}</div>
+              <div className="asset-folder-grid">
+                {tree.foldersOfType(assetNav.kind).map((f) =>
+                  renderFolder(f.id, f.label, f.count, () =>
+                    setAssetNav({ kind: assetNav.kind, semantic: f.semantic }),
+                  ),
+                )}
+              </div>
+            </>
+          ) : currentFolder && currentFolder.items.length > 0 ? (
+            <>
+              <div className="asset-breadcrumb">
+                全部 / {ASSET_TYPE_LABEL[assetNav.kind]}
+                {assetNav.semantic ? ` / ${ASSET_SEMANTIC_LABEL[assetNav.semantic]}` : ""}
+              </div>
+              <div className="studio-grid">{currentFolder.items.map(renderAssetCard)}</div>
+            </>
+          ) : (
+            <div className="studio-empty">暂无资产</div>
           )}
         </section>
       </main>
@@ -261,8 +337,31 @@ export default function StudioPage({
       <main className="ic-studio">
         <div className="ic-studio-card">
           <h1>我的画布</h1>
-          <p>打开导演台画布继续编排分镜；本地模板可在画布侧栏「工程」里加载。</p>
+          <p>
+            打开导演台画布继续编排分镜；本地模板可在画布侧栏「工程」里加载。
+            <br />
+            小白模式用磁吸卡片（靠近即建立关系），专业模式用节点连线，两种模式共用同一套数据模型，
+            但各自保存为独立工程文件，互不干扰。
+          </p>
+          <div className="ic-tier-seg" style={{ margin: "0 auto 12px" }}>
+            <button
+              type="button"
+              className={editorTier === "novice" ? "on" : ""}
+              onClick={() => setEditorTier("novice")}
+            >
+              小白模式
+            </button>
+            <button
+              type="button"
+              className={editorTier === "pro" ? "on" : ""}
+              onClick={() => setEditorTier("pro")}
+            >
+              专业模式
+            </button>
+          </div>
           <div className="ic-studio-stats">
+            <span>当前档位 {editorTier === "novice" ? "小白模式" : "专业模式"}</span>
+            <span>该档位工程 {tierProjectCount}</span>
             <span>本地模板 {templateCount}</span>
             <span>画布节点资产 {assetCount}</span>
           </div>

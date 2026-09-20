@@ -4,6 +4,7 @@ import {
   listVideoModels,
   sendBlobToEditor,
   fetchPrefs,
+  waitForVideoPostprocess,
   type VideoModelOption,
 } from "./bridge";
 import { addAsset, listAssets } from "./localLibrary";

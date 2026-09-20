@@ -71,8 +71,14 @@ import {
   type PoseTrack,
 } from "./stage3dPoseRetarget";
 import StageImportModal, { type StageImportResult } from "./StageImportModal";
+import {
+  capturePoseFrames,
+  encodePoseVideo,
+  planPoseVideoFrames,
+} from "./stage3dPoseVideo";
 import { useCanvasStore } from "./store";
 import { uploadAssetToHost, poseExtractViaHost } from "./bridge";
+import { CameraRecorder } from "./cameraRecorder";
 import CommandPalette, { isTypingTarget, type CommandItem } from "./CommandPalette";
 
 export type StageActor = {
@@ -743,6 +749,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const [trackTargetId, setTrackTargetId] = useState<string>("");
   /** 一键运镜：轨迹范围 0~100% */
   const [moveRange, setMoveRange] = useState(100);
+  /** 录制运镜：采样用户手动拖动的相机轨迹（纯相机层，不触模型包） */
+  const camRecRef = useRef<CameraRecorder | null>(null);
+  const [camRecording, setCamRecording] = useState(false);
   const ASPECTS: { id: AspectId; label: string }[] = [
     { id: "auto", label: "自适应" },
     { id: "21:9", label: "21:9" },
@@ -810,6 +819,11 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   const [poseBadFrames, setPoseBadFrames] = useState<Set<number>>(new Set());
   /** 关键点编辑模式：叠加小窗可拖拽修正 */
   const [poseEditOn, setPoseEditOn] = useState(false);
+  /* ── 模式 B 第四刀：录制白模视频（逐帧采集 → 后端 FFmpeg 合成 → reference_video） ── */
+  /** 录制进行中（防重复点击） */
+  const [poseVideoBusy, setPoseVideoBusy] = useState(false);
+  /** 录制进度（已采集帧 / 总帧），0 表示未在录制 */
+  const [poseVideoProgress, setPoseVideoProgress] = useState(0);
   /** 驱动播放 rAF 句柄 */
   const poseDriveRafRef = useRef<number | null>(null);
   /** 播放起始时间戳（帧推进基准） */
@@ -1230,6 +1244,14 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         setFps(Math.round(f.value));
       }
       controls.update();
+      // —— 录制运镜：采样当前相机位姿（纯相机层）——
+      const rec = camRecRef.current;
+      if (rec?.isRecording) {
+        rec.record(
+          [camera.position.x, camera.position.y, camera.position.z],
+          [controls.target.x, controls.target.y, controls.target.z],
+        );
+      }
       const apiNow = apiRef.current;
       if (apiNow) {
         // —— 掌镜 WASD：自由走镜头 ——
@@ -3290,11 +3312,193 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     setPoseEditOn(false);
   };
 
+  /**
+   * 第四刀：录制白模动作视频（逐帧渲染 → 采集 PNG → 后端 FFmpeg 合成 → 挂为 reference_video）
+   *
+   * 为什么逐帧采集而不是前端实时录制：见 `stage3dPoseVideo.ts` 顶部说明
+   * （MediaRecorder 会掉帧；主画面 canvas 是 preserveDrawingBuffer:false）。
+   *
+   * ⚠️ 两个必须处理的细节（不处理就会录出"能看但不对"的片子）：
+   *  1. **必须先设 `poseDriveBasePosRef`** —— `applyPoseFrameToActor` 的 root 位移
+   *     依赖它，为空时只应用原地姿态、**走位丢失**。而走位是漫剧刚需（设计文档 §一）。
+   *  2. 录制分辨率压到 540 宽即可 —— 运动参考视频的模型只看动作，不需要高分辨率；
+   *     压小可显著降低帧内存与编码耗时。
+   */
+  const recordPoseVideo = async () => {
+    const track = poseTrackRef.current;
+    const actorId = selectedRef.current;
+    const api = apiRef.current;
+    const el = mountRef.current;
+    if (!track) {
+      onStatus("请先解析姿态并加载关键点轨迹");
+      return;
+    }
+    if (!actorId) {
+      onStatus("请先选中一个角色再录制白模动作");
+      return;
+    }
+    if (!api || !el) {
+      onStatus("3D 视图未就绪，无法录制");
+      return;
+    }
+    if (poseVideoBusy) return;
+
+    // 运动参考不需要高分辨率：压到 ≤540 宽，保证偶数边长（libx264 + yuv420p 要求）
+    const viewW = Math.max(1, el.clientWidth);
+    const viewH = Math.max(1, el.clientHeight);
+    let targetW = Math.max(2, Math.min(540, viewW));
+    targetW -= targetW % 2;
+    let targetH = Math.max(2, Math.round((targetW * viewH) / viewW));
+    targetH -= targetH % 2;
+
+    const savedPos = api.camera.position.clone();
+    const savedTarget = api.controls.target.clone();
+    const savedAspect = api.camera.aspect;
+    const prevW = api.renderer.domElement.width;
+    const prevH = api.renderer.domElement.height;
+    const composer = composerRef.current;
+
+    // ① 记录并设置 root 基准（否则走位丢失）；录制结束恢复
+    const actorObj = api.objects.get(actorId);
+    const savedBase = poseDriveBasePosRef.current;
+    const savedActorPos = actorObj ? actorObj.position.clone() : null;
+    if (actorObj) {
+      poseDriveBasePosRef.current = [actorObj.position.x, actorObj.position.y, actorObj.position.z];
+    }
+
+    const rt = new THREE.WebGLRenderTarget(targetW, targetH, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      generateMipmaps: false,
+    });
+
+    setPoseVideoBusy(true);
+    setPoseVideoProgress(0);
+    try {
+      api.renderer.setSize(targetW, targetH, false);
+      composer?.setSize(targetW, targetH);
+      api.camera.aspect = targetW / targetH;
+      api.camera.updateProjectionMatrix();
+      api.renderer.setRenderTarget(rt);
+
+      const cap = await capturePoseFrames(
+        {
+          renderFrameToRT: (i) => {
+            applyPoseFrameToActor(i, actorId);
+            // 注意：EffectComposer.render() 的签名是 render(deltaTime?: number)，
+            // scene/camera 在 RenderPass 构造时就已绑定（见本文件 new RenderPass(scene, camera)）。
+            // 传 (scene, camera) 会被当成 deltaTime —— 类型不匹配（TS2554）且语义错误。
+            if (composer) composer.render();
+            else api.renderer.render(api.scene, api.camera);
+          },
+          readRTAsDataUrl: () => readRenderTargetToDataURL(api.renderer, rt, targetW, targetH),
+        },
+        track.frames.length,
+        { onProgress: (done) => setPoseVideoProgress(done) },
+      );
+
+      if (!cap.ok) {
+        onStatus(`❌ ${cap.message}`);
+        return;
+      }
+      if (cap.capped) {
+        onStatus(
+          `帧数超上限已抽稀：每 ${cap.step.toFixed(1)} 帧取 1（共 ${cap.frames.length} 帧）`,
+        );
+      }
+
+      // 帧率按「采集帧数 ÷ 原时长」反推 —— 这样成片时长与原动作一致（抽稀后仍对得上）
+      const dur = Number(track.duration) || 0;
+      const fps = dur > 0
+        ? Math.max(1, Math.min(120, Math.round(cap.frames.length / dur)))
+        : 25;
+
+      onStatus(`⏳ 正在合成白模视频（${cap.frames.length} 帧 @ ${fps}fps）…`);
+      const enc = await encodePoseVideo(cap.frames, fps, `白模动作_${cap.frames.length}帧`);
+      if (!enc.ok || !enc.url) {
+        onStatus(`❌ ${enc.message || "白模视频合成失败"}`);
+        return;
+      }
+      // 挂为动作参考视频 → 走第一刀既有通道（reference_video）
+      setMotionRefVideo({
+        url: enc.url,
+        name: `白模动作_${enc.frames}帧_${enc.duration}s.mp4`,
+      });
+      onStatus(`✅ 白模动作视频已生成（${enc.frames} 帧 / ${enc.duration}s），已挂为动作参考`);
+    } finally {
+      api.renderer.setRenderTarget(null);
+      api.renderer.setSize(prevW, prevH, false);
+      composer?.setSize(prevW, prevH);
+      api.camera.aspect = savedAspect;
+      api.camera.updateProjectionMatrix();
+      api.camera.position.copy(savedPos);
+      api.controls.target.copy(savedTarget);
+      rt.dispose();
+      // 恢复 root 基准与角色位置，避免录制把场景留在末帧姿态
+      poseDriveBasePosRef.current = savedBase;
+      if (actorObj && savedActorPos) actorObj.position.copy(savedActorPos);
+      setPoseVideoBusy(false);
+      setPoseVideoProgress(0);
+    }
+  };
+
   /** 停止正在播放的路径 */
   const stopCamPath = () => {
     if (pathRafRef.current !== null) {
       cancelAnimationFrame(pathRafRef.current);
       pathRafRef.current = null;
+    }
+  };
+
+  /** 开始录制运镜：采样用户手动拖动的相机轨迹 */
+  const startCamRecord = () => {
+    const api = apiRef.current;
+    if (!api) return;
+    if (!camRecRef.current) camRecRef.current = new CameraRecorder();
+    camRecRef.current.start();
+    setCamRecording(true);
+    onStatus("⏺ 录制运镜中 — 拖动镜头运镜，再点「停止录制」生成路径点");
+  };
+
+  /** 停止录制运镜：抽稀成 pathPoints，写入当前机位（无当前机位则从视角新建） */
+  const stopCamRecord = () => {
+    const rec = camRecRef.current;
+    if (!rec) return;
+    const { durationMs, pathPoints } = rec.stop(24);
+    setCamRecording(false);
+    if (pathPoints.length < 2) {
+      onStatus("录制太短，至少需要 2 个路径点");
+      return;
+    }
+    const api = apiRef.current;
+    if (activeCamId) {
+      setCameras((prev) =>
+        prev.map((c) =>
+          c.id === activeCamId
+            ? { ...c, pathPoints, pathDuration: Math.max(1000, Math.round(durationMs)) }
+            : c,
+        ),
+      );
+      onStatus(
+        `已录制运镜：${pathPoints.length} 点 · ${(durationMs / 1000).toFixed(1)}s，写入「${activeCam?.name || "当前机位"}」`,
+      );
+    } else if (api) {
+      const p = api.camera.position;
+      const t = api.controls.target;
+      const cam: StageCamera = {
+        id: uid("cam"),
+        name: `运镜 ${cameras.length + 1}`,
+        position: [p.x, p.y, p.z],
+        lookAt: [t.x, t.y, t.z],
+        fov,
+        pathPoints,
+        pathDuration: Math.max(1000, Math.round(durationMs)),
+      };
+      setCameras((prev) => [...prev, cam]);
+      setActiveCamId(cam.id);
+      onStatus(`已录制运镜为新机位「${cam.name}」：${pathPoints.length} 点`);
     }
   };
 
@@ -4089,6 +4293,27 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
                         <p className="muted tiny" style={{ flex: 1, margin: 0 }}>未解析</p>
                       )}
                     </div>
+                    {/* 第四刀：录制白模动作视频 → 合成 mp4 → 挂为 reference_video 走第一刀通道 */}
+                    <div className="stage3d-route-row">
+                      <button
+                        type="button"
+                        className="btn primary"
+                        onClick={() => void recordPoseVideo()}
+                        disabled={!motionPoseData || poseVideoBusy}
+                        title={
+                          motionPoseData
+                            ? "逐帧渲染白模动作并合成为视频，挂为动作参考"
+                            : "请先解析姿态并加载关键点轨迹"
+                        }
+                      >
+                        {poseVideoBusy ? `⏺ 录制中 ${poseVideoProgress}` : "🎞 录制白模动作"}
+                      </button>
+                      <p className="muted tiny" style={{ flex: 1, margin: 0 }}>
+                        {poseVideoBusy
+                          ? `已采集 ${poseVideoProgress} 帧…`
+                          : "生成 motion-ref 视频（无需实时录制，不掉帧）"}
+                      </p>
+                    </div>
                   </>
                 ) : null}
 
@@ -4321,6 +4546,15 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
               ▶ 播放当前机位路径
             </button>
             <button type="button" className="btn" onClick={stopCamPath}>■ 停止路径</button>
+            <div className="section-title">录制运镜</div>
+            <p className="muted tiny">点「录制」后拖动镜头运镜，再点「停止」生成路径点（写入当前机位）</p>
+            <button
+              type="button"
+              className={`btn${camRecording ? " danger" : " teal"}`}
+              onClick={camRecording ? stopCamRecord : startCamRecord}
+            >
+              {camRecording ? "⏹ 停止录制" : "⏺ 录制运镜"}
+            </button>
           </>
         ) : null}
 

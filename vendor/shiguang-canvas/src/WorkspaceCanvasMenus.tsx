@@ -17,6 +17,8 @@ export default function WorkspaceCanvasMenus() {
   const activeCanvasName = useCanvasStore((s) => s.activeCanvasName);
   const ensureWorkspace = useCanvasStore((s) => s.ensureWorkspace);
   const listProjects = useCanvasStore((s) => s.listProjects);
+  /** 工作区列表按当前档位过滤：小白模式与专业模式各自独立 */
+  const editorTier = useCanvasStore((s) => s.editorTier);
   const createProject = useCanvasStore((s) => s.createProject);
   const openProject = useCanvasStore((s) => s.openProject);
   const renameProject = useCanvasStore((s) => s.renameProject);
@@ -29,6 +31,7 @@ export default function WorkspaceCanvasMenus() {
   const duplicateCanvas = useCanvasStore((s) => s.duplicateCanvas);
   const listTemplates = useCanvasStore((s) => s.listTemplates);
   const saveTemplate = useCanvasStore((s) => s.saveTemplate);
+  const saveSelectionTemplate = useCanvasStore((s) => s.saveSelectionTemplate);
   const loadTemplate = useCanvasStore((s) => s.loadTemplate);
   const deleteTemplate = useCanvasStore((s) => s.deleteTemplate);
 
@@ -48,7 +51,7 @@ export default function WorkspaceCanvasMenus() {
     return () => window.removeEventListener("mousedown", onDoc);
   }, [openMenu]);
 
-  const projects = listProjects();
+  const projects = listProjects(editorTier);
   const canvases = listCanvases();
   const workspaceLabel = activeProjectName || "未命名工作区";
   const canvasLabel = activeCanvasName || "画布 1";
@@ -270,6 +273,17 @@ export default function WorkspaceCanvasMenus() {
               }}
             >
               + 存为模板
+            </button>
+            <button
+              type="button"
+              className="libtv-dd-item action"
+              onClick={() => {
+                const name = promptName("把选中的卡片存为模板", "我的卡片组合");
+                if (name) saveSelectionTemplate(name);
+                close();
+              }}
+            >
+              + 存选中卡片为模板
             </button>
             {listTemplates().filter((t) => !t.builtin).length > 0 ? (
               <button

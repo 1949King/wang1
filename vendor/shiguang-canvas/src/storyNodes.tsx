@@ -2,7 +2,7 @@
  * AI-Canvas-tauri 对齐节点：Markdown / 分镜表 / 交互宫格
  * 纯前端实现，媒体与入轨仍走拾光 bridge / 剪辑真相源。
  */
-import React, { memo, useMemo, useCallback, useState } from "react";
+import React, { memo, useMemo, useCallback, useState, useRef } from "react";
 import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react";
 import {
   useCanvasStore,
@@ -15,6 +15,8 @@ import {
   defaultStoryboardCells,
 } from "./store";
 import { cropGridCell } from "./imageTools";
+import { planStoryboardMemory, uploadAssetToHost, videoStoryboard, type MemoryPlanRow } from "./bridge";
+import type { MemoryType } from "./stores/node-factory";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -90,12 +92,26 @@ export const MarkdownNode = memo(function MarkdownNode({ id, data, selected }: N
 const SHOT_SIZES = ["远景", "全景", "中景", "近景", "特写", "大特写"];
 const CAMERAS = ["固定", "推", "拉", "摇", "移", "跟", "升", "降", "手持", "环绕"];
 
+/**
+ * 观众记忆类型 —— 决定「这一镜该给多少秒」。
+ * 三档对应后端 memory_model 的三条衰减曲线（24h 基线保留率：细节 < 意义 < 情绪）。
+ *
+ * ⚠️ 这里只写**相对**描述，具体百分比一律显示后端回传的真值 ——
+ *    前端硬编码数字会和 Python 侧的 λ 漂移（角色提示词就是这个坑）。
+ */
+const MEMORY_OPTIONS: { value: MemoryType; label: string; hint: string }[] = [
+  { value: "detail", label: "细节", hint: "衰减最快：本来就会被忘记，可剪短剪碎" },
+  { value: "meaning", label: "意义", hint: "衰减居中：三档里的中性基准" },
+  { value: "emotion", label: "情绪", hint: "衰减最慢：是「被记住」的真正载体，值得给足时长" },
+];
+
 export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: NodeProps) {
   const d = data as ShotlistData;
   const rows = d.rows || [];
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const nodes = useCanvasStore((s) => s.nodes);
   const selectedId = useCanvasStore((s) => s.selectedId);
+  const setStatus = useCanvasStore((s) => s.setStatus);
 
   const setRows = useCallback(
     (next: ShotlistRow[]) => updateNodeData(id, { rows: next }),
@@ -104,6 +120,84 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
 
   const patchRow = (rowId: string, patch: Partial<ShotlistRow>) => {
     setRows(rows.map((r) => (r.id === rowId ? { ...r, ...patch } : r)));
+  };
+
+  const [memoryPlan, setMemoryPlan] = useState<MemoryPlanRow[] | null>(null);
+  const [memoryWarnings, setMemoryWarnings] = useState<string[]>([]);
+  const [tHours, setTHours] = useState<number>(24);
+  const [planning, setPlanning] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const pullRef = useRef<HTMLInputElement>(null);
+
+  /** 一键拉片：上传参考视频 → 后端检测镜头边界 + 抽帧 + 色调/景别 → 填分镜表 */
+  const onPickReferenceVideo = async (file: File | null) => {
+    if (!file) return;
+    setPulling(true);
+    try {
+      const up = await uploadAssetToHost(file);
+      if (!up.ok || !up.path) throw new Error(up.message || "上传失败");
+      const res = await videoStoryboard({ path: up.path });
+      if (!res.ok || !res.shots?.length) {
+        setStatus?.(`拉片失败：${res.message || "无镜头"}`);
+        return;
+      }
+      const next: ShotlistRow[] = res.shots.map((s, i) => ({
+        id: `row_${Math.random().toString(36).slice(2, 9)}`,
+        shotNo: String(i + 1).padStart(2, "0"),
+        shotSize: s.shot || "中景",
+        camera: s.camera || "固定",
+        content: s.description || "",
+        dialogue: s.dialogue || "",
+        duration: Number(s.duration) || 3,
+        note:
+          s.tone || s.brightness != null
+            ? `${s.tone || "中性"}色调` +
+              (s.brightness != null ? ` · 亮度${Math.round(s.brightness * 100)}%` : "")
+            : "",
+        memoryType: "meaning",
+        frameUrl: s.frame || undefined,
+        frameKind: "image",
+      }));
+      setRows(next);
+      setStatus?.(`拉片完成：${next.length} 镜（${res.scene_source || "自动"}检测）`);
+    } catch (e) {
+      setStatus?.(`拉片失败：${e}`);
+    } finally {
+      setPulling(false);
+      if (pullRef.current) pullRef.current.value = "";
+    }
+  };
+
+  /** 拉一次记忆规划，并把建议时长写回分镜表（总时长守恒） */
+  const runMemoryPlan = async () => {
+    if (!rows.length) return;
+    setPlanning(true);
+    try {
+      const res = await planStoryboardMemory({
+        rows: rows.map((r) => ({
+          id: r.id,
+          memoryType: r.memoryType || "meaning",
+          duration: Number(r.duration) || 3,
+        })),
+      });
+      if (!res.ok || !res.rows?.length) {
+        setStatus?.(`记忆规划失败：${res.message || "无返回"}`);
+        return;
+      }
+      setMemoryPlan(res.rows);
+      setMemoryWarnings(res.warnings || []);
+      setTHours(res.t_hours ?? 24);
+      const byId = new Map(res.rows.map((r) => [r.id, r.suggestedDuration]));
+      setRows(rows.map((r) => (byId.has(r.id) ? { ...r, duration: byId.get(r.id) as number } : r)));
+      setStatus?.(
+        `已按记忆重排时长：${res.totalCurrent ?? 0}s → ${res.totalSuggested ?? 0}s（总时长守恒）` +
+          (res.warnings?.length ? ` · ⚠ ${res.warnings[0]}` : ""),
+      );
+    } catch (e) {
+      setStatus?.(`记忆规划失败：${e}`);
+    } finally {
+      setPlanning(false);
+    }
   };
 
   const bindSelectedFrame = (rowId: string) => {
@@ -170,6 +264,24 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
           </button>
           <button
             type="button"
+            className="sg-node-mini-btn"
+            onClick={() => pullRef.current?.click()}
+            disabled={pulling}
+            title="上传参考片 → 自动检测镜头边界 + 抽代表帧 + 判色调/景别，生成可编辑分镜表"
+          >
+            {pulling ? "拉片中…" : "📹 拉片"}
+          </button>
+          <button
+            type="button"
+            className="sg-node-mini-btn"
+            onClick={() => void runMemoryPlan()}
+            disabled={planning || !rows.length}
+            title="按观众记忆保留率重排各镜时长（总时长守恒）：细节让位、情绪拿时长"
+          >
+            {planning ? "规划中…" : "按记忆重排时长"}
+          </button>
+          <button
+            type="button"
             className="sg-node-mini-btn primary"
             onClick={expandToShots}
           >
@@ -178,6 +290,13 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
         </div>
       </div>
       <div className="body nodrag nowheel">
+        <input
+          ref={pullRef}
+          type="file"
+          accept="video/*"
+          hidden
+          onChange={(e) => void onPickReferenceVideo(e.target.files?.[0] || null)}
+        />
         <table className="sg-shotlist-table">
           <thead>
             <tr>
@@ -188,6 +307,7 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
               <th>内容</th>
               <th>台词</th>
               <th>秒</th>
+              <th title="观众记忆类型：决定这一镜该给多少秒">记忆</th>
               <th></th>
             </tr>
           </thead>
@@ -197,11 +317,13 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
                 ? nodes.find((n) => n.id === row.frameNodeId)
                 : null;
               const liveUrl =
-                live &&
-                ((live.data as any).imageUrl ||
-                  (live.data as any).posterUrl ||
-                  (live.data as any).videoUrl ||
-                  row.frameUrl);
+                (live &&
+                  ((live.data as any).imageUrl ||
+                    (live.data as any).posterUrl ||
+                    (live.data as any).videoUrl)) ||
+                row.frameUrl;
+              const planRow = memoryPlan?.find((p) => p.id === row.id);
+              const memType = row.memoryType || "meaning";
               return (
                 <tr key={row.id}>
                   <td>
@@ -263,6 +385,27 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
                     />
                   </td>
                   <td>
+                    <select
+                      value={memType}
+                      title={MEMORY_OPTIONS.find((m) => m.value === memType)?.hint}
+                      onChange={(e) => patchRow(row.id, { memoryType: e.target.value as MemoryType })}
+                    >
+                      {MEMORY_OPTIONS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                    {planRow ? (
+                      <span
+                        className="muted"
+                        title={`${tHours}h 后约保留 ${(planRow.retention * 100).toFixed(1)}%（后端按记忆衰减模型算）`}
+                      >
+                        {(planRow.retention * 100).toFixed(0)}%
+                      </span>
+                    ) : null}
+                  </td>
+                  <td>
                     <button
                       type="button"
                       className="sg-node-mini-btn danger"
@@ -276,6 +419,13 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
             })}
           </tbody>
         </table>
+        {memoryWarnings.length
+          ? memoryWarnings.map((w, i) => (
+              <p className="meta" key={i}>
+                ⚠ {w}
+              </p>
+            ))
+          : null}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>

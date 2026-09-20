@@ -166,6 +166,9 @@ export async function listImageModels(): Promise<{
   }
 }
 
+/** 去重：同一 GFPGAN 预载 job 只跑一条前端轮询（批量生图会多次触发同一 job_id） */
+const _modelPreloadInflight = new Set<string>();
+
 export async function generateImageViaHost(opts: {
   prompt: string;
   model?: string;
@@ -174,6 +177,9 @@ export async function generateImageViaHost(opts: {
   reference_image?: string;
   strength?: number;
   n?: number;
+  quality?: string;
+  /** 人脸修复模型后台预载进度回调（GFPGAN 下载期间异步上报，不阻塞生图返回） */
+  onPreloadProgress?: (p: { progress: number; message: string }) => void;
 }): Promise<{
   ok: boolean;
   message?: string;
@@ -184,6 +190,10 @@ export async function generateImageViaHost(opts: {
   mode?: string;
   img2img_fallback?: boolean;
   fallback_placeholder?: boolean;
+  /** 画质档含人脸修复时后端自动触发的 GFPGAN 后台预载任务 id（据此轮询 /host/model-preload） */
+  preload_job_id?: string;
+  /** 触发时人脸修复模型是否已就绪（true=可走 GFPGAN，false=本次暂时回退区域超分） */
+  face_restore_ready?: boolean;
 }> {
   const token = bridgeToken();
   const count = Math.max(1, Math.min(4, opts.n || 1));
@@ -200,14 +210,42 @@ export async function generateImageViaHost(opts: {
           size: opts.size || "1024x576",
           reference_image: opts.reference_image || "",
           strength: opts.strength ?? 0.65,
+          quality: opts.quality || "standard",
         }),
       },
     );
+    let data: {
+      ok: boolean;
+      message?: string;
+      image_data_url?: string;
+      image_url?: string;
+      images?: string[];
+      model?: string;
+      mode?: string;
+      img2img_fallback?: boolean;
+      fallback_placeholder?: boolean;
+      preload_job_id?: string;
+      face_restore_ready?: boolean;
+    };
     try {
-      return await res.json();
+      data = await res.json();
     } catch {
       return { ok: false, message: `HTTP ${res.status}`, fallback_placeholder: true };
     }
+    // 命中人脸修复档且模型未就绪时，后台轮询预载进度（幂等去重），不阻塞本次生图返回
+    const preloadJobId = data?.preload_job_id;
+    if (
+      opts.onPreloadProgress &&
+      preloadJobId &&
+      !data.face_restore_ready &&
+      !_modelPreloadInflight.has(preloadJobId)
+    ) {
+      _modelPreloadInflight.add(preloadJobId);
+      void waitForModelPreload(data, opts.onPreloadProgress).finally(() => {
+        _modelPreloadInflight.delete(preloadJobId);
+      });
+    }
+    return data;
   }
   const images: string[] = [];
   let lastMsg = "";
@@ -230,6 +268,88 @@ export async function generateImageViaHost(opts: {
       : lastMsg || "批量生图失败",
     fallback_placeholder: !okAny,
   };
+}
+
+// ── 本地模型（GFPGAN 人脸修复 ONNX）后台预载进度轮询 ──
+
+export type ModelPreloadStatus = {
+  ok: boolean;
+  job_id?: string;
+  kind?: string;
+  status?: "processing" | "done";
+  progress?: number;
+  message?: string;
+  ready?: boolean;
+  updated_at?: number;
+};
+
+/** 触发 GFPGAN 后台预载（幂等），返回 job_id 供前端轮询 */
+export async function startModelPreload(): Promise<{
+  ok: boolean;
+  job_id?: string;
+  message?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(`${BRIDGE}/host/model-preload?token=${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: "{}",
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `预载触发失败: ${e}` };
+  }
+}
+
+/** 轮询指定预载任务的进度；job_id 无效返回 ok=false */
+export async function getModelPreloadStatus(jobId: string): Promise<ModelPreloadStatus> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(`${BRIDGE}/host/model-preload?job_id=${encodeURIComponent(jobId)}`, {
+      headers: { "X-Shiguang-Token": token },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { ok: false, message: e?.message || String(e) };
+  }
+}
+
+/**
+ * 若生图返回 preload_job_id 且 face_restore_ready=false，则后台预载尚未完成时，
+ * 轮询直到 GFPGAN 就绪（或超时回退）。onProgress({ progress, message }) 供 UI 展示。
+ * 与人脸修复无关（无 preload_job_id）时，直接返回未预载状态。
+ */
+export async function waitForModelPreload(
+  result: {
+    preload_job_id?: string;
+    face_restore_ready?: boolean;
+  },
+  onProgress?: (p: { progress: number; message: string }) => void,
+): Promise<{ ready: boolean; job_id: string; message: string }> {
+  const jobId = result.preload_job_id || "";
+  if (!jobId) {
+    return { ready: false, job_id: "", message: "未触发" };
+  }
+  if (result.face_restore_ready) {
+    return { ready: true, job_id: jobId, message: "人脸修复模型已就绪" };
+  }
+  const deadline = Date.now() + 30 * 60 * 1000; // 首次下载约 300MB，最多等 30 分钟
+  let last = "";
+  while (Date.now() < deadline) {
+    const status = await getModelPreloadStatus(jobId);
+    onProgress?.({ progress: status.progress || 0, message: status.message || "" });
+    last = status.message || last;
+    if (status.status === "done") {
+      return {
+        ready: !!status.ready,
+        job_id: jobId,
+        message: status.message || (status.ready ? "模型已就绪" : "模型下载失败，将回退区域超分"),
+      };
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return { ready: false, job_id: jobId, message: last || "预载超时，将回退区域超分" };
 }
 
 /** 经 canvas_bridge 调五维评分器做 AI 审阅，返回卡片质量分数与 passed/issues-found 状态 */
@@ -804,6 +924,7 @@ export async function generateVideoViaHost(opts: {
   reference_video?: string;
   first_frame?: string;
   last_frame?: string;
+  quality?: string;
 }): Promise<{
   ok: boolean;
   message?: string;
@@ -814,6 +935,10 @@ export async function generateVideoViaHost(opts: {
   channel_name?: string;
   supports_motion_ref?: boolean;
   reference_video_url?: string;
+  /** 后处理（超分/补帧）是否在后台执行中 */
+  postprocessing?: boolean;
+  /** 后处理任务 id，前端据此轮询 /host/video-postprocess */
+  postprocess_job_id?: string;
 }> {
   const token = bridgeToken();
   const res = await fetch(
@@ -831,6 +956,7 @@ export async function generateVideoViaHost(opts: {
         reference_video: opts.reference_video || "",
         first_frame: opts.first_frame || "",
         last_frame: opts.last_frame || "",
+        quality: opts.quality || "standard",
       }),
     },
   );
@@ -839,6 +965,71 @@ export async function generateVideoViaHost(opts: {
   } catch {
     return { ok: false, message: `HTTP ${res.status}` };
   }
+}
+
+// ── 单视频后处理（超分/补帧）进度轮询 ──
+
+export type VideoPostprocessStatus = {
+  ok: boolean;
+  job_id?: string;
+  status?: "processing" | "done";
+  progress?: number;
+  message?: string;
+  video_path?: string;
+  video_url?: string;
+  postprocessed?: boolean;
+  updated_at?: number;
+};
+
+export async function getVideoPostprocessStatus(jobId: string): Promise<VideoPostprocessStatus> {
+  const tok = bridgeToken();
+  try {
+    const res = await fetch(`${BRIDGE}/host/video-postprocess?job_id=${encodeURIComponent(jobId)}`, {
+      headers: { "X-Shiguang-Token": tok },
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { ok: false, message: e?.message || String(e) };
+  }
+}
+
+/**
+ * 若 generateVideoViaHost 返回 postprocessing=true，则轮询 /host/video-postprocess
+ * 直到后处理（超分/补帧）完成，返回增强后的 url/path；否则原样返回。
+ * onProgress({ progress, message }) 供 UI 展示进度（可选）。
+ */
+export async function waitForVideoPostprocess(
+  result: {
+    ok: boolean;
+    video_url?: string;
+    video_path?: string;
+    postprocessing?: boolean;
+    postprocess_job_id?: string;
+  },
+  onProgress?: (p: { progress: number; message: string }) => void,
+): Promise<{ video_url: string; video_path: string; postprocessed: boolean }> {
+  const base = {
+    video_url: result.video_url || "",
+    video_path: result.video_path || "",
+    postprocessed: false,
+  };
+  if (!result.postprocessing || !result.postprocess_job_id) {
+    return base;
+  }
+  const deadline = Date.now() + 15 * 60 * 1000; // 最多等 15 分钟
+  while (Date.now() < deadline) {
+    const status = await getVideoPostprocessStatus(result.postprocess_job_id);
+    onProgress?.({ progress: status.progress || 0, message: status.message || "" });
+    if (status.status === "done") {
+      return {
+        video_url: status.video_url || base.video_url,
+        video_path: status.video_path || base.video_path,
+        postprocessed: !!status.postprocessed,
+      };
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return base;
 }
 
 // ── 模式 B 姿态解析（视频 → 关键点 JSON 子进程） ──
@@ -875,6 +1066,53 @@ export async function poseExtractViaHost(opts: {
         max_frames: opts.max_frames ?? 300,
         model_complexity: opts.model_complexity ?? 1,
         timeout: opts.timeout ?? 180,
+      }),
+    },
+  );
+  try {
+    return await res.json();
+  } catch {
+    return { ok: false, message: `HTTP ${res.status}` };
+  }
+}
+
+/**
+ * 白模姿态视频合成（模式 B 第四刀）
+ * ---------------------------------
+ * 前端逐帧渲染白模姿态并采集 PNG（复用离屏 RenderTarget 读像素，
+ * 不依赖 `preserveDrawingBuffer`），把帧序列交给后端 FFmpeg 合成 mp4。
+ * 产出的 mp4 即作为 `reference_video` 走第一刀通道。
+ *
+ * 为什么不在前端实时录制：`MediaRecorder` 录到的是"实时发生"的过程，会掉帧；
+ * 逐帧导出则是"要哪帧渲染哪帧"，帧率精确。
+ */
+export async function poseVideoEncodeViaHost(opts: {
+  /** PNG data URL 序列（`data:image/png;base64,...`） */
+  frames: string[];
+  /** 帧率，默认 25 */
+  fps?: number;
+  /** 产物名（仅用于文件名，非路径） */
+  name?: string;
+}): Promise<{
+  ok: boolean;
+  message?: string;
+  url?: string;
+  path?: string;
+  frames?: number;
+  fps?: number;
+  duration?: number;
+  bytes?: number;
+}> {
+  const token = bridgeToken();
+  const res = await fetch(
+    `${BRIDGE}/host/pose-video-encode?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({
+        frames: opts.frames,
+        fps: opts.fps ?? 25,
+        name: opts.name ?? "pose_motion",
       }),
     },
   );
@@ -996,6 +1234,29 @@ export async function concatVideos(opts: {
     return await res.json();
   } catch (e: any) {
     return { ok: false, message: e?.message || String(e) };
+  }
+}
+
+/** 图 → 静帧视频（成片闭环 · 伪真图卡）。返回本地视频路径数组（供 concatVideos 使用）。 */
+export async function imagesToStillVideos(
+  items: string[],
+  duration?: number,
+): Promise<string[]> {
+  if (!items.length) return [];
+  const tok = bridgeToken();
+  try {
+    const res = await fetch(`${BRIDGE}/host/still-video`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shiguang-Token": tok,
+      },
+      body: JSON.stringify({ items, duration: duration || 3 }),
+    });
+    const data = await res.json();
+    return Array.isArray(data?.paths) ? (data.paths as string[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -1132,6 +1393,54 @@ export type CameraPlanShot = {
   pathDuration?: number;
 };
 
+/** 一键拉片（视频）单镜：镜像后端 /host/video-storyboard 的 shots 行 */
+export type VideoStoryboardShot = {
+  id?: number;
+  start?: number;
+  end?: number;
+  duration?: number;
+  shot?: string;
+  camera?: string;
+  description?: string;
+  dialogue?: string;
+  tone?: string;
+  brightness?: number;
+  frame?: string | null;
+};
+
+/** 一键拉片：参考视频 → 可编辑分镜表（后端检测镜头边界 + 抽帧 + 色调/景别） */
+export async function videoStoryboard(input: {
+  path?: string;
+  url?: string;
+  max_shots?: number;
+}): Promise<{
+  ok: boolean;
+  shots: VideoStoryboardShot[];
+  fallback?: boolean;
+  scene_source?: string;
+  duration?: number;
+  message?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/video-storyboard?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          path: input.path || "",
+          url: input.url || "",
+          max_shots: input.max_shots || 30,
+        }),
+      },
+    );
+    return await res.json();
+  } catch {
+    return { ok: false, shots: [], message: "网络异常" };
+  }
+}
+
 /** WS4#2 AI 分镜自动摆机位：分镜表 / 剧本 → 相机路径规划（经画布桥） */
 export async function planStoryboardCameras(input: {
   shots?: StoryboardShot[];
@@ -1160,6 +1469,58 @@ export async function planStoryboardCameras(input: {
     return await res.json();
   } catch {
     return { ok: false, cameras: [], message: "网络异常" };
+  }
+}
+
+/** 记忆规划单行：镜像后端 app/core/ai/storyboard_memory.plan 的返回 */
+export type MemoryPlanRow = {
+  id: string;
+  memoryType: "detail" | "meaning" | "emotion";
+  label: string;
+  /** t 小时后的基线保留率 0~1（后端按 memory_model 的 λ 算，前端不要自己算） */
+  retention: number;
+  currentDuration: number;
+  suggestedDuration: number;
+  delta: number;
+};
+
+/**
+ * 分镜记忆规划：给定每镜的「观众记忆类型」，换算保留率与建议时长。
+ *
+ * 总时长守恒、按保留率加权再分配 —— 细节让位、情绪拿时长。
+ * 理论依据：24h 基线保留率 细节 11.5% / 意义 61.9% / 情绪 82.5%。
+ *
+ * ⚠️ 保留率与分配一律由后端算（λ 的唯一真相源在 Python 侧），
+ *    前端只负责选类型 + 展示回传的真值，避免两份 λ 漂移。
+ */
+export async function planStoryboardMemory(input: {
+  rows: { id: string; memoryType?: string; duration?: number }[];
+  t_hours?: number;
+}): Promise<{
+  ok: boolean;
+  t_hours?: number;
+  rows: MemoryPlanRow[];
+  totalCurrent?: number;
+  totalSuggested?: number;
+  warnings?: string[];
+  message?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/storyboard-memory-plan?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          rows: input.rows,
+          ...(input.t_hours ? { t_hours: input.t_hours } : {}),
+        }),
+      },
+    );
+    return await res.json();
+  } catch {
+    return { ok: false, rows: [], message: "网络异常" };
   }
 }
 

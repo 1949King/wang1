@@ -20,21 +20,41 @@ export type NodeStatus = "idle" | "generating" | "success" | "failed";
 
 /**
  * 角色库条目（对接 Python CharacterStore）
- * — 字段与 Python CHARACTER_FIELD_SCHEMA 对齐
+ * — 字段与 Python CHARACTER_FIELD_SCHEMA 对齐（含分组）
  * — 前端只缓存一份列表，增删改通过 /host/characters 端点同步
+ * — 新增字段需同步两个前端包 + Python schema；校验 _verify/check_character_schema.py
  */
 export type CharacterEntry = {
   id: string;
+  // 基础身份
   name: string;
   gender?: "男" | "女" | "其他" | string;
   age_range?: string;
   role_type?: "主角" | "配角" | "反派" | "路人" | string;
   tags?: string[];
+  // 形象与符号（会进生图提示词）
   appearance?: string;
+  /** 气质倾向，如 清冷疏离 / 温润克己 */
+  temperament?: string;
+  /** 标志性符号：跨集可辨识的固定视觉锚点 */
+  memory_anchors?: string;
   personality?: string;
+  // 内在人格（剧本一致性；不进提示词）
+  values?: string;
+  core_desire?: string;
+  relations?: string;
+  backstory_events?: string;
+  sensory_triggers?: string;
+  thinking_pattern?: string;
+  feedback_pattern?: string;
+  speech_style?: string;
+  // 其他
   representative_line?: string;
   background?: string;
   notes?: string;
+  /** 由 Python build_character_prompt 拼好的生图提示片段（服务端下发）。
+   *  前端直接消费，不要自己再拼字段 —— 两份拼装逻辑必然漂移。 */
+  prompt?: string;
   media_dir?: string;            // 角色参考图目录（Python 端填充）
   avatar_url?: string;           // 画布侧可显示的头像 URL
   created_at?: string;
@@ -95,6 +115,15 @@ export type ShotData = {
   cameraYaw?: number;
   /** 俯仰角度（度）：负=俯拍，正=仰拍 */
   cameraPitch?: number;
+  /** 3D 相机计划（导演卡拆解自动带出机位+运镜，供 Stage3D 摆机位 / 预览） */
+  camera3d?: {
+    position: [number, number, number];
+    lookAt: [number, number, number];
+    fov: number;
+    movement?: string;
+    pathPoints?: { pos: [number, number, number]; look: [number, number, number] }[];
+    pathDuration?: number;
+  };
   // === 生成控制 ===
   seed?: number;
   cfg?: number;
@@ -288,6 +317,17 @@ export type MarkdownData = {
   preview?: boolean;
 };
 
+/**
+ * 观众记忆类型 —— 决定「这一镜该给多少秒」。
+ *
+ * 对应 app/core/ai/memory_model.py 的三档衰减（λ 不同）：细节衰减最快、情绪留得最久。
+ * （括号里的百分比是**未校准初始 λ** 下的 24h 基线保留率，会用真实完播率重算，别当事实）
+ *
+ * ⚠️ 保留率与建议时长一律由后端 /host/storyboard-memory-plan 换算
+ *    （app/core/ai/storyboard_memory.py），前端不要自己算 —— 两份 λ 必然漂移。
+ */
+export type MemoryType = "detail" | "meaning" | "emotion";
+
 /** 分镜表一行（画面绑定画布上的 image/video 节点） */
 export type ShotlistRow = {
   id: string;
@@ -298,6 +338,8 @@ export type ShotlistRow = {
   dialogue: string;
   duration: number;
   note: string;
+  /** 观众记忆类型；缺省按「意义」（三档里的中性基准）处理 */
+  memoryType?: MemoryType;
   frameNodeId?: string;
   frameKind?: "image" | "video";
   frameUrl?: string;
@@ -468,6 +510,7 @@ export function createShotlistRow(index = 1): ShotlistRow {
     dialogue: "",
     duration: 3,
     note: "",
+    memoryType: "meaning",   // 中性基准：既不刻意压缩也不刻意拉长
   };
 }
 

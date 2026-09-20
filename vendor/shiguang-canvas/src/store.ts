@@ -34,6 +34,7 @@ import {
   readBundleWithActiveCanvas,
 } from "./stores/project-storage";
 import { persistMediaUrl, reviewCanvasNodeViaHost } from "./bridge";
+import { comfyToCanvasNodes, type ComfyCanvasNode } from "./comfyToCanvas";
 import { persistNodesCopy, applyUrlMapToNodes } from "./stores/persist-media";
 import { BUILTIN_TEMPLATES } from "./stores/templates";
 import { upgradeSchemaV2toV3, collectAiVersions } from "./stores/migrations";
@@ -135,6 +136,21 @@ export type ViewMode =
 
 export type CanvasLayoutMode = "flow" | "simple" | "storyboard";
 
+/** 画布档位：小白模式（磁吸意图画布）/ 专业模式（节点画布） */
+export type CanvasTier = "novice" | "pro";
+
+/** 档位持久化 key */
+export const TIER_STORAGE_KEY = "shiguang-canvas:tier:v1";
+
+/** 读取已保存的档位，默认专业模式（存量用户行为不变） */
+export function readStoredTier(): CanvasTier {
+  try {
+    return localStorage.getItem(TIER_STORAGE_KEY) === "novice" ? "novice" : "pro";
+  } catch {
+    return "pro";
+  }
+}
+
 const VIEW_MODES: ReadonlySet<string> = new Set([
   "home",
   "projects",
@@ -160,6 +176,8 @@ export type ProjectMeta = {
   nodeCount: number;
   /** 画布项目关联的 3D 导演台快照版本 */
   stage3dSnapshotId?: string;
+  /** 该工程所属画布档位；缺失视为专业模式（存量工程） */
+  tier?: CanvasTier;
 };
 
 /** 单工作区内的画布快照 */
@@ -195,6 +213,8 @@ export type ProjectBundle = {
   /** 同一工作区多画布（缺省时用顶层 nodes/edges 当作「画布 1」） */
   canvases?: CanvasSnapshot[];
   activeCanvasId?: string;
+  /** 保存在哪个档位创建；缺失视为专业模式 */
+  tier?: CanvasTier;
   /** S6: 项目内用过的 AI provider/model 版本快照（打开时对比系统当前版本弹提醒） */
   aiVersions?: {
     /** provider → model 映射，收集自 config / generator / shot 节点的 data.model 字段 */
@@ -229,6 +249,8 @@ type Store = {
   canvasLayoutMode: CanvasLayoutMode;
   /** 磁吸模式开关：开启后拖拽节点时产生磁吸效果 */
   magneticMode: boolean;
+  /** 画布档位：小白模式 = 磁吸意图画布；专业模式 = 节点画布 */
+  editorTier: CanvasTier;
   /** 脏版本号：任何节点/连线变动 +1，用于触发 auto-save 的 useEffect 依赖 */
   dirtyVersion: number;
   /** 3D 导演台场景快照（saveProject 时打包，loadProject 时恢复） */
@@ -245,6 +267,8 @@ type Store = {
   setViewMode: (m: ViewMode) => void;
   setCanvasLayoutMode: (m: CanvasLayoutMode) => void;
   setMagneticMode: (on: boolean) => void;
+  /** 切换画布档位（会持久化；小白模式强制开启磁吸） */
+  setEditorTier: (t: CanvasTier) => void;
   openDirectorForNode: (nodeId: string) => void;
   clearDirectorTarget: () => void;
 
@@ -252,6 +276,15 @@ type Store = {
   setSelected: (id: string | null) => void;
   updateSelectedData: (patch: Record<string, unknown>) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  /** 小白模式：双击卡片请求打开精细编辑（Inspector 自动展开进阶设置） */
+  requestProEdit: () => void;
+  /** 双击信号计数器：Inspector 订阅它变化后展开进阶设置 */
+  proEditNonce: number;
+  /** 咬合侧隐形表（瞬态 UI 态，不落盘）：nodeId → 需透明的贴合边方向。
+   *  由 CanvasShell 依据 bonds 几何推导写入，NoviceCard 订阅后给贴合边加透明描边+直角，
+   *  两卡贴合处融为一块（对齐 Windows 磁贴观感，2026-09-16 用户裁定）。 */
+  bondedSides: Record<string, import("./magnetic/types").SpatialDirection[]>;
+  setBondedSides: (map: Record<string, import("./magnetic/types").SpatialDirection[]>) => void;
   // 层叠系统（磁吸层 CardStack 状态入口）
   pushLayer: (nodeId: string, params: Record<string, unknown>) => void;
   removeLayer: (nodeId: string, layerId: string) => void;
@@ -275,7 +308,9 @@ type Store = {
   addStoryboardGrid: (count?: 9 | 25) => void;
   applyStoryboard: (shots: StoryboardShot[], scriptTitle?: string) => void;
   /** 导演卡拆解：把分镜结果追加为导演卡的下游镜头节点（非破坏，保留画布既有内容） */
-  breakdownDirectorCard: (directorId: string, shots: StoryboardShot[]) => void;
+  breakdownDirectorCard: (directorId: string, shots: StoryboardShot[], cameras?: StageCameraPlanShot[]) => void;
+  /** ComfyUI workflow 粘贴落地：把 comfyToCanvasNodes 的映射结果铺成画布节点 + 连线 */
+  applyComfyWorkflow: (json: unknown, origin?: { x: number; y: number }) => number;
   addThreeView: () => void;
   addVariants: (axis?: "表情" | "服装" | "背景", count?: number) => void;
   addCaptureToCanvas: (
@@ -343,7 +378,7 @@ type Store = {
   activeCanvasName: string;
 
   // ===== Multi-Project CRUD =====
-  listProjects: () => ProjectMeta[];
+  listProjects: (tier?: CanvasTier) => ProjectMeta[];
   ensureWorkspace: () => string;
   createProject: (name: string) => string;
   openProject: (id: string) => void;
@@ -366,6 +401,8 @@ type Store = {
   // ===== Template (workflow preset) =====
   listTemplates: () => { id: string; name: string; savedAt: string; builtin?: boolean; description?: string }[];
   saveTemplate: (name: string) => void;
+  /** 选择性存模板：只存「选中的一组卡片」及其内部连线（卡片生态 · 积木沉淀） */
+  saveSelectionTemplate: (name: string) => number;
   loadTemplate: (id: string) => void;
   deleteTemplate: (id: string) => void;
 
@@ -374,7 +411,7 @@ type Store = {
   refreshCharacters: () => Promise<void>;                         // GET /host/characters
   bindCharacterToShot: (nodeId: string, characterId: string) => void;
   unbindCharacterFromShot: (nodeId: string) => void;
-  syncCharacterToShot: (nodeId: string) => void;                // 手动刷 appearance → prompt 前缀
+  syncCharacterToShot: (nodeId: string) => void;                // 手动从角色库重刷 prompt 里的角色设定块
 
   // ===== 3D Stage Snapshot Sync =====
   setStage3dSnapshot: (snapshot: unknown) => void;
@@ -480,8 +517,12 @@ async function persistAndWriteSnapshot(
     );
     bundle.name = snap.activeProjectName || bundle.name || "未命名工作区";
     try {
-      writeProjectBundle(bundle);
       const idx = readProjectsIndex();
+      const prev = idx.find((m) => m.id === snap.activeProjectId);
+      // 工程所属档位：沿用原档位，新建时按当前档位写入
+      const tier = prev?.tier || bundle.tier || readStoredTier();
+      bundle.tier = tier;
+      writeProjectBundle(bundle);
       const others = idx.filter((m) => m.id !== snap.activeProjectId);
       writeProjectsIndex([
         {
@@ -489,6 +530,7 @@ async function persistAndWriteSnapshot(
           name: bundle.name,
           savedAt: nowISO,
           nodeCount: persisted.length,
+          tier,
         },
         ...others,
       ]);
@@ -527,6 +569,33 @@ async function persistAndWriteSnapshot(
   }
 }
 
+// ── 角色设定块 → 生图提示词 ──────────────────────────────────────────
+// 旧实现只拼 target.appearance：用户在角色库填的「气质倾向 / 标志性符号 / 性格特征」
+// 三个 visual 字段全被丢掉，绑定角色后一个字都进不了提示词。
+// 现在直接用服务端 /host/characters 下发的 prompt（Python build_character_prompt 拼的，
+// 含 visual 组全部字段）—— 前端不再自己拼，避免两份拼装逻辑漂移。
+//
+// 顺带修掉两个幂等性 bug：旧代码的删除正则锚在开头 ^，但新块是 append 到末尾，
+// 于是「重复绑定越绑越长」「解绑删不掉」。
+
+/** 角色设定块必须占一行：行内换行压平，否则下面的行级幂等替换会漏。 */
+function charPromptBlock(text: string | undefined): string {
+  const t = String(text || "").replace(/\s*\n\s*/g, " ").trim();
+  return t ? `[角色设定: ${t}]` : "";
+}
+
+/** 命中 `[角色设定: ...]` / 旧版 `[角色外貌: ...]` 整行（贪婪到行内最后一个 ]）。 */
+const CHAR_BLOCK_RE = /^[ \t]*\[角色(?:设定|外貌):[^\n]*\][ \t]*\r?\n?/gm;
+
+/** 幂等替换 prompt 里的角色设定块；block 传空串即删除。 */
+function applyCharBlock(prompt: string | undefined, block: string): string {
+  const out = String(prompt || "")
+    .replace(CHAR_BLOCK_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return block ? (out ? out + "\n" + block : block) : out;
+}
+
 export const useCanvasStore = create<Store>((set, get) => ({
   nodes: [
     makeNode("script", { x: 80, y: 120 }),
@@ -541,6 +610,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
   viewMode: "home",
   canvasLayoutMode: "flow",
   magneticMode: true,
+  editorTier: readStoredTier(),
   directorTargetNodeId: null,
   stage3dApplySeq: 0,
   pendingStage3dCameras: null,
@@ -549,6 +619,9 @@ export const useCanvasStore = create<Store>((set, get) => ({
   activeCanvasId: null,
   activeCanvasName: "画布 1",
   dirtyVersion: 0,
+  proEditNonce: 0,
+  bondedSides: {},
+  setBondedSides: (map) => set({ bondedSides: map }),
   showGrid: true,
   smoothLine: true,
   onNodesChange: (changes) =>
@@ -601,6 +674,19 @@ export const useCanvasStore = create<Store>((set, get) => ({
   clearDirectorTarget: () => set({ directorTargetNodeId: null }),
   setCanvasLayoutMode: (canvasLayoutMode) => set({ canvasLayoutMode }),
   setMagneticMode: (magneticMode) => set({ magneticMode }),
+  setEditorTier: (editorTier) => {
+    try {
+      localStorage.setItem(TIER_STORAGE_KEY, editorTier);
+    } catch {
+      /* 隐私模式下写入失败不影响本次切换 */
+    }
+    // 小白模式强制开启磁吸 + 回到卡片视图：卡片靠磁吸建立关系，这是它的核心交互
+    set(
+      editorTier === "novice"
+        ? { editorTier, magneticMode: true, canvasLayoutMode: "flow" as CanvasLayoutMode }
+        : { editorTier },
+    );
+  },
   setShowGrid: (showGrid) => set({ showGrid }),
   setSmoothLine: (smoothLine) => set({ smoothLine }),
   setSelected: (selectedId) => set({ selectedId }),
@@ -609,6 +695,8 @@ export const useCanvasStore = create<Store>((set, get) => ({
     if (!id) return;
     get().updateNodeData(id, patch);
   },
+  /** 小白模式双击信号：双击卡片 = 打开右侧精细编辑（Inspector 展开进阶设置）。自增 nonce 触发订阅 */
+  requestProEdit: () => set((s) => ({ proEditNonce: s.proEditNonce + 1 })),
   updateNodeData: (id, patch) => {
     set((state) => ({
       nodes: state.nodes.map((n) =>
@@ -859,9 +947,11 @@ export const useCanvasStore = create<Store>((set, get) => ({
     list.forEach((s, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
+      // 网格步进 = CARD_SIZE(240×200) - 贴合落位 gap=-2（invariant：相邻边框融合）→ 238/198
+      // 旧值 230 会让相邻卡重叠 10px：超出 bondTolerance(2px) 不构成咬合，视觉却近乎贴死（V4.23.2 修正）
       const node = makeNode(
         "shot",
-        { x: 320 + col * 230, y: 40 + row * 200 },
+        { x: 320 + col * 238, y: 40 + row * 198 },
         {
           title: `镜 ${String(i + 1).padStart(2, "0")}`,
           shotSize: s.shot || "中景",
@@ -886,8 +976,9 @@ export const useCanvasStore = create<Store>((set, get) => ({
       dirtyVersion: state.dirtyVersion + 1,
     }));
   },
-  breakdownDirectorCard: (directorId, shots) => {
+  breakdownDirectorCard: (directorId, shots, cameras) => {
     const list = Array.isArray(shots) ? shots : [];
+    const camList = Array.isArray(cameras) ? cameras : [];
     const directorNode = get().nodes.find((n) => n.id === directorId);
     if (!directorNode) return;
     if (!list.length) {
@@ -904,15 +995,28 @@ export const useCanvasStore = create<Store>((set, get) => ({
     list.forEach((s, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
+      const cam = camList[i];
+      // 网格步进 = CARD_SIZE(240×200) - 贴合落位 gap=-2 → 238/198（V4.23.2，与拉片布局一致）
       const child = makeNode(
         "shot",
-        { x: baseX + 360 + col * 230, y: baseY + row * 200 },
+        { x: baseX + 360 + col * 238, y: baseY + row * 198 },
         {
           title: `镜 ${String(i + 1).padStart(2, "0")}`,
           shotSize: s.shot || "中景",
           duration: Number(s.duration) || 3,
           dialogue: s.dialogue || "",
           prompt: s.description || `分镜 ${i + 1}`,
+          // 导演卡拆解顺带把 AI 相机计划（机位 + 运镜）写进分镜卡，供 Stage3D 摆机位
+          camera3d: cam
+            ? {
+                position: cam.position,
+                lookAt: cam.lookAt,
+                fov: cam.fov,
+                movement: cam.movement,
+                pathPoints: cam.pathPoints,
+                pathDuration: cam.pathDuration,
+              }
+            : undefined,
         } as Partial<ShotData>,
       );
       shotNodes.push(child);
@@ -935,6 +1039,53 @@ export const useCanvasStore = create<Store>((set, get) => ({
       errorMessage: "",
       lastBreakdown: { shots: shotNodes.length },
     });
+  },
+  applyComfyWorkflow: (json, origin) => {
+    const mapped = comfyToCanvasNodes(json);
+    if (!mapped.nodes.length) {
+      set({ status: "无法识别的 ComfyUI 工作流" });
+      return 0;
+    }
+    pushGraphHistory(get);
+    const baseX = origin?.x ?? 120;
+    const baseY = origin?.y ?? 80;
+    // 按「config/prompt/source/text 左列，image 右列」布局，避免全堆成一团
+    const col = 260;
+    const row = 180;
+    const comfyToNodeId = new Map<string, string>();
+    const nodes: Node[] = mapped.nodes.map((cn: ComfyCanvasNode, i) => {
+      const onRight = cn.kind === "image";
+      const x = baseX + (onRight ? col * 2 : 0);
+      const y = baseY + i * row;
+      const node = makeNode(cn.kind, { x, y }, {
+        title: cn.title,
+        ...(cn.kind === "prompt" || cn.kind === "text"
+          ? { text: (cn.data.prompt as string) || cn.title }
+          : {}),
+        ...(cn.kind === "image" || cn.kind === "source"
+          ? { prompt: (cn.data.prompt as string) || "" }
+          : {}),
+        ...(cn.kind === "config"
+          ? { content: `ComfyUI 节点：${cn.data.comfyClassType || cn.title}` }
+          : {}),
+      } as Partial<NodeData>);
+      comfyToNodeId.set(cn.comfyId, node.id);
+      return node;
+    });
+    const edges: Edge[] = mapped.edges.flatMap((e) => {
+      const src = comfyToNodeId.get(e.source);
+      const dst = comfyToNodeId.get(e.target);
+      if (!src || !dst) return [];
+      return [{ id: uid("e"), source: src, target: dst, ...defaultEdgeOptions } as Edge];
+    });
+    set((state) => ({
+      nodes: [...state.nodes, ...nodes],
+      edges: [...state.edges, ...edges],
+      selectedId: nodes[0]?.id || null,
+      status: `已导入 ComfyUI 工作流：${nodes.length} 个节点`,
+      dirtyVersion: state.dirtyVersion + 1,
+    }));
+    return nodes.length;
   },
   addThreeView: () => {
     pushGraphHistory(get);
@@ -1366,17 +1517,23 @@ export const useCanvasStore = create<Store>((set, get) => ({
     }
   },
   // —— 多项目 CRUD ——
-  listProjects: () => {
-    return readProjectsIndex().sort((a, b) => (b.savedAt > a.savedAt ? 1 : -1));
+  listProjects: (tier) => {
+    const all = readProjectsIndex().sort((a, b) => (b.savedAt > a.savedAt ? 1 : -1));
+    if (!tier) return all;
+    // 小白模式与专业模式各自只看自己的工程（同一份数据模型，独立工程文件）
+    return all.filter((m) => (m.tier || "pro") === tier);
   },
   ensureWorkspace: () => {
     const s = get();
     if (s.activeProjectId) return s.activeProjectId;
-    const existing = readProjectsIndex();
+    const tier = s.editorTier;
+    const all = readProjectsIndex();
+    const existing = all.filter((m) => (m.tier || "pro") === tier);
     if (existing.length) {
       get().openProject(existing[0].id);
       return existing[0].id;
     }
+    // 该档位下还没有工程：有存量专业工程时不去抢占，直接新建当前档位工程
     const legacyRaw = localStorage.getItem(PROJECT_KEY) || localStorage.getItem(PROJECT_KEY_OLD);
     if (legacyRaw) {
       try {
@@ -1439,7 +1596,13 @@ export const useCanvasStore = create<Store>((set, get) => ({
     const id = uid("proj");
     const now = new Date().toISOString();
     const canvasId = uid("canvas");
-    const meta: ProjectMeta = { id, name, savedAt: now, nodeCount: 0 };
+    const meta: ProjectMeta = {
+      id,
+      name,
+      savedAt: now,
+      nodeCount: 0,
+      tier: get().editorTier,
+    };
     writeProjectsIndex([meta, ...readProjectsIndex()]);
     const canvases: CanvasSnapshot[] = [
       { id: canvasId, name: "画布 1", nodes: [], edges: [], savedAt: now },
@@ -1456,6 +1619,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
       savedAt: now,
       canvases,
       activeCanvasId: canvasId,
+      tier: get().editorTier,
     };
     writeProjectBundle(bundle);
     pushGraphHistory(get);
@@ -1741,10 +1905,14 @@ export const useCanvasStore = create<Store>((set, get) => ({
           edges: Array.isArray(migrated?.edges) ? (migrated.edges as Edge[]) : [],
           savedAt: now,
           stage3d: migrated?.stage3d,
+          tier: readStoredTier(),
         };
         writeProjectBundle(bundle);
         const idx = readProjectsIndex();
-        writeProjectsIndex([{ id, name: bundle.name, savedAt: now, nodeCount: nodes.length }, ...idx]);
+        writeProjectsIndex([
+          { id, name: bundle.name, savedAt: now, nodeCount: nodes.length, tier: bundle.tier },
+          ...idx,
+        ]);
         if (opts?.open !== false) {
           get().loadProjectBundle(bundle);
         }
@@ -1804,6 +1972,40 @@ export const useCanvasStore = create<Store>((set, get) => ({
     arr = arr.slice(0, 20);
     localStorage.setItem(TEMPLATES_KEY, JSON.stringify(arr));
     set({ status: `模板已保存：${entry.name}` });
+  },
+  saveSelectionTemplate: (name) => {
+    const sid = get().selectedId;
+    const selected = get().nodes.filter((n) => n.selected || n.id === sid);
+    if (selected.length === 0) {
+      set({ status: "没有选中的卡片，先点选要沉淀成模板的一组卡片" });
+      return 0;
+    }
+    const idSet = new Set(selected.map((n) => n.id));
+    // 只保留两端都在选中集内的连线（卡片内部关系，不含连向外部的线）
+    const edges = get().edges.filter(
+      (e) => idSet.has(e.source) && idSet.has(e.target),
+    );
+    const entry = {
+      id: uid("tpl"),
+      name: (name || "卡片组合").trim(),
+      savedAt: new Date().toISOString(),
+      dramaTitle: "",
+      episode: "",
+      nodes: selected,
+      edges,
+    };
+    let arr: any[] = [];
+    try {
+      arr = JSON.parse(localStorage.getItem(TEMPLATES_KEY) || "[]");
+      if (!Array.isArray(arr)) arr = [];
+    } catch {
+      arr = [];
+    }
+    arr.unshift(entry);
+    arr = arr.slice(0, 20);
+    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(arr));
+    set({ status: `已把 ${selected.length} 张卡片存为模板「${entry.name}」` });
+    return selected.length;
   },
   loadTemplate: (id) => {
     // 预装模板：builtin:xxx 前缀
@@ -2110,7 +2312,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
       nodes: s.nodes.map((n) => {
         if (n.id !== nodeId) return n;
         const d = n.data as ShotData;
-        const appearance = target.appearance ? `[角色外貌: ${target.appearance}] ` : "";
+        const charBlock = charPromptBlock(target.prompt);
         return {
           ...n,
           data: {
@@ -2118,7 +2320,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
             characterId: target.id,
             characterName: target.name,
             characterAppearance: target.appearance || "",
-            prompt: (d.prompt || "").replace(/^\[角色外貌:[^\]]*\]\s*/, "") + (appearance ? "\n" + appearance : ""),
+            prompt: applyCharBlock(d.prompt, charBlock),
           } as ShotData,
         };
       }),
@@ -2139,7 +2341,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
             characterId: undefined,
             characterName: undefined,
             characterAppearance: undefined,
-            prompt: (d.prompt || "").replace(/^\[角色外貌:[^\]]*\]\s*/, "").trim(),
+            prompt: applyCharBlock(d.prompt, ""),
           } as ShotData,
         };
       }),
@@ -2159,19 +2361,19 @@ export const useCanvasStore = create<Store>((set, get) => ({
       nodes: s.nodes.map((n) => {
         if (n.id !== nodeId) return n;
         const nd = n.data as ShotData;
-        const appearance = target.appearance ? `[角色外貌: ${target.appearance}] ` : "";
+        const charBlock = charPromptBlock(target.prompt);
         return {
           ...n,
           data: {
             ...nd,
             characterName: target.name,
             characterAppearance: target.appearance || "",
-            prompt: (nd.prompt || "").replace(/^\[角色外貌:[^\]]*\]\s*/, "") + (appearance ? "\n" + appearance : ""),
+            prompt: applyCharBlock(nd.prompt, charBlock),
           } as ShotData,
         };
       }),
       dirtyVersion: s.dirtyVersion + 1,
-      status: `已从角色库同步「${target.name}」的最新外貌描述`,
+      status: `已从角色库同步「${target.name}」的最新角色设定`,
     }));
   },
 

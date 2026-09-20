@@ -27,6 +27,7 @@ import {
   batchGenerateVideos,
   getBatchStatus,
   concatVideos,
+  imagesToStillVideos,
   inpaintViaHost,
   installInjectScript,
   listImageModels,
@@ -36,6 +37,7 @@ import {
   listChatModels,
   sendBlobToEditor,
   syncModelPool,
+  waitForVideoPostprocess,
   type BridgePrefs,
   type CanvasAssetRef,
   type ImageModelOption,
@@ -482,6 +484,7 @@ export default function App() {
           n: opts?.count || 1,
           size: opts?.size,
           reference_image: opts?.references?.[0] || "",
+          quality: opts?.quality || "standard",
         });
         if (res.images?.length) return res.images;
         const one = res.image_data_url || res.image_url;
@@ -497,8 +500,10 @@ export default function App() {
           channel_id: parsed.channel_id,
           duration: opts?.duration || 5,
           reference_image: opts?.references?.[0] || "",
+          quality: opts?.quality || "standard",
         });
-        return res.video_url || "";
+        const final = await waitForVideoPostprocess(res);
+        return final.video_url || "";
       },
       generateText: async (prompt, opts) => {
         const res = await generateTextViaHost({
@@ -745,6 +750,7 @@ export default function App() {
         duration,
         size: "720x1280",
         reference_image,
+        quality: data.qualityTier || "standard",
       });
       if (res.ok && res.video_url) {
         setNodeVideo(node.id, res.video_url, data.posterUrl || data.firstFrameUrl);
@@ -763,6 +769,8 @@ export default function App() {
       reference_image,
       strength: 0.65,
       n: 1,
+      quality: (data as any).qualityTier || "standard",
+      onPreloadProgress: (p) => setStatus(`人脸修复模型预载 ${p.progress}%：${p.message}`),
     });
     if (res.ok && (res.image_data_url || res.image_url || res.images?.length)) {
       const urls = res.images?.length
@@ -798,6 +806,7 @@ export default function App() {
       reference_image,
       strength: 0.65,
       n: 1,
+      quality: (data as any).qualityTier || "standard",
     });
     const url =
       res.images?.[0] ||
@@ -824,6 +833,7 @@ export default function App() {
       duration,
       size: "720x1280",
       reference_image,
+      quality: data.qualityTier || "standard",
     });
     return { res, url: res.video_url || "", modelKey };
   };
@@ -1147,8 +1157,55 @@ export default function App() {
         `批量完成：成功 ${ok}/${shots.length}` +
           (skipped ? `，跳过视频 ${skipped}` : ""),
       );
+      // 一键成片：只收集「本次批量生成」的成功节点媒体，拼成一条成片
+      await tryConcatToFilm(shots.map((s) => s.id), ok);
     }
     setGenerating(false);
+  };
+
+  /** 成片闭环：把批量生成的成功结果（静帧图 + 真视频）拼成一条成片 */
+  const tryConcatToFilm = async (shotIds: string[], okCount: number) => {
+    if (okCount < 2) return; // 少于 2 段无法拼接
+    const all = useCanvasStore.getState().nodes;
+    const mediaItems: { url: string; title: string }[] = [];
+    // 只收集本次批量生成的节点，且保持 shotIds 的时间链顺序
+    for (const sid of shotIds) {
+      const n = all.find((x) => x.id === sid);
+      if (!n) continue;
+      const d = n.data as NodeData;
+      if ((d as { status?: string }).status !== "success") continue; // 跳过失败/未完成的
+      const title = (d as { title?: string }).title || n.id;
+      if (d.kind === "video" && (d as { videoUrl?: string }).videoUrl) {
+        mediaItems.push({ url: (d as { videoUrl?: string }).videoUrl!, title });
+      } else if (
+        (d.kind === "shot" || d.kind === "image" || d.kind === "director" || d.kind === "panorama") &&
+        (d as { imageUrl?: string }).imageUrl
+      ) {
+        mediaItems.push({ url: (d as { imageUrl?: string }).imageUrl!, title });
+      }
+    }
+    if (mediaItems.length < 2) return;
+    setStatus(`🧩 正在把 ${mediaItems.length} 段素材拼成一条成片…`);
+    // 统一走 /host/still-video：图片转静帧视频，视频原样返回本地路径
+    const paths = await imagesToStillVideos(
+      mediaItems.map((m) => m.url),
+      3,
+    );
+    if (paths.length < 2) {
+      setStatus(`⚠️ 可拼接的有效素材不足（${paths.length} 段）`);
+      return;
+    }
+    const cr = await concatVideos({ paths, transition_sec: 0.4 });
+    if (cr.ok && (cr.output_path || cr.video_url)) {
+      addStudioNode("video", {
+        title: `一键成片（${cr.segment_count ?? paths.length} 段 · ${cr.total_duration?.toFixed(1) || "?"}s）`,
+        prompt: mediaItems.map((m) => m.title).join(" → "),
+        videoUrl: cr.video_url || cr.output_path,
+      });
+      setStatus(`✅ 成片完成：${cr.segment_count ?? paths.length} 段 → ${cr.total_duration?.toFixed(1) || "?"}s`);
+    } else {
+      setStatus(`拼接失败: ${cr.message || "未知错误"}（${paths.length} 段素材已就绪，可重试）`);
+    }
   };
 
   const nodeImageUrl = (data: NodeData) => {
@@ -1572,8 +1629,10 @@ export default function App() {
       onSetPrimaryImage={setPrimaryImage}
       onGroupSelected={groupSelected}
       onExportZip={async () => {
-        const { exportProjectZip, downloadBlob } = await import("./projectZip");
+        const { exportProjectZip, downloadBlob, fetchProjectTimeline } = await import("./projectZip");
         const b = getProjectBundle();
+        // P1-4：导出时并入剪辑器完整时间线（可回滚/diff/直导）
+        const timeline = await fetchProjectTimeline();
         const blob = await exportProjectZip({
           version: 1,
           dramaTitle: b.dramaTitle,
@@ -1581,16 +1640,31 @@ export default function App() {
           nodes: b.nodes,
           edges: b.edges,
           stage3d: b.stage3d,
+          timeline: timeline ?? undefined,
           savedAt: new Date().toISOString(),
         });
         downloadBlob(blob, `shiguang-canvas-${Date.now()}.zip`);
-        setStatus("已导出工程 ZIP");
+        setStatus(
+          timeline
+            ? `已导出工程 ZIP（含时间线 ${timeline.clip_count ?? timeline.clips.length} 片段）`
+            : "已导出工程 ZIP（未取到时间线）",
+        );
       }}
       onImportZip={async (file) => {
         try {
-          const { importProjectZip } = await import("./projectZip");
+          const { importProjectZip, pushTimelineToEditor } = await import("./projectZip");
           const bundle = await importProjectZip(file);
           loadProjectBundle(bundle);
+          // P1-4：导入时若快照带时间线，提供直导剪辑器
+          if (bundle.timeline && Array.isArray(bundle.timeline.clips) && bundle.timeline.clips.length) {
+            const push = window.confirm(
+              `该工程快照包含 ${bundle.timeline.clips.length} 个时间线片段，是否一并直导剪辑器？`,
+            );
+            if (push) {
+              const r = await pushTimelineToEditor(bundle.timeline.clips as Record<string, unknown>[]);
+              setStatus(r.ok ? `时间线已直导剪辑器：${r.message}` : `直导失败：${r.message}`);
+            }
+          }
         } catch (e) {
           setStatus(`导入 ZIP 失败: ${e}`);
         }

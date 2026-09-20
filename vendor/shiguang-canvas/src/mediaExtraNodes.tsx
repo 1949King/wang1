@@ -16,7 +16,7 @@ import {
   ANIMATION_ACTION_LABELS,
   animationGrid,
 } from "./store";
-import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard } from "./bridge";
+import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard, planStoryboardCameras } from "./bridge";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -190,7 +190,15 @@ export const DirectorCardNode = memo(function DirectorCardNode({ id, data, selec
       if (!res.ok && !(res.shots && res.shots.length)) {
         throw new Error(res.message || "拆解失败");
       }
-      breakdownDirectorCard(id, res.shots || []);
+      // 拆解后顺带规划 AI 相机计划（机位 + 运镜），写进每张分镜卡供 Stage3D 摆机位
+      let cameras: Parameters<typeof breakdownDirectorCard>[2] = [];
+      try {
+        const plan = await planStoryboardCameras({ shots: res.shots || [] });
+        if (plan.ok) cameras = plan.cameras || [];
+      } catch {
+        cameras = [];
+      }
+      breakdownDirectorCard(id, res.shots || [], cameras);
     } catch (e) {
       updateNodeData(id, { status: "failed", errorMessage: String(e).slice(0, 200) });
     }
@@ -387,7 +395,11 @@ export const AnimationNode = memo(function AnimationNode({ id, data, selected }:
       `${ANIMATION_ACTION_LABELS[d.action] || d.action}动作，` +
       `${cols}x${rows} sprite sheet，${d.frames}帧，纯白背景，侧视图，游戏像素清晰轮廓`;
     try {
-      const res = await generateImageViaHost({ prompt, n: 1 });
+      const res = await generateImageViaHost({
+        prompt,
+        n: 1,
+        onPreloadProgress: (p) => setStatus(`人脸修复模型预载 ${p.progress}%：${p.message}`),
+      });
       const url = res.images?.[0] || res.image_data_url || res.image_url;
       if (!res.ok || !url) throw new Error(res.message || "生图失败");
       updateNodeData(id, { sheetUrl: url, status: "success", previewMode: "sheet" });

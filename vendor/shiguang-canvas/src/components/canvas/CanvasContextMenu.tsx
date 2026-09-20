@@ -107,6 +107,7 @@ export default function CanvasContextMenu({ menu, onClose, onOpenStage3d, onBrea
   const deleteEdge = useCanvasStore((s) => s.deleteEdge);
   const selectAll = useCanvasStore((s) => s.selectAll);
   const setStatus = useCanvasStore((s) => s.setStatus);
+  const applyComfyWorkflow = useCanvasStore((s) => s.applyComfyWorkflow);
 
   const hasSelection = selectedNodes.length > 0 || Boolean(selectedId);
 
@@ -157,17 +158,30 @@ export default function CanvasContextMenu({ menu, onClose, onOpenStage3d, onBrea
     [menu, addNode, onConnect, setStatus, onClose],
   );
 
-  // 导入 ComfyUI 工作流：弹输入框粘贴 JSON → dry-run 解析 → 状态反馈；引擎未安装时弹诊断
+  // 导入 ComfyUI 工作流：弹输入框粘贴 JSON → 解析 → 自动落成画布节点；引擎未安装时弹诊断
   const handleImportComfyWorkflow = useCallback(async () => {
     const text = window.prompt("请粘贴 ComfyUI 工作流 JSON（复制后 Ctrl+V 到此处）");
     if (text == null) return; // 用户取消
     const outcome = await importComfyWorkflowText(text);
-    setStatus(outcome.message);
+    if (!outcome.ok) {
+      setStatus(outcome.message);
+      onClose();
+      return;
+    }
+    // 解析成功：把 workflow 铺成画布节点 + 连线（小白/专业模式共用同一画布）
+    let json: unknown;
+    try {
+      json = JSON.parse(text.trim());
+    } catch {
+      json = null;
+    }
+    const placed = json != null ? applyComfyWorkflow(json, menu.flow) : 0;
+    setStatus(placed > 0 ? `已导入 ComfyUI 工作流：${placed} 个节点` : outcome.message);
     if (outcome.engineMissing && outcome.detail) {
-      window.alert(`ComfyUI 引擎未安装\n\n${outcome.detail}`);
+      window.alert(`ComfyUI 引擎未安装（节点已铺到画布，生成需引擎）\n\n${outcome.detail}`);
     }
     onClose();
-  }, [setStatus, onClose]);
+  }, [setStatus, applyComfyWorkflow, menu.flow, onClose]);
 
   if (!menu) return null;
   if (!pos) return null;

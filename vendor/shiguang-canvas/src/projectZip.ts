@@ -12,6 +12,12 @@ export type ProjectBundle = {
   savedAt: string;
   /** 3D 导演台场景快照 */
   stage3d?: unknown;
+  /** 工程级快照（P1-4）：剪辑器时间线（完整 _clips，可回滚/diff/直导） */
+  timeline?: {
+    clips: unknown[];
+    clip_count?: number;
+    taken_at?: string;
+  };
 };
 
 function crc32(buf: Uint8Array): number {
@@ -261,6 +267,71 @@ export async function importProjectZip(file: File | Blob): Promise<ProjectBundle
     }
   }
   return project;
+}
+
+// ── 工程级快照（P1-4）：时间线抓取 / diff / 直导 ──────────────────
+
+import { bridgeToken } from "./bridge";
+
+export type TimelineClipRow = Record<string, unknown>;
+export type TimelinePayload = { clips: TimelineClipRow[]; clip_count?: number; taken_at?: string };
+
+/** 从桥抓取剪辑器完整时间线（走 /host/project-snapshot/export）。失败返回 null，不抛。 */
+export async function fetchProjectTimeline(): Promise<TimelinePayload | null> {
+  try {
+    const res = await fetch(
+      `${location.origin}/host/project-snapshot/export?token=${encodeURIComponent(bridgeToken())}`,
+      { headers: { "X-Shiguang-Token": bridgeToken() } },
+    );
+    const data = await res.json();
+    if (!data?.ok) return null;
+    const timeline = data.timeline || {};
+    return {
+      clips: Array.isArray(timeline.clips) ? timeline.clips : [],
+      clip_count: timeline.clip_count,
+      taken_at: timeline.taken_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 把时间线写回剪辑器（直导）。返回 {ok, message}。 */
+export async function pushTimelineToEditor(clips: TimelineClipRow[]): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch(
+      `${location.origin}/host/project-snapshot/import?token=${encodeURIComponent(bridgeToken())}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shiguang-Token": bridgeToken() },
+        body: JSON.stringify({ clips }),
+      },
+    );
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `直导剪辑器失败: ${e}` };
+  }
+}
+
+/** 结构 diff 两份时间线（纯前端，供「导入前预览差异」展示）。 */
+export function diffTimelineClips(
+  before: TimelineClipRow[],
+  after: TimelineClipRow[],
+): { added: number; removed: number; changed: { clip_id: unknown; field: string }[] } {
+  const key = (c: TimelineClipRow) => c.id ?? `${c.path}@${c.start_time}`;
+  const bm = new Map(before.map((c) => [key(c), c]));
+  const am = new Map(after.map((c) => [key(c), c]));
+  const added = [...am.keys()].filter((k) => !bm.has(k)).length;
+  const removed = [...bm.keys()].filter((k) => !am.has(k)).length;
+  const changed: { clip_id: unknown; field: string }[] = [];
+  for (const [k, bc] of bm) {
+    const ac = am.get(k);
+    if (!ac) continue;
+    for (const f of ["start_time", "duration", "in_point", "out_point", "path", "name"]) {
+      if (bc[f] !== ac[f]) changed.push({ clip_id: bc.id, field: f });
+    }
+  }
+  return { added, removed, changed };
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
