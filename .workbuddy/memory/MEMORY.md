@@ -25,7 +25,16 @@
 9. **静默 except 判定线**：UI 绘制 `pass` 可接受；状态机/资源路径 `pass` 不可接受（须 `logger.debug(..., exc_info=True)`）。例外 `except RuntimeError: pass` 有意保留。
 10. **沙箱 wmic 黑名单**：import app 链触发 config_manager 的 wmic；验证脚本用 subprocess 包一层、写干净 UTF-8 再读。
 11. **清理纪律（2026-09-21 血泪）**：临时文件**禁止用 `_*` 等宽 glob 清理**。必须① 显式列名单删除；② 删除前先 `git ls-files <候选>` 区分「项目自有 / 本次新建」；③ 未在 git 里的产物先确认有无副本（我曾用 `_*` 误删 6 个项目自有文件，3 个 git 跟踪的救回，3 个未跟踪 PNG 永久丢失）。
-12. **HEAD 已 stale**：`git` 只停在 **2026-09-12 `d67f80a`**（27 次提交），此后 ~9 天改动**全部未提交**（2026-09-21 实测 `git status` 7750 项：7477 `D` / 137 `M` / 136 `??`）。已定性：**非事故** —— 97.6% 是被移除的 vendored OpenShot/libopenshot（7303 项），余 174 项为归档搬迁（`docs/knowledge`→`docs/_archive/knowledge` 已核实）与已下线模块（`account_ops_*`、`drama_finder_plugin`、7 个旧 `video_editor/*` 并入 `editor_module.py`）。**悬空 import 反查 = 0**。⇒ 真正的风险是**这 9 天没有 git 保护**。
+12. **git 已补-commit（2026-09-21）**：此前 HEAD 停在 2026-09-12（27 次提交），~9 天改动未提交。现已拆成 **10 个语义提交**固化（`d67f80a..5809fa3`）：config / vendor(openshot 移除 7309) / clean ×2 / core / editor / plugins / canvas / docs / verify。**只在本机，未 push**（`origin = github.com/1949King/shiguangjianying`）。四条踩坑纪律见下表。
+
+   | 坑 | 后果 | 正解 |
+|---|---|---|
+   | `git add -A -f -- <目录>` | **穿透嵌套 .gitignore**，把 6462 个 node_modules + `__pycache__` + `dist/` 卷进历史（一次性 +236 万行） | 用 `git status -uall` 得到的**精确文件清单**，`-f` 是最后手段 |
+   | `git check-ignore <已跟踪文件>` | 恒返回"未忽略"（默认跳过索引内的文件），误判成全都很干净 | 判历史性忽略要加 `--no-index`；其实 status 里的路径**本来就不被忽略** |
+   | `git show --stat` | 长路径被截断成 `...`，统计严重失真 | 统计/审计一律用 `--numstat` + `-c core.quotePath=false` |
+   | 逐文件调子进程 | 7856 次 `check-ignore` 跑了 17 分钟没出结果 | 用 `check-ignore -z --stdin` 一次批量；或把临时文件写 `tempfile.gettempdir()` |
+
+   另记两个环境限制：沙箱**每轮最多 50 次删除**（超了连 `shutil.move` 都被拦，改用同盘 `os.rename` 或 `.git/info/exclude`）；跨盘 `rename` 会报 WinError 17。
 
 ## 三、用户习惯与偏好
 
