@@ -4,20 +4,20 @@
 
 A PyQt6-based desktop application(**拾光剪影**)focused on short-drama **editing** and **AI canvas** (agent + digital human). Publishing/finder plugins are interface shells only.
 
-**现行技术文档(单一事实源·优先阅读)**: [`docs/现行技术文档.md`](docs/现行技术文档.md)
-**完整知识库(分页)**: [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
+**唯一开发文档(单一事实源)**: [`docs/现行技术文档.md`](docs/现行技术文档.md) — 后续开发只读这一份
+**历史/深度细节(已归档)**: [`docs/_archive/`](docs/_archive/) — 不再作为现行依据
 
 ## Tech Stack
 
 - **UI Framework**: PyQt6
-- **Video Processing**: FFmpeg, OpenCV/PyAV, OpenShot/MLT libraries
+- **Video Processing**: FFmpeg, OpenCV/PyAV, MLT (via `thirdparty/mlt/Shotcut` runtime; OpenShot was evaluated early and rejected — remnants removed 2026-09-14, NOT a fork)
 - **AI Integration**: Ollama (local), various cloud APIs (DeepSeek, OpenAI, etc.)
 - **Language**: Python 3.x
 - **Architecture**: Layered — `app/core/` (business logic), `app/modules/lego/` (feature UI), EventBus
 
 ## Key Terminology
 
-完整表见 [`docs/knowledge/01-glossary.md`](docs/knowledge/01-glossary.md).常用:
+完整表见 [`docs/_archive/knowledge/01-glossary.md`](docs/_archive/knowledge/01-glossary.md).常用:
 
 | Term | Meaning |
 |------|---------|
@@ -48,10 +48,10 @@ app/
   core/                    # Business logic (preview, timeline, ffmpeg, AI…)
   modules/lego/            # LEGO UI modules (editor, home, settings…)
 docs/
-  knowledge/               # ★ 项目知识库(INDEX + 00–07 + catalog)
-  P0_CAPCUT_ALIGN.md       # 剪映对齐分期
+  现行技术文档.md          # ★ 唯一开发文档(单一事实源)
+  _archive/                # 历史文档归档(不再作为现行依据)
 scripts/
-  sync_knowledge.py        # 刷新知识库清单
+  frozen_zone_guard.py     # 冻结区机器校验
 ```
 
 ## Coding Conventions
@@ -66,21 +66,21 @@ scripts/
 
 ## Rules
 
-1. Read [`docs/现行技术文档.md`](docs/现行技术文档.md)（单一事实源）before coding；细节查 [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)
+1. Read [`docs/现行技术文档.md`](docs/现行技术文档.md)（单一事实源）before coding；历史细节查 [`docs/_archive/knowledge/INDEX.md`](docs/_archive/knowledge/INDEX.md)（仅回溯，非现行依据）
 2. Understand existing business logic before adding features
 3. Make minimal changes — don't break existing functionality
 4. Layer separation: UI renders, core processes data, main window dispatches
 5. All dialogs must have a parent window
 6. Handle exceptions: validate inputs, prevent duplicate clicks, show errors / log warnings
-7. After architecture or bugfix changes, update `docs/knowledge/05-known-issues.md` (and related pages)
+7. After architecture or bugfix changes, write back to `docs/现行技术文档.md`（唯一开发文档）
 
 ## Issue Tracker
 
 - Location: GitHub Issues
 - Triage labels: `bug`, `feature`, `enhancement`, `documentation`
 
-## Sync
+## 冻结区校验
 
 ```bash
-python scripts/sync_knowledge.py
+python scripts/frozen_zone_guard.py
 ```

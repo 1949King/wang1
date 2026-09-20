@@ -6,7 +6,7 @@
 #   1) pip install pre-commit
 #   2) pre-commit install   （每个仓库只需一次）
 #   3) 之后每次 commit 自动跑；首次会下载 ruff，稍慢。
-# 详见 docs/CODE_REVIEW_STANDARD.md
+# 详见 docs/现行技术文档.md §11「代码审查标准」（单一事实源）
 # ============================================================
 
 repos:

@@ -2,34 +2,30 @@
 
 本仓库给编码 Agent 的入口说明。
 
-## 先读
+## 唯一开发文档（单一事实源）
 
-| 优先级 | 路径 |
-|--------|------|
-| 1 | [`docs/现行技术文档.md`](docs/现行技术文档.md)（**单一事实源·后续据此开发**） |
-| 2 | [`docs/knowledge/INDEX.md`](docs/knowledge/INDEX.md)（分页知识库） |
-| 3 | [`docs/knowledge/08-frozen-zones.md`](docs/knowledge/08-frozen-zones.md)（**已修好功能锁死**） |
-| 4 | [`CONTEXT.md`](CONTEXT.md) |
-| 5 | [`docs/P0_CAPCUT_ALIGN.md`](docs/P0_CAPCUT_ALIGN.md)（剪辑对齐范围） |
-| 6 | [`.workbuddy/memory/MEMORY.md`](.workbuddy/memory/MEMORY.md)（长期记忆） |
+**只读这一份：** [`docs/现行技术文档.md`](docs/现行技术文档.md)
+
+它已覆盖：产品定位与北极星 · 技术栈 · 架构分层与真相源 · 活路径（主/副/拓展） · 冻结区 · 发展方向与优先级 · 编码规范 · **代码收敛唯一真相源** · 代码体检与审查标准。
+
+- 历史 / 深度细节已归档至 [`docs/_archive/`](docs/_archive/)，**不作为现行依据**，也不作为开发改动入口。
+- 不要编辑多份开发文档；所有架构 / 活路径 / 已知问题 / 优先级变更，统一写回 `docs/现行技术文档.md`。
+
+## 编码铁律
+
+见 [`.trae/rules/0.md`、`1.md`、`2.md`](.trae/rules/)（工作区自动加载）。
 
 ## 冻结区
 
-未获用户「解冻 \<zone-id\>」前，禁止改 `frozen_zones.json` 所列符号与 `FROZEN:*` 标记块。
+未获用户「解冻 \<zone-id\>」前，禁止改 `frozen_zones.json` 所列符号与 `FROZEN:*` 标记块（清单见 `docs/knowledge/frozen_zones.json`，机器基线，勿移动）。
 
 ```bash
 python scripts/frozen_zone_guard.py          # 检查
 python scripts/frozen_zone_guard.py --update # 解冻改完后重写基线
 ```
 
-## 活路径
+## 关键约定备忘
 
-见知识库 INDEX「活路径」一节（主路径 + 抽出副路径 + 拓展/闭环）。剪辑改动优先这批文件，勿误入未接线的 `AppState` / 孤儿 `ExportRenderer`。注意注册表 id 为 **`extensions`**（非旧 `plugins`）。
-
-## 同步知识库
-
-```bash
-python scripts/sync_knowledge.py
-```
-
-会刷新 `docs/knowledge/sources/MANIFEST.md` 与 `docs/knowledge/catalog.json`。
+- 注册表 id 为 **`extensions`**（非旧 `plugins`）。
+- 时间线真相源 = `EditorModule._clips`；勿误入未接线的 `AppState` / 孤儿 `ExportRenderer`。
+- 剪辑改动优先 `docs/现行技术文档.md` §4「活路径」所列文件。

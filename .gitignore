@@ -48,8 +48,7 @@
 /.workbuddy-key-fallback/
 /.gitconfig
 
-# ====== 备份的上游仓库 git 目录（解除 embedded submodule 指针用，绝对不要上传）======
-# 任何层级的 .git.bak（目录或 worktree 文件）都是为了把原 openshot 上游 git 库剥离而改名的备份
+# ====== 备份的上游仓库 git 目录（历史遗留：原 openshot-qt 上游库已删除，此条防 .git.bak 再现）======
 .git.bak/
 .git.bak
 
@@ -175,7 +174,6 @@ data/*.json
 
 # 第三方二进制文件（太大）
 thirdparty/
-libopenshot-audio-build/
 
 # 视频素材与导出
 素材库/

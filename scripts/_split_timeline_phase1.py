@@ -79,7 +79,6 @@ from .timeline_subwidgets import (
     AUDIO_EXTS,
     _MediaWorkerGate,
     _media_worker_gate,
-    _report_timeline_widget_debug,
     _TIMELINE_ZOOM_MIN,
     _TIMELINE_ZOOM_MAX,
     _TIMELINE_BASE_PPS,
