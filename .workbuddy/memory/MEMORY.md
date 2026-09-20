@@ -1,44 +1,46 @@
 # 拾光剪影 — 项目长期记忆（核心事实）
 
-> **结构化知识库（优先）**: [`docs/knowledge/INDEX.md`](../../docs/knowledge/INDEX.md)  
-> 本文件保留北极星与偏好摘要；架构/活路径/已知问题以知识库 00–08 为准。  
-> 摘要复核：**2026-08-13**
+> 结构化知识库（优先）：`docs/_archive/knowledge/INDEX.md`（00–19，**已归档到 `_archive/`**）
+>   常查：00 概览 · 05 已知问题 · 08 冻结区 · 17 磁吸不变量 · 17 动捕设计 · 19 画布概论
+> 版本历史：`docs/CHANGELOG.md`；逐轮明细：`.workbuddy/memory/YYYY-MM-DD.md`
+> 本文件只留「北极星 + 核心不变量 + 用户偏好」摘要，细节一律查知识库。复核 **2026-09-21**
+> 排查方法沉淀：`~/.workbuddy/skills/git-mass-deletion-triage/`（删定性）· `ast-scope-nameerror-hunt`（NameError 扫描）
 
-## 一、产品北极星闭环
+## 一、产品北极星
 
-7 阶段：精剪 → 人工改 → 文案 → 发布 → 数据采集 → 优化建议 → 选题。
+闭环 7 阶段，V4.19.0 起「发布/数据采集/优化建议」随账号运营下线，活路径收敛为「剪辑精剪 + AI 画布」两条：精剪 → 人工改 → 文案 → 选题。
+- C3 剪辑 workflow_hint ✅；仍缺：选题自动导入时间线 / 一键粗剪写 `_clips`
+- 优先级：**先剪辑（稳→快→全→可维护），后 AI 闭环**
 
-| 状态 | 说明 |
-|------|------|
-| C1 | 发布真回执 ✅ |
-| C2 | 爆款建议进账号运营 UI ✅ |
-| C3 | 剪辑 workflow_hint ✅；短剧跳转走 `extensions` ✅ |
-| 仍缺 | 选题自动导入时间线 / 一键粗剪写 `_clips` |
+## 二、核心不变量（改动前必读，错了代价大）
 
-优先级：**先剪辑（稳→快→全→可维护），后 AI 闭环。**
+1. **真相源** = `EditorModule._clips`；勿用 `AppState`/孤儿 `ExportRenderer`。`_clips` 跨线程共享、**必须持锁**：① 非原子替换整段 `with self._clips_lock:`；② 序列化/遍历用 `_clips_snapshot()`，绝不把 `self._clips` 引用交给 `json.dump`；③ 锁是 **RLock**。
+2. **插件 = 两套**（别被同名类迷惑）：`ExtensionsRegistry`（`app/core/extension_base.py:332`）+ `PluginManager`（`app/core/plugin_manager.py:13`）。真家 `app/plugins/`；`plugin_*.py` 与旧 plugins 目录已归档、勿合并。
+3. **冻结区 9 zone / 85 锁点**：守卫 `scripts/frozen_zone_guard.py`（仅 `--update`/`--list`，无 `--check`，无参即校验）。`canvas-magnetic-intent` 锁 33 整文件，画布改动无一例外需解冻。改 zone 同步 4 处：`frozen_zones.json` · `docs/现行技术文档.md` §5 · `.cursor/rules/frozen-zones.mdc`。
+4. **两套独立版本号**：主程序 `app/version.py`；画布 `vendor/shiguang-canvas/src/canvasVersion.ts`。刻意不同步、各自递增。改画布版三件套：`canvasVersion.ts` → `package.json` → CHANGELOG。禁内联版本字符串。
+5. **Agent 常量单一来源** = `app/core/agent_constants.py`（`STATUS_*` + `ERR_WAITING_APPROVAL`），禁裸字符串。
+6. **能力元数据单一来源** = `app/core/agent_capability_catalog.py`；新增能力唯一入口 = 目录表加一行（`verify_catalog_consistency()` 守卫）。
+7. **音画纠偏 ~280ms（冻结区）**，勿压回 80ms。
+8. **内联样式 = 主题盲区**：每新增一个 `setStyleSheet` 内联控件，必须回 `set_theme()` 补刷新（对比度：深色底 `#edf3ff` / 浅色底 `#172033`）。
+9. **静默 except 判定线**：UI 绘制 `pass` 可接受；状态机/资源路径 `pass` 不可接受（须 `logger.debug(..., exc_info=True)`）。例外 `except RuntimeError: pass` 有意保留。
+10. **沙箱 wmic 黑名单**：import app 链触发 config_manager 的 wmic；验证脚本用 subprocess 包一层、写干净 UTF-8 再读。
+11. **清理纪律（2026-09-21 血泪）**：临时文件**禁止用 `_*` 等宽 glob 清理**。必须① 显式列名单删除；② 删除前先 `git ls-files <候选>` 区分「项目自有 / 本次新建」；③ 未在 git 里的产物先确认有无副本（我曾用 `_*` 误删 6 个项目自有文件，3 个 git 跟踪的救回，3 个未跟踪 PNG 永久丢失）。
+12. **HEAD 已 stale**：`git` 只停在 **2026-09-12 `d67f80a`**（27 次提交），此后 ~9 天改动**全部未提交**（2026-09-21 实测 `git status` 7750 项：7477 `D` / 137 `M` / 136 `??`）。已定性：**非事故** —— 97.6% 是被移除的 vendored OpenShot/libopenshot（7303 项），余 174 项为归档搬迁（`docs/knowledge`→`docs/_archive/knowledge` 已核实）与已下线模块（`account_ops_*`、`drama_finder_plugin`、7 个旧 `video_editor/*` 并入 `editor_module.py`）。**悬空 import 反查 = 0**。⇒ 真正的风险是**这 9 天没有 git 保护**。
 
-地基：①清创 ✅ ②不卡（一轮+A2）✅ ③接线大半 ④拆上帝类进行中（宿主 ~10.8k） 顶层部分完成。
+## 三、用户习惯与偏好
 
-## 二、代码健康度（摘要）
+- 核电管工转 AIGC；简体中文；指令极简；先看结论再展开
+- 小白模式讲解：比喻 + 表格；迭代：规划→「开始」→汇总→「继续」
+- 拒绝随机效果；前后端强绑定；情绪化时专业耐心推进、不回怼
+- 素材库仅本机；素材网站直达在「帮助」；画布默认 `shiguang-canvas`
 
-- 真相源：`EditorModule._clips`；勿用 `AppState` / 孤儿 `ExportRenderer`
-- 已抽：`clip_transform` · `editor_export` · `editor_burn` · `editor_subtitle_panel` · B0–B2 core
-- 注册表：`extensions`（默认开）取代 `plugins`；`drama` 仅插件；**`account` 已迁插件**
-- 音画纠偏：**~280ms**（冻结区）；勿压回 80ms
-- 冻结区 7 个：见 `docs/knowledge/08-frozen-zones.md`
+## 四、分区索引（细节查 `docs/_archive/knowledge/`，不在此展开）
 
-## 三、用户工作习惯与偏好
-
-- 核电管工转 AIGC；简体中文；指令极简；偏好先看结论再展开
-- 讲解要「小白模式」：比喻 + 表格
-- 迭代：规划→确认「开始」→收汇总说「继续」
-- 拒绝随机效果；前后端强绑定
-- 情绪化表达不满时不回怼，专业耐心推进
-
-## 四、最近落地（2026-08-12～13 · 跨 IDE 共用）
-
-- 素材库仅本机；素材网站直达在**帮助**
-- 账号运营：**插件** `app/plugins/account_ops_plugin/`，入口拓展中心（注册表已无 `account`）
-- 画布默认 `shiguang-canvas`；3D 导演台可**单人/群像模板**；素模正面=+Z（五官+黄箭头）
-- 姿势：点选人模 → 滑条 / 关节(J)；旧站位按钮不会生成多人，须用群像模板
-- 构建产物：`vendor/shiguang-canvas/dist`（`Stage3D-2xKnAlH-.js`，含 `dummy13-v3`）
+- **磁吸系统不变量**（edge-gap 判据 / Bond 咬合 / 三段式手感 / 让位 reflow / 空间记忆 depth）→ `17-canvas-magnetic-invariants.md`（**专文**）+ `08-frozen-zones.md`
+- **角色库字段模型**（一字段横跨 6 处，`visual` vs `inner` 流向）→ `_verify/check_character_schema.py`
+- **画布桥接层**（`@_route_*` 注册、节点级后端化、SSE 桥、端口 18765）→ `19-canvas-design-review.md` + `05-known-issues.md`
+- **参考视频驱动生视频 / 姿态解析（模式 A/B）** → `17-motion-ref-design.md`（§五已订正：**刀1/2/3 完成**，刀3=`stage3dPoseRetarget.ts`+Stage3D.tsx UI；**下一刀=刀4 录制白模视频**；刀5 通道就位、无模型支持 `video_motion`）
+- **代码健康度基线**（2026-09-19 全库实测 228,583 行、`editor_module.py` 9,479 行）→ `docs/_reports/2026-09-19-全库代码评价报告.md`
+- **Agent 定位「知心秘书」+ 温度开关** → `app/core/agent_persona.py`
+- **冷启动性能**（MainWindow 8.24s→0.191s）→ `docs/冷启动性能诊断报告.md` + 技能 `~/.workbuddy/skills/python-coldstart-profiling/`
+- **视频代码化 / 词锚定**（`timeline_dsl.py` 死代码 / `timeline_source.py` 工程源码层 / 阶段1 完成、阶段3 未做）→ `docs/_reports/2026-09-20-工程源码化与词锚定阶段1.md`（**尚未沉淀进知识库**）

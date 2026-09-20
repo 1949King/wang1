@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated": "2026-08-07",
+  "updated": "2026-09-13",
   "policy": "未获用户明确「解冻 <zone-id>」授权前，禁止修改下列保护区。修 bug 也须先解冻再改，并重新跑 python scripts/frozen_zone_guard.py --update。",
   "zones": [
     {
       "id": "playback-av",
       "title": "时间线播放 · 音画同步",
-      "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms；2026-08-07 解冻后允许 speed_ramp 映射 source_t/rate",
+      "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms；2026-08-07 解冻后允许 speed_ramp 映射 source_t/rate；2026-09-13 用户授权解冻修复：_arm_media_audio 播放速率节流（ramp 连续变速下每 33ms 重设 setPlaybackRate 致 WMF 音频抖动，改为相对变化>8% 才重设）+ 切源清速率缓存，已重锁",
       "invariants": [
         "QMediaPlayer 不 setVideoOutput（画面只走 PreviewManager/OpenCV）",
         "播放主时钟是 QElapsedTimer 墙钟，禁止恢复 playhead += 固定步长",
@@ -15,28 +15,80 @@
         "联动音频片不得被 BGM 播放器双开",
         "播放中预览质量为 low；tick 约 33ms；顺序 grab 追赶",
         "主音/BGM 纠偏阈值不宜压回 ~80ms（易可闻卡顿）",
-        "有 speed_ramp 时 source_t/瞬时 rate 走 speed_ramping 映射，否则常数 speed"
+        "有 speed_ramp 时 source_t/瞬时 rate 走 speed_ramping 映射，否则常数 speed",
+        "_arm_media_audio 播放速率按相对变化>8%节流，禁止恢复每 tick 无条件 setPlaybackRate"
       ],
       "symbols": [
-        {"file": "app/modules/lego/editor_module.py", "name": "_ensure_media_audio_output"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_arm_media_audio"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_ensure_media_signals"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_on_media_status_changed"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_on_position_changed"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_on_playback_state_changed"},
-        {"file": "app/modules/lego/editor_module.py", "name": "on_deactivated"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_play_pause"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_start_timeline_playback"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_stop_timeline_playback"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_on_timeline_playback_tick"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_rebasing_playback_clock"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_sync_bgm_audio"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_is_linked_video_audio_clip"},
-        {"file": "app/core/preview_manager.py", "name": "get_frame_at"}
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_ensure_media_audio_output"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_arm_media_audio"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_ensure_media_signals"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_on_media_status_changed"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_on_position_changed"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_on_playback_state_changed"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "on_deactivated"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_play_pause"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_start_timeline_playback"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_stop_timeline_playback"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_on_timeline_playback_tick"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_rebasing_playback_clock"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_sync_bgm_audio"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_is_linked_video_audio_clip"
+        },
+        {
+          "file": "app/core/preview_manager.py",
+          "name": "get_frame_at"
+        }
       ],
       "markers": [
-        {"file": "app/modules/lego/editor_module.py", "id": "playback-av:init-media"},
-        {"file": "app/modules/lego/editor_module.py", "id": "playback-av:main-audio"}
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "id": "playback-av:init-media"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "id": "playback-av:main-audio"
+        }
       ]
     },
     {
@@ -49,14 +101,32 @@
         "关进程路径须 mute + stop + setSource 空 URL"
       ],
       "symbols": [
-        {"file": "app/modules/lego/editor_module.py", "name": "cleanup"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_shutdown_media"},
-        {"file": "app/modules/lego/main_window.py", "name": "_stop_all_media_on_exit"},
-        {"file": "app/modules/lego/main_window.py", "name": "closeEvent"}
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "cleanup"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_shutdown_media"
+        },
+        {
+          "file": "app/modules/lego/main_window.py",
+          "name": "_stop_all_media_on_exit"
+        },
+        {
+          "file": "app/modules/lego/main_window.py",
+          "name": "closeEvent"
+        }
       ],
       "markers": [
-        {"file": "app/modules/lego/editor_module.py", "id": "exit-media:shutdown"},
-        {"file": "app/modules/lego/main_window.py", "id": "exit-media:main-window"}
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "id": "exit-media:shutdown"
+        },
+        {
+          "file": "app/modules/lego/main_window.py",
+          "id": "exit-media:main-window"
+        }
       ]
     },
     {
@@ -69,9 +139,14 @@
         "normalize_clip_transform / apply_normalized_transform 为唯一写入真相"
       ],
       "symbols": [],
-      "files": ["app/modules/lego/clip_transform.py"],
+      "files": [
+        "app/modules/lego/clip_transform.py"
+      ],
       "markers": [
-        {"file": "app/modules/lego/clip_transform.py", "id": "clip-transform:module"}
+        {
+          "file": "app/modules/lego/clip_transform.py",
+          "id": "clip-transform:module"
+        }
       ]
     },
     {
@@ -84,12 +159,30 @@
         "表达式失败必须能回退分段 concat"
       ],
       "symbols": [
-        {"file": "app/modules/lego/video_processor.py", "name": "_piecewise_linear_expr"},
-        {"file": "app/modules/lego/video_processor.py", "name": "_clamped_transform_expr"},
-        {"file": "app/modules/lego/video_processor.py", "name": "_bake_clip_transform_continuous"},
-        {"file": "app/modules/lego/video_processor.py", "name": "_bake_clip_transform_scale_segments"},
-        {"file": "app/modules/lego/video_processor.py", "name": "bake_clip_transform"},
-        {"file": "app/modules/lego/video_processor.py", "name": "_build_transform_segments"}
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "_piecewise_linear_expr"
+        },
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "_clamped_transform_expr"
+        },
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "_bake_clip_transform_continuous"
+        },
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "_bake_clip_transform_scale_segments"
+        },
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "bake_clip_transform"
+        },
+        {
+          "file": "app/modules/lego/video_processor.py",
+          "name": "_build_transform_segments"
+        }
       ],
       "markers": []
     },
@@ -103,61 +196,105 @@
         "暂停时才画变换框把手"
       ],
       "symbols": [
-        {"file": "app/modules/lego/editor_module.py", "name": "_preview_content_rect"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_preview_norm_from_pos"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_clip_box_norm"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_hit_preview_transform_mode"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_overlay_transform_handles_on_qimage"},
-        {"file": "app/modules/lego/editor_module.py", "name": "_apply_preview_transform_to_clip"},
-        {"file": "app/modules/lego/editor_module.py", "name": "eventFilter"}
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_preview_content_rect"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_preview_norm_from_pos"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_clip_box_norm"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_hit_preview_transform_mode"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_overlay_transform_handles_on_qimage"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "_apply_preview_transform_to_clip"
+        },
+        {
+          "file": "app/modules/lego/editor_module.py",
+          "name": "eventFilter"
+        }
       ],
       "markers": []
     },
     {
       "id": "plugin-host-ui",
       "title": "插件宿主常驻 UI 入口",
-      "reason": "短剧筛选插件已删除，但 plugins_module 宿主层的常驻标签打开/关闭逻辑仍须冻结",
+      "reason": "账号运营/短剧筛选插件已彻底删除（含 drama_btn 常驻入口与 _open_drama_finder_tab 等），plugins_module 宿主层仅保留 AI特效工坊入口与通用插件打开/初始化逻辑，仍须冻结（2026-09-15 用户授权解冻清理）",
       "invariants": [
         "插件中心常驻标签打开不误走仅 apply_effect 的特效插件",
         "Plugin.__init__ 预置 _widget/_context/_initialized；run 可无先验 initialize"
       ],
       "symbols": [
-        {"file": "app/modules/lego/plugins_module.py", "name": "_plugin_offers_widget_ui"},
-        {"file": "app/modules/lego/plugins_module.py", "name": "_ensure_plugin_initialized"},
-        {"file": "app/modules/lego/plugins_module.py", "name": "_open_plugin_ui"}
+        {
+          "file": "app/modules/lego/plugins_module.py",
+          "name": "_plugin_offers_widget_ui"
+        },
+        {
+          "file": "app/modules/lego/plugins_module.py",
+          "name": "_ensure_plugin_initialized"
+        },
+        {
+          "file": "app/modules/lego/plugins_module.py",
+          "name": "_open_plugin_ui"
+        }
       ],
       "markers": [
-        {"file": "app/modules/lego/plugins_module.py", "id": "drama-finder-ui:plugins-host"}
+        {
+          "file": "app/modules/lego/plugins_module.py",
+          "id": "plugin-host-ui:plugins-host"
+        }
       ]
     },
     {
       "id": "plugin-store-catalog",
       "title": "插件商店真实目录",
-      "reason": "仅上架 app/plugins 真实可加载项；剔除虚构商品",
+      "reason": "仅上架 app/plugins 真实可加载项；已剔除 drama-finder/account-ops 及虚构商品（2026-09-15 用户授权解冻清理）",
       "invariants": [
         "OFFICIAL_ITEMS 必须能在磁盘找到 local_path",
         "FAKE_OFFICIAL_IDS 中的虚构条目不得回写商店",
         "内置插件 is_installed=True"
       ],
       "symbols": [
-        {"file": "app/modules/lego/plugin_store.py", "name": "init_official_items"},
-        {"file": "app/modules/lego/plugin_store.py", "name": "_resolve_plugin_path"}
+        {
+          "file": "app/modules/lego/plugin_store.py",
+          "name": "init_official_items"
+        },
+        {
+          "file": "app/modules/lego/plugin_store.py",
+          "name": "_resolve_plugin_path"
+        }
       ],
       "markers": [
-        {"file": "app/modules/lego/plugin_store.py", "id": "plugin-store-catalog:official"}
+        {
+          "file": "app/modules/lego/plugin_store.py",
+          "id": "plugin-store-catalog:official"
+        }
       ]
     },
     {
       "id": "stage3d-core",
       "title": "3D导演台 · 模型渲染与桥接",
-      "reason": "用户明确要求冻结，防止 GLB 模型加载、骨骼绑定、姿势应用、材质渲染、Python 桥接层被误改；2026-08-20",
+      "reason": "用户明确要求冻结，防止 GLB 模型加载、骨骼绑定、姿势应用、材质渲染、Python 桥接层被误改；2026-08-20。2026-09-13 用户授权解冻两次：① character_management_module.py 仅改「预热时机」（无条件预热 → 仅可见时预热 + 幂等）；② 角色库 CHARACTER_FIELD_SCHEMA 由 10 字段扩到 20 字段并改为按分组动态渲染 UI，canvas_bridge.build_character_prompt 消费新增的 temperament / memory_anchors，两个前端包 CharacterEntry 同步。两次均未动端口（18765/3011/3010）、渲染、GLB 路径与材质，改完重新上锁。2026-09-17 用户授权解冻（修复画布白屏）：仅改 canvas_runtime.py 的端口探测逻辑——新增模块级 http_probe()（无代理 GET 校验真返回画布页面）与 CanvasRuntime._port_serves_canvas()，is_ready()/_start_static_server() 的「端口占用则复用」判断由纯 TCP 探活升级为 HTTP 健康校验，_start_static_server 的 OSError 分支补友好提示；**未动 18765/3011/3010 任何端口值**，未动渲染/GLB/材质/桥接符号，改完重新上锁。2026-09-20 用户授权解冻（模式 B 第四刀：录制白模动作视频）：仅改 Stage3D.tsx —— 新增 recordPoseVideo()（逐帧离屏渲染 → 采集 PNG → 交后端 /host/pose-video-encode 合成 → setMotionRefVideo 挂为 reference_video）、两处状态（poseVideoBusy / poseVideoProgress）、一处 import、动作 tab 一个按钮；**只读渲染结果，未动材质替换/骨名映射/GLB 加载/端口值/预热时机/角色库 schema**。配套新增未冻结文件 stage3dPoseVideo.ts（纯逻辑 + 单测）与 app/core/ai/pose_video_service.py（FFmpeg 合成），canvas_server.py 与 bridge.ts 均不在冻结区故未登记。验证：tsc 存量 37 处→37 处（A/B 证明零新增）、vitest 76/76 通过、vite build rc=0、守卫复跑 OK frozen zones intact (85 locks)",
       "invariants": [
         "bodyFigureUrl 只返回 bodychan.glb 或 bodykun.glb（来自用户 blend 文件）",
         "prepareBodyFigureMeshes 不得覆盖 GLB 原始材质",
         "loadGLBRiggedHumanoid 加载 GLB 后不做材质替换或颜色覆盖",
         "canvas_bridge 端口 18765 不得更改",
         "canvas_runtime 静态端口 3011 / dev 端口 3010 不得更改",
-        "export_vinchau_glb.py 导出时不得修改骨名映射或材质设置"
+        "export_vinchau_glb.py 导出时不得修改骨名映射或材质设置",
+        "画布预热只能在模块可见时触发（_bootstrap_if_visible / showEvent + _booted 幂等）；不得恢复 setup_ui 末尾的无条件 QTimer.singleShot(200, self._bootstrap)",
+        "角色库 CHARACTER_FIELD_SCHEMA 新增字段必须同步 canvas_bridge.build_character_prompt（仅 visual 组）与两个前端包的 CharacterEntry；静态校验 _verify/check_character_schema.py"
       ],
       "symbols": [],
       "files": [
@@ -174,16 +311,40 @@
     {
       "id": "canvas-magnetic-intent",
       "title": "画布磁吸意图系统 · 导演卡 + L1 参数",
-      "reason": "小白画布按《磁吸意图画布开发规格说明书》实现：四向磁吸紧密贴合、六向槽位高亮、导演卡剧本自动拆解、生成卡 L1 导演参数；用户要求冻结锁定，2026-09-12",
+      "reason": "小白画布按《磁吸意图画布开发规格说明书》实现：四向磁吸紧密贴合、六向槽位高亮、导演卡剧本自动拆解、生成卡 L1 导演参数；用户要求冻结锁定，2026-09-12。2026-09-13 用户授权解冻一次：修正磁吸判据（中心距→边缘间隙）、新增 Bond 咬合 + SnapSeam 咬合缝、落地拖拽分离阻力三段式；按规格保留全部阈值数值，改完重新上锁并补登记 bonds.ts / SnapSeam.tsx / novice/*。2026-09-16 用户授权解冻两次：① 吸附视觉无感化改造——撤销「咬合缝常驻可见」，静止贴合零视觉残留，仅拖拽拉扯瞬态显示细线阻力反馈、落座/断裂保留一次性细闪光（无文字胶囊）；② 意图胶囊卡片交互升级——L1/L2 参数按节点类型分派（只渲染 node-factory 真实字段，移除前后端均无消费的 aspectRatio/styleStrength/negativePrompt 假字段）、L3 专业参数经 L2 底部「▾ 专业参数」展开（不再完全隐藏）、单击选中卡片内直接输入主文本（KIND_TEXT_FIELD）、双击卡片经 store.requestProEdit 展开右侧精细编辑；③ 画布 Agent 展开时隐藏右侧设置面板（agentPanelOpen 时 inspector 不渲染，只显示 Agent-IM）；④ 吸附贴合无缝化——落位 gap 0→-2（相邻边框融合消除暗缝）、.nv-card 补 border-box（实尺寸=落位基准 240×200）、圆角 8→4（贴合四角缺口减半）；2026-09-16 用户授权解冻第五次：⑤ 咬合侧描边透明化——贴合边由 bonds 几何推导（bondedSidesMap → store.bondedSides → NoviceCard 挂 bonded-* class）改透明描边+贴合边直角（圆角 0），选中态 1px ring 让位纯投影，两卡贴合处融为一块（Windows 磁贴式全齐平无缝）；⑥ 竖排缩放控件上移 bottom:68px 避让底部 libtv-dock（资产管理行），消除图标重叠；磁吸行为/阈值/阻力手感全部不变，改完重新上锁。2026-09-17 用户授权解冻（追加改动）：放大磁吸阈值 weak 80→120、strong 25→60（medium 50 不动）+ 新增 instant 等级（instantDistance=10，magneticStrength=1.0，拖拽中 gap<10 直接 writeNodePos 到 snapPos，对齐 Win11 磁贴「边对边立刻贴齐」手感）；卡片尺寸 240×200 / 贴合缝机制（bonds/bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid=关闭 / XYDrag 时序 全部不变；改完重新上锁。2026-09-17 用户授权解冻（V4.23.2 追加）：小白自动布局网格步进对齐贴合落位——拉片（store.ts breakdownScript）与导演卡拆解（breakdownDirectorCard）x 步进 230→238、y 步进 200→198（= CARD_SIZE 240×200 − 贴合落位 gap=-2）；旧值 230 使相邻卡重叠 10px，超出 bondTolerance(2px) 不构成咬合、视觉却近乎贴死；同轮重建 dist（此前 V4.23.1 instant snap 仅落 src 未构建，运行时仍跑旧磁吸 weak 80/strong 25），改完重新上锁。2026-09-17 用户授权解冻（V4.24.0「四周灯光包围 + 贴合即连接」）：① 新手卡推翻「咬合侧隐形/静止零残留」——每张卡四周包一圈发光轮廓（青蓝灯光 #22d3ee 系，选中卡绿色灯光 #4ade80 系），贴合处双光带分界；类型色条改 ::before 内缘伪元素；bonded-* 透明+直角 CSS 废除（挂载链路保留）。② 「贴合即连接」——吸附成功不再自动生成软连接虚线与「此节点输出」徽章（onSoftDragStop 移除 pushSoftConnection），softConnections 恒空、固化/丢弃链路保留备用。③ styles.css 修复 sg-agent-head dock 窄面板按钮被压成竖排（flex-wrap:wrap + 按钮 flex-shrink:0/white-space:nowrap）。改完 vite build 重建 dist 并验证（pushSoftConnection 调用=0、发光样式进 CSS bundle、bonded 透明规则 0 残留），重新上锁。2026-09-17 用户授权解冻（修复磁吸方向 180° bug）：computeMagnetic 里 getDirection 返回「目标相对拖拽」的方位（dx=目标中心-拖拽中心，用于六向语义标签），却被直接传给 getSnapPosition（其语义=「拖拽节点应放到目标的哪一侧」），两者相反——导致目标在拖拽右侧时 snap 到目标右侧（用户反馈「左右吸附跑到最右、左边吸不上」），上下同理方向反了；修复为调用前 oppositeDirection 取反（left↔right / top↔bottom，stack 不变），best.direction 仍保留原方位供 MagneticLines 语义标签展示；新增 4 个方向回归测试（MagneticEngine.test.ts：目标在右/左/下/上四向，断言 snap 落点在目标正确一侧）；磁吸阈值（120/50/60/10）/六向语义/gap=-2/三段式阻力手感全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-17 用户授权解冻（修复 Agent 面板不靠右）：styles.css 的 .workspace.agent-open 系列 grid 由 4 列 200px 1fr 240px minmax(300px,360px) 改 3 列（删除 240px inspector 残留列）——agentPanelOpen 时 inspector 本就不渲染（不变量已锁定），DOM 仅 sidebar/canvas-wrap/AgentPanel 三个子元素，4 列模板把 AgentPanel 挤进第 3 列（240px）、最右 360px 空置，用户反馈「Agent 交互界面不在最右边靠齐」；改为 3 列后 Agent-IM 直接落最右 minmax(300px,360px) 列，right-collapsed 对 Agent 面板无效（Agent 打开期间始终贴右）；磁吸行为/阈值/卡片尺寸/贴合缝机制全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-18 用户授权解冻（V4.28.0「1+4 结合」磁贴画布视觉优化）：用户对小白模式 UI 与磁吸手感仍不满意，经 4 套可视化方案选定「1+4 结合」= Windows 磁贴无缝吸附 + 列表块大圆角/蓝色拖拽占位线。改动：① 卡片视觉——圆角 4→16、四周灯光包围改为深色实色块（#151a26 + 1px 白描边）、类型色由标题栏整块背景承载（废除 ::before 内缘色条）、选中态绿色灯光改为白色描边环；② 拖拽占位线——MagneticLines 的弯曲发光磁力线 + 两端发光圆点改为蓝色直线占位缝（#378ADD，3px 核心 + 10px 柔光晕，标在目标卡被贴边全长，stack 走整卡外框），方向语义标签胶囊保留；③ 修复 V4.23.1 遗留 bug——computeMagnetic 的 levelRank 映射漏 instant 档，导致 instant 被后遍历的 strong/medium 覆盖（「instant snap 时灵时不灵」的根因），补 instant:4 并加回归测试；magneticLevels.ts 等级元数据表补 instant 档（消除 tsc 类型错误）。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完 vite build 重建 dist（新 bundle 验证 #378add/seam-blur/instant:4 进包、旧 mag-glow 移除）并重新上锁。2026-09-18 用户授权解冻（V4.28.1「方案 A：剥离方向业务语义」）：用户质疑「上下 = 并行对照」等方向语义是从未确认过的臆造设计——早期规格文档 v3.1 给空间方向（left/right/top/bottom/stack）硬套了「输入/输出/对照/分支/导演卡/历史」业务语义，属过度设计。本次彻底剥离：删除 DIRECTION_SEMANTICS / SOFT_CONNECTION_SEMANTICS 两套语义表、删除 Bond.color 死字段（无人消费）、删除 SnapSlotHighlight.tsx 整个组件（六向槽位彩色语义条+标签）、MagneticLines 去掉方向语义标签胶囊（只留蓝色占位缝）、SoftConnectionLines 去掉语义标签改统一中性青色、NoviceInspector 去掉「六向放置」图例；SpatialDirection 类型与 BOND_COLORS（拉扯阻力反馈色，非语义）保留。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完重新上锁2026-09-18 用户授权解冻（V4.28.2「靠近即吸附」）：推翻「instant 直接 snap + 其它三档渐进吸引」——useMagneticDrag.onNodeDrag 对 weak/medium/strong/instant 一律直接 writeNodePos 到 snapPos，废除 getMagneticOffset 渐进吸引，松手 onNodeDragStop 钉回落点并闪光；删除 MagneticEngine 的 magneticStrength / getMagneticOffset 两个死函数及其测试。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、交互态、三段式阻力（30/50/bondGiveRatio=0.28）、snapToGrid 关闭、XYDrag 时序全部不变，改完重新上锁。 2026-09-18 用户授权解冻（借鉴手机主屏拖拽手感 + 下一代第一层空间记忆）：① 跟手浮起——useMagneticDrag.onNodeDrag 删除 writeNodePos（拖拽中不再覆写卡片位置，100% 跟指针走），只记录 magState；消除每帧重建 nodes 数组的卡顿。② 单轴吸附——MagneticEngine.getSnapPosition 新增 dragPos 参数，只动被吸附那一轴（吸左右时 y 取 dragPos.y，吸上下时 x 取 dragPos.x），修复「上下吸附不对」（实测垂直错开 180px 时落点瞬移一整卡高）；computeMagnetic 调用处传入 {x:dragRect.x,y:dragRect.y}。③ 松手落座动画——onNodeDragStop 改用 animateNodeTo(snapAnimationMs=200)，强吸附带 overshootPx(5)，不再瞬间跳过去。④ 空间记忆第一层——NoviceCard 挂 data-depth(=intentDepth)，novice-cards.css 加 [data-depth] 三档配色（仅 filter + 描边透明度，不改尺寸/不加 box-shadow/不改圆角）；顺修 NoviceCard 陈旧注释（4px→16px）。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合落位 gap=-2、三段式阻力（30/50/bondGiveRatio=0.28）、snapToGrid 关闭、XYDrag 时序、方向无语义、拖拽占位缝、大圆角色块 全部不变；新增 3 条单轴吸附回归测试（vitest 40→43 全绿）；改完重新上锁（81 locks）。 2026-09-18 用户授权解冻（第 2 次：整列让位，手机主屏第 2 条机制）：① 新增 magnetic/reflow.ts 纯函数 planReflow()——输入拖拽卡落位矩形 + 其余节点，输出 {ghost, shifts, axis, blocked}；三条红线：只推同行/列（对侧轴投影重叠 ≥ MIN_OVERLAP(40)，与 bonds.ts 同尺）、链式整体平移一格不递归（step = 卡尺寸 + LANDING_GAP(-2) = 238/198）、推动后撞上同行紧贴链外卡则整条链放弃（blocked）；层叠（两轴均插进）前置排除。② 新增 magnetic/SlotGhost.tsx——ViewportPortal 内 2px 虚线坑位框（#378ADD + rgba(55,138,221,0.06) 填充 + 圆角 16），仅预览不驱动位移。③ useMagneticDrag 新增 reflowPlan state 与 animateNodesTo()（批量平移，单次 setState，按各卡当前真实位置起算，无过冲）；onNodeDrag 记录预览、onNodeDragStop 执行——顺序为「邻居先滑开（180ms）→ 拖拽卡落进 ghost」。④ CanvasShell 挂载 SlotGhost 并透传 reflowPlan。⑤ 新增 15 条让位回归测试（reflow.test.ts），vitest 43→58 全绿。**保留项**：拖拽中绝不覆写任何卡位置（含邻居）、卡片尺寸 240×200、吸附阈值 120/50/60/10、贴合落位 gap=-2、三段式阻力（30/50/bondGiveRatio=0.28）、snapToGrid 关闭、方向无语义、拖拽占位缝、大圆角色块、空间记忆第一层配色红线 全部不变；改完重新上锁（81 locks）。 2026-09-19 用户授权解冻（画布版本号治理 · 用户发现「画布版本号没迭代」）：**问题**——画布是独立子项目，其版本号一直被硬编码在 3 处（`package.json` / `CanvasShell.tsx:827` / `AppNav.tsx:37`）且自项目建立起停在 `v0.1.0`，历经 V4.21~V4.30 十余轮画布改动从未维护，而该版本号**真实显示在导航栏右上角**，导致界面版本与主程序 4.30.0 严重脱节（主程序改了画布没改）。**修复**：① 新建 `src/canvasVersion.ts` 作为唯一事实来源（CANVAS_VERSION / _LABEL / _CODENAME / _TITLE）；② `CanvasShell.tsx` 删硬编码改传常量；③ `AppNav.tsx` 删除 `version = \"v0.1.0\"` 默认值（改为**必填**，漏传即在界面暴露）、新增 `versionTitle` 参数接 tooltip；④ `package.json` version 0.1.0 → 0.2.0（与常量对齐）；⑤ 画布版本定为 `0.2.0`（代号「磁吸手感成型」）——因 V4.29/V4.30 已实质改动画布交互（跟手/单轴吸附/落座动画/空间记忆/整列让位），属 MINOR 级功能变更。⑥ 将 `canvasVersion.ts` 与 `AppNav.tsx` **纳入本 zone 保护**（后者此前不在清单内）。**验证**：tsc 仅命中 `riggedHumanoid.ts`/`Stage3D.tsx` 存量错误、改动文件 0 错误；vitest 58 passed 全绿；build 成功（298 模块 ← 297+1）；dist 产物确认 `\"0.2.0\"` 进包、`v0.1.0` 已消失、codename 与 title 链路接通。改完重新上锁（83 locks）。。2026-09-20 用户授权解冻（V4.32.4 视频动捕第四刀，仅版本号维护）：canvasVersion.ts 的 CANVAS_VERSION 0.2.0 → 0.3.0、版本代号「磁吸手感成型」→「白模动作录制」。这是技能流程第 8 步要求的「画布版本三件套」之一（另两件 package.json / CHANGELOG 不在冻结区），非功能改动；**未动任何磁吸判据、阈值、卡片尺寸、落位 gap、阻力手感、交互态**。同轮 stage3d-core 已另行解冻（见该 zone 记录）。改完 --update 重锁并复跑守卫通过",
       "invariants": [
-        "卡片间距 gap=0 紧密贴合（MagneticEngine.ts）",
-        "磁吸阈值 weak/medium/strong = 80/50/25px，过冲5、回弹200ms、拉伸30、断裂50",
-        "六向语义：左输入参考 / 右输出接续 / 上并行对照 / 下分支备选 / 前导演卡 / 后历史版本",
+        "贴合落位（2026-09-16 裁定，2026-09-18「1+4 结合」视觉修订）：吸附落位 gap=-2 保留——Bond 容差内的咬合重叠量，分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（不再是「四周灯光圈双光带」，也不再是边框融合隐形）；.nv-card 必须 box-sizing:border-box（DOM 实尺寸=落位用 240×200）；卡片圆角 16（2026-09-18 用户裁定「1+4 结合」：4→16 大圆角，对齐列表块风）。上下左右吸附统一生效。自动布局网格步进必须 = CARD_SIZE − 2（x 238 / y 198，V4.23.2）：拉片与导演卡拆解生成的小白卡直接落在贴合位，禁止回退 230/200（会重叠 10px 破坏咬合）",
+        "磁吸阈值 weak/medium/strong = 120/50/60px，瞬时阈值 instant=10px（2026-09-17 用户裁定：放大强吸判定+新增瞬时档，对齐 Win11 磁贴「边对边立刻贴齐」手感）；过冲5、回弹200ms、拉伸30、断裂50",
+        "方向无语义（2026-09-18 方案 A 用户裁定，推翻早期「六向语义」）：磁吸方向 left/right/top/bottom/stack 只表示物理方位，禁止再给方向硬套「输入/输出/对照/分支/导演卡/历史」等业务语义标签与语义色；吸附反馈统一为蓝色占位缝（见「拖拽占位缝」），不再渲染方向语义标签、六向槽位彩色条、软连接语义标签、右侧面板「六向放置」图例",
         "导演卡自动拆解走 breakdownStoryboard + breakdownDirectorCard，非破坏式追加下游分镜卡",
         "生成卡 L1 画质四档 qualityTier = draft/standard/fine/cinema，与 shot 一致",
         "生成卡默认 duration=5、motionStrength=60、consistency=75",
         "L1 面板仅在非参考视频节点显示（isReference 不显示）",
-        "缩小色块视觉由 .react-flow.zoomed-out 类控制"
+        "缩小色块视觉由 .react-flow.zoomed-out 类控制",
+        "磁吸等级判据用「边缘间隙 edge-gap」，不是中心距：卡片 240×200，并排贴合时中心距恰为 240px，用中心距判 25px 阈值必然失效（V4.13.0 修正的根因）",
+        "靠近即落座（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」二次修订）：拖拽中只要进入磁吸范围（edge-gap < weakDistance=120px）即认定「松手会吸附到这里」（magState 记录 snapPos），但**拖拽期间不改卡片位置**；松手时才动画落座。磁吸等级（weak/medium/strong/instant）仅用于目标优先级（levelRank）+ UI 反馈 + 落座过冲判定，不再区分吸附力度、也不在拖拽中产生位移。历史：V4.28.2 曾为「进入范围即整卡瞬移」，2026-09-18 推翻（与手机主屏「绝不瞬移」手感相反且每帧重建 nodes 数组致卡顿）",
+        "Bond 咬合由几何推导：边距 ≤ bondTolerance(2px) 且投影重叠 ≥ MIN_OVERLAP(40px)；不落盘，刷新后自动恢复",
+        "Bond 只识别 左/右/上/下 四向贴合缝，不含 stack 层叠",
+        "咬合缝 SnapSeam（2026-09-16 用户裁定 + 2026-09-18 修订）：静止贴合的分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（见「大圆角色块」），SnapSeam 不再承担静止零残留承诺；仅拖拽拉扯瞬态显示细线阻力反馈（拉伸中 #fbbf24 / 即将断开 #f87171）；落座/断裂保留一次性细闪光，不出现文字胶囊",
+        "贴合即连接（2026-09-17 用户裁定）：吸附成功 = 关系已建立，不再自动生成软连接虚线与方向徽章（CanvasShell onSoftDragStop 的 pushSoftConnection 已移除）；softConnections 状态与固化/丢弃链路保留（恒为空列表、SoftConnectionLines 渲染空列表），未来手动建立血缘可复用",
+        "大圆角色块（2026-09-18 用户裁定「1+4 结合」，推翻 2026-09-17「四周灯光包围」）：每张小白卡为深色实色块——body 背景 #151a26 + 1px 描边 rgba(255,255,255,0.08)，圆角 16px，去掉四周发光光晕（不再有 box-shadow 光晕 / 1px 亮芯）；类型色由标题栏整块背景承载（.nv-card-head background:var(--nv-accent)、文字改深色 #0f1115），废除 .nv-card::before 内缘色条；选中态 .on 改为白色描边环（border #ffffff + box-shadow 0 0 0 1px rgba(255,255,255,0.35)），废除绿色灯光；贴合处由相邻卡片深色块 + 类型色块自然并排分界；bondedSidesMap→store.bondedSides→NoviceCard 挂 bonded-* class 的链路保留，但 bonded-* 的「边框透明+直角」CSS 规则已废除；卡片圆角统一由 novice-cards.css 管理（16px），NoviceCard 不得内联 borderRadius",
+        "拖拽占位缝（2026-09-18 用户裁定「1+4 结合」，推翻旧「弯曲发光磁力线」）：MagneticLines 拖拽靠近目标时，在目标卡被贴的那条边全长绘制蓝色直线占位缝（#378ADD，3px 核心线 + 10px 柔光晕 opacity 0.25，滤镜 seam-blur），替换旧的 Q 曲线磁力线 + 两端发光圆点；方向由 magState.direction 映射——目标在右→贴其左缘竖线、在左→贴其右缘竖线、在下→贴其上缘横线、在上→贴其下缘横线、stack→目标整卡外框；不渲染任何方向语义标签（2026-09-18 方案 A 剥离）",
+        "竖排缩放控件避让（2026-09-16 用户裁定）：.react-flow__controls.react-flow__panel 必须 bottom:68px，抬到 libtv-dock（bottom:10px、顶边≈52px）上方，两者不得重叠",
+        "意图胶囊卡片交互分级（2026-09-16 用户裁定）：单击选中 = 卡片内直接输入主文本（KIND_TEXT_FIELD 绑定 node-factory 真实字段）；双击 = store.requestProEdit 触发右侧面板展开 L2 进阶设置",
+        "画布 Agent 打开时隐藏右侧设置面板（2026-09-16 用户裁定）：agentPanelOpen 时 inspector aside（小白 NoviceInspector / 专业项目+选中节点参数）不渲染，只显示 Agent-IM 交互界面；Agent 关闭后恢复",
+        "L1/L2/L3 参数按节点类型分派（2026-09-16 用户裁定）：只渲染 node-factory 类型定义中真实存在的字段；L3 专业参数（steps/cfg/seed/补帧）经 L2 底部「▾ 专业参数」折叠展开，不再完全隐藏；aspectRatio/styleStrength/negativePrompt 三字段前后端生成链路均无消费，已移除不许复活",
+        "拖拽分离阻力三段式：拉力 ≤30px 完全不动 / 30~50px 只跟出 bondGiveRatio(0.28) / ≥50px 断裂并 muted 该邻居",
+        "仍在咬合时松手须 150ms 平滑回位且不过冲；强吸附落座才带 overshootPx(5) 过冲",
+        "小白模式 snapToGrid 必须关闭：16px 量化会把拉扯变成阶梯跳，吃掉阻力手感",
+        "React Flow v12 的 XYDrag 先写 store 再回调，onNodeDrag/onNodeDragStop 内覆盖位置必然生效——阻力手感依赖此顺序",
+        "跟手浮起（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」，推翻 V4.28.2「靠近即吸附」的拖拽中瞬移）：拖拽中 onNodeDrag **绝不覆写卡片位置**（不再调用 writeNodePos），卡片 1:1 跟指针走；onNodeDrag 只计算并记录 magState（level/targetId/direction/snapX/snapY = 「若现在松手会落在哪」）。性能收益：消除每帧重建 nodes 数组 + 每帧重算 bonds/bondedSides 的正反馈卡顿。落座动作全部移交 onNodeDragStop。禁止恢复「拖拽中 writeNodePos 贴到 snapPos」",
+        "单轴吸附（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」）：getSnapPosition 必须接受 dragPos（拖拽卡当前左上角）并**只动被吸附的那一轴** —— case left/right 的 y 取 dragPos.y（不再硬取 targetPos.y），case top/bottom 的 x 取 dragPos.x（不再硬取 targetPos.x）；stack 除外（保持 targetPos+8）。旧行为「吸左右时把 y 拽到目标 y」实测垂直错开 180px 时落点瞬移一整卡高，是用户反馈「上下吸附不对」的真实根因。dragPos 缺省时回退旧行为保证兼容。回归 _verify: MagneticEngine.test.ts「单轴吸附」describe（3 例）",
+        "松手落座动画（2026-09-18 用户裁定）：onNodeDragStop 吸附落座必须走 animateNodeTo（snapAnimationMs=200 平滑滑入），不再瞬间 writeNodePos 跳过去；强吸附（strong/instant）落座带 overshootPx(5) 过冲，weak/medium 不带（对齐既有不变量「强吸附落座才带 overshootPx(5)」）。animateNodeTo 收尾自带 findBondFor，参数即形成的咬合；仍粘住松手仍走 150ms 回位不过冲（不变）",
+        "instant 等级（2026-09-17 用户裁定，对齐 Win11 磁贴「边对边立刻贴齐」手感）：computeMagnetic 判定 gap < instantDistance(10px) → level='instant'。**注**：instant 自 2026-09-18「跟手浮起」起不再表示「拖拽中立刻贴齐」，而是作为**最高优先级**（levelRank instant:4）参与目标选择 + 决定落座是否带过冲；所有等级拖拽中一律跟手、松手才落座。卡片尺寸 240×200 / 贴合缝机制（bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid 关闭 / XYDrag 时序 全部不变。levelRank 映射必须含 instant:4：漏掉它时 instant 会被后遍历的 strong/medium 错误覆盖（2026-09-18 修复，补 MagneticEngine.test.ts 回归）",
+        "空间记忆 · 第一层（2026-09-18 用户裁定「下一代概念」）：NoviceCard 挂 data-depth（= 已有 intentDepth 1~3），novice-cards.css 用 [data-depth] 分档配色。**红线：只改颜色**——标题栏 filter(saturate/brightness) + 描边透明度；不得改尺寸（卡片实尺寸恒 240×200，磁吸落位基准）、不得加 box-shadow（不变量「不再有 box-shadow 光晕」）、不得改圆角（统一 16px）。.nv-card.on 选中态描边优先级必须高于所有 [data-depth] 描边规则",
+        "整列让位（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」第 2 条机制）：拖拽卡准备落进被占用的空位时，挡住它的**同一行/列**卡片顺次推开一格，拖拽卡最终落进锚点让出的坑（ghost）。规划由 `magnetic/reflow.ts` 的 planReflow() 纯函数负责，UI 预览由 `magnetic/SlotGhost.tsx`（ViewportPortal 虚线框）承担。**三条红线**：① 只推同一行/列（垂直于让位轴方向投影重叠 ≥ MIN_OVERLAP(40px)，与 bonds.ts 同一把尺子）；② 链式只推一格——链上卡片整体平移 step(=卡尺寸+LANDING_GAP(-2)=238/198)，绝不递归/放大；③ 推动后若链尾撞上同行紧贴的链外卡则整条链放弃（blocked）。另：层叠（两轴均插进）前置排除、不让位。**时序红线**：拖拽中只记录 reflowPlan 预览、绝不移动任何卡（含邻居）；让位位移一律在 onNodeDragStop 执行，且顺序必须是「邻居先滑开（animateNodesTo/180ms）→ 拖拽卡再落进 ghost」，反过来会先叠一下再被挤走。回归 _verify: reflow.test.ts（15 例）",
+        "让位与吸附/咬合的分工（2026-09-18）：computeMagnetic 管「一对一吸附落点」，computeBonds 管「静态咬合关系」，SpatialAnalyzer 只做「布局模式识别」（不返回可执行位移，故让位不可复用它），planReflow 管「一对多位移规划」。禁止把让位逻辑塞进 computeMagnetic 或 SpatialAnalyzer",
+        "画布版本号单一事实来源（2026-09-19 用户裁定「画布独立版本号」）：画布版本线与主程序**刻意不同步**——主程序版本在 `app/version.py`（Qt6 侧显示），画布版本只能来自 `src/canvasVersion.ts` 的 `CANVAS_VERSION`（导航栏 `.ic-nav-ver` 显示）。**禁止在组件里内联版本字符串**。历史坑：版本号曾被硬编码在 `package.json` / `CanvasShell.tsx:827` / `AppNav.tsx:37` 三处，自项目建立起一直停在 `v0.1.0`、历经 V4.21~V4.30 十余轮画布改动从未维护，界面显示与实际功能严重脱节。维护三件套：① 改 `canvasVersion.ts` ② 同步 `package.json` 的 `version`（无 v 前缀）③ 在 `docs/CHANGELOG.md` 画布段落记一笔。`AppNav` 的 `version` 为**必填参数**（已移除默认值，漏传会在界面直接暴露）"
       ],
       "symbols": [],
       "files": [
@@ -191,15 +352,20 @@
         "vendor/shiguang-canvas/src/magnetic/FloatingToolbar.tsx",
         "vendor/shiguang-canvas/src/magnetic/MagneticEngine.ts",
         "vendor/shiguang-canvas/src/magnetic/MagneticLines.tsx",
-        "vendor/shiguang-canvas/src/magnetic/SnapSlotHighlight.tsx",
         "vendor/shiguang-canvas/src/magnetic/SoftConnection.ts",
         "vendor/shiguang-canvas/src/magnetic/SoftConnectionLines.tsx",
         "vendor/shiguang-canvas/src/magnetic/SpatialAnalyzer.ts",
         "vendor/shiguang-canvas/src/magnetic/SpatialIndex.ts",
         "vendor/shiguang-canvas/src/magnetic/StackBadge.tsx",
+        "vendor/shiguang-canvas/src/magnetic/reflow.ts",
+        "vendor/shiguang-canvas/src/magnetic/SlotGhost.tsx",
+        "vendor/shiguang-canvas/src/canvasVersion.ts",
+        "vendor/shiguang-canvas/src/AppNav.tsx",
         "vendor/shiguang-canvas/src/magnetic/StatusBadge.tsx",
         "vendor/shiguang-canvas/src/magnetic/types.ts",
         "vendor/shiguang-canvas/src/magnetic/useMagneticDrag.ts",
+        "vendor/shiguang-canvas/src/magnetic/bonds.ts",
+        "vendor/shiguang-canvas/src/magnetic/SnapSeam.tsx",
         "vendor/shiguang-canvas/src/CanvasShell.tsx",
         "vendor/shiguang-canvas/src/styles.css",
         "vendor/shiguang-canvas/src/nodes.tsx",
@@ -208,7 +374,13 @@
         "vendor/shiguang-canvas/src/mediaExtraNodes.tsx",
         "vendor/shiguang-canvas/src/registerBuiltinNodes.ts",
         "vendor/shiguang-canvas/src/NodePalette.tsx",
-        "vendor/shiguang-canvas/src/components/canvas/CanvasEmptyState.tsx"
+        "vendor/shiguang-canvas/src/components/canvas/CanvasEmptyState.tsx",
+        "vendor/shiguang-canvas/src/novice/types.ts",
+        "vendor/shiguang-canvas/src/novice/NoviceCard.tsx",
+        "vendor/shiguang-canvas/src/novice/NoviceInspector.tsx",
+        "vendor/shiguang-canvas/src/novice/novice-cards.css",
+        "vendor/shiguang-canvas/src/novice/novice-inspector.css",
+        "vendor/shiguang-canvas/src/novice/index.ts"
       ],
       "markers": []
     }
