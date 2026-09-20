@@ -60,6 +60,24 @@ from PyQt6.QtWidgets import (
 logger = logging.getLogger("AI短剧编辑器.editor")
 
 
+def _with_agent_history(system_prompt: str, user_prompt: str, enabled: bool) -> List[Dict[str, str]]:
+    """拼装发给模型的消息：system + （完整档时）多轮历史 + 当前 user。
+
+    轻量档不接历史，省 token；完整档才召回，让 Agent 记得上文。
+    """
+    messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    if enabled:
+        try:
+            from app.core.agent_session import agent_sessions
+            history = agent_sessions.get_history_messages("editor")
+            if history:
+                messages.extend(history)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 召回多轮历史失败: {e}")
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
+
+
 class EditorAgentPanelMixin:
     """编辑 Agent 面板与流水线编排 Mixin。
 
@@ -71,169 +89,317 @@ class EditorAgentPanelMixin:
     # ======================================================================
     # 抽取自 editor_module.py L10353-10699
     # ======================================================================
+    # ── 空间策略常量（V4.34.1）────────────────────────────────────────────
+    # 不预设「唯一最佳宽度」，而是提供两档随时切：
+    #   默认档 380 = 与右侧工具栏同宽，剪片时**不挤压预览**
+    #   展开档 620 = 从预览区借空间，对话区舒展
+    # 宽度偏好用 QSettings 记忆（跨会话）。
+    _AGENT_PANEL_NORMAL = 380
+    _AGENT_PANEL_WIDE = 620
+
+    def _toggle_agent_panel_width(self) -> None:
+        """在「默认档 380」与「展开档 620」之间切换右栏宽度。
+
+        **空间策略**（V4.34.1）：Agent 与剪辑的空间矛盾没有「唯一解」——
+        剪片时它该窄（让位给预览/时间线），对话时它该宽。故做成**用户随时可切**，
+        而不是我替你定死一个宽度。
+        """
+        sp = getattr(self, "_top_splitter", None)
+        if sp is None:
+            return
+        try:
+            sizes = list(sp.sizes())
+            if len(sizes) < 3:
+                return
+            cur = sizes[-1]
+            mid = (self._AGENT_PANEL_WIDE + self._AGENT_PANEL_NORMAL) // 2
+            target = self._AGENT_PANEL_NORMAL if cur >= mid else self._AGENT_PANEL_WIDE
+            delta = target - cur
+            # 从「预览区」借/还空间（预览是最大的一栏，伸缩最无痛）
+            sp.setSizes([sizes[0], max(240, sizes[1] - delta), target])
+            self._persist_agent_panel_width()
+            tip = "已回归默认宽度（剪辑优先）" if target == self._AGENT_PANEL_NORMAL else "已展开对话区（对话优先）"
+            try:
+                self._append_agent_message("系统", f"{tip} · 右栏 {target}px。")
+            except Exception:
+                pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 切换面板宽度失败: {e}")
+
+    def _persist_agent_panel_width(self) -> None:
+        """记住右栏宽度偏好（QSettings，跨会话）。"""
+        try:
+            from PyQt6.QtCore import QSettings
+
+            sp = getattr(self, "_top_splitter", None)
+            if sp is None:
+                return
+            sizes = list(sp.sizes())
+            if len(sizes) >= 3:
+                QSettings("ShiguangEditor", "AgentPanel").setValue("right_width", int(sizes[-1]))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 保存宽度偏好失败: {e}")
+
+    def _restore_agent_panel_width(self) -> None:
+        """恢复上次的右栏宽度（默认 380；夹在 300~760 防记忆值把布局搞坏）。"""
+        try:
+            from PyQt6.QtCore import QSettings
+
+            sp = getattr(self, "_top_splitter", None)
+            if sp is None:
+                return
+            w = QSettings("ShiguangEditor", "AgentPanel").value("right_width", self._AGENT_PANEL_NORMAL)
+            try:
+                w = max(300, min(760, int(w)))
+            except (TypeError, ValueError):
+                w = self._AGENT_PANEL_NORMAL
+            sizes = list(sp.sizes())
+            if len(sizes) >= 3 and abs(sizes[-1] - w) > 8:
+                delta = w - sizes[-1]
+                sp.setSizes([sizes[0], max(240, sizes[1] - delta), w])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 恢复宽度偏好失败: {e}")
+
+    def _agent_panel_styles(self) -> Dict[str, str]:
+        """剪辑 Agent 面板的**主题感知**样式集合（V4.34.0 UI 重设计 · 第一步）。
+
+        **为什么必须这么改**：此前本面板约 30 处 `setStyleSheet` **硬编深色**
+        （`#0f1117` / `#21262d` / `#c9d1d9` …），浅色主题下会变成一块「深色孤岛」，
+        与周围割裂 —— 正是项目纪律「**内联样式 = 主题盲区**」的典型案例。
+
+        现在所有颜色集中由 `ThemeManager.get_colors()` 提供，深/浅色自动适配。
+        控件只需 `setStyleSheet(S["xxx"])`，不再出现任何颜色字面量。
+
+        （根治方案是把规则并入全局 QSS；本步先用「样式工厂」消除硬编码，
+        风险最小、见效最快，后续可平滑迁移到全局 QSS。）
+        """
+        try:
+            from .theme_manager import ThemeManager
+
+            c = ThemeManager.instance().get_colors()
+        except Exception:  # 兜底：主题不可用时退回深色（保证面板仍可用）
+            logger.debug("[Agent] 取主题色板失败，用深色兜底", exc_info=True)
+            c = {
+                "bg_main": "#070a12", "bg_secondary": "#101621", "bg_tertiary": "#172033",
+                "bg_hover": "#1f2b42", "text_primary": "#edf3ff", "text_secondary": "#aab6cc",
+                "text_disabled": "#667085", "text_on_accent": "#f8fbff", "border": "#253044",
+                "accent": "#2f7bff", "accent_hover": "#4d8dff", "accent_soft": "#102a4d",
+                "success": "#2dd4bf", "danger": "#fb7185",
+            }
+        g = c.get
+        return {
+            # 容器
+            "panel": (
+                f"QWidget#editAgentPanel{{background:{g('bg_main')};}}"
+                f"QWidget#editAgentPanel QLabel{{color:{g('text_primary')};"
+                f"background:transparent;border:none;}}"
+            ),
+            "title": f"color:{g('text_primary')};font-size:12px;font-weight:700;",
+            "muted": f"color:{g('text_secondary')};font-size:11px;",
+            "ok_hint": f"color:{g('success')};font-size:11px;",
+            # 输入类
+            "line_edit": (
+                f"QLineEdit{{background:{g('bg_secondary')};color:{g('text_primary')};"
+                f"border:1px solid {g('border')};border-radius:6px;padding:4px 8px;font-size:11px;}}"
+                f"QLineEdit:focus{{border-color:{g('accent')};}}"
+            ),
+            "combo": (
+                f"QComboBox{{background:{g('bg_secondary')};color:{g('text_primary')};"
+                f"border:1px solid {g('border')};border-radius:6px;padding:3px 8px;font-size:11px;}}"
+                f"QComboBox:hover{{border-color:{g('accent')};}}"
+                f"QComboBox::drop-down{{border:none;width:16px;}}"
+                f"QComboBox QAbstractItemView{{background:{g('bg_secondary')};color:{g('text_primary')};"
+                f"border:1px solid {g('border')};outline:0;font-size:11px;padding:2px 0;}}"
+                f"QComboBox QAbstractItemView::item{{padding:4px 10px;min-height:22px;"
+                f"color:{g('text_primary')};}}"
+                f"QComboBox QAbstractItemView::item:hover{{background:{g('bg_hover')};}}"
+                f"QComboBox QAbstractItemView::item:selected{{background:{g('accent')};"
+                f"color:{g('text_on_accent')};}}"
+            ),
+            "text_readonly": (
+                f"QTextEdit{{background:{g('bg_secondary')};color:{g('text_secondary')};"
+                f"border:1px solid {g('border')};border-radius:8px;padding:6px;font-size:11px;}}"
+            ),
+            # 按钮
+            "btn": (
+                f"QPushButton{{background:{g('bg_tertiary')};color:{g('text_primary')};"
+                f"border:1px solid {g('border')};border-radius:6px;padding:4px 10px;font-size:11px;}}"
+                f"QPushButton:hover{{background:{g('bg_hover')};}}"
+            ),
+            "btn_ghost": (
+                f"QPushButton{{background:{g('bg_secondary')};color:{g('text_secondary')};"
+                f"border:1px solid {g('border')};border-radius:8px;padding:4px 10px;font-size:11px;}}"
+                f"QPushButton:hover{{color:{g('text_primary')};border-color:{g('accent')};}}"
+            ),
+            "btn_primary": (
+                f"QPushButton{{background:{g('accent')};color:{g('text_on_accent')};"
+                f"border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}}"
+                f"QPushButton:hover{{background:{g('accent_hover')};}}"
+                f"QPushButton:disabled{{background:{g('bg_tertiary')};color:{g('text_disabled')};}}"
+            ),
+            "btn_danger": (
+                f"QPushButton{{background:transparent;color:{g('danger')};"
+                f"border:1px solid {g('danger')};border-radius:8px;padding:8px 16px;"
+                f"font-size:12px;font-weight:600;}}"
+                f"QPushButton:hover:enabled{{background:{g('danger')};color:{g('text_on_accent')};}}"
+                f"QPushButton:disabled{{color:{g('text_disabled')};border-color:{g('border')};}}"
+            ),
+            "btn_close": (
+                f"QPushButton{{background:transparent;color:{g('text_secondary')};"
+                f"border:1px solid {g('border')};border-radius:6px;padding:4px 10px;font-size:11px;}}"
+                f"QPushButton:hover{{color:{g('danger')};border-color:{g('danger')};}}"
+            ),
+            "btn_pipeline": (
+                f"QPushButton{{background:{g('accent_soft')};color:{g('accent')};"
+                f"border:1px solid {g('accent')};border-radius:8px;padding:6px 12px;"
+                f"font-size:11px;font-weight:600;}}"
+                f"QPushButton:hover{{background:{g('accent')};color:{g('text_on_accent')};}}"
+            ),
+            # 卡片 / 容器（含卡内控件规则 —— 用后代选择器一次覆盖，免逐个设样式）
+            "card": (
+                f"QFrame{{background:{g('bg_secondary')};border:1px solid {g('border')};"
+                f"border-radius:10px;}}"
+                f"QFrame QLabel{{color:{g('text_secondary')};font-size:11px;}}"
+                f"QFrame QComboBox{{background:{g('bg_tertiary')};color:{g('text_primary')};"
+                f"border:1px solid {g('border')};border-radius:6px;padding:4px 8px;font-size:11px;}}"
+                f"QFrame QComboBox::drop-down{{border:none;width:16px;}}"
+                f"QFrame QComboBox QAbstractItemView{{background:{g('bg_secondary')};"
+                f"color:{g('text_primary')};border:1px solid {g('border')};outline:0;"
+                f"font-size:11px;padding:2px 0;}}"
+                f"QFrame QComboBox QAbstractItemView::item{{padding:4px 10px;min-height:22px;}}"
+                f"QFrame QComboBox QAbstractItemView::item:hover{{background:{g('bg_hover')};}}"
+                f"QFrame QComboBox QAbstractItemView::item:selected{{background:{g('accent')};"
+                f"color:{g('text_on_accent')};}}"
+                f"QFrame QDoubleSpinBox,QFrame QSpinBox{{background:{g('bg_tertiary')};"
+                f"color:{g('text_primary')};border:1px solid {g('border')};"
+                f"border-radius:6px;padding:4px 8px;font-size:11px;}}"
+                f"QFrame QCheckBox{{color:{g('text_secondary')};font-size:11px;}}"
+            ),
+            "card_ok": (
+                f"QFrame{{background:{g('accent_soft')};border:1px solid {g('accent')};"
+                f"border-radius:8px;}}"
+            ),
+            "scroll": (
+                f"QScrollArea{{background:transparent;border:none;}}"
+                f"QScrollBar:vertical{{background:transparent;width:8px;border:none;}}"
+                f"QScrollBar::handle:vertical{{background:{g('border')};border-radius:4px;"
+                f"min-height:30px;}}"
+                f"QScrollBar::handle:vertical:hover{{background:{g('text_disabled')};}}"
+                f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0;}}"
+                f"QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{{background:none;}}"
+            ),
+            "plan_title": f"color:{g('accent')};font-size:12px;font-weight:700;",
+            # 渠道状态灯（P1-2 健康检查 / P1-1 报价）：成功 / 告警 / 次要
+            "status_ok": f"color:{g('success')};font-size:10px;",
+            "status_warn": f"color:{g('danger')};font-size:10px;font-weight:700;",
+            "status_dim": f"color:{g('text_secondary')};font-size:10px;",
+            # 带底色的信息条（原「🧠 大脑状态」那种胶囊标签）
+            "card_label": (
+                f"QLabel{{background:{g('bg_secondary')};color:{g('text_secondary')};"
+                f"border:1px solid {g('border')};border-radius:6px;"
+                f"padding:6px 10px;font-size:11px;}}"
+            ),
+        }
+
     def _create_edit_agent_panel(self) -> QWidget:
         """创建剪辑 Agent 对话面板（嵌入右侧工具栏标签页）。"""
         panel = QWidget()
         panel.setObjectName("editAgentPanel")
-        panel.setStyleSheet("""
-            QWidget#editAgentPanel{background:#0f1117;}
-            QLabel{color:#c9d1d9;background:transparent;border:none;}
-        """)
+        S = self._agent_panel_styles()          # 主题感知样式（不再硬编颜色）
+        panel.setStyleSheet(S["panel"])
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
+        # ── 头部：一行紧凑（标题 + 模式 + 弹性留白 + 模型 + 刷新 + 收起）──
         head = QHBoxLayout()
+        head.setSpacing(6)
         title = QLabel("剪辑 Agent")
-        title.setStyleSheet("color:#fff;font-size:12px;font-weight:700;")
+        title.setStyleSheet(S["title"])
         head.addWidget(title)
-        head.addStretch()
 
-        # 模式切换：Plan 模式 / 执行模式
-        mode_label = QLabel("模式")
-        mode_label.setStyleSheet("color:#8b949e;font-size:11px;")
-        head.addWidget(mode_label)
+        # 模式切换：Plan / 协作 B / 自主 C
+        # （去掉「模式」文字标签，靠 tooltip 说明 —— 省一列宽度，头部更紧凑）
         self._agent_mode_combo = QComboBox()
         self._agent_mode_combo.addItem("协作 B", "collaborative")
         self._agent_mode_combo.addItem("Plan", "plan")
         self._agent_mode_combo.addItem("自主 C", "autonomous")
-        self._agent_mode_combo.setMinimumWidth(100)
+        self._agent_mode_combo.setMinimumWidth(88)
         self._agent_mode_combo.setToolTip(
             "Plan：只规划不改时间线；协作 B：建议清单勾选后写入；自主 C：白名单自动执行（付费生成不重试）"
         )
-        self._agent_mode_combo.setStyleSheet("""
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:3px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:16px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
-            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
-        """)
+        self._agent_mode_combo.setStyleSheet(S["combo"])
         head.addWidget(self._agent_mode_combo)
+        head.addStretch()
 
-        model_label = QLabel("模型")
-        model_label.setStyleSheet("color:#8b949e;font-size:11px;")
-        head.addWidget(model_label)
-
+        # 模型选择：弹性宽度（原固定 260px，窄面板会把其他按钮挤掉）
         self._edit_agent_model_combo = QComboBox()
-        self._edit_agent_model_combo.setMinimumWidth(260)
-        self._edit_agent_model_combo.setStyleSheet("""
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:4px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:18px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;
-                padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{
-                background:#1f2937;
-            }
-            QComboBox QAbstractItemView::item:selected{
-                background:#238636;color:#ffffff;
-            }
-            QComboBox QAbstractItemView::item:disabled{
-                color:#484f58;background:transparent;
-                padding:4px 10px;min-height:22px;
-            }
-        """)
-        head.addWidget(self._edit_agent_model_combo)
+        self._edit_agent_model_combo.setToolTip("选择本次对话使用的模型")
+        self._edit_agent_model_combo.setStyleSheet(S["combo"])
+        head.addWidget(self._edit_agent_model_combo, 1)
 
         refresh_btn = QPushButton("刷新")
-        refresh_btn.setStyleSheet("QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#30363d;}")
+        refresh_btn.setToolTip("重新加载可用模型列表")
+        refresh_btn.setStyleSheet(S["btn"])
         refresh_btn.clicked.connect(self._refresh_edit_agent_models)
         head.addWidget(refresh_btn)
 
         self._agent_active_hint = QLabel("")
-        self._agent_active_hint.setStyleSheet("color:#3fb950;font-size:11px;padding-left:4px;")
+        self._agent_active_hint.setStyleSheet(S["ok_hint"])
         head.addWidget(self._agent_active_hint)
 
+        # 展开 / 还原右栏宽度（V4.34.1 空间策略）：剪片时窄、对话时宽，随时切
+        self._agent_expand_btn = QPushButton("⤢")
+        self._agent_expand_btn.setToolTip(
+            f"展开对话区（右栏 {self._AGENT_PANEL_NORMAL} → {self._AGENT_PANEL_WIDE}px）；再点还原"
+        )
+        self._agent_expand_btn.setFixedWidth(30)
+        self._agent_expand_btn.setStyleSheet(S["btn"])
+        self._agent_expand_btn.clicked.connect(self._toggle_agent_panel_width)
+        head.addWidget(self._agent_expand_btn)
+
         close_btn = QPushButton("收起")
-        close_btn.setStyleSheet("QPushButton{background:#2a1f24;color:#ffb4bd;border:1px solid #5c222b;border-radius:6px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#5c222b;color:#fff;}")
+        close_btn.setStyleSheet(S["btn_close"])
         close_btn.clicked.connect(self._close_agent_tab)
         head.addWidget(close_btn)
         layout.addLayout(head)
 
         # 多集上下文（Dify 式应用变量，写入 MemoryStore）
+        # 紧凑化：去掉「剧名」「集数」「平台」三个文字标签，语义交给 placeholder + tooltip
         proj_row = QHBoxLayout()
         proj_row.setSpacing(6)
-        _pl = "color:#8b949e;font-size:11px;"
-        _pe = "QLineEdit{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}"
-        for text in ("剧名",):
-            lb = QLabel(text)
-            lb.setStyleSheet(_pl)
-            proj_row.addWidget(lb)
+        _pe = S["line_edit"]
         self._agent_drama_edit = QLineEdit()
         self._agent_drama_edit.setPlaceholderText("漫剧名（写入多集记忆）")
+        self._agent_drama_edit.setToolTip("剧名：多集记忆的归组键")
         self._agent_drama_edit.setStyleSheet(_pe)
         proj_row.addWidget(self._agent_drama_edit, 2)
-        lb_ep = QLabel("集数")
-        lb_ep.setStyleSheet(_pl)
-        proj_row.addWidget(lb_ep)
         self._agent_episode_edit = QLineEdit()
-        self._agent_episode_edit.setPlaceholderText("如 03")
-        self._agent_episode_edit.setMaximumWidth(72)
+        self._agent_episode_edit.setPlaceholderText("集数 03")
+        self._agent_episode_edit.setToolTip("集数：如 03")
+        self._agent_episode_edit.setMaximumWidth(80)
         self._agent_episode_edit.setStyleSheet(_pe)
         proj_row.addWidget(self._agent_episode_edit)
-        lb_pf = QLabel("平台")
-        lb_pf.setStyleSheet(_pl)
-        proj_row.addWidget(lb_pf)
         self._agent_platform_edit = QLineEdit()
-        self._agent_platform_edit.setPlaceholderText("douyin")
-        self._agent_platform_edit.setMaximumWidth(90)
+        self._agent_platform_edit.setPlaceholderText("平台 douyin")
+        self._agent_platform_edit.setToolTip("目标平台：如 douyin")
+        self._agent_platform_edit.setMaximumWidth(104)
         self._agent_platform_edit.setStyleSheet(_pe)
         proj_row.addWidget(self._agent_platform_edit)
-        save_ctx_btn = QPushButton("保存上下文")
-        save_ctx_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
-            "border-radius:6px;padding:4px 10px;font-size:11px;}"
-            "QPushButton:hover{background:#30363d;}"
-        )
+        save_ctx_btn = QPushButton("保存")
+        save_ctx_btn.setToolTip("保存多集上下文")
+        save_ctx_btn.setStyleSheet(S["btn"])
         save_ctx_btn.clicked.connect(self._save_agent_project_context)
         proj_row.addWidget(save_ctx_btn)
         layout.addLayout(proj_row)
         self._load_agent_project_context_fields()
         self._subscribe_provider_activated()
 
-        # ── 内容区 QScrollArea（确保内容超出时可滚动）──
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea{background:transparent;border:none;}
-            QScrollBar:vertical{background:#0f1117;width:8px;border:none;}
-            QScrollBar::handle:vertical{background:#30363d;border-radius:4px;min-height:30px;}
-            QScrollBar::handle:vertical:hover{background:#484f58;}
-            QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
-            QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:none;}
-        """)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(0, 4, 0, 4)
-        scroll_layout.setSpacing(8)
-
-        # ── 左右脑神经链接：🧠 大脑状态条（实时显示神经元/突触/激活统计）──
-        self._agent_brain_status_label = QLabel("🧠 大脑初始化中...")
-        self._agent_brain_status_label.setStyleSheet(
-            "QLabel{background:#1a1030;color:#d2a8ff;border:1px solid #3b1f6f;"
-            "border-radius:6px;padding:6px 10px;font-size:11px;}"
-        )
+        # ── 大脑状态条（紧凑一行，放对话区上方）──
+        self._agent_brain_status_label = QLabel("大脑初始化中…")
+        self._agent_brain_status_label.setStyleSheet(S["card_label"])
         self._agent_brain_status_label.setWordWrap(True)
-        scroll_layout.addWidget(self._agent_brain_status_label)
+        layout.addWidget(self._agent_brain_status_label)
         # 启动时首次刷新 + 定时器周期刷新（每 5 秒）
         QTimer.singleShot(0, self._refresh_agent_brain_status)
         self._agent_brain_refresh_timer = QTimer(self)
@@ -241,12 +407,24 @@ class EditorAgentPanelMixin:
         self._agent_brain_refresh_timer.timeout.connect(self._refresh_agent_brain_status)
         self._agent_brain_refresh_timer.start()
 
+        # ── ★ 对话区（主角，弹性占满剩余空间）──
+        # 原实现把它塞进滚动区且 setFixedHeight(72) —— 面板叫「Agent」，对话区却最小，
+        # 这是「对话体验非常难受」的直接原因。现移出滚动区、由面板布局直接给空间。
         self._edit_agent_chat = QTextEdit()
         self._edit_agent_chat.setReadOnly(True)
-        self._edit_agent_chat.setFixedHeight(72)
-        self._edit_agent_chat.setPlaceholderText("Agent 状态和执行结果会显示在这里。")
-        self._edit_agent_chat.setStyleSheet("QTextEdit{background:#0d1117;color:#9fb3c8;border:1px solid #21262d;border-radius:8px;padding:6px;font-size:11px;}")
-        scroll_layout.addWidget(self._edit_agent_chat)
+        self._edit_agent_chat.setMinimumHeight(220)
+        self._edit_agent_chat.setPlaceholderText("在这里和 Agent 对话 —— 结果与状态也会显示在这里。")
+        self._edit_agent_chat.setStyleSheet(S["text_readonly"])
+        layout.addWidget(self._edit_agent_chat, 1)
+
+        # ── 卡片滚动区（折叠后很矮，不抢对话区的空间）──
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(S["scroll"])
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 4, 0, 4)
+        scroll_layout.setSpacing(6)
 
         # ── 新增 1：执行参数配置卡（P0 痛点1+8）──
         self._build_agent_config_card(scroll_layout)
@@ -265,15 +443,15 @@ class EditorAgentPanelMixin:
 
         # Plan 模式规划显示区域（默认隐藏）
         self._agent_plan_card = QFrame()
-        self._agent_plan_card.setStyleSheet("QFrame{background:#0d1f12;border:1px solid #1f4d2a;border-radius:8px;}")
+        self._agent_plan_card.setStyleSheet(S["card_ok"])
         self._agent_plan_card.setVisible(False)
         plan_layout = QVBoxLayout(self._agent_plan_card)
         plan_layout.setContentsMargins(10, 8, 10, 10)
         plan_layout.setSpacing(6)
 
         plan_header = QHBoxLayout()
-        plan_title = QLabel("📋 执行规划")
-        plan_title.setStyleSheet("color:#7ee787;font-size:12px;font-weight:700;")
+        plan_title = QLabel("执行规划")
+        plan_title.setStyleSheet(S["plan_title"])
         plan_header.addWidget(plan_title)
         plan_header.addStretch()
         plan_layout.addLayout(plan_header)
@@ -282,18 +460,18 @@ class EditorAgentPanelMixin:
         self._agent_plan_view.setReadOnly(True)
         self._agent_plan_view.setMinimumHeight(80)
         self._agent_plan_view.setMaximumHeight(160)
-        self._agent_plan_view.setStyleSheet("QTextEdit{background:#0a1a0e;color:#9fb3c8;border:1px solid #1f4d2a;border-radius:6px;padding:6px;font-size:11px;}")
+        self._agent_plan_view.setStyleSheet(S["text_readonly"])
         plan_layout.addWidget(self._agent_plan_view)
 
         plan_btn_row = QHBoxLayout()
         plan_btn_row.setSpacing(6)
-        self._agent_plan_confirm_btn = QPushButton("✅ 确认执行")
-        self._agent_plan_confirm_btn.setStyleSheet("QPushButton{background:#238636;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:600;}QPushButton:hover{background:#2ea043;}")
+        self._agent_plan_confirm_btn = QPushButton("确认执行")
+        self._agent_plan_confirm_btn.setStyleSheet(S["btn_primary"])
         self._agent_plan_confirm_btn.clicked.connect(self._confirm_agent_plan)
         plan_btn_row.addWidget(self._agent_plan_confirm_btn)
 
         self._agent_plan_cancel_btn = QPushButton("取消")
-        self._agent_plan_cancel_btn.setStyleSheet("QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 14px;font-size:11px;}QPushButton:hover{background:#30363d;}")
+        self._agent_plan_cancel_btn.setStyleSheet(S["btn"])
         self._agent_plan_cancel_btn.clicked.connect(self._cancel_agent_plan)
         plan_btn_row.addWidget(self._agent_plan_cancel_btn)
         plan_btn_row.addStretch()
@@ -302,14 +480,36 @@ class EditorAgentPanelMixin:
         scroll_layout.addWidget(self._agent_plan_card)
 
         interaction_card = QFrame()
-        interaction_card.setStyleSheet("QFrame{background:#111722;border:1px solid #263244;border-radius:10px;}")
+        interaction_card.setStyleSheet(S["card"])
         interaction_layout = QVBoxLayout(interaction_card)
         interaction_layout.setContentsMargins(10, 10, 10, 10)
         interaction_layout.setSpacing(8)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
         interaction_title = QLabel("输入剪辑指令")
-        interaction_title.setStyleSheet("color:#e6edf3;font-size:12px;font-weight:700;")
-        interaction_layout.addWidget(interaction_title)
+        interaction_title.setStyleSheet(S["title"])
+        title_row.addWidget(interaction_title)
+        title_row.addStretch()
+
+        # 知心秘书温度开关（默认关=轻量；开=完整，多耗 token）
+        self._agent_persona_btn = QPushButton(self._persona_btn_label())
+        self._agent_persona_btn.setToolTip(
+            "开启「知心秘书」后我会记得你、更主动关心，但每次对话会多消耗一些 token；"
+            "关闭则保持轻量、几乎不增成本。"
+        )
+        self._agent_persona_btn.setStyleSheet(S["btn_ghost"])
+        self._agent_persona_btn.clicked.connect(self._toggle_agent_persona)
+        title_row.addWidget(self._agent_persona_btn)
+
+        # 自定义称呼
+        self._agent_nickname_btn = QPushButton("称呼")
+        self._agent_nickname_btn.setToolTip("设置希望我怎么称呼你")
+        self._agent_nickname_btn.setStyleSheet(S["btn_ghost"])
+        self._agent_nickname_btn.clicked.connect(self._set_agent_nickname)
+        title_row.addWidget(self._agent_nickname_btn)
+
+        interaction_layout.addLayout(title_row)
 
         quick_row = QHBoxLayout()
         quick_row.setSpacing(6)
@@ -321,7 +521,7 @@ class EditorAgentPanelMixin:
         ]
         for label, prompt in quick_prompts:
             btn = QPushButton(label)
-            btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:12px;padding:4px 10px;font-size:11px;}QPushButton:hover{background:#1e6bde;color:#fff;border-color:#1e6bde;}")
+            btn.setStyleSheet(S["btn_ghost"])
             btn.clicked.connect(lambda _, text=prompt: self._fill_edit_agent_prompt(text))
             quick_row.addWidget(btn)
         quick_row.addStretch()
@@ -330,62 +530,90 @@ class EditorAgentPanelMixin:
         # 全链路一键执行按钮（Agent 全量双向闭环：生成→预览→打分→精剪→成片）
         pipeline_row = QHBoxLayout()
         pipeline_row.setSpacing(6)
-        pipeline_btn = QPushButton("🚀 全链路执行（生成→预览→打分→精剪→成片）")
+        pipeline_btn = QPushButton("全链路执行（生成→预览→打分→精剪→成片）")
         pipeline_btn.setObjectName("edit_agent_pipeline_btn")
         pipeline_btn.setProperty("waiting_preview", False)
-        pipeline_btn.setStyleSheet("QPushButton{background:#1f2a3d;color:#7ee787;border:1px solid #2f5139;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;}QPushButton:hover{background:#238636;color:#fff;border-color:#238636;}")
+        pipeline_btn.setStyleSheet(S["btn_pipeline"])
         pipeline_btn.clicked.connect(self._on_run_full_pipeline)
         self._edit_agent_pipeline_btn = pipeline_btn  # 保存引用
         pipeline_row.addWidget(pipeline_btn)
+        # P1-3 任务化取消按钮：仅在全链路任务运行期间可见（queued/running/cancelling）
+        pipeline_cancel_btn = QPushButton("⏹ 取消")
+        pipeline_cancel_btn.setObjectName("edit_agent_pipeline_cancel_btn")
+        pipeline_cancel_btn.setStyleSheet(S["btn_danger"])
+        pipeline_cancel_btn.setVisible(False)
+        pipeline_cancel_btn.clicked.connect(self._on_cancel_pipeline_job)
+        self._edit_agent_pipeline_cancel_btn = pipeline_cancel_btn
+        pipeline_row.addWidget(pipeline_cancel_btn)
+        self._pipeline_job_id = ""   # 当前轮询的全链路任务号（空 = 无任务）
         pipeline_row.addStretch()
         interaction_layout.addLayout(pipeline_row)
 
         input_row = QHBoxLayout()
+        input_row.setSpacing(6)
         self._edit_agent_input = QLineEdit()
         self._edit_agent_input.setPlaceholderText("例如：把当前片段切成两段，给第一段加电影滤镜，并添加淡入转场")
-        self._edit_agent_input.setStyleSheet("QLineEdit{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:8px;font-size:12px;}")
+        self._edit_agent_input.setStyleSheet(S["line_edit"])
         self._edit_agent_input.returnPressed.connect(self._send_edit_agent_message)
         input_row.addWidget(self._edit_agent_input, 1)
 
         self._edit_agent_send_btn = QPushButton("发送")
-        self._edit_agent_send_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
+        self._edit_agent_send_btn.setStyleSheet(S["btn_primary"])
         self._edit_agent_send_btn.clicked.connect(self._send_edit_agent_message)
         input_row.addWidget(self._edit_agent_send_btn)
 
+        # 终止：只在任务运行时显示（V4.34.1 输入区瘦身：次级动作收进「⋯」）
         self._edit_agent_stop_btn = QPushButton("终止")
         self._edit_agent_stop_btn.setEnabled(False)
-        self._edit_agent_stop_btn.setStyleSheet("QPushButton{background:#3a1f24;color:#ffb4bd;border:1px solid #6b2530;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;}QPushButton:disabled{background:#1b1f24;color:#555;border-color:#2a2f36;}QPushButton:hover:enabled{background:#5c222b;}")
+        self._edit_agent_stop_btn.setVisible(False)
+        self._edit_agent_stop_btn.setStyleSheet(S["btn_danger"])
         self._edit_agent_stop_btn.clicked.connect(self._stop_edit_agent_message)
         input_row.addWidget(self._edit_agent_stop_btn)
 
+        # 暂停 / 继续 / 重规划 → 「⋯」菜单
+        # （控件本身保留为不可见宿主，避免别处 setEnabled / setText 调用报错）
         self._edit_agent_pause_btn = QPushButton("暂停")
-        self._edit_agent_pause_btn.setToolTip("暂停任务；点「继续」后才会再跑")
-        self._edit_agent_pause_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
         self._edit_agent_pause_btn.clicked.connect(self._pause_edit_agent_task)
-        input_row.addWidget(self._edit_agent_pause_btn)
-
         self._edit_agent_resume_btn = QPushButton("继续")
-        self._edit_agent_resume_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
         self._edit_agent_resume_btn.clicked.connect(self._resume_edit_agent_task)
-        input_row.addWidget(self._edit_agent_resume_btn)
-
         self._edit_agent_replan_btn = QPushButton("重规划")
-        self._edit_agent_replan_btn.setToolTip("切到 Plan 并用上一条指令重新规划")
-        self._edit_agent_replan_btn.setStyleSheet("QPushButton{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:12px;}")
         self._edit_agent_replan_btn.clicked.connect(self._replan_edit_agent_task)
-        input_row.addWidget(self._edit_agent_replan_btn)
+        for _b in (self._edit_agent_pause_btn, self._edit_agent_resume_btn,
+                   self._edit_agent_replan_btn):
+            _b.setVisible(False)
+
+        more_btn = QToolButton()
+        more_btn.setText("⋯")
+        more_btn.setToolTip("更多操作：暂停 / 继续 / 重规划")
+        more_btn.setStyleSheet(S["btn"])
+        more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        more_menu = QMenu(more_btn)
+        more_menu.addAction("暂停任务", self._pause_edit_agent_task)
+        more_menu.addAction("继续任务", self._resume_edit_agent_task)
+        more_menu.addSeparator()
+        more_menu.addAction("重规划（切到 Plan 重来）", self._replan_edit_agent_task)
+        more_btn.setMenu(more_menu)
+        input_row.addWidget(more_btn)
         interaction_layout.addLayout(input_row)
         scroll_layout.addWidget(interaction_card)
 
         # 设置 scrollArea 的 content 并加入主布局
+        # stretch=0：卡片区不抢空间（对话区已拿到 stretch=1）；卡片折叠后只剩标题行
         scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area, 1)
+        layout.addWidget(scroll_area, 0)
 
         self._edit_agent_worker = None
         self._edit_agent_stream_buffer = ""
         self._edit_agent_inbox = []
         self._refresh_edit_agent_models()
-        self._append_agent_message("Agent", "已就绪。下方输入剪辑需求或点击快捷指令。")
+        self._greet_agent_secretary()
+
+        # 空闲关怀：完整档时，长时间无交互主动问候一句（每分钟检查一次）
+        self._agent_last_active = time.time()
+        self._agent_idle_timer = QTimer(self)
+        self._agent_idle_timer.setInterval(60_000)
+        self._agent_idle_timer.timeout.connect(self._check_agent_idle)
+        self._agent_idle_timer.start()
 
         # 注册统一调用层 handler，传入 EditorModule lazy 引用
         try:
@@ -417,7 +645,33 @@ class EditorAgentPanelMixin:
         except Exception as e:
             logger.warning(f"[Agent] 全链路事件监听初始化失败: {e}")
 
+        # 恢复上次的右栏宽度偏好（延迟到布局 settle 后，避免启动时跳动）
+        QTimer.singleShot(200, self._restore_agent_panel_width)
+
+        # 快捷键直达（V4.34.1 调用体验）：Ctrl+Shift+A 切到 Agent 并聚焦输入框
+        try:
+            from PyQt6.QtGui import QKeySequence, QShortcut
+
+            self._agent_shortcut = QShortcut(QKeySequence("Ctrl+Shift+A"), self)
+            self._agent_shortcut.activated.connect(self._focus_agent_panel)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 快捷键注册失败: {e}")
+
         return panel
+
+    def _focus_agent_panel(self) -> None:
+        """快捷键 / 独立入口共用：切到 Agent 面板并把焦点交给输入框。"""
+        try:
+            idx = getattr(self, "_agent_tab_index", -1)
+            tabs = getattr(self, "_tools_tabs", None)
+            if tabs is not None and idx is not None and idx >= 0:
+                tabs.setCurrentIndex(idx)      # 懒加载 Tab 会在此刻构建
+            inp = getattr(self, "_edit_agent_input", None)
+            if inp is not None:
+                inp.setFocus()
+                inp.selectAll()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 聚焦面板失败: {e}")
 
     # ======================================================================
     # 抽取自 editor_module.py L10825-10969
@@ -575,42 +829,20 @@ class EditorAgentPanelMixin:
         """构造参数配置卡（平台 / 目标时长 / 单段时长 / Provider 选择）。"""
         card = QFrame()
         card.setObjectName("agentConfigCard")
-        card.setStyleSheet("""
-            QFrame#agentConfigCard{background:#111722;border:1px solid #263244;border-radius:10px;}
-            QLabel{color:#8b949e;font-size:11px;}
-            QComboBox{
-                background:#161b22;color:#e6edf3;border:1px solid #30363d;
-                border-radius:6px;padding:4px 8px;font-size:11px;
-            }
-            QComboBox::drop-down{border:none;width:18px;}
-            QComboBox QAbstractItemView{
-                background:#0d1117;color:#e6edf3;border:1px solid #30363d;
-                selection-background-color:#238636;selection-color:#ffffff;
-                outline:0;font-size:11px;padding:2px 0px;
-            }
-            QComboBox QAbstractItemView::item{
-                padding:4px 10px;min-height:22px;color:#e6edf3;
-            }
-            QComboBox QAbstractItemView::item:hover{background:#1f2937;}
-            QComboBox QAbstractItemView::item:selected{background:#238636;color:#ffffff;}
-            QDoubleSpinBox{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:11px;}
-        """)
+        S = self._agent_panel_styles()
+        card.setStyleSheet(S["card"])
         lay = QVBoxLayout(card)
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(6)
 
         head = QHBoxLayout()
-        t = QLabel("⚙️ 全链路执行参数")
-        t.setStyleSheet("color:#e6edf3;font-size:12px;font-weight:700;")
+        t = QLabel("全链路执行参数")
+        t.setStyleSheet(S["title"])
         head.addWidget(t)
         head.addStretch()
-        toggle = QPushButton("收起")
+        toggle = QPushButton("展开")
         toggle.setFixedHeight(24)
-        toggle.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;"
-            "border-radius:6px;padding:2px 10px;font-size:11px;}"
-            "QPushButton:hover{background:#30363d;}"
-        )
+        toggle.setStyleSheet(S["btn"])
         head.addWidget(toggle)
         lay.addLayout(head)
 
@@ -618,6 +850,8 @@ class EditorAgentPanelMixin:
         body_lay = QVBoxLayout(body)
         body_lay.setContentsMargins(0, 0, 0, 0)
         body_lay.setSpacing(6)
+        # 默认收起（V4.34.1）：这是唯一常驻展开的卡片，收起后给对话区让出空间
+        body.setVisible(False)
 
         grid = QGridLayout()
         grid.setSpacing(6)
@@ -668,7 +902,7 @@ class EditorAgentPanelMixin:
 
         # Provider 状态警告
         self._agent_provider_status_lbl = QLabel("")
-        self._agent_provider_status_lbl.setStyleSheet("color:#7ee787;font-size:10px;")
+        self._agent_provider_status_lbl.setStyleSheet(S["ok_hint"])
         self._agent_provider_status_lbl.setWordWrap(True)
         body_lay.addWidget(self._agent_provider_status_lbl)
         self._agent_provider_combo.currentIndexChanged.connect(self._refresh_provider_status)
@@ -693,29 +927,26 @@ class EditorAgentPanelMixin:
         """构造剪辑脚本结果卡（HTML 渲染 + 复制/导出/一键手动精剪）。"""
         card = QFrame()
         card.setObjectName("agentScriptCard")
-        card.setStyleSheet("QFrame#agentScriptCard{background:#101810;border:1px solid #1f4d2a;border-radius:10px;}")
+        S = self._agent_panel_styles()
+        card.setStyleSheet(S["card"])
         card.setVisible(False)
         lay = QVBoxLayout(card)
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(6)
 
         head = QHBoxLayout()
-        t = QLabel("📝 剪辑创意脚本")
-        t.setStyleSheet("color:#7ee787;font-size:12px;font-weight:700;")
+        t = QLabel("剪辑创意脚本")
+        t.setStyleSheet(S["title"])
         head.addWidget(t)
         head.addStretch()
 
-        self._agent_copy_script_btn = QPushButton("📋 复制")
-        self._agent_copy_script_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 10px;font-size:10px;}"
-            "QPushButton:hover{background:#1e6bde;color:#fff;}")
+        self._agent_copy_script_btn = QPushButton("复制")
+        self._agent_copy_script_btn.setStyleSheet(S["btn"])
         self._agent_copy_script_btn.clicked.connect(self._on_copy_script_clicked)
         head.addWidget(self._agent_copy_script_btn)
 
-        self._agent_export_script_btn = QPushButton("📁 导出")
-        self._agent_export_script_btn.setStyleSheet(
-            "QPushButton{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 10px;font-size:10px;}"
-            "QPushButton:hover{background:#1e6bde;color:#fff;}")
+        self._agent_export_script_btn = QPushButton("导出")
+        self._agent_export_script_btn.setStyleSheet(S["btn"])
         self._agent_export_script_btn.clicked.connect(self._on_export_script_clicked)
         head.addWidget(self._agent_export_script_btn)
         lay.addLayout(head)
@@ -723,17 +954,13 @@ class EditorAgentPanelMixin:
         self._agent_script_view = QTextEdit()
         self._agent_script_view.setReadOnly(True)
         self._agent_script_view.setFixedHeight(130)
-        self._agent_script_view.setStyleSheet(
-            "QTextEdit{background:#0a1a0e;color:#9fb3c8;border:1px solid #1f4d2a;border-radius:6px;padding:6px;font-size:11px;}")
+        self._agent_script_view.setStyleSheet(S["text_readonly"])
         lay.addWidget(self._agent_script_view)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._agent_manual_edit_btn = QPushButton("▶ 一键手动精剪")
-        self._agent_manual_edit_btn.setStyleSheet(
-            "QPushButton{background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:8px;padding:5px 14px;font-size:11px;font-weight:700;}"
-            "QPushButton:hover{background:#388bfd;}"
-            "QPushButton:disabled{background:#1b1f24;color:#555;border-color:#2a2f36;}")
+        self._agent_manual_edit_btn = QPushButton("一键手动精剪")
+        self._agent_manual_edit_btn.setStyleSheet(S["btn_primary"])
         self._agent_manual_edit_btn.clicked.connect(self._on_manual_edit_clicked)
         btn_row.addWidget(self._agent_manual_edit_btn)
         lay.addLayout(btn_row)
@@ -765,6 +992,19 @@ class EditorAgentPanelMixin:
         dropped = script.get("dropped_clips", []) or []
         rationale = script.get("rationale", "")
 
+        # HTML 渲染同样要**主题感知**（内联 style 也是主题盲区）
+        try:
+            from .theme_manager import ThemeManager
+
+            _c = ThemeManager.instance().get_colors()
+        except Exception:
+            _c = {}
+        _tp = _c.get("text_primary") or "#edf3ff"
+        _ts = _c.get("text_secondary") or "#aab6cc"
+        _acc = _c.get("accent") or "#2f7bff"
+        _ok = _c.get("success") or "#2dd4bf"
+        _bad = _c.get("danger") or "#fb7185"
+
         # 镜头序列
         seq_html = []
         for i, item in enumerate(clip_order, 1):
@@ -772,29 +1012,35 @@ class EditorAgentPanelMixin:
             dur = item.get("duration", "")
             grade = item.get("grade", "")
             tr = transitions.get(cid, transitions.get(str(i-1), ""))
-            color = {"S": "#ffd700", "A": "#7ee787", "B": "#d29922", "C": "#fb8500", "D": "#ff7b72"}.get(grade, "#58a6ff")
+            # 评分色：S/A → success，B/C → accent，D → danger（不再硬编金色/橙色）
+            color = {"S": _ok, "A": _ok, "B": _acc, "C": _acc, "D": _bad}.get(grade, _acc)
             grade_tag = f' <span style="color:{color};font-weight:700;">[{grade}]</span>' if grade else ""
-            dur_tag = f' <span style="color:#8b949e;">{dur}s</span>' if dur else ""
-            tr_tag = f' <span style="color:#d29922;">→ {tr}</span>' if tr and i < len(clip_order) else ""
-            seq_html.append(f'<span style="color:#e6edf3;">{i}. {cid}</span>{grade_tag}{dur_tag}{tr_tag}')
-        seq_text = "<br>".join(seq_html) or '<span style="color:#8b949e;">(空)</span>'
+            dur_tag = f' <span style="color:{_ts};">{dur}s</span>' if dur else ""
+            tr_tag = f' <span style="color:{_acc};">→ {tr}</span>' if tr and i < len(clip_order) else ""
+            seq_html.append(f'<span style="color:{_tp};">{i}. {cid}</span>{grade_tag}{dur_tag}{tr_tag}')
+        seq_text = "<br>".join(seq_html) or f'<span style="color:{_ts};">(空)</span>'
 
         # 卡点
-        beat_text = ", ".join([f"{b:.1f}s" for b in beat_pts]) if beat_pts else '<span style="color:#8b949e;">(无)</span>'
+        beat_text = (", ".join([f"{b:.1f}s" for b in beat_pts]) if beat_pts
+                     else f'<span style="color:{_ts};">(无)</span>')
         # 剔除
-        dropped_text = ", ".join(dropped) if dropped else '<span style="color:#8b949e;">(无)</span>'
+        dropped_text = (", ".join(dropped) if dropped
+                        else f'<span style="color:{_ts};">(无)</span>')
 
+        rationale_html = (f'<div><b style="color:{_acc};">创意说明：</b>'
+                          f'<span style="color:{_ts};">{rationale}</span></div>'
+                          if rationale else "")
         html = f"""
-        <div style="font-family:微软雅黑;font-size:11px;line-height:1.5;">
-          <div><b style="color:#7ee787;">平台：</b>{platform} &nbsp;
-               <b style="color:#7ee787;">时长：</b>{target_dur}s &nbsp;
-               <b style="color:#7ee787;">节奏：</b>{pacing}</div>
-          {'<div><b style="color:#7ee787;">创意说明：</b><span style="color:#9fb3c8;">'+rationale+'</span></div>' if rationale else ''}
-          <div><b style="color:#7ee787;">镜头顺序（{len(clip_order)}）：</b></div>
+        <div style="font-family:微软雅黑;font-size:11px;line-height:1.5;color:{_tp};">
+          <div><b style="color:{_acc};">平台：</b>{platform} &nbsp;
+               <b style="color:{_acc};">时长：</b>{target_dur}s &nbsp;
+               <b style="color:{_acc};">节奏：</b>{pacing}</div>
+          {rationale_html}
+          <div><b style="color:{_acc};">镜头顺序（{len(clip_order)}）：</b></div>
           <div style="padding:4px 0;">{seq_text}</div>
-          <div><b style="color:#7ee787;">卡点：</b><span style="color:#9fb3c8;">{beat_text}</span></div>
-          <div><b style="color:#7ee787;">配乐风格：</b><span style="color:#9fb3c8;">{bgm or '未选择'}</span></div>
-          <div><b style="color:#ff7b72;">已剔除镜头：</b><span style="color:#ff7b72;">{dropped_text}</span></div>
+          <div><b style="color:{_acc};">卡点：</b><span style="color:{_ts};">{beat_text}</span></div>
+          <div><b style="color:{_acc};">配乐风格：</b><span style="color:{_ts};">{bgm or '未选择'}</span></div>
+          <div><b style="color:{_bad};">已剔除镜头：</b><span style="color:{_bad};">{dropped_text}</span></div>
         </div>
         """
         view.setHtml(html)
@@ -834,7 +1080,8 @@ class EditorAgentPanelMixin:
 
         provider, model = self._get_selected_edit_agent_model()
         self._persist_agent_project_context_silent()
-        messages = compress_messages(self._build_edit_agent_messages(user_text))
+        messages = compress_messages(self._build_edit_agent_messages(user_text),
+                                     model=model, provider=provider)
         task = agent_tasks.create(
             session_id="editor",
             goal=user_text,
@@ -866,7 +1113,150 @@ class EditorAgentPanelMixin:
         self._edit_agent_worker = worker
         self._edit_agent_send_btn.setEnabled(False)
         self._edit_agent_stop_btn.setEnabled(True)
+        # 终止按钮按需显示（V4.34.1 输入区瘦身：空闲时不占位）
+        self._edit_agent_stop_btn.setVisible(True)
         worker.start()
+
+    def _record_agent_turn(self, user_text: str, assistant_text: str = ""):
+        """完整档：把一轮对话写入多轮历史，供下次构建 prompt 时召回。
+
+        轻量档直接跳过（不接历史，省 token）。放在结果回调里调用，
+        保证历史只在「一轮完整结束」后追加，避免与当前 user 重复。
+        """
+        # 记忆深挖：从用户话里提炼偏好（本地规则、零 token、始终进行）
+        self._mine_preference_from_chat(user_text)
+        try:
+            from app.core.agent_persona import is_persona_enabled
+            if not is_persona_enabled():
+                return
+            from app.core.agent_session import agent_sessions
+            agent_sessions.push_history("editor", user_msg=user_text, assistant_msg=assistant_text or "")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 记录对话历史失败: {e}")
+
+    # ────────────────────────────────────────────────────────────────────
+    # 知心秘书：问候 / 温度开关 / 称呼 / 空闲关怀
+    # ────────────────────────────────────────────────────────────────────
+    _IDLE_REMINDER_MINUTES = 30
+
+    # 偏好信号词：命中即认为用户在表达习惯/喜好，原句归档到长期记忆
+    _PREFERENCE_MARKERS = (
+        "我喜欢", "我习惯", "我偏好", "我一般", "我通常", "我比较", "我更",
+        "我不喜欢", "我讨厌", "我烦", "以后", "下次", "尽量", "最好",
+    )
+
+    def _mine_preference_from_chat(self, user_text: str):
+        """记忆深挖：从用户话里提炼偏好并归档（本地规则，零 token）。
+
+        命中偏好信号词 + 长度适中 → 原句归档到 user_preference，
+        由完整档的 get_agent_context(include_preferences=True) 召回。
+        不调模型、不阻塞主链路、去重防刷屏。
+        """
+        try:
+            t = (user_text or "").strip()
+            if len(t) < 4 or len(t) > 80:
+                return
+            if not any(m in t for m in self._PREFERENCE_MARKERS):
+                return
+            from app.core.memory_store import memory_store
+            existing = memory_store.query(category="user_preference", tags=["auto"], limit=20)
+            for e in existing:
+                if (e.content or {}).get("text") == t:
+                    return  # 已归档过，跳过
+            memory_store.record(
+                category="user_preference",
+                content={"key": "auto_note", "text": t},
+                tags=["preference", "auto"],
+                score=0.55,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 偏好挖掘失败: {e}")
+
+    def _persona_btn_label(self) -> str:
+        try:
+            from app.core.agent_persona import is_persona_enabled
+            return "🌡 知心秘书：开" if is_persona_enabled() else "🌡 知心秘书：关"
+        except Exception:  # noqa: BLE001
+            return "🌡 知心秘书：关"
+
+    def _greet_agent_secretary(self):
+        """面板打开问候：完整档给秘书问候；轻量档给普通就绪 + 首次成本提示。"""
+        try:
+            from app.core.agent_persona import (
+                build_greeting, is_persona_enabled, has_persona_choice, build_onboard_hint,
+            )
+            if is_persona_enabled():
+                self._append_agent_message("Agent", build_greeting())
+            else:
+                self._append_agent_message("Agent", "已就绪。下方输入剪辑需求或点击快捷指令。")
+                if not has_persona_choice():
+                    self._append_agent_message("系统", build_onboard_hint())
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 秘书问候失败: {e}")
+            self._append_agent_message("Agent", "已就绪。下方输入剪辑需求或点击快捷指令。")
+
+    def _toggle_agent_persona(self):
+        """切换知心秘书温度开关。"""
+        try:
+            from app.core.agent_persona import is_persona_enabled, set_persona, build_greeting
+            turning_on = not is_persona_enabled()
+            set_persona(turning_on)
+            btn = getattr(self, '_agent_persona_btn', None)
+            if btn is not None:
+                btn.setText("🌡 知心秘书：开" if turning_on else "🌡 知心秘书：关")
+            if turning_on:
+                self._append_agent_message(
+                    "系统", "已开启「知心秘书」。以后我会记得你、更主动关心你。"
+                )
+                g = build_greeting()
+                if g:
+                    self._append_agent_message("Agent", g)
+            else:
+                self._append_agent_message(
+                    "系统", "已关闭「知心秘书」，回到轻量模式（几乎不增 token）。"
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Agent] 切换知心秘书失败: {e}")
+
+    def _set_agent_nickname(self):
+        """自定义 Agent 对我的称呼。"""
+        try:
+            from app.core.agent_persona import get_nickname, set_nickname
+            current = get_nickname()
+            name, ok = QInputDialog.getText(
+                self, "我的称呼", "你希望我怎么称呼你？", text=current
+            )
+            if not ok:
+                return
+            name = (name or "").strip()
+            if not name:
+                return
+            if set_nickname(name):
+                self._append_agent_message("系统", f"好嘞，以后我就叫你「{name}」啦。")
+            else:
+                self._append_agent_message("系统", "称呼保存失败，请重试。")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Agent] 设置称呼失败: {e}")
+
+    def _check_agent_idle(self):
+        """完整档：长时间无交互时主动关怀一句（默认 30 分钟）。"""
+        try:
+            from app.core.agent_persona import is_persona_enabled, get_nickname
+            if not is_persona_enabled():
+                return
+            if getattr(self, '_edit_agent_worker', None) and self._edit_agent_worker.isRunning():
+                return
+            last = getattr(self, '_agent_last_active', time.time())
+            if time.time() - last < self._IDLE_REMINDER_MINUTES * 60:
+                return
+            name = get_nickname() or "朋友"
+            self._append_agent_message(
+                "Agent",
+                f"（{name}，你有一阵没操作了，累了就歇会儿，我随时待命。）",
+            )
+            self._agent_last_active = time.time()  # 重置，避免每分钟刷屏
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 空闲关怀失败: {e}")
 
     # ======================================================================
     # 抽取自 editor_module.py L11793-11877
@@ -881,15 +1271,18 @@ class EditorAgentPanelMixin:
         context = self._get_agent_timeline_context()
         extensions_info = self._get_agent_extensions_context()
         from app.core.agent_policy import mode_prompt_block
+        from app.core.agent_persona import build_persona_hint, is_persona_enabled
 
         is_plan_mode = self._is_agent_plan_mode()
         agent_mode = self._get_agent_session_mode()
         caps_info = list_editor_capabilities_for_prompt()
+        persona_hint = build_persona_hint()
 
         system_prompt = (
             "你是拾光剪影的 AI 剪辑助手，也是一位友善的对话伙伴。"
             "你可以像普通 AI 助手一样自由对话，自然回答剪辑技巧、项目功能、视频创作等任何问题，"
             "文字内容不限格式，直接回复即可，不要套 JSON。\n\n"
+            f"{persona_hint}\n\n"
             "只有当用户提出明确的剪辑操作需求（切分、删除、滤镜、转场、特效、字幕、轨等）时，"
             "才输出可执行的 JSON 指令数组，且不要附带多余解释文字。\n"
             f"{build_agent_actions_help_block()}"
@@ -900,8 +1293,6 @@ class EditorAgentPanelMixin:
             "call_extension 用于调用拓展中心的插件/Skill/MCP 工具，参数示例: "
             "{\"extension_id\":\"技能ID\",\"tool_id\":\"工具ID\",\"params\":{\"key\":\"value\"}}。"
             "call_model 参数示例: {\"provider\":\"deepseek\",\"messages\":[{\"role\":\"user\",\"content\":\"...\"}],\"model\":\"...\"}。"
-            "start_workflow 参数示例: {\"drama_info\":{\"title\":\"...\",\"platform\":\"douyin\"}}。"
-            "account_optimize 参数示例: {\"platform\":\"douyin\",\"features\":{...}}。"
         )
 
         # Plan 模式要求先规划
@@ -919,7 +1310,7 @@ class EditorAgentPanelMixin:
         try:
             from app.core.memory_store import memory_store
             from app.core.agent_feedback_bridge import agent_feedback_bridge
-            mem_ctx = memory_store.get_agent_context(top_k=5)
+            mem_ctx = memory_store.get_agent_context(top_k=5, include_preferences=is_persona_enabled())
             pending = agent_feedback_bridge.get_pending_feedback(limit=3)
             if mem_ctx:
                 system_prompt += mem_ctx
@@ -952,10 +1343,7 @@ class EditorAgentPanelMixin:
             f"{caps_prompt}"
             f"{ext_prompt}"
         )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        return _with_agent_history(system_prompt, user_prompt, is_persona_enabled())
 
     # ======================================================================
     # 抽取自 editor_module.py L11891-11959
@@ -1007,7 +1395,7 @@ class EditorAgentPanelMixin:
             logger.debug(f"收集 SkillEngine 技能失败: {e}")
 
         # 补充 PluginManager 管理的传统插件（修复 Agent 看不到传统插件的问题：
-        # 原逻辑只收集 ExtensionsRegistry 和 SkillEngine，短剧筛选/AI特效等
+        # 原逻辑只收集 ExtensionsRegistry 和 SkillEngine，AI特效等
         # PluginManager 管理的插件对 Agent 不可见，模型无法生成 call_extension 指令）
         try:
             # _ensure_plugin_manager 内置 lazy load（首次调用初始化，后续直接返回）
@@ -1343,7 +1731,7 @@ class EditorAgentPanelMixin:
         except Exception as e:
             logger.warning(f"Agent 调用 SkillEngine 失败: {e}")
 
-        # 回退到 PluginManager（传统插件：短剧筛选、AI特效工坊等）
+        # 回退到 PluginManager（传统插件：AI特效工坊等）
         # 修复 Agent 看不到 PluginManager 管理的传统插件问题：
         # 原逻辑只走 ExtensionsRegistry + SkillEngine，传统插件无法被调用
         try:
@@ -1383,28 +1771,19 @@ class EditorAgentPanelMixin:
             if inp is not None:
                 brief = inp.text().strip()
             try:
-                from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
+                from app.core.ai.pipeline_jobs import submit_full_pipeline
 
                 send_btn = getattr(self, "_edit_agent_send_btn", None)
                 if send_btn is not None:
                     send_btn.setEnabled(False)
 
-                def _cb(result):
-                    try:
-                        QTimer.singleShot(0, lambda: self._on_full_pipeline_done(result))
-                    except Exception:
-                        logger.exception("[Agent] 全链路继续回调切主线程失败")
-
-                capability_dispatcher.invoke_async(CapabilityRequest(
-                    capability_id="pipeline.run_full",
-                    params={
-                        "materials": [],  # 已在之前的会话中处理，此处沿用
-                        "creative_brief": brief,
-                        **self._get_pipeline_params(),
-                        "auto_preview_pass": True,  # 关键：跳过预览阻塞
-                    },
-                    caller="agent",
-                ), callback=_cb)
+                job = submit_full_pipeline({
+                    "materials": [],  # 已在之前的会话中处理，此处沿用
+                    "creative_brief": brief,
+                    **self._get_pipeline_params(),
+                    "auto_preview_pass": True,  # 关键：跳过预览阻塞
+                })
+                self._start_pipeline_job_polling(str(job.get("job_id") or ""))
             except Exception as e:
                 logger.exception("[Agent] 全链路继续执行失败")
                 self._append_agent_message("Agent", f"❌ 继续执行失败: {e}")
@@ -1444,6 +1823,49 @@ class EditorAgentPanelMixin:
             )
             return
 
+        # ── P1-1 成本确认：走「AI 视频生成业务线」（无素材、有简报）且预估花费 > 0 时，
+        #    生成前弹确认 —— 花钱的事让用户拍板，不再静默扣费。（报价失败不阻断生成）
+        if not materials and brief:
+            try:
+                from app.core.ai.video_generation_client import video_generation_client
+
+                _p = self._get_pipeline_params()
+                _seg = max(1, int(float(_p["target_duration"]) // float(_p["clip_duration"])))
+                _q = video_generation_client.quote(
+                    str(_p["provider"]), count=_seg,
+                    duration=float(_p["clip_duration"])) or {}
+                _cost = float(_q.get("cost_estimate") or 0.0)
+                if _cost > 0:
+                    from PyQt6.QtWidgets import QMessageBox
+
+                    ret = QMessageBox.question(
+                        self, "生成成本确认",
+                        f"本次 AI 视频生成预计：\n\n"
+                        f"    {_q.get('count', _seg)} 段 × {_q.get('provider')}"
+                        f" ≈ ¥{_cost:.2f}\n\n"
+                        f"（估算值：声明单价×段数，实际以渠道账单为准）\n"
+                        f"是否开始生成？",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if ret != QMessageBox.StandardButton.Yes:
+                        self._append_agent_message(
+                            "Agent", f"🛑 已取消生成（预估 ¥{_cost:.2f}，未产生任何花费）")
+                        return
+                    self._append_agent_message(
+                        "Agent", f"💰 成本已确认：预计 ¥{_cost:.2f}（{_q.get('count', _seg)} 段）")
+            except Exception:
+                logger.debug("[Agent] 生成前报价失败，跳过成本确认", exc_info=True)
+
+        # ── P1-3 单任务守卫：同一时刻面板只跟踪一个全链路任务 ──
+        active_jid = getattr(self, "_pipeline_job_id", "")
+        if active_jid:
+            self._append_agent_message(
+                "Agent",
+                f"⚠️ 已有全链路任务 {active_jid} 在执行，请等它结束或点「⏹ 取消」后再启动。"
+            )
+            return
+
         # 左右脑协同联想：此前 correlate()/right_brain_think()/left_brain_think() 只有定义没有
         # 调用方，是完全不影响任何实际决策的死代码。这里在启动前跑一次，把联想到的能力
         # 展示给用户，让「左右脑协同」名副其实（仅展示，不改变实际路由/参数逻辑）。
@@ -1462,37 +1884,136 @@ class EditorAgentPanelMixin:
                 logger.debug(f"[Agent] 左右脑联想失败: {e}")
 
         try:
-            from app.core.capability_dispatcher import capability_dispatcher, CapabilityRequest
+            from app.core.ai.pipeline_jobs import submit_full_pipeline
             self._append_agent_message(
-                "Agent", f"🚀 启动全链路执行（素材 {len(materials)} 个，简报: {brief[:30] or '无'}）...")
+                "Agent", f"🚀 启动全链路执行（素材 {len(materials)} 个，简报: {brief[:30] or '无'}）..."
+                         f"已转为后台任务，可随时取消")
             # 防重复点击
             send_btn = getattr(self, "_edit_agent_send_btn", None)
             if send_btn is not None:
                 send_btn.setEnabled(False)
 
-            def _cb(result):
-                # worker 线程回调 → 通过 QTimer 切回主线程刷新 UI
-                try:
-                    QTimer.singleShot(0, lambda: self._on_full_pipeline_done(result))
-                except Exception:
-                    logger.exception("[Agent] 全链路回调切主线程失败")
-
-            capability_dispatcher.invoke_async(CapabilityRequest(
-                capability_id="pipeline.run_full",
-                params={
-                    "materials": materials,
-                    "creative_brief": brief,
-                    **self._get_pipeline_params(),
-                    "auto_preview_pass": False,  # 默认：等待人工确认
-                },
-                caller="agent",
-            ), callback=_cb)
+            job = submit_full_pipeline({
+                "materials": materials,
+                "creative_brief": brief,
+                **self._get_pipeline_params(),
+                "auto_preview_pass": False,  # 默认：等待人工确认
+            })
+            self._start_pipeline_job_polling(str(job.get("job_id") or ""))
         except Exception as e:
             logger.exception("[Agent] 全链路启动失败")
             self._append_agent_message("Agent", f"❌ 全链路启动失败: {e}")
             send_btn = getattr(self, "_edit_agent_send_btn", None)
             if send_btn is not None:
                 send_btn.setEnabled(True)
+
+    # ======================================================================
+    # P1-3 全链路任务轮询 + 取消（gen-jobs 任务表）
+    # ======================================================================
+    def _start_pipeline_job_polling(self, job_id: str):
+        """启动全链路任务轮询（QTimer 1s）+ 显示取消按钮。"""
+        self._pipeline_job_id = job_id
+        cancel_btn = getattr(self, "_edit_agent_pipeline_cancel_btn", None)
+        if cancel_btn is not None:
+            cancel_btn.setEnabled(bool(job_id))
+            cancel_btn.setVisible(bool(job_id))
+        timer = getattr(self, "_pipeline_job_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(1000)
+            timer.timeout.connect(self._poll_pipeline_job_tick)
+            self._pipeline_job_timer = timer
+        if job_id:
+            timer.start()
+
+    def _stop_pipeline_job_polling(self):
+        """停轮询 + 撤取消按钮 + 清任务号（终态/启动失败时调用）。"""
+        timer = getattr(self, "_pipeline_job_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._pipeline_job_id = ""
+        cancel_btn = getattr(self, "_edit_agent_pipeline_cancel_btn", None)
+        if cancel_btn is not None:
+            cancel_btn.setVisible(False)
+
+    def _poll_pipeline_job_tick(self):
+        """轮询全链路任务；终态 → 停轮询、撤取消钮、分发完成/失败/取消 UI。
+
+        进度条/阶段消息不在这里刷——orchestrator 经 EventBus 已实时驱动
+        （_handle_pipeline_progress），轮询只负责终态判定，两套信号不打架。
+        """
+        jid = getattr(self, "_pipeline_job_id", "")
+        if not jid:
+            self._stop_pipeline_job_polling()
+            return
+        try:
+            from app.core.ai.pipeline_jobs import job_status
+            s = job_status(jid)
+        except Exception:
+            logger.exception("[Agent] 查询全链路任务失败")
+            return  # 查询失败不终止轮询，下个 tick 再试
+        status = str(s.get("status") or "")
+        if status not in ("done", "failed", "cancelled"):
+            return  # 排队/运行/取消中：继续等
+        self._stop_pipeline_job_polling()
+        send_btn = getattr(self, "_edit_agent_send_btn", None)
+        if send_btn is not None:
+            send_btn.setEnabled(True)
+        if status == "cancelled":
+            self._append_agent_message(
+                "Agent", "🛑 全链路已取消（当前段跑完即止，结果丢弃未落盘）")
+            return
+        if status == "done":
+            payload = s.get("result") or {}
+            if payload.get("paused"):
+                # 预览等待：⏸️ 消息已由 pipeline_waiting_preview 事件发出、
+                # 按钮已切「确认预览并继续」——这里只安静收尾，不报失败
+                return
+            try:
+                from app.core.capability_dispatcher import CapabilityResult
+
+                result = CapabilityResult(
+                    jid, bool(payload.get("success")),
+                    output=payload.get("output") or {},
+                    error=str(payload.get("error") or "") or None)
+                self._on_full_pipeline_done(result)
+            except Exception:
+                logger.exception("[Agent] 全链路任务完成回调失败")
+            return
+        # failed：结果按 gen-jobs 语义丢弃，错误信息保留在任务 error 里
+        try:
+            from app.core.capability_dispatcher import CapabilityResult
+
+            result = CapabilityResult(
+                jid, False,
+                error=str(s.get("error") or "全链路执行失败"))
+            self._on_full_pipeline_done(result)
+        except Exception:
+            logger.exception("[Agent] 全链路任务失败回调失败")
+
+    def _on_cancel_pipeline_job(self):
+        """取消当前全链路任务（queued 真取消；running 段间生效，结果丢弃不落盘）。"""
+        jid = getattr(self, "_pipeline_job_id", "")
+        if not jid:
+            return
+        ok = False
+        msg = ""
+        try:
+            from app.core.ai.pipeline_jobs import cancel_job
+            r = cancel_job(jid, "用户点击取消")
+            ok = bool(r.get("ok"))
+            msg = str(r.get("message") or "")
+        except Exception:
+            logger.exception("[Agent] 取消全链路任务失败")
+        if ok:
+            cancel_btn = getattr(self, "_edit_agent_pipeline_cancel_btn", None)
+            if cancel_btn is not None:
+                cancel_btn.setEnabled(False)  # 等轮询确认终态后统一隐藏
+            self._append_agent_message(
+                "Agent", "⏳ 已请求取消：当前段跑完后生效，结果将丢弃不落盘")
+        else:
+            self._append_agent_message(
+                "Agent", f"⚠️ 取消未生效（{msg or '任务可能刚结束'}）")
 
     # ======================================================================
     # 抽取自 editor_module.py L12979-13042

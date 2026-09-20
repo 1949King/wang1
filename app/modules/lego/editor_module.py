@@ -19,37 +19,6 @@ import threading
 import queue
 import time
 
-def _report_video_import_debug(hypothesis_id: str, location: str, msg: str, data: Optional[Dict[str, Any]] = None):
-    """临时调试上报：定位视频导入与时间线添加链路。"""
-    # #region debug-point video-import-timeline
-    try:
-        import urllib.request as _urlrequest
-        env_path = os.path.join(os.getcwd(), ".dbg", "video-import-timeline.env")
-        debug_url = "http://127.0.0.1:7777/event"
-        session_id = "video-import-timeline"
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as env_file:
-                for line in env_file:
-                    if line.startswith("DEBUG_SERVER_URL="):
-                        debug_url = line.strip().split("=", 1)[1]
-                    elif line.startswith("DEBUG_SESSION_ID="):
-                        session_id = line.strip().split("=", 1)[1]
-        payload = json.dumps({
-            "sessionId": session_id,
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "msg": f"[DEBUG] {msg}",
-            "data": data or {},
-            "ts": int(time.time() * 1000),
-        }, ensure_ascii=False).encode("utf-8")
-        _urlrequest.urlopen(
-            _urlrequest.Request(debug_url, data=payload, headers={"Content-Type": "application/json"}),
-            timeout=0.8,
-        ).read()
-    except Exception:
-        logger.debug("video import debug report failed", exc_info=True)
-    # #endregion
 
 logger = logging.getLogger("AI短剧编辑器.editor_module")
 
@@ -169,10 +138,6 @@ from .editor_ui_builder_mixin import EditorUiBuilderMixin
 from .editor_ai_process_mixin import EditorAiProcessMixin
 from .editor_ai_tools_mixin import EditorAiToolsMixin
 from .editor_agent_runtime_mixin import EditorAgentRuntimeMixin
-from .account_skills import (
-    AccountDataCollectSkill, AccountAnalysisSkill,
-    PublishContentSkill, MatrixPublishSkill, register_account_skills
-)
 try:
     from app.core.sequence_format import (
         SequenceFormat,
@@ -197,13 +162,10 @@ if _app_root not in _sys.path:
 
 # Core 管理器懒加载
 project_manager = _lazy_import('core.project_manager')
-asset_manager = _lazy_import('core.asset_manager')
 timeline_manager = _lazy_import('core.timeline_manager')
 effect_manager = _lazy_import('core.effect_manager')
-transition_manager = _lazy_import('core.transition_manager')
 
 EditorScheduler = _LazyClassProxy('core.editor_scheduler', 'EditorScheduler')
-AudioManager = _LazyClassProxy('core.audio_manager', 'AudioManager')
 SubtitleManager = _LazyClassProxy('core.subtitle_manager', 'SubtitleManager')
 PresetManager = _LazyClassProxy('core.preset_manager', 'PresetManager')
 PluginManager = _LazyClassProxy('core.plugin_manager', 'PluginManager')
@@ -508,6 +470,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         self._ui_playhead_last_ms = 0
         # <<< FROZEN:playback-av:init-media END
         # 视频片段管理
+        # _clips 的真相源。⚠️ 它是**跨线程共享**的：
+        #   · 画布桥（HTTP 线程）通过 project_snapshot 的 provider/writer 读写；
+        #   · autosave 定时器（主线程）每 3s 把 _clips 序列化落盘；
+        #   · 渲染/导出路径在主线程遍历。
+        # 所有「非原子替换」（先清空再逐个 append）与「序列化遍历」必须持有
+        # _clips_lock，否则会读到空列表/半截列表，或让 json.dump 撞上
+        # "list changed size during iteration" 写出损坏工程文件。
+        self._clips_lock = threading.RLock()
         self._clips = []  # 存储视频片段
         self._current_clip = None  # 当前选中的片段
         self._last_beat_times = []
@@ -554,20 +524,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         # 项目管理系统 - 懒加载
         self._project_manager = None
         
-        # 素材管理系统 - 懒加载
-        self._media_manager = None
-        
         # 时间线管理系统 - 懒加载
         self._timeline_manager = None
         
         # 特效管理系统 - 懒加载
         self._effect_manager = None
-        
-        # 转场管理系统 - 懒加载
-        self._transition_manager = None
-        
-        # 音频处理系统 - 懒加载
-        self._audio_manager = None
         
         # 字幕系统 - 懒加载
         self._subtitle_manager = None
@@ -623,7 +584,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             from app.core.canvas_bridge import set_timeline_snapshot_provider
             set_timeline_snapshot_provider(lambda: self.agent_get_timeline_context())
         except Exception:
-            pass
+            logger.debug("画布快照提供者注册失败", exc_info=True)
+        try:
+            # P1-4 工程级快照：注册完整 _clips 读/写回调（直导剪辑器入口）
+            from app.core.project_snapshot import set_full_clips_provider, set_clips_writer
+            # ⚠️ 用快照而非 list(self._clips)：本 provider 由画布桥线程调用，
+            # 若此刻主线程正在做「清空→填充」的非原子替换，会读到空/半截列表。
+            set_full_clips_provider(lambda: self._clips_snapshot())
+            set_clips_writer(self.agent_replace_timeline_clips)
+        except Exception:
+            logger.debug("工程快照读写回调注册失败", exc_info=True)
         
         # 连接工作流 / 数据分析 / JKL：延后到首屏渲染后，避免挡住模块打开
         QTimer.singleShot(0, self._deferred_editor_boot)
@@ -683,10 +653,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         """首屏 UI 已挂上后再接工作流 / 分析器 / JKL，缩短模块打开阻塞。"""
         t0 = time.perf_counter()
         try:
-            self.connect_to_workflow()
-        except Exception as e:
-            logger.warning("连接工作流管理器失败: %s", e)
-        try:
             self.connect_to_data_analyzer()
         except Exception as e:
             logger.warning("连接数据分析器失败: %s", e)
@@ -722,14 +688,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     
     # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def _ensure_audio_manager(self):
-        """懒加载音频管理器"""
-        if self._audio_manager is not None:
-            return self._audio_manager
-        self._audio_manager = AudioManager()
-        logger.info('✅ 音频处理系统已加载')
-        return self._audio_manager
-    
     def _ensure_subtitle_manager(self):
         """懒加载字幕管理器"""
         if self._subtitle_manager is not None:
@@ -745,7 +703,164 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         self._preset_manager = PresetManager()
         logger.info('✅ 预设系统已加载')
         return self._preset_manager
-    
+
+    def list_aesthetic_packs(self):
+        """列出所有美学预设包（供 UI 面板展示）。"""
+        return self._ensure_preset_manager().list_packs()
+
+    def apply_aesthetic_pack(self, pack_id, target_clip_id=None):
+        """一键套用美学预设包到片段（写真相源 ``_clips``，可撤销）。
+
+        美学预设包 = 多个 clip 级 step（color/lut/filter/transition/blend_mode/opacity）
+        的组合。本方法遍历 steps 写片段 effects/顶层字段，并作为一个 compound action
+        压入撤销栈——一次撤销还原整包，不破坏既有 ``edit_clip`` before/after 语义。
+
+        Args:
+            pack_id: 预设包 id（见 preset_manager.list_packs()）
+            target_clip_id: 目标片段 id；缺省作用于当前选中片段
+
+        Returns:
+            dict: success / pack_id / clip_id / name / applied / message
+        """
+        pm = self._ensure_preset_manager()
+        pack = pm.get_pack(pack_id)
+        if not pack:
+            return {"success": False, "message": f"未找到美学预设包 {pack_id}"}
+        steps = pm.apply_pack(pack_id)
+        if not steps:
+            return {"success": False, "message": f"美学预设包 {pack_id} 无有效步骤"}
+
+        target = None
+        if target_clip_id:
+            target = next((c for c in self._clips if c.get("id") == target_clip_id), None)
+        if target is None:
+            target = getattr(self, "_current_clip", None)
+        if not isinstance(target, dict) or not target.get("id"):
+            return {"success": False, "message": "未选中片段"}
+
+        # before 快照：记录所有会被改动的字段（撤销时精确还原）
+        before_effects = dict(target.get("effects") or {}) if isinstance(target.get("effects"), dict) else {}
+        before = {
+            "effects": before_effects,
+            "filter": target.get("filter"),
+            "filter_intensity": target.get("filter_intensity"),
+            "transition": target.get("transition"),
+            "transitions": target.get("transitions"),
+            "blend_mode": target.get("blend_mode"),
+            "opacity": target.get("opacity"),
+        }
+
+        effects = dict(before_effects)
+        after_extra: Dict[str, Any] = {}
+        applied: List[str] = []
+
+        for step in steps:
+            kind = step.get("kind")
+            if kind == "color":
+                cp = dict(effects.get("color_params") or {})
+                for k in ("brightness", "contrast", "saturation", "hue",
+                          "exposure", "sharpen", "temperature"):
+                    if k in step and step[k] is not None:
+                        cp[k] = float(step[k])
+                effects["color_params"] = cp
+                for k in ("brightness", "contrast", "saturation", "hue", "exposure", "sharpen"):
+                    if k in cp:
+                        effects[k] = cp[k]
+                applied.append("color")
+            elif kind == "lut":
+                cp = dict(effects.get("color_params") or {})
+                lut = step.get("lut")
+                if lut:
+                    cp["lut"] = lut
+                    cp["lut_intensity"] = float(step.get("lut_intensity", 0.7))
+                    cp.pop("lut_fast", None)
+                else:
+                    cp.pop("lut", None)
+                    cp.pop("lut_intensity", None)
+                effects["color_params"] = cp
+                applied.append("lut")
+            elif kind == "filter":
+                fname = step.get("filter_name") or step.get("name") or ""
+                if fname:
+                    intens = float(step.get("intensity", 0.7))
+                    effects["filter"] = fname
+                    effects["filter_intensity"] = intens
+                    after_extra["filter"] = fname
+                    after_extra["filter_intensity"] = intens
+                    applied.append("filter")
+            elif kind == "transition":
+                ttype = step.get("transition_type") or "fade"
+                dur = max(0.1, float(step.get("duration", 0.5)))
+                tr = {
+                    "type": ttype,
+                    "plugin_id": step.get("plugin_id") or ttype,
+                    "duration": dur,
+                    "position": "end",
+                    "curve": step.get("curve", "线性"),
+                }
+                after_extra["transition"] = tr
+                transitions = list(target.get("transitions") or [])
+                if not isinstance(transitions, list):
+                    transitions = []
+                transitions.append(tr)
+                after_extra["transitions"] = transitions
+                applied.append("transition")
+            elif kind == "blend_mode":
+                mode = step.get("mode")
+                if mode:
+                    after_extra["blend_mode"] = str(mode)
+                    applied.append("blend_mode")
+            elif kind == "opacity":
+                op = float(step.get("value", 1.0))
+                effects["opacity"] = op
+                after_extra["opacity"] = op
+                applied.append("opacity")
+
+        after = {
+            "effects": effects,
+            "filter": after_extra.get("filter", target.get("filter")),
+            "filter_intensity": after_extra.get("filter_intensity", target.get("filter_intensity")),
+            "transition": after_extra.get("transition", target.get("transition")),
+            "transitions": after_extra.get("transitions", target.get("transitions")),
+            "blend_mode": after_extra.get("blend_mode", target.get("blend_mode")),
+            "opacity": after_extra.get("opacity", target.get("opacity")),
+        }
+
+        # 写真相源：先写目标 dict，再兜底同步 _clips 里同 id 片段
+        for k, v in after.items():
+            target[k] = v
+        for c in self._clips:
+            if c.get("id") == target.get("id") and c is not target:
+                for k, v in after.items():
+                    c[k] = v
+                break
+
+        self._record_action({
+            "type": "compound",
+            "steps": [{"type": "edit_clip", "clip_id": target.get("id"),
+                       "before": before, "after": after}],
+            "label": f"aesthetic_pack:{pack_id}",
+        })
+        self._sync_timeline_widget_state()
+        self._refresh_preview_with_effects()
+        self._notify_edit(f"已套用美学预设包「{pack.get('name')}」")
+        return {"success": True, "pack_id": pack_id, "clip_id": target.get("id"),
+                "name": pack.get("name"), "applied": applied}
+
+    def _apply_selected_aesthetic_pack(self):
+        """调色面板「美学预设包」下拉的套用入口：读选中 pack id → 套用到当前片段。"""
+        combo = getattr(self, "_aesthetic_pack_combo", None)
+        if combo is None:
+            return
+        pack_id = combo.currentData()
+        if not pack_id:
+            QMessageBox.information(self, "美学预设包", "请先选择一个预设包")
+            return
+        res = self.apply_aesthetic_pack(pack_id)
+        if not (isinstance(res, dict) and res.get("success")):
+            QMessageBox.warning(self, "美学预设包",
+                                (res or {}).get("message", "套用失败"))
+
     def _ensure_plugin_manager(self):
         """懒加载插件管理器"""
         if self._plugin_manager is not None:
@@ -797,7 +912,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if isinstance(pv, QStackedLayout) and hasattr(self, "_preview_label"):
                     pv.setCurrentWidget(self._preview_label)
             except Exception:
-                pass
+                logger.debug("预览页切换失败", exc_info=True)
             return None
         if getattr(self, '_gl_unavailable', False):
             return None
@@ -905,18 +1020,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         logger.info('✅ 项目管理系统已加载')
         return self._project_manager
     
-    def _ensure_media_manager(self):
-        """懒加载素材管理器"""
-        if self._media_manager is not None:
-            return self._media_manager
-        try:
-            from app.core.asset_manager import asset_manager as _am
-        except ImportError:
-            from core.asset_manager import asset_manager as _am
-        self._media_manager = _am
-        logger.info('✅ 素材管理系统已加载')
-        return self._media_manager
-    
     def _ensure_timeline_manager(self):
         """懒加载时间线管理器"""
         if self._timeline_manager is not None:
@@ -941,18 +1044,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         logger.info('✅ 特效管理系统已加载')
         return self._effect_manager
     
-    def _ensure_transition_manager(self):
-        """懒加载转场管理器"""
-        if self._transition_manager is not None:
-            return self._transition_manager
-        try:
-            from app.core.transition_manager import get_transition_manager as _gtm
-        except ImportError:
-            from core.transition_manager import get_transition_manager as _gtm
-        self._transition_manager = _gtm()
-        logger.info('✅ 转场管理系统已加载')
-        return self._transition_manager
-    
     def _setup_ui(self):
         t0 = time.perf_counter()
         layout = QVBoxLayout(self)
@@ -968,6 +1059,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         
         top_splitter = QSplitter(Qt.Orientation.Horizontal)
         top_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; width: 4px; }")
+        # 存引用：Agent 面板的「⤢ 展开」需要临时调整右栏宽度（V4.34.1）
+        self._top_splitter = top_splitter
         
         left_panel = self._create_left_panel()
         top_splitter.addWidget(left_panel)
@@ -982,6 +1075,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         t_tools = time.perf_counter()
         
         top_splitter.setSizes([280, 750, 380])
+        # 拖拽结束 → 记住宽度偏好（V4.34.1 空间策略：把空间调配权交给用户）
+        top_splitter.splitterMoved.connect(lambda *_: self._persist_agent_panel_width())
         main_splitter.addWidget(top_splitter)
         
         timeline_panel = self._create_timeline_panel()
@@ -1225,26 +1320,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 # ── 更新导入预览 ──
                 self._update_import_preview(file_path)
                 
-                _report_video_import_debug(
-                    "A",
-                    "editor_module._import_video:start",
-                    "import video selected",
-                    {
-                        "file_path": file_path,
-                        "preview_manager_is_none": self._preview_manager is None,
-                        "has_preview_manager_attr": hasattr(self, "_preview_manager"),
-                    },
-                )
-                asset_info = asset_manager.import_asset(file_path, category="videos")
-                _report_video_import_debug(
-                    "A",
-                    "editor_module._import_video:asset",
-                    "asset imported",
-                    {
-                        "asset_path": asset_info.get("path"),
-                        "preview_manager_is_none": self._preview_manager is None,
-                    },
-                )
+                from app.core.local_asset_manager import local_asset_manager as _lam
+                _asset = _lam.import_asset(file_path, category="videos")
+                if _asset is None:
+                    raise RuntimeError("素材导入失败")
+                asset_info = _asset.to_dict()
                 logger.info(f"导入素材成功: {asset_info['name']}")
                 # _load_video → 加片 → 已 open + 刷首帧；勿再 force/open（会清空缓存+帧数探针）
                 self._load_video(asset_info["path"])
@@ -1259,12 +1339,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     logger.debug("导入后启动代理失败: %s", e)
                 self._event_bus.emit(EventType.VIDEO_LOADED, {"path": asset_info["path"], "asset_id": asset_info["id"]})
             except Exception as e:
-                _report_video_import_debug(
-                    "A",
-                    "editor_module._import_video:exception",
-                    "import video exception",
-                    {"error": repr(e), "error_type": type(e).__name__},
-                )
                 QMessageBox.warning(self, "导入失败", f"导入视频失败: {str(e)}")
                 logger.error(f'导入视频失败: {e}')
 
@@ -1397,7 +1471,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if isinstance(pv_layout, QStackedLayout):
                 pv_layout.setCurrentWidget(self._preview_label)
         except Exception:
-            pass
+            logger.debug("预览布局切换失败", exc_info=True)
 
         sf = getattr(self, "_sequence_format", None) or SequenceFormat.default()
         frame = getattr(self, "_preview_frame", None)
@@ -1743,7 +1817,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if sel:
                     return sel
             except Exception:
-                pass
+                logger.debug("选中项读取失败", exc_info=True)
         cur = getattr(self, "_current_clip", None)
         return [cur] if isinstance(cur, dict) else []
 
@@ -1826,7 +1900,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if int(qimage.width()) == cw and int(qimage.height()) == ch:
                 return qimage
         except Exception:
-            pass
+            logger.debug("图像尺寸判断失败", exc_info=True)
         xform = (
             Qt.TransformationMode.FastTransformation
             if getattr(self, "_timeline_playing", False)
@@ -2399,7 +2473,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._preview_label.setText("")
         except Exception:
-            pass
+            logger.debug("预览标签清空失败", exc_info=True)
         
         # 使用QMediaPlayer加载视频（主要用于音频）
         media_content = QUrl.fromLocalFile(file_path)
@@ -2442,7 +2516,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 self._force_show_first_video_frame()
             except Exception:
-                pass
+                logger.debug("首帧显示失败", exc_info=True)
     
     
     
@@ -2617,6 +2691,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._media_player.setPlaybackRate(
                         float(getattr(self, "_audio_pending_rate", 1.0) or 1.0)
                     )
+                    # 2026-09-13 解冻修复：同步速率缓存，避免 tick 节流判断基于过期值
+                    self._audio_applied_rate = float(getattr(self, "_audio_pending_rate", 1.0) or 1.0)
                     self._media_player.setPosition(
                         int(getattr(self, "_audio_pending_seek_ms", 0) or 0)
                     )
@@ -2671,10 +2747,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         rate = max(0.05, float(rate or 1.0))
         self._audio_pending_seek_ms = seek_ms
         self._audio_pending_rate = rate
-        try:
-            self._media_player.setPlaybackRate(rate)
-        except Exception as e:
-            logger.debug("设置音频播放速率失败: %s", e)
+        # 2026-09-13 解冻修复：播放速率节流。曲线变速（speed_ramp）下每 33ms tick
+        # 都会带上连续变化的瞬时倍率，若每次都 setPlaybackRate，Windows WMF 后端
+        # 频繁切速率会造成音频抖动/重缓冲。仅当相对变化超过 8%（含绝对下限 0.02）才重设。
+        applied = getattr(self, "_audio_applied_rate", None)
+        if applied is None or abs(rate - applied) > max(0.02, 0.08 * max(0.05, applied)):
+            try:
+                self._media_player.setPlaybackRate(rate)
+                self._audio_applied_rate = rate
+            except Exception as e:
+                logger.debug("设置音频播放速率失败: %s", e)
         st = self._media_player.mediaStatus()
         ready = st in (
             QMediaPlayer.MediaStatus.LoadedMedia,
@@ -2812,6 +2894,68 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             return widget.get_keyframes()
         clip = next((c for c in self._clips if c.get("id") == clip_id), None)
         return list((clip or {}).get("keyframes") or [])
+
+    def _open_keyframe_curve_editor(self):
+        """深工具：可视化关键帧曲线编辑器（拖拽点 / 双击改缓动 / 右键删除）。"""
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+
+        clip = self._current_clip
+        if not clip:
+            self._notify_edit("请先选择片段")
+            return
+        prop_labels = {
+            "opacity": "不透明度", "volume": "音量", "scale": "缩放",
+            "x": "水平位置", "y": "垂直位置", "rotation": "旋转",
+        }
+        prop, ok = QInputDialog.getItem(
+            self, "曲线编辑器", "选择属性通道：", list(prop_labels.values()), 0, False,
+        )
+        if not ok:
+            return
+        prop_key = next((p for p, lab in prop_labels.items() if lab == prop), "opacity")
+        ranges = {
+            "opacity": (0.0, 1.0), "volume": (0.0, 2.0), "scale": (0.1, 3.0),
+            "x": (0.0, 1.0), "y": (0.0, 1.0), "rotation": (-180.0, 180.0),
+        }
+        lo, hi = ranges.get(prop_key, (0.0, 1.0))
+        all_kfs = self.get_keyframes_for_clip(clip.get("id"))
+        channel_kfs = [k for k in all_kfs if str(k.get("prop", prop_key)) == prop_key]
+        other_kfs = [k for k in all_kfs if str(k.get("prop", prop_key)) != prop_key]
+        dur = float(clip.get("duration", 10) or 10)
+
+        try:
+            from app.modules.lego.keyframe_curve_editor import KeyframeCurveEditor
+        except Exception:
+            from app.modules.lego.keyframe_curve_editor import KeyframeCurveEditor  # noqa: F811
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"关键帧曲线 — {prop_labels.get(prop_key, prop_key)}")
+        dlg.setMinimumSize(580, 380)
+        lay = QVBoxLayout(dlg)
+        editor = KeyframeCurveEditor(value_range=(lo, hi))
+        editor.set_keyframes(channel_kfs, time_span=(0.0, max(dur, 1.0)))
+        lay.addWidget(editor)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setText("应用")
+        cancel_btn = btns.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn is not None:
+            cancel_btn.setText("取消")
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        edited = editor.keyframes()
+        for k in edited:
+            k["prop"] = prop_key
+        merged = other_kfs + edited
+        self.add_keyframes_to_clip(clip.get("id"), merged)
+        self._notify_edit(f"已更新 {prop_labels.get(prop_key, prop_key)} 曲线（{len(edited)} 个关键帧）")
 
     def _on_add_keyframe_clicked(self):
         """关键帧按钮：选属性 → 填数值 → 写入播放头。"""
@@ -3093,6 +3237,289 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             return True
         return False
     
+    def agent_trim_clip(self, clip_id: str, duration: Optional[float] = None,
+                        in_point: Optional[float] = None,
+                        out_point: Optional[float] = None) -> Dict[str, Any]:
+        """Agent 公开接口：裁剪片段（时长 / 入点 / 出点），统一进撤销栈并同步 UI。
+
+        收敛了一条真实缺陷：此前 AI 面板的 `trim_clip` 直接写
+        `clip["duration"]` / `clip["out_point"]`，数据变了却**不进撤销栈**
+        （Ctrl+Z 回不去），也不同步内核时间线与联动音画。
+        现在本地面板与 capability 都走这里，只有一个实现。
+        """
+        try:
+            if duration is None and in_point is None and out_point is None:
+                return {"action": "trim_clip", "success": False,
+                        "message": "trim_clip 需要 duration / in_point / out_point 之一"}
+            clip = next((c for c in self._clips if c.get("id") == clip_id), None)
+            if clip is None:
+                return {"action": "trim_clip", "success": False,
+                        "message": f"未找到片段 {clip_id}"}
+
+            # ── 只改时长：复用 _resize_clip（已含撤销 + 联动音画 + 同步）──
+            if in_point is None and out_point is None:
+                try:
+                    dur = float(duration)
+                except (TypeError, ValueError):
+                    return {"action": "trim_clip", "success": False, "message": "裁剪时长参数无效"}
+                if dur <= 0:
+                    return {"action": "trim_clip", "success": False, "message": "裁剪时长必须为正数"}
+                if not self._resize_clip(clip_id, dur):
+                    return {"action": "trim_clip", "success": False,
+                            "message": f"未找到片段 {clip_id}"}
+                self._touch_project_dirty()
+                self._refresh_preview_with_effects()
+                self._notify_edit(f"片段已裁剪为 {dur:.2f}s")
+                return {"action": "trim_clip", "success": True,
+                        "message": f"片段已裁剪为 {dur:.2f}s",
+                        "clip_id": clip_id, "duration": dur}
+
+            # ── 改入/出点：自己走一遍 before/after + 撤销栈 ──
+            before = {
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "track": int(clip.get("track", 0) or 0),
+                "duration": float(clip.get("duration", 0) or 0),
+                "in_point": float(clip.get("in_point", 0) or 0),
+                "out_point": float(clip.get("out_point", 0) or 0),
+            }
+            speed = float(clip.get("speed", 1.0) or 1.0) or 1.0
+            new_in = before["in_point"] if in_point is None else max(0.0, float(in_point))
+            if out_point is not None:
+                new_out = max(new_in + 0.05, float(out_point))
+            elif in_point is not None:
+                # 只移入点：保持时长不变，出点跟着平移（源内窗口整体挪动）
+                new_out = new_in + before["duration"] * speed
+            else:
+                new_out = before["out_point"] or (new_in + before["duration"] * speed)
+            if new_out <= new_in:
+                return {"action": "trim_clip", "success": False, "message": "出点必须大于入点"}
+
+            clip["in_point"] = new_in
+            clip["out_point"] = new_out
+            clip["duration"] = max(0.05, (new_out - new_in) / speed)
+            after = {
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "track": int(clip.get("track", 0) or 0),
+                "duration": float(clip["duration"]),
+                "in_point": new_in,
+                "out_point": new_out,
+            }
+            link_steps = self._linked_av_edit_steps(clip, before=before)
+            self._sync_linked_av_timing(clip, before=before)
+            main = {"type": "edit_clip", "clip_id": clip_id, "before": before, "after": after}
+            if link_steps:
+                self._record_action({
+                    "type": "compound",
+                    "steps": [main] + link_steps,
+                    "label": "trim_clip_linked_av",
+                })
+            else:
+                self._record_action(main)
+            self._sync_timeline_widget_state()
+            self._sync_kernel_timeline()
+            self._touch_project_dirty()
+            self._refresh_preview_with_effects()
+            self._notify_edit(f"片段已裁剪：{new_in:.2f}s → {new_out:.2f}s")
+            return {
+                "action": "trim_clip", "success": True,
+                "message": f"片段已裁剪：{new_in:.2f}s → {new_out:.2f}s",
+                "clip_id": clip_id, "in_point": new_in,
+                "out_point": new_out, "duration": float(clip["duration"]),
+            }
+        except Exception as e:
+            logger.exception(f"[Agent] agent_trim_clip 失败: {e}")
+            return {"action": "trim_clip", "success": False, "message": str(e)}
+
+    def agent_move_clip(self, clip_id: str, new_start_time: float) -> Dict[str, Any]:
+        """Agent 公开接口：移动片段到新时间点（move_clip 已含撤销 + 联动音画 + 同步）。"""
+        try:
+            st = float(new_start_time)
+        except (TypeError, ValueError):
+            return {"action": "move_clip", "success": False, "message": "new_start_time 参数无效"}
+        if st < 0:
+            return {"action": "move_clip", "success": False, "message": "new_start_time 不能为负"}
+        if not self.move_clip(clip_id, st):
+            return {"action": "move_clip", "success": False,
+                    "message": "移动片段失败（片段可能不在时间线）"}
+        self._touch_project_dirty()
+        return {
+            "action": "move_clip", "success": True,
+            "message": f"已移动片段到 {st:.2f}s",
+            "clip_id": clip_id, "start_time": st,
+        }
+
+    # ═══════════════════════════════════════════════════════════════
+    # 词锚定 · 重锚（阶段 5：接入 Agent）
+    # ═══════════════════════════════════════════════════════════════
+    def agent_reanchor_clips(
+        self,
+        dialogues: Optional[List[Dict[str, Any]]] = None,
+        *,
+        dry_run: bool = True,
+        threshold: float = 0.75,
+        spread: bool = True,
+    ) -> Dict[str, Any]:
+        """Agent 公开接口：文案改动后把片段重新对齐到新台词。
+
+        「重锚」解决的是：锚点记在**台词的第 a~b 个词**上，一旦改了文案、
+        重跑 ASR，词级时间会整体变化，锚点必须重新求解。计算全在
+        ``app.core.dialogue_anchor.plan_reanchor``（纯函数、只读快照、不写 `_clips`），
+        本方法只负责「取快照 → 出计划 → （可选）落地」。
+
+        Args:
+            dialogues: 新的台词序列（`DialogueSegment` 或同形 dict 均可）。
+                       为 None 时用构造参数 ``self._dialogues``（若存在）。
+            dry_run:   **默认 True —— 只出计划、不动时间线**。Agent 应先出计划
+                       给用户看，确认后带 ``dry_run=False`` 再来一次。
+            threshold: 指纹相似度阈值，低于此值判孤儿（不硬挂错句子）。
+            spread:    落地时是否「铺开」——把每个片段时长改成它新分到的词区间
+                       长度。默认开：词区间本就更精确，用段落时长会与区间打架。
+                       关掉则只平移 ``start_time``、时长保持原样。
+
+        Returns:
+            计划摘要 + 逐片段差异。``dry_run=True`` 时带 ``applied=False``。
+            落地成功时带 ``undo=1``（整包**一条** compound 撤销，Ctrl+Z 一次回滚）。
+
+        ⚠️ 纪律：本方法绝不「部分落地」。若没有任何片段可重排（全孤儿/全无锚点），
+        直接返回 ``applied=False`` 而不写 ``_action_history`` —— 避免用户按一次
+        Ctrl+Z 却看不到任何变化，误以为撤销坏了。
+        """
+        from app.core.dialogue_anchor import plan_reanchor, summarize
+
+        try:
+            thr = float(threshold)
+        except (TypeError, ValueError):
+            return {"action": "reanchor_clips", "success": False,
+                    "message": "threshold 参数无效"}
+
+        # ── 1) 取新台词：优先入参，回落 self._dialogues ──
+        dlg = dialogues if dialogues is not None else getattr(self, "_dialogues", None)
+        if not dlg:
+            return {
+                "action": "reanchor_clips", "success": False,
+                "message": ("没有可用的台词序列。请先跑剧情理解/ASR 得到带词级时间的台词，"
+                            "或直接把 dialogues 传进来。"),
+            }
+
+        # ── 2) 取快照（持锁一次拿到稳定列表，绝不把 self._clips 引用交出去）──
+        clips = self._clips_snapshot()
+
+        # ── 3) 纯函数求解计划（不写任何状态）──
+        try:
+            plan = plan_reanchor(clips, dlg, threshold=thr)
+        except Exception as e:
+            logger.warning(f"[Agent] 重锚计划求解失败: {e}")
+            return {"action": "reanchor_clips", "success": False,
+                    "message": f"重锚计划求解失败: {e}"}
+
+        summary = summarize(plan)
+        shifts = [
+            {
+                "clip_id": s.clip_id,
+                "reason": s.reason,
+                "old_range": list(s.old_range) if s.old_range else None,
+                "new_range": list(s.new_range) if s.new_range else None,
+                "dialogue_id": s.dialogue_id,
+                "note": s.note,
+            }
+            for s in plan.shifts
+        ]
+        base: Dict[str, Any] = {
+            "action": "reanchor_clips",
+            "success": True,
+            "message": summary,
+            "matched": plan.matched,
+            "orphaned": plan.orphaned,
+            "unchanged": plan.unchanged,
+            "unmatched_new": plan.unmatched_new,
+            "overlaps": list(plan.overlaps),
+            "total": plan.total,
+            "shifts": shifts,
+        }
+
+        # ── dry_run：只交计划 ──
+        if dry_run:
+            base.update({"dry_run": True, "applied": False,
+                         "message": f"[预览] {summary}。确认后请以 dry_run=false 再执行。"})
+            return base
+
+        # ── 4) 落地 ──
+        movable = plan.moved()
+        if not movable:
+            base.update({
+                "dry_run": False, "applied": False,
+                "message": f"无可重排片段（{summary}），时间线未改动。",
+            })
+            return base
+
+        clip_by_id = {str(c.get("id", "")): c for c in clips}
+        steps: List[Dict[str, Any]] = []
+
+        for s in movable:
+            clip = clip_by_id.get(s.clip_id)
+            if clip is None or not s.new_range:
+                continue
+            new_start = max(0.0, float(s.new_range[0]))
+            before = {
+                "start_time": float(clip.get("start_time", 0) or 0),
+                "track": int(clip.get("track", 0) or 0),
+                "duration": float(clip.get("duration", 0) or 0),
+                "in_point": float(clip.get("in_point", 0) or 0),
+                "out_point": float(clip.get("out_point", 0) or 0),
+            }
+            after = dict(before)
+            after["start_time"] = new_start
+            if spread:
+                # 新词区间长度 → 新时长；同步 out_point 保持「入点 + 时长」契约
+                new_dur = max(0.05, float(s.new_range[1]) - new_start)
+                after["duration"] = new_dur
+                after["out_point"] = float(clip.get("in_point", 0) or 0) + new_dur
+            steps.append({
+                "type": "edit_clip",
+                "clip_id": s.clip_id,
+                "before": before,
+                "after": after,
+            })
+
+        if not steps:
+            base.update({
+                "dry_run": False, "applied": False,
+                "message": "计划中的片段在时间线上已找不到（可能被并发删除），未改动时间线。",
+            })
+            return base
+
+        # ⚠️ 整段持 _clips_lock：本方法是跨线程写入口（画布桥/Agent 线程），
+        # 「逐个改 start_time/duration」若不原子，渲染与 autosave 会读到半新半旧的
+        # 时间线。RLock 可重入，内部 _sync_* 再取锁不会死锁。
+        lock = getattr(self, "_clips_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._clips_lock = lock
+        with lock:
+            for step in steps:
+                for c in self._clips:
+                    if str(c.get("id", "")) == step["clip_id"]:
+                        self._apply_clip_fields(c, step["after"])
+                        break
+            # 一条 compound 撤销：用户按一次 Ctrl+Z 还原整包重排
+            self._record_action({
+                "type": "compound",
+                "steps": steps,
+                "label": "reanchor_clips",
+            })
+            self._sync_timeline_widget_state()
+            self._sync_kernel_timeline()
+        self._refresh_preview_with_effects()
+
+        base.update({
+            "dry_run": False,
+            "applied": True,
+            "undo": 1,
+            "moved": len(steps),
+            "message": f"已按新台词重排 {len(steps)} 个片段（{summary}）。Ctrl+Z 一次可整包撤销。",
+        })
+        return base
+
     # ===== 补短 P0#4:撤销/重做完整贯通 UI =====
     # _on_ai_clip / _on_ai_clip_fallback 已迁移到 ai_agent_panel.py（AiAgentPanelMixin）
 
@@ -3501,7 +3928,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             else:
                 t.setInterval(60)
         except Exception:
-            pass
+            logger.debug("定时器间隔设置失败", exc_info=True)
         t.start()
 
     def _begin_preview_scrub(self):
@@ -3576,7 +4003,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     try:
                         self._media_player.setPlaybackRate(max(0.05, rate))
                     except Exception:
-                        pass
+                        logger.debug("播放速率设置失败", exc_info=True)
                 except Exception:
                     st = float(clip.get("start_time", 0) or 0)
                     in_p = float(clip.get("in_point", 0) or 0)
@@ -3633,13 +4060,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 self._media_player.pause()
             except Exception:
-                pass
+                logger.debug("播放器暂停失败", exc_info=True)
             try:
                 bgm = getattr(self, "_bgm_player", None)
                 if bgm is not None:
                     bgm.pause()
             except Exception:
-                pass
+                logger.debug("BGM 暂停失败", exc_info=True)
             self._render_timeline_frame(position)
         finally:
             self._arm_media_audio = real_arm  # type: ignore[method-assign]
@@ -3935,7 +4362,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         )
 
     def _on_workflow_hint_received(self, hint: dict) -> None:
-        """接收闭环跳转的工作流提示（如账号运营爆款建议 → 下一轮粗剪）。"""
+        """接收闭环跳转的工作流提示（如爆款建议 → 下一轮粗剪）。"""
         if not isinstance(hint, dict):
             return
         body = (hint.get("body") or "").strip()
@@ -4036,7 +4463,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 try:
                     self._notify_edit(msg)
                 except Exception:
-                    pass
+                    logger.warning("编辑通知发送失败", exc_info=True)
             return
 
         file_path = data.get("file_path", "") if isinstance(data, dict) else str(data)
@@ -4077,11 +4504,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 QMessageBox.warning(self, "添加失败", msg)
             except Exception:
-                pass
+                logger.warning("添加失败提示框弹出异常", exc_info=True)
             try:
                 self._notify_edit(msg)
             except Exception:
-                pass
+                logger.warning("编辑通知发送失败", exc_info=True)
 
     def _on_send_clip_to_canvas(self):
         """剪辑选中片段 → AI 画布 outbox。"""
@@ -4237,33 +4664,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         """已废弃：禁止生成与对白无关的占位字幕。"""
         return []
     
-    # ===== 工作流集成 =====
-    def connect_to_workflow(self):
-        """连接到工作流管理器"""
-        from .workflow_manager import get_workflow_manager
-        self._workflow_manager = get_workflow_manager()
-        self._workflow_manager.workflow_completed.connect(self._on_workflow_completed)
-        self._workflow_manager.step_completed.connect(self._on_workflow_step_completed)
-        logger.info('✅ EditorModule 已连接到工作流管理器')
-    
-    def _on_workflow_completed(self, context):
-        """工作流完成回调"""
-        if context.video_path and os.path.exists(context.video_path):
-            self._load_video(context.video_path)
-        
-        # 更新文案
-        if context.creative:
-            self._received_copywriting = context.creative
-            self._refresh_copywriting_display()
-    
-    def _on_workflow_step_completed(self, step_name, result):
-        """工作流步骤完成回调"""
-        if step_name == "ai_clip" and result.get("success"):
-            clips = result.get("clips", [])
-            for clip in clips:
-                if clip.get("input_path"):
-                    self._add_clip_to_timeline(clip["input_path"])
-    
+
     # ===== 数据闭环集成 =====
     # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
@@ -4306,7 +4707,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             styles = {}
         project_data = {
             "version": "1.2",
-            "clips": self._clips,
+            # 必须拷贝：json.dump 遍历期间若画布桥线程 append/清空 _clips，
+            # 会抛 RuntimeError 或被写出「半截列表」的损坏工程文件。
+            "clips": self._clips_snapshot(),
             "timeline_zoom": self._timeline_zoom,
             "subtitles": subs,
             "subtitle_styles": styles,
@@ -4487,7 +4890,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 try:
                     steps.extend(self._linked_av_edit_steps(clip_data, before=before))
                 except Exception:
-                    pass
+                    logger.debug("联动音频编辑步骤扩展失败", exc_info=True)
                 if len(steps) == 1:
                     self._record_action(steps[0])
                 else:
@@ -4558,49 +4961,56 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 msl.blockSignals(False)
         except Exception as _e:
             logger.warning("操作异常（已忽略）: %s", _e)
-        self._clips = []
-        self._clip_widgets = []
-        self._clip_id_to_widget = {}
-        self._current_clip = None
+        # ⚠️ 整段持有 _clips_lock：「先清空再逐个 append」若不原子，
+        # 画布桥线程（agent_replace_timeline_clips）或 autosave 会读到中间态。
+        lock = getattr(self, "_clips_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._clips_lock = lock
+        with lock:
+            self._clips = []
+            self._clip_widgets = []
+            self._clip_id_to_widget = {}
+            self._current_clip = None
 
-        # 清空现有轨道上的片段控件
-        if hasattr(self, '_timeline_widget') and self._timeline_widget:
-            if hasattr(self._timeline_widget, "all_clip_widgets"):
-                for w in list(self._timeline_widget.all_clip_widgets()):
-                    cid = w.clip_data.get("id")
-                    self._timeline_widget.remove_clip_widget_by_id(cid)
-            else:
-                for track in getattr(self._timeline_widget, '_tracks', []):
-                    layout = track.get("content_layout")
-                    if not layout:
-                        continue
-                    for i in reversed(range(layout.count())):
-                        w = layout.itemAt(i).widget()
-                        if w is not None and hasattr(w, "clip_data"):
-                            layout.removeWidget(w)
-                            w.deleteLater()
-            self._timeline_widget._clips = []
-
-        for clip in clips:
-            if not isinstance(clip, dict):
-                continue
-            self._clips.append(clip)
+            # 清空现有轨道上的片段控件
             if hasattr(self, '_timeline_widget') and self._timeline_widget:
-                widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
-                if widget is not None:
-                    self._clip_widgets.append(widget)
-                    if clip.get("id"):
-                        self._clip_id_to_widget[clip["id"]] = widget
-            if not self._current_clip:
-                self._current_clip = clip
+                if hasattr(self._timeline_widget, "all_clip_widgets"):
+                    for w in list(self._timeline_widget.all_clip_widgets()):
+                        cid = w.clip_data.get("id")
+                        self._timeline_widget.remove_clip_widget_by_id(cid)
+                else:
+                    for track in getattr(self._timeline_widget, '_tracks', []):
+                        layout = track.get("content_layout")
+                        if not layout:
+                            continue
+                        for i in reversed(range(layout.count())):
+                            w = layout.itemAt(i).widget()
+                            if w is not None and hasattr(w, "clip_data"):
+                                layout.removeWidget(w)
+                                w.deleteLater()
+                self._timeline_widget._clips = []
 
-        # 旧工程可能只存了视频片：补联动音频，否则音频轨无波形
-        self._ensure_linked_audio_clips()
-        # 修复「视频轨被裁成 ~8s、同文件音频仍是全长」导致播放后半只剩声音
-        try:
-            self._heal_linked_av_duration_mismatch()
-        except Exception as e:
-            logger.error(f'联动音画时长修复失败: {e}')
+            for clip in clips:
+                if not isinstance(clip, dict):
+                    continue
+                self._clips.append(clip)
+                if hasattr(self, '_timeline_widget') and self._timeline_widget:
+                    widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
+                    if widget is not None:
+                        self._clip_widgets.append(widget)
+                        if clip.get("id"):
+                            self._clip_id_to_widget[clip["id"]] = widget
+                if not self._current_clip:
+                    self._current_clip = clip
+
+            # 旧工程可能只存了视频片：补联动音频，否则音频轨无波形
+            self._ensure_linked_audio_clips()
+            # 修复「视频轨被裁成 ~8s、同文件音频仍是全长」导致播放后半只剩声音
+            try:
+                self._heal_linked_av_duration_mismatch()
+            except Exception as e:
+                logger.error(f'联动音画时长修复失败: {e}')
 
         # 无 sequence / resolution 的旧工程：按首个视频片推断画幅
         if _sequence_needs_infer:
@@ -4644,7 +5054,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._current_clip = c
                     break
         except Exception:
-            pass
+            logger.debug("剪辑定位失败", exc_info=True)
 
         self._sync_kernel_timeline()
         if hasattr(self, "_timeline_widget") and hasattr(self._timeline_widget, "relayout_clips"):
@@ -4656,7 +5066,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             QTimer.singleShot(0, self._force_show_first_video_frame)
             QTimer.singleShot(200, self._force_show_first_video_frame)
         except Exception:
-            pass
+            logger.debug("首帧定时显示失败", exc_info=True)
         n_sub = 0
         try:
             sm = getattr(self, "_subtitle_manager", None)
@@ -4935,7 +5345,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 pm.set_proxy_preview_enabled(bool(enabled))
             except Exception:
-                pass
+                logger.debug("代理预览开关失败", exc_info=True)
         # 切换后重开当前预览源
         try:
             self._preview_source_path = None
@@ -4970,7 +5380,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 mgr.clear_idle_cache(14.0)
             except Exception:
-                pass
+                logger.debug("空闲缓存清理失败", exc_info=True)
             self._proxy_manager = mgr
             logger.info("[proxy] 管理器就绪 cache=%s", mgr.cache_dir)
         except Exception as e:
@@ -4984,7 +5394,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._init_proxy_media_manager()
         except Exception:
-            pass
+            logger.debug("代理媒体管理器初始化失败", exc_info=True)
         return getattr(self, "_proxy_manager", None)
 
     def _maybe_proxy_preview_path(self, src: str) -> str:
@@ -5142,7 +5552,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 self._preview_source_path = open_src
                 return True
         except Exception:
-            pass
+            logger.debug("预览源路径设置失败", exc_info=True)
         try:
             ok = bool(pm.open_video(open_src, preload=preload, for_scrub=for_scrub))
             if ok:
@@ -5186,7 +5596,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 try:
                     self._render_timeline_frame(st)
                 except Exception:
-                    pass
+                    logger.debug("时间线帧渲染失败", exc_info=True)
             player = getattr(self, "_media_player", None)
             if player is not None:
                 from PyQt6.QtCore import QUrl
@@ -5201,7 +5611,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     if hasattr(tw, "set_total_duration") and total > 0:
                         tw.set_total_duration(max(total + 2.0, total * 1.02))
             except Exception:
-                pass
+                logger.debug("总时长显示失败", exc_info=True)
             return frame is not None
         except Exception as e:
             logger.debug("强制首帧预览失败: %s", e)
@@ -5249,7 +5659,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     if tw is not None:
                         tw.set_playhead_position(st)
                 except Exception:
-                    pass
+                    logger.debug("播放头位置设置失败", exc_info=True)
             elif st <= t < st + max(clip_dur, 0.05):
                 try:
                     from app.core.speed_ramping import source_time_for_clip_at_timeline
@@ -5283,7 +5693,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 self._force_show_first_video_frame()
             except Exception:
-                pass
+                logger.debug("首帧显示失败", exc_info=True)
 
     # [Mixin] 已迁移至 editor_ui_builder_mixin.py
     @staticmethod
@@ -5368,7 +5778,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if getattr(self, "_resolution_var", None) is not None:
                 res = self._resolution_var.currentText() or res
         except Exception:
-            pass
+            logger.debug("分辨率变量读取失败", exc_info=True)
         try:
             w, h = parse_resolution(res)
         except Exception:
@@ -5392,7 +5802,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 aspect = aspect_from_size(w, h)
             except Exception:
-                pass
+                logger.debug("宽高比计算失败", exc_info=True)
             w, h = normalize_size(aspect, w, h)
         self._sequence_format = SequenceFormat(
             aspect=aspect, width=int(w), height=int(h), fit_mode=fit,
@@ -5411,7 +5821,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._set_export_combo_text("_aspect_var", self._sequence_format.aspect)
                     self._aspect_var.blockSignals(False)
         except Exception:
-            pass
+            logger.debug("宽高比下拉设置失败", exc_info=True)
 
     def _on_export_aspect_or_resolution_changed(self, *_args) -> None:
         sender = self.sender() if hasattr(self, "sender") else None
@@ -5421,7 +5831,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._schedule_preview_refresh()
         except Exception:
-            pass
+            logger.debug("预览刷新调度失败", exc_info=True)
 
     def _on_export_fit_mode_changed(self, *_args) -> None:
         self._sync_sequence_format_from_export_combos(prefer_aspect=False)
@@ -5429,7 +5839,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._schedule_preview_refresh()
         except Exception:
-            pass
+            logger.debug("预览刷新调度失败", exc_info=True)
 
     # 容器（格式）↔ 编码兼容表：避免用户选出「格式与编码不匹配」导出失败或播放器打不开
     _CONTAINER_VIDEO_CODECS = {
@@ -5488,7 +5898,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._schedule_preview_refresh()
         except Exception:
-            pass
+            logger.debug("预览刷新调度失败", exc_info=True)
 
     def _apply_export_video_preset(
         self,
@@ -5552,7 +5962,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             self._schedule_preview_refresh()
         except Exception:
-            pass
+            logger.debug("预览刷新调度失败", exc_info=True)
 
     # [Mixin] 已迁移至 editor_ai_tools_mixin.py
 
@@ -6108,6 +6518,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if clip_changed:
                 self._media_player.setSource(QUrl.fromLocalFile(src))
                 self._audio_bound_clip_id = cid
+                # 2026-09-13 解冻修复：切源后媒体引擎速率可能被复位，清缓存强制下次重设
+                self._audio_applied_rate = None
             self._arm_media_audio(source_t, rate)
         except Exception as e:
             print(f"音频同步失败: {e}")
@@ -6559,7 +6971,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if bar.isSliderDown():
                 return
         except Exception:
-            pass
+            logger.debug("滑杆状态读取失败", exc_info=True)
         total = 0.0
         try:
             total = float(self._timeline_total_duration() or 0)
@@ -6730,11 +7142,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 dur = max(dur, float(getattr(tw, "_total_duration", 0) or 0))
             except Exception:
-                pass
+                logger.debug("总时长读取失败", exc_info=True)
         try:
             dur = max(dur, float(getattr(self, "_total_duration", 0) or 0))
         except Exception:
-            pass
+            logger.debug("总时长读取失败", exc_info=True)
         return max(0.0, dur)
 
     def _zoom_timeline_to_fit(self):
@@ -6768,7 +7180,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if scroll is not None and hasattr(scroll, "horizontalScrollBar"):
                 scroll.horizontalScrollBar().setValue(0)
         except Exception:
-            pass
+            logger.debug("滚动条复位失败", exc_info=True)
         self._notify_edit(f"时间线适应窗口 {zoom}%")
 
     def _mark_sequence_in(self):
@@ -6818,7 +7230,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             elif hasattr(tw, "update"):
                 tw.update()
         except Exception:
-            pass
+            logger.debug("时间线刷新失败", exc_info=True)
 
     def _ripple_delete_gaps(self):
         """Shift+Del / 合缝：各轨磁吸贴齐（前移片，不删内容），可撤销。"""
@@ -7141,10 +7553,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 self._bgm_audio_output.setVolume(out)
         except Exception as _e:
             logger.warning("操作异常（已忽略）: %s", _e)
-        if hasattr(self, '_audio_manager') and self._audio_manager:
-            tracks = self._audio_manager.list_audio_tracks()
-            for t in tracks:
-                self._audio_manager.adjust_audio_volume(t['id'], out)
         self._notify_edit(f"总控音量 {int(vol * 100)}%")
 
     # [Mixin] 已迁移至 editor_effects_mixin.py
@@ -7634,6 +8042,23 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     # 这些方法包装同名私有方法，增加 try/except 保护，避免 handler 直接依赖私有实现
     # ═══════════════════════════════════════════════════════════════
 
+    def _clips_snapshot(self) -> List[Dict[str, Any]]:
+        """原子取得 ``_clips`` 的浅拷贝列表。
+
+        为什么需要它：``_clips`` 会被画布桥线程和 autosave 定时器同时接触。
+        直接遍历 ``self._clips`` 或把引用交给 ``json.dump`` 都会在
+        「非原子替换」进行到一半时读到中间态。本方法在锁内 list() 一次，
+        调用方拿到的是**当时那一刻**的稳定列表（元素仍是同一批 dict 引用，
+        因为剪辑数据靠 id 定位、不做深拷贝才符合现有契约）。
+
+        用法：跨线程 / 序列化 / 需要遍历过程中修改集合的场景一律用它。
+        """
+        lock = getattr(self, "_clips_lock", None)
+        if lock is None:
+            return list(self._clips or [])
+        with lock:
+            return list(self._clips or [])
+
     def agent_get_timeline_context(self) -> Dict[str, Any]:
         """Agent 公开接口：获取当前时间线上下文（时间线数据、选中片段、播放头位置）。"""
         try:
@@ -7641,6 +8066,144 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         except Exception as e:
             logger.warning(f"[Agent] agent_get_timeline_context 失败: {e}")
             return {"error": str(e), "clip_count": 0, "clips": []}
+
+    def agent_replace_timeline_clips(self, clips: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Agent 公开接口：整条替换时间线片段（工程级快照直导/回滚的落点）。
+
+        复用 ``import_project`` 的重建序列（清空 _clips → 逐个 add_clip → 同步内核 →
+        重排 → 刷首帧），但不弹文件框、不碰字幕/贴纸（那些属于独立工程资产）。
+        返回诚实结果：失败时 ``ok:False`` + 可执行中文指引，绝不假成功。
+        """
+        try:
+            if not isinstance(clips, list):
+                return {"ok": False, "message": "clips 必须是数组"}
+            # ⚠️ 整段持有 _clips_lock：本方法是**跨线程写入口**（画布桥调用），
+            # 「先清空再逐个 append」若不原子，渲染/autosave/导出线程会读到
+            # 空列表或半截列表。RLock 可重入，内部方法再取锁不会死锁。
+            lock = getattr(self, "_clips_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                self._clips_lock = lock
+            with lock:
+                self._clips = []
+                self._clip_widgets = []
+                self._clip_id_to_widget = {}
+                self._current_clip = None
+
+                # 清空现有轨道片段控件
+                if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                    if hasattr(self._timeline_widget, "all_clip_widgets"):
+                        for w in list(self._timeline_widget.all_clip_widgets()):
+                            cid = w.clip_data.get("id")
+                            self._timeline_widget.remove_clip_widget_by_id(cid)
+                    else:
+                        for track in getattr(self._timeline_widget, "_tracks", []):
+                            layout = track.get("content_layout")
+                            if not layout:
+                                continue
+                            for i in reversed(range(layout.count())):
+                                w = layout.itemAt(i).widget()
+                                if w is not None and hasattr(w, "clip_data"):
+                                    layout.removeWidget(w)
+                                    w.deleteLater()
+                    self._timeline_widget._clips = []
+
+                for clip in clips:
+                    if not isinstance(clip, dict):
+                        continue
+                    self._clips.append(clip)
+                    if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                        widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
+                        if widget is not None:
+                            self._clip_widgets.append(widget)
+                            if clip.get("id"):
+                                self._clip_id_to_widget[clip["id"]] = widget
+                    if not self._current_clip:
+                        self._current_clip = clip
+
+                self._ensure_linked_audio_clips()
+                try:
+                    self._heal_linked_av_duration_mismatch()
+                except Exception as e:
+                    logger.error(f"联动音画时长修复失败: {e}")
+                # 主选优先视频片
+                for c in self._clips:
+                    if str(c.get("type", "")).lower() != "audio" and c.get("path"):
+                        self._current_clip = c
+                        break
+            self._sync_kernel_timeline()
+            if hasattr(self, "_timeline_widget") and hasattr(self._timeline_widget, "relayout_clips"):
+                self._timeline_widget.relayout_clips()
+            self._force_show_first_video_frame()
+            self._notify_edit(f"已导入 {len(self._clips)} 个片段（工程快照）")
+            return {"ok": True, "message": f"已替换时间线：{len(self._clips)} 个片段"}
+        except Exception as e:
+            logger.exception(f"[Agent] agent_replace_timeline_clips 失败: {e}")
+            return {"ok": False, "message": f"替换时间线失败（非假成功）: {e}"}
+
+    def agent_apply_storyboard_durations(
+        self, durations: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Agent 公开接口：把分镜记忆规划算出的「建议时长」真正落回 ``_clips``。
+
+        输入 ``durations`` 形如 ``[{"clip_id": "c1", "duration": 6.5}, ...]``。
+        按 clip_id 匹配 ``_clips``，只改 ``duration`` 字段（不动其它属性），
+        改完触发时间线 widget 重排 + 内核同步 + 首帧刷新（如果可达）。
+        匹配不到的 clip_id 计入 ``unmatched``，绝不假成功。
+
+        诚实失败：参数非法 / 剪辑模块没就绪 → ``ok:false`` + message。
+        """
+        try:
+            if not isinstance(durations, list):
+                return {"ok": False, "message": "durations 必须是数组"}
+            clips = getattr(self, "_clips", [])
+            if not isinstance(clips, list):
+                return {"ok": False, "message": "_clips 不是数组"}
+            applied = 0
+            unmatched: List[str] = []
+            for d in durations:
+                if not isinstance(d, dict):
+                    continue
+                cid = d.get("clip_id")
+                dur = d.get("duration")
+                if not isinstance(cid, str) or not cid:
+                    continue
+                if not isinstance(dur, (int, float)) or not float(dur) > 0:
+                    continue
+                target = next((c for c in clips if c.get("id") == cid), None)
+                if target is None:
+                    unmatched.append(cid)
+                    continue
+                target["duration"] = float(dur)
+                # out_point 跟着改（保持 in_point 起点不动）
+                try:
+                    in_pt = float(target.get("in_point", 0) or 0)
+                    target["out_point"] = in_pt + float(dur)
+                except Exception:
+                    pass
+                applied += 1
+            # 同步内核 + 刷新
+            try:
+                self._sync_kernel_timeline()
+            except Exception:
+                logger.debug("storyboard duration apply: _sync_kernel_timeline 失败", exc_info=True)
+            try:
+                if hasattr(self, "_timeline_widget") and self._timeline_widget:
+                    if hasattr(self._timeline_widget, "relayout_clips"):
+                        self._timeline_widget.relayout_clips()
+                    self._force_show_first_video_frame()
+            except Exception:
+                logger.debug("storyboard duration apply: 刷新时间线失败", exc_info=True)
+            self._notify_edit(f"分镜记忆已落回 {applied} 个片段的时长")
+            return {
+                "ok": True,
+                "applied": applied,
+                "unmatched": unmatched,
+                "message": f"已应用 {applied} 个片段（未匹配 {len(unmatched)} 个）",
+            }
+        except Exception as e:
+            logger.exception(f"[Agent] agent_apply_storyboard_durations 失败: {e}")
+            return {"ok": False, "message": f"应用失败（非假成功）: {e}"}
 
     def agent_send_selected_to_canvas(self, clip_id: str = "") -> Dict[str, Any]:
         """把选中（或指定）视频片段推到画布 outbox；不改时间线。"""
@@ -7726,6 +8289,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             self._do_on_edit_agent_result(user_text, raw)
             # ✅ 激活 AgentBrain Hebbian 学习（P0）：成功路径强化相关突触
             self._agent_brain_learn(success=True, user_text=user_text)
+            # 知心秘书完整档：记录本轮对话到多轮历史
+            self._record_agent_turn(user_text, raw)
         except Exception as e:
             logger.exception(f"[Agent] _on_edit_agent_result 处理失败: {e}")
             # ❌ 失败路径弱化相关突触，让 Agent 下次倾向其他路径
@@ -7843,7 +8408,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             try:
                 self._append_agent_message("系统", f"❌ Agent 错误处理异常: {e}")
             except Exception:
-                pass
+                logger.warning("Agent 错误消息输出失败", exc_info=True)
 
     # [Mixin] _on_edit_agent_stopped 已迁移至 editor_agent_runtime_mixin.py
 
@@ -8270,7 +8835,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": res.get("message", "") if isinstance(res, dict) else "切分成功",
                 })
             except Exception:
-                pass
+                logger.warning("切分成功通知发送失败", exc_info=True)
             return res
         except Exception as e:
             logger.exception(f"[Agent] agent_split_clip 失败: {e}")
@@ -8284,7 +8849,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": str(e),
                 })
             except Exception:
-                pass
+                logger.warning("切分失败通知发送失败", exc_info=True)
             return {"action": "split_clip", "success": False, "message": str(e)}
 
     def _copy_clip_data_to_timeline(self, clip: Dict[str, Any], offset: float = 1.0):
@@ -8388,7 +8953,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         try:
             duration = max(duration, float(self._probe_video_duration(file_path) or 0.0))
         except Exception:
-            pass
+            logger.debug("视频时长探测失败", exc_info=True)
         try:
             pm = getattr(self, "_preview_manager", None)
             if pm is not None and self._media_paths_equal(
@@ -8411,7 +8976,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     duration = max(duration, fc / fps)
             cap.release()
         except Exception:
-            pass
+            logger.debug("视频资源释放失败", exc_info=True)
         return float(duration or 0.0)
 
     def _heal_av_clips_signature(self):
@@ -8494,7 +9059,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if tw is not None and hasattr(tw, "set_total_duration") and total > 0:
                     tw.set_total_duration(max(total + 2.0, total * 1.02))
             except Exception:
-                pass
+                logger.debug("总时长显示失败", exc_info=True)
         # 无论是否修好，缓存当前签名，避免每次播放重复探测
         self._heal_av_sig = self._heal_av_clips_signature()
         return healed
@@ -8504,17 +9069,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         import os as _os
         import time as _time
 
-        _report_video_import_debug(
-            "C",
-            "editor_module._add_clip_to_timeline:start",
-            "add clip start",
-            {
-                "file_path": file_path,
-                "file_exists": bool(file_path and _os.path.exists(file_path)),
-                "module_has_os": "os" in globals(),
-                "timeline_widget_type": type(getattr(self, "_timeline_widget", None)).__name__ if hasattr(self, "_timeline_widget") else None,
-            },
-        )
         if not file_path or not _os.path.exists(file_path):
             QMessageBox.warning(self, "添加失败", "视频文件不存在")
             return
@@ -8622,12 +9176,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             except Exception:
                 logger.debug("add_clip 撤销记录失败", exc_info=True)
         except Exception as e:
-            _report_video_import_debug(
-                "B",
-                "editor_module._add_clip_to_timeline:exception",
-                "add clip exception",
-                {"error": repr(e), "error_type": type(e).__name__},
-            )
             logger.exception("添加片段到时间线失败")
             QMessageBox.warning(self, "添加失败", f"添加片段到时间线失败: {e}")
             logger.error(f'添加片段到时间线失败: {e}')
@@ -8704,7 +9252,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": f"滤镜 {filter_name} (强度 {intensity:.0%})",
                 })
             except Exception:
-                pass
+                logger.warning("滤镜结果通知发送失败", exc_info=True)
             return {"success": True, "filter_name": filter_name, "intensity": intensity}
         except Exception as e:
             logger.exception(f"[Agent] agent_apply_filter 失败: {e}")
@@ -8719,7 +9267,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": str(e),
                 })
             except Exception:
-                pass
+                logger.warning("滤镜失败通知发送失败", exc_info=True)
             return {"success": False, "message": str(e)}
 
     def _on_filter_category_changed(self, category: str):
@@ -8868,7 +9416,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": f"转场 {transition_type} ({duration:.1f}s)",
                 })
             except Exception:
-                pass
+                logger.warning("转场结果通知发送失败", exc_info=True)
             return {"success": True, "transition_type": transition_type, "duration": duration}
         except Exception as e:
             logger.exception(f"[Agent] agent_apply_transition 失败: {e}")
@@ -8883,7 +9431,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     "message": str(e),
                 })
             except Exception:
-                pass
+                logger.warning("转场失败通知发送失败", exc_info=True)
             return {"success": False, "message": str(e)}
 
     def _copy_clip(self):
@@ -8993,7 +9541,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if QApplication.activeModalWidget() is not None:
                 return
         except Exception:
-            pass
+            logger.debug("模态窗口判断失败", exc_info=True)
         tw = getattr(self, "_timeline_widget", None)
         if tw is not None and hasattr(tw, "cancel_active_clip_interaction"):
             if tw.cancel_active_clip_interaction():
@@ -9007,7 +9555,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if QApplication.activeModalWidget() is not None:
                 return
         except Exception:
-            pass
+            logger.debug("模态窗口判断失败", exc_info=True)
         tw = getattr(self, "_timeline_widget", None)
         if tw is not None and hasattr(tw, "is_razor_mode") and tw.is_razor_mode():
             tw.set_razor_mode(False)
@@ -9020,7 +9568,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 btn.setChecked(bool(enabled))
                 btn.blockSignals(False)
             except Exception:
-                pass
+                logger.debug("按钮状态设置失败", exc_info=True)
 
     def _on_razor_cut_at(self, cut_t: float):
         """时间线刀片点击：切开指针下所有覆盖片（含联动音画）。"""
@@ -9047,7 +9595,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if w.inherits("QLineEdit"):
                     return
         except Exception:
-            pass
+            logger.debug("控件类型判断失败", exc_info=True)
         self._toggle_razor_tool()
 
     def _cut_clip(self):

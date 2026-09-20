@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # 语音分析
 WHISPER_AVAILABLE = False
 _whisper_model_type = None
+_whisper_probed = False          # 探测只做一次（见下方惰性化改造说明）
 
 def _detect_whisper():
     """检测Whisper可用性，优先使用faster-whisper"""
@@ -43,7 +44,25 @@ def _detect_whisper():
                 logger.debug("Whisper print fallback failed: %s", e)
             return False
 
-_detect_whisper()
+
+def _ensure_whisper_probed() -> bool:
+    """惰性探测 Whisper 可用性（V4.32.3 冷启动优化）。
+
+    修复：原先本模块在导入期直接调用 `_detect_whisper()`。该函数会真的
+    `import faster_whisper`，而 faster_whisper 依赖 torch —— 实测量到
+    单此一跳就花 6.97s，把「检测库装没装」变成「把整个 torch 拖进内存」。
+    调用方（main_window → modules → drama_understanding_engine）位于冷启动
+    路径上，导致打开首页要等 7.76s。
+
+    改为首次真正需要时才探测，结果缓存，语义与原先等价（探测时机从
+    「模块导入」推迟到「首次使用」）。
+    """
+    global _whisper_probed
+    if not _whisper_probed:
+        _whisper_probed = True
+        _detect_whisper()
+    return WHISPER_AVAILABLE
+
 
 # 视觉分析
 try:
@@ -56,6 +75,7 @@ except ImportError as e:
 
 # 本地LLM
 OLLAMA_AVAILABLE = False
+_ollama_probed = False           # 探测只做一次（见下方惰性化改造说明）
 
 def _check_ollama():
     """检测Ollama可用性，同时检查import和服务运行状态"""
@@ -76,7 +96,22 @@ def _check_ollama():
         logger.error(f'⚠️ Ollama连接失败: {e}')
         return False
 
-_check_ollama()
+
+def _ensure_ollama_probed() -> bool:
+    """惰性探测 Ollama 可用性（V4.32.3 冷启动优化）。
+
+    修复：原先本模块在导入期直接调用 `_check_ollama()`。该函数会
+    `client.list()` 真连本地 Ollama 服务 —— 导入即产生网络/进程副作用，
+    服务未运行时还可能阻塞到超时。检测型代码不应有外部副作用。
+
+    改为首次真正需要时才探测，结果缓存。
+    """
+    global _ollama_probed
+    if not _ollama_probed:
+        _ollama_probed = True
+        _check_ollama()
+    return OLLAMA_AVAILABLE
+
 
 
 class SceneType(Enum):
@@ -116,6 +151,19 @@ class PlotPointType(Enum):
 
 
 @dataclass
+class WordTiming:
+    """单个词的时间与文本 —— 词锚定的最小单位。
+
+    为什么需要它：段落级时间戳只够「定位到这句话」。一旦文案改了、重跑 ASR，
+    时间全变，落点就废了。有了词级时间，锚点可以记成
+    「第 N 句的第 a 个词到第 b 个词」，改文案只需重排、不必重分析。
+    """
+    text: str
+    start: float
+    end: float
+
+
+@dataclass
 class DialogueSegment:
     """对话片段"""
     start_time: float
@@ -125,6 +173,12 @@ class DialogueSegment:
     emotion: EmotionalTone
     volume: float  # 音量级别
     speed: float   # 语速
+    # ↓ 新增字段必须带默认值且放在末尾 —— dataclass 不允许「无默认字段」
+    #   排在「有默认字段」之后。全库 3 个构造点均用关键字实参，故追加安全。
+    # `id` 只是**当次分析**的局部标识，跨版本对应靠 text_fingerprint 重新锚定
+    # （改文案会重跑 ASR，时间也会变，不存在内容派生的稳定 id）。
+    id: str = ""
+    words: List["WordTiming"] = field(default_factory=list)
 
 
 @dataclass
@@ -244,14 +298,16 @@ class DramaUnderstandingEngine:
         self._yolo_available = False
 
         logger.info(f'🎭 DramaUnderstandingEngine 初始化完成')
-        logger.info(f"   - Whisper模型: {whisper_model} {('(可用)' if WHISPER_AVAILABLE else '(不可用)')}")
-        logger.info(f"   - Ollama模型: {ollama_model} {('(可用)' if OLLAMA_AVAILABLE else '(不可用)')}")
+        logger.info(f"   - Whisper模型: {whisper_model} {('(可用)' if _ensure_whisper_probed() else '(不可用)')}")
+        logger.info(f"   - Ollama模型: {ollama_model} {('(可用)' if _ensure_ollama_probed() else '(不可用)')}")
         logger.info(f"   - 视觉分析: {('(可用)' if VISION_AVAILABLE else '(不可用)')}")
         logger.info(f'   - 本地AI优先: {use_local_ai}')
     
     def _load_whisper(self):
         """加载Whisper模型，支持faster-whisper和openai-whisper"""
         if self._whisper_model is None:
+            # 必须先确保探测过，否则 _whisper_model_type 仍为 None，下方两个分支都不会命中
+            _ensure_whisper_probed()
             logger.info(f'🎤 加载Whisper模型: {self.whisper_model_name} (类型: {_whisper_model_type})')
             if _whisper_model_type == "faster_whisper":
                 import faster_whisper
@@ -361,10 +417,12 @@ class DramaUnderstandingEngine:
             video_path,
             model_size=self.whisper_model_name,
             language="zh",
+            # 词级时间戳：词锚定的原料。段落级时间戳做不了「改文案免重剪」。
+            word_timestamps=True,
         )
 
         dialogues = []
-        for seg in raw_segments:
+        for _idx, seg in enumerate(raw_segments):
             start_t = seg.get("start", 0)
             end_t = seg.get("end", 0)
             text = seg.get("text", "").strip()
@@ -377,11 +435,34 @@ class DramaUnderstandingEngine:
                 text=text,
                 emotion=self._detect_emotion_from_text(text),
                 volume=seg.get("avg_logprob", 0.0),
-                speed=self._calc_speech_speed(start_t, end_t, text)
+                speed=self._calc_speech_speed(start_t, end_t, text),
+                id=f"d{_idx:04d}",
+                words=self._to_word_timings(seg.get("words")),
             )
             dialogues.append(dialogue)
 
         return dialogues
+
+    @staticmethod
+    def _to_word_timings(raw_words) -> List["WordTiming"]:
+        """把 ASR 的 `[{"text","start","end"}]` 归一成 WordTiming 列表。
+
+        容错：缺字段/类型不对的条目直接跳过，不让一条脏数据毁掉整段锚点原料。
+        """
+        out: List[WordTiming] = []
+        for w in raw_words or []:
+            try:
+                text = str(w.get("text", "") or "").strip()
+                if not text:
+                    continue
+                out.append(WordTiming(
+                    text=text,
+                    start=float(w.get("start", 0.0) or 0.0),
+                    end=float(w.get("end", 0.0) or 0.0),
+                ))
+            except Exception:
+                continue
+        return out
 
     def _analyze_audio_layer_fallback(self, video_path: str) -> List[DialogueSegment]:
         """Whisper ASR 回退方案（内置模型加载，兼容旧环境）"""
@@ -396,6 +477,7 @@ class DramaUnderstandingEngine:
                 task="transcribe",
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500),
+                word_timestamps=True,   # 词锚定原料，见 WordTiming 注释
             )
             raw_segments = list(segments_iter)
         else:
@@ -403,21 +485,38 @@ class DramaUnderstandingEngine:
                 video_path,
                 language="zh",
                 task="transcribe",
-                verbose=False
+                verbose=False,
+                word_timestamps=True,
             )
             raw_segments = result.get("segments", [])
 
         dialogues = []
-        for seg in raw_segments:
+        for _idx, seg in enumerate(raw_segments):
             if _whisper_model_type == "faster_whisper":
                 start_t, end_t = seg.start, seg.end
                 text = seg.text.strip() if seg.text else ""
                 avg_logprob = getattr(seg, 'avg_logprob', 0.0)
+                words = self._to_word_timings([
+                    {
+                        "text": (getattr(w, "word", "") or "").strip(),
+                        "start": getattr(w, "start", 0.0),
+                        "end": getattr(w, "end", 0.0),
+                    }
+                    for w in (getattr(seg, "words", None) or [])
+                ])
             else:
                 start_t = seg.get("start", 0)
                 end_t = seg.get("end", 0)
                 text = seg.get("text", "").strip()
                 avg_logprob = seg.get("avg_logprob", 0.0)
+                words = self._to_word_timings([
+                    {
+                        "text": (w.get("word", "") or "").strip(),
+                        "start": w.get("start", 0.0),
+                        "end": w.get("end", 0.0),
+                    }
+                    for w in (seg.get("words") or [])
+                ])
 
             dialogue = DialogueSegment(
                 start_time=start_t,
@@ -426,7 +525,9 @@ class DramaUnderstandingEngine:
                 text=text,
                 emotion=self._detect_emotion_from_text(text),
                 volume=avg_logprob,
-                speed=self._calc_speech_speed(start_t, end_t, text)
+                speed=self._calc_speech_speed(start_t, end_t, text),
+                id=f"d{_idx:04d}",
+                words=words,
             )
             dialogues.append(dialogue)
 
@@ -506,7 +607,7 @@ class DramaUnderstandingEngine:
         if not text or not text.strip():
             return None
         # 尝试 LLM
-        if OLLAMA_AVAILABLE:
+        if _ensure_ollama_probed():
             try:
                 return self._llm_emotion_vector(text)
             except Exception as e:
@@ -571,7 +672,7 @@ class DramaUnderstandingEngine:
         """
         批量 LLM 情绪分析：一次请求分析多句对白，大幅减少 API 调用次数。
         """
-        if not OLLAMA_AVAILABLE or not texts:
+        if not _ensure_ollama_probed() or not texts:
             return [self._keyword_emotion_vector(t) for t in texts]
 
         results = [self._keyword_emotion_vector(t) for t in texts]  # 默认 fallback
@@ -905,7 +1006,7 @@ class DramaUnderstandingEngine:
         text = " ".join([d.text for d in dialogues])
 
         # LLM 优先
-        if OLLAMA_AVAILABLE:
+        if _ensure_ollama_probed():
             try:
                 return self._llm_classify_scene(text)
             except Exception as e:
@@ -1070,7 +1171,7 @@ class DramaUnderstandingEngine:
             drama.emotion_journey = []
 
         # ── 5) LLM 全局情绪走势分析 ──
-        if OLLAMA_AVAILABLE and len(drama.dialogues) >= 10:
+        if _ensure_ollama_probed() and len(drama.dialogues) >= 10:
             try:
                 drama.emotional_arc_analysis = self._llm_emotional_arc(drama)
             except Exception:
@@ -1982,7 +2083,7 @@ class DramaUnderstandingEngine:
                                              genre=drama.genre)
 
         # LLM 精修：用剧情理解重新评估每个片段的价值
-        if OLLAMA_AVAILABLE and len(highlights) > 1:
+        if _ensure_ollama_probed() and len(highlights) > 1:
             try:
                 highlights = self._llm_refine_highlights(
                     drama, highlights, target_platform, video_style,

@@ -509,6 +509,14 @@ class SettingsModule(BaseModule):
         self._theme_combo.setMinimumWidth(200)
         theme_layout.addRow("主题:", self._theme_combo)
 
+        # 导航栏显示模式：图标+名称 / 仅图标（悬浮显示名称）
+        self._nav_mode_combo = QComboBox()
+        self._nav_mode_combo.addItem("显示图标和名称", "full")
+        self._nav_mode_combo.addItem("仅显示图标（悬浮出名称）", "compact")
+        self._nav_mode_combo.setMinimumWidth(200)
+        self._nav_mode_combo.currentIndexChanged.connect(self._on_nav_mode_changed)
+        theme_layout.addRow("导航栏:", self._nav_mode_combo)
+
         self._theme_status_label = QLabel("")
         self._theme_status_label.setObjectName("hintLabel")
         theme_layout.addRow("当前生效:", self._theme_status_label)
@@ -1171,7 +1179,15 @@ class SettingsModule(BaseModule):
             self._theme_combo.blockSignals(False)
             # 启动时同步设置面板自身容器样式（不触发全局事件）
             self.set_theme(theme)
-        
+
+        # 导航栏显示模式回填（不触发即时生效事件）
+        nav_mode = self._settings.value("nav_mode", "full")
+        nav_idx = self._nav_mode_combo.findData("compact" if nav_mode == "compact" else "full")
+        if nav_idx >= 0:
+            self._nav_mode_combo.blockSignals(True)
+            self._nav_mode_combo.setCurrentIndex(nav_idx)
+            self._nav_mode_combo.blockSignals(False)
+
         font_size = self._settings.value("font_size", 14, type=int)
         index = self.FONT_SIZES.index(font_size) if font_size in self.FONT_SIZES else 4
         self._font_size_combo.setCurrentIndex(index)
@@ -1232,7 +1248,11 @@ class SettingsModule(BaseModule):
         theme_key = list(self.THEMES.keys())[self._theme_combo.currentIndex()]
         self._settings.setValue("theme", theme_key)
         self.set_theme(theme_key)  # 立即应用主题
-        
+
+        # 导航栏显示模式（full=图标+名称 / compact=仅图标悬浮显名）
+        if hasattr(self, "_nav_mode_combo"):
+            self._settings.setValue("nav_mode", self._nav_mode_combo.currentData() or "full")
+
         font_size = int(self._font_size_combo.currentText())
         self._settings.setValue("font_size", font_size)
         
@@ -1718,7 +1738,7 @@ class SettingsModule(BaseModule):
         actual_theme = ThemeManager.resolve_theme(theme_key)
         self._settings.setValue("theme", theme_key)
         self._settings.setValue("resolved_theme", actual_theme)
-        
+
         # 1. 发送 THEME_CHANGED 事件，main_window 接收后会：
         #    - 调用 ThemeManager.apply_theme() 应用全局 QSS
         #    - 遍历所有模块设置 theme 属性
@@ -1729,9 +1749,18 @@ class SettingsModule(BaseModule):
                                          {"theme": theme_key, "resolved_theme": actual_theme}, "settings_module")
         except Exception as e:
             logger.debug("主题变更事件发送失败: %s", e)
-        
+
         # 2. 更新设置面板自身 UI
         self.set_theme(theme_key)
+
+    def _on_nav_mode_changed(self, idx: int):
+        """导航栏显示模式变化：持久化 + 即时通知主窗口应用（full=图标+名称 / compact=仅图标）"""
+        if idx < 0:
+            return
+        mode = self._nav_mode_combo.currentData() or "full"
+        self._settings.setValue("nav_mode", mode)
+        # settings_changed 信号已连到 main_window._on_settings_changed（即时生效）
+        self.settings_changed.emit("nav_mode", {"nav_mode": mode})
     
     # ─────────────── 主题切换系统 END ───────────────
     

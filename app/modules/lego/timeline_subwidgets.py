@@ -9,12 +9,8 @@
 - TrackControlPanel 轨道控制面板
 - TrackViewport 轨道视图区域
 """
-import os
-import json
 import logging
 import threading
-import time
-import urllib.request
 import weakref
 
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
@@ -88,37 +84,6 @@ class _MediaWorkerGate:
 
 _media_worker_gate = _MediaWorkerGate(max_concurrent=3)
 
-
-def _report_timeline_widget_debug(hypothesis_id, location, msg, data=None):
-    """临时调试上报：定位 TimelineWidget 片段创建链路。"""
-    # #region debug-point video-import-timeline
-    try:
-        env_path = os.path.join(os.getcwd(), ".dbg", "video-import-timeline.env")
-        debug_url = "http://127.0.0.1:7777/event"
-        session_id = "video-import-timeline"
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as env_file:
-                for line in env_file:
-                    if line.startswith("DEBUG_SERVER_URL="):
-                        debug_url = line.strip().split("=", 1)[1]
-                    elif line.startswith("DEBUG_SESSION_ID="):
-                        session_id = line.strip().split("=", 1)[1]
-        payload = json.dumps({
-            "sessionId": session_id,
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "msg": f"[DEBUG] {msg}",
-            "data": data or {},
-            "ts": int(time.time() * 1000),
-        }, ensure_ascii=False).encode("utf-8")
-        urllib.request.urlopen(
-            urllib.request.Request(debug_url, data=payload, headers={"Content-Type": "application/json"}),
-            timeout=0.8,
-        ).read()
-    except Exception:
-        logger.debug("timeline widget debug report failed", exc_info=True)
-    # #endregion
 
 # 时间线精细编辑常量
 _TIMELINE_ZOOM_MIN = 10

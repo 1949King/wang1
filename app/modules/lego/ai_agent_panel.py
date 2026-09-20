@@ -225,6 +225,70 @@ class AiAgentPanelMixin:
         if hasattr(self, '_ai_task_label'):
             self._ai_task_label.setText(f"任务: {msg}")
 
+    # ────────────── Agent 主动建议（状态 → 建议卡片） ──────────────
+
+    def _refresh_proactive_suggestions(self):
+        """根据当前时间线状态生成「下一步建议」卡片（确定性，无随机）。"""
+        container = getattr(self, "_suggestion_container", None)
+        if container is None:
+            return
+        try:
+            from app.core.agent_proactive import suggest_next_actions, collect_proactive_state
+            from PyQt6.QtWidgets import QLabel, QPushButton
+        except Exception as e:
+            logger.warning("加载建议引擎失败: %s", e)
+            return
+        # 清空旧卡片
+        while container.count():
+            item = container.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        state = collect_proactive_state(self)
+        suggestions = suggest_next_actions(state, limit=4)
+        if not suggestions:
+            empty = QLabel("暂无建议 — 导入素材后会自动出现下一步动作")
+            empty.setStyleSheet("color:#888;font-size:10px;")
+            empty.setWordWrap(True)
+            container.addWidget(empty)
+            return
+        for sg in suggestions:
+            btn = QPushButton(f"{sg.get('icon', '✨')} {sg.get('title', '')}")
+            btn.setToolTip(sg.get("description", ""))
+            btn.setStyleSheet(
+                "QPushButton{background:#0f172a;color:#e2e8f0;border:1px solid #334155;"
+                "border-radius:4px;padding:7px 8px;font-size:10px;text-align:left;}"
+                "QPushButton:hover{background:#1e293b;color:#fff;}"
+            )
+            btn.clicked.connect(lambda checked=False, s=sg: self._apply_proactive_suggestion(s))
+            container.addWidget(btn)
+
+    def _apply_proactive_suggestion(self, suggestion: Dict[str, Any]):
+        """执行一条建议：editor_method 走 editor 直接方法，capability 走 dispatcher。"""
+        kind = suggestion.get("kind")
+        target = suggestion.get("target")
+        params = dict(suggestion.get("params") or {})
+        try:
+            if kind == "editor_method":
+                fn = getattr(self, target, None)
+                if fn is None:
+                    QMessageBox.warning(self, "建议", f"未知操作 {target}")
+                    return
+                result = fn(**params)
+                ok = bool(isinstance(result, dict) and result.get("success"))
+                msg = (result or {}).get("message") if isinstance(result, dict) else str(result)
+            else:
+                res = self._agent_dispatch(target, params)
+                ok = bool(isinstance(res, dict) and res.get("success"))
+                msg = (res or {}).get("message") if isinstance(res, dict) else str(res)
+            # 执行后立即刷新建议（状态可能已变化）
+            self._refresh_proactive_suggestions()
+            if not ok and msg:
+                QMessageBox.information(self, "建议", f"未完成：{msg}")
+        except Exception as e:
+            logger.warning("执行建议失败: %s", e)
+            QMessageBox.warning(self, "建议", f"执行失败：{e}")
+
     # ────────────── Agent 指令执行 ──────────────
 
     @staticmethod
@@ -250,7 +314,7 @@ class AiAgentPanelMixin:
             if mode == MODE_AUTONOMOUS:
                 return True
         except Exception:
-            pass
+            logger.debug("读取 Agent 模式失败，回退 collaborative", exc_info=True)
         dangers = [
             c for c in commands
             if getattr(c, "action", "") in _AGENT_DANGEROUS_ACTIONS
@@ -489,14 +553,12 @@ class AiAgentPanelMixin:
             clip = self._resolve_agent_clip(params)
             if not clip:
                 return {"action": action, "success": False, "message": "未找到要裁剪的片段"}
-            duration = params.get("new_duration") or params.get("duration")
-            if not duration and params.get("end_time") is not None:
-                duration = float(params.get("end_time")) - float(params.get("start_time", clip.get("start_time", 0)))
-            if not duration or float(duration) <= 0:
-                return {"action": action, "success": False, "message": "裁剪时长无效"}
-            clip["duration"] = float(duration)
-            clip["out_point"] = clip.get("in_point", 0) + float(duration)
-            return {"action": action, "success": True, "message": f"片段已裁剪为 {float(duration):.1f}s"}
+            # 改走 capability：此前这里直接写 clip["duration"]/["out_point"]，
+            # 数据变了却**不进撤销栈**（Ctrl+Z 回不去），也不同步内核时间线与联动音画。
+            # 现在统一收敛到 editor.trim_clip，只有一个实现。
+            res = self._agent_dispatch("editor.trim_clip", {**params, "clip_id": clip.get("id")})
+            res["action"] = action
+            return res
         if action == "split_clip":
             clip = self._resolve_agent_clip(params)
             if not clip:
@@ -532,10 +594,6 @@ class AiAgentPanelMixin:
             return self._agent_call_extension(params)
         if action == "call_model":
             return self._agent_dispatch("model.chat_with_fallback", params)
-        if action == "start_workflow":
-            return self._agent_dispatch("workflow.start", params)
-        if action == "account_optimize":
-            return self._agent_dispatch("account.optimize_strategy", params)
         if action == "suggest_cleanup":
             open_ui = bool(params.get("open_ui", True))
             res = self.agent_suggest_cleanup(open_ui=open_ui)
@@ -559,9 +617,12 @@ class AiAgentPanelMixin:
                 new_start = float(params["new_start_time"])
             except (TypeError, ValueError):
                 return {"action": action, "success": False, "message": "new_start_time 参数无效"}
-            if not self.move_clip(clip.get("id"), new_start):
-                return {"action": action, "success": False, "message": "移动片段失败（片段可能不在时间线）"}
-            return {"action": action, "success": True, "message": f"已移动片段到 {new_start:.2f}s"}
+            # 同样收敛到 capability，避免「面板一套实现 / 能力一套实现」分叉
+            res = self._agent_dispatch(
+                "editor.move_clip", {"clip_id": clip.get("id"), "new_start_time": new_start}
+            )
+            res["action"] = action
+            return res
         if action == "change_speed":
             clip = self._resolve_agent_clip(params)
             if not clip:

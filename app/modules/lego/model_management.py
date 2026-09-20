@@ -197,6 +197,10 @@ class ModelManagementModule(QWidget):
 
         self._main_tabs.addTab(scroll, "🤖 模型广场")
 
+        # 网关统计 tab：token 消耗 / 成本 / 成功率 / 缓存命中 / 异常告警
+        from .gateway_stats_panel import GatewayStatsPanel
+        self._main_tabs.addTab(GatewayStatsPanel(), "📊 网关统计")
+
         layout.addWidget(self._main_tabs)
 
         self._status_bar = QStatusBar()

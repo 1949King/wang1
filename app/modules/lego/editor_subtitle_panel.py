@@ -246,6 +246,17 @@ def build_subtitle_panel_section(editor: _SubtitlePanelHost, layout: QVBoxLayout
     tx.layout().addWidget(cr)
     layout.addWidget(tx)
 
+    fp = editor._sect("花字预设")
+    editor._sub_preset_cmb = QComboBox()
+    editor._sub_preset_cmb.addItems(["无", "综艺黄字黑边", "综艺白字红边", "霓虹粉", "霓虹青", "大字幕", "手写体", "金色质感", "漫画冲击"])
+    editor._sub_preset_cmb.setStyleSheet(sub_input_style())
+    fp.layout().addWidget(editor._sub_preset_cmb)
+    pset_btn = QPushButton("🎨 套用花字")
+    pset_btn.setStyleSheet(sub_btn_style("#ec4899"))
+    pset_btn.clicked.connect(lambda: apply_preset_style(editor))
+    fp.layout().addWidget(pset_btn)
+    layout.addWidget(fp)
+
     st = editor._sect("样式")
     editor._sub_outline_cmb = editor._cmb("描边", ["无", "黑色", "白色", "红色", "蓝色", "黄色"])
     st.layout().addWidget(editor._sub_outline_cmb)
@@ -358,6 +369,39 @@ def apply_subtitle_style(editor: _SubtitlePanelHost) -> None:
 
 def on_color_click(editor: _SubtitlePanelHost, color: str) -> None:
     editor._sub_color_value = color
+
+
+_PRESET_STYLE_MAP = {
+    "综艺黄字黑边": "pop_yellow",
+    "综艺白字红边": "pop_white_red",
+    "霓虹粉": "neon_pink",
+    "霓虹青": "neon_cyan",
+    "大字幕": "big_white",
+    "手写体": "handwrite",
+    "金色质感": "gold",
+    "漫画冲击": "comic_impact",
+}
+
+
+def apply_preset_style(editor: _SubtitlePanelHost) -> None:
+    """一键套用花字预设（样式定义在 subtitle_manager 内置库）。"""
+    if not editor._subtitle_manager:
+        return
+    sid = editor._selected_sub_id
+    if not sid:
+        QMessageBox.information(editor, "花字", "请先在列表中选择一条字幕")
+        return
+    combo = getattr(editor, "_sub_preset_cmb", None)
+    name = combo.currentText() if combo else "无"
+    if name == "无":
+        return
+    style_name = _PRESET_STYLE_MAP.get(name)
+    if not style_name:
+        return
+    editor._subtitle_manager.apply_style_to_subtitle(sid, style_name)
+    editor._project_dirty = True
+    refresh_subtitle_list(editor)
+    QMessageBox.information(editor, "花字", f"已套用花字预设：{name}")
 
 
 def refresh_subtitle_list(editor: _SubtitlePanelHost) -> None:

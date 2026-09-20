@@ -97,7 +97,7 @@ class Skill(ABC):
     - 支持重试和超时
     
     分类体系：
-        skill_category  — 功能分类（导演/剪辑/AIGC/账号...）
+        skill_category  — 功能分类（导演/剪辑/AIGC...）
         skill_domain    — 执行域（pipeline=后端执行 / canvas=交给画布节点）
     """
     
@@ -106,14 +106,13 @@ class Skill(ABC):
     CATEGORY_DIRECTOR = "AI 导演"      # 剧本/分镜/创意
     CATEGORY_EDITING = "视频处理"       # 剪辑/字幕/转码
     CATEGORY_QUALITY = "AI 质检"        # 画质/特效检测
-    CATEGORY_ACCOUNT = "账号运营"       # 发布/数据/矩阵
     CATEGORY_AUDIO = "音频处理"         # TTS/音频增强
     CATEGORY_TEXT = "文本工具"          # 文案/润色/翻译
     CATEGORY_OTHER = "其他"
     
     ALL_CATEGORIES = [
         CATEGORY_AIGC, CATEGORY_DIRECTOR, CATEGORY_EDITING,
-        CATEGORY_QUALITY, CATEGORY_ACCOUNT, CATEGORY_AUDIO,
+        CATEGORY_QUALITY, CATEGORY_AUDIO,
         CATEGORY_TEXT, CATEGORY_OTHER,
     ]
     

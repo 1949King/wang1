@@ -363,6 +363,18 @@ class EditorUiBuilderMixin:
         title_label.setStyleSheet("color: #999999; font-size: 11px; font-weight: 600;")
         title_layout.addWidget(title_label)
         title_layout.addStretch()
+        # Agent 独立入口（V4.34.1 调用体验）：
+        # Agent 与「调色/特效/文字…」等素材属性 Tab 性质不同，被埋在 11 个 Tab 的第 10 个很难找。
+        # 这里给一个直达按钮（等价 Ctrl+Shift+A），点一下切到 Agent 并聚焦输入框。
+        agent_jump = QPushButton("🤖 Agent")
+        agent_jump.setToolTip("直达剪辑 Agent 对话（Ctrl+Shift+A）")
+        agent_jump.setStyleSheet(
+            "QPushButton{background:#1f2a3d;color:#8fb8ff;border:1px solid #2f4360;"
+            "border-radius:6px;padding:2px 10px;font-size:11px;}"
+            "QPushButton:hover{background:#2a3d5c;color:#cfe0ff;}"
+        )
+        agent_jump.clicked.connect(self._focus_agent_panel)
+        title_layout.addWidget(agent_jump)
         layout.addWidget(title_bar)
         
         tabs = QTabWidget()
@@ -539,9 +551,24 @@ class EditorUiBuilderMixin:
         lib = self._sect("贴纸库")
         g = QGridLayout()
         g.setSpacing(4)
-        stickers = [("❤", "爱心"), ("⭐", "星星"), ("🔥", "火焰"), ("💎", "钻石"),
-                    ("🎵", "音符"), ("✨", "闪亮"), ("💬", "聊天气泡"), ("🏷", "标签"),
-                    ("👑", "皇冠"), ("🎯", "靶心"), ("🌈", "彩虹"), ("🎪", "马戏团")]
+        stickers = [
+            # 情感
+            ("❤", "爱心"), ("💕", "双心"), ("💔", "心碎"), ("😍", "花痴"),
+            ("😭", "大哭"), ("😄", "开心"), ("😡", "生气"), ("🤔", "思考"),
+            ("👍", "点赞"), ("👎", "踩"), ("🙏", "拜托"), ("💯", "满分"),
+            # 特效装饰
+            ("✨", "闪亮"), ("⭐", "星星"), ("🌟", "闪光星"), ("💫", "眩晕"),
+            ("🔥", "火焰"), ("💥", "爆炸"), ("⚡", "闪电"), ("💎", "钻石"),
+            ("🎵", "音符"), ("🎶", "多重音符"), ("💡", "灵感"), ("🎊", "彩带"),
+            # 符号气泡
+            ("💬", "气泡"), ("🗨", "左气泡"), ("🗯", "怒气泡"), ("❗", "感叹"),
+            ("❓", "问号"), ("⚠️", "警告"), ("✅", "对勾"), ("❌", "叉"),
+            ("🚫", "禁止"), ("💤", "睡觉"), ("💢", "生气符号"), ("🎯", "靶心"),
+            # 物品
+            ("👑", "皇冠"), ("🌈", "彩虹"), ("🎪", "马戏团"), ("🎁", "礼物"),
+            ("🎀", "蝴蝶结"), ("🔔", "铃铛"), ("📌", "图钉"), ("🏷", "标签"),
+            ("📷", "相机"), ("🎬", "场记板"), ("🎤", "麦克风"), ("🕹", "游戏"),
+        ]
         self._sticker_btns = []
         for i, (emoji, name) in enumerate(stickers):
             b = QPushButton(f"{emoji}\n{name}")
@@ -880,6 +907,12 @@ class EditorUiBuilderMixin:
         del_kf_btn.setStyleSheet("QPushButton{background:#2a2a2a;color:#ddd;border:1px solid #333;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:hover{background:#3a3a3a;color:#fff;}")
         del_kf_btn.clicked.connect(self._on_delete_keyframe_near_playhead)
         title_layout.addWidget(del_kf_btn)
+
+        curve_btn = QPushButton("📈 曲线")
+        curve_btn.setToolTip("可视化编辑关键帧曲线（拖拽点 / 双击改缓动 / 右键删除）")
+        curve_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:1px solid #1e6bde;border-radius:4px;padding:3px 8px;font-size:10px;}QPushButton:hover{background:#1557b0;}")
+        curve_btn.clicked.connect(self._open_keyframe_curve_editor)
+        title_layout.addWidget(curve_btn)
         
         layout.addWidget(title_bar)
         

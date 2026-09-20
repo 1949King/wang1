@@ -21,7 +21,6 @@ from datetime import datetime
 import tempfile
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import numpy as np
 
 logger = logging.getLogger(__name__)
 

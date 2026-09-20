@@ -22,6 +22,11 @@ from .core import EventBus, EventType, MasterClock, DataBus
 from .auth import auth_service  # 修复 P0-A: 移除 main_window.py 内的伪 User/AuthService,统一从 auth 模块导入
 from .module_registry import get_registry, ModuleTier  # 模块注册表：分级 + 开关
 from .theme_manager import ThemeManager  # 全局主题管理器
+from .nav_icons import (  # 导航模块矢量图标（QtSvg 缺失时自动回退 emoji）
+    NAV_MODULE_ICON_SIZE,
+    make_nav_icon,
+    nav_icon_available,
+)
 from app.version import __version__
 
 logger = logging.getLogger("AI短剧编辑器.main_window")
@@ -56,28 +61,71 @@ class NavigationButton(QPushButton):
         self._is_active = False
         self._is_hovered = False
         self._theme = "dark"  # 默认深色主题
-        self._icon = icon
+        self._icon = icon      # emoji：仅在矢量图标不可用时兜底
         self._text = text
         self._collapsed = False
+        # 该模块是否有矢量图标且 QtSvg 可用（否则整条回退到 emoji，行为与改造前一致）
+        self._has_vector_icon = nav_icon_available(module_id)
+        self._vector_applied = False   # _apply_content 内更新：是否真的用上了矢量图标
 
-        self.setText(f"  {icon}  {text}" if icon else text)
         self.setMinimumHeight(44)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 图标 + 文字由 _update_style → _apply_content 统一设置
+        # （替代原先把 emoji 拼进 setText 的写法）
         self._update_style()
 
-    def set_collapsed(self, collapsed: bool):
-        """折叠时只显示图标，展开恢复文字"""
-        self._collapsed = collapsed
-        if collapsed:
+    def _icon_color(self) -> str:
+        """图标色随主题与交互状态变化 —— 这正是矢量图标相对 emoji 的核心优势：
+        emoji 的颜色由系统字体决定，主题切换与选中态都改不动它。"""
+        if self._is_active:
+            return "#f8fbff"                       # 选中：压在 accent 底色上的白
+        if self._theme == "light":
+            return "#172033" if self._is_hovered else "#3d4d63"
+        return "#edf3ff" if self._is_hovered else "#c2cfe4"
+
+    def _apply_content(self):
+        """设置按钮的图标与文字；矢量不可用时回退到 emoji 内联文本。
+
+        折叠态只留图标；展开态图标 + 文字。文字不再自带前导空格 ——
+        emoji 时代的缩进由 QSS 的 padding-left 负责，这里保持一致。
+        """
+        if self._has_vector_icon:
+            icon = make_nav_icon(
+                self.module_id, self._icon_color(), size=NAV_MODULE_ICON_SIZE
+            )
+            if icon is not None:
+                self.setIcon(icon)
+                self.setIconSize(QSize(NAV_MODULE_ICON_SIZE, NAV_MODULE_ICON_SIZE))
+                self.setText("" if self._collapsed else self._text)
+                self._vector_applied = True
+                return
+        # ── 兜底：维持改造前的 emoji 内联文本行为 ──
+        self._vector_applied = False
+        self.setIcon(QIcon())
+        if self._collapsed:
             self.setText(self._icon if self._icon else "•")
-            self.setMinimumWidth(44)
-            self.setMaximumWidth(44)
-            self.setToolTip(self._text)
         else:
             self.setText(f"  {self._icon}  {self._text}" if self._icon else self._text)
+
+    def set_collapsed(self, collapsed: bool):
+        """折叠时只显示图标（居中），展开恢复文字（两种模式都悬浮显示名称）"""
+        self._collapsed = collapsed
+        if collapsed:
+            self.setMinimumWidth(44)
+            self.setMaximumWidth(44)
+        else:
             self.setMinimumWidth(0)
             self.setMaximumWidth(16777215)
-            self.setToolTip("")
+        self._apply_content()
+        # 折叠态只剩一个图标，是唯一的信息入口：走 emoji 兜底时必须把 emoji
+        # 一并写进提示（用户可能认图不认字）；使用矢量图标时名字本身就够了。
+        if collapsed and not self._vector_applied:
+            self.setToolTip(f"{self._icon} {self._text}".strip())
+        else:
+            self.setToolTip(self._text)
+        # 折叠/展开的 text-align 与 padding 不同，必须重算样式，
+        # 否则沿用展开态 left+16px 会把 44px 按钮里的图标挤偏
+        self._update_style()
     
     def set_theme(self, theme: str):
         """设置主题"""
@@ -101,6 +149,9 @@ class NavigationButton(QPushButton):
         super().leaveEvent(event)
     
     def _update_style(self):
+        # 图标色随状态变化，样式重算时必须一并刷新图标内容。
+        # （emoji 做不到这件事 —— 它的颜色由系统字体决定。）
+        self._apply_content()
         palette = {
             "light": {
                 "text": "#172033",
@@ -124,6 +175,13 @@ class NavigationButton(QPushButton):
             },
         }["light" if self._theme == "light" else "dark"]
 
+        # 折叠态图标居中：展开态的 left+16px 会把 44px 按钮里的图标挤到偏右
+        palette["align"] = (
+            "center; padding-left: 0px;"
+            if self._collapsed
+            else "left; padding-left: 16px;"
+        )
+
         # 侧栏是高频入口，选中、悬停、默认态必须一眼可分辨。
         if self._theme == "light":
             if self._is_active:
@@ -133,8 +191,7 @@ class NavigationButton(QPushButton):
                         color: %(active_text)s;
                         border: 1px solid %(active)s;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 700;
                     }
@@ -149,8 +206,7 @@ class NavigationButton(QPushButton):
                         color: %(text)s;
                         border: 1px solid %(border)s;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 500;
                     }
@@ -162,8 +218,7 @@ class NavigationButton(QPushButton):
                         color: %(muted)s;
                         border: 1px solid transparent;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 400;
                     }
@@ -181,8 +236,7 @@ class NavigationButton(QPushButton):
                         color: %(active_text)s;
                         border: 1px solid %(active)s;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 700;
                     }
@@ -197,8 +251,7 @@ class NavigationButton(QPushButton):
                         color: %(text)s;
                         border: 1px solid %(border)s;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 500;
                     }
@@ -210,8 +263,7 @@ class NavigationButton(QPushButton):
                         color: %(muted)s;
                         border: 1px solid transparent;
                         border-radius: 10px;
-                        text-align: left;
-                        padding-left: 16px;
+                        text-align: %(align)s;
                         font-size: 14px;
                         font-weight: 400;
                     }
@@ -221,6 +273,82 @@ class NavigationButton(QPushButton):
                         border: 1px solid %(border)s;
                     }
                 """ % palette)
+
+
+_NAV_TOGGLE_ICON_SIZE = 18          # 逻辑像素；按钮 28×28，四周留 5px 呼吸
+
+# 图标色跟随主题的 text_primary。对比度实测（相对导航栏底色 bg_secondary）：
+#   深色 #edf3ff on #101621 ≈ 16:1
+#   浅色 #172033 on #fcfdff ≈ 16:1
+# 旧实现把颜色写死成 #aab6cc（深色主题的 text_secondary），浅色主题下
+# 只有 2.0:1 —— 远低于 UI 组件 3:1 下限，看上去就是个空框。
+_NAV_TOGGLE_ICON_COLORS = {"dark": "#edf3ff", "light": "#172033"}
+
+
+def _make_nav_toggle_icon(collapsed: bool, color: str) -> "QIcon":
+    """绘制导航栏「折叠 / 展开」图标（矢量，不依赖字体字形）。
+
+    图形语义 = 「一整块面板 + 折叠方向」：
+      · 圆角外框   —— 整块面板（导航栏所占的那一列）
+      · 左侧实心条 —— 导航栏本体
+      · 单尖角箭头 —— 点击后它往哪走
+          展开态 → 朝左（把它收窄到左边缘）
+          折叠态 → 朝右（把它向右展开回来）
+
+    为什么弃用字符 `«` / `»`：
+      1. 依赖字体字形 —— 字体缺字或字重偏细时，14px 落在 28px 按钮里几乎不可见；
+      2. 语义抽象 —— 看不出它管的是「整条导航栏」，而非某个具体功能；
+      3. 旧样式把颜色写死成深色主题色，浅色主题下对比度掉到 2.0:1。
+    """
+    from PyQt6.QtCore import QPointF, QRectF
+    from PyQt6.QtGui import QGuiApplication, QPainter, QPen, QPixmap, QPolygonF
+
+    # 高分屏：位图按屏幕 DPR 放大、再设回 DPR，保证边缘锐利
+    try:
+        _screen = QGuiApplication.primaryScreen()
+        dpr = float(_screen.devicePixelRatio()) if _screen else 1.0
+    except Exception:
+        dpr = 1.0
+    dpr = max(1.0, min(dpr, 4.0))
+
+    size = _NAV_TOGGLE_ICON_SIZE
+    pm = QPixmap(int(round(size * dpr)), int(round(size * dpr)))
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    col = QColor(color)
+
+    # 1) 外框 = 整块面板
+    frame_pen = QPen(col)
+    frame_pen.setWidthF(1.4)
+    painter.setPen(frame_pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(1.7, 2.7, 14.6, 12.6), 2.6, 2.6)
+
+    # 2) 左侧实心条 = 导航栏本体
+    #    内缩一圈再画，避免压住外框左侧描边 —— 否则左侧糊成一整块，
+    #    「面板 + 里面的侧栏」这两层结构就读不出来了。
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(col)
+    painter.drawRoundedRect(QRectF(3.3, 4.2, 3.1, 9.6), 1.1, 1.1)
+
+    # 3) 方向箭头
+    arrow_pen = QPen(col)
+    arrow_pen.setWidthF(1.7)
+    arrow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    arrow_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(arrow_pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    if collapsed:
+        pts = [(10.6, 6.5), (13.0, 9.0), (10.6, 11.5)]   # 朝右：展开
+    else:
+        pts = [(13.4, 6.5), (11.0, 9.0), (13.4, 11.5)]   # 朝左：收起
+    painter.drawPolyline(QPolygonF([QPointF(x, y) for x, y in pts]))
+
+    painter.end()
+    return QIcon(pm)
 
 
 class NavigationBar(QWidget):
@@ -247,6 +375,10 @@ class NavigationBar(QWidget):
         self.setProperty("theme", self._theme)
         for child in self.findChildren(QWidget):
             child.setProperty("theme", self._theme)
+
+        # 折叠按钮用的是内联样式（不受全局 QSS 属性选择器影响），
+        # 必须在此手动刷新图标与配色 —— 漏掉这行就是浅色主题下「空框」的成因。
+        self._apply_toggle_btn_style()
         
         # 更新logo标签颜色（内联样式，不受全局QSS影响）
         if theme == "light":
@@ -290,6 +422,7 @@ class NavigationBar(QWidget):
         logo_layout = QHBoxLayout(logo_widget)
         logo_layout.setContentsMargins(0, 0, 0, 0)
         logo_layout.setSpacing(4)
+        self._logo_layout = logo_layout  # 折叠态需让折叠按钮居中
 
         self._logo_label = QLabel("🎬 拾光剪影")
         self._logo_label.setStyleSheet("""
@@ -302,28 +435,21 @@ class NavigationBar(QWidget):
         """)
         logo_layout.addWidget(self._logo_label, 1)
 
-        self._toggle_btn = QPushButton("«")
+        self._toggle_btn = QPushButton()
         self._toggle_btn.setFixedSize(28, 28)
+        self._toggle_btn.setIconSize(QSize(_NAV_TOGGLE_ICON_SIZE, _NAV_TOGGLE_ICON_SIZE))
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle_btn.setToolTip("收起导航栏")
         self._toggle_btn.clicked.connect(self._on_toggle_clicked)
-        self._toggle_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #aab6cc;
-                border: 1px solid #253044;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #1f2b42;
-                color: #edf3ff;
-            }
-        """)
+        # 图标与配色统一由 _apply_toggle_btn_style 负责（主题感知）。
+        # 旧写法在这里内联写死深色主题色，且 set_theme() 从不更新它 ——
+        # 浅色主题下图标色 #aab6cc 落在 #fcfdff 上只有 2.0:1，等于看不见。
+        self._apply_toggle_btn_style(collapsed=False)
         logo_layout.addWidget(self._toggle_btn)
 
-        logo_layout.addWidget(logo_widget)
+        # 修复：此处原来是 logo_layout.addWidget(logo_widget)——把容器加进它
+        # 自己的布局（自嵌套），Qt 布局计算错乱导致 logo 图标与折叠按钮重叠。
+        # 正确做法：logo_widget 加入外层主布局 layout。
+        layout.addWidget(logo_widget)
 
         self._version_label = QLabel(f"v{__version__} Qt6版")
         self._version_label.setStyleSheet("color: #aab6cc; font-size: 12px; padding-left: 2px;")
@@ -343,11 +469,19 @@ class NavigationBar(QWidget):
         layout.addStretch()
     
     def add_module(self, module_id: str, name: str, icon: str = ""):
-        """添加导航按钮（已存在则不重复添加）"""
+        """添加导航按钮（已存在则不重复添加）
+
+        修复（2026-09-17 折叠态图标不显示）：MainWindow._setup_ui 先按持久化
+        nav_mode=compact 调 set_collapsed(True)，此时 _buttons 还是空表，折叠
+        循环没作用到任何按钮；随后 _setup_default_modules 才 add_module——
+        新按钮按展开态初始化（"图标+名称"、left+16px），塞进 60px 窄栏文字
+        被裁没，图标消失。故新按钮创建时必须继承栏当前的折叠态。"""
         if module_id in self._buttons:
             return
         button = NavigationButton(name, icon, module_id)
         button.set_theme(self._theme)
+        if self._collapsed:
+            button.set_collapsed(True)
         button.clicked.connect(lambda: self._on_button_clicked(module_id))
         self._buttons[module_id] = button
         self._button_layout.addWidget(button)
@@ -382,30 +516,113 @@ class NavigationBar(QWidget):
 
     # —— 折叠/展开 ——
 
+    def _apply_toggle_btn_style(self, collapsed: Optional[bool] = None):
+        """刷新折叠按钮的图标与配色（主题感知 + 状态感知）。
+
+        必须由 `set_theme()` 与 `set_collapsed()` 共同调用：
+        原先该按钮的样式只在 `_setup_ui` 里设置一次、颜色写死为深色主题值，
+        主题切换后不会更新 —— 浅色主题下图标对比度只有 2.0:1，肉眼等同空框。
+        """
+        if collapsed is None:
+            collapsed = self._collapsed
+        theme = "light" if self._theme == "light" else "dark"
+
+        self._toggle_btn.setIcon(
+            _make_nav_toggle_icon(collapsed, _NAV_TOGGLE_ICON_COLORS[theme])
+        )
+        # 提示语说清「点了会怎样」，而不只是复述按钮名
+        self._toggle_btn.setToolTip(
+            "展开导航栏（显示模块名称）" if collapsed
+            else "收起导航栏（只保留图标，腾出画面宽度）"
+        )
+
+        # 给按钮一个淡底色块而不是只有描边 —— 「看起来像按钮」本身就是可发现性
+        if theme == "light":
+            self._toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background: #eef3f9;
+                    border: 1px solid #dce5f0;
+                    border-radius: 6px;
+                }
+                QPushButton:hover {
+                    background: #dde7f4;
+                    border: 1px solid #c6d4e6;
+                }
+                QPushButton:pressed {
+                    background: #cfdcef;
+                }
+            """)
+        else:
+            self._toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background: #172033;
+                    border: 1px solid #253044;
+                    border-radius: 6px;
+                }
+                QPushButton:hover {
+                    background: #1f2b42;
+                    border: 1px solid #31405c;
+                }
+                QPushButton:pressed {
+                    background: #25334c;
+                }
+            """)
+
     def set_collapsed(self, collapsed: bool):
-        """折叠/展开导航栏：折叠时只显示图标，宽度缩到 56px"""
+        """折叠/展开导航栏：折叠时只显示图标，宽度缩到 60px
+
+        几何账（2026-09-17 修复折叠图标残缺）：折叠宽 60、主布局左右边距
+        收窄为各 8 → 按钮可用宽 = 60-16 = 44px，与 NavigationButton 折叠
+        固定宽 44 精确吻合。此前折叠宽 56 但边距仍是 16+16 → 可用仅 24px，
+        44px 按钮被裁掉一半（图标残缺、悬浮区过小连 tooltip 都难触发）。
+        """
         self._collapsed = collapsed
-        target_w = 56 if collapsed else 220
+        target_w = 60 if collapsed else 220
         self.setFixedWidth(target_w)
+        lay = self.layout()
+        if lay is not None:
+            if collapsed:
+                lay.setContentsMargins(8, 12, 8, 12)
+            else:
+                lay.setContentsMargins(16, 20, 16, 20)
 
         # logo + 版本 + 分隔线：折叠时隐藏
         self._logo_label.setVisible(not collapsed)
         self._version_label.setVisible(not collapsed)
         self._separator.setVisible(not collapsed)
 
-        # 所有导航按钮：折叠时只保留图标
+        # 折叠按钮在窄栏内居中
+        if collapsed:
+            self._logo_layout.setAlignment(self._toggle_btn, Qt.AlignmentFlag.AlignCenter)
+        else:
+            self._logo_layout.setAlignment(self._toggle_btn, Qt.AlignmentFlag.AlignLeft)
+
+        # 所有导航按钮：折叠时只保留图标（居中样式）
         for btn in self._buttons.values():
             btn.set_collapsed(collapsed)
 
-        # 折叠按钮：折叠时显示展开图标，展开时显示折叠图标
-        self._toggle_btn.setText("»" if collapsed else "«")
-        self._toggle_btn.setToolTip("展开导航栏" if collapsed else "收起导航栏")
+        # 折叠按钮：图标方向 + 提示语都随状态翻转（同时刷新主题配色）
+        self._apply_toggle_btn_style(collapsed)
 
     def is_collapsed(self) -> bool:
         return getattr(self, "_collapsed", False)
 
+    def set_nav_mode(self, mode: str):
+        """导航栏显示模式（主题设置里的持久化选项）：
+        "compact" = 仅显示图标（悬浮显示名称）；"full" = 显示图标和名称。
+        与折叠状态共用同一套几何，但作为持久化模式存在；折叠按钮的
+        手动切换也会同步写回该设置（同一事实源）。"""
+        self.set_collapsed(mode == "compact")
+
     def _on_toggle_clicked(self):
         self.set_collapsed(not self.is_collapsed())
+        # 手动折叠/展开同样持久化，重启后保持
+        try:
+            QSettings("拾光剪影", "Settings").setValue(
+                "nav_mode", "compact" if self.is_collapsed() else "full"
+            )
+        except Exception as e:
+            logger.debug("持久化导航栏模式失败: %s", e)
 
 
 class MainWindow(QMainWindow):
@@ -418,8 +635,6 @@ class MainWindow(QMainWindow):
     │     ├── 剪辑
     │     ├── 文案生成
     │     ├── 多任务
-    │     ├── 短剧筛选
-    │     ├── 账号运营
     │     ├── 素材库
     │     ├── 插件中心
     │     └── 性能监控
@@ -499,7 +714,9 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            if module_id in self._modules and self._modules[module_id].widget_class:
+            # 懒注册模块的 widget_class 为 None，需按 _mod_def 判定其可加载性
+            info = self._modules.get(module_id)
+            if info and (info.widget_class or getattr(info, "_mod_def", None)):
                 self._lazy_loaded_modules[module_id] = True
                 logger.info(f"模块 {module_id} 已预加载")
         except Exception as e:
@@ -562,6 +779,13 @@ class MainWindow(QMainWindow):
         self._nav_bar = NavigationBar()
         self._nav_bar.module_selected.connect(self._on_module_selected)
         nav_content_layout.addWidget(self._nav_bar)
+
+        # 应用持久化的导航栏显示模式（主题设置 →「导航栏」；full=图标+名称 / compact=仅图标）
+        try:
+            saved_nav_mode = self._settings.value("nav_mode", "full")
+            self._nav_bar.set_nav_mode("compact" if saved_nav_mode == "compact" else "full")
+        except Exception as e:
+            logger.debug("应用导航栏显示模式失败: %s", e)
         
         content_widget = QWidget()
         content_widget.setObjectName("moduleContainer")
@@ -643,11 +867,17 @@ class MainWindow(QMainWindow):
             name = mod["name"]
             icon = mod.get("icon", "")
             desc = mod.get("description", "")
-            widget_class = self._lazy_import_widget_class(mod)
-            if widget_class is None:
+            # 真懒加载（冷启动 P2）：此处只做「有没有界面类」的**静态判定**，不 import。
+            # 原先走 `_lazy_import_widget_class(mod)` + `register_module(...)`，
+            # 名字叫 lazy 但对全部启用模块逐个 importlib.import_module，
+            # 实测 _setup_default_modules 因此耗时 0.217s（editor_module 0.075s 最重），
+            # 窗口要等 8 个模块全部导入完才出现。
+            # 现改为登记 mod_def，widget_class 由 _get_widget_class_lazy 在首次激活时导入
+            # —— 复用早已存在但启动路径没走上的懒加载机制。
+            if not mod.get("import_module") or not mod.get("import_class"):
                 logger.warning("模块 %s 无界面类，已从导航栏省略", module_id)
                 continue
-            self.register_module(module_id, name, icon, desc, widget_class)
+            self.register_module_lazy(module_id, name, icon, desc, mod)
 
         # 预加载优先级按注册表顺序自动生成
         for idx, mod in enumerate(enabled):
@@ -803,7 +1033,10 @@ class MainWindow(QMainWindow):
             self._activate_module(module_id, info)
             return
 
-        if info.widget_class and info.state == ModuleState.INACTIVE:
+        # 懒注册模块的 widget_class 初始为 None（只有 _mod_def），
+        # 因此不能只看 widget_class —— 否则懒注册的模块永远进不了加载流程。
+        if (info.widget_class or getattr(info, "_mod_def", None)) \
+                and info.state == ModuleState.INACTIVE:
             info.state = ModuleState.LOADING
             self._show_loading_indicator(module_id)
             self._load_module_with_progress(module_id)
@@ -899,7 +1132,16 @@ class MainWindow(QMainWindow):
             self._apply_theme(theme)
             # 持久化主题设置
             self._settings.setValue("theme", theme)
-        
+
+        # 导航栏显示模式（设置→外观→主题设置→「导航栏」；即时生效）
+        if "nav_mode" in settings:
+            mode = settings["nav_mode"]
+            if hasattr(self, "_nav_bar"):
+                try:
+                    self._nav_bar.set_nav_mode("compact" if mode == "compact" else "full")
+                except Exception as e:
+                    logger.debug("应用导航栏显示模式失败: %s", e)
+
         if "font_size" in settings or "font_family" in settings:
             self._apply_font_settings(settings)
     
@@ -1004,25 +1246,6 @@ class MainWindow(QMainWindow):
                     self.show_status(f"打开工程失败: {e}", "#f97316")
             return
 
-        # M1：短剧筛选宿主为拓展中心；兼容旧 id=plugins
-        if module_id in ("extensions", "plugins") and action == "drama_finder":
-            if widget is not None:
-                if hasattr(widget, "_open_drama_finder"):
-                    widget._open_drama_finder()
-                elif hasattr(widget, "_open_drama_finder_tab"):
-                    widget._open_drama_finder_tab()
-            if nav_hint:
-                self.show_status(nav_hint, "#a78bfa")
-            return
-
-        # 账号运营宿主为拓展中心插件
-        if module_id in ("extensions", "plugins") and action == "account_ops":
-            if widget is not None and hasattr(widget, "_open_account_ops"):
-                widget._open_account_ops()
-            if nav_hint:
-                self.show_status(nav_hint, "#14b8a6")
-            return
-
         if module_id == "editor" and workflow_hint and widget:
             if hasattr(widget, "_on_workflow_hint_received"):
                 widget._on_workflow_hint_received(workflow_hint)
@@ -1076,18 +1299,6 @@ class MainWindow(QMainWindow):
         # M1：旧事件 target=plugins → 拓展中心 extensions
         if target == "plugins":
             target = "extensions"
-
-        # 账号运营已迁插件：旧 target=account → 拓展中心并打开界面
-        if target == "account":
-            target = "extensions"
-            action = action or "account_ops"
-            nav_hint = nav_hint or "账号运营已迁至拓展中心插件"
-            data = {
-                **data,
-                "target": target,
-                "action": action,
-                "hint": nav_hint,
-            }
 
         registry = get_registry()
         if not registry.is_enabled(target):

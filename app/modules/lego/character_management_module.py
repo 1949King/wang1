@@ -38,18 +38,63 @@ from .base_module import BaseModule
 # 角色数据模型
 # ---------------------------------------------------------------------------
 
+# 字段定义：(key, 中文标签, 类型, 是否必填, 分组)
+#
+# 分组决定字段「流向哪里」，改分组前先确认消费方：
+#   base   — 基础身份，渲染在面板头部（不出现在滚动表单里）
+#   visual — 影响生图/生视频提示词（build_character_prompt 读取，仅此组进提示词）
+#   inner  — 内在人格，供剧本创作与跨集一致性校验；**不进提示词**
+#            （画面描述里塞「核心欲望」只会污染出图，这是刻意的隔离）
+#   other  — 其他长文本
+#
+# ⚠️ 新增字段需同步 4 处，否则「填了不生效」或「前端看不到」：
+#   ① 本表
+#   ② app/core/canvas_bridge.py::build_character_prompt（仅 visual 组）
+#   ③ app/core/canvas_server.py::/host/characters（已改为按本表派生，无需手工加）
+#   ④ vendor/shiguang-canvas 与 vendor/AI-Canvas-tauri 两处 node-factory.ts 的 CharacterEntry
 CHARACTER_FIELD_SCHEMA = [
-    ("name",         "角色名",       "string",  True),
-    ("gender",       "性别",         "enum",    False),  # enum: 男/女/其他
-    ("age_range",    "年龄段",       "string",  False),  # 如: 青年 / 中年
-    ("role_type",    "角色类型",     "enum",    False),  # enum: 主角 / 配角 / 反派
-    ("tags",         "标签",         "list",    False),  # 逗号分隔
-    ("appearance",   "外貌特征",     "text",    False),  # 衣着、发型、体态
-    ("personality",  "性格特征",     "text",    False),  # 性格描述
-    ("representative_line", "代表台词", "text",  False),
-    ("background",   "人物背景",     "text",    False),
-    ("notes",        "备注",         "text",    False),
+    # ---- 基础身份 ----
+    ("name",         "角色名",       "string",  True,  "base"),
+    ("gender",       "性别",         "enum",    False, "base"),  # enum: 男/女/其他
+    ("age_range",    "年龄段",       "string",  False, "base"),  # 如: 青年 / 中年
+    ("role_type",    "角色类型",     "enum",    False, "base"),  # enum: 主角 / 配角 / 反派
+    ("tags",         "标签",         "list",    False, "base"),  # 逗号分隔
+    # ---- 形象与符号（进生图提示词）----
+    ("appearance",     "外貌特征",   "text",    False, "visual"),  # 衣着、发型、体态
+    ("temperament",    "气质倾向",   "text",    False, "visual"),  # 如: 清冷疏离 / 温润克己
+    ("memory_anchors", "标志性符号", "text",    False, "visual"),  # 跨集可辨识的固定视觉符号
+    ("personality",    "性格特征",   "text",    False, "visual"),  # 性格描述
+    # ---- 内在人格（剧本一致性；不进提示词）----
+    ("values",           "价值排序",   "text",  False, "inner"),  # 最看重什么、如何排序
+    ("core_desire",      "核心欲望",   "text",  False, "inner"),  # 驱动行动的根本诉求
+    ("relations",        "关系网",     "text",  False, "inner"),  # 与关键人物的关系及张力
+    ("backstory_events", "关键经历",   "text",  False, "inner"),  # 塑造其性格的关键事件
+    ("sensory_triggers", "情绪触发点", "text",  False, "inner"),  # 什么会激起强烈情绪
+    ("thinking_pattern", "思维模式",   "text",  False, "inner"),  # 归因方式 / 自动化思维
+    ("feedback_pattern", "应激反应",   "text",  False, "inner"),  # 受挫 / 被认可时的行为倾向
+    ("speech_style",     "语言风格",   "text",  False, "inner"),  # 语气 / 口头禅 / 说话习惯
+    # ---- 其他 ----
+    ("representative_line", "代表台词", "text",  False, "other"),
+    ("background",   "人物背景",     "text",    False, "other"),
+    ("notes",        "备注",         "text",    False, "other"),
 ]
+
+# 分组渲染顺序 + 显示名（UI 渲染与提示词筛选共用同一份定义）
+CHARACTER_FIELD_GROUPS = [
+    ("base",   "基础身份"),
+    ("visual", "形象与符号 · 影响出图"),
+    ("inner",  "内在人格 · 剧本一致性"),
+    ("other",  "其他"),
+]
+
+# 头部单行控件承载的字段，不重复出现在滚动表单里
+_HEADER_FIELD_KEYS = ("name", "gender", "age_range", "role_type", "tags")
+
+
+def characters_schema_by_group(group: str) -> List[tuple]:
+    """按分组取字段定义（保持 schema 原序）。"""
+    return [f for f in CHARACTER_FIELD_SCHEMA if f[4] == group]
+
 
 GENDER_OPTIONS = ["男", "女", "其他"]
 ROLE_OPTIONS = ["主角", "配角", "反派", "路人"]
@@ -261,7 +306,9 @@ class CharacterEditorPanel(QWidget):
 
         root.addWidget(header)
 
-        # 长文本字段
+        # 长文本字段：按 schema 分组动态生成
+        # 加字段只需改 CHARACTER_FIELD_SCHEMA —— 此处不再逐个硬编码控件，
+        # 避免「schema 加了字段、UI 忘了加控件」这类漂移
         form_scroll = QScrollArea()
         form_scroll.setWidgetResizable(True)
         form_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
@@ -270,23 +317,29 @@ class CharacterEditorPanel(QWidget):
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(10)
 
-        self._appearance_edit = self._mk_text_edit("外貌特征（衣着、发型、体态等）")
-        self._personality_edit = self._mk_text_edit("性格特征")
-        self._line_edit_long = self._mk_text_edit("代表台词")
-        self._bg_edit = self._mk_text_edit("人物背景")
-        self._notes_edit = self._mk_text_edit("备注")
-
-        for label_text, edit in [
-            ("外貌特征", self._appearance_edit),
-            ("性格特征", self._personality_edit),
-            ("代表台词", self._line_edit_long),
-            ("人物背景", self._bg_edit),
-            ("备注", self._notes_edit),
-        ]:
-            lbl = QLabel(label_text)
-            lbl.setStyleSheet("color:#bbb;font-size:12px;font-weight:bold;")
-            form_layout.addWidget(lbl)
-            form_layout.addWidget(edit)
+        self._text_edits: Dict[str, QTextEdit] = {}
+        for group_key, group_label in CHARACTER_FIELD_GROUPS:
+            fields = [
+                f for f in characters_schema_by_group(group_key)
+                if f[0] not in _HEADER_FIELD_KEYS and f[2] in ("text", "string")
+            ]
+            if not fields:
+                continue  # base 组已由头部单行控件承载
+            group_lbl = QLabel(group_label)
+            group_lbl.setStyleSheet(
+                "color:#7c9cbf;font-size:11px;font-weight:bold;"
+                "padding-top:8px;border-top:1px solid #242424;"
+            )
+            form_layout.addWidget(group_lbl)
+            # inner 组字段普遍短，压缩高度以免面板过长
+            box_h = 76 if group_key == "inner" else 104
+            for key, label, _ftype, _required, _group in fields:
+                lbl = QLabel(label)
+                lbl.setStyleSheet("color:#bbb;font-size:12px;font-weight:bold;")
+                form_layout.addWidget(lbl)
+                edit = self._mk_text_edit("", max_height=box_h)
+                self._text_edits[key] = edit
+                form_layout.addWidget(edit)
 
         form_layout.addStretch()
         form_scroll.setWidget(form_inner)
@@ -308,10 +361,10 @@ class CharacterEditorPanel(QWidget):
 
         root.addLayout(btn_row)
 
-    def _mk_text_edit(self, placeholder: str) -> QTextEdit:
+    def _mk_text_edit(self, placeholder: str = "", max_height: int = 120) -> QTextEdit:
         te = QTextEdit()
         te.setPlaceholderText(placeholder)
-        te.setMaximumHeight(120)
+        te.setMaximumHeight(max_height)
         te.setStyleSheet("""
             QTextEdit {
                 background:#1a1a1a; color:#eee; border:1px solid #2a2a2a;
@@ -389,11 +442,8 @@ class CharacterEditorPanel(QWidget):
         if isinstance(tags, list):
             tags = ", ".join(tags)
         self._tags_edit.setText(tags or "")
-        self._appearance_edit.setPlainText(c.get("appearance") or "")
-        self._personality_edit.setPlainText(c.get("personality") or "")
-        self._line_edit_long.setPlainText(c.get("representative_line") or "")
-        self._bg_edit.setPlainText(c.get("background") or "")
-        self._notes_edit.setPlainText(c.get("notes") or "")
+        for key, edit in self._text_edits.items():
+            edit.setPlainText(c.get(key) or "")
         self.set_enabled(True)
 
     def clear(self):
@@ -401,20 +451,18 @@ class CharacterEditorPanel(QWidget):
         self._name_edit.clear()
         self._age_edit.clear()
         self._tags_edit.clear()
-        self._appearance_edit.clear()
-        self._personality_edit.clear()
-        self._line_edit_long.clear()
-        self._bg_edit.clear()
-        self._notes_edit.clear()
+        for edit in self._text_edits.values():
+            edit.clear()
         self.set_enabled(False)
 
     def set_enabled(self, enabled: bool):
-        for w in [
+        widgets = [
             self._name_edit, self._gender_combo, self._role_combo,
-            self._age_edit, self._tags_edit, self._appearance_edit,
-            self._personality_edit, self._line_edit_long,
-            self._bg_edit, self._notes_edit, self._save_btn, self._delete_btn,
-        ]:
+            self._age_edit, self._tags_edit,
+            *self._text_edits.values(),
+            self._save_btn, self._delete_btn,
+        ]
+        for w in widgets:
             w.setEnabled(enabled)
 
     # ------ 动作 ------
@@ -425,18 +473,16 @@ class CharacterEditorPanel(QWidget):
             tags = [t.strip() for t in tags_raw.replace("，", ",").split(",") if t.strip()]
         else:
             tags = []
-        return {
+        data = {
             "name": self._name_edit.text().strip(),
             "gender": self._gender_combo.currentText(),
             "role_type": self._role_combo.currentText(),
             "age_range": self._age_edit.text().strip(),
             "tags": tags,
-            "appearance": self._appearance_edit.toPlainText().strip(),
-            "personality": self._personality_edit.toPlainText().strip(),
-            "representative_line": self._line_edit_long.toPlainText().strip(),
-            "background": self._bg_edit.toPlainText().strip(),
-            "notes": self._notes_edit.toPlainText().strip(),
         }
+        for key, edit in self._text_edits.items():
+            data[key] = edit.toPlainText().strip()
+        return data
 
     def _on_save(self):
         data = self._collect_data()
@@ -698,7 +744,9 @@ class CharacterManagementModule(BaseModule):
         self._interp_check.toggled.connect(lambda *_: self._sync_bridge_prefs())
 
         # 延迟启动桥与探测画布；定期刷新 Agent 按钮状态
-        QTimer.singleShot(200, self._bootstrap)
+        # 注意：只在该模块真正可见时才预热 —— 原来这里无条件预热，导致没点进
+        # 「AI 画布」也会在启动阶段白烧一份 桥 + 静态服务 + WebEngine + 前端包
+        QTimer.singleShot(200, self._bootstrap_if_visible)
         self._agent_poll = QTimer(self)
         self._agent_poll.setInterval(10000)
         self._agent_poll.timeout.connect(self._poll_agent_btn_state)
@@ -912,15 +960,60 @@ class CharacterManagementModule(BaseModule):
         )
         return True
 
+    def _bootstrap_if_visible(self):
+        """延迟预热：只有模块真正可见时才启动画布。
+
+        setup_ui 之后 200ms 触发。若此时「AI 画布」不是当前页（QTabWidget 未显示
+        本页），则什么都不做，等 showEvent / on_activated 再预热。
+        """
+        if getattr(self, "_booted", False):
+            return
+        try:
+            visible = bool(self.isVisible())
+        except Exception:
+            visible = True  # 判断失败时按可见处理，避免画布永不启动
+        if visible:
+            self._bootstrap()
+
+    def showEvent(self, event):  # noqa: N802 (Qt 命名)
+        """切到本模块时预热画布（QTabWidget 切页会触发 showEvent）。
+
+        不依赖宿主是否调用 on_activated —— 实测宿主没有调用该生命周期钩子。
+        """
+        super().showEvent(event)
+        if getattr(self, "_booted", False):
+            return
+        QTimer.singleShot(0, self._bootstrap)
+
     def _bootstrap(self):
+        # 幂等：预热只做一次，重复进入模块不重复起桥 / 建 WebEngine
+        if getattr(self, "_booted", False):
+            return
+        self._booted = True
+        _t_all = time.perf_counter()
+        _t0 = time.perf_counter()
         self._ensure_bridge()
+        _ms_bridge = (time.perf_counter() - _t0) * 1000
+        _t0 = time.perf_counter()
         self._sync_bridge_prefs()
+        _ms_prefs = (time.perf_counter() - _t0) * 1000
         try:
             from app.core.canvas_runtime import get_canvas_runtime
         except ImportError:
             from core.canvas_runtime import get_canvas_runtime  # type: ignore
+        _t0 = time.perf_counter()
         rt = get_canvas_runtime()
-        if rt.is_ready():
+        _ready = rt.is_ready()
+        _ms_probe = (time.perf_counter() - _t0) * 1000
+        logger.info(
+            "画布预热计时 bridge=%.0fms prefs=%.0fms probe=%.0fms ready=%s total=%.0fms",
+            _ms_bridge,
+            _ms_prefs,
+            _ms_probe,
+            _ready,
+            (time.perf_counter() - _t_all) * 1000,
+        )
+        if _ready:
             self._load_canvas(rt.url)
             self._set_status(f"已连接 {rt.url}")
             QTimer.singleShot(800, self._maybe_inject_existing_agent)

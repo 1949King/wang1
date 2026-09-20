@@ -41,7 +41,7 @@ logger = logging.getLogger("AI短剧编辑器.modules")
 # 实际上 importlib.import_module() 推迟到首次真·访问时才执行。
 #
 # _LazyModuleProxy：用于模块级变量（如 np.array(), librosa.load()）
-# _LazyClassProxy：  用于类变量（如 EditorScheduler(), AudioManager()）
+# _LazyClassProxy：  用于类变量（如 EditorScheduler(), SubtitleManager()）
 #
 # 关键设计：
 #   • __slots__ 减少每个代理的内存开销
@@ -95,8 +95,8 @@ class _LazyClassProxy:
     """延迟加载类代理，专门用于支持实例化的类变量。
 
     与 _LazyModuleProxy 的区别：
-      • 需要分别指定模块名和类名（如 'core.audio_manager' + 'AudioManager'）
-      • 主要场景：EditorScheduler()、AudioManager(...) 等类实例化
+      • 需要分别指定模块名和类名（如 'core.subtitle_manager' + 'SubtitleManager'）
+      • 主要场景：EditorScheduler()、SubtitleManager(...) 等类实例化
 
     使用示例：
         EditorScheduler = _LazyClassProxy('core.editor_scheduler', 'EditorScheduler')
@@ -187,10 +187,6 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from .core import EventBus, EventType, MasterClock, DataBus
 from .skill_engine import SkillEngine, Skill
-from .account_skills import (
-    AccountDataCollectSkill, AccountAnalysisSkill, 
-    PublishContentSkill, MatrixPublishSkill, register_account_skills
-)
 
 # 确保 app/ 在 sys.path 中以兼容 core.xxx 导入
 import sys as _sys
@@ -200,33 +196,27 @@ if _app_root not in _sys.path:
 
 # ===== Core 管理器懒加载（仅在剪辑/项目管理等模块激活时才导入） =====
 project_manager = _lazy_import('core.project_manager')      # project_manager.create_project(...)
-asset_manager = _lazy_import('core.asset_manager')          # asset_manager.xxx
 timeline_manager = _lazy_import('core.timeline_manager')    # timeline_manager.xxx
 effect_manager = _lazy_import('core.effect_manager')        # effect_manager.xxx
-transition_manager = _lazy_import('core.transition_manager')  # transition_manager.xxx
 
 # 类级别代理（支持实例化: EditorScheduler()）
 EditorScheduler = _LazyClassProxy('core.editor_scheduler', 'EditorScheduler')
-AudioManager = _LazyClassProxy('core.audio_manager', 'AudioManager')
 SubtitleManager = _LazyClassProxy('core.subtitle_manager', 'SubtitleManager')
 PresetManager = _LazyClassProxy('core.preset_manager', 'PresetManager')
 PluginManager = _LazyClassProxy('core.plugin_manager', 'PluginManager')
 
-# 导入TOP 0级剪辑引擎
-try:
-    from .top0_integration import Top0VideoProcessor
-    TOP0_ENGINE_AVAILABLE = True
-except ImportError as e:
-    logger.error(f'TOP 0级引擎导入失败: {e}')
-    TOP0_ENGINE_AVAILABLE = False
+# 导入TOP 0级剪辑引擎（冷启动 P1：改为惰性，见下方 _LAZY_REEXPORTS / __getattr__）
+#
+# 原写法是顶层 `from .top0_integration import Top0VideoProcessor`，实测这一跳
+# 0.330s（top0_integration → drama_understanding_engine → cv2/numpy/aiohttp）。
+# 而 Top0VideoProcessor 在本文件内**零消费**（TOP0_ENGINE_AVAILABLE 也无人读），
+# 唯一真实使用者 app/core/editor_scheduler.py:719 早就用自己的 _safe_import 懒加载。
+# 故删掉顶层导入，改为经模块级 __getattr__ 按需转发。
+TOP0_ENGINE_AVAILABLE = None     # None = 未探测；访问 Top0VideoProcessor 时仍可用
 
-# 导入爆款优化引擎
-try:
-    from .viral_optimization_engine import ViralOptimizationEngine, Platform, VideoFeatures
-    VIRAL_ENGINE_AVAILABLE = True
-except ImportError as e:
-    logger.error(f'爆款优化引擎导入失败: {e}')
-    VIRAL_ENGINE_AVAILABLE = False
+# 导入爆款优化引擎（同上，本文件内零消费；真实消费者各自就地导入）
+# 注意：Platform / VideoFeatures 是 enum/dataclass，转发时一并按需加载。
+VIRAL_ENGINE_AVAILABLE = None
 
 # 导入视频处理相关模块
 import subprocess
@@ -873,348 +863,6 @@ class AIClipAlgorithm:
         video.close()
         return out_path
 
-# 账号运营分析类
-class AccountAnalyzer:
-    """ """
-    def __init__(self):
-        self.data_dir = "运营数据"
-        os.makedirs(self.data_dir, exist_ok=True)
-    
-    def add_video_data(self, video_id, title, views, likes, comments, shares, conversions):
-        """ """
-        try:
-            data = {
-                "video_id": video_id,
-                "title": title,
-                "views": views,
-                "likes": likes,
-                "comments": comments,
-                "shares": shares,
-                "conversions": conversions,
-                "timestamp": datetime.now().isoformat(),
-                "like_rate": likes / views if views > 0 else 0,
-                "comment_rate": comments / views if views > 0 else 0,
-                "share_rate": shares / views if views > 0 else 0,
-                "conversion_rate": conversions / views if views > 0 else 0
-            }
-            
-            data_file = os.path.join(self.data_dir, f"{video_id}.json")
-            with open(data_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            return True
-        except Exception as e:
-            logger.error(f'添加视频数据失败: {e}')
-            return False
-    
-    def analyze_data(self):
-        """ """
-        try:
-            all_data = []
-            for file in os.listdir(self.data_dir):
-                if file.endswith(".json"):
-                    file_path = os.path.join(self.data_dir, file)
-                    try:
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            all_data.append(data)
-                    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-                        continue
-            
-            if not all_data:
-                return {"error": "无数据"}
-            
-            # 计算平均值
-            total_views = sum(d.get("views", 0) for d in all_data)
-            total_likes = sum(d.get("likes", 0) for d in all_data)
-            total_comments = sum(d.get("comments", 0) for d in all_data)
-            total_shares = sum(d.get("shares", 0) for d in all_data)
-            total_conversions = sum(d.get("conversions", 0) for d in all_data)
-            
-            avg_views = total_views / len(all_data)
-            avg_likes = total_likes / len(all_data)
-            avg_comments = total_comments / len(all_data)
-            avg_shares = total_shares / len(all_data)
-            avg_conversions = total_conversions / len(all_data)
-            
-            # 计算平均比率
-            avg_like_rate = sum(d.get("like_rate", 0) for d in all_data) / len(all_data)
-            avg_comment_rate = sum(d.get("comment_rate", 0) for d in all_data) / len(all_data)
-            avg_share_rate = sum(d.get("share_rate", 0) for d in all_data) / len(all_data)
-            avg_conversion_rate = sum(d.get("conversion_rate", 0) for d in all_data) / len(all_data)
-            
-            # 找出表现最好的视频
-            top_views = sorted(all_data, key=lambda x: x.get("views", 0), reverse=True)[:3]
-            top_conversions = sorted(all_data, key=lambda x: x.get("conversions", 0), reverse=True)[:3]
-            top_conversion_rate = sorted(all_data, key=lambda x: x.get("conversion_rate", 0), reverse=True)[:3]
-            
-            return {
-                "total_videos": len(all_data),
-                "total_views": total_views,
-                "total_likes": total_likes,
-                "total_comments": total_comments,
-                "total_shares": total_shares,
-                "total_conversions": total_conversions,
-                "average_views": avg_views,
-                "average_likes": avg_likes,
-                "average_comments": avg_comments,
-                "average_shares": avg_shares,
-                "average_conversions": avg_conversions,
-                "average_like_rate": avg_like_rate,
-                "average_comment_rate": avg_comment_rate,
-                "average_share_rate": avg_share_rate,
-                "average_conversion_rate": avg_conversion_rate,
-                "top_views": top_views,
-                "top_conversions": top_conversions,
-                "top_conversion_rate": top_conversion_rate
-            }
-        except Exception as e:
-            logger.error(f'分析数据失败: {e}')
-            return {"error": str(e)}
-    
-    def generate_optimization_suggestions(self, analysis_data):
-        """ """
-        if "error" in analysis_data:
-            return "暂无数据,无法生成建议"
-        
-        suggestions = []
-        
-        # 基于数据生成建议
-        if analysis_data["average_like_rate"] < 0.05:
-            suggestions.append("建议优化视频内容质量,增加情感共鸣点")
-        
-        if analysis_data["average_comment_rate"] < 0.01:
-            suggestions.append("建议在视频中设置互动问题,鼓励观众评论")
-        
-        if analysis_data["average_share_rate"] < 0.005:
-            suggestions.append("建议增加视频的价值性和分享点")
-        
-        if analysis_data["average_conversion_rate"] < 0.001:
-            suggestions.append("建议优化引导语和转化路径")
-        
-        if not suggestions:
-            suggestions.append("数据表现良好,继续保持")
-        
-        return "\n".join(suggestions)
-
-# 初始化账号分析器
-account_analyzer = AccountAnalyzer()
-
-# OpenClow 自动化引擎
-class OpenClowEngine:
-    """ """
-    def __init__(self):
-        """ """
-        self.data_dir = "openclow_data"
-        os.makedirs(self.data_dir, exist_ok=True)
-        self.platforms = ["抖音", "快手", "视频号"]
-        self.accounts = {}
-        self.published_content = []
-        self.reply_rules = []
-        self.operation_data = []
-    
-    def collect_data(self, platform, account_id):
-        """ """
-        try:
-            # 模拟数据采集过程
-            logger.info(f'开始采集{platform}账号{account_id}的数据...')
-            # 模拟采集的数据
-            collected_data = {
-                "platform": platform,
-                "account_id": account_id,
-                "timestamp": datetime.now().isoformat(),
-                "data": {
-                    "views": 10000,
-                    "likes": 500,
-                    "comments": 100,
-                    "shares": 50,
-                    "followers": 5000
-                }
-            }
-            # 保存采集的数据
-            data_file = os.path.join(self.data_dir, f"{platform}_{account_id}_{int(time.time())}.json")
-            with open(data_file, "w", encoding="utf-8") as f:
-                json.dump(collected_data, f, ensure_ascii=False, indent=2)
-            logger.info(f'{platform}账号{account_id}的数据采集完成')
-            return collected_data
-        except Exception as e:
-            logger.error(f'数据采集失败: {e}')
-            return None
-    
-    def auto_publish(self, platform, account_id, content, schedule_time=None):
-        """ """
-        try:
-            # 模拟内容发布过程
-            publish_time = schedule_time if schedule_time else datetime.now().isoformat()
-            logger.info(f'开始发布内容到{platform}账号{account_id}...')
-            # 创建发布记录
-            publish_record = {
-                "id": f"pub_{int(time.time())}",
-                "platform": platform,
-                "account_id": account_id,
-                "content": content,
-                "publish_time": publish_time,
-                "status": "published",
-                "timestamp": datetime.now().isoformat()
-            }
-            # 保存发布记录
-            self.published_content.append(publish_record)
-            # 保存到文件
-            publish_file = os.path.join(self.data_dir, f"publish_{publish_record['id']}.json")
-            with open(publish_file, "w", encoding="utf-8") as f:
-                json.dump(publish_record, f, ensure_ascii=False, indent=2)
-            logger.info(f'内容已成功发布到{platform}账号{account_id}')
-            return publish_record
-        except Exception as e:
-            logger.error(f'内容发布失败: {e}')
-            return None
-    
-    def smart_reply(self, platform, account_id, comment, keywords=None):
-        """ """
-        try:
-            # 模拟智能回复过程
-            logger.info(f'处理{platform}账号{account_id}的评论...')
-            reply = "感谢您的评论!"  # 默认回复
-            # 基于关键词生成回复
-            if keywords:
-                for keyword in keywords:
-                    if keyword in comment:
-                        # 查找匹配的回复规则
-                        for rule in self.reply_rules:
-                            if rule["keyword"] in comment:
-                                reply = rule["reply"]
-                                break
-                        else:
-                            reply = f"感谢您的评论!"
-                        break
-            else:
-                reply = f"感谢您的评论!"
-            # 创建回复记录
-            reply_record = {
-                "id": f"reply_{int(time.time())}",
-                "platform": platform,
-                "account_id": account_id,
-                "comment": comment,
-                "reply": reply,
-                "timestamp": datetime.now().isoformat()
-            }
-            # 保存回复记录
-            reply_file = os.path.join(self.data_dir, f"reply_{reply_record['id']}.json")
-            with open(reply_file, "w", encoding="utf-8") as f:
-                json.dump(reply_record, f, ensure_ascii=False, indent=2)
-            logger.info(f'已回复{platform}账号{account_id}的评论')
-            return reply_record
-        except Exception as e:
-            logger.error(f'智能回复失败: {e}')
-            return None
-    
-    def write_back_data(self, platform, account_id, data):
-        """ """
-        try:
-            # 模拟数据回写过程
-            logger.info(f'回写{platform}账号{account_id}的运营数据...')
-            # 创建回写记录
-            write_back_record = {
-                "id": f"writeback_{int(time.time())}",
-                "platform": platform,
-                "account_id": account_id,
-                "data": data,
-                "timestamp": datetime.now().isoformat()
-            }
-            # 保存回写记录
-            self.operation_data.append(write_back_record)
-            # 保存到文件
-            write_back_file = os.path.join(self.data_dir, f"writeback_{write_back_record['id']}.json")
-            with open(write_back_file, "w", encoding="utf-8") as f:
-                json.dump(write_back_record, f, ensure_ascii=False, indent=2)
-            logger.info(f'{platform}账号{account_id}的运营数据回写完成')
-            return write_back_record
-        except Exception as e:
-            logger.error(f'数据回写失败: {e}')
-            return None
-    
-    def generate_operation_suggestions(self, platform, account_id, data):
-        """ """
-        try:
-            # 模拟生成运营建议
-            logger.info(f'为{platform}账号{account_id}生成运营建议...')
-            # 基于数据生成建议
-            suggestions = []
-            # 分析数据
-            views = data.get("views", 0)
-            likes = data.get("likes", 0)
-            comments = data.get("comments", 0)
-            shares = data.get("shares", 0)
-            followers = data.get("followers", 0)
-            
-            # 计算互动率
-            if views > 0:
-                interaction_rate = (likes + comments + shares) / views
-            else:
-                interaction_rate = 0
-            
-            # 基于数据生成建议
-            if views < 10000:
-                suggestions.append("建议增加内容发布频率,提高账号曝光度")
-            if interaction_rate < 0.05:
-                suggestions.append("建议在视频中增加互动元素,提高观众参与度")
-            if comments < 100:
-                suggestions.append("建议主动回复评论,增强粉丝粘性")
-            if shares < 50:
-                suggestions.append("建议创作更具分享价值的内容")
-            if followers < 1000:
-                suggestions.append("建议优化账号简介和封面,吸引更多关注")
-            
-            if not suggestions:
-                suggestions.append("账号运营状况良好,继续保持现有策略")
-            
-            # 创建建议记录
-            suggestion_record = {
-                "id": f"suggestion_{int(time.time())}",
-                "platform": platform,
-                "account_id": account_id,
-                "data": data,
-                "suggestions": suggestions,
-                "timestamp": datetime.now().isoformat()
-            }
-            # 保存建议记录
-            suggestion_file = os.path.join(self.data_dir, f"suggestion_{suggestion_record['id']}.json")
-            with open(suggestion_file, "w", encoding="utf-8") as f:
-                json.dump(suggestion_record, f, ensure_ascii=False, indent=2)
-            logger.info(f'已为{platform}账号{account_id}生成运营建议')
-            return suggestion_record
-        except Exception as e:
-            logger.error(f'生成运营建议失败: {e}')
-            return None
-    
-    def add_reply_rule(self, keyword, reply):
-        """ """
-        rule = {
-            "id": f"rule_{int(time.time())}",
-            "keyword": keyword,
-            "reply": reply,
-            "timestamp": datetime.now().isoformat()
-        }
-        self.reply_rules.append(rule)
-        # 保存规则到文件
-        rules_file = os.path.join(self.data_dir, "reply_rules.json")
-        with open(rules_file, "w", encoding="utf-8") as f:
-            json.dump(self.reply_rules, f, ensure_ascii=False, indent=2)
-        return rule
-    
-    def get_published_content(self):
-        """ """
-        return self.published_content
-    
-    def get_operation_data(self):
-        """ """
-        return self.operation_data
-
-# 初始化OpenClow引擎
-openclow_engine = OpenClowEngine()
-
-
-
 # 自定义提示框 - 优化显示效果
 class CustomMessageBox(QMessageBox):
     """ """
@@ -1436,7 +1084,6 @@ class HomeModule(BaseModule):
             ("📝", "AI脚本", "copywriting", "#4caf50"),
             ("📋", "批量处理", "tasks", "#ff9800"),
             ("🧩", "拓展中心", "extensions", "#9c27b0"),
-            ("👤", "账号运营", "extensions", "#00bcd4", "account_ops"),
             ("📁", "素材管理", "materials", "#795548"),
         ]
         
@@ -1724,16 +1371,13 @@ class HomeModule(BaseModule):
             "<b>核心功能一览：</b>\n"
             "🎬 <b>剪辑工作台</b> — 多轨道编辑、滤镜、转场、字幕、AI辅助剪辑\n"
             "✍️ <b>AI文案生成</b> — 智能脚本/标题/标签，支持推送到剪辑\n"
-            "🎭 <b>短剧筛选</b> — 多平台热度榜、佣金分析、趋势预测\n"
-            "👤 <b>账号运营</b> — 多平台矩阵管理、OAuth授权、批量发布\n"
             "🤖 <b>模型广场</b> — 16+ AI模型接入、使用统计、成本追踪\n"
             "🧩 <b>插件中心</b> — 可扩展插件生态、一键安装/卸载\n\n"
             "<b>快速上手：</b>\n"
             "1️⃣ 点击「新建剪辑」开始一个项目\n"
             "2️⃣ 在「模型广场」配置AI模型\n"
-            "3️⃣ 浏览「短剧筛选」发掘热点\n"
-            "4️⃣ 访问「设置」自定义快捷键和主题\n"
-            "5️⃣ 打开「帮助」查看详细教程\n\n"
+            "3️⃣ 访问「设置」自定义快捷键和主题\n"
+            "4️⃣ 打开「帮助」查看详细教程\n\n"
             "拾光剪影 — AI驱动的短视频创作平台 🚀"
         )
         box = QMessageBox(self)
@@ -1867,37 +1511,102 @@ class HomeModule(BaseModule):
             QMessageBox.warning(self, "打开失败", f"工程文件不存在：\n{project_file}")
 
 
-# 时间线控件已抽到 timeline_widget.py / timeline_subwidgets.py / clip_widget.py，此处 re-export 保持向后兼容
-from .timeline_widget import TimelineWidget
-from .timeline_subwidgets import TimeRuler, TrackControlPanel
-from .clip_widget import ClipWidget
+# ═══════════════════════════════════════════════════════════════
+# 向后兼容 re-export（冷启动 P1 优化：改为惰性转发）
+# ═══════════════════════════════════════════════════════════════
+#
+# 问题：本文件在 2026-06-13 的「懒加载架构」改造中把顶部 import 换成了
+# _LazyModuleProxy / _LazyClassProxy，但**文件末尾**仍留着一整块顶层
+# eager import（原 1517-1547 行）：timeline_widget / timeline_subwidgets /
+# clip_widget / editor_module / copywriting_module / tasks_module /
+# materials_module / plugins_module / performance_module / model_management。
+#
+# 后果：任何 `import .modules`（哪怕只为拿 HomeModule）都会连带加载整条链。
+# 冷启动实测：MainWindow._setup_default_modules → import .modules 时，
+# HomeModule 那一跳 7.76s（其中 torch 6.97s 由 drama_understanding_engine
+# 的模块级探测引入，已单独修复）；拆掉本题块后进一步降到 ~0.9s 以下。
+# **懒加载设计是从文件底部被击穿的。**
+#
+# 改法：删除顶层 import，改用 PEP 562 模块级 __getattr__ 惰性转发。
+# 语义与原先等价 —— `from .modules import ClipWidget` 仍可用，只是
+# 真正的 importlib.import_module() 推迟到首次访问该名字时执行。
+#
+# ⚠️ 循环导入注意：editor_module / copywriting_module 等会反向
+# `from .modules import show_clear_messagebox`。改为惰性后，读取
+# show_clear_messagebox 时本模块必须已执行完（模块级 __getattr__ 只在
+# 属性缺失时才触发，而 show_clear_messagebox 是真实定义，不经过这里），
+# 因此不受影响。
 
-# EditorModule 已拆分为独立文件 editor_module.py
-from .editor_module import EditorModule
+_LAZY_REEXPORTS = {
+    # 名字 -> (子模块, 类名)
+    "TimelineWidget":         (".timeline_widget", "TimelineWidget"),
+    "TimeRuler":              (".timeline_subwidgets", "TimeRuler"),
+    "TrackControlPanel":      (".timeline_subwidgets", "TrackControlPanel"),
+    "ClipWidget":             (".clip_widget", "ClipWidget"),
+    "EditorModule":           (".editor_module", "EditorModule"),
+    "CopywritingModule":      (".copywriting_module", "CopywritingModule"),
+    "TasksModule":            (".tasks_module", "TasksModule"),
+    "MaterialsModule":        (".materials_module", "MaterialsModule"),
+    "PluginsModule":          (".plugins_module", "PluginsModule"),
+    "PerformanceModule":      (".performance_module", "PerformanceModule"),
+    "ModelManagementModule":  (".model_management", "ModelManagementModule"),
+    # 冷启动 P1 追加：原先在文件中段 eager import，本文件内零消费
+    "Top0VideoProcessor":     (".top0_integration", "Top0VideoProcessor"),
+    "ViralOptimizationEngine": (".viral_optimization_engine", "ViralOptimizationEngine"),
+    "Platform":               (".viral_optimization_engine", "Platform"),
+    "VideoFeatures":          (".viral_optimization_engine", "VideoFeatures"),
+}
 
-# CopywritingModule / TasksModule / MaterialsModule 已拆分为独立文件
-from .copywriting_module import CopywritingModule
-from .tasks_module import TasksModule
-from .materials_module import MaterialsModule
-
-
-MODULE_CLASSES = [
-    HomeModule,
-    EditorModule,
-    CopywritingModule,
-    TasksModule,
-    MaterialsModule,
+# 惰性模块列表（顺序即历史 MODULE_CLASSES 的存在顺序，供需要枚举的调用方使用）
+LAZY_MODULE_CLASS_NAMES = [
+    "HomeModule",
+    "EditorModule",
+    "CopywritingModule",
+    "TasksModule",
+    "MaterialsModule",
+    "PluginsModule",
+    "PerformanceModule",
+    "ModelManagementModule",
 ]
 
-from .plugins_module import PluginsModule
-from .performance_module import PerformanceModule
-from .account_ops_module import AccountOpsModule
-from .model_management import ModelManagementModule
 
-MODULE_CLASSES.extend([
-    PluginsModule,
-    PerformanceModule,
-    AccountOpsModule,
-    ModelManagementModule,
-])
+def __getattr__(name: str):
+    """PEP 562：按需转发被拆出去的模块类（冷启动 P1）。
+
+    仅当属性在本模块中不存在时才被调用。HomeModule 等定义在本文件内的类
+    不经过这里；被拆到独立文件的类才走惰性 import。
+    """
+    target = _LAZY_REEXPORTS.get(name)
+    if target is not None:
+        submodule, class_name = target
+        import importlib as _il
+        mod = _il.import_module(submodule, package=__package__)
+        return getattr(mod, class_name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    """让 dir(modules) 仍能列出惰性转发名（保持可发现性）。"""
+    return sorted(list(globals().keys()) + list(_LAZY_REEXPORTS.keys()))
+
+
+def get_module_classes():
+    """惰性获取全部模块类（替代原先的 MODULE_CLASSES 常量）。
+
+    原 MODULE_CLASSES 是全库零消费的常量（仅本文件内两处赋值/扩展），
+    此处改为按需构造，避免为了一个没人读的列表在导入期拉起所有模块。
+    """
+    import importlib as _il
+    out = []
+    for nm in LAZY_MODULE_CLASS_NAMES:
+        if nm == "HomeModule":
+            out.append(HomeModule)
+            continue
+        target = _LAZY_REEXPORTS.get(nm)
+        if target is None:
+            continue
+        submodule, class_name = target
+        mod = _il.import_module(submodule, package=__package__)
+        out.append(getattr(mod, class_name))
+    return out
 

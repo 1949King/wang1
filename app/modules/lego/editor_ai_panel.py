@@ -38,10 +38,13 @@ class _AiPanelHost(Protocol):
     _ollama_status_label: Any
     _prompt_edit: Any
     _ai_history_list: Any
+    _suggestion_container: Any
 
     def _sect(self, title: str) -> Any: ...
     def _refresh_ollama_diagnose_ui(self) -> None: ...
     def _show_ollama_diagnose_detail(self) -> None: ...
+    def _refresh_proactive_suggestions(self) -> None: ...
+    def _apply_proactive_suggestion(self, suggestion: Any) -> None: ...
     def _on_ai_clip(self) -> None: ...
     def _funclip_process(self) -> None: ...
     def _autoclip_process(self) -> None: ...
@@ -75,7 +78,7 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
     try:
         # 修复：此前多绕了一层 dirname，解析到仓库根 data/active_provider.json
         # （不存在），实际文件位置是 app/data/active_provider.json（与
-        # copywriting_module.py / account_ops_module.py / model_config.py
+        # copywriting_module.py / model_config.py
         # 里的算法一致：从本文件 app/modules/lego/xxx.py 往上 3 层到 app/）。
         # 这里模型状态因此常年显示"未加载"，即使真的已经激活了 provider。
         active_path = os.path.join(
@@ -222,6 +225,20 @@ def build_ai_panel_tab(editor: _AiPanelHost) -> Any:
     roundtrip_btn.clicked.connect(self._on_canvas_roundtrip_suggest)
     canvas_lo.addWidget(roundtrip_btn)
     l.addWidget(canvas_sec)
+
+    sg = self._sect("✨ 下一步建议")
+    sg_lo = sg.layout()
+    refresh_btn = QPushButton("🔄 刷新建议")
+    refresh_btn.setStyleSheet(
+        "QPushButton{background:#2a2a2a;color:#ccc;border:1px solid #333;"
+        "border-radius:4px;padding:4px 10px;font-size:10px;}"
+    )
+    refresh_btn.clicked.connect(self._refresh_proactive_suggestions)
+    sg_lo.addWidget(refresh_btn)
+    self._suggestion_container = QVBoxLayout()
+    self._suggestion_container.setSpacing(4)
+    sg_lo.addLayout(self._suggestion_container)
+    l.addWidget(sg)
 
     hs = self._sect("📋 处理历史")
     self._ai_history_list = QListWidget()

@@ -27,6 +27,18 @@ class BaseCloudProvider(ABC):
     def __init__(self, api_key: str, base_url: str = ""):
         self.api_key: str = api_key
         self.base_url: str = base_url or self.default_base_url
+        # 最近一次调用的真实 token 用量（由子类在非流式/流式解析到 usage 时写入）。
+        # AIEngine 优先消费此值做计量，拿不到（空/0）时降级估算。
+        self.last_usage: dict[str, int] = {}
+
+    @staticmethod
+    def _extract_usage(data: dict) -> dict[str, int]:
+        """从 OpenAI 兼容响应提取真实 token 用量；无 usage 时返回 0（触发降级估算）。"""
+        u = data.get("usage") or {}
+        return {
+            "prompt_tokens": int(u.get("prompt_tokens") or 0),
+            "completion_tokens": int(u.get("completion_tokens") or 0),
+        }
 
     @property
     @abstractmethod

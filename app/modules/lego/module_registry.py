@@ -31,7 +31,6 @@
     reg = get_registry()
     for mod in reg.enabled_modules():
         print(mod["name"], mod["tier"])
-    # 账号运营已迁插件：app/plugins/account_ops_plugin（拓展中心入口）
 """
 
 from __future__ import annotations
@@ -207,8 +206,6 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
     # ╔═════════════════════════╗
     # ║ 实验功能 (EXPERIMENTAL) ║ ← 默认关闭，手动开启，不保证稳定
     # ╚═════════════════════════╝
-    # 短剧筛选：仅插件 app/plugins/drama_finder_plugin
-    # 账号运营：仅插件 app/plugins/account_ops_plugin（拓展中心打开）
     {
         "id": "extensions",
         "name": "拓展中心",
@@ -231,18 +228,6 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "import_class": "PerformanceModule",
         "default_enabled": False,
         "can_disable": True,
-    },
-    {
-        "id": "ai_clip_flow",
-        "name": "AI 剪辑流水线",
-        "icon": "🎞️",
-        "description": "素材→分析→自动剪辑编排（实验·半通：需 Ollama/Whisper，默认关）",
-        "tier": ModuleTier.EXPERIMENTAL,
-        "import_module": ".ai_clip_flow",
-        "import_class": "AIClipFlowModule",
-        "default_enabled": False,
-        "can_disable": True,
-        "optional": True,
     },
 ]
 
@@ -365,10 +350,10 @@ class ModuleRegistry:
             overrides["extensions"] = overrides.pop("plugins")
             logger.info('[ModuleRegistry] 已迁移模块设置: plugins → extensions')
 
-        # 账号运营已迁插件，丢弃导航开关残留，避免设置页出现死项
+        # 账号运营已彻底移除，丢弃导航开关残留，避免设置页出现死项
         if "account" in overrides:
             overrides.pop("account", None)
-            logger.info('[ModuleRegistry] 已移除废弃模块开关: account（改走拓展中心插件）')
+            logger.info('[ModuleRegistry] 已移除废弃模块开关: account')
 
         self._overrides = overrides
         if overrides:

@@ -52,7 +52,6 @@ class PluginsModule(BaseModule):
     
     # 回退列表：仅真实存在于 app/plugins 的插件（与 plugin_store.OFFICIAL_ITEMS 对齐）
     STORE_PLUGINS = [
-        ("🎭", "短剧筛选", "运营工具", "v1.1.1", "免费", "封面卡片墙+详情预览；静态缓存/可选真爬"),
         ("🎨", "AI特效制作", "AI工具", "v1.0.0", "免费", "风格迁移/背景替换/超分/美颜（需 torch）"),
         ("💥", "动作特效", "特效工具", "v1.0.0", "免费", "动作场景动感特效"),
         ("😄", "喜剧特效", "特效工具", "v1.0.0", "免费", "喜剧风格氛围特效"),
@@ -87,14 +86,6 @@ class PluginsModule(BaseModule):
         title.setStyleSheet("font-size:18px;font-weight:bold;color:#fff;")
         top_row.addWidget(title)
         top_row.addStretch()
-        drama_btn = QPushButton("🎭 短剧筛选")
-        drama_btn.setStyleSheet(
-            "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:6px;"
-            "padding:7px 14px;font-size:11px;font-weight:600;}"
-            "QPushButton:hover{background:#6d28d9;}"
-        )
-        drama_btn.clicked.connect(self._open_drama_finder_tab)
-        top_row.addWidget(drama_btn)
         ai_effect_btn = QPushButton("✨ AI特效工坊")
         ai_effect_btn.setStyleSheet("QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:600;}QPushButton:hover{background:#1557b0;}")
         ai_effect_btn.clicked.connect(self._open_ai_effect_tab)
@@ -122,7 +113,6 @@ class PluginsModule(BaseModule):
         installed_scroll.setWidget(self._installed_container)
         
         self._tabs.addTab(installed_scroll, "📦 已安装")
-        self._drama_tab_index = self._tabs.addTab(self._create_drama_finder_tab(), "🎭 短剧筛选")
         self._ai_effect_tab_index = self._tabs.addTab(self._create_ai_effect_tab(), "✨ AI特效工坊")
         self._store_tab_index = self._tabs.addTab(self._create_store_tab(), "🛍️ 插件商店")
         layout.addWidget(self._tabs, 1)
@@ -552,7 +542,7 @@ class PluginsModule(BaseModule):
                 return p
         return None
 
-    # >>> FROZEN:drama-finder-ui:plugins-host BEGIN
+    # >>> FROZEN:plugin-host-ui:plugins-host BEGIN
     def _plugin_offers_widget_ui(self, plugin) -> bool:
         """是否提供可嵌入的 QWidget 界面。
 
@@ -568,7 +558,7 @@ class PluginsModule(BaseModule):
                 cfg = {}
         wc = str(cfg.get("widget_class") or "")
         # 特效管线插件：通用打开会误调 run()→bool
-        if callable(getattr(plugin, "apply_effect", None)) and wc != "DramaFinderWidget":
+        if callable(getattr(plugin, "apply_effect", None)):
             return False
         if wc:
             return True
@@ -597,67 +587,11 @@ class PluginsModule(BaseModule):
             except Exception as e:
                 logger.debug("设置插件上下文失败: %s", e)
 
-    def _create_drama_finder_tab(self) -> QWidget:
-        """插件中心常驻：短剧筛选可视化（卡片 + 预览）。"""
-        from PyQt6.QtCore import QTimer
-        wrap = QWidget()
-        lo = QVBoxLayout(wrap)
-        lo.setContentsMargins(0, 4, 0, 0)
-        tip = QLabel("正在加载短剧筛选界面…")
-        tip.setStyleSheet("color:#888;padding:24px;font-size:12px;")
-        tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lo.addWidget(tip, 1)
-        self._drama_tab_wrap = wrap
-        self._drama_tab_layout = lo
-        self._drama_placeholder = tip
-        self._drama_widget = None
-        QTimer.singleShot(0, self._ensure_drama_finder_widget)
-        return wrap
 
-    def _ensure_drama_finder_widget(self) -> None:
-        """懒加载并嵌入 DramaFinderWidget。"""
-        if getattr(self, "_drama_widget", None) is not None:
-            return
-        lay = getattr(self, "_drama_tab_layout", None)
-        if lay is None:
-            return
-        try:
-            plugin = self._find_plugin_by_name("短剧筛选")
-            if plugin is not None:
-                self._ensure_plugin_initialized(plugin)
-                w = plugin.run()
-            else:
-                from app.plugins.drama_finder_plugin.drama_ui import DramaFinderWidget
-                w = DramaFinderWidget(self)
-            if not isinstance(w, QWidget):
-                raise RuntimeError("短剧筛选未返回界面组件")
-            ph = getattr(self, "_drama_placeholder", None)
-            if ph is not None:
-                lay.removeWidget(ph)
-                ph.deleteLater()
-                self._drama_placeholder = None
-            w.setParent(self._drama_tab_wrap)
-            lay.addWidget(w, 1)
-            self._drama_widget = w
-            w.show()
-        except Exception as e:
-            logger.warning("嵌入短剧筛选界面失败: %s", e)
-            ph = getattr(self, "_drama_placeholder", None)
-            if ph is not None:
-                ph.setText(f"短剧筛选加载失败: {e}")
-                ph.setStyleSheet("color:#ef4444;padding:24px;")
 
-    def _open_drama_finder_tab(self):
-        """切换到短剧筛选可视化标签。"""
-        self._ensure_drama_finder_widget()
-        if hasattr(self, "_tabs") and hasattr(self, "_drama_tab_index"):
-            self._tabs.setCurrentIndex(self._drama_tab_index)
 
     def _open_plugin_ui(self, name: str):
-        """打开插件可视化界面；短剧筛选优先切到常驻标签页。"""
-        if name == "短剧筛选":
-            self._open_drama_finder_tab()
-            return
+        """打开插件可视化界面。"""
         plugin = self._find_plugin_by_name(name)
         if plugin is None:
             QMessageBox.warning(
@@ -694,7 +628,7 @@ class PluginsModule(BaseModule):
             dlg.exec()
         except Exception as e:
             QMessageBox.warning(self, "打开插件界面失败", str(e))
-    # <<< FROZEN:drama-finder-ui:plugins-host END
+    # <<< FROZEN:plugin-host-ui:plugins-host END
 
     # ── 插件评分/评价存储 ──
 

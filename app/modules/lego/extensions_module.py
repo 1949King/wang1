@@ -204,26 +204,6 @@ class ExtensionsModule(BaseModule):
         bar.addWidget(title)
         bar.addStretch()
 
-        # 快捷入口：短剧筛选（兼容旧插件中心）
-        drama_btn = QPushButton("🎭 短剧筛选")
-        drama_btn.setStyleSheet(
-            "QPushButton{background:#7c3aed;color:#fff;border:none;border-radius:6px;"
-            "padding:7px 14px;font-size:11px;font-weight:600;}"
-            "QPushButton:hover{background:#6d28d9;}"
-        )
-        drama_btn.clicked.connect(self._open_drama_finder)
-        bar.addWidget(drama_btn)
-
-        # 快捷入口：账号运营（原主导航模块，已迁插件）
-        account_btn = QPushButton("👤 账号运营")
-        account_btn.setStyleSheet(
-            "QPushButton{background:#0d9488;color:#fff;border:none;border-radius:6px;"
-            "padding:7px 14px;font-size:11px;font-weight:600;}"
-            "QPushButton:hover{background:#0f766e;}"
-        )
-        account_btn.clicked.connect(self._open_account_ops)
-        bar.addWidget(account_btn)
-
         # 快捷入口：AI 特效工坊（兼容旧插件中心）
         ai_effect_btn = QPushButton("✨ AI特效工坊")
         ai_effect_btn.setStyleSheet(
@@ -256,90 +236,9 @@ class ExtensionsModule(BaseModule):
 
         return bar
 
-    def _open_drama_finder(self):
-        """打开短剧筛选插件界面（兼容旧插件中心）"""
-        plugin = self._find_plugin_by_name("短剧筛选")
-        if plugin is not None:
-            self._open_plugin_ui("短剧筛选")
-        else:
-            # 尝试直接导入 DramaFinderWidget
-            try:
-                from app.plugins.drama_finder_plugin.drama_ui import DramaFinderWidget
-                dlg = QDialog(self)
-                dlg.setWindowTitle("短剧筛选")
-                dlg.resize(1000, 720)
-                dlg.setStyleSheet("QDialog{background:#121212;}")
-                lay = QVBoxLayout(dlg)
-                lay.setContentsMargins(0, 0, 0, 0)
-                widget = DramaFinderWidget(dlg)
-                lay.addWidget(widget, 1)
-                self._add_drama_send_to_editor_bar(dlg, lay, widget)
-                dlg.exec()
-            except Exception as e:
-                QMessageBox.warning(self, "打开失败", f"短剧筛选插件未安装:\n{e}")
 
-    def _open_account_ops(self):
-        """打开账号运营插件界面（原主导航模块，已迁拓展中心）"""
-        plugin = self._find_plugin_by_name("账号运营")
-        if plugin is not None:
-            self._open_plugin_ui("账号运营")
-            return
-        try:
-            from app.modules.lego.account_ops_module import AccountOpsModule
-            dlg = QDialog(self)
-            dlg.setWindowTitle("账号运营")
-            dlg.resize(1100, 760)
-            dlg.setStyleSheet("QDialog{background:#121212;}")
-            lay = QVBoxLayout(dlg)
-            lay.setContentsMargins(0, 0, 0, 0)
-            tip = QLabel(
-                "插件功能已卸，仅保留接口。Agent 的 account.* 调用会诚实失败。"
-            )
-            tip.setWordWrap(True)
-            tip.setStyleSheet("color:#a1a1aa;font-size:11px;padding:8px 12px;")
-            lay.addWidget(tip)
-            widget = AccountOpsModule()
-            lay.addWidget(widget, 1)
-            dlg.exec()
-        except Exception as e:
-            QMessageBox.warning(self, "打开失败", f"账号运营插件未就绪:\n{e}")
 
-    def _add_drama_send_to_editor_bar(self, dlg: QDialog, lay: QVBoxLayout, drama_widget) -> None:
-        """M6：外挂「发送到剪辑」（不改冻结区 drama_ui.py）。"""
-        bar = QHBoxLayout()
-        tip = QLabel("选题回流：选中短剧后发送本地成片到剪辑时间线（不自动精剪）")
-        tip.setStyleSheet("color:#a1a1aa;font-size:11px;padding:4px 8px;")
-        tip.setWordWrap(True)
-        bar.addWidget(tip, 1)
-        send_btn = QPushButton("📤 发送到剪辑")
-        send_btn.setStyleSheet(
-            "QPushButton{background:#16a34a;color:#fff;border:none;border-radius:6px;"
-            "padding:8px 14px;font-size:12px;font-weight:600;}"
-            "QPushButton:hover{background:#15803d;}"
-        )
 
-        def _on_send():
-            try:
-                from app.modules.lego.drama_send_to_editor import send_selected_drama_to_editor
-            except ImportError:
-                from modules.lego.drama_send_to_editor import send_selected_drama_to_editor  # type: ignore
-            result = send_selected_drama_to_editor(drama_widget, parent=dlg)
-            if result.get("success"):
-                try:
-                    dlg.accept()
-                except Exception:
-                    pass
-
-        send_btn.clicked.connect(_on_send)
-        bar.addWidget(send_btn)
-        wrap = QFrame()
-        wrap.setStyleSheet("QFrame{background:#1a1a1a;border-top:1px solid #333;}")
-        wrap.setLayout(bar)
-        lay.addWidget(wrap)
-
-    def _open_drama_finder_tab(self):
-        """M1：兼容旧 plugins_module / MainWindow 调用名 → 弹窗打开短剧筛选。"""
-        self._open_drama_finder()
 
     def _open_ai_effects_studio(self):
         """打开 AI 特效工坊（兼容旧插件中心，绕过通用UI检查直接打开）"""
@@ -1446,8 +1345,6 @@ class ExtensionsModule(BaseModule):
                 enabled = getattr(p, "enabled", False)
                 # 特殊插件直接绑定专用方法
                 special_map = {
-                    "短剧筛选": self._open_drama_finder,
-                    "账号运营": self._open_account_ops,
                     "AI特效制作": self._open_ai_effects_studio,
                 }
                 is_special = name in special_map
@@ -1652,7 +1549,7 @@ class ExtensionsModule(BaseModule):
                 cfg = {}
         wc = str(cfg.get("widget_class") or "")
         # 特效管线插件：通用打开会误调 run()→bool
-        if callable(getattr(plugin, "apply_effect", None)) and wc != "DramaFinderWidget":
+        if callable(getattr(plugin, "apply_effect", None)):
             return False
         if wc:
             return True
@@ -1702,7 +1599,7 @@ class ExtensionsModule(BaseModule):
         self._refresh_installed()
 
     def _open_plugin_ui(self, name: str):
-        """打开插件可视化界面；短剧筛选优先切到常驻标签页"""
+        """打开插件可视化界面"""
         plugin = self._find_plugin_by_name(name)
         if plugin is None:
             QMessageBox.warning(
@@ -1728,9 +1625,6 @@ class ExtensionsModule(BaseModule):
             lay.addWidget(result, 1)
             result.show()
 
-            # M6：短剧筛选对话框外挂「发送到剪辑」
-            if name in ("短剧筛选",) or type(result).__name__ == "DramaFinderWidget":
-                self._add_drama_send_to_editor_bar(dlg, lay, result)
 
             def _detach(_result=0, w=result):
                 try:

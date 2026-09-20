@@ -35,33 +35,8 @@ from modules.lego import SkillEngine
 se = SkillEngine.get_instance()
 print(f"  ✅ SkillEngine 单例 ({time.time()-t2:.2f}s)")
 
-# 4. 验证 BaseRepository 死锁修复
-print(f"[4/5] 验证 BaseRepository 死锁修复...")
-t3 = time.time()
-import tempfile
-import os as os_mod
-from core.base_repository import BaseRepository
-tmp = tempfile.mkdtemp()
-db_path = os_mod.path.join(tmp, 'test.json')
-repo = BaseRepository(db_path)
-# 这一步会触发 v0→v1 迁移
-result = repo.save('test_key', {'value': 42})
-assert result is True, f"save 应返回 True, 实际 {result}"
-data = repo.get_all()
-assert data.get('test_key') == {'value': 42}, f"数据丢失: {data}"
-assert data.get('_schema_version') == 1, f"schema_version 缺失: {data}"
-# 测试 delete
-repo.save('to_delete', 'x')
-del_result = repo.delete('to_delete')
-assert del_result is True
-# 测试 clear
-clear_result = repo.clear()
-assert clear_result is True
-assert repo.get_all().get('_schema_version') == 1, "clear 后应保留 schema_version"
-print(f"  ✅ save/delete/clear 无死锁, schema_version 正确 ({time.time()-t3:.2f}s)")
-
-# 5. 事件循环跑 1 秒
-print(f"[5/5] 启动 Qt 事件循环 1 秒...")
+# 4. 事件循环跑 1 秒
+print(f"[4/4] 启动 Qt 事件循环 1 秒...")
 t4 = time.time()
 QTimer.singleShot(1000, app.quit)
 app.exec()

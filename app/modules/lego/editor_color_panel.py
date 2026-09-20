@@ -17,6 +17,7 @@ try:
         QComboBox,
         QFileDialog,
         QHBoxLayout,
+        QLabel,
         QMessageBox,
         QPushButton,
         QScrollArea,
@@ -68,6 +69,8 @@ class _ColorPanelHost(Protocol):
     def _preview_lut_live(self) -> None: ...
     def _reset_color_grading(self) -> None: ...
     def _apply_color_grading(self) -> None: ...
+    def list_aesthetic_packs(self) -> list: ...
+    def _apply_selected_aesthetic_pack(self) -> None: ...
 
 
 def build_color_panel_tab(editor: _ColorPanelHost) -> Any:
@@ -218,6 +221,36 @@ def build_color_panel_tab(editor: _ColorPanelHost) -> Any:
     apc.clicked.connect(editor._apply_color_grading)
     arb.addWidget(apc)
     l.addLayout(arb)
+
+    # ── 美学预设包：一键套用组合风格（LUT + 调色 + 转场） ──
+    apk = editor._sect("🎨 美学预设包")
+    apk_lo = apk.layout()
+    editor._aesthetic_pack_combo = QComboBox()
+    editor._aesthetic_pack_combo.setStyleSheet(
+        "QComboBox{background:#0a0a0a;color:#fff;border:1px solid #222;"
+        "border-radius:4px;padding:3px 6px;font-size:10px;}"
+        "QComboBox QAbstractItemView{background:#121212;color:#fff;"
+        "border:1px solid #333;selection-background-color:#1e6bde;}"
+    )
+    editor._aesthetic_pack_combo.addItem("选择美学预设包…", None)
+    try:
+        for p in editor.list_aesthetic_packs():
+            editor._aesthetic_pack_combo.addItem(p.get("name", p.get("id")), p.get("id"))
+    except Exception:
+        logger.debug("加载美学预设包列表失败", exc_info=True)
+    apk_lo.addWidget(editor._aesthetic_pack_combo)
+    apk_hint = QLabel("一键叠加 LUT + 调色 + 转场，作用于当前选中片段")
+    apk_hint.setStyleSheet("color:#888;font-size:10px;")
+    apk_hint.setWordWrap(True)
+    apk_lo.addWidget(apk_hint)
+    apk_apply = QPushButton("✅ 一键套用")
+    apk_apply.setStyleSheet(
+        "QPushButton{background:#1e6bde;color:#fff;border:none;border-radius:4px;"
+        "padding:5px;font-size:10px;font-weight:600;}QPushButton:hover{background:#1557b0;}"
+    )
+    apk_apply.clicked.connect(editor._apply_selected_aesthetic_pack)
+    apk_lo.addWidget(apk_apply)
+    l.addWidget(apk)
 
     l.addStretch()
     s.setWidget(c)

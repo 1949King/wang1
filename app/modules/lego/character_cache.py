@@ -359,11 +359,25 @@ class AnalysisCache:
             "scenes": scenes_list,
             "dialogues": [
                 {
+                    "id": str(getattr(d, "id", "") or ""),
                     "start_time": float(getattr(d, "start_time", 0)),
                     "end_time": float(getattr(d, "end_time", 0)),
                     "speaker": str(getattr(d, "speaker", "")),
                     "text": str(getattr(d, "text", "")),
                     "emotion": str(getattr(d, "emotion", "HAPPY")),
+                    # ⚠️ volume / speed 此前**只反序列化不序列化**，导致缓存回读
+                    # 永远是默认 0.0（静默丢数据）。补上。
+                    "volume": float(getattr(d, "volume", 0.0) or 0.0),
+                    "speed": float(getattr(d, "speed", 0.0) or 0.0),
+                    # 词级时间戳：词锚定的原料，必须落缓存，否则缓存命中即失锚
+                    "words": [
+                        {
+                            "text": str(getattr(w, "text", "") or ""),
+                            "start": float(getattr(w, "start", 0.0) or 0.0),
+                            "end": float(getattr(w, "end", 0.0) or 0.0),
+                        }
+                        for w in (getattr(d, "words", None) or [])
+                    ],
                 }
                 for d in getattr(drama, "dialogues", [])
             ],
@@ -440,7 +454,7 @@ class AnalysisCache:
         # dialogues（可选字段；若无则给空列表）
         dialogues = []
         try:
-            from .drama_understanding_engine import DialogueSegment
+            from .drama_understanding_engine import DialogueSegment, WordTiming
             for dlg in d.get("dialogues", []):
                 dialogues.append(DialogueSegment(
                     start_time=float(dlg.get("start_time", 0)),
@@ -450,6 +464,15 @@ class AnalysisCache:
                     emotion=str(dlg.get("emotion", "HAPPY")),
                     volume=float(dlg.get("volume", 0.0)),
                     speed=float(dlg.get("speed", 0.0)),
+                    id=str(dlg.get("id", "") or ""),
+                    words=[
+                        WordTiming(
+                            text=str(w.get("text", "") or ""),
+                            start=float(w.get("start", 0.0) or 0.0),
+                            end=float(w.get("end", 0.0) or 0.0),
+                        )
+                        for w in (dlg.get("words") or [])
+                    ],
                 ))
         except Exception:
             dialogues = []

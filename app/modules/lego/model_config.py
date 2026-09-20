@@ -516,39 +516,63 @@ def ensure_active_provider_sensible() -> str:
     """若激活为 Ollama 但本地不可用、且已有云端 Key，则切到首个可用云端（优先 deepseek）。
 
     返回最终激活的 provider_id（可能未变）。
+
+    【性能】热点路径惰性化（2026-09-12）
+      原实现每次调用都无条件做两件重活：
+        ① 探活本机 Ollama（HTTP GET /api/tags，超时 8s，实测约 2.1s）
+        ② import cloud_api 并逐个 is_configured（实测约 0.4s）
+      但这只影响「未选 provider」或「选的正是 ollama」两种情况；已选定具体云端时
+      结果与探测无关。改为惰性求值 + 快路径直接返回，省下约 2.5s 的同步阻塞
+      （画布冷启动 / Agent 面板首帧都受益）。判定语义与原实现逐分支等价。
     """
     active = load_active_provider()
+
+    # ── 快路径：已选定具体云端 provider → 无需任何网络探测 ──
+    if active and active != "ollama":
+        return active
+
     cloud_candidates = (
         "deepseek", "doubao", "zhipu", "qwen", "openai", "siliconflow",
         "chatgpt2api", "moonshot", "kimi",
     )
 
-    ollama_ok = False
-    try:
-        from app.modules.lego.ollama_client import ollama_client
-        ollama_ok = bool(ollama_client and ollama_client.is_available())
-    except Exception:
-        ollama_ok = False
+    def _ollama_ok() -> bool:
+        try:
+            from app.modules.lego.ollama_client import ollama_client
+            return bool(ollama_client and ollama_client.is_available())
+        except Exception:
+            return False
 
-    configured_cloud: list[str] = []
-    try:
-        from app.modules.lego.cloud_api import cloud_api_service
+    def _configured_cloud() -> list[str]:
+        out: list[str] = []
+        try:
+            from app.modules.lego.cloud_api import cloud_api_service
+        except Exception:
+            return out
         for pid in cloud_candidates:
             try:
                 if cloud_api_service.is_configured(pid):
-                    configured_cloud.append(pid)
+                    out.append(pid)
             except Exception:
                 continue
-    except Exception:
-        configured_cloud = []
+        return out
 
-    if active == "ollama" and not ollama_ok and configured_cloud:
+    if active == "ollama":
+        # 选了 Ollama：仅当它不可用、且已有云 Key 时才切走
+        if _ollama_ok():
+            return active
+        configured_cloud = _configured_cloud()
+        if configured_cloud:
+            save_active_provider(configured_cloud[0])
+            return configured_cloud[0]
+        return active
+
+    # active 为空：先查云 Key（纯本地读，便宜），都没有才去探 Ollama（贵）
+    configured_cloud = _configured_cloud()
+    if configured_cloud:
         save_active_provider(configured_cloud[0])
         return configured_cloud[0]
-    if not active and configured_cloud:
-        save_active_provider(configured_cloud[0])
-        return configured_cloud[0]
-    if not active and ollama_ok:
+    if _ollama_ok():
         save_active_provider("ollama")
         return "ollama"
     return active

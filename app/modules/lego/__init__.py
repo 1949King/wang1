@@ -28,9 +28,6 @@ def __getattr__(name: str):
     if name == "BUILTIN_BLOCKS":
         from .builtin_blocks import BUILTIN_BLOCKS
         return BUILTIN_BLOCKS
-    if name == "register_account_skills":
-        from .account_skills import register_account_skills
-        return register_account_skills
     if name == "register_skills":
         from .video_editing_skill import register_skills
         return register_skills
@@ -38,7 +35,6 @@ def __getattr__(name: str):
         "HomeModule",
         "EditorModule",
         "MaterialsModule",
-        "AccountOpsModule",
         "CopywritingModule",
         "TasksModule",
         "PluginsModule",

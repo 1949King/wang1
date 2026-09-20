@@ -350,6 +350,38 @@ class EditorAiToolsMixin:
             lst.setItemWidget(it, lbl)
             it.setSizeHint(lbl.sizeHint())
         card.setVisible(True)
+        # 五维打分写回评分簿（P0-2 闭环：打完分沉淀，下次生成自动选用高分组合）
+        self._record_scores_to_book(scored_results)
+
+    def _record_scores_to_book(self, scored_results: List[Dict[str, Any]]):
+        """把打分结果写入风格评分簿（失败只记日志，绝不打断 UI 展示）。"""
+        try:
+            from app.core.ai.score_book import get_score_book
+        except Exception:
+            logger.debug("评分簿不可用，跳过写回", exc_info=True)
+            return
+        script = getattr(self, "_last_editing_script", None)
+        style_dna = "default"
+        if isinstance(script, dict):
+            style_dna = str(script.get("output_mode")
+                            or script.get("platform") or "default") or "default"
+        book = get_score_book()
+        recorded = 0
+        for sc in scored_results:
+            try:
+                book.record(
+                    style_dna,
+                    dims=sc.get("dimensions") or {},
+                    gains=sc.get("gains") or [],
+                    negatives=sc.get("negatives") or [],
+                    score=sc.get("weighted_score", 0.0),
+                    retake=bool(sc.get("retake", False)),
+                )
+                recorded += 1
+            except Exception:
+                logger.debug("单条评分写回失败，跳过", exc_info=True)
+        if recorded:
+            logger.info("评分簿已写回 %d 条（style_dna=%s）", recorded, style_dna)
 
     # 抽取自 editor_module.py L8205-8217
     def _on_copy_script_clicked(self):

@@ -465,42 +465,104 @@ class EditorAgentRuntimeMixin:
             "provider": pv.currentData() if pv else "auto",
         }
 
-    # 抽取自 editor_module.py L7631-7668
+    # 抽取自 editor_module.py L7631-7668；V4.36.0 起含 P1-1 报价 + P1-2 健康灯
     def _refresh_provider_status(self):
-        """刷新 provider 可用性状态标签（只读查询，不修改 client）。"""
+        """刷新 provider 状态标签（只读查询，不修改 client）。
+
+        V4.36.0：
+        - **P1-2 健康灯**：配了账号但无一健康（退避中/配额尽）或封装不可用的渠道，
+          在 provider 下拉里**变灰禁选**；状态行给出人话原因。
+        - **P1-1 报价**：按当前 UI 参数（时长/单段/渠道）预估「预计 ¥X」，只读预演。
+        """
         lbl = getattr(self, "_agent_provider_status_lbl", None)
         if lbl is None:
             return
+        # 主题感知的状态灯样式（样式工厂提供，不再硬编颜色）
+        try:
+            S = self._agent_panel_styles()
+        except Exception:
+            S = {}
+        ok_css = S.get("status_ok", "color:#2dd4bf;font-size:10px;")
+        warn_css = S.get("status_warn", "color:#fb7185;font-size:10px;font-weight:700;")
+        dim_css = S.get("status_dim", "color:#aab6cc;font-size:10px;")
         try:
             from app.core.ai.video_generation_client import video_generation_client
-            chosen = self._agent_provider_combo.currentData() if hasattr(self, "_agent_provider_combo") else "auto"
+            combo = getattr(self, "_agent_provider_combo", None)
+            chosen = combo.currentData() if combo is not None else "auto"
             providers = video_generation_client.list_providers()
-            # 注意：list_providers 返回 dict 列表，不是对象
-            cloud_ok = False
-            cloud_names = []
-            for p in providers:
-                pid = p.get("id", "")
-                if pid in ("seedance", "cogvideo") and p.get("available", False):
-                    cloud_ok = True
-                    cloud_names.append(pid.upper())
-            if chosen == "auto":
-                if cloud_ok:
-                    lbl.setText(f"✔ 云端可用: {', '.join(cloud_names)}")
-                    lbl.setStyleSheet("color:#7ee787;font-size:10px;")
-                else:
-                    lbl.setText("⚠ 云端 Provider 全部不可用，将回退本地色块占位生成")
-                    lbl.setStyleSheet("color:#ff7b72;font-size:10px;font-weight:700;")
-            elif chosen == "local":
-                lbl.setText("使用本地占位色块生成（无需网络）")
-                lbl.setStyleSheet("color:#7ee787;font-size:10px;")
+
+            def _row(pid: str) -> dict:
+                return next((x for x in providers if x.get("id") == pid), {}) or {}
+
+            def _dead(pid: str) -> bool:
+                """死号 = 封装不可用，或配了账号但无一健康（退避/配额尽）。"""
+                r = _row(pid)
+                if not r.get("available", False):
+                    return True
+                h = r.get("health") or {}
+                return h.get("accounts", 0) > 0 and h.get("healthy", 0) <= 0
+
+            # ── P1-2：死号在下拉里变灰禁选（auto/local 永远可选）──
+            if combo is not None:
+                model = combo.model()
+                for i in range(combo.count()):
+                    pid = combo.itemData(i)
+                    if pid in ("auto", "local", None):
+                        continue
+                    item = model.item(i) if hasattr(model, "item") else None
+                    if item is not None:
+                        item.setEnabled(not _dead(pid))
+
+            # ── P1-1：按当前 UI 参数报价（只读预演，不消耗额度）──
+            seg_n = 0
+            q = {}
+            try:
+                p = self._get_pipeline_params()
+                seg_n = max(1, int(float(p["target_duration"]) // float(p["clip_duration"])))
+                q = video_generation_client.quote(
+                    str(p["provider"]), count=seg_n,
+                    duration=float(p["clip_duration"])) or {}
+            except Exception:
+                logger.debug("[Agent] 生成报价失败（不影响状态显示）", exc_info=True)
+            cost = float(q.get("cost_estimate") or 0.0)
+            if q.get("cloud_available"):
+                acct = q.get("account_id") or ""
+                quota = q.get("quota_remaining")
+                cost_txt = f"预计 ¥{cost:.2f}（{q.get('count', seg_n)}段×{q.get('provider')}"
+                if acct:
+                    cost_txt += f"·{acct}"
+                if isinstance(quota, int):
+                    cost_txt += f"·配额余{quota}"
+                cost_txt += "）"
             else:
-                chosen_obj = next((x for x in providers if x.get("id") == chosen), None)
-                if chosen_obj and chosen_obj.get("available", False):
-                    lbl.setText(f"✔ {chosen.upper()} 可用")
-                    lbl.setStyleSheet("color:#7ee787;font-size:10px;")
+                cost_txt = "本地占位（免费）"
+
+            # ── 状态行（三档文案）──
+            if chosen == "auto":
+                cloud_names = [p.get("id", "").upper() for p in providers
+                               if p.get("id") not in ("local",)
+                               and p.get("available", False)
+                               and not _dead(p.get("id", ""))]
+                if cloud_names:
+                    lbl.setText(f"✔ 云端可用: {', '.join(cloud_names)} · {cost_txt}")
+                    lbl.setStyleSheet(ok_css)
                 else:
-                    lbl.setText(f"⚠ {chosen.upper()} 不可用，将回退本地色块")
-                    lbl.setStyleSheet("color:#ff7b72;font-size:10px;font-weight:700;")
+                    lbl.setText(f"⚠ 云端渠道不可用/全死号 · {cost_txt}")
+                    lbl.setStyleSheet(warn_css)
+            elif chosen == "local":
+                lbl.setText(f"使用本地占位色块生成（无需网络） · {cost_txt}")
+                lbl.setStyleSheet(dim_css)
+            else:
+                if _dead(chosen):
+                    reason = (q.get("reason") or "死号/封装不可用")
+                    lbl.setText(f"⚠ {chosen.upper()} {reason}，将回退本地色块 · {cost_txt}")
+                    lbl.setStyleSheet(warn_css)
+                else:
+                    h = _row(chosen).get("health") or {}
+                    extra = f"·配额余{h.get('quota_remaining')}" \
+                        if h.get("accounts", 0) > 0 else ""
+                    lbl.setText(f"✔ {chosen.upper()} 可用{extra} · {cost_txt}")
+                    lbl.setStyleSheet(ok_css)
         except Exception as e:
             logger.debug(f"[Agent] provider 状态刷新失败: {e}")
             lbl.setText("")
@@ -688,6 +750,7 @@ class EditorAgentRuntimeMixin:
                 send_btn.setEnabled(True)
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
+                stop_btn.setVisible(False)   # 任务结束 → 收回终止按钮（V4.34.1 输入区瘦身）
             inbox = getattr(self, "_edit_agent_inbox", None) or []
             if inbox:
                 nxt = inbox.pop(0)

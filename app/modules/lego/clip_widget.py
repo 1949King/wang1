@@ -55,16 +55,6 @@ class ClipWidget(QFrame):
 
     def __init__(self, clip_data, parent=None):
         super().__init__(parent)
-        # _report_timeline_widget_debug(  # 禁用调试报告，避免网络超时
-        #     "B",
-        #     "timeline_widget.ClipWidget.__init__",
-        #     "clip widget init",
-        #     {
-        #         "module_has_os": "os" in globals(),
-        #         "clip_path": clip_data.get("path") if isinstance(clip_data, dict) else None,
-        #         "clip_keys": list(clip_data.keys()) if isinstance(clip_data, dict) else None,
-        #     },
-        # )
         self.clip_data = clip_data
         self._is_selected = False
         self._is_resizing = False
@@ -1205,20 +1195,27 @@ class ClipWidget(QFrame):
         return False
 
     def sleep_media_workers(self):
-        """折叠/休眠：停止缩略图与波形线程。"""
+        """折叠/休眠：停止缩略图与波形线程。
+
+        注意：本函数的三步都**必须留痕**（不用裸 pass），原因：
+          1. token 自增失败 → 旧缩略图任务回写覆盖新状态，表现为"拖动后缩略图错帧"；
+          2. gate 取消失败 → worker 泄漏，轨道反复折叠/展开后线程越滚越多。
+        两者都是"静默即难查"的类型，宁可日志吵也不要瞎。
+        """
         try:
             if getattr(self, "_thumb_debounce", None) is not None:
                 self._thumb_debounce.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("休眠：停止缩略图防抖失败: %s", e, exc_info=True)
         try:
             _media_worker_gate.cancel_owner(self)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("休眠：取消媒体 worker 归属失败（可能泄漏 worker）: %s", e, exc_info=True)
         try:
             self._thumb_gen_token = int(getattr(self, "_thumb_gen_token", 0) or 0) + 1
-        except Exception:
-            pass
+        except Exception as e:
+            # 这里吞掉会导致旧任务回写覆盖新状态，必须可见
+            logger.debug("休眠：缩略图代际 token 自增失败（旧任务可能回写）: %s", e, exc_info=True)
         for attr in ("_thumbnail_worker", "_waveform_worker"):
             w = getattr(self, attr, None)
             if w is None:
@@ -1230,9 +1227,10 @@ class ClipWidget(QFrame):
                     w.quit()
                     w.wait(500)
             except RuntimeError:
+                # C++ 侧已析构（控件销毁时序），无需处理；下面统一清空引用。
                 pass
             except Exception as e:
-                logger.debug("停媒体 worker 失败: %s", e)
+                logger.debug("停媒体 worker 失败: %s", e, exc_info=True)
             setattr(self, attr, None)
         self._waveform_scheduled = False
         self._scaled_thumb_cache = {}

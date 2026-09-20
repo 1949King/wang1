@@ -72,6 +72,7 @@ class DeepSeekProvider(BaseCloudProvider):
                                 yield "error"
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -126,6 +127,7 @@ class DoubaoProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -184,6 +186,7 @@ class OpenAIProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -238,6 +241,7 @@ class ZhipuProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -296,6 +300,7 @@ class QwenProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -405,6 +410,7 @@ class SparkProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -463,6 +469,7 @@ class KimiProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -521,6 +528,7 @@ class BaichuanProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -579,6 +587,7 @@ class MiniMaxProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -704,6 +713,7 @@ class GroqProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -762,6 +772,7 @@ class SiliconFlowProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -820,6 +831,7 @@ class StepfunProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -878,6 +890,7 @@ class YiProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -936,6 +949,7 @@ class OllamaProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except requests.exceptions.ConnectionError:
@@ -996,6 +1010,7 @@ class ModelScopeProvider(BaseCloudProvider):
                                 pass
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -1063,6 +1078,7 @@ class ChatGPT2APIProvider(BaseCloudProvider):
                                 logger.warning(f"API error: {e}")
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except requests.exceptions.ConnectionError:
@@ -1129,6 +1145,7 @@ class KlingProvider(BaseCloudProvider):
                                 logger.warning(f"Kling stream error: {e}")
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -1193,6 +1210,7 @@ class FishAudioProvider(BaseCloudProvider):
                                 logger.warning(f"FishAudio stream error: {e}")
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:
@@ -1258,6 +1276,7 @@ class StabilityProvider(BaseCloudProvider):
                                 logger.warning(f"Stability stream error: {e}")
             else:
                 data = response.json()
+                self.last_usage = self._extract_usage(data)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 yield content
         except Exception as e:

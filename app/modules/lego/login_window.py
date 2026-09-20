@@ -411,36 +411,6 @@ class RegisterWidget(QWidget):
         
         return widget
     
-    def _do_phone_register(self):
-        phone = self._reg_phone_input.text().strip()
-        password = self._reg_phone_password.text()
-        password2 = self._reg_phone_password2.text()
-        nickname = self._reg_phone_nickname.text().strip()
-        
-        if not phone:
-            self._show_error("请输入手机号")
-            return
-        if not password:
-            self._show_error("请设置密码")
-            return
-        if password != password2:
-            self._show_error("两次密码不一致")
-            return
-        
-        self._reg_phone_btn.setText("注册中...")
-        self._reg_phone_btn.setEnabled(False)
-        
-        success, message = self._auth.register_with_phone(phone, password, nickname)
-        
-        if success:
-            self._show_success(message + "，请登录")
-            self.register_success.emit()
-        else:
-            self._show_error(message)
-        
-        self._reg_phone_btn.setText("注 册")
-        self._reg_phone_btn.setEnabled(True)
-    
     def _send_phone_code(self):
         phone = self._reg_phone_input.text().strip()
         if not phone:

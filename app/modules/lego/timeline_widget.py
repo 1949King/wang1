@@ -46,7 +46,6 @@ from .timeline_subwidgets import (
     AUDIO_EXTS,
     _MediaWorkerGate,
     _media_worker_gate,
-    _report_timeline_widget_debug,
     _TIMELINE_ZOOM_MIN,
     _TIMELINE_ZOOM_MAX,
     _TIMELINE_BASE_PPS,
@@ -1031,13 +1030,14 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
         if grab_w is not None:
             try:
                 grab_w.releaseMouse()
-            except Exception:
-                pass
+            except Exception as e:
+                # 释放失败会让该 widget 继续吃掉鼠标事件 → 表现为"框选卡死"
+                logger.debug("框选：释放抓取 widget 鼠标失败（可能卡死输入）: %s", e, exc_info=True)
             self._marquee_grab_widget = None
         try:
             self._apply_selection_visual()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("框选：复位选中态视觉失败: %s", e, exc_info=True)
         vp = getattr(self, "_track_viewport", None)
         if vp is not None:
             vp.update()

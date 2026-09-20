@@ -80,8 +80,6 @@ class HelpModule(BaseModule):
             ("⚙️", "内核模式", self._kernel_mode_guide),
             ("✍️", "文案生成", self._copywriting),
             ("📋", "多任务管理", self._tasks),
-            ("🎭", "短剧筛选", self._drama),
-            ("👤", "账号运营（插件）", self._account),
             ("📁", "素材库", self._materials),
             ("🌐", "素材网站直达", self._material_sites),
             ("🧩", "插件中心", self._plugins),
@@ -491,7 +489,6 @@ class HelpModule(BaseModule):
                       "使用「文案生成」模块AI自动生成爆款标题和文案"])
         self._subtitle("第四步：导出与发布")
         self._bullet(["剪辑模块底部设置输出参数（分辨率/帧率/编码/格式）后点击导出",
-                      "进入「账号运营」模块绑定各平台账号，一键批量发布",
                       "使用「矩阵发布」功能勾选多账号同时发布到抖音/快手/视频号等平台"])
         self._cl.addStretch()
 
@@ -597,34 +594,7 @@ class HelpModule(BaseModule):
                       "5. 在任务列表中查看进度，完成后可下载/发布"])
         self._cl.addStretch()
 
-    def _drama(self):
-        self._clear(); self._title("🎭 短剧筛选（插件）")
-        self._text("短剧筛选仅保留插件入口与回流接口，榜单/爬虫功能已卸。")
-        self._subtitle("如何打开")
-        self._bullet(["「拓展中心」顶部或商店中的「🎭 短剧筛选」",
-                      "EventBus：MODULE_ACTIVATED{target:extensions, action:drama_finder}",
-                      "「发送到剪辑」仍可用：自行指定本地成片"])
-        self._subtitle("已卸")
-        self._bullet(["Playwright / TikHub 真爬",
-                      "静态假榜单与卡片墙",
-                      "自动抓剧进时间线"])
-        self._tip("无选中条目时发送到剪辑会诚实失败，可选手选本地视频。")
-        self._cl.addStretch()
 
-    def _account(self):
-        self._clear(); self._title("👤 账号运营（拓展中心插件）")
-        self._text("账号运营已从主导航迁出，现为拓展中心插件壳。"
-                    "发布队列 / 爆款卡 / 矩阵上传已卸；Agent 的 account.* 会诚实失败。")
-        self._subtitle("怎么打开")
-        self._bullet(["左侧导航「拓展中心」→ 顶部「👤 账号运营」",
-                      "或首页快捷「账号运营」（会跳到拓展中心并打开占位页）",
-                      "插件目录：app/plugins/account_ops_plugin/"])
-        self._subtitle("仍保留的接口")
-        self._bullet(["商店 id：account-ops",
-                      "EventBus：action=account_ops",
-                      "能力名：account.collect_data / account.optimize_strategy / account.publish（失败可见）"])
-        self._tip("精剪与导出仍在「剪辑」。")
-        self._cl.addStretch()
 
     def _materials(self):
         self._clear(); self._title("📁 素材库")
@@ -744,7 +714,7 @@ class HelpModule(BaseModule):
         self._text("生图/生视频/语音模型统一在模型广场卡片里配置（硅基流动、OpenAI、通义、豆包、ChatGPT2API 等）。"
                     "填好 API Key 并激活后，打开「AI 画布」点顶部「🔄 同步模型池」即可自动发现对应能力的模型，"
                     "在画布节点下拉框里就能选到。对话模型（DeepSeek/GPT 等）也在模型广场配置，两者不冲突。")
-        self._tip("激活的模型将应用于所有AI功能：文案生成/短剧筛选/字幕生成等")
+        self._tip("激活的模型将应用于所有AI功能：文案生成/字幕生成等")
         self._cl.addStretch()
 
     def _ai_canvas(self):
@@ -892,10 +862,6 @@ class HelpModule(BaseModule):
              "1）检查输出目录是否有写入权限和足够磁盘空间；2）尝试降低输出分辨率或比特率；3）确认FFmpeg已正确安装；4）关闭其他占用GPU的程序。"),
             ("API配置后不生效？",
              "确认三点：1）模型已激活（状态栏显示绿色）；2）API Key填写正确无多余空格；3）网络环境可以访问目标API地址（可能需要代理）。"),
-            ("短剧筛选的数据是真实的吗？",
-             "当前为内置演示数据，覆盖69条短剧/电影/电视剧/漫剧，每5分钟自动刷新。实际使用时可通过接入各平台API获取实时排行榜数据。"),
-            ("如何批量发布到多个平台？",
-             "进入「账号运营」模块，先在各平台绑定账号，然后在「矩阵发布」区域勾选目标账号，填写标题和描述后点击「批量发布」即可。"),
             ("插件安装后不显示？",
              "检查插件是否在「已安装插件」标签页中。如果在，确认状态为「已启用」（绿色）。如仍不显示，尝试重启应用。"),
             ("支持哪些视频格式？",

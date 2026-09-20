@@ -8,8 +8,6 @@ AI短剧编辑器 - Qt6 主程序入口
 ├── 剪辑模块 (EditorModule) - 轨道、预览、滤镜、字幕
 ├── 文案生成模块 (CopywritingModule) - AI文案、标题、脚本
 ├── 多任务模块 (TasksModule) - 批量处理、任务队列
-├── 短剧筛选（插件壳 drama_finder_plugin）- 入口与回流接口，功能已卸
-├── 账号运营插件壳 (account_ops_plugin) - 拓展中心入口；account.* 诚实失败
 ├── 素材库模块 (MaterialsModule) - 视频、音频、图片管理
 ├── 插件中心模块 (PluginsModule) - 积木管理
 └── 性能监控模块 (PerformanceModule) - 系统监控
@@ -332,6 +330,7 @@ class Application:
         self._apm_collector: 'object | None' = None
         self._alert_manager: 'object | None' = None
         self._i18n: 'object | None' = None
+        self._instance_server: 'object | None' = None
     
     def _check_environment(self) -> bool:
         """检查运行环境"""
@@ -469,10 +468,9 @@ class Application:
         """初始化 Skill 系统"""
         logger.info("🎯 初始化 Skill 系统...")
 
-        from .modules.lego import register_account_skills, register_skills
+        from .modules.lego import register_skills
 
         register_skills()
-        register_account_skills()
         logger.info("✅ Skill 系统初始化完成")
 
     def _init_qt(self):
@@ -795,6 +793,62 @@ class Application:
             safe = msg.encode('gbk', errors='replace').decode('gbk', errors='replace')
             print(safe)
 
+    def _acquire_single_instance(self) -> bool:
+        """单实例守卫：若已有实例在跑，通知其激活窗口并让本进程退出。
+
+        防止多会话遗留的 GUI 进程叠加、互抢画布端口（3011/18765）导致白屏。
+        返回 True 表示本进程成为主实例继续启动；False 表示应直接退出。
+        """
+        try:
+            from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+        except Exception as e:
+            logger.debug("QLocalServer 不可用，跳过单实例守卫: %s", e)
+            return True
+
+        key = "shiguang-editor-single-instance"
+        probe = QLocalSocket()
+        probe.connectToServer(key)
+        if probe.waitForConnected(300):
+            try:
+                probe.write(b"activate")
+                probe.flush()
+                probe.waitForBytesWritten(300)
+                probe.disconnectFromServer()
+            except Exception:
+                pass
+            logger.info("检测到已运行的编辑器实例，已请求其激活窗口，本实例退出")
+            return False
+
+        self._instance_server = QLocalServer()
+        try:
+            QLocalServer.removeServer(key)  # 清理崩溃残留的陈旧命名管道
+        except Exception:
+            pass
+        if self._instance_server.listen(key):
+            self._instance_server.newConnection.connect(self._on_instance_activated)
+            logger.debug("单实例守卫已就位（成为主实例）")
+        # listen 失败也不阻塞启动（降级为允许多实例，不因锁而打不开应用）
+        return True
+
+    def _on_instance_activated(self) -> None:
+        """收到第二个实例的 activate 请求 → 激活本实例主窗口。"""
+        try:
+            server = self._instance_server
+            if server is not None:
+                conn = server.nextPendingConnection()
+                if conn is not None:
+                    conn.disconnectFromServer()
+        except Exception:
+            pass
+        try:
+            mw = self._main_window
+            if mw is not None:
+                mw.show()  # type: ignore[reportAttributeAccessIssue]
+                mw.raise_()  # type: ignore[reportAttributeAccessIssue]
+                mw.activateWindow()  # type: ignore[reportAttributeAccessIssue]
+        except Exception as e:
+            logger.debug("激活主窗口失败: %s", e)
+
     def run(self) -> int:
         """运行应用"""
         self._safe_print("\n" + "=" * 60)
@@ -811,6 +865,8 @@ class Application:
             self._init_blocks()
             self._init_skills()
             self._init_qt()
+            if not self._acquire_single_instance():
+                return 0
             self._init_modules()
             self._setup_event_handlers()
             
