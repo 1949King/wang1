@@ -80,7 +80,7 @@ def ensure_loaded() -> None:
                 try:
                     inst.initialize({})
                 except Exception:
-                    pass
+                    logger.debug("转场插件 %s initialize 失败", plugin_id, exc_info=True)
             name = plugin_id
             try:
                 info = getattr(inst, "plugin_info", None)
@@ -90,7 +90,7 @@ def ensure_loaded() -> None:
                 elif getattr(inst, "name", None):
                     name = str(inst.name)
             except Exception:
-                pass
+                logger.debug("读取转场插件 %s 信息失败", plugin_id, exc_info=True)
             _registry[plugin_id] = inst
             _infos.append({"id": plugin_id, "name": name, "module": mod_name})
         except Exception as e:
@@ -208,6 +208,13 @@ _WIPE_XFADE = {
     "up": "wipeup",
     "down": "wipedown",
 }
+# 新增转场（2026-09-16 撑开）：open/close 或四向方向 → ffmpeg xfade 短名（全部 exact）
+_CIRCLE_XFADE = {"open": "circleopen", "close": "circleclose"}
+_VERT_XFADE = {"open": "vertopen", "close": "vertclose"}
+_HORZ_XFADE = {"open": "horzopen", "close": "horzclose"}
+_COVER_XFADE = {"left": "coverleft", "right": "coverright", "up": "coverup", "down": "coverdown"}
+_REVEAL_XFADE = {"left": "revealleft", "right": "revealright", "up": "revealup", "down": "revealdown"}
+_SMOOTH_XFADE = {"left": "smoothleft", "right": "smoothright", "up": "smoothup", "down": "smoothdown"}
 
 # 兼容旧中文短名 / 插件显示名
 _LABEL_TO_XFADE: Dict[str, str] = {
@@ -273,6 +280,36 @@ _EXPORT_FIDELITY: Dict[str, Dict[str, str]] = {
         "xfade": "pixelize",
         "note": "导出将近似为 pixelize（非预览 RGB 错位/块位移）",
     },
+    "transition_circle": {
+        "mode": "exact",
+        "xfade": "",  # open/close 在 xfade_name_for_transition 解析
+        "note": "",
+    },
+    "transition_vert": {
+        "mode": "exact",
+        "xfade": "",
+        "note": "",
+    },
+    "transition_horz": {
+        "mode": "exact",
+        "xfade": "",
+        "note": "",
+    },
+    "transition_cover": {
+        "mode": "exact",
+        "xfade": "",
+        "note": "",
+    },
+    "transition_reveal": {
+        "mode": "exact",
+        "xfade": "",
+        "note": "",
+    },
+    "transition_smooth": {
+        "mode": "exact",
+        "xfade": "",
+        "note": "",
+    },
 }
 
 _KNOWN_XFADE = frozenset({
@@ -297,6 +334,18 @@ def xfade_name_for_transition(trans: Optional[Dict[str, Any]]) -> str:
         return _SLIDE_XFADE.get(direction, "slideright")
     if pid == "transition_wipe":
         return _WIPE_XFADE.get(direction, "wipeleft")
+    if pid == "transition_circle":
+        return _CIRCLE_XFADE.get(direction, "circleopen")
+    if pid == "transition_vert":
+        return _VERT_XFADE.get(direction, "vertopen")
+    if pid == "transition_horz":
+        return _HORZ_XFADE.get(direction, "horzopen")
+    if pid == "transition_cover":
+        return _COVER_XFADE.get(direction, "coverleft")
+    if pid == "transition_reveal":
+        return _REVEAL_XFADE.get(direction, "revealleft")
+    if pid == "transition_smooth":
+        return _SMOOTH_XFADE.get(direction, "smoothleft")
     if pid and pid in _PLUGIN_TO_XFADE:
         return _PLUGIN_TO_XFADE[pid]
     label = str(trans.get("type") or trans.get("name") or "").strip()

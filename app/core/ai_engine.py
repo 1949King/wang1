@@ -171,6 +171,11 @@ class AIEngine:
         self._call_history: List[AICallRecord] = []
         self._max_history = 500
 
+        # ── 网关计量（缓存命中 + 持久化落盘） ──
+        self._cache_hits = 0
+        self._cache_total = 0
+        self._gw_store = None  # GatewayStatsStore 单例（延迟加载）
+
         # ── 预算追踪（AI NG 预算 / 成本仪表盘） ──
         self._budget_limit: float = 0.0          # 0 = 不限制
         self._project_budget: float = 0.0        # 单项目预算上限，0 = 不限制
@@ -323,6 +328,9 @@ class AIEngine:
         stats.consecutive_failures += 1
         stats.last_error = error
         stats.last_error_time = time.time()
+
+        # 失败调用也落盘（token 未知记 0），供错误率/异常检测
+        self._record_gateway(provider, "", 0, 0, 0.0, False, error, 0.0, cached=False)
 
         if stats.consecutive_failures >= self._circuit_breaker_threshold:
             self._circuit_open[provider] = (
@@ -504,6 +512,11 @@ class AIEngine:
             cache_key = self._cache_key(provider, messages, kwargs)
             cached = self._cache_get(cache_key)
             if cached is not None:
+                self._cache_hits += 1
+                self._cache_total += 1
+                self._record_gateway(
+                    provider, model or "default", 0, 0, 0.0, True, "", 0.0, cached=True
+                )
                 yield cached
                 return
         else:
@@ -548,6 +561,14 @@ class AIEngine:
                 )
                 prompt_tokens = self._estimate_tokens(prompt_text)
 
+                # 真实 usage 采集：先取 provider 实例引用，调用后读其 last_usage
+                usage_src = None
+                if provider != "ollama":
+                    try:
+                        usage_src = self._cloud_api.get_provider(provider)
+                    except Exception:
+                        usage_src = None
+
                 # ═══ 实际调用 ═══
                 if provider == "ollama":
                     gen = self._ollama_client.chat(
@@ -569,6 +590,15 @@ class AIEngine:
                 # ── 成功：记录统计 ──
                 full_result = "".join(result_chunks)
                 completion_tokens = self._estimate_tokens(full_result)
+
+                # 真实 usage 优先：provider 返回了 usage 则覆盖估算值
+                real_usage = getattr(usage_src, "last_usage", None) or {}
+                if real_usage.get("prompt_tokens") or real_usage.get("completion_tokens"):
+                    prompt_tokens = int(real_usage.get("prompt_tokens") or prompt_tokens)
+                    completion_tokens = int(
+                        real_usage.get("completion_tokens") or completion_tokens
+                    )
+
                 cost = self._estimate_cost(
                     provider, prompt_tokens, completion_tokens
                 )
@@ -593,6 +623,13 @@ class AIEngine:
                     self._call_history = self._call_history[
                         -self._max_history:
                     ]
+
+                self._cache_total += 1
+                self._record_gateway(
+                    provider, model or "default",
+                    prompt_tokens, completion_tokens, duration_ms,
+                    True, "", cost, cached=False,
+                )
 
                 logger.debug(
                     f"[AIEngine] ✓ {provider} "
@@ -739,6 +776,60 @@ class AIEngine:
     # ────────────────────────────────────────────────────────────────
     # 统计 & 诊断
     # ────────────────────────────────────────────────────────────────
+
+    def _record_gateway(self, provider: str, model: str, prompt_tokens: int,
+                        completion_tokens: int, duration_ms: float, success: bool,
+                        error: str, cost: float, cached: bool = False) -> None:
+        """落盘一次调用到 gateway_stats。计量失败静默，不拖垮主链路。"""
+        try:
+            if self._gw_store is None:
+                from app.core.gateway_stats import gateway_stats
+                self._gw_store = gateway_stats
+            self._gw_store.record(
+                provider=provider, model=model,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                duration_ms=duration_ms, success=success, error=error,
+                cost=cost, cached=cached,
+            )
+        except Exception:
+            pass
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """缓存命中统计（本次会话内存累计）。"""
+        total = max(self._cache_total, 1)
+        return {
+            "hits": self._cache_hits,
+            "total": self._cache_total,
+            "hit_rate": round(self._cache_hits / total * 100, 1),
+        }
+
+    def get_gateway_snapshot(self) -> Dict[str, Any]:
+        """网关统计完整快照（供「网关统计」UI 一次拉取）。
+
+        含：持久化总览 / 按 provider 聚合 / 14 天趋势 / 最近调用 / 异常检测 /
+        缓存命中 / 熔断状态 / 预算。
+        """
+        try:
+            if self._gw_store is None:
+                from app.core.gateway_stats import gateway_stats
+                self._gw_store = gateway_stats
+            gw = self._gw_store
+            return {
+                "summary": gw.total_summary(),
+                "by_provider": gw.by_provider(),
+                "trend": gw.trend(days=14),
+                "recent": gw.recent(limit=20),
+                "health": gw.health(),
+                "cache": self.get_cache_stats(),
+                "circuit_open": [
+                    p for p in self._circuit_open
+                    if time.time() < self._circuit_open[p]
+                ],
+                "budget": self.check_budget(),
+            }
+        except Exception as e:
+            logger.warning("gateway snapshot failed: %s", e)
+            return {}
 
     def get_stats(self) -> Dict[str, Dict]:
         """获取所有提供者的使用统计"""
@@ -1038,6 +1129,9 @@ class AIEngineEnhanced(AIEngine):
                         language=language,
                         rate=rate,
                         volume=volume,
+                        # TTS 正音守护（V4.33.5）：长台词分段合成，治「长片段后面发音错」；
+                        # 短句不分段、零影响。可用 guard=False 关闭。
+                        guard=bool(kwargs.get("guard", True)),
                     )
                     if result.get("success"):
                         yield {"success": True, "audio_path": result.get("audio_path", "")}

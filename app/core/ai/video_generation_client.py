@@ -25,6 +25,26 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# P1-3 取消异常：任务线程内逐段检查抛出；伪包/独立加载时无任务底座，
+# 空元组 except 子句永不匹配（等价于没有这个 except），普通调用零影响。
+try:
+    from app.core.canvas_gen_jobs import GenCancelled as _GenCancelled
+except Exception:  # noqa: BLE001 - 独立加载场景（_verify 伪包）不可能出现取消
+    _GenCancelled = ()  # type: ignore[assignment]
+
+
+def _raise_if_cancelled() -> None:
+    """gen-jobs 任务线程内已取消 → 抛 GenCancelled；普通调用（无令牌）零影响。
+
+    ⚠️ 调用点不要包进 catch-all try（会把取消控制流吞成普通失败）。
+    """
+    try:
+        from .pipeline_jobs import raise_if_cancelled as _ric
+    except Exception:  # noqa: BLE001 - 伪包加载：无任务底座
+        return
+    _ric()
+
+
 # 占位片段默认参数
 _DEFAULT_FPS = 30
 _DEFAULT_RESOLUTION = (1280, 720)  # 720p 占位
@@ -70,7 +90,8 @@ class VideoGenerationClient:
     def generate(self, prompt: str, duration: float = _DEFAULT_DURATION,
                  count: int = 1, provider: str = "auto",
                  width: int = _DEFAULT_RESOLUTION[0],
-                 height: int = _DEFAULT_RESOLUTION[1]) -> List[str]:
+                 height: int = _DEFAULT_RESOLUTION[1],
+                 spec: Optional[Dict[str, Any]] = None) -> List[str]:
         """
         生成视频片段
 
@@ -78,16 +99,31 @@ class VideoGenerationClient:
             prompt:    标准化提示词（中英文均可）
             duration:  单段时长（秒）
             count:     生成段数
-            provider:  生成器；auto 表示按优先级依次尝试
+            provider:  生成器；auto 表示按能力声明 + 优先级依次尝试
             width/height: 分辨率
+            spec:      本次请求的**能力需求**（如 first_last_frame=True /
+                       image_to_video=True / resolution="1080p"）；未提的字段不参与筛选
 
         返回：
             生成的视频文件路径列表（全部失败返回空列表）
         """
+        _raise_if_cancelled()  # P1-3：入口即响应取消（排队期被取消的任务不再起跑）
         results: List[str] = []
-        providers = self._resolve_provider_order(provider)
+        providers = self._resolve_provider_order(provider, spec=spec,
+                                                 duration=duration,
+                                                 width=width, height=height)
+        # 额度池重排（P0-1）：有健康账号的 provider 优先；无账号配置时透传
+        pool = None
+        try:
+            from .provider_pool import get_pool
+
+            pool = get_pool()
+            providers = pool.reorder_providers(providers)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 额度池不可用，跳过重排", exc_info=True)
         last_error = ""
         for name in providers:
+            _raise_if_cancelled()  # P1-3：provider 尝试之间响应取消
             handler = self._get_provider(name)
             if handler is None:
                 continue
@@ -96,14 +132,23 @@ class VideoGenerationClient:
                                 width=width, height=height)
                 if paths:
                     results.extend(paths)
+                    if pool is not None:
+                        pool.report_success(name, segments=len(paths))
                     logger.info(f"[VideoGenerationClient] {name} 成功生成 {len(paths)} 段")
                     break  # 成功即停止尝试后续 provider
+                if pool is not None and name != "local":
+                    pool.report_failure(name, error="返回空结果")
+            except _GenCancelled:
+                raise  # 取消是控制流，不记 provider 失败（P1-3）
             except Exception as e:
                 logger.warning(f"[VideoGenerationClient] {name} 执行失败: {e}")
                 last_error = str(e)
+                if pool is not None and name != "local":
+                    pool.report_failure(name, error=str(e))
 
         # 所有真实 provider 失败 → 回退本地占位生成（保证业务流程可演示）
         if not results:
+            _raise_if_cancelled()  # P1-3：占位生成前响应取消（不白跑 ffmpeg）
             if provider not in ("local",):
                 logger.warning(f"[VideoGenerationClient] 真实 provider 全部失败，回退占位生成 ({last_error})")
             results = self._call_local_fallback(prompt=prompt, duration=duration,
@@ -115,22 +160,143 @@ class VideoGenerationClient:
         return results[:count] if results else []
 
     def list_providers(self) -> List[Dict[str, Any]]:
-        """列出可用生成器及其可用状态（供 UI 展示）"""
-        return [
-            {"id": "seedance", "name": "火山引擎 Seedance",
-             "available": self._get_provider("seedance") is not None},
-            {"id": "cogvideo", "name": "智谱 CogVideo",
-             "available": self._get_provider("cogvideo") is not None},
-            {"id": "local", "name": "本地占位生成（FFmpeg 色块）", "available": True},
-        ]
+        """列出可用生成器及其可用状态 + 能力/单价/健康摘要（供 UI 展示）"""
+        try:
+            from .provider_caps import get_caps
+        except Exception:
+            get_caps = None  # type: ignore[assignment]
+        pool = None
+        try:
+            from .provider_pool import get_pool
+
+            pool = get_pool()
+        except Exception:
+            logger.debug("[VideoGenerationClient] 额度池不可用，健康信息缺省", exc_info=True)
+        rows: List[Dict[str, Any]] = []
+        for pid, name in (
+            ("seedance", "火山引擎 Seedance"),
+            ("cogvideo", "智谱 CogVideo"),
+            ("local", "本地占位生成（FFmpeg 色块）"),
+        ):
+            row: Dict[str, Any] = {
+                "id": pid, "name": name,
+                "available": self._get_provider(pid) is not None,
+            }
+            if get_caps is not None:
+                caps = get_caps(pid)
+                if caps:
+                    row["caps"] = {
+                        k: caps.get(k)
+                        for k in ("text_to_video", "image_to_video",
+                                  "first_last_frame", "lip_sync",
+                                  "max_duration", "resolutions", "quality_tier")
+                    }
+                    row["price_per_clip"] = float(caps.get("price_per_clip") or 0.0)
+            if pool is not None:
+                try:
+                    row["health"] = pool.health(pid)
+                except Exception:
+                    logger.debug("[VideoGenerationClient] %s 健康查询失败", pid, exc_info=True)
+            rows.append(row)
+        return rows
+
+    # ────────────── 报价（P1-1）──────────────
+
+    def quote(self, provider: str = "auto", *, count: int = 1,
+              duration: float = 0.0, width: int = 0, height: int = 0,
+              spec: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """**生成前报价**：沿真实路由链预估本次生成花费 + 谁接单 + 配额健康。
+
+        与 ``generate()`` 同一套决策（能力筛选 → 池内重排 → handler 可用性），
+        但**只读预演**：不生成、不记账、不消耗配额。
+        候选链里「客户端封装加载不出」的渠道会被跳过（与 generate 循环一致）。
+
+        Returns（池可用时）::
+            {"ok", "provider", "account_id", "tier", "price_per_clip", "count",
+             "cost_estimate", "currency", "quota_remaining", "cloud_available",
+             "dead_providers", "reason", "note"}
+        池不可用时退化为声明表估算（provider/cost_estimate/count/note）。
+        """
+        merged: Dict[str, Any] = {}
+        try:
+            from .provider_caps import normalize_spec
+
+            merged = normalize_spec(spec, duration=duration, width=width, height=height)
+        except Exception:
+            logger.debug("[VideoGenerationClient] spec 规范化失败，按空 spec 报价", exc_info=True)
+
+        # ① 池视角报价（含账号/配额/死号跳过）
+        try:
+            from .provider_pool import get_pool
+
+            q = get_pool().quote(provider, count=count, spec=merged or None)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 池报价不可用，退化为声明估算", exc_info=True)
+            q = {}
+
+        # ② 校验「池认为的首选」handler 是否真的加载得出（与 generate 循环一致）
+        chosen = str(q.get("provider") or "")
+        if chosen and chosen != "local" and self._get_provider(chosen) is None:
+            # 池不可用时 chosen 为空 → 走 ③ 的声明链兜底；
+            # 池可用但首选封装缺失 → 沿池的重排链找下一个 handler 可用的
+            fallback = self._resolve_provider_order(provider, spec=spec,
+                                                    duration=duration,
+                                                    width=width, height=height)
+            chosen = next((p for p in fallback
+                           if p != "local" and self._get_provider(p) is not None), "local")
+            if chosen != q.get("provider"):
+                q = dict(q)
+                q["provider"] = chosen
+                q["cloud_available"] = chosen != "local"
+                q["account_id"] = ""
+                q["quota_remaining"] = 0
+                if chosen == "local":
+                    q["cost_estimate"] = 0.0
+                    q["price_per_clip"] = 0.0
+                    q["reason"] = "云端客户端封装不可用，将回退本地占位"
+
+        if q:
+            return q
+
+        # ③ 池完全不可用：声明表估算 + handler 可用性修正
+        try:
+            from .provider_caps import quote as caps_quote
+
+            q = dict(caps_quote(provider, count=count, spec=merged or None))
+            if q.get("provider") != "local" and \
+                    self._get_provider(str(q.get("provider"))) is None:
+                q["provider"] = "local"
+                q["cost_estimate"] = 0.0
+                q["price_per_clip"] = 0.0
+            return q
+        except Exception:
+            return {"ok": True, "provider": "local", "count": max(1, int(count or 1)),
+                    "cost_estimate": 0.0, "currency": "CNY",
+                    "note": "报价模块不可用，按本地占位（免费）报"}
 
     # ────────────── Provider 解析 ──────────────
 
-    def _resolve_provider_order(self, provider: str) -> List[str]:
-        """解析 provider 调用顺序"""
-        if provider and provider != "auto":
-            return [provider, "local"]
-        return ["seedance", "cogvideo", "local"]
+    def _resolve_provider_order(self, provider: str,
+                                spec: Optional[Dict[str, Any]] = None,
+                                duration: float = 0.0,
+                                width: int = 0, height: int = 0) -> List[str]:
+        """解析 provider 调用顺序。
+
+        V4.35.0 起走**能力声明路由**（provider_caps.resolve_order）：
+        按本次请求 spec 筛掉不支持的 provider，再按 quality_tier 排序，
+        local 永远兜底。声明模块不可用时**诚实降级**回旧的名字顺序。
+        """
+        try:
+            from .provider_caps import normalize_spec, resolve_order
+
+            # 合并：显式 spec 优先，未提的字段由 generate() 的 duration/分辨率补上
+            merged = normalize_spec(spec, duration=duration, width=width, height=height)
+            return resolve_order(provider, spec=merged)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 能力路由不可用，回退名字顺序", exc_info=True)
+            if provider and provider != "auto":
+                return [provider, "local"]
+            return ["seedance", "cogvideo", "local"]
 
     def _get_provider(self, name: str) -> Optional[Callable]:
         """延迟加载 provider，加载失败返回 None"""
@@ -199,6 +365,7 @@ class VideoGenerationClient:
         paths: List[str] = []
         safe_prompt = (prompt or "AI生成")[:20].replace(" ", "_").replace(":", "_")
         for i in range(count):
+            _raise_if_cancelled()  # P1-3：占位段与段之间响应取消
             out_path = os.path.join(
                 self._output_dir,
                 f"gen_{int(time.time())}_{uuid.uuid4().hex[:6]}_{safe_prompt}_{i + 1}.mp4"

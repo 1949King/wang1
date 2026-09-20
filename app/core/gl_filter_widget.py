@@ -26,7 +26,7 @@ from PyQt6.QtOpenGL import (
     QOpenGLVersionProfile,
 )
 
-from modules.utils.logger import logger
+from app.modules.utils.logger import logger
 
 # GL 常量（避免依赖 PyOpenGL）
 GL_COLOR_BUFFER_BIT = 0x00004000

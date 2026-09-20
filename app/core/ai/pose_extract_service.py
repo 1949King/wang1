@@ -5,7 +5,7 @@
 
 架构位置：canvas_server(/host/pose-extract) → PoseExtractService → pose_worker 子进程
 
-设计约束（docs/knowledge/17-motion-ref-design.md §六）：
+设计约束（docs/_archive/knowledge/17-motion-ref-design.md §六）：
   - 姿态推理放独立子进程，推理完立即退出释放显存，不与 AI 画布视频生成抢显存；
   - 依赖缺失 / 打包环境 / 超时 / 视频损坏 → 诚实失败（返回明确 message），不假成功；
   - 单例模式，线程锁保护子进程互斥（同时只跑一个推理任务）。

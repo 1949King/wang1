@@ -3,7 +3,7 @@
 ================================
 独立子进程脚本：视频 → MediaPipe BlazePose 关键点 → JSON 落盘。
 
-设计约束（docs/knowledge/17-motion-ref-design.md §五/§六）：
+设计约束（docs/_archive/knowledge/17-motion-ref-design.md §五/§六）：
   - 必须以独立进程运行（由 pose_extract_service 调度），进程退出即释放显存；
   - 不 import app.* 模块，保证在任意 Python 环境可独立运行；
   - 依赖缺失 / 视频损坏 / 无有效帧 → 诚实失败（非零退出码 + stderr 说明），绝不输出假数据。

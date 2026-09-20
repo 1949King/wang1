@@ -1,5 +1,5 @@
 from enum import Enum
-from modules.utils.logger import logger
+from app.modules.utils.logger import logger
 from typing import Optional, Dict, Any, Tuple, List, Callable
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QThread, QSemaphore, QMutex

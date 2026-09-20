@@ -31,6 +31,12 @@ logger = logging.getLogger("AI短剧编辑器.project_agent_host")
 _editor_ref: Any = None
 _editor_lock = threading.Lock()
 
+# ── 流式推送节流（chat.delta）──
+# 每 _DELTA_INTERVAL 秒或满 _DELTA_MIN_CHARS 字才推一次。
+# 长文场景可调小以降低「打字机」感知延迟；短响应场景调大以减少 SSE 消息量。
+_DELTA_INTERVAL = 0.08
+_DELTA_MIN_CHARS = 24
+
 
 # ── 画布 Agent 事件推送（走 canvas_bridge SSE） ──────────────────
 
@@ -244,7 +250,7 @@ def _run_on_ui(fn) -> Tuple[bool, Any, str]:
             done.set()
 
     QTimer.singleShot(0, _wrap)
-    if not done.wait(timeout=120.0):
+    if not done.wait(timeout=5.0):
         return False, None, "等待主线程超时"
     if not box.get("ok"):
         return False, None, str(box.get("err") or "主线程执行失败")
@@ -397,7 +403,8 @@ def project_agent_chat(
         else:
             path = "editor"
 
-    messages = compress_messages(messages)
+    # 预算按模型窗口自适应（V4.33.4）：128K 窗口 ≈ 15 万字符，未命中模型时退回 12000
+    messages = compress_messages(messages, model=model, provider=provider)
     sid = (stream_id or "").strip() or f"s_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     if sid:
         push_to_canvas(
@@ -417,7 +424,7 @@ def project_agent_chat(
             if not sid or not buf:
                 return
             now = time.time()
-            if not force and (now - last_push) < 0.08 and len(buf) < 24:
+            if not force and (now - last_push) < _DELTA_INTERVAL and len(buf) < _DELTA_MIN_CHARS:
                 return
             push_to_canvas(
                 "chat.delta",
@@ -916,3 +923,112 @@ def script_compliance_check(
         "summary": summary,
         "total_suggestions": len(suggestions),
     }
+
+
+# ════════════════════════════════════════════════════════════════════
+# 多轮 Agent 循环 + 控制台（Track B / D）
+#   run_project_agent_loop  = 观察→规划→行动→观察 的 while 循环（复用 agent_loop）
+#   get_agent_console       = 任务/大脑/会话/循环/记忆 聚合快照（供面板/前端）
+# ════════════════════════════════════════════════════════════════════
+
+def run_project_agent_loop(
+    *,
+    message: str,
+    mode: str = "",
+    session_id: str = "",
+    provider: str = "",
+    model: str = "",
+    use_native_tools: bool = False,
+) -> Dict[str, Any]:
+    """多轮 Agent 循环入口（项目/画布侧）。
+
+    与单轮 ``project_agent_chat`` 的区别：模型每轮选工具 → 执行 → 观察结果回流 →
+    再决策，直到给出最终答复、预算耗尽、或协作模式下遇写工具待确认而暂停。
+
+    执行器策略：画布前端 action（addNode/queryNodes…）走 SSE 派发，
+    其余（editor.*/pipeline.* 等 capability）走 CapabilityDispatcher（含 policy）。
+    """
+    message = (message or "").strip()
+    if not message:
+        return {"ok": False, "message": "消息为空"}
+
+    from app.core.agent_loop import agent_loop
+    from app.core.agent_policy import normalize_mode
+    from app.core.agent_action_registry import build_canvas_actions_list, build_clipskills_layers_block
+
+    amode = normalize_mode(mode or "")
+    sid = (session_id or "canvas_loop").strip() or "canvas_loop"
+
+    # 工具清单（画布 action + 能力分层约束）进 system
+    try:
+        canvas_actions = build_canvas_actions_list()
+    except Exception:
+        canvas_actions = []
+    tool_prompt = build_clipskills_layers_block()
+    tool_prompt += (
+        "\n[画布工具]\n"
+        + json.dumps(
+            [{"action": a["action"], "effect": a["effect"],
+              "danger_level": a["danger_level"], "desc": a["description"]}
+             for a in canvas_actions],
+            ensure_ascii=False,
+        )[:3000]
+    )
+
+    # canvas_tools 后端化（2026-09-15）：画布节点级 action（含别名）已注册为
+    # canvas.* capability，统一走 dispatcher（经 ACTION_TO_CAPABILITY 映射）；
+    # 仅 media_write 生成类（runGenerate/batchGenerate）仍走 SSE 桥（前端 onRequestGenerate）。
+    from app.core.agent_action_registry import (
+        ACTION_TO_CAPABILITY, canvas_generation_actions,
+    )
+    generation_actions = canvas_generation_actions()
+
+    def executor(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        if action in generation_actions:
+            from app.core.agent_runtime import dispatch_canvas_tools
+            results = dispatch_canvas_tools(
+                [{"action": action, "params": params}], mode=amode, session_id=sid,
+            )
+            if results:
+                r = results[0]
+                return {
+                    "ok": bool(r.get("ok")),
+                    "error": r.get("error") or "",
+                    "payload": r.get("payload"),
+                    "capability_id": action,
+                }
+            return {"ok": False, "error": "画布未回执", "capability_id": action}
+        # 归一别名 → canonical capability_id，再统一走 dispatcher（节点级走 handler 桥接）
+        cap = ACTION_TO_CAPABILITY.get(action, action)
+        return agent_loop._make_dispatcher_executor(amode, sid)(cap, params)
+
+    result = agent_loop.run(
+        goal=message, mode=amode, session_id=sid,
+        provider=provider, model=model,
+        system_prompt="你是拾光剪影「导演台画布」助手（Agent-IM）。用简短中文；"
+                      "需要改画布/时间线时输出工具调用，执行结果会喂回给你，多轮推进直到完成。",
+        tool_prompt=tool_prompt,
+        tool_executor=executor,
+        use_native_tools=use_native_tools,
+    )
+    return {
+        "ok": True,
+        "result": result.to_dict(),
+        "agent_mode": amode,
+        "message": "多轮循环已结束" if result.reason == "done" else f"循环结束（{result.reason}）",
+    }
+
+
+def get_agent_console(
+    *,
+    session_id: str = "",
+    task_id: str = "",
+) -> Dict[str, Any]:
+    """Agent 控制台状态快照（Track D 数据层，只读聚合）。"""
+    from app.core.agent_console import collect_agent_status
+
+    try:
+        status = collect_agent_status(session_id=session_id, task_id=task_id)
+        return {"ok": True, **status}
+    except Exception as e:
+        return {"ok": False, "message": f"控制台聚合失败: {e}"}

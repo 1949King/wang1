@@ -41,39 +41,12 @@ MAX_PARALLEL_READS = 3
 MAX_READ_RETRIES = 3
 
 # capability_id → (effect, paid)
-_CAPABILITY_EFFECTS: Dict[str, Tuple[str, bool]] = {
-    "editor.get_timeline_context": (EFFECT_READ, False),
-    "editor.suggest_cleanup": (EFFECT_READ, False),
-    "editor.send_selected_to_canvas": (EFFECT_CANVAS_WRITE, False),
-    "editor.suggest_canvas_roundtrip": (EFFECT_READ, False),
-    "model.list_models": (EFFECT_READ, False),
-    "ext.list_tools": (EFFECT_READ, False),
-    "model.chat": (EFFECT_READ, True),
-    "model.chat_with_fallback": (EFFECT_READ, True),
-    "editor.split_clip": (EFFECT_CANVAS_WRITE, False),
-    "editor.apply_filter": (EFFECT_CANVAS_WRITE, False),
-    "editor.add_transition": (EFFECT_CANVAS_WRITE, False),
-    "editor.ripple_delete_range": (EFFECT_CANVAS_WRITE, False),
-    "canvas.open": (EFFECT_READ, False),
-    "canvas.sync_models": (EFFECT_READ, False),
-    "canvas.list_actions": (EFFECT_READ, False),
-    "ext.run_extension": (EFFECT_FILE_WRITE, False),
-    "ext.run_skill": (EFFECT_FILE_WRITE, False),
-    "workflow.start": (EFFECT_FILE_WRITE, False),
-    "workflow.submit_batch": (EFFECT_FILE_WRITE, False),
-    "account.collect_data": (EFFECT_READ, False),
-    "account.optimize_strategy": (EFFECT_READ, False),
-    "account.publish": (EFFECT_FILE_WRITE, False),
-    "pipeline.route": (EFFECT_READ, False),
-    "pipeline.preview_validate": (EFFECT_READ, False),
-    "pipeline.score": (EFFECT_READ, False),
-    "pipeline.generate_script": (EFFECT_READ, True),
-    "pipeline.generate": (EFFECT_MEDIA_WRITE, True),
-    "pipeline.regenerate_clip": (EFFECT_MEDIA_WRITE, True),
-    "pipeline.execute_editing": (EFFECT_CANVAS_WRITE, False),
-    "pipeline.run_full": (EFFECT_FILE_WRITE, True),
-    "memory.suggest": (EFFECT_MEMORY_WRITE, False),
-}
+# 单一事实来源：app/core/agent_capability_catalog.py（capability_effect_paid）。
+# 此前这里是硬编码 35 项，且漏了 editor.inspect_media / editor.get_media（会落
+# 「未登记 = FILE_WRITE」兜底，读素材被误判成写文件）。现改为从目录派生。
+from app.core.agent_capability_catalog import capability_effect_paid
+
+_CAPABILITY_EFFECTS: Dict[str, Tuple[str, bool]] = capability_effect_paid()
 
 # 画布前端 executeRemoteTask action → (effect, paid)
 # 由 agent_action_registry._CANVAS_ACTION_ROWS 派生，保持「同一套 Agent 单一动作清单」，
@@ -96,8 +69,6 @@ _EDITOR_ACTION_EFFECTS: Dict[str, Tuple[str, bool]] = {
     "apply_filter": (EFFECT_CANVAS_WRITE, False),
     "call_extension": (EFFECT_FILE_WRITE, False),
     "call_model": (EFFECT_READ, True),
-    "start_workflow": (EFFECT_FILE_WRITE, False),
-    "account_optimize": (EFFECT_READ, False),
     "suggest_cleanup": (EFFECT_READ, False),
     "canvas_sync_models": (EFFECT_READ, False),
     "canvas_open": (EFFECT_READ, False),

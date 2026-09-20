@@ -279,7 +279,7 @@ class ProxyMediaManager:
             if p:
                 return str(p)
         except Exception:
-            pass
+            logger.debug("定位项目内 ffmpeg 失败，回退 PATH", exc_info=True)
         return "ffmpeg"
 
     def _build_ffmpeg_cmd(self, source_path: str, proxy_path: str) -> List[str]:

@@ -140,22 +140,23 @@ class ShortcutManager(QObject):
     - 维护所有动作的快捷键
     - 提供 QAction 注册接口
     - 加载/保存用户自定义配置
+
+    单例由本模块底部的 `shortcut_manager` 全局实例提供（全库唯一构造点）。
+    曾用 `__new__` 返回缓存实例，但 **PyQt6 下「覆写 `__new__` 返回缓存实例」与
+    「`__init__` 内调用 `super().__init__()`」的组合会触发 C 层无限递归**，
+    导致 `import app.core.shortcut_manager` 直接栈溢出（0xC00000FD，Python 无法捕获）。
+    最小复现与条件对照见 `docs/冷启动性能诊断报告.md` §7.5b。
     """
 
     shortcut_changed = pyqtSignal(str, str)  # (action_id, new_key)
 
-    _instance: Optional["ShortcutManager"] = None
-
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self, config_path: str = ""):
+        # ⚠️ super().__init__() 必须在任何 self 属性访问之前调用：
+        # PyQt6 在 QObject 基类未初始化时读取实例属性会抛
+        # `RuntimeError: super-class __init__() of type X was never called`。
+        super().__init__()
         if getattr(self, '_initialized', False):
             return
-        super().__init__()
         self._initialized = True
 
         # 动作回调: { action_id: callback }

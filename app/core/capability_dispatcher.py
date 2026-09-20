@@ -10,7 +10,7 @@ Agent / UI / 外部入口访问三大模块的唯一通道。
   - 同步 invoke 与异步 invoke_async 并存
 
 架构位置：
-  Agent → CapabilityDispatcher → 三大核心模块（剪辑/模型/拓展）+ 多任务调度 + 账号运营
+  Agent → CapabilityDispatcher → 三大核心模块（剪辑/模型/拓展）+ 多任务调度
 """
 from __future__ import annotations
 import logging
@@ -21,16 +21,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from app.core.agent_constants import ERR_WAITING_APPROVAL
+
+# P1-3 取消异常：管线任务化后取消是控制流，dispatcher 的 catch-all 必须放行，
+# 否则任务层看到的永远是「执行失败」而不是 cancelled。独立加载场景不可能出现取消，
+# 空元组 except 子句永不匹配。
+try:
+    from app.core.canvas_gen_jobs import GenCancelled as _GenCancelled
+except Exception:  # noqa: BLE001
+    _GenCancelled = ()  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
 class CapabilityCategory(str, Enum):
-    """能力分类 —— 对应三大模块 + 多任务 + 账号运营 + 全链路"""
+    """能力分类 —— 对应三大模块 + 多任务 + 全链路"""
     EDITOR = "editor"        # 剪辑模块
     MODEL = "model"          # 模型模块
     EXTENSION = "extension"  # 拓展模块
     WORKFLOW = "workflow"    # 多任务调度
-    ACCOUNT = "account"      # 账号运营
     PIPELINE = "pipeline"    # Agent 全链路闭环
     CANVAS = "canvas"        # AI 画布
 
@@ -207,7 +216,7 @@ class CapabilityDispatcher:
                     return CapabilityResult(
                         request_id=request.request_id,
                         success=False,
-                        error="waiting_approval",
+                        error=ERR_WAITING_APPROVAL,
                         output=sanitize_for_log(
                             {
                                 "require_approval": True,
@@ -239,6 +248,10 @@ class CapabilityDispatcher:
                 result = entry.handler(request)
                 result.capability_id = request.capability_id
                 result.request_id = request.request_id
+            except _GenCancelled:
+                # P1-3：取消是控制流不是执行失败——放行给任务层标记 cancelled，
+                # 不写 trace/不广播 CAPABILITY_COMPLETED（被中止的调用没有结果语义）。
+                raise
             except Exception as e:
                 logger.exception(f"[CapabilityDispatcher] {request.capability_id} 执行异常")
                 result = CapabilityResult(

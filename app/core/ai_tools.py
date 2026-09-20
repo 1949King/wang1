@@ -1,7 +1,7 @@
 import json
 import os
 from config import OUTPUT_PATH
-from modules.utils.logger import logger
+from app.modules.utils.logger import logger
 
 class AITools:
     def __init__(self):

@@ -4,9 +4,8 @@
 LRU/LFU策略 + 内存/磁盘双级缓存 + 异步支持
 
 B2 收敛标记 (2026-05-31):
-本文件包含真核心实现 (LRUCache / LFUCache / DiskCache / HybridCache / @cached)
-SSOT 推荐位置: app/modules/utils/cache_system.py
-本文件保留以兼容旧 import 路径, 新代码请从 app.modules.utils.cache_system 导入
+本文件为缓存系统唯一真相源 (SSOT): LRUCache / LFUCache / DiskCache / HybridCache / @cached
+(旧的 app/modules/utils/cache_system.py 与 app/utils/cache_system.py 已合并删除)
 """
 
 import os

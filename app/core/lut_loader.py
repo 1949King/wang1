@@ -338,7 +338,7 @@ class LUTLoader:
             if os.path.isfile(alt):
                 return self.load(os.path.abspath(alt))
         except Exception:
-            pass
+            logger.debug("LUT 路径兜底解析失败: %s", key, exc_info=True)
         return None
 
     def list_presets(self) -> List[str]:

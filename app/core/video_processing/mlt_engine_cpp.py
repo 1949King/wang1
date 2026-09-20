@@ -13,6 +13,7 @@ MLT DLL 来源: 安装 Shotcut 后，MLT DLL 位于:
 """
 import os
 import sys
+import time
 import ctypes
 import logging
 from ctypes import c_char_p, c_int, c_int64, c_double, c_void_p, POINTER, byref, create_string_buffer

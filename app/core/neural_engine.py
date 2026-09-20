@@ -156,13 +156,15 @@ class NeuralEngine:
     # ── 模型下载（从 HuggingFace hub）────────────────────
 
     def download_model(self, model_name: str,
-                       progress_cb: Callable[[str], None] = None) -> Optional[str]:
+                       progress_cb: Callable[[str], None] = None,
+                       filename: str = "model.onnx") -> Optional[str]:
         """
         从 HuggingFace/ModelScope 下载模型到本地缓存。
         
         参数:
           model_name: 如 "onnx-community/RealESRGAN_x2plus"
           progress_cb: 进度回调
+          filename: 仓库内目标文件名，默认 "model.onnx"
         返回:
           本地文件路径，失败返回 None
         """
@@ -182,7 +184,7 @@ class NeuralEngine:
                 progress_cb(f"从 HuggingFace Hub: {model_name}")
             path = hf_hub_download(
                 repo_id=model_name,
-                filename="model.onnx",
+                filename=filename,
                 cache_dir=self._cache_dir,
                 local_files_only=False,
             )
@@ -208,6 +210,21 @@ class NeuralEngine:
             logger.debug(f"ModelScope 下载失败: {e}")
 
         return None
+
+    def get_cached_model_path(self, model_name: str,
+                              filename: str = "model.onnx") -> Optional[str]:
+        """仅检查本地缓存，不触发下载；命中返回本地路径，否则 None。"""
+        try:
+            from huggingface_hub import hf_hub_download
+            path = hf_hub_download(
+                repo_id=model_name,
+                filename=filename,
+                cache_dir=self._cache_dir,
+                local_files_only=True,
+            )
+            return path if path and os.path.isfile(path) else None
+        except Exception:
+            return None
 
     # ── ONNX 推理 ─────────────────────────────────────────
 

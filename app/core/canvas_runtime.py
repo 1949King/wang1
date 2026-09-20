@@ -29,6 +29,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -161,6 +162,26 @@ def port_open(host: str = "127.0.0.1", port: int = DEFAULT_PORT, timeout: float 
         return False
 
 
+def http_probe(url: str, timeout: float = 1.5) -> bool:
+    """无代理 GET 探测，验证 URL 真的返回画布页面。
+
+    仅用 ``port_open`` 做 TCP 探活会误判「半死监听」——进程 socket 还在 LISTEN
+    却不 accept（backlog 满后 RST / 502），导致新实例复用死监听而白屏。
+    这里走系统代理绕过（``ProxyHandler({})``）再校验响应体含画布挂载点，
+    避开本机代理软件对 localhost 的干扰。
+    """
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        req = urllib.request.Request(url, headers={"User-Agent": "shiguang-probe"})
+        with opener.open(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return False
+            body = resp.read(4096).decode("utf-8", "replace")
+            return 'id="root"' in body or "拾光导演台" in body
+    except Exception:
+        return False
+
+
 class _SPAHandler(SimpleHTTPRequestHandler):
     """SPA：缺文件时回退 index.html；prompts/、models/ 可回退 public/ 目录（dist 未重建时仍能读离线资源）。"""
 
@@ -267,18 +288,24 @@ class CanvasRuntime:
                 self._mode = "external"
                 return True
             return False
-        if port_open(port=self._active_port):
+        if self._port_serves_canvas(self._active_port):
             return True
         # 外部可能已在 3000 起了 dev
-        if self._active_port != self.port and port_open(port=self.port):
+        if self._active_port != self.port and self._port_serves_canvas(self.port):
             self._active_port = self.port
             self._mode = "external"
             return True
-        if port_open(port=self.port):
+        if self._port_serves_canvas(self.port):
             self._active_port = self.port
             self._mode = "external"
             return True
         return False
+
+    def _port_serves_canvas(self, port: int) -> bool:
+        """端口在听且 HTTP 健康（真返回画布页面）。仅 TCP 探活会误判半死监听。"""
+        if not port_open(port=port):
+            return False
+        return http_probe(f"http://127.0.0.1:{port}/")
 
     def _start_tauri_process(self) -> tuple[bool, str]:
         """拉起 AI-Canvas-tauri 应用进程（engine=tauri 专用）。
@@ -361,11 +388,16 @@ class CanvasRuntime:
             self._mode = "static"
             return True, f"画布静态服务已在运行: {self.url}"
 
-        # 端口占用则换用已有服务
+        # 端口占用则换用已有服务——但仅当 HTTP 健康；半死监听不复用（否则白屏）
         if port_open(port=self.static_port):
-            self._active_port = self.static_port
-            self._mode = "static"
-            return True, f"画布已在运行: {self.url}"
+            if http_probe(f"http://127.0.0.1:{self.static_port}/"):
+                self._active_port = self.static_port
+                self._mode = "static"
+                return True, f"画布已在运行: {self.url}"
+            logger.warning(
+                "static port %s occupied but not serving canvas (半死监听，不复用)",
+                self.static_port,
+            )
 
         try:
             public_root = str(vendor_canvas_dir() / "public")
@@ -382,7 +414,11 @@ class CanvasRuntime:
             return True, f"画布已启动（静态秒开）: {self.url}"
         except OSError as e:
             logger.warning("static server bind failed: %s", e)
-            return False, str(e)
+            return False, (
+                f"画布端口 {self.static_port} 被占用但服务不健康。\n"
+                f"可能有残留的旧编辑器进程占着端口，请关闭后重试，或点「刷新」。\n"
+                f"（{e}）"
+            )
         except Exception as e:
             return False, str(e)
 

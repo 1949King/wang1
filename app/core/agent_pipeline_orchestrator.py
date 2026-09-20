@@ -8,7 +8,7 @@ Agent 全链路闭环总编排器 (AgentPipelineOrchestrator)
      - 路线A 无素材 → AI 视频生成业务线（创意拆解→生成→初检→预览→打分→脚本→精剪→成片）
      - 路线B 有素材 → AI 素材剪辑业务线（解析→打分→脚本→预览→精剪→成片）
   2. 两条业务线统一汇合：预览校验 → 五维打分 → 剪辑脚本 → 精修剪辑 → 正式成片
-  3. 后置：多任务调度 + 账号运营 + 数据回流（由既有 capability 支持）
+  3. 后置：多任务调度 + 数据回流（由既有 capability 支持）
   4. 全局双向回流：所有问题/数据/缺陷回流 Agent 持续迭代
 
 设计原则：
@@ -18,17 +18,43 @@ Agent 全链路闭环总编排器 (AgentPipelineOrchestrator)
   - 精剪执行通过 CapabilityDispatcher 调用 editor 能力，不越层直接操作 UI。
   - 任一阶段失败有回退，保证流程不中断（可演示）。
 
+大脑路由（2026-09-13 · V4.14.2）：
+  预览校验是全链路唯一真正的岔路：失败片段可以「重生成补救」也可以「带瑕疵继续」。
+  此处向 AgentBrain.suggest_next() 咨询，按历史突触权重选分支，并把选择写进
+  `session.executed_path` —— 会话结束时 reinforce_path 会回灌这次选择的好坏，
+  学习回路自此闭合。无学习数据时权重全为中性 ⇒ 恒选默认（现状行为），冷启动零风险；
+  设 `SG_BRAIN_ROUTE=0` 可整体关闭。
+
 架构位置：
   Agent 面板 → AgentPipelineOrchestrator → 各子模块 → 成片
 """
 from __future__ import annotations
 import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# P1-3 取消异常：管线任务化后，生成深处的取消经 execute() 上抛到任务层。
+# 无 app 包的独立加载场景不可能出现取消，空元组 except 子句永不匹配。
+try:
+    from app.core.canvas_gen_jobs import GenCancelled
+except Exception:  # noqa: BLE001
+    GenCancelled = ()  # type: ignore[assignment]
+
+# ── 大脑路由（学习回路最后一步）──
+# 预览失败时的两个分支：
+#   CONTINUE   = 带瑕疵继续（打分→脚本→精剪）——**现状行为，永远作为默认**
+#   REGENERATE = 先局部重生成问题片段再继续（花钱/耗时，可能救回质量）
+_BRANCH_CONTINUE = "pipeline.score"
+_BRANCH_REGENERATE = "pipeline.regenerate_clip"
+# 单次会话最多重生成几个片段（`preview_validation_loop` 自身还有 _max_regen 上限）
+_MAX_REGEN_PER_SESSION = 3
+# 总开关：设 SG_BRAIN_ROUTE=0 可整体关闭大脑路由（回到纯规则行为）
+BRAIN_ROUTING_ENABLED = os.environ.get("SG_BRAIN_ROUTE", "1") == "1"
 
 
 @dataclass
@@ -47,6 +73,7 @@ class PipelineSession:
     error: Optional[str] = None
     stage: str = "idle"                                    # 当前阶段
     executed_path: List[str] = field(default_factory=list) # 真实执行经过的 capability 序列（供 Hebbian 精确强化）
+    brain_advice: Optional[Dict[str, Any]] = None          # 大脑给出的分支建议（含权重依据，供 UI/排障）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,6 +86,7 @@ class PipelineSession:
             "final_video_path": self.final_video_path,
             "success": self.success, "degraded": self.degraded,
             "error": self.error, "stage": self.stage,
+            "brain_advice": self.brain_advice,
         }
 
 
@@ -177,13 +205,48 @@ class AgentPipelineOrchestrator:
             # ── 第三步：统一汇合 - 预览校验 ──
             session.stage = "preview"
             self._emit_progress(session, "片段进入剪辑模块预览校验...")
-            self._run_preview_validation(unified_clips, auto_preview_pass, session_id)
+            self._run_preview_validation(unified_clips, session_id)
             session.executed_path.append("pipeline.preview_validate")
             from app.core.preview_validation_loop import preview_validation_loop
             session.preview_status = preview_validation_loop.get_preview_status()
+            failed_count = int(
+                (session.preview_status.get("by_status", {}) or {}).get("failed", 0) or 0
+            )
 
-            # 如果存在未通过的片段且未启用自动通过，暂停流程等待人工确认
-            if not auto_preview_pass and session.preview_status.get("by_status", {}).get("failed", 0) > 0:
+            # ── 第三步半：大脑决策（学习回路最后一步）──
+            # 预览有失败片段时，向 AgentBrain 咨询「重生成补救」还是「带瑕疵继续」。
+            # 无学习数据时权重全为中性 ⇒ 选中默认（= 既有行为），冷启动不改变任何东西。
+            if failed_count > 0:
+                session.brain_advice = self._consult_brain(failed_count)
+                if (session.brain_advice.get("choice") == _BRANCH_REGENERATE
+                        and auto_preview_pass):
+                    replaced = self._try_regenerate_failed(
+                        unified_clips, max_clips=_MAX_REGEN_PER_SESSION
+                    )
+                    if replaced:
+                        # 记入真实执行路径 ⇒ 结果好坏会自动回灌给突触（闭环）
+                        session.executed_path.append("pipeline.regenerate_clip")
+                        session.preview_status = preview_validation_loop.get_preview_status()
+                        failed_count = int(
+                            (session.preview_status.get("by_status", {}) or {}).get("failed", 0) or 0
+                        )
+                        self._emit_progress(
+                            session, f"大脑选择重生成：已替换 {replaced} 个问题片段"
+                        )
+                    else:
+                        self._emit_progress(session, "重生成未成功，回退原有策略")
+
+            # 自动核验模式：标记通过（与既有行为一致）
+            if auto_preview_pass:
+                for c in unified_clips:
+                    cid = c.get("clip_id") or c.get("id") or ""
+                    if cid:
+                        preview_validation_loop.mark_preview_passed(cid)
+                session.preview_status = preview_validation_loop.get_preview_status()
+                failed_count = 0
+
+            # 人工模式且仍有失败 → 暂停等待确认（带上大脑建议供人参考）
+            if failed_count > 0 and not auto_preview_pass:
                 session.stage = "waiting_for_preview_confirmation"
                 self._emit_progress(session, "⚠️ 预览未通过，等待人工确认...")
                 # 广播需要人工确认的事件
@@ -196,6 +259,7 @@ class AgentPipelineOrchestrator:
                             "session_id": session_id,
                             "status": session.preview_status,
                             "message": "预览校验发现问题，请在时间线确认后点击继续",
+                            "brain_advice": session.brain_advice,
                         },
                         source="AgentPipelineOrchestrator",
                     )
@@ -242,6 +306,10 @@ class AgentPipelineOrchestrator:
                 session,
                 "全链路降级完成（仅脚本）" if session.degraded else "全链路执行完成",
             )
+        except GenCancelled:
+            # P1-3：取消是控制流（段间/阶段间生效），交任务层标记 cancelled，
+            # 不吞成「会话执行异常」；非任务线程调用不可能走到这里，行为零变化。
+            raise
         except Exception as e:
             logger.exception(f"[AgentPipelineOrchestrator] 会话 {session_id} 执行异常")
             session.success = False
@@ -434,9 +502,14 @@ class AgentPipelineOrchestrator:
     # ────────────── 统一汇合流程 ──────────────
 
     def _run_preview_validation(self, clips: List[Dict[str, Any]],
-                                auto_preview_pass: bool, session_id: str) -> None:
-        """统一预览校验：加载到时间线 + AI 自动核验"""
-        from app.core.preview_validation_loop import preview_validation_loop, PreviewStatus
+                                session_id: str) -> None:
+        """统一预览校验：加载到时间线 + AI 自动核验。
+
+        注意：这里**不再**顺手把失败片段标记通过 —— 是否强制通过、是否先重生成，
+        交由 `execute()` 里的大脑决策/人工确认决定（原实现把「自动通过」埋在这里，
+        导致预览失败这个唯一岔路根本没有分支可言）。
+        """
+        from app.core.preview_validation_loop import preview_validation_loop
         preview_validation_loop.clear()
         preview_validation_loop.load_clips_to_timeline(clips, request_id=session_id)
 
@@ -450,13 +523,112 @@ class AgentPipelineOrchestrator:
             if not cid:
                 continue
             preview_validation_loop.ai_auto_inspect(cid)
-        # auto_preview_pass=True 时，未失败的片段自动标记通过
-        if auto_preview_pass:
+
+    # ────────────── 大脑决策（学习回路出口）──────────────
+
+    def _consult_brain(self, failed_count: int) -> Dict[str, Any]:
+        """向 AgentBrain 咨询「预览失败后走哪条分支」。
+
+        - 默认分支恒为 `pipeline.score`（带瑕疵继续）—— 与接入大脑前完全一致；
+        - 只有真的学到「重生成更能成功」时才会偏离默认；
+        - `SG_BRAIN_ROUTE=0` 或大脑不可用时，返回默认，行为不变。
+        """
+        fallback = {
+            "from": "pipeline.preview_validate",
+            "choice": _BRANCH_CONTINUE,
+            "default": _BRANCH_CONTINUE,
+            "changed": False,
+            "learned": False,
+            "weights": {},
+            "failed_count": failed_count,
+            "reason": "大脑路由关闭或不可用，沿用默认",
+        }
+        if not BRAIN_ROUTING_ENABLED:
+            return fallback
+        try:
+            from app.core.agent_brain import agent_brain
+            # 内心状态（affect_model）：低信任时让大脑少信历史权重（向默认收缩）。
+            # 冷启动 trust=0.5 ⇒ 不干预，与未接入时行为一致。
+            trust = None
+            try:
+                from app.core.ai.affect_model import agent_affect
+                trust = agent_affect.current_trust()
+            except Exception:
+                trust = None
+            advice = agent_brain.suggest_next(
+                "pipeline.preview_validate",
+                [_BRANCH_CONTINUE, _BRANCH_REGENERATE],
+                default=_BRANCH_CONTINUE,
+                trust=trust,
+            )
+            advice["failed_count"] = failed_count
+            return advice
+        except Exception as e:
+            logger.debug(f"[AgentPipelineOrchestrator] 大脑咨询失败: {e}")
+            return fallback
+
+    def _try_regenerate_failed(self, clips: List[Dict[str, Any]],
+                               max_clips: int = _MAX_REGEN_PER_SESSION) -> int:
+        """对预览失败的片段做局部重生成（走 capability，受 policy 与 _max_regen 双重约束）。
+
+        成功替换的片段会**回写进 clips 的 path**，保证后续打分/精剪用的是新片段。
+        返回实际替换成功的数量。
+        """
+        try:
+            from app.core.preview_validation_loop import (
+                preview_validation_loop, PreviewStatus,
+            )
+            from app.core.capability_dispatcher import (
+                capability_dispatcher, CapabilityRequest,
+            )
+        except Exception as e:
+            logger.debug(f"[AgentPipelineOrchestrator] 重生成依赖不可用: {e}")
+            return 0
+
+        try:
+            failed = preview_validation_loop.get_clips_by_status(PreviewStatus.FAILED)
+        except Exception as e:
+            logger.debug(f"[AgentPipelineOrchestrator] 取失败片段失败: {e}")
+            return 0
+
+        replaced = 0
+        new_by_id: Dict[str, Dict[str, Any]] = {}
+        for c in (failed or [])[:max_clips]:
+            cid = c.get("clip_id") or c.get("id") or ""
+            if not cid:
+                continue
+            try:
+                result = capability_dispatcher.invoke(CapabilityRequest(
+                    capability_id="pipeline.regenerate_clip",
+                    params={"clip_id": cid},
+                    caller="orchestrator",
+                ))
+            except Exception as e:
+                logger.debug(f"[AgentPipelineOrchestrator] 重生成 {cid} 异常: {e}")
+                continue
+            if result is not None and getattr(result, "success", False):
+                out = getattr(result, "output", None)
+                if isinstance(out, dict):
+                    new_by_id[cid] = out
+                replaced += 1
+            else:
+                logger.debug(
+                    f"[AgentPipelineOrchestrator] 重生成 {cid} 未成功: "
+                    f"{getattr(result, 'error', '')}"
+                )
+
+        # 回写统一片段列表，避免后续打分/精剪仍在用旧片段
+        if new_by_id:
             for c in clips:
-                cid = _get_cid(c)
-                if not cid:
+                cid = c.get("clip_id") or c.get("id") or ""
+                new_clip = new_by_id.get(cid)
+                if not new_clip:
                     continue
-                preview_validation_loop.mark_preview_passed(cid)
+                if new_clip.get("path"):
+                    c["path"] = new_clip["path"]
+                c["regenerated"] = True
+        logger.info(f"[AgentPipelineOrchestrator] 局部重生成完成：{replaced} 个片段被替换")
+        return replaced
 
     def _run_scoring(self, clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """统一五维打分"""
@@ -585,6 +757,21 @@ class AgentPipelineOrchestrator:
             agent_brain.reinforce_path(path, success=bool(session.success))
         except Exception as e:
             logger.debug(f"[AgentBrain] 链路强化失败: {e}")
+
+        # ── 内心状态（affect_model）：观察本次会话，更新分支期望（公式⑩ EWMA）──
+        # decision_key 用「决策点→选择」记录期望成功率；失败静默降级。
+        try:
+            from app.core.ai.affect_model import agent_affect
+            branch = ""
+            advice = getattr(session, "brain_advice", None)
+            if isinstance(advice, dict):
+                branch = str(advice.get("choice") or "")
+            agent_affect.observe_run(
+                success=bool(session.success),
+                decision_key=f"preview_validate->{branch}" if branch else "",
+            )
+        except Exception as e:
+            logger.debug(f"[AgentPipelineOrchestrator] 内心状态观察失败: {e}")
 
 
 # 全局单例便捷引用

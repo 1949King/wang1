@@ -1,5 +1,5 @@
 """
-能力 handlers —— 三大模块 + 多任务 + 账号运营的具体实现
+能力 handlers —— 三大模块 + 多任务的具体实现
 ======================================================
 所有 handler 都通过 lazy 引用既有单例，不重新实现业务逻辑。
 
@@ -7,8 +7,7 @@ handler 分类：
   - EditorCapabilityHandlers: 剪辑模块（split/filter/transition/timeline_context/ripple_delete_range/suggest_cleanup）
   - ModelCapabilityHandlers: 模型模块（chat/chat_with_fallback/list_models）
   - ExtensionCapabilityHandlers: 拓展模块（run_extension/run_skill/list_tools）
-  - WorkflowCapabilityHandlers: 多任务调度（start_workflow/submit_batch）
-  - AccountCapabilityHandlers: 账号运营（collect_data/optimize_strategy/publish；功能已卸，诚实失败）
+  - WorkflowCapabilityHandlers: 多任务调度（submit_batch）
 """
 from __future__ import annotations
 import logging
@@ -88,6 +87,221 @@ class CanvasCapabilityHandlers:
             output={"actions": build_canvas_actions_list()},
             error=None,
         )
+
+    def node_action(self, req: CapabilityRequest) -> CapabilityResult:
+        """画布节点级操作（canvas_tools 后端化，2026-09-15）。
+
+        节点状态存在前端 Zustand store，后端无法直接改；唯一通道是
+        push_to_canvas("task.create") → 前端 executeRemoteTask → POST /host/agent/reply。
+        capability_id 形如 canvas.add_node，反查回前端 action（addNode）后推送并同步等回执。
+        策略/预算/记忆/脑神经元已由 dispatcher 统一处理，这里只做「桥接 + 等待回执」，
+        不重复 decide / begin_tool_call（避免双重计费）。
+        """
+        from app.core.agent_action_registry import canvas_capability_to_action
+
+        action_name = canvas_capability_to_action().get(req.capability_id or "")
+        if not action_name:
+            return CapabilityResult(
+                req.request_id, False, error=f"未知画布节点能力: {req.capability_id}"
+            )
+        try:
+            from app.core.project_agent_host import push_to_canvas, wait_for_canvas_reply
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"画布桥接不可用: {e}")
+
+        evt = push_to_canvas(
+            "task.create",
+            {"action": action_name, "params": req.params or {}},
+            ack_required=True,
+        )
+        reply = wait_for_canvas_reply(str(evt.get("id") or ""), timeout=20.0)
+        payload = (reply or {}).get("payload") if isinstance(reply, dict) else None
+        ok = bool(payload and payload.get("ok")) if payload is not None else False
+        if reply is None:
+            err = "画布未回执（超时）"
+        elif not ok:
+            err = str((payload or {}).get("error") or "执行失败")
+        else:
+            err = None
+        return CapabilityResult(req.request_id, ok, output=payload, error=err)
+
+    # ── 画布生成能力（Agent 亲手驱动后端 /host/* 生成链路，2026-09-15）──
+    # 复用 /host/generate-image / generate-video / comfyui/run / video-concat /
+    # still-video 背后的同一批纯 Python 函数，让 AgentLoop（走 dispatcher）也能
+    # 直接驱动，而不再只依赖前端 canvas_tools 的 runGenerate 触发。
+
+    def generate_image(self, req: CapabilityRequest) -> CapabilityResult:
+        """画布生图：复用 /host/generate-image 的 generate_image_openai_compatible。"""
+        try:
+            from app.core.canvas_aigc import generate_image_openai_compatible
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"生图依赖不可用: {e}")
+        p = req.params or {}
+        try:
+            res = generate_image_openai_compatible(
+                prompt=str(p.get("prompt") or ""),
+                model=str(p.get("model") or ""),
+                size=str(p.get("size") or ""),
+                channel_id=str(p.get("channel_id") or ""),
+                reference_image=str(p.get("reference_image") or ""),
+                strength=float(p.get("strength") or 0.65),
+                quality=str(p.get("quality") or "standard"),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"生图失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or res.get("error") or "生图失败"),
+        )
+
+    def generate_video(self, req: CapabilityRequest) -> CapabilityResult:
+        """画布生视频：复用 /host/generate-video 的 generate_video_via_host。"""
+        try:
+            from app.core.canvas_aigc import generate_video_via_host
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"生视频依赖不可用: {e}")
+        p = req.params or {}
+        try:
+            res = generate_video_via_host(
+                prompt=str(p.get("prompt") or ""),
+                model=str(p.get("model") or ""),
+                channel_id=str(p.get("channel_id") or ""),
+                duration=float(p.get("duration") or 5.0),
+                size=str(p.get("size") or ""),
+                reference_image=str(p.get("reference_image") or ""),
+                reference_video=str(p.get("reference_video") or p.get("referenceVideo") or ""),
+                first_frame=str(p.get("first_frame") or p.get("firstFrame") or ""),
+                last_frame=str(p.get("last_frame") or p.get("lastFrame") or ""),
+                quality=str(p.get("quality") or "standard"),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"生视频失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or res.get("error") or "生视频失败"),
+        )
+
+    def comfyui_run(self, req: CapabilityRequest) -> CapabilityResult:
+        """运行 ComfyUI 工作流：复用 /host/comfyui/run 的 comfy_provider 入口。"""
+        import json as _json
+
+        p = req.params or {}
+        wf = p.get("workflow_json") or p.get("workflow")
+        if isinstance(wf, str):
+            try:
+                wf = _json.loads(wf)
+            except Exception:
+                return CapabilityResult(req.request_id, False, error="workflow_json 不是合法 JSON")
+        if not isinstance(wf, dict):
+            return CapabilityResult(req.request_id, False, error="缺少 workflow_json（对象或 JSON 字符串）")
+        dry_run = bool(p.get("dry_run", False))
+        try:
+            from app.core.ai.comfy_provider import comfy_provider
+            res = comfy_provider.run_workflow_from_json(wf, dry_run=dry_run)
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"ComfyUI 执行失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("error") or res.get("message") or "ComfyUI 执行失败"),
+        )
+
+    def concat_videos(self, req: CapabilityRequest) -> CapabilityResult:
+        """拼接多段视频成片：复用 /host/video-concat 的 FFmpeg 拼接链路。"""
+        import os
+        import time as _time
+
+        p = req.params or {}
+        paths = [str(x) for x in (p.get("paths") or p.get("video_paths") or []) if str(x)]
+        transition = float(p.get("transition_sec") or 0)
+        if len(paths) < 2:
+            return CapabilityResult(req.request_id, False, error="至少需要 2 个视频路径才能拼接")
+        missing = [x for x in paths if not os.path.isfile(x)]
+        if missing:
+            return CapabilityResult(req.request_id, False, error=f"路径不存在: {missing[:3]}")
+        try:
+            from app.core.canvas_bridge import (
+                _run_concat_demuxer, _run_concat_xfade, canvas_inbox_dir, _probe_duration,
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"拼接依赖不可用: {e}")
+        out = os.path.join(canvas_inbox_dir(), f"concat_{int(_time.time())}_{len(paths)}segs.mp4")
+        try:
+            result = _run_concat_xfade(paths, out, transition) if transition > 0 else _run_concat_demuxer(paths, out)
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"FFmpeg 拼接异常: {e}")
+        if not result:
+            return CapabilityResult(req.request_id, False, error="FFmpeg 拼接失败，请检查 ffmpeg 安装与输入文件")
+        total_dur = sum(_probe_duration(x) for x in paths)
+        return CapabilityResult(req.request_id, True, output={
+            "ok": True,
+            "output_path": result,
+            "video_url": f"/inbox_file/{os.path.basename(result)}",
+            "segment_count": len(paths),
+            "total_duration": round(total_dur, 2),
+            "transition_sec": transition,
+        })
+
+    def image_to_video(self, req: CapabilityRequest) -> CapabilityResult:
+        """静帧图 → 伪视频：复用 /host/still-video 的单图链路（成片闭环用）。"""
+        import base64 as _b64
+        import os
+        import time as _time
+        import uuid as _uuid
+
+        p = req.params or {}
+        src = str(p.get("image_path") or p.get("image_url") or p.get("path") or p.get("url") or "").strip()
+        if not src:
+            return CapabilityResult(req.request_id, False, error="缺少 image_path / image_url")
+        try:
+            duration = float(p.get("duration") or 3.0)
+        except (TypeError, ValueError):
+            duration = 3.0
+        try:
+            from app.core.canvas_bridge import _image_to_still_video, canvas_inbox_dir, _safe_filename
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"图转视频依赖不可用: {e}")
+
+        local_path = ""
+        if "/inbox_file/" in src:
+            local_path = os.path.join(canvas_inbox_dir(), _safe_filename(src.split("/inbox_file/", 1)[-1]))
+        elif src.startswith("data:image/") and ";base64," in src:
+            try:
+                head, b64 = src.split(";base64,", 1)
+                ext = "png"
+                if "jpeg" in head or "jpg" in head:
+                    ext = "jpg"
+                elif "webp" in head:
+                    ext = "webp"
+                payload = _b64.b64decode(b64)
+                name = f"{int(_time.time())}_{_uuid.uuid4().hex[:8]}.{ext}"
+                dest = os.path.join(canvas_inbox_dir(), name)
+                with open(dest, "wb") as f:
+                    f.write(payload)
+                local_path = dest
+            except Exception as exc:
+                return CapabilityResult(req.request_id, False, error=f"data URL 落盘失败: {exc}")
+        else:
+            local_path = src
+
+        if not os.path.isfile(local_path):
+            return CapabilityResult(req.request_id, False, error=f"图片不存在: {local_path}")
+        ext = os.path.splitext(local_path)[1].lower()
+        if ext in (".mp4", ".mov", ".webm", ".m4v", ".mkv"):
+            return CapabilityResult(req.request_id, True, output={
+                "ok": True, "path": os.path.abspath(local_path), "kind": "video",
+            })
+        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            return CapabilityResult(req.request_id, False, error=f"不支持的图片格式: {ext}")
+        out = _image_to_still_video(local_path, duration_sec=duration)
+        if not out:
+            return CapabilityResult(req.request_id, False, error="图转视频失败")
+        return CapabilityResult(req.request_id, True, output={
+            "ok": True, "path": os.path.abspath(out), "kind": "still",
+            "video_url": f"/inbox_file/{os.path.basename(out)}", "duration": duration,
+        })
 
 
 # ────────────── 剪辑能力 handlers ──────────────
@@ -392,6 +606,90 @@ class EditorCapabilityHandlers:
             editor._refresh_preview_with_effects()
         return CapabilityResult(req.request_id, True, output={"clip_id": clip_id, **applied})
 
+    def trim_clip(self, req: CapabilityRequest) -> CapabilityResult:
+        """裁剪片段：改时长 / 入点 / 出点（走 agent_trim_clip，可撤销 + 同步 UI）。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clip_id = req.params.get("clip_id") or req.params.get("id")
+        clip = next((c for c in editor._clips if c.get("id") == clip_id), None)
+        if not clip:
+            return CapabilityResult(req.request_id, False, error=f"未找到片段 {clip_id}")
+        # 兼容面板里的几种叫法：new_duration / duration / end_time
+        duration = req.params.get("new_duration")
+        if duration is None:
+            duration = req.params.get("duration")
+        if duration is None and req.params.get("end_time") is not None:
+            try:
+                duration = float(req.params["end_time"]) - float(clip.get("start_time", 0) or 0)
+            except (TypeError, ValueError):
+                return CapabilityResult(req.request_id, False, error="end_time 参数无效")
+        res = editor.agent_trim_clip(
+            clip_id,
+            duration=duration,
+            in_point=req.params.get("in_point"),
+            out_point=req.params.get("out_point"),
+        )
+        ok = bool(isinstance(res, dict) and res.get("success"))
+        return CapabilityResult(
+            req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
+            error=None if ok else (res or {}).get("message", "裁剪失败"),
+        )
+
+    def move_clip(self, req: CapabilityRequest) -> CapabilityResult:
+        """移动片段到新时间点（走 agent_move_clip，可撤销 + 联动音画）。"""
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        clip_id = req.params.get("clip_id") or req.params.get("id")
+        if not clip_id:
+            return CapabilityResult(req.request_id, False, error="缺少 clip_id")
+        if req.params.get("new_start_time") is None:
+            return CapabilityResult(req.request_id, False, error="move_clip 需要 new_start_time（秒）")
+        res = editor.agent_move_clip(clip_id, req.params.get("new_start_time"))
+        ok = bool(isinstance(res, dict) and res.get("success"))
+        return CapabilityResult(
+            req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
+            error=None if ok else (res or {}).get("message", "移动片段失败"),
+        )
+
+    def reanchor_clips(self, req: CapabilityRequest) -> CapabilityResult:
+        """词锚定重锚：文案改动后把片段重新对齐到新台词。
+
+        **默认 dry_run=True —— 只出计划、不动时间线**。这是刻意的默认值：
+        重锚会成批挪动片段，Agent 必须先让用户看到差异清单再落地。
+        只在 ``params.dry_run=false`` 时才真正改写时间线。
+
+        参数：
+            dialogues: 新台词序列（可省略，回落 EditorModule._dialogues）
+            dry_run:   默认 true
+            threshold: 指纹相似度阈值，默认 0.75
+            spread:    落地时是否按新词区间调整时长，默认 true
+        """
+        editor = self._get_editor()
+        if editor is None:
+            return CapabilityResult(req.request_id, False, error="EditorModule 未就绪")
+        # ⚠️ 默认 True：漏传 dry_run 时宁可只出计划，绝不静默改时间线
+        dry_run = bool(req.params.get("dry_run", True))
+        dialogues = req.params.get("dialogues")
+        try:
+            threshold = float(req.params.get("threshold", 0.75))
+        except (TypeError, ValueError):
+            return CapabilityResult(req.request_id, False, error="threshold 参数无效")
+        res = editor.agent_reanchor_clips(
+            dialogues,
+            dry_run=dry_run,
+            threshold=threshold,
+            spread=bool(req.params.get("spread", True)),
+        )
+        ok = bool(isinstance(res, dict) and res.get("success"))
+        if isinstance(res, dict) and res.get("applied"):
+            ok = True
+        return CapabilityResult(
+            req.request_id, ok, output=res if isinstance(res, dict) else {"raw": res},
+            error=None if ok else (res or {}).get("message", "重锚失败"),
+        )
+
     def set_keyframes(self, req: CapabilityRequest) -> CapabilityResult:
         """批量写入关键帧（含插值/缓动），归一化字段后复用 EditorModule.add_keyframes_to_clip。"""
         editor = self._get_editor()
@@ -510,7 +808,7 @@ class ExtensionCapabilityHandlers:
         return CapabilityResult(req.request_id, False, error=f"未找到扩展: {ext_id}")
 
     def run_skill(self, req: CapabilityRequest) -> CapabilityResult:
-        """直接通过 SkillEngine 执行 Skill（含 account_skills）"""
+        """直接通过 SkillEngine 执行 Skill"""
         from app.modules.lego.skill_engine import skill_engine
         skill_id = req.params.get("skill_id")
         inputs = req.params.get("inputs") or {}
@@ -554,24 +852,6 @@ class ExtensionCapabilityHandlers:
 class WorkflowCapabilityHandlers:
     """多任务调度 handlers —— Flow/Workflow/Batch 三件套统一入口"""
 
-    def start_workflow(self, req: CapabilityRequest) -> CapabilityResult:
-        """启动全链路工作流
-
-        链路边界（见 docs/Agent诊断与优化方案.md）：
-        - 本能力走【链路 C：WorkflowManager】短剧产品流程（抓剧→剪辑→文案→发布）
-        - 素材精剪全链路为【链路 B：AgentPipelineOrchestrator】（分流→打分→脚本→精剪）
-        - 对外能力名 workflow.start 保持不变
-        """
-        from app.modules.lego.workflow_manager import WorkflowManager
-        from app.modules.lego.drama_crawler import DramaInfo
-        manager = WorkflowManager()
-        drama_data = req.params.get("drama_info", {})
-        try:
-            drama = DramaInfo(**drama_data) if isinstance(drama_data, dict) else drama_data
-            manager.start_workflow(drama)
-            return CapabilityResult(req.request_id, True, output={"status": "started"})
-        except Exception as e:
-            return CapabilityResult(req.request_id, False, error=str(e))
 
     def submit_batch_task(self, req: CapabilityRequest) -> CapabilityResult:
         """提交批量任务"""
@@ -600,22 +880,6 @@ class WorkflowCapabilityHandlers:
         return CapabilityResult(req.request_id, True, output={"task_id": task.task_id})
 
 
-# ────────────── 账号运营 handlers ──────────────
-_ACCOUNT_UNLOADED = "插件功能已卸，仅保留接口"
-
-
-class AccountCapabilityHandlers:
-    """账号运营 handlers —— 能力 id 仍注册，执行诚实失败。"""
-
-    def collect_data(self, req: CapabilityRequest) -> CapabilityResult:
-        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
-
-    def optimize_strategy(self, req: CapabilityRequest) -> CapabilityResult:
-        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
-
-    def publish(self, req: CapabilityRequest) -> CapabilityResult:
-        return CapabilityResult(req.request_id, False, error=_ACCOUNT_UNLOADED)
-
 # ────────────── Agent 全链路闭环 handlers ──────────────
 class PipelineCapabilityHandlers:
     """
@@ -637,8 +901,24 @@ class PipelineCapabilityHandlers:
         return CapabilityResult(req.request_id, True, output=result.to_dict())
 
     def generate(self, req: CapabilityRequest) -> CapabilityResult:
-        """AI 视频生成业务线：创意拆解→生成→初检→回溯闭环"""
+        """AI 视频生成业务线：创意拆解→生成→初检→回溯闭环
+
+        可选传入 ``guards``（生成质量守护上下文）→ **管线自动**在生成前注入守护约束、
+        生成后叠加守护质检（角色卡 / 道具结构 / 表情幅度 + 防漂移防畸形负面词）。
+        """
         from app.core.ai_video_generation_pipeline import ai_video_generation_pipeline
+        g = req.params.get("guards")
+        # guards="auto"（或 {"auto": true, "character_name": "林晚", ...}）
+        # → 从**角色库 / 参数自动装配**守护上下文，免去手填 {"character": {...}} 这类 JSON
+        if g == "auto" or (isinstance(g, dict) and g.get("auto")):
+            from app.core.ai.guard_pipeline import build_guards_from_context
+
+            kw = dict(g) if isinstance(g, dict) else {}
+            kw.pop("auto", None)
+            # style_dna 未显式给时用平台当风格命名空间（评分簿按它隔离学习）
+            if not kw.get("style_dna"):
+                kw["style_dna"] = req.params.get("platform", "")
+            g = build_guards_from_context(**kw)
         result = ai_video_generation_pipeline.execute(
             creative_brief=req.params.get("creative_brief", ""),
             platform=req.params.get("platform", "douyin"),
@@ -646,13 +926,97 @@ class PipelineCapabilityHandlers:
             clip_duration=float(req.params.get("clip_duration", 5.0)),
             provider=req.params.get("provider", "auto"),
             request_id=req.request_id,
+            guards=g if isinstance(g, dict) else None,
         )
         return CapabilityResult(
             req.request_id, result.success,
             output={"clips": [c.to_dict() for c in result.clips],
-                    "outline": result.outline, "error": result.error},
+                    "outline": result.outline, "error": result.error,
+                    "cost_estimate": result.cost_estimate},
             error=result.error,
         )
+
+    def quote(self, req: CapabilityRequest) -> CapabilityResult:
+        """生成前报价（P1-1）：预计花费 + 谁接单 + 配额健康 —— 只读预演，不生成。
+
+        参数（均可选）：
+            provider:        auto/seedance/cogvideo/local（默认 auto）
+            target_duration: 目标总时长（秒，默认 30）
+            clip_duration:   单段时长（秒，默认 5）
+            count:           段数（给了就直接用，否则按 target/clip 推算）
+            spec:            能力需求（如 {"first_last_frame": true}）
+        """
+        from app.core.ai.video_generation_client import video_generation_client
+
+        provider = req.params.get("provider", "auto")
+        clip_duration = float(req.params.get("clip_duration", 5.0))
+        count = req.params.get("count")
+        if not count:
+            target = float(req.params.get("target_duration", 30.0))
+            count = max(1, int(target // clip_duration))
+        q = video_generation_client.quote(
+            str(provider), count=int(count), duration=clip_duration,
+            spec=req.params.get("spec") or None)
+        return CapabilityResult(
+            req.request_id, True,
+            output={
+                "provider": q.get("provider"),
+                "count": q.get("count"),
+                "cost_estimate": q.get("cost_estimate", 0.0),
+                "currency": q.get("currency", "CNY"),
+                "price_per_clip": q.get("price_per_clip", 0.0),
+                "account_id": q.get("account_id", ""),
+                "quota_remaining": q.get("quota_remaining", 0),
+                "cloud_available": q.get("cloud_available", False),
+                "dead_providers": q.get("dead_providers", []),
+                "reason": q.get("reason", ""),
+                "note": q.get("note", ""),
+            },
+        )
+
+    def submit_pipeline(self, req: CapabilityRequest) -> CapabilityResult:
+        """全链路异步提交（P1-3）：立即返回任务号，进度可查、可取消、不阻塞。
+
+        params 与 ``pipeline.run_full`` 一致（materials/creative_brief/platform/
+        target_duration/clip_duration/provider/auto_preview_pass）。
+        提交是**启动动作**（生成线可能花钱）——Agent 侧按危险动作走确认流。
+        """
+        from app.core.ai.pipeline_jobs import submit_full_pipeline
+
+        params = {
+            "materials": req.params.get("materials", []),
+            "creative_brief": req.params.get("creative_brief", ""),
+            "platform": req.params.get("platform", "douyin"),
+            "target_duration": float(req.params.get("target_duration", 30.0)),
+            "clip_duration": float(req.params.get("clip_duration", 5.0)),
+            "provider": req.params.get("provider", "auto"),
+            "auto_preview_pass": bool(req.params.get("auto_preview_pass", False)),
+        }
+        job = submit_full_pipeline(params)
+        return CapabilityResult(req.request_id, bool(job.get("job_id")),
+                                output=job,
+                                error=None if job.get("job_id") else "任务提交失败")
+
+    def job_status(self, req: CapabilityRequest) -> CapabilityResult:
+        """管线任务状态查询（P1-3）：给 job_id 查单个（done 附完整结果 = fetch）；
+        不给则列近期管线任务 + 队列统计。只读。"""
+        from app.core.ai.pipeline_jobs import job_status as _js
+
+        jid = str(req.params.get("job_id") or "").strip()
+        out = _js(jid, limit=int(req.params.get("limit", 10) or 10))
+        return CapabilityResult(req.request_id, bool(out.get("ok")), output=out,
+                                error=None if out.get("ok") else str(out.get("message") or "任务不存在"))
+
+    def job_cancel(self, req: CapabilityRequest) -> CapabilityResult:
+        """取消管线任务（P1-3）：排队中真取消；运行中当前段跑完后生效、
+        结果丢弃不落盘；终态幂等。"""
+        from app.core.ai.pipeline_jobs import cancel_job
+
+        jid = str(req.params.get("job_id") or "").strip()
+        if not jid:
+            return CapabilityResult(req.request_id, False, error="缺少 job_id")
+        return CapabilityResult(req.request_id, True,
+                                output=cancel_job(jid, str(req.params.get("reason") or "Agent 取消")))
 
     def preview_validate(self, req: CapabilityRequest) -> CapabilityResult:
         """预览校验：片段进入剪辑模块轨道 + AI自动核验
@@ -778,6 +1142,188 @@ class PipelineCapabilityHandlers:
         return CapabilityResult(req.request_id, session.success,
                                 output=session.to_dict(), error=session.error)
 
+    # ── 生成质量守护 · 第一件：TTS 正音（治配音长文本漂移）──
+    @staticmethod
+    def _make_tts_llm():
+        """把项目 ai_engine 包装成 tts_guard 需要的 (prompt)->str 回调。
+
+        不可用时返回 None —— tts_guard 会降级为「只切段不注音」，绝不崩。
+        """
+        try:
+            from app.core.ai_engine import ai_engine
+        except Exception:
+            logger.debug("[tts_polish] ai_engine 不可用，降级为只切段", exc_info=True)
+            return None
+
+        def _call(prompt: str) -> str:
+            chunks = list(ai_engine.chat_with_fallback(
+                messages=[{"role": "user", "content": prompt}],
+                stream=False,
+            ))
+            return "".join(chunks) if chunks else ""
+
+        return _call
+
+    def tts_polish(self, req: CapabilityRequest) -> CapabilityResult:
+        """TTS 正音：长台词切段 + 多音字注音（治「长视频后面发音错/与字幕不符」）。
+
+        两道防线（本能力只出计划，effect=read，不改任何数据）：
+          · 生成前：语义切段（每段回到 TTS 稳定长度）+ 多音字注音；
+          · 生成后：传 asr_texts 时顺带跑回读质检，返回需**定向重生成**的段。
+
+        params:
+          text       台词原文（必填）
+          max_chars  每段最大字数（默认 40）
+          use_llm    是否接 LLM 做多音字消歧（默认 True；不可用时自动降级）
+          asr_texts  可选，各段 ASR 回读文本 → 触发 verify_segments
+          threshold  可选，回读相似度阈值（默认 0.9）
+        """
+        from app.core.ai.tts_guard import plan_tts, verify_segments
+
+        text = req.params.get("text", "") or ""
+        max_chars = int(req.params.get("max_chars", 40) or 40)
+        llm = self._make_tts_llm() if req.params.get("use_llm", True) else None
+
+        plan = plan_tts(text, max_chars=max_chars, llm=llm)
+
+        asr_texts = req.params.get("asr_texts")
+        if isinstance(asr_texts, list) and asr_texts and plan["segments"]:
+            originals = [s["text"] for s in plan["segments"]]
+            plan["readback"] = verify_segments(
+                [str(x) for x in asr_texts],
+                originals,
+                threshold=float(req.params.get("threshold", 0.9) or 0.9),
+            )
+
+        return CapabilityResult(
+            req.request_id, plan["ok"], output=plan,
+            error=None if plan["ok"] else "台本为空，无可切分内容",
+        )
+
+    # ── 生成质量守护 · 第二件：角色一致性锚定（治人物跨镜头漂移）──
+    def character_anchor(self, req: CapabilityRequest) -> CapabilityResult:
+        """角色一致性锚定：跨镜头特征卡 + 漂移检测（治「人物形象漂移」）。
+
+        只出计划（effect=read），不改任何数据：
+          · 传 character          → 建立/复用锚定卡（特征指纹 + 防漂移负面词）
+          · 再传 shot_prompts     → 校验各镜头 prompt 是否漏拼角色强特征
+          · 传 anchor + character → 跑漂移检测（角色库被改动后定位变了哪几项）
+
+        params:
+          character        角色条目 dict（name/gender/appearance/… 对齐 CHARACTER_FIELD_SCHEMA）
+          prompt           可选，已派生的角色 prompt（优先复用，保持派生单一来源）
+          reference_image  可选，定妆照路径
+          shot_prompts     可选，各镜头生成 prompt 列表 → 触发漏拼校验
+          anchor           可选，已有锚定卡 → 与 character 做漂移比对
+        """
+        from app.core.ai.character_anchor import plan_anchor, plan_multi_anchor
+
+        raw_chars = req.params.get("characters")
+        # 多角色批量锚定（传 characters 列表时走批量路径：一次建多卡 + 跨角色冲突检查）
+        if isinstance(raw_chars, list) and raw_chars:
+            prompts = req.params.get("prompts")
+            result = plan_multi_anchor(
+                raw_chars, prompts=prompts if isinstance(prompts, dict) else None)
+            return CapabilityResult(req.request_id, result["ok"], output=result)
+
+        raw_char = req.params.get("character")
+        shot_prompts = req.params.get("shot_prompts")
+        raw_anchor = req.params.get("anchor")
+        result = plan_anchor(
+            raw_char if isinstance(raw_char, dict) else None,
+            prompt=str(req.params.get("prompt") or ""),
+            reference_image=str(req.params.get("reference_image") or ""),
+            shot_prompts=list(shot_prompts) if isinstance(shot_prompts, list) else None,
+            anchor=raw_anchor if isinstance(raw_anchor, dict) else None,
+        )
+        return CapabilityResult(
+            req.request_id, result["ok"], output=result,
+            error=None if result["ok"] else result["message"],
+        )
+
+    # ── 生成质量守护 · 第三件：表情幅度守护（治表情夸张）──
+    def expression_clamp(self, req: CapabilityRequest) -> CapabilityResult:
+        """表情幅度守护：权重钳制 + 帧间限幅 + 幅度质检（治「鼓腮等表情过于剧烈」）。
+
+        只出计划（effect=read），不改任何数据：
+          · 传 frames     → 生成前钳制（绝对幅度 + 帧间跳变）+ 生成后质检
+          · 只传 emotion  → 仅出提示词约束（幅度克制描述 + 防夸张负面词）
+
+        params:
+          frames     可选，表情参数帧序列 [{arkit维度: 0~1}, …]（「鼓腮」= cheekPuff）
+          emotion    可选，当前情绪（写进提示词片段）
+          profile    可选，subtle / natural / intense（默认 natural）
+          overrides  可选，覆盖个别维度上限 {维度: 上限}
+          max_delta  可选，帧间最大变化（默认 0.25）
+        """
+        from app.core.ai.expression_guard import plan_expression
+
+        frames = req.params.get("frames")
+        ov = req.params.get("overrides")
+        result = plan_expression(
+            list(frames) if isinstance(frames, list) else None,
+            emotion=str(req.params.get("emotion") or ""),
+            profile=str(req.params.get("profile") or "natural"),
+            overrides=ov if isinstance(ov, dict) else None,
+            max_delta=float(req.params.get("max_delta", 0.25) or 0.25),
+            sparse=bool(req.params.get("sparse", False)),
+            sparse_min_delta=float(req.params.get("sparse_min_delta", 0.03) or 0.03),
+        )
+        return CapabilityResult(req.request_id, result["ok"], output=result)
+
+    # ── 生成质量守护 · 第四件：手持道具守护（治武器结构畸形）──
+    def prop_consistency(self, req: CapabilityRequest) -> CapabilityResult:
+        """手持道具守护：结构约束 + 握持描述 + 道具漂移检测（治「武器结构畸形」）。
+
+        实图诊断：手持长杆武器在握持处长出「一横一竖」的**三通 / T 形交叉结构**，
+        本应是连续贯通、无分支的长杆 ⇒ 核心是**结构拓扑约束**，非握持一致性。
+
+        只出计划（effect=read），不改任何数据。params:
+          prop             可选，道具条目 dict（prop_type/prop_color/prop_material/…）
+          prop_type        可选，道具类型键（spear/staff/sword/greatsword/axe/bow/staff_magic）
+          grip             可选，握法（single_hand/two_hand/raised/shouldered/pointing）
+          hand             可选，right/left/both
+          custom_structure 可选，自定义结构描述（覆盖模板）
+          anchor           可选，已有道具锚定卡 → 与 prop 做漂移比对
+          hand_points      可选，21 点手部关键点 → 跑合理性规则
+        """
+        from app.core.ai.prop_guard import plan_prop
+
+        prop = req.params.get("prop")
+        anchor = req.params.get("anchor")
+        hp = req.params.get("hand_points")
+        result = plan_prop(
+            prop if isinstance(prop, dict) else None,
+            prop_type=str(req.params.get("prop_type") or ""),
+            grip=str(req.params.get("grip") or "single_hand"),
+            hand=str(req.params.get("hand") or "right"),
+            custom_structure=str(req.params.get("custom_structure") or ""),
+            off_prop_type=str(req.params.get("off_prop_type") or ""),
+            anchor=anchor if isinstance(anchor, dict) else None,
+            hand_points=list(hp) if isinstance(hp, list) else None,
+        )
+        return CapabilityResult(req.request_id, result["ok"], output=result)
+
+    # ── 生成质量守护 · 总入口（多守护 + 全量负面词）──
+    def guard_all(self, req: CapabilityRequest) -> CapabilityResult:
+        """生成质量守护总入口：一次跑多个守护 + 合并全量负面词。
+
+        只出计划（effect=read）。params:
+          kinds   可选，要跑的守护列表（tts/character/expression/prop；缺省全跑）
+          params  可选，{kind: {该守护入参}}，如
+                  {"tts":{"text":"…"},"prop":{"prop_type":"spear","grip":"two_hand"}}
+          不传 params 时仍会返回**全量负面词**（生成前一次拼齐约束）。
+        """
+        from app.core.ai.guards import plan_guards
+
+        kinds = req.params.get("kinds")
+        p = req.params.get("params")
+        result = plan_guards(
+            list(kinds) if isinstance(kinds, list) else None,
+            params=p if isinstance(p, dict) else None,
+        )
+        return CapabilityResult(req.request_id, result["ok"], output=result)
+
 
 # ────────────── 注册入口 ──────────────
 def register_builtin_handlers(dispatcher: CapabilityDispatcher,
@@ -797,7 +1343,6 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     model_handlers = ModelCapabilityHandlers()
     editor_handlers = EditorCapabilityHandlers(editor_module_ref)
     workflow_handlers = WorkflowCapabilityHandlers()
-    account_handlers = AccountCapabilityHandlers()
     pipeline_handlers = PipelineCapabilityHandlers(editor_module_ref)
     canvas_handlers = CanvasCapabilityHandlers()
 
@@ -824,6 +1369,25 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
     dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,
                         canvas_handlers.list_actions, "输出统一画布动作清单（单一事实来源）")
+    # 画布生成（Agent 亲手驱动后端生成链路）
+    dispatcher.register("canvas.generate_image", CapabilityCategory.CANVAS,
+                        canvas_handlers.generate_image, "画布生图（模型广场 AIGC 渠道）")
+    dispatcher.register("canvas.generate_video", CapabilityCategory.CANVAS,
+                        canvas_handlers.generate_video, "画布生视频（模型广场 AIGC 渠道）")
+    dispatcher.register("canvas.comfyui_run", CapabilityCategory.CANVAS,
+                        canvas_handlers.comfyui_run, "运行 ComfyUI 工作流（本地引擎）")
+    dispatcher.register("canvas.concat_videos", CapabilityCategory.CANVAS,
+                        canvas_handlers.concat_videos, "拼接多段视频成片（FFmpeg）")
+    dispatcher.register("canvas.image_to_video", CapabilityCategory.CANVAS,
+                        canvas_handlers.image_to_video, "静帧图转伪视频（成片闭环用）")
+    # 画布节点级操作（canvas_tools 后端化）：由 _CANVAS_ACTION_ROWS 派生，统一走 dispatcher。
+    # 节点状态在前端，handler 统一是 canvas_handlers.node_action（经 task.create 桥接回执）。
+    from app.core.agent_action_registry import canvas_node_capabilities as _canvas_node_caps
+    for _c in _canvas_node_caps():
+        dispatcher.register(
+            _c["capability_id"], CapabilityCategory.CANVAS,
+            canvas_handlers.node_action, _c["description"],
+        )
 
     # 剪辑模块
     dispatcher.register("editor.split_clip", CapabilityCategory.EDITOR,
@@ -844,32 +1408,30 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         editor_handlers.set_keyframes, "批量写入关键帧（含插值/缓动）")
     dispatcher.register("editor.ripple_delete_range", CapabilityCategory.EDITOR,
                         editor_handlers.ripple_delete_range, "波纹删除时间线区间")
+    dispatcher.register("editor.trim_clip", CapabilityCategory.EDITOR,
+                        editor_handlers.trim_clip, "裁剪片段（时长/入点/出点，可撤销）")
+    dispatcher.register("editor.move_clip", CapabilityCategory.EDITOR,
+                        editor_handlers.move_clip, "移动片段到新时间点（可撤销）")
     dispatcher.register("editor.suggest_cleanup", CapabilityCategory.EDITOR,
                         editor_handlers.suggest_cleanup, "建议去水词/静音并确认后执行")
     dispatcher.register("editor.send_selected_to_canvas", CapabilityCategory.EDITOR,
                         editor_handlers.send_selected_to_canvas, "选中片段推到 AI 画布")
     dispatcher.register("editor.suggest_canvas_roundtrip", CapabilityCategory.EDITOR,
                         editor_handlers.suggest_canvas_roundtrip, "建议哪些片送到画布做变体")
+    dispatcher.register("editor.reanchor_clips", CapabilityCategory.EDITOR,
+                        editor_handlers.reanchor_clips, "按新台词重锚片段（默认只出计划）")
 
     # 多任务调度
-    dispatcher.register("workflow.start", CapabilityCategory.WORKFLOW,
-                        workflow_handlers.start_workflow, "启动全链路工作流")
     dispatcher.register("workflow.submit_batch", CapabilityCategory.WORKFLOW,
                         workflow_handlers.submit_batch_task, "提交批量任务")
-
-    # 账号运营
-    dispatcher.register("account.collect_data", CapabilityCategory.ACCOUNT,
-                        account_handlers.collect_data, "采集账号数据")
-    dispatcher.register("account.optimize_strategy", CapabilityCategory.ACCOUNT,
-                        account_handlers.optimize_strategy, "生成优化建议")
-    dispatcher.register("account.publish", CapabilityCategory.ACCOUNT,
-                        account_handlers.publish, "发布作品")
 
     # Agent 全链路闭环
     dispatcher.register("pipeline.route", CapabilityCategory.PIPELINE,
                         pipeline_handlers.route, "业务分流：AI生成/素材剪辑")
     dispatcher.register("pipeline.generate", CapabilityCategory.PIPELINE,
                         pipeline_handlers.generate, "AI视频生成业务线")
+    dispatcher.register("pipeline.quote", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.quote, "生成前报价：预计花费+可用渠道+配额健康")
     dispatcher.register("pipeline.preview_validate", CapabilityCategory.PIPELINE,
                         pipeline_handlers.preview_validate, "预览校验：轨道排布+画面质检")
     dispatcher.register("pipeline.regenerate_clip", CapabilityCategory.PIPELINE,
@@ -882,25 +1444,128 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         pipeline_handlers.execute_editing, "精修剪辑+成片输出")
     dispatcher.register("pipeline.run_full", CapabilityCategory.PIPELINE,
                         pipeline_handlers.run_full, "全链路一键执行")
+    dispatcher.register("pipeline.submit", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.submit_pipeline,
+                        "全链路异步提交：立即返回任务号，进度可查、可取消")
+    dispatcher.register("pipeline.job_status", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.job_status,
+                        "管线任务状态/进度/结果查询（无任务号则列近期任务）")
+    dispatcher.register("pipeline.job_cancel", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.job_cancel,
+                        "取消管线任务：排队真取消；运行中段间生效、结果丢弃")
+    dispatcher.register("pipeline.tts_polish", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.tts_polish,
+                        "TTS 正音：长台词语义切段 + 多音字注音")
+    dispatcher.register("pipeline.character_anchor", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.character_anchor,
+                        "角色一致性锚定：跨镜头特征卡 + 漂移检测")
+    dispatcher.register("pipeline.expression_clamp", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.expression_clamp,
+                        "表情幅度守护：权重钳制 + 帧间限幅 + 幅度质检")
+    dispatcher.register("pipeline.prop_consistency", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.prop_consistency,
+                        "手持道具守护：结构约束 + 握持描述 + 道具漂移检测")
+    dispatcher.register("pipeline.guard_all", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.guard_all,
+                        "生成质量守护总入口：多守护 + 全量负面词")
 
     logger.info("[capability_handlers] 已注册内置能力（含画布）")
 
-    # 阶段 1：对话 action → capability 映射一致性（仅告警，不阻断启动）
+    # ═══════════════════════════════════════════════════════════════
+    # 启动自检（三项）——2026-09-19 加固
+    #
+    # 原实现的问题：三处自检全部只 logger.warning，且**自身异常降级为 logger.debug**，
+    # 结果「守卫自己挂了也无人知晓」——正是它要防的那类静默缺陷（见
+    # docs/_reports/2026-09-19-全库代码评价报告.md P1-3）。
+    #
+    # 现在：① 问题清单汇总成一条可见摘要（含计数，便于一眼扫到）
+    #       ② 守卫自身异常升为 warning 并带 exc_info，不再吞
+    #       ③ 结果写入模块级 _STARTUP_SELFCHECK，供启动面板 / _verify 脚本读取
+    # ═══════════════════════════════════════════════════════════════
+    _selfcheck = _run_startup_selfcheck(dispatcher)
+    globals()["_STARTUP_SELFCHECK"] = _selfcheck
+
+    if _selfcheck["total"]:
+        logger.warning(
+            "[capability_handlers] 启动自检发现 %d 项不一致（目录 %d / action映射 %d / 脑同步 %d），"
+            "详见下方逐条告警；聚合结果见 capability_handlers._STARTUP_SELFCHECK",
+            _selfcheck["total"],
+            len(_selfcheck["catalog"]),
+            len(_selfcheck["action_map"]),
+            len(_selfcheck["brain_sync"]),
+        )
+
+
+def get_startup_selfcheck() -> Dict[str, Any]:
+    """返回最近一次启动自检的聚合结果（供启动面板 / 回归脚本读取）。
+
+    结构::
+
+        {
+          "catalog":     [...],   # 目录 ↔ 注册 双向不一致
+          "action_map":  [...],   # 对话 action → capability 映射失效
+          "brain_sync":  [...],   # AgentBrain 同步问题
+          "guard_errors":[...],   # 守卫自身异常（原被 debug 吞掉）
+          "total": int,
+        }
+
+    注意：``register_builtin_handlers`` 未被调用时返回空结构，不报错。
+    """
+    return globals().get("_STARTUP_SELFCHECK") or {
+        "catalog": [], "action_map": [], "brain_sync": [],
+        "guard_errors": [], "total": 0,
+    }
+
+
+def _run_startup_selfcheck(dispatcher) -> Dict[str, Any]:
+    """执行三项启动自检，返回聚合结果；守卫自身异常不静默。"""
+    result: Dict[str, Any] = {
+        "catalog": [], "action_map": [], "brain_sync": [],
+        "guard_errors": [], "total": 0,
+    }
+
+    # ── ① 目录一致性：目录 ↔ 真实注册 双向对齐 ──
+    # 避免再次出现 editor.inspect_media 那种「注册了却漏 effect」的静默缺陷。
+    try:
+        from app.core.agent_capability_catalog import verify_catalog_consistency
+
+        registered_ids = {e["capability_id"] for e in dispatcher.list_capabilities()}
+        for problem in verify_catalog_consistency(registered_ids):
+            result["catalog"].append(problem)
+            logger.warning("[capability_catalog] 目录不一致：%s", problem)
+    except Exception as e:
+        msg = "一致性守卫自身失败: %r" % (e,)
+        result["guard_errors"].append(msg)
+        logger.warning("[capability_catalog] %s", msg, exc_info=True)
+
+    # ── ② 对话 action → capability 映射一致性 ──
     try:
         from app.core.agent_action_registry import ACTION_TO_CAPABILITY
+
         known = {e["capability_id"] for e in dispatcher.list_capabilities()}
         for action, cap_id in ACTION_TO_CAPABILITY.items():
             if cap_id not in known:
-                logger.warning(
-                    "[capability_handlers] 对话 action %r 映射到未注册 capability %r",
-                    action, cap_id,
-                )
+                problem = "对话 action %r 映射到未注册 capability %r" % (action, cap_id)
+                result["action_map"].append(problem)
+                logger.warning("[capability_handlers] %s", problem)
     except Exception as e:
-        logger.debug("[capability_handlers] action↔capability 自检跳过: %s", e)
+        msg = "action↔capability 自检自身失败: %r" % (e,)
+        result["guard_errors"].append(msg)
+        logger.warning("[capability_handlers] %s", msg, exc_info=True)
 
-    # ── 左右脑神经链接：让 AgentBrain 感知所有已注册 capability ──
+    # ── ③ 左右脑神经链接：让 AgentBrain 感知所有已注册 capability ──
+    # 脑同步失败意味着 Agent 神经元表与实际能力脱节，不能再降为 debug。
     try:
         from app.core.agent_brain import agent_brain
+
         agent_brain.sync_from_dispatcher(dispatcher)
     except Exception as e:
-        logger.debug(f"[AgentBrain] 同步 dispatcher 失败: {e}")
+        msg = "AgentBrain 同步 dispatcher 失败: %r" % (e,)
+        result["brain_sync"].append(msg)
+        logger.warning("[AgentBrain] %s", msg, exc_info=True)
+
+    result["total"] = (
+        len(result["catalog"]) + len(result["action_map"])
+        + len(result["brain_sync"]) + len(result["guard_errors"])
+    )
+    return result

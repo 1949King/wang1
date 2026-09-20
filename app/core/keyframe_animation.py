@@ -280,36 +280,6 @@ class KeyframeAnimation:
         self._cache.clear()
         return new_kfs
 
-    def get_value(self, time_sec: float) -> float:
-        """获取指定时间点的插值"""
-        if not self._keyframes:
-            return 0.0
-        self._sort()
-        cache_key = round(time_sec, 2)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        if len(self._keyframes) == 1:
-            return float(self._keyframes[0].value)
-        if time_sec <= self._keyframes[0].time:
-            return float(self._keyframes[0].value)
-        if time_sec >= self._keyframes[-1].time:
-            return float(self._keyframes[-1].value)
-        right_idx = 1
-        while right_idx < len(self._keyframes) and self._keyframes[right_idx].time < time_sec:
-            right_idx += 1
-        kf0 = self._keyframes[right_idx - 1]
-        kf1 = self._keyframes[right_idx]
-        duration = kf1.time - kf0.time
-        if duration <= 0:
-            return float(kf1.value)
-        t = (time_sec - kf0.time) / duration
-        t = self._apply_easing(t, kf0.easing if kf0 != self._keyframes[0] else kf1.easing)
-        v0 = float(kf0.value)
-        v1 = float(kf1.value)
-        result = v0 + (v1 - v0) * t
-        self._cache[cache_key] = result
-        return result
-
     def _apply_easing(self, t: float, easing: EasingType) -> float:
         t = max(0.0, min(1.0, t))
         if easing == EasingType.LINEAR:

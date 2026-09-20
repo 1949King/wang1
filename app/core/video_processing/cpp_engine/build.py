@@ -2,6 +2,11 @@ import os
 import subprocess
 import sys
 import shutil
+import logging
+
+# ⚠️ logger 必须在使用之前定义：本脚本从第 1 行日志起就要用它。
+# （历史 Bug：logger 曾被错放在文件中部 "Step 4" 处，导致整个脚本一执行即 NameError）
+logger = logging.getLogger("AI短剧编辑器.core.video_processing.cpp_engine.build")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.path.join(SCRIPT_DIR, 'build')
@@ -67,8 +72,6 @@ if result.returncode != 0:
 # Step 4: Find and copy output
 logger.info('\n[4/4] Looking for output...')
 import glob
-import logging
-logger = logging.getLogger("AI短剧编辑器.core.video_processing.cpp_engine.build")
 
 pyd_files = glob.glob(os.path.join(BUILD_DIR, 'Release', '*.pyd'))
 logger.info(f'  Found {len(pyd_files)} .pyd files in Release/')

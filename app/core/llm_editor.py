@@ -747,41 +747,37 @@ class LLMEditor:
             return {"action": cmd.action, "success": True, "message": f"{p.get('track_type', 'video')} 轨道已添加"}
 
         elif cmd.action == "add_transition":
-            # 对接 TransitionManager 真实添加转场
-            from app.core.transition_manager import TransitionManager
+            # 对接 transition_plugin_registry 真实写入片段转场元数据
             transition_type = p.get("transition_type", "fade")
             duration = p.get("duration", 0.5)
+            curve = p.get("curve", "线性")
+            position = p.get("position", "end")
             tid, cid = _resolve_clip(clip_index)
-            if cid and cid != "all":
-                # 查找同一轨道中的下一个相邻片段
-                tracks_data = tm.get_timeline(timeline_id)
-                next_cid = None
-                if tracks_data:
-                    all_clips = []
-                    for t_id, t_data in tracks_data.get("tracks", {}).items():
-                        for clip in t_data.get("clips", []):
-                            all_clips.append((t_id, clip.get("id")))
-                    for i, (_, cur_cid) in enumerate(all_clips):
-                        if cur_cid == cid and i + 1 < len(all_clips):
-                            next_cid = all_clips[i + 1][1]
-                            break
-                if next_cid:
-                    tmgr = TransitionManager()
-                    try:
-                        instance = tmgr.create_transition_instance(transition_type, {"duration": duration})
-                    except (ValueError, KeyError):
-                        instance = {
-                            "id": f"transition_{abs(hash(transition_type))}",
-                            "transition_id": transition_type,
-                            "name": transition_type,
-                            "parameters": {"duration": duration},
-                        }
-                    tmgr.apply_transition(cid, next_cid, instance)
-                    return {"action": cmd.action, "success": True, "message": f"转场 {transition_type} ({duration}s) 已添加"}
-                else:
-                    return {"action": cmd.action, "success": False, "message": "未找到相邻片段，转场需要两个相邻片段"}
-            else:
+            if not cid or cid == "all":
                 return {"action": cmd.action, "success": False, "message": "无法解析目标片段，请指定片段序号"}
+            clip = tm.get_clip(timeline_id, cid)
+            if not clip:
+                return {"action": cmd.action, "success": False, "message": "未找到目标片段"}
+            # 解析 plugin_id（对齐预览双帧混合与导出 xfade 语义）
+            plugin_id = None
+            try:
+                from app.core.transition_plugin_registry import resolve_plugin_id
+                plugin_id = resolve_plugin_id(transition_type)
+            except Exception:
+                plugin_id = None
+            transition = {
+                "type": transition_type,
+                "plugin_id": plugin_id or transition_type,
+                "duration": max(0.1, float(duration)),
+                "position": position or "end",
+                "curve": curve or "线性",
+            }
+            transitions = list(clip.get("transitions") or [])
+            if not isinstance(transitions, list):
+                transitions = []
+            transitions.append(transition)
+            tm.update_clip(timeline_id, cid, transition=transition, transitions=transitions)
+            return {"action": cmd.action, "success": True, "message": f"转场 {transition_type} ({duration}s) 已添加"}
 
         elif cmd.action == "add_effect":
             # 对接 EffectManager 真实应用特效

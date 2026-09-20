@@ -395,12 +395,15 @@ class AIVoiceGenerator:
                        voice_profile_id: str = "", **kwargs) -> Dict[str, Any]:
         """适配 AIEngine TTS：生成并可选写盘。
 
+        传 ``guard=True`` 时启用 **TTS 正音守护**（V4.33.5）：长台词先**切段**
+        （每段回到 TTS 稳定长度）再逐段合成、拼接 —— 治「长片段后面发音错 / 与字幕不符」。
+        默认关（``guard`` 缺省 False），**行为与改造前逐字一致**。
+
         Returns:
-            {"success": bool, "audio_path": str, "error": str}
+            {"success": bool, "audio_path": str, "error": str, "guarded": bool, "segments": int}
         """
         import os
         import tempfile
-        import wave
 
         if not (text or "").strip():
             return {"success": False, "error": "文本为空"}
@@ -413,6 +416,13 @@ class AIVoiceGenerator:
                     break
             if not profile_id and self._voice_profiles:
                 profile_id = next(iter(self._voice_profiles))
+
+        # ── TTS 正音守护（可选）：长台词分段合成 ──
+        if kwargs.get("guard"):
+            guarded = self._generate_audio_guarded(
+                text, output_path=output_path, voice_profile_id=profile_id, **kwargs)
+            if guarded is not None:      # None = 无需分段（短句），继续走原路径
+                return guarded
 
         request = VoiceGenerationRequest(
             text=text.strip(),
@@ -433,19 +443,95 @@ class AIVoiceGenerator:
             fd, path = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
 
+        err = self._write_wav(path, result.audio_data, result.sample_rate)
+        if err:
+            return {"success": False, "error": f"写音频失败: {err}"}
+        return {"success": True, "audio_path": path, "guarded": False}
+
+    @staticmethod
+    def _write_wav(path: str, audio_data: Any, sample_rate: int = 22050) -> Optional[str]:
+        """把 float32 音频写成 16bit 单声道 wav。
+
+        **返回 None 表示成功**，否则返回错误信息（便于调用方原样透出原因）。
+        """
+        import os
+        import wave
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            pcm = np.asarray(result.audio_data, dtype=np.float32)
+            pcm = np.asarray(audio_data, dtype=np.float32)
             pcm = np.clip(pcm, -1.0, 1.0)
             int16 = (pcm * 32767.0).astype(np.int16)
             with wave.open(path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
-                wf.setframerate(int(result.sample_rate or 22050))
+                wf.setframerate(int(sample_rate or 22050))
                 wf.writeframes(int16.tobytes())
-            return {"success": True, "audio_path": path}
+            return None
         except Exception as e:
-            return {"success": False, "error": f"写音频失败: {e}"}
+            return str(e)
+
+    def _generate_audio_guarded(self, text: str, *, output_path: str = "",
+                                voice_profile_id: str = "",
+                                **kwargs) -> Optional[Dict[str, Any]]:
+        """**TTS 正音守护**：长台词分段合成再拼接（V4.33.5）。
+
+        为什么分段：AI 配音在**长片段**里会「前面正常、后面发音错 / 与字幕不符」——
+        根因是长文本 TTS 注意力漂移（见 `app/core/ai/tts_guard.py` docstring）。
+        每段回到「一句话」的长度即可消除，而**不必换 TTS 引擎**。
+
+        ⚠️ **只切段、不喂 SSML 注音**：现有本地 TTS（gTTS / Coqui）不支持 SSML，
+        喂进去会把 ``<phoneme>`` 标签当文字念出来。注音要等接入支持 SSML 的后端
+        （如 edge-tts 的 SSML 模式）再启用 —— 宁可不注音，也不要念出标签。
+
+        Returns:
+            ``None`` → 无需分段（短句），调用方走原路径；
+            ``dict`` → 分段结果（成功含 ``audio_path`` / ``segments``；失败含 ``error``）。
+        """
+        import os
+        import tempfile
+
+        from app.core.ai.tts_guard import plan_tts
+
+        try:
+            max_chars = int(kwargs.get("guard_max_chars") or 40)
+        except (TypeError, ValueError):
+            max_chars = 40
+        # llm=None：此处不做多音字注音（见上方 SSML 说明），只借 TTS 守护的**切段**能力
+        plan = plan_tts(text, max_chars=max_chars, llm=None)
+        segs = [s for s in (plan.get("segments") or []) if str(s.get("text") or "").strip()]
+        if len(segs) <= 1:
+            return None
+
+        parts: List[Any] = []
+        for s in segs:
+            req = VoiceGenerationRequest(
+                text=str(s["text"]),
+                voice_profile_id=voice_profile_id,
+                speed=float(kwargs.get("rate", kwargs.get("speed", 1.0)) or 1.0),
+                volume=float(kwargs.get("volume", 1.0) or 1.0),
+                language=str(kwargs.get("language", "zh") or "zh"),
+            )
+            r = self.generate_voice(req)
+            if not r.success or r.audio_data is None:
+                idx = int(s.get("index", 0)) + 1
+                return {"success": False, "guarded": True, "segments": len(segs),
+                        "error": f"第 {idx}/{len(segs)} 段合成失败：{r.error_message or '未知原因'}"}
+            parts.append(np.asarray(r.audio_data, dtype=np.float32))
+
+        if not parts:
+            return {"success": False, "guarded": True, "segments": 0, "error": "分段合成结果为空"}
+        merged = np.concatenate(parts)
+
+        path = (output_path or "").strip()
+        if not path:
+            fd, path = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+        prof = self._voice_profiles.get(voice_profile_id)
+        err = self._write_wav(path, merged, getattr(prof, "sample_rate", 22050) or 22050)
+        if err:
+            return {"success": False, "guarded": True, "segments": len(segs),
+                    "error": f"写音频失败: {err}"}
+        return {"success": True, "audio_path": path, "guarded": True, "segments": len(segs)}
     
     def clear_results(self):
         """清除生成结果"""

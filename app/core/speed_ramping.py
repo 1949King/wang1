@@ -397,7 +397,9 @@ def source_time_for_clip_at_timeline(clip: Dict[str, Any], timeline_pos: float) 
         try:
             ramp = SpeedRamp.from_dict(ramp_raw)
             if ramp.keyframes:
-                return max(0.0, float(ramp.get_source_time(local)))
+                # 2026-09-13 修复：ramp 关键帧时间轴是「源文件绝对时间」，
+                # 片段裁剪（in_point>0）时源时间必须补上裁剪偏移，否则预览取帧回到源文件 0 秒
+                return max(0.0, in_p + float(ramp.get_source_time(local)))
         except Exception as e:
             logger.debug("speed_ramp 源时间映射失败，回退常数 speed: %s", e)
     speed = max(0.05, float((clip or {}).get("speed", 1.0) or 1.0))
@@ -411,13 +413,15 @@ def instant_speed_for_clip_at_timeline(clip: Dict[str, Any], timeline_pos: float
     有 speed_ramp 时：取映射后的源时间上的 get_speed_at；否则用 clip["speed"]。
     """
     st = float((clip or {}).get("start_time", 0) or 0)
+    in_p = float((clip or {}).get("in_point", 0) or 0)
     local = max(0.0, float(timeline_pos) - st)
     ramp_raw = (clip or {}).get("speed_ramp")
     if isinstance(ramp_raw, dict) and ramp_raw.get("enabled") and ramp_raw.get("keyframes"):
         try:
             ramp = SpeedRamp.from_dict(ramp_raw)
             if ramp.keyframes:
-                src_t = float(ramp.get_source_time(local))
+                # 2026-09-13 修复：与源时间映射同根因，速度采样点同样要补 in_point 偏移
+                src_t = in_p + float(ramp.get_source_time(local))
                 return max(0.05, float(ramp.get_speed_at(src_t)))
         except Exception as e:
             logger.debug("speed_ramp 瞬时倍率失败，回退常数 speed: %s", e)

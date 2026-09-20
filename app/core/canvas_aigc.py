@@ -10,6 +10,8 @@ canvas_bridge.py，并通过 re-export 引用本模块。
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
 import json
 import logging
 import math
@@ -17,9 +19,22 @@ import os
 import re
 import shutil
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
+
+# 取消感知的 urlopen：任务线程内会把响应登记到取消令牌，取消即可中断在途请求。
+# 非任务线程（旧同步路径）行为与 urllib.request.urlopen 完全一致。
+try:
+    from app.core.canvas_gen_jobs import open_url as _open_url_cancellable
+except ImportError:  # 兼容扁平导入（scripts/ 直跑）
+    try:
+        from canvas_gen_jobs import open_url as _open_url_cancellable  # type: ignore
+    except ImportError:  # 兜底：退回原生 urlopen
+        import urllib.request as _urllib_request
+
+        def _open_url_cancellable(req: Any, timeout: float, **kw: Any) -> Any:
+            return _urllib_request.urlopen(req, timeout=timeout, **kw)
 
 # 与 canvas_bridge.DEFAULT_PORT 保持一致（stage3d-core 冻结：端口 18765 不得更改）
 DEFAULT_PORT = 18765
@@ -77,15 +92,226 @@ IMAGE_KEYWORDS = (
 )
 
 
+# ───────────────────── 生成能力常量（收敛散落的能力魔法字符串） ─────────────────────
+CAPABILITY_TEXT = "text"
+CAPABILITY_IMAGE = "image"
+CAPABILITY_VIDEO = "video"
+CAPABILITY_AUDIO = "audio"
+CAPABILITY_MUSIC = "music"
+ALL_CAPABILITIES = (
+    CAPABILITY_TEXT,
+    CAPABILITY_IMAGE,
+    CAPABILITY_VIDEO,
+    CAPABILITY_AUDIO,
+    CAPABILITY_MUSIC,
+)
+
+
 def guess_capability(name: str) -> str:
+    """按模型名关键词猜测生成能力（text/image/video/audio）。
+
+    仅作「模型名 → 能力」的启发式兜底；AIGC 目录里显式 capability（含 music）优先于
+    本函数返回值（见 :func:`build_host_ai_config_patch` 的 ``_merge_models``）。"""
     value = (name or "").lower()
     if any(k in value for k in VIDEO_KEYWORDS):
-        return "video"
+        return CAPABILITY_VIDEO
     if any(k in value for k in AUDIO_KEYWORDS):
-        return "audio"
+        return CAPABILITY_AUDIO
     if any(k in value for k in IMAGE_KEYWORDS):
-        return "image"
-    return "text"
+        return CAPABILITY_IMAGE
+    return CAPABILITY_TEXT
+
+
+class LocalGenerationBackend(ABC):
+    """本地生成后端统一抽象。
+
+    统一「本地推理」后端的能力声明、可用性探测与生成分派，取代 generate_* 里各自
+    硬编码的本地回退。约束：
+      - 统一的是「能力声明 + 可用性 + 分派」；各后端返回结构保留原约定
+        （视频 {ok,...} / 音频 {success,...}），调用方读取字段不变，避免破坏行为。
+      - comfy_provider（ComfyUI 工作流引擎，走 /host/comfy/*）与 neural_engine
+        （剪辑特效 ONNX/Torch 推理，走特效插件）属不同域，不纳入本抽象。
+    """
+
+    backend_id: str = ""
+    capabilities: Tuple[str, ...] = ()
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """后端是否可用（依赖可导入、权重/引擎可探测等）。"""
+
+    @abstractmethod
+    def generate(self, capability: str, **params: Any) -> Dict[str, Any]:
+        """按能力执行本地生成，返回 {ok|success, ...}（字段约定见各实现）。"""
+
+
+class LocalVideoInferBackend(LocalGenerationBackend):
+    """本地开源视频模型推理后端（local_video_infer.generate_video_local）。"""
+
+    backend_id = "local_video_infer"
+    capabilities = (CAPABILITY_VIDEO,)
+
+    @staticmethod
+    def _import_fn() -> Optional[Any]:
+        try:
+            from app.core.local_video_infer import generate_video_local
+        except ImportError:
+            try:
+                from core.local_video_infer import generate_video_local  # type: ignore
+            except ImportError:
+                return None
+        return generate_video_local
+
+    def is_available(self) -> bool:
+        return self._import_fn() is not None
+
+    def generate(self, capability: str, **params: Any) -> Dict[str, Any]:
+        fn = self._import_fn()
+        if fn is None:
+            return {
+                "ok": False,
+                "message": "本地推理模块 local_video_infer.py 不可用，请检查文件是否存在",
+            }
+        return fn(**params)
+
+
+class LocalVoiceBackend(LocalGenerationBackend):
+    """本地 TTS 后端（voice_generator.VoiceGenerator）。音乐生成本地后端暂缺（诚实缺口）。"""
+
+    backend_id = "local_voice"
+    capabilities = (CAPABILITY_AUDIO,)
+
+    def is_available(self) -> bool:
+        try:
+            from app.core.voice_generator import VoiceGenerator
+        except ImportError:
+            try:
+                from core.voice_generator import VoiceGenerator  # type: ignore
+            except ImportError:
+                return False
+        return True
+
+    def generate(self, capability: str, **params: Any) -> Dict[str, Any]:
+        text = str(params.get("text") or params.get("prompt") or "")
+        output_path = str(params.get("output_path") or "")
+        try:
+            from app.core.voice_generator import VoiceGenerator
+        except ImportError:
+            from core.voice_generator import VoiceGenerator  # type: ignore
+        # guard=True：长台词自动**分段合成**（治「长片段后面发音错 / 与字幕不符」，见 app/core/ai/tts_guard.py）；
+        # 短句（≤ guard_max_chars）不分段、走原路径，零影响。
+        return VoiceGenerator().generate_audio(
+            text, output_path=output_path, guard=bool(params.get("guard", True)))
+
+
+class GenerationRegistry:
+    """生成能力 → 本地后端注册表。
+
+    统一「能力 → 可用本地后端」查找；云端渠道解析仍走 :func:`_resolve_aigc_channel`，
+    两者一本地一云端，共同构成画布生成的统一路由（收敛原散装硬编码回退）。"""
+
+    def __init__(self) -> None:
+        self._backends: Dict[str, LocalGenerationBackend] = {}
+
+    def register(self, backend: LocalGenerationBackend) -> None:
+        """登记一个本地后端（按 backend_id 覆盖，惰性、不做重 import）。"""
+        self._backends[backend.backend_id] = backend
+
+    def resolve(self, capability: str) -> List[LocalGenerationBackend]:
+        """返回该能力下所有「可用」的本地后端（按登记顺序）。"""
+        return [
+            b
+            for b in self._backends.values()
+            if capability in b.capabilities and b.is_available()
+        ]
+
+    def backend_ids(self) -> List[str]:
+        """列出已登记后端 id（调试/UI 展示用）。"""
+        return list(self._backends.keys())
+
+
+# 全局本地生成后端注册表（实例化即登记内建本地后端；适配器 __init__ 均无重 import）
+local_generation_registry = GenerationRegistry()
+local_generation_registry.register(LocalVideoInferBackend())
+local_generation_registry.register(LocalVoiceBackend())
+
+
+# ───────────────────── 参数翻译层（语义层 → 各后端实现层） ─────────────────────
+# 与 vendor/shiguang-canvas/src/novice/types.ts 的 QualityTier / MotionLevel 对齐，
+# 作为后端「唯一语义真值」。前端只回传语义档位字符串（quality = draft/standard/fine/cinema，
+# motion = low/medium/high），具体的 steps / size / fps 等实现层参数由这里统一翻译，
+# 杜绝各后端、各渠道各写一套映射。
+QUALITY_TIERS = ("draft", "standard", "fine", "cinema")
+MOTION_LEVELS = ("low", "medium", "high")
+
+# 语义画质档位 → 通用实现层参数（镜像 types.ts QUALITY_PRESET 的语义契约；
+# steps/upscale 等字段供支持的后端选用，size 为 provider 无关的通用分辨率映射）
+QUALITY_PRESET: Dict[str, Dict[str, Any]] = {
+    "draft": {"steps": 12, "upscale": False, "face_restore": False, "frame_interpolate": False},
+    "standard": {"steps": 22, "upscale": False, "face_restore": True, "frame_interpolate": False},
+    "fine": {"steps": 30, "upscale": True, "face_restore": True, "frame_interpolate": True},
+    "cinema": {"steps": 45, "upscale": True, "face_restore": True, "frame_interpolate": True},
+}
+
+# 语义运动幅度 → 强度（0-100，镜像 types.ts MOTION_LEVELS 的 value）
+MOTION_PRESET: Dict[str, int] = {"low": 20, "medium": 55, "high": 90}
+
+# 语义画质档位 → 默认分辨率（provider 无关，所有图片/视频生成 API 通用）
+_QUALITY_SIZE_IMAGE: Dict[str, str] = {
+    "draft": "1024x576",
+    "standard": "1024x576",
+    "fine": "1280x720",
+    "cinema": "1920x1080",
+}
+_QUALITY_SIZE_VIDEO: Dict[str, str] = {
+    "draft": "960x540",
+    "standard": "1280x720",
+    "fine": "1280x720",
+    "cinema": "1920x1080",
+}
+
+
+def translate_quality(quality: str, capability: str = CAPABILITY_IMAGE) -> Dict[str, Any]:
+    """把语义画质档位翻译成该能力下的「通用实现层参数」。
+
+    返回：
+      - size：该档位默认分辨率（provider 无关）
+      - steps/upscale/face_restore/frame_interpolate：语义契约字段，供支持的后端选用。
+    未知档位退回 standard，保证不抛错、不越级降低质量。"""
+    tier = quality if quality in QUALITY_PRESET else "standard"
+    size_map = _QUALITY_SIZE_VIDEO if capability == CAPABILITY_VIDEO else _QUALITY_SIZE_IMAGE
+    translated = dict(QUALITY_PRESET[tier])
+    translated["size"] = size_map[tier]
+    return translated
+
+
+def translate_motion(motion: str) -> int:
+    """把语义运动幅度（low/medium/high）翻译成 0-100 强度；未知值退回 medium。"""
+    return MOTION_PRESET.get(motion, MOTION_PRESET["medium"])
+
+
+def _json_request(
+    method: str,
+    url: str,
+    api_key: str,
+    body: Optional[Dict[str, Any]] = None,
+    timeout: float = 60,
+) -> Any:
+    """带 Bearer 鉴权的 JSON 请求（收敛 generate_video/music 里重复的 _json_req）。"""
+    import urllib.request
+
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    with _open_url_cancellable(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
 def build_host_ai_config_patch() -> Dict[str, Any]:
@@ -381,6 +607,7 @@ def generate_image_openai_compatible(
     channel_id: str = "",
     reference_image: str = "",
     strength: float = 0.65,
+    quality: str = "standard",
 ) -> Dict[str, Any]:
     """用模型广场同步的 AIGC 渠道调用 OpenAI-compatible ``/images/generations``。
 
@@ -394,6 +621,10 @@ def generate_image_openai_compatible(
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "message": "提示词为空"}
+
+    # 语义画质档位 → 实现层参数（size 作为 provider 无关兜底；steps 供支持的后端选用）
+    quality_params = translate_quality(quality, CAPABILITY_IMAGE)
+    size = size or (quality_params.get("size") or "1024x576")
 
     patch = build_host_ai_config_patch()
     channels = list(patch.get("channels") or [])
@@ -448,7 +679,7 @@ def generate_image_openai_compatible(
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _open_url_cancellable(req, timeout=120) as resp:
                 return {
                     "ok": True,
                     "payload": json.loads(resp.read().decode("utf-8", errors="replace")),
@@ -492,7 +723,7 @@ def generate_image_openai_compatible(
             }
         if img_url:
             try:
-                with urllib.request.urlopen(img_url, timeout=60) as r:
+                with _open_url_cancellable(img_url, timeout=60) as r:
                     raw_img = r.read()
                 mime = "image/png"
                 ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
@@ -536,6 +767,7 @@ def generate_image_openai_compatible(
         }
         if "siliconflow" in base.lower():
             img2_body["image_size"] = size or "1024x576"
+            img2_body["num_inference_steps"] = int(quality_params.get("steps") or 22)
         else:
             img2_body["size"] = size or "1024x576"
         r2 = _post(img2_body)
@@ -557,6 +789,7 @@ def generate_image_openai_compatible(
     }
     if "siliconflow" in base.lower():
         body["image_size"] = size or "1024x576"
+        body["num_inference_steps"] = int(quality_params.get("steps") or 22)
         body.pop("size", None)
 
     r = _post(body)
@@ -579,6 +812,20 @@ def generate_image_openai_compatible(
         parsed["img2img_fallback"] = True
     elif used_img2img:
         parsed["mode"] = "img2img"
+
+    # 本地增强后处理：按画质档位做人脸修复 + 超分
+    if parsed.get("ok") and parsed.get("image_data_url") and (
+        quality_params.get("face_restore") or quality_params.get("upscale")
+    ):
+        try:
+            from app.core.generation_postprocess import apply_image_postprocess
+
+            enhanced = apply_image_postprocess(parsed["image_data_url"], quality_params)
+            if enhanced and enhanced != parsed["image_data_url"]:
+                parsed["image_data_url"] = enhanced
+                parsed["postprocessed"] = True
+        except Exception as exc:
+            logger.debug(f"生图后处理跳过: {exc}")
     return parsed
 
 
@@ -672,7 +919,7 @@ def inpaint_via_host(
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
             },
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with _open_url_cancellable(req, timeout=120) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
         items = payload.get("data") if isinstance(payload, dict) else None
         if isinstance(items, list) and items:
@@ -806,7 +1053,7 @@ def generate_audio_via_host(
                         "Authorization": f"Bearer {api_key}",
                     },
                 )
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with _open_url_cancellable(req, timeout=120) as resp:
                     raw = resp.read()
                     ctype = resp.headers.get("Content-Type") or ""
                 if raw:
@@ -834,15 +1081,12 @@ def generate_audio_via_host(
                 cloud_err = str(e)[:200]
 
     try:
-        try:
-            from app.core.voice_generator import VoiceGenerator
-        except ImportError:
-            from core.voice_generator import VoiceGenerator  # type: ignore
-
-        vg = VoiceGenerator()
         name = f"tts_{int(time.time())}_{abs(hash(prompt)) % 100000}.wav"
         dest = os.path.join(_canvas_inbox_dir(), name)
-        result = vg.generate_audio(prompt, output_path=dest)
+        local_backends = local_generation_registry.resolve(CAPABILITY_AUDIO)
+        if not local_backends:
+            raise RuntimeError("本地 VoiceGenerator 不可用")
+        result = local_backends[0].generate(CAPABILITY_AUDIO, text=prompt, output_path=dest)
         if result.get("success") and os.path.isfile(dest):
             url = f"http://127.0.0.1:{int(bridge_port)}/inbox_file/{name}"
             msg = "TTS 已生成（本地 VoiceGenerator · edge-tts/gTTS 可用时更佳）"
@@ -913,7 +1157,7 @@ def agent_chat_proxy(message: str) -> Dict[str, Any]:
                 method="POST",
                 headers=headers,
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with _open_url_cancellable(req, timeout=60) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             try:
                 data = json.loads(raw)
@@ -1067,6 +1311,9 @@ def generate_video_via_host(
     first_frame: str = "",
     last_frame: str = "",
     bridge_port: int = DEFAULT_PORT,
+    quality: str = "standard",
+    postprocess_progress_callback: Optional[Callable[[int, str], None]] = None,
+    postprocess_done_callback: Optional[Callable[[str, str], None]] = None,
 ) -> Dict[str, Any]:
     """用模型广场 AIGC 渠道尝试生视频；失败返回明确错误（不假成功占位）。
 
@@ -1084,6 +1331,47 @@ def generate_video_via_host(
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "message": "提示词为空"}
+
+    # 语义画质档位 → 实现层参数（size 作为 provider 无关兜底；steps 供本地/支持的后端选用）
+    quality_params = translate_quality(quality, CAPABILITY_VIDEO)
+    size = size or (quality_params.get("size") or "1280x720")
+
+    def _apply_local_postprocess(result: Dict[str, Any]) -> Dict[str, Any]:
+        """对已落盘的本地视频按画质档位做补帧/超分；后台线程执行，立即返回原始结果。"""
+        if not result.get("ok") or not result.get("video_path"):
+            return result
+        if not (quality_params.get("frame_interpolate") or quality_params.get("upscale")):
+            return result
+
+        src_path = result["video_path"]
+        # 标记后处理进行中，主流程无需等待；前端按 job_id 轮询进度与最终产物
+        result["postprocessing"] = True
+        result["postprocessed"] = False
+
+        def _run_postprocess() -> None:
+            from app.core.generation_postprocess import apply_video_postprocess
+
+            final_path = src_path
+            try:
+                enhanced = apply_video_postprocess(
+                    src_path,
+                    quality_params,
+                    progress_callback=postprocess_progress_callback,
+                )
+                if enhanced and enhanced != src_path and os.path.isfile(enhanced):
+                    final_path = enhanced
+            except Exception as exc:
+                logger.debug(f"生视频后处理跳过: {exc}")
+            if postprocess_done_callback:
+                try:
+                    postprocess_done_callback(src_path, final_path)
+                except Exception as exc:
+                    logger.debug(f"后处理完成回调异常: {exc}")
+
+        import threading
+
+        threading.Thread(target=_run_postprocess, daemon=True, name="video-postprocess").start()
+        return result
 
     # ── 参考视频运动驱动（motion-ref 模式 A）：先落 inbox，再能力探测；不支持则诚实失败 ──
     if (reference_video or "").strip():
@@ -1122,19 +1410,14 @@ def generate_video_via_host(
 
     # ── 本地 GPU 推理 fallback：channel_id 以 "local/" 开头强制本地 ──
     if channel_id and channel_id.startswith("local/"):
-        try:
-            from app.core.local_video_infer import generate_video_local
-        except ImportError:
-            try:
-                from core.local_video_infer import generate_video_local  # type: ignore
-            except ImportError:
-                generate_video_local = None
-        if generate_video_local is None:
+        local_backends = local_generation_registry.resolve(CAPABILITY_VIDEO)
+        if not local_backends:
             return {
                 "ok": False,
                 "message": "本地推理模块 local_video_infer.py 不可用，请检查文件是否存在",
             }
-        return generate_video_local(
+        return _apply_local_postprocess(local_backends[0].generate(
+            CAPABILITY_VIDEO,
             prompt=prompt,
             model=model,
             duration=duration,
@@ -1143,7 +1426,8 @@ def generate_video_via_host(
             first_frame=first_frame,
             last_frame=last_frame,
             bridge_port=bridge_port,
-        )
+            steps=quality_params.get("steps"),
+        ))
 
     patch = build_host_ai_config_patch()
     channels = list(patch.get("channels") or [])
@@ -1190,18 +1474,7 @@ def generate_video_via_host(
     errors: List[str] = []
 
     def _json_req(method: str, url: str, body: Optional[Dict[str, Any]] = None, timeout: float = 60):
-        data = json.dumps(body).encode("utf-8") if body is not None else None
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method=method,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        return _json_request(method, url, api_key, body=body, timeout=timeout)
 
     def _json_req_retryable(
         method: str, url: str, body: Optional[Dict[str, Any]] = None, timeout: float = 60,
@@ -1255,7 +1528,7 @@ def generate_video_via_host(
         with open(path, "wb") as f:
             f.write(raw)
         url = f"http://127.0.0.1:{int(bridge_port)}/inbox_file/{name}"
-        return {
+        return _apply_local_postprocess({
             "ok": True,
             "video_path": path,
             "video_url": url,
@@ -1263,11 +1536,11 @@ def generate_video_via_host(
             "channel_id": ch.get("id"),
             "channel_name": ch.get("name"),
             "message": f"已生成视频（{ch.get('name')} / {model}）",
-        }
+        })
 
     def _download_url(file_url: str) -> Dict[str, Any]:
         req = urllib.request.Request(file_url, headers={"Authorization": f"Bearer {api_key}"})
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _open_url_cancellable(req, timeout=180) as resp:
             raw = resp.read()
         return _save_video_bytes(raw, ".mp4")
 
@@ -1289,7 +1562,7 @@ def generate_video_via_host(
                     "duration": int(max(5, min(15, duration))),
                     "size": size or "1920x1080",
                     "fps": 30,
-                    "quality": "speed",
+                    "quality": "quality" if quality in ("fine", "cinema") else "speed",
                     "with_audio": False,
                 }
                 # 参考图（角色正脸）用于身份锚定，CogVideoX 兼容该字段
@@ -1871,18 +2144,7 @@ def generate_music_via_host(
     errors: List[str] = []
 
     def _json_req(method: str, url: str, body: Optional[Dict[str, Any]] = None, timeout: float = 120):
-        data = json.dumps(body).encode("utf-8") if body is not None else None
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method=method,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        return _json_request(method, url, api_key, body=body, timeout=timeout)
 
     def _download_to_inbox(file_url: str, ext: str = ".mp3") -> Dict[str, Any]:
         """下载音频到 canvas inbox 并返回可播放 URL。下载后校验文件有效性（>1KB）。"""
@@ -1891,7 +2153,7 @@ def generate_music_via_host(
                 file_url,
                 headers={"Authorization": f"Bearer {api_key}"} if file_url.startswith(base) else {},
             )
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with _open_url_cancellable(req, timeout=300) as resp:
                 raw = resp.read()
         except Exception as e:
             return {"ok": False, "message": f"下载音乐失败: {e}"}
@@ -2412,3 +2674,232 @@ def storyboard_to_camera_plan(shots: List[Dict[str, Any]]) -> Dict[str, Any]:
             }
         )
     return {"ok": True, "cameras": cameras, "count": len(cameras)}
+
+
+# ── 一键拉片：参考视频 → 可编辑分镜表 ───────────────────────────────
+# 上传参考片 → ffprobe 读时长 → SceneAnalyzer 检测镜头边界（PySceneDetect 优先，
+# 缺库降级帧差法，再降级均匀切段）→ ffmpeg 抽代表帧 → cv2 算色调/亮度 →
+# 按镜头时长启发式推断景别 → 生成可编辑分镜表（不伪造画面内容，诚实标注时间区间）。
+
+
+def _extract_shot_frame(ffmpeg: str, path: str, t: float, width: int = 256) -> Optional[bytes]:
+    """用 ffmpeg 抽 t 秒处的 1 帧 JPEG（缩到 width 宽），失败返回 None。"""
+    import subprocess
+    import sys
+    import tempfile
+
+    fd, out = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        cmd = [
+            ffmpeg, "-y", "-ss", f"{t:.3f}", "-i", path,
+            "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "4", out,
+        ]
+        r = subprocess.run(
+            cmd, capture_output=True, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        if r.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+            return None
+        with open(out, "rb") as f:
+            return f.read()
+    except Exception as e:
+        logger.warning("抽帧失败 t=%.2f: %s", t, e)
+        return None
+    finally:
+        try:
+            os.remove(out)
+        except OSError:
+            logger.debug("清理临时抽帧文件失败: %s", out, exc_info=True)
+
+
+def _analyze_frame_tone(jpeg_bytes: bytes) -> Optional[Dict[str, Any]]:
+    """从 JPEG 帧算平均亮度与冷暖色调（cv2 缺库时返回 None，诚实降级）。"""
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.frombuffer(jpeg_bytes, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return None
+        b = float(img[:, :, 0].mean())
+        g = float(img[:, :, 1].mean())
+        r = float(img[:, :, 2].mean())
+        brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        warmth = r - b
+        tone = "暖" if warmth > 12 else ("冷" if warmth < -12 else "中性")
+        return {
+            "tone": tone,
+            "brightness": round(brightness, 3),
+            "r": round(r, 1),
+            "g": round(g, 1),
+            "b": round(b, 1),
+        }
+    except Exception as e:
+        logger.debug("帧色调分析失败: %s", e)
+        return None
+
+
+def _infer_shot_size(dur: float) -> str:
+    """镜头时长 → 景别启发式（短镜头多为特写/近景，长镜头多为全景/远景）。"""
+    if dur < 1.5:
+        return "特写"
+    if dur < 3.0:
+        return "近景"
+    if dur < 5.0:
+        return "中景"
+    if dur < 8.0:
+        return "全景"
+    return "远景"
+
+
+def _infer_camera(shot_size: str) -> str:
+    """景别 → 默认运镜（无光流估计时的确定性启发式，不伪装成真实检测）。"""
+    return "推" if shot_size in ("特写", "近景") else "固定"
+
+
+def video_storyboard_breakdown(
+    path: str,
+    use_llm: bool = False,
+    max_shots: int = 30,
+    frames_dir: Optional[str] = None,
+    frame_url_prefix: Optional[str] = None,
+) -> Dict[str, Any]:
+    """一键拉片：参考视频 → 可编辑分镜表。
+
+    返回值 shots 每镜：
+      id / start / end / duration / shot(景别) / camera(运镜) /
+      description(镜头语言描述) / dialogue / tone(色调) / brightness(亮度) /
+      frame(代表帧 URL 或 dataURL，供前端分镜表「画面」列直接展示)。
+
+    use_llm 当前为占位：宿主无视觉模型，无法从帧解析真实画面内容；
+    保留参数位供后续接入视觉模型，届时描述可升级为真实镜头语言。
+    """
+    if not path or not os.path.isfile(path):
+        return {"ok": False, "shots": [], "message": "视频文件不存在"}
+
+    # 1. 时长
+    duration = 0.0
+    try:
+        from app.core.ffmpeg_utils import probe_video_duration
+    except ImportError:
+        from core.ffmpeg_utils import probe_video_duration  # type: ignore
+    try:
+        duration = float(probe_video_duration(path) or 0.0)
+    except Exception:
+        duration = 0.0
+
+    # 2. 镜头边界检测（PySceneDetect → 帧差法 → 均匀切段）
+    try:
+        from app.core.ai_editing_assistant import SceneAnalyzer
+    except ImportError:
+        from core.ai_editing_assistant import SceneAnalyzer  # type: ignore
+    scenes: List[Tuple[float, float]] = []
+    scene_source = "none"
+    try:
+        detected = SceneAnalyzer().analyze_scenes(video_path=path)
+        if detected:
+            for s in detected:
+                scenes.append((float(s.start_time), float(s.end_time)))
+            scene_source = "pyscene"
+    except Exception as e:
+        logger.warning("场景检测失败: %s", e)
+
+    # 帧差法降级：直接用 SceneAnalyzer 的帧差法需要先读帧，这里改为均匀切段兜底
+    if not scenes and duration > 0:
+        seg = 4.0
+        n = max(1, min(int(max_shots), int(math.ceil(duration / seg))))
+        scenes = [(i * seg, min((i + 1) * seg, duration)) for i in range(n)]
+        scene_source = "uniform"
+    if not scenes:
+        return {"ok": False, "shots": [], "message": "未检测到有效镜头"}
+
+    # 3. 合并过短镜头 + 截断到 max_shots
+    merged: List[Tuple[float, float]] = []
+    for start, end in scenes:
+        if end - start < 0.4:  # 忽略 <0.4s 的碎镜头
+            if merged:
+                merged[-1] = (merged[-1][0], end)
+            continue
+        merged.append((start, end))
+    if not merged:
+        merged = scenes
+    merged = merged[: max(1, min(int(max_shots), len(merged)))]
+
+    # 4. ffmpeg + cv2 准备
+    ffmpeg: Optional[str] = None
+    try:
+        from app.core.ffmpeg_utils import find_ffmpeg
+    except ImportError:
+        from core.ffmpeg_utils import find_ffmpeg  # type: ignore
+    try:
+        ffmpeg = find_ffmpeg()
+    except Exception:
+        ffmpeg = None
+
+    if frames_dir is None:
+        import tempfile
+        frames_dir = tempfile.mkdtemp(prefix="shiguang_storyboard_")
+    os.makedirs(frames_dir, exist_ok=True)
+
+    import base64
+    import uuid
+
+    shots: List[Dict[str, Any]] = []
+    for i, (start, end) in enumerate(merged):
+        mid = (start + end) / 2.0
+        frame_bytes: Optional[bytes] = None
+        frame_url: Optional[str] = None
+        tone_info: Optional[Dict[str, Any]] = None
+
+        if ffmpeg:
+            frame_bytes = _extract_shot_frame(ffmpeg, path, mid)
+        if frame_bytes:
+            tone_info = _analyze_frame_tone(frame_bytes)
+            fname = f"storyboard_{uuid.uuid4().hex[:12]}.jpg"
+            try:
+                with open(os.path.join(frames_dir, fname), "wb") as f:
+                    f.write(frame_bytes)
+                if frame_url_prefix:
+                    frame_url = f"{frame_url_prefix.rstrip('/')}/{fname}"
+                else:
+                    frame_url = "data:image/jpeg;base64," + base64.b64encode(frame_bytes).decode("ascii")
+            except OSError:
+                frame_url = None
+
+        dur = round(end - start, 3)
+        shot_size = _infer_shot_size(dur)
+        camera = _infer_camera(shot_size)
+        tone = tone_info.get("tone") if tone_info else "中性"
+        brightness = tone_info.get("brightness") if tone_info else None
+        desc_parts = [f"镜头{i + 1}", f"{start:.1f}s-{end:.1f}s", shot_size]
+        if tone_info:
+            desc_parts.append(f"{tone}色调")
+        if brightness is not None:
+            desc_parts.append(f"亮度{int(round(brightness * 100))}%")
+
+        shots.append(
+            {
+                "id": i + 1,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "duration": dur,
+                "shot": shot_size,
+                "camera": camera,
+                "description": " · ".join(desc_parts),
+                "dialogue": "",
+                "tone": tone,
+                "brightness": brightness,
+                "frame": frame_url,
+            }
+        )
+
+    return {
+        "ok": True,
+        "shots": shots,
+        "fallback": scene_source in ("uniform",),
+        "scene_source": scene_source,
+        "duration": round(duration, 3),
+        "message": f"拉片完成：{len(shots)} 镜（{scene_source} 检测）",
+    }

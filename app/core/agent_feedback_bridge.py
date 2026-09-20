@@ -4,7 +4,7 @@ Agent 反馈桥 (AgentFeedbackBridge)
 把 DataAnalyzer 的策略调整回流到 Agent + MemoryStore，闭环 5→6→7→1。
 
 架构位置：
-  账号运营 → DataAnalyzer → AgentFeedbackBridge → MemoryStore + Agent 面板
+  业务数据 → DataAnalyzer → AgentFeedbackBridge → MemoryStore + Agent 面板
 
 工作流：
   1. 发布完成 → EventBus.emit(PUBLISH_RESULT)
@@ -123,7 +123,7 @@ class AgentFeedbackBridge:
                 severity = "low"
             brain_feedback = {
                 "type": "success" if feedback.get("success") else "quality",
-                "related_capabilities": ["account.publish", "workflow.start"],
+                "related_capabilities": [],
                 "severity": severity,
                 "platform": feedback.get("platform", ""),
                 "views": views_f,

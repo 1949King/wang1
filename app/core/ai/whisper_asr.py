@@ -150,6 +150,7 @@ def transcribe(
     model_size: str = "base",
     language: str = "zh",
     hotwords: str = "",
+    word_timestamps: bool = False,
 ) -> List[Dict]:
     """
     Whisper 语音识别，返回统一格式的 segment 列表。
@@ -159,10 +160,16 @@ def transcribe(
         model_size: 模型大小 (tiny/base/small/medium/large)
         language:   识别语言
         hotwords:   热词提示（逗号分隔），帮助模型偏向特定词汇
+        word_timestamps: 是否返回**词级**时间戳。
+            段落级时间戳只够"定位到这句话"，做不了「词锚定」——
+            改一句台词就落点全废。开启后每段附带 `words` 列表，
+            元素为 `{"text", "start", "end"}`，是目前唯一能支撑
+            「改文案只需重排、不必重分析」的原料。
+            代价：转写略慢（多一次词级对齐）。
 
     Returns:
-        [{"start": 0.0, "end": 2.5, "text": "你好世界"}, ...]
-        失败时返回空列表
+        [{"start": 0.0, "end": 2.5, "text": "你好世界", "words": [...]}, ...]
+        `words` 仅在 word_timestamps=True 时出现；失败时返回空列表
     """
     backend = _detect_backend()
     if not backend:
@@ -179,34 +186,72 @@ def transcribe(
                 kwargs["initial_prompt"] = f"以下词汇可能出现: {hotwords}"
             kwargs["vad_filter"] = True
             kwargs["vad_parameters"] = dict(min_silence_duration_ms=500)
+            if word_timestamps:
+                kwargs["word_timestamps"] = True
             segments_iter, _info = model.transcribe(video_path, **kwargs)
-            return [
-                {
+            out = []
+            for seg in segments_iter:
+                item = {
                     "start": seg.start,
                     "end": seg.end,
                     "text": seg.text.strip() if seg.text else "",
                     "avg_logprob": getattr(seg, "avg_logprob", 0.0),
                 }
-                for seg in segments_iter
-            ]
+                if word_timestamps:
+                    item["words"] = _extract_words(getattr(seg, "words", None), "attr")
+                out.append(item)
+            return out
         else:
             # openai-whisper
             kwargs = {"language": language} if language else {}
             if hotwords:
                 kwargs["initial_prompt"] = f"以下词汇可能出现: {hotwords}"
+            if word_timestamps:
+                kwargs["word_timestamps"] = True
             result = model.transcribe(video_path, **kwargs)
-            return [
-                {
+            out = []
+            for seg in result.get("segments", []):
+                item = {
                     "start": seg.get("start", 0),
                     "end": seg.get("end", 0),
                     "text": seg.get("text", "").strip(),
                     "avg_logprob": seg.get("avg_logprob", 0.0),
                 }
-                for seg in result.get("segments", [])
-            ]
+                if word_timestamps:
+                    item["words"] = _extract_words(seg.get("words"), "dict")
+                out.append(item)
+            return out
     except Exception as e:
         logger.warning(f"Whisper 转录失败 [{video_path}]: {e}")
         return []
+
+
+def _extract_words(raw_words, shape: str) -> List[Dict]:
+    """把两种后端的词级结果归一成 `[{"text", "start", "end"}]`。
+
+    faster-whisper 的词是对象（属性访问），openai-whisper 是 dict。
+    空文本的词（纯空白）丢弃 —— 它们没有锚定价值，留着只会抬高 from_word/to_word
+    的序号，让锚点在两版之间对不齐。
+    """
+    out: List[Dict] = []
+    if not raw_words:
+        return out
+    for w in raw_words:
+        try:
+            if shape == "attr":
+                text = (getattr(w, "word", "") or "").strip()
+                start = float(getattr(w, "start", 0.0) or 0.0)
+                end = float(getattr(w, "end", 0.0) or 0.0)
+            else:
+                text = (w.get("word", "") or "").strip()
+                start = float(w.get("start", 0.0) or 0.0)
+                end = float(w.get("end", 0.0) or 0.0)
+        except Exception:
+            continue
+        if not text:
+            continue
+        out.append({"text": text, "start": start, "end": end})
+    return out
 
 
 def segments_to_srt_text(segments: List[Dict]) -> str:

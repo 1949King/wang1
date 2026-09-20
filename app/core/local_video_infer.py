@@ -304,6 +304,7 @@ def _infer_minimax_h3(
     last_frame: Optional[str] = None,
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """MiniMax H3 系列推理：33B 全模态 transformer，原生输出 768p 视频 + 32kHz 立体声音频。
 
@@ -331,7 +332,7 @@ def _infer_minimax_h3(
     except Exception:
         pass
 
-    steps = 28 if vram_gb >= 24 else 22
+    steps = steps if steps is not None else (28 if vram_gb >= 24 else 22)
     frames = []
     audio_wav = None
     audio_sr = 32000
@@ -433,6 +434,7 @@ def _infer_wan(
     reference_image: Optional[str] = None,
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Wan 系列推理：Wan 2.1 / 2.2 / 2.6 / 3.0，支持 T2V + I2V。"""
     import torch
@@ -455,7 +457,7 @@ def _infer_wan(
     except Exception:
         pass
 
-    steps = 30 if vram_gb >= 16 else 24
+    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 5.0
 
     if reference_image:
@@ -502,6 +504,7 @@ def _infer_cogvideox(
     last_frame: Optional[str] = None,
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """CogVideoX 系列推理：1.0 / 1.5 / 2.0，支持 T2V + I2V + 首尾帧。"""
     import torch
@@ -523,7 +526,7 @@ def _infer_cogvideox(
     except Exception:
         pass
 
-    steps = 30 if vram_gb >= 16 else 24
+    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 6.0
     result = pipe(
         prompt=prompt,
@@ -548,6 +551,7 @@ def _infer_hunyuan(
     reference_image: Optional[str] = None,
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """HunyuanVideo 系列推理：腾讯开源，支持 T2V + I2V。"""
     import torch
@@ -565,7 +569,7 @@ def _infer_hunyuan(
     if vram_gb and vram_gb < 16:
         pipe.enable_model_cpu_offload()
 
-    steps = 30 if vram_gb >= 16 else 24
+    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 6.0
     result = pipe(
         prompt=prompt,
@@ -590,6 +594,7 @@ def _infer_ltx(
     reference_image: Optional[str] = None,
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """LTX-Video 系列推理：Lightricks 开源，支持 T2V + I2V，4K 50fps。"""
     import torch
@@ -607,7 +612,7 @@ def _infer_ltx(
     if vram_gb and vram_gb < 12:
         pipe.enable_model_cpu_offload()
 
-    steps = 30 if vram_gb >= 16 else 24
+    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 3.0
     result = pipe(
         prompt=prompt,
@@ -631,6 +636,7 @@ def _infer_mochi(
     size: str = "1280x720",
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Mochi 系列推理：Genmo 开源，纯 T2V。"""
     import torch
@@ -648,7 +654,7 @@ def _infer_mochi(
     if vram_gb and vram_gb < 16:
         pipe.enable_model_cpu_offload()
 
-    steps = 30 if vram_gb >= 16 else 24
+    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 3.5
     result = pipe(
         prompt=prompt,
@@ -684,6 +690,7 @@ def generate_video_local(
     last_frame: str = "",
     bridge_port: int = 8765,
     out_dir: str = "",
+    steps: Optional[int] = None,
 ) -> Dict[str, Any]:
     """本地开源视频模型推理统一入口。
 
@@ -778,6 +785,8 @@ def generate_video_local(
     if kind == "cogvideox":
         fn_kwargs["first_frame"] = first_frame
         fn_kwargs["last_frame"] = last_frame
+    if steps is not None:
+        fn_kwargs["steps"] = int(steps)
 
     try:
         result = infer_fn(**fn_kwargs)

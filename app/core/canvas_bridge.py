@@ -325,9 +325,18 @@ def build_character_prompt(char: Optional[Dict[str, Any]]) -> str:
     appearance = str(char.get("appearance") or "").strip()
     if appearance:
         parts.append("外貌:" + appearance[:240])
+    temperament = str(char.get("temperament") or "").strip()
+    if temperament:
+        parts.append("气质倾向:" + temperament[:80])
+    # 标志性符号：跨集保持同一视觉锚点，是长线剧集「认得出这个人」的关键
+    memory_anchors = str(char.get("memory_anchors") or "").strip()
+    if memory_anchors:
+        parts.append("标志性符号:" + memory_anchors[:120])
     personality = str(char.get("personality") or "").strip()
     if personality:
-        parts.append("气质:" + personality[:120])
+        # 前缀由「气质」改为「性格」：新增 temperament 已占用「气质」语义，
+        # 两个词并存会互相稀释；本字段 schema 标签本就是「性格特征」
+        parts.append("性格:" + personality[:120])
     return "，".join(parts)
 
 
@@ -370,6 +379,91 @@ def canvas_outbox_dir() -> str:
 _BATCH_JOBS: Dict[str, Any] = {}
 import threading as _threading
 _BATCH_LOCK = _threading.Lock()
+
+# ── 单视频后处理任务注册表：超分/补帧后台执行，前端轮询进度与最终产物 ──
+_POSTPROCESS_JOBS: Dict[str, Any] = {}
+_POSTPROCESS_LOCK = _threading.Lock()
+
+# ── 本地模型预载任务注册表：GFPGAN 等后台下载，前端轮询进度（非阻塞） ──
+_MODEL_PRELOAD_JOBS: Dict[str, Any] = {}
+_MODEL_PRELOAD_LOCK = _threading.Lock()
+_GFPGAN_ONNX_REPO = "hacksider/deep-live-cam"
+# 不同版本仓库内模型文件名不同，按序尝试
+_GFPGAN_ONNX_FILES = ("GFPGANv1.4.onnx", "gfpgan-1024.onnx")
+
+
+def start_gfpgan_preload() -> str:
+    """保证 GFPGAN ONNX 后台预载；幂等，返回 job_id 供前端轮询进度。"""
+    with _MODEL_PRELOAD_LOCK:
+        for jid, job in _MODEL_PRELOAD_JOBS.items():
+            if job.get("kind") == "gfpgan":
+                return jid
+
+    job_id = uuid.uuid4().hex[:12]
+    with _MODEL_PRELOAD_LOCK:
+        _MODEL_PRELOAD_JOBS[job_id] = {
+            "job_id": job_id,
+            "kind": "gfpgan",
+            "status": "processing",
+            "progress": 0,
+            "message": "等待模型预载...",
+            "ready": False,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+    def _report(pct: int, message: str) -> None:
+        with _MODEL_PRELOAD_LOCK:
+            job = _MODEL_PRELOAD_JOBS.get(job_id)
+            if job:
+                job["progress"] = int(pct)
+                job["message"] = message or ""
+                job["updated_at"] = time.time()
+
+    def _finish(ready: bool, message: str) -> None:
+        with _MODEL_PRELOAD_LOCK:
+            job = _MODEL_PRELOAD_JOBS.get(job_id)
+            if job:
+                job["status"] = "done"
+                job["ready"] = bool(ready)
+                job["progress"] = 100
+                job["message"] = message
+                job["updated_at"] = time.time()
+
+    def _run() -> None:
+        try:
+            from app.core.neural_engine import get_neural_engine
+
+            eng = get_neural_engine()
+            if not getattr(eng, "is_available", False):
+                _finish(False, "无可用神经网络后端")
+                return
+            # 任一候选文件已缓存即视为就绪
+            for filename in _GFPGAN_ONNX_FILES:
+                if eng.get_cached_model_path(_GFPGAN_ONNX_REPO, filename):
+                    _finish(True, "GFPGAN 已就绪（缓存命中）")
+                    return
+            _report(10, "开始预载 GFPGAN（首次约 300MB，后续秒开）...")
+            for filename in _GFPGAN_ONNX_FILES:
+                try:
+                    downloaded = eng.download_model(
+                        _GFPGAN_ONNX_REPO,
+                        filename=filename,
+                        progress_cb=lambda msg, _f=filename: _report(40, f"[{_f}] {msg}"),
+                    )
+                except Exception as exc:
+                    logger.debug("[ModelPreload] GFPGAN 下载失败 %s: %s", filename, exc)
+                    downloaded = None
+                if downloaded and os.path.isfile(downloaded):
+                    _finish(True, "GFPGAN 预载完成")
+                    return
+            _finish(False, "GFPGAN 下载失败（将回退区域超分）")
+        except Exception as exc:
+            logger.debug("[ModelPreload] GFPGAN 预载异常: %s", exc)
+            _finish(False, "GFPGAN 预载异常")
+
+    threading.Thread(target=_run, daemon=True, name="gfpgan-preload").start()
+    return job_id
 
 
 def _ffmpeg_bin() -> str:
@@ -710,7 +804,7 @@ def emit_canvas_to_editor(
     canvas_node_id: str = "",
     canvas_kind: str = "",
 ) -> Dict[str, Any]:
-    """推送到剪辑模块（与 drama_send_to_editor 同通道）。"""
+    """推送到剪辑模块。"""
     path = os.path.abspath(file_path)
     if not os.path.isfile(path):
         return {"success": False, "message": f"文件不存在: {path}"}

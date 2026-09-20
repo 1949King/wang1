@@ -223,6 +223,15 @@ class LogManager:
 
 log_manager = LogManager()
 
+# 模块级 logger —— 兑现本文件 docstring 第 12 行的承诺
+# 「新代码推荐: from core.log_manager import logger」
+#
+# 修的是真 NameError：cleanup_old_logs() 的 except 分支引用了模块级 `logger`，
+# 但该名字此前**从未定义**（只有函数局部 logger 和 log_manager 单例）。
+# 后果：删旧日志失败时，except 体内自己抛 NameError 逃逸出去，
+# 把「记一条 debug 日志」变成「崩一次」——典型的静默雷。
+logger: logging.Logger = log_manager.get_logger(__name__)
+
 
 def setup_logging(**kwargs) -> logging.Logger:
     return log_manager.setup(**kwargs)

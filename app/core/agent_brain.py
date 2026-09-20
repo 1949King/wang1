@@ -81,39 +81,20 @@ class Synapse:
 # 内置 capability 的左右脑分类表（与 capability_handlers 对齐）
 # ═══════════════════════════════════════════════════════════════
 
-# 格式: (capability_id, hemisphere, 中文标签, 关键词列表)
-_NEURON_TAXONOMY: List[Tuple[str, BrainHemisphere, str, List[str]]] = [
-    # ── 右脑（创意类）7 个 ──
-    ("model.chat",                  BrainHemisphere.RIGHT, "AI 对话",       ["对话", "聊天", "问答", "生成文案"]),
-    ("model.chat_with_fallback",    BrainHemisphere.RIGHT, "AI 智能降级",   ["降级", "回退", "智能调用"]),
-    ("pipeline.generate",           BrainHemisphere.RIGHT, "AI 视频生成",   ["生成", "视频", "抽卡", "画面"]),
-    ("pipeline.generate_script",    BrainHemisphere.RIGHT, "剪辑脚本生成",  ["脚本", "创意", "镜头顺序", "配乐"]),
-    ("ext.run_extension",           BrainHemisphere.RIGHT, "拓展插件",      ["插件", "拓展", "效果"]),
-    ("ext.run_skill",               BrainHemisphere.RIGHT, "技能执行",      ["技能", "skill", "导演"]),
-    ("account.optimize_strategy",   BrainHemisphere.RIGHT, "优化建议",      ["优化", "建议", "策略"]),
+# 格式: (capability_id, hemisphere(字符串), 中文标签, 关键词列表)
+# 单一事实来源：app/core/agent_capability_catalog.py（neuron_taxonomy）。
+# 此前这里是硬编码 27 个神经元、且漏了 9 个已注册能力（靠 sync_from_dispatcher
+# 兜底成无标签的胼胝体神经元）。现从目录派生，hemisphere 用字符串、由
+# _init_neuron_taxonomy 转成 BrainHemisphere 枚举，避免本模块 import 目录层造成循环。
+from app.core.agent_capability_catalog import neuron_taxonomy
 
-    # ── 左脑（逻辑类）13 个 ──
-    ("editor.split_clip",           BrainHemisphere.LEFT,  "片段切分",      ["切分", "切割", "split"]),
-    ("editor.apply_filter",         BrainHemisphere.LEFT,  "应用滤镜",      ["滤镜", "调色", "filter"]),
-    ("editor.add_transition",       BrainHemisphere.LEFT,  "添加转场",      ["转场", "过渡", "transition"]),
-    ("editor.get_timeline_context", BrainHemisphere.LEFT,  "时间线上下文",  ["时间线", "上下文", "轨道"]),
-    ("editor.ripple_delete_range",  BrainHemisphere.LEFT,  "波纹删除区间",  ["波纹删", "波纹删除", "ripple"]),
-    ("editor.suggest_cleanup",      BrainHemisphere.LEFT,  "去水词建议确认", ["去水词", "清静音", "填充词", "suggest_cleanup"]),
-    ("workflow.start",              BrainHemisphere.LEFT,  "启动工作流",    ["工作流", "启动", "workflow"]),
-    ("workflow.submit_batch",       BrainHemisphere.LEFT,  "批量任务",      ["批量", "任务", "batch"]),
-    ("account.collect_data",        BrainHemisphere.LEFT,  "数据采集",      ["采集", "数据", "统计"]),
-    ("account.publish",             BrainHemisphere.LEFT,  "作品发布",      ["发布", "上传", "publish"]),
-    ("pipeline.preview_validate",   BrainHemisphere.LEFT,  "预览校验",      ["预览", "校验", "质检"]),
-    ("pipeline.regenerate_clip",    BrainHemisphere.LEFT,  "局部重生成",    ["重生成", "替换", "局部"]),
-    ("pipeline.execute_editing",    BrainHemisphere.LEFT,  "精剪成片",      ["精剪", "成片", "导出", "剪辑"]),
+_NEURON_TAXONOMY: List[Tuple[str, str, str, List[str]]] = neuron_taxonomy()
 
-    # ── 胼胝体（混合类）5 个 ──
-    ("pipeline.route",              BrainHemisphere.CORPUS_CALLOSUM, "业务分流", ["分流", "路由", "判断"]),
-    ("pipeline.score",              BrainHemisphere.CORPUS_CALLOSUM, "五维打分", ["打分", "评分", "等级"]),
-    ("pipeline.run_full",           BrainHemisphere.CORPUS_CALLOSUM, "全链路执行", ["全链路", "一键", "完整"]),
-    ("model.list_models",           BrainHemisphere.CORPUS_CALLOSUM, "模型列表", ["模型", "列表", "可用"]),
-    ("ext.list_tools",              BrainHemisphere.CORPUS_CALLOSUM, "拓展工具列表", ["工具", "列表"]),
-]
+_HEMI_MAP = {
+    "right": BrainHemisphere.RIGHT,
+    "left": BrainHemisphere.LEFT,
+    "cc": BrainHemisphere.CORPUS_CALLOSUM,
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -172,7 +153,7 @@ class AgentBrain:
         for nid, hemi, label, _kw in _NEURON_TAXONOMY:
             self._neurons[nid] = Neuron(
                 neuron_id=nid,
-                hemisphere=hemi,
+                hemisphere=_HEMI_MAP.get(hemi, BrainHemisphere.CORPUS_CALLOSUM),
                 label=label,
             )
         logger.debug(f"[AgentBrain] 注册 {len(self._neurons)} 个神经元")
@@ -405,6 +386,99 @@ class AgentBrain:
         max_possible = len(right) * len(left)
         return connections / max_possible if max_possible > 0 else 0.0
 
+    # ─────────────── 决策咨询：把学到的权重用回路径选择 ───────────────
+    #
+    # 这是学习回路此前缺失的最后一步：
+    #   invoke → activate → reinforce_path 写权重 → 【此处】用权重选分支 → 结果再 reinforce
+    # 设计要点：
+    #   1. 无数据时所有候选权重 = _NEUTRAL_WEIGHT(0.5)，且 default 排在候选首位，
+    #      稳定排序保证平票时选中 default ⇒ **冷启动行为与「没有大脑」完全一致**。
+    #   2. 不做 ε 随机探索：本项目拒绝随机效果，宁可冷启动保守，也不引入不可复现的抖动。
+
+    _NEUTRAL_WEIGHT = 0.5  # 与 Synapse.weight 默认值一致：未学过的分支按中性处理
+
+    def synapse_weight(self, pre: str, post: str) -> Optional[float]:
+        """查询突触权重；无记录返回 None（与「学到 0.5」区分开）。"""
+        syn = self._synapses.get((pre, post))
+        if syn is None:
+            return None
+        return float(syn.weight)
+
+    def score_candidates(self, from_id: str,
+                         candidates: List[str]) -> List[Tuple[str, float, bool]]:
+        """给候选后继打分：返回 [(cand, weight, learned)]，按权重降序（平票保持传入次序）。"""
+        out: List[Tuple[str, float, bool]] = []
+        for cand in candidates or []:
+            w = self.synapse_weight(from_id, cand)
+            out.append((cand, self._NEUTRAL_WEIGHT if w is None else w, w is not None))
+        out.sort(key=lambda x: -x[1])  # 稳定排序 ⇒ 平票保持传入次序
+        return out
+
+    def suggest_next(self, from_id: str, candidates: List[str],
+                     default: Optional[str] = None,
+                     trust: Optional[float] = None) -> Dict[str, Any]:
+        """在候选后继里选一个：权重最高者胜；无学习数据则回退 default（= 既有行为）。
+
+        Args:
+            from_id: 当前所处的 capability_id（决策点）
+            candidates: 候选后继 capability_id 列表
+            default: 无差异时的默认选择（**必须传「现状行为」**，保证冷启动不改变行为）
+            trust: 可选，内心状态（affect_model）给出的信任值 [0,1]。
+                中性 0.5 ⇒ 不收缩（行为与未传时一致）；< 0.5 ⇒ 学到的权重向
+                中性 0.5 收缩（低信任时少信历史）；None ⇒ 完全不干预（冷启动）。
+
+        Returns:
+            Dict: from / choice / default / changed / learned / weights / reason
+        """
+        cands = [c for c in (candidates or []) if c]
+        if not cands:
+            return {"from": from_id, "choice": None, "default": None, "changed": False,
+                    "learned": False, "weights": {}, "reason": "无候选分支"}
+
+        # default 置顶：稳定排序下平票必然选中它
+        default_id = default if default in cands else cands[0]
+        ordered = [default_id] + [c for c in cands if c != default_id]
+
+        # 信任收缩（内心状态接入点，2026-09-15）：
+        # factor = clamp(0.5 + trust, 0.5, 1.0) —— trust=0.5 → 1.0（原样生效）；
+        # trust 低 → 学到的偏差减半向 0.5 收缩；不放大（trust 高也不超过 1.0，不冒险）。
+        factor = 1.0
+        if trust is not None:
+            try:
+                t = max(0.0, min(1.0, float(trust)))
+            except (TypeError, ValueError):
+                t = 0.5
+            factor = max(0.5, min(1.0, 0.5 + t))
+        ranked = [
+            (c,
+             self._NEUTRAL_WEIGHT + (w - self._NEUTRAL_WEIGHT) * factor if learned else w,
+             learned)
+            for c, w, learned in self.score_candidates(from_id, ordered)
+        ]
+        choice, best_w, _ = ranked[0]
+        weights = {c: round(w, 4) for c, w, _l in ranked}
+        learned = any(l for _c, _w, l in ranked)
+        changed = choice != default_id
+
+        if not learned:
+            reason = f"无学习数据，沿用默认 {default_id}"
+        elif changed:
+            reason = (f"历史权重 {choice}={best_w:.3f} 高于默认 "
+                      f"{default_id}={weights.get(default_id, 0.0):.3f}，改走 {choice}")
+        else:
+            reason = f"历史权重最高的仍是默认 {default_id}（{best_w:.3f}）"
+
+        logger.debug(f"[AgentBrain] 决策咨询 from={from_id} → {choice}（{reason}）")
+        return {
+            "from": from_id,
+            "choice": choice,
+            "default": default_id,
+            "changed": changed,
+            "learned": learned,
+            "weights": weights,
+            "reason": reason,
+        }
+
     # ─────────────── 持久化 ───────────────
 
     def _persist_synapses(self) -> None:
@@ -445,7 +519,12 @@ class AgentBrain:
         self._loaded = True
         try:
             from app.core.memory_store import memory_store
-            entries = memory_store.query(category="brain_synapse", tags=["synapse"], limit=200)
+            # 同一突触每次持久化都会新增一条记录；query 按 score 降序返回 + 循环后写覆盖，
+            # 会保留「分数最低的旧版本」——强化过的权重重启后退回最弱版（2026-09-13 修正）。
+            # latest_per_key 按 (pre, post) 去重、取 timestamp 最新的一条，不受排序影响。
+            entries = memory_store.latest_per_key(
+                category="brain_synapse", key_fields=("pre", "post"), limit=200
+            )
             loaded = 0
             for e in entries:
                 try:

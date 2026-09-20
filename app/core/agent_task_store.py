@@ -10,27 +10,50 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.core.agent_constants import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_PAUSED,
+    STATUS_PLANNING,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    STATUS_STOPPED,
+    STATUS_WAITING_APPROVAL,
+)
+
 logger = logging.getLogger(__name__)
 
 _STORAGE = os.path.join("data", "agent_tasks.json")
 _MAX_TASKS = 80
 
 _LEGAL = {
-    "queued": {"planning", "running", "stopped", "failed"},
-    "planning": {"running", "paused", "failed", "stopped", "waiting_approval"},
-    "running": {
-        "waiting_approval",
-        "paused",
-        "completed",
-        "failed",
-        "stopped",
-        "planning",
+    STATUS_QUEUED: {STATUS_PLANNING, STATUS_RUNNING, STATUS_STOPPED, STATUS_FAILED},
+    STATUS_PLANNING: {
+        STATUS_RUNNING,
+        STATUS_PAUSED,
+        STATUS_FAILED,
+        STATUS_STOPPED,
+        STATUS_WAITING_APPROVAL,
     },
-    "waiting_approval": {"running", "paused", "stopped", "failed", "completed"},
-    "paused": {"running", "planning", "stopped", "failed"},
-    "completed": set(),
-    "failed": {"planning", "running"},
-    "stopped": set(),
+    STATUS_RUNNING: {
+        STATUS_WAITING_APPROVAL,
+        STATUS_PAUSED,
+        STATUS_COMPLETED,
+        STATUS_FAILED,
+        STATUS_STOPPED,
+        STATUS_PLANNING,
+    },
+    STATUS_WAITING_APPROVAL: {
+        STATUS_RUNNING,
+        STATUS_PAUSED,
+        STATUS_STOPPED,
+        STATUS_FAILED,
+        STATUS_COMPLETED,
+    },
+    STATUS_PAUSED: {STATUS_RUNNING, STATUS_PLANNING, STATUS_STOPPED, STATUS_FAILED},
+    STATUS_COMPLETED: set(),
+    STATUS_FAILED: {STATUS_PLANNING, STATUS_RUNNING},
+    STATUS_STOPPED: set(),
 }
 
 
@@ -77,8 +100,8 @@ class AgentTaskStore:
                 if not isinstance(row, dict) or not row.get("id"):
                     continue
                 st = str(row.get("status") or "")
-                if st in ("planning", "running", "waiting_approval", "queued"):
-                    row["status"] = "paused"
+                if st in (STATUS_PLANNING, STATUS_RUNNING, STATUS_WAITING_APPROVAL, STATUS_QUEUED):
+                    row["status"] = STATUS_PAUSED
                     row["pausedReason"] = "app_restart"
                     row["updatedAt"] = _now()
                 self._tasks[str(row["id"])] = row

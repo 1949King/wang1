@@ -30,6 +30,26 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# P1-3 取消异常：gen-jobs 任务线程内抛出；无 app 包的独立加载场景不可能出现，
+# 空元组 except 子句永不匹配（等价于没有该子句）。
+try:
+    from app.core.canvas_gen_jobs import GenCancelled
+except Exception:  # noqa: BLE001 - 独立加载场景不可能出现取消
+    GenCancelled = ()  # type: ignore[assignment]
+
+
+def _job_ctx():
+    """取管线任务上下文（pipeline_jobs：阶段上报/取消检查）。
+
+    gen-jobs 任务线程内非 None；直连调用（无任务底座）返回 None，
+    所有上报/取消检查随之静默跳过——既有调用方行为零变化。
+    """
+    try:
+        from app.core.ai import pipeline_jobs
+        return pipeline_jobs
+    except Exception:  # noqa: BLE001
+        return None
+
 
 @dataclass
 class GeneratedClip:
@@ -72,6 +92,7 @@ class GenerationPipelineResult:
     prompts: List[str] = field(default_factory=list)         # 标准化提示词
     error: Optional[str] = None
     request_id: str = ""
+    cost_estimate: float = 0.0   # 生成前报价（P1-1，估算值；供 UI/审计展示）
 
 
 class AIVideoGenerationPipeline:
@@ -116,7 +137,8 @@ class AIVideoGenerationPipeline:
                 scene_count: Optional[int] = None,
                 clip_duration: float = 5.0,
                 provider: str = "auto",
-                request_id: str = "") -> GenerationPipelineResult:
+                request_id: str = "",
+                guards: Optional[Dict[str, Any]] = None) -> GenerationPipelineResult:
         """
         执行 AI 视频生成业务线全流程
 
@@ -128,6 +150,14 @@ class AIVideoGenerationPipeline:
             clip_duration:   单段时长
             provider:        视频生成 provider（auto/seedance/cogvideo/local）
             request_id:      会话 id
+            guards:          **生成质量守护上下文**（可选，V4.33.2）。传入后：
+                             ① 生成前自动把守护约束注入每个提示词（角色卡 / 道具结构 / 表情幅度）；
+                             ② 初检时叠加守护的结构化质检（道具 / 角色漂移）。
+                             形如 ``{"character": {...}, "prop": {...}, "expression": {...}}``；
+                             缺省 None 时行为与接入前完全一致。
+                             **成本提示（V4.33.5）**：质检里的 LLM 聚焦审核**默认关** ——
+                             它在回溯循环里每轮都会跑，默认开会线性增加调用费用。
+                             需要时在 guards 里加 ``"use_llm": true`` 显式开启。
         """
         request_id = request_id or uuid.uuid4().hex[:12]
         if not creative_brief:
@@ -135,19 +165,41 @@ class AIVideoGenerationPipeline:
                                             request_id=request_id)
 
         result = GenerationPipelineResult(success=True, request_id=request_id)
+        ctx = _job_ctx()  # P1-3：任务上下文（无任务时为 None，全部静默）
         logger.info(f"[AIVideoGenerationPipeline] 启动生成业务线 | brief={creative_brief[:40]} "
                     f"| platform={platform} | duration={target_duration}s")
 
         try:
+            if ctx:
+                ctx.pipeline_stage("creative", "创意层拆解（大纲→剧本→关键词→提示词）")
             # 1. 创意层拆解：大纲 → 剧本 → 关键词 → 提示词
             result.outline = self._gen_outline(creative_brief, platform, target_duration)
             result.script = self._gen_script(result.outline)
             result.keywords = self._gen_keywords(result.script)
             scene_n = scene_count or max(1, int(target_duration // clip_duration))
-            result.prompts = self._gen_prompts(result.keywords, scene_n)
+            result.prompts = self._gen_prompts(result.keywords, scene_n, guards=guards)
+
+            # 生成前报价（P1-1）：预估花费写进日志与结果（只读预演，不消耗额度）
+            try:
+                from app.core.ai.video_generation_client import video_generation_client
+
+                _q = video_generation_client.quote(
+                    provider, count=scene_n, duration=clip_duration)
+                result.cost_estimate = float(_q.get("cost_estimate") or 0.0)
+                logger.info(
+                    "[AIVideoGenerationPipeline] 生成前报价：%s × %d 段 ≈ ¥%.2f（%s）",
+                    _q.get("provider"), scene_n, result.cost_estimate,
+                    _q.get("reason") or "正常")
+            except Exception:
+                logger.debug("[AIVideoGenerationPipeline] 报价失败（不阻断生成）",
+                             exc_info=True)
 
             # 2. AI 抽卡生成 + 3. 后台初检（含回溯闭环）
+            total_scenes = len(result.prompts)
             for idx, prompt in enumerate(result.prompts):
+                if ctx:
+                    ctx.raise_if_cancelled()  # P1-3：场景与场景之间响应取消
+                    ctx.pipeline_stage("generation", f"生成片段 {idx + 1}/{total_scenes}")
                 clip = self._generate_and_inspect(
                     prompt=prompt,
                     visual_description=self._scene_visual(result.script, idx),
@@ -157,9 +209,13 @@ class AIVideoGenerationPipeline:
                     duration=clip_duration,
                     provider=provider,
                     request_id=request_id,
+                    guards=guards,
                 )
                 if clip:
                     result.clips.append(clip)
+                    if ctx and total_scenes > 0:
+                        # 诚实进度：只报真实完成数（段内拿不到信号，不伪造平滑条）
+                        ctx.pipeline_progress(round((idx + 1) * 100.0 / total_scenes))
 
             if not result.clips:
                 result.success = False
@@ -167,6 +223,9 @@ class AIVideoGenerationPipeline:
             else:
                 logger.info(f"[AIVideoGenerationPipeline] 生成完成：{len(result.clips)} 个合格片段")
 
+        except GenCancelled:
+            # 取消是控制流：交任务层标记 cancelled（结果丢弃不落盘），不吞成执行失败
+            raise
         except Exception as e:
             logger.exception(f"[AIVideoGenerationPipeline] 执行异常")
             result.success = False
@@ -228,34 +287,63 @@ class AIVideoGenerationPipeline:
             logger.warning(f"[AIVideoGenerationPipeline] 关键词提取失败，用占位: {e}")
         return {"plot": ["故事"], "emotion": ["中性"], "shot": ["中景"], "style": ["写实"]}
 
-    def _gen_prompts(self, keywords: Dict[str, List[str]], scene_count: int) -> List[str]:
-        """标准化提示词生成"""
+    def _gen_prompts(self, keywords: Dict[str, List[str]], scene_count: int,
+                     guards: Optional[Dict[str, Any]] = None) -> List[str]:
+        """标准化提示词生成（传入 ``guards`` 时**自动注入守护约束**）"""
+        prompts: List[str] = []
         try:
             resp = self._call_llm("prompt_from_keywords",
                                   keywords=json.dumps(keywords, ensure_ascii=False),
                                   scene_count=scene_count)
-            prompts = self._extract_json(resp)
-            if isinstance(prompts, list) and prompts:
-                return [str(p) for p in prompts][:scene_count]
+            got = self._extract_json(resp)
+            if isinstance(got, list) and got:
+                prompts = [str(p) for p in got][:scene_count]
         except Exception as e:
             logger.warning(f"[AIVideoGenerationPipeline] 提示词生成失败，用占位: {e}")
-        # 占位提示词
-        style = " ".join(keywords.get("style", ["cinematic"]))
-        return [f"a cinematic shot, {style}, scene {i + 1}, high quality"
-                for i in range(scene_count)]
+        if not prompts:
+            # 占位提示词
+            style = " ".join(keywords.get("style", ["cinematic"]))
+            prompts = [f"a cinematic shot, {style}, scene {i + 1}, high quality"
+                       for i in range(scene_count)]
+
+        # ── 生成前守护：把角色卡 / 道具结构 / 表情幅度约束注进每个提示词 ──
+        if guards:
+            prompts = [self._apply_guard_to_prompt(p, guards) for p in prompts]
+        return prompts
+
+    def _apply_guard_to_prompt(self, prompt: str, guards: Dict[str, Any]) -> str:
+        """把守护约束注入单个提示词；守护层不可用时**原样返回**（诚实降级）。"""
+        try:
+            from app.core.ai.guard_pipeline import enhance_prompt
+
+            out = enhance_prompt(prompt, guards=guards)
+            if out.get("changed"):
+                logger.info(f"[AIVideoGenerationPipeline] 已注入守护约束：{out.get('parts')}")
+            return str(out.get("prompt") or prompt)
+        except Exception:
+            logger.debug("[AIVideoGenerationPipeline] 守护约束注入失败，用原提示词", exc_info=True)
+            return prompt
 
     # ────────────── 生成 + 初检（含回溯闭环） ──────────────
 
     def _generate_and_inspect(self, prompt: str, visual_description: str,
                               dialogue: str, emotion: str, scene_index: int,
                               duration: float, provider: str,
-                              request_id: str) -> Optional[GeneratedClip]:
-        """生成单段 + 后台初检，不合格回溯重写提示词重新生成"""
+                              request_id: str,
+                              guards: Optional[Dict[str, Any]] = None) -> Optional[GeneratedClip]:
+        """生成单段 + 后台初检，不合格回溯重写提示词重新生成
+
+        传 ``guards`` 时，初检会**叠加守护的结构化质检**（见 ``_guard_inspect``）：
+        守护不通过 → 问题并入 ``issues`` → 走同一条回溯重写路径。
+        """
         from app.core.ai.video_generation_client import video_generation_client
 
+        ctx = _job_ctx()
         current_prompt = prompt
         retries = 0
         while retries <= self.MAX_RETRIES:
+            if ctx:
+                ctx.raise_if_cancelled()  # P1-3：回溯重试之间也响应取消
             # 生成
             paths = video_generation_client.generate(
                 prompt=current_prompt, duration=duration, count=1, provider=provider,
@@ -268,6 +356,15 @@ class AIVideoGenerationPipeline:
             path = paths[0]
             # 后台初检
             passed, issues, suggestion, skipped = self._inspect(current_prompt, visual_description)
+            # 生成后守护：叠加结构化质检（不通过则并入 issues，走同一条回溯）
+            guard_hint = ""
+            if guards:
+                g_ok, g_issues, guard_hint = self._guard_inspect(current_prompt, guards)
+                if not g_ok:
+                    issues = list(issues or []) + list(g_issues)
+                    passed = False
+                    skipped = False
+                    logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 守护质检未过：{g_issues}")
             if passed:
                 return GeneratedClip(
                     clip_id=uuid.uuid4().hex[:10], path=path, prompt=current_prompt,
@@ -280,8 +377,9 @@ class AIVideoGenerationPipeline:
             self._emit_inspection_failed(scene_index, current_prompt, issues, suggestion, request_id)
             logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 初检未过，回溯重写提示词 "
                         f"(retries={retries}): {issues}")
-            # 用 suggestion 修正提示词
-            current_prompt = self._revise_prompt(current_prompt, suggestion, issues)
+            # 用 suggestion（+ 守护的明确提示）修正提示词
+            current_prompt = self._revise_prompt(current_prompt, suggestion, issues,
+                                                 guard_hint=guard_hint)
             retries += 1
 
         # 回溯次数用尽仍失败，返回未通过片段（交由上层决定是否剔除）
@@ -319,12 +417,37 @@ class AIVideoGenerationPipeline:
         # LLM 不可用/解析失败时默认通过（保证流程不卡死），但如实标记为「未核验」
         return True, [], "", True
 
-    def _revise_prompt(self, prompt: str, suggestion: str, issues: List[str]) -> str:
-        """根据初检建议回溯重写提示词"""
-        if not suggestion and not issues:
-            return prompt
+    @staticmethod
+    def _guard_inspect(prompt: str, guards: Dict[str, Any]) -> tuple:
+        """生成后**守护质检**（委托 ``guard_pipeline.augment_inspection``）。
+
+        返回 ``(ok, issues, revise_hint)``。守护层不可用时**默认通过**（不拖垮管线）。
+
+        ⚠️ **默认不调 LLM**（V4.33.5）：本函数在回溯循环里**每轮**都会跑，
+        若默认调 LLM，``MAX_RETRIES`` 轮就是同样多次额外费用。规则层（道具 / 角色漂移）零成本；
+        需要更精准审核时，在 guards 里写 ``{"use_llm": true}`` 显式开启。
+        """
+        try:
+            from app.core.ai.guard_pipeline import augment_inspection
+
+            r = augment_inspection(prompt, guards=guards,
+                                   use_llm=bool(guards.get("use_llm", False)))
+            return (bool(r.get("ok")), list(r.get("issues") or []),
+                    str(r.get("revise_hint") or ""))
+        except Exception:
+            logger.debug("[AIVideoGenerationPipeline] 守护质检失败，默认通过", exc_info=True)
+            return True, [], ""
+
+    def _revise_prompt(self, prompt: str, suggestion: str, issues: List[str],
+                       guard_hint: str = "") -> str:
+        """根据初检建议（+ 守护的明确提示）回溯重写提示词"""
         hint = suggestion or ("；".join(issues) if issues else "")
-        return f"{prompt} | avoid: {hint[:80]}"
+        # 守护提示是「针对守护维度的明确规避项」，优先并入（原实现只有一句笼统 avoid）
+        if guard_hint:
+            hint = f"{hint}；{guard_hint}" if hint else guard_hint
+        if not hint:
+            return prompt
+        return f"{prompt} | avoid: {hint[:160]}"
 
     # ────────────── LLM 调用封装 ──────────────
 

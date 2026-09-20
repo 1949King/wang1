@@ -24,10 +24,13 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.core.canvas_aigc import (
+    CAPABILITY_IMAGE,
+    CAPABILITY_VIDEO,
     agent_chat_proxy,
     build_host_ai_config_patch,
     generate_audio_via_host,
@@ -37,13 +40,23 @@ from app.core.canvas_aigc import (
     inpaint_via_host,
     storyboard_breakdown,
     storyboard_to_camera_plan,
+    translate_quality,
+    video_storyboard_breakdown,
 )
+from app.core import canvas_gen_jobs as _gen_jobs
+from app.core import project_snapshot as _proj_snap
+from app.core.ai import storyboard_memory as _storyboard_memory
 from app.core.canvas_bridge import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     _BUILTIN_PLUGIN_REGISTRY,
     _BATCH_JOBS,
     _BATCH_LOCK,
+    _POSTPROCESS_JOBS,
+    _POSTPROCESS_LOCK,
+    _MODEL_PRELOAD_JOBS,
+    _MODEL_PRELOAD_LOCK,
+    start_gfpgan_preload,
     _BRIDGE_PREFS,
     _EVT_REPLY_LOCK,
     _EVT_REPLY_QUEUES,
@@ -58,7 +71,9 @@ from app.core.canvas_bridge import (
     _safe_filename,
     _toggle_canvas_plugin_enabled,
     _upsert_canvas_plugin,
+    _image_to_still_video,
     broadcast_agent_event,
+    build_character_prompt,
     canvas_inbox_dir,
     canvas_outbox_dir,
     emit_canvas_to_editor,
@@ -246,6 +261,44 @@ def _read_local_prompt_json(source_id: str) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# ── 路由表（P1-1 · 绞杀者模式）────────────────────────────────────────
+# 历史包袱：`do_GET` / `do_POST` 各是一条 600~950 行的 `if path == ...` 链。
+# 全量重写风险太高，这里改成：
+#     **新端点一律用 @_route_get / @_route_post 注册进路由表**，
+#     请求进来先查表，未命中才回落老的 if 链（老链行为完全不变）。
+# 这样加端点不用再往千行链里塞，老链后续可逐条迁出。
+#
+# ⚠️ 曾经的教训：端点被追加到文件末尾 → 落进上一个函数体内、且在 `return` 之后
+#    → 语法合法、静态检查全绿、但永远走不到（`/host/plugins/install` 就是这样死的）。
+#    `_verify/check_canvas_routes.py` 现在会用 AST 检测这类不可达路由。
+_ROUTES_GET: Dict[str, str] = {}
+_ROUTES_POST: Dict[str, str] = {}
+
+
+def _route_get(path: str):
+    """把一个 _BridgeHandler 方法注册为 GET 路由。"""
+
+    def _deco(fn):
+        if path in _ROUTES_GET:
+            raise ValueError(f"GET 路由重复注册: {path}")
+        _ROUTES_GET[path] = fn.__name__
+        return fn
+
+    return _deco
+
+
+def _route_post(path: str):
+    """把一个 _BridgeHandler 方法注册为 POST 路由。"""
+
+    def _deco(fn):
+        if path in _ROUTES_POST:
+            raise ValueError(f"POST 路由重复注册: {path}")
+        _ROUTES_POST[path] = fn.__name__
+        return fn
+
+    return _deco
+
+
 class _BridgeHandler(BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
@@ -292,9 +345,35 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
+    def _dispatch_table(self, table: Dict[str, str], path: str, **kw) -> bool:
+        """路由表分发：命中则执行并返回 True，未命中返回 False（交给老 if 链）。
+
+        统一在这里兜异常，路由表里的 handler 不用各自写 try/except 大网。
+        """
+        name = table.get(path)
+        if not name:
+            return False
+        handler = getattr(self, name, None)
+        if handler is None:
+            logger.error("路由表指向了不存在的方法: %s -> %s", path, name)
+            return False
+        try:
+            handler(**kw)
+        except Exception as exc:  # noqa: BLE001 - 桥接层统一兜底，避免连接崩掉
+            logger.exception("[%s] 路由处理失败", path)
+            try:
+                self._json(500, {"ok": False, "message": str(exc)})
+            except Exception:
+                logger.debug("写 500 响应失败", exc_info=True)
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
+
+        # ── 路由表优先（新增端点走这里）；未命中才回落下面的老 if 链 ──
+        if self._dispatch_table(_ROUTES_GET, path, parsed=parsed):
+            return
         if path in ("/", "/health"):
             self._json(
                 200,
@@ -418,30 +497,32 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         # ── Character Library（对接 CharacterStore）─────────────
         if path == "/host/characters":
-            from app.modules.lego.character_management_module import CharacterStore
+            from app.modules.lego.character_management_module import (
+                CHARACTER_FIELD_SCHEMA,
+                CharacterStore,
+            )
             try:
                 store = CharacterStore()
                 raw = store.all()
-                # 裁剪为 CharacterEntry 结构（与前端对齐）
+                # 裁剪为 CharacterEntry 结构（与前端对齐）。
+                # 字段白名单由 CHARACTER_FIELD_SCHEMA 派生 —— 新增角色字段时此处无需手工同步，
+                # 否则会出现「库里存了、前端看不到」的静默漏传。
+                # 一致性校验：_verify/check_character_schema.py
                 characters = []
                 for c in raw:
-                    characters.append({
-                        "id": c.get("id", ""),
-                        "name": c.get("name", ""),
-                        "gender": c.get("gender", ""),
-                        "age_range": c.get("age_range", ""),
-                        "role_type": c.get("role_type", ""),
-                        "tags": c.get("tags", []) or [],
-                        "appearance": c.get("appearance", ""),
-                        "personality": c.get("personality", ""),
-                        "representative_line": c.get("representative_line", ""),
-                        "background": c.get("background", ""),
-                        "notes": c.get("notes", ""),
-                        "media_dir": c.get("media_dir", ""),
-                        "avatar_url": c.get("avatar_url", ""),
-                        "created_at": c.get("created_at", ""),
-                        "updated_at": c.get("updated_at", ""),
-                    })
+                    entry = {"id": c.get("id", "")}
+                    for key in [f[0] for f in CHARACTER_FIELD_SCHEMA]:
+                        entry[key] = c.get(key) or ""
+                    entry["tags"] = c.get("tags") or []      # 列表字段不能退化成空串
+                    # 由 Python 侧唯一真相源拼好的生图提示片段（含 visual 组全部 4 个字段）。
+                    # 前端直接用它，不要自己再拼一遍 —— 两份拼装逻辑必然漂移。
+                    # 一致性校验：_verify/check_character_schema.py
+                    entry["prompt"] = build_character_prompt(c)
+                    entry["media_dir"] = c.get("media_dir", "")
+                    entry["avatar_url"] = c.get("avatar_url", "")
+                    entry["created_at"] = c.get("created_at", "")
+                    entry["updated_at"] = c.get("updated_at", "")
+                    characters.append(entry)
                 self._json(200, characters)
             except Exception as exc:
                 logger.warning(f"/host/characters 读取失败: {exc}")
@@ -874,6 +955,65 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             })
             return
 
+        # ── GET /host/video-postprocess?job_id=xxx：查询单视频后处理任务进度 ──
+        if path == "/host/video-postprocess":
+            if not _check_host_token(self):
+                self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            qs = parse_qs(parsed.query)
+            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
+            if not job_id:
+                self._json(400, {"ok": False, "message": "job_id 不能为空"})
+                return
+            with _POSTPROCESS_LOCK:
+                job = _POSTPROCESS_JOBS.get(job_id)
+            if not job:
+                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
+                return
+            self._json(200, {
+                "ok": True,
+                "job_id": job_id,
+                "status": job["status"],
+                "progress": job["progress"],
+                "message": job["message"],
+                "video_path": job["video_path"],
+                "video_url": job["video_url"],
+                "postprocessed": job["postprocessed"],
+                "updated_at": job["updated_at"],
+            })
+            return
+
+        # ── GET/POST /host/model-preload：本地模型（GFPGAN）后台预载进度轮询 / 触发 ──
+        if path == "/host/model-preload":
+            if not _check_host_token(self):
+                self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            if self.command == "POST":
+                job_id = start_gfpgan_preload()
+                self._json(200, {"ok": True, "job_id": job_id})
+                return
+            qs = parse_qs(parsed.query)
+            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
+            if not job_id:
+                self._json(400, {"ok": False, "message": "job_id 不能为空"})
+                return
+            with _MODEL_PRELOAD_LOCK:
+                job = _MODEL_PRELOAD_JOBS.get(job_id)
+            if not job:
+                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
+                return
+            self._json(200, {
+                "ok": True,
+                "job_id": job_id,
+                "kind": job.get("kind"),
+                "status": job.get("status"),
+                "progress": job.get("progress"),
+                "message": job.get("message"),
+                "ready": job.get("ready"),
+                "updated_at": job.get("updated_at"),
+            })
+            return
+
         if path.startswith("/inbox_file/"):
             name = _safe_filename(path.split("/inbox_file/", 1)[-1])
             fpath = os.path.join(canvas_inbox_dir(), name)
@@ -907,6 +1047,10 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length > 0 else b""
         ctype = (self.headers.get("Content-Type") or "").lower()
+
+        # ── 路由表优先（新增端点走这里）；未命中才回落下面的老 if 链 ──
+        if self._dispatch_table(_ROUTES_POST, parsed.path, parsed=parsed, raw=raw, ctype=ctype):
+            return
 
         # ── POST: Tauri 桌面画布主窗口关闭时通知后端清理 ──────────────
         # Tauri 端在 on_window_event CloseRequested 中 POST 此端点，
@@ -1176,13 +1320,16 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             except Exception:
                 self._json(400, {"ok": False, "message": "invalid json"})
                 return
+            quality = str(data.get("quality") or "standard")
+            size = str(data.get("size") or "") or translate_quality(quality, CAPABILITY_IMAGE)["size"]
             res = generate_image_openai_compatible(
                 prompt=str(data.get("prompt") or ""),
                 model=str(data.get("model") or ""),
-                size=str(data.get("size") or "1024x576"),
+                size=size,
                 channel_id=str(data.get("channel_id") or ""),
                 reference_image=str(data.get("reference_image") or ""),
                 strength=float(data.get("strength") or 0.65),
+                quality=quality,
             )
             code = 200 if res.get("ok") else 400
             if not res.get("ok"):
@@ -1190,6 +1337,16 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     from app.core.ai_engine import AIEngine; AIEngine().increment_ng_count(1)
                 except Exception:
                     logger.debug("increment_ng_count failed", exc_info=True)
+            # 画质档位含人脸修复时，后台预载 GFPGAN（不阻塞本次生成，前端按 job_id 轮询进度）
+            try:
+                if isinstance(res, dict) and translate_quality(quality, CAPABILITY_IMAGE).get("face_restore"):
+                    preload_job_id = start_gfpgan_preload()
+                    res["preload_job_id"] = preload_job_id
+                    with _MODEL_PRELOAD_LOCK:
+                        _pjob = _MODEL_PRELOAD_JOBS.get(preload_job_id)
+                    res["face_restore_ready"] = bool(_pjob and _pjob.get("ready"))
+            except Exception as exc:
+                logger.debug(f"GFPGAN 预载触发失败: {exc}")
             self._json(code, res)
             return
         # ── ComfyUI 工作流执行：POST /host/comfyui/run（粘贴即用 / dry-run 演练） ──
@@ -1232,18 +1389,75 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 self._json(400, {"ok": False, "message": "invalid json"})
                 return
             port = getattr(self.server, "bridge_port", DEFAULT_PORT)
+            quality = str(data.get("quality") or "standard")
+            size = str(data.get("size") or "") or translate_quality(quality, CAPABILITY_VIDEO)["size"]
+
+            # 需要后处理（超分/补帧）时创建后台任务，前端按 postprocess_job_id 轮询进度
+            quality_params = translate_quality(quality, CAPABILITY_VIDEO)
+            postprocess_job_id = ""
+            progress_cb = None
+            done_cb = None
+            if quality_params.get("frame_interpolate") or quality_params.get("upscale"):
+                postprocess_job_id = uuid.uuid4().hex[:12]
+                with _POSTPROCESS_LOCK:
+                    _POSTPROCESS_JOBS[postprocess_job_id] = {
+                        "job_id": postprocess_job_id,
+                        "status": "processing",
+                        "progress": 0,
+                        "message": "等待后处理...",
+                        "video_path": "",
+                        "video_url": "",
+                        "postprocessed": False,
+                        "created_at": time.time(),
+                        "updated_at": time.time(),
+                    }
+
+                def progress_cb(pct: int, message: str) -> None:
+                    with _POSTPROCESS_LOCK:
+                        job = _POSTPROCESS_JOBS.get(postprocess_job_id)
+                        if job:
+                            job["progress"] = int(pct)
+                            job["message"] = message or ""
+                            job["updated_at"] = time.time()
+
+                def done_cb(src_path: str, final_path: str) -> None:
+                    with _POSTPROCESS_LOCK:
+                        job = _POSTPROCESS_JOBS.get(postprocess_job_id)
+                        if not job:
+                            return
+                        if final_path and final_path != src_path and os.path.isfile(final_path):
+                            job["video_path"] = final_path
+                            job["video_url"] = (
+                                f"http://127.0.0.1:{int(port)}/inbox_file/"
+                                f"{os.path.basename(final_path)}"
+                            )
+                            job["postprocessed"] = True
+                        job["status"] = "done"
+                        job["progress"] = 100
+                        job["message"] = "后处理完成"
+                        job["updated_at"] = time.time()
+
             res = generate_video_via_host(
                 prompt=str(data.get("prompt") or ""),
                 model=str(data.get("model") or ""),
                 channel_id=str(data.get("channel_id") or ""),
                 duration=float(data.get("duration") or 5.0),
-                size=str(data.get("size") or "1280x720"),
+                size=size,
                 reference_image=str(data.get("reference_image") or ""),
                 reference_video=str(data.get("reference_video") or data.get("referenceVideo") or ""),
                 first_frame=str(data.get("first_frame") or data.get("firstFrame") or ""),
                 last_frame=str(data.get("last_frame") or data.get("lastFrame") or ""),
                 bridge_port=int(port),
+                quality=quality,
+                postprocess_progress_callback=progress_cb,
+                postprocess_done_callback=done_cb,
             )
+            if postprocess_job_id and res.get("ok") and res.get("postprocessing"):
+                res["postprocess_job_id"] = postprocess_job_id
+            elif postprocess_job_id:
+                # 未派生出后处理工作（生成失败/无需处理），清理掉避免残留
+                with _POSTPROCESS_LOCK:
+                    _POSTPROCESS_JOBS.pop(postprocess_job_id, None)
             code = 200 if res.get("ok") else 400
             if not res.get("ok"):
                 try:
@@ -1290,6 +1504,33 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 logger.exception("[/host/pose-extract] 失败")
+                self._json(500, {"ok": False, "message": str(e)})
+                return
+            code = 200 if res.get("ok") else 400
+            self._json(code, res)
+            return
+        # ── 模式 B 第四刀：POST /host/pose-video-encode（逐帧 PNG 序列 → mp4，落 inbox） ──
+        # 前端逐帧渲染白模姿态并采集 PNG data URL（复用离屏 RenderTarget 读像素），
+        # 本端点负责合成。产出的 mp4 即作为 reference_video 走第一刀通道。
+        if parsed.path == "/host/pose-video-encode":
+            if not _check_host_token(self):
+                self._json(401, {"ok": False, "message": "unauthorized"})
+                return
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                self._json(400, {"ok": False, "message": "invalid json"})
+                return
+            try:
+                from app.core.ai.pose_video_service import encode_pose_video
+
+                res = encode_pose_video(
+                    data.get("frames") or [],
+                    fps=int(data.get("fps") or 25),
+                    name=str(data.get("name") or "pose_motion"),
+                )
+            except Exception as e:
+                logger.exception("[/host/pose-video-encode] 失败")
                 self._json(500, {"ok": False, "message": str(e)})
                 return
             code = 200 if res.get("ok") else 400
@@ -1959,68 +2200,699 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self._json(200 if res.get("success") else 400, res)
         return
 
-        # ── 画布节点插件操作（install / toggle / uninstall）──
-        if parsed.path == "/host/plugins/install":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
+
+    # ── 画布节点插件操作（install / toggle / uninstall）─────────────────
+    # 2026-09-13 修复：这三个端点原先被追加在 `_handle_ingest()` 的 `return` 之后，
+    # 语法合法但永不执行 —— 前端点「安装/启用/卸载插件」只会拿到 do_POST 末尾的 404。
+    # 现改为 @_route_post 注册进路由表。新增端点请照此办理，不要往老 if 链里塞。
+
+    @_route_post("/host/plugins/install")
+    def _h_plugins_install(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        plugin_id = str(data.get("id") or "").strip()
+        if not plugin_id:
+            self._json(400, {"ok": False, "message": "plugin id required"})
+            return
+        preset = next((p for p in _BUILTIN_PLUGIN_REGISTRY if p.get("id") == plugin_id), None)
+        entry: Dict[str, Any] = {
+            "name": str(data.get("name") or (preset.get("name") if preset else "") or plugin_id),
+            "version": str(data.get("version") or (preset.get("version") if preset else "") or "0.0.0"),
+            "description": str(data.get("description") or (preset.get("description") if preset else "") or ""),
+            "url": str(data.get("url") or (preset.get("url") if preset else "") or ""),
+            "nodes": data.get("nodes") or (preset.get("nodes") if preset else []) or [],
+            "official": bool(data.get("official", (preset.get("official") if preset else False))),
+            "enabled": True,
+        }
+        saved = _upsert_canvas_plugin(plugin_id, **entry)
+        self._json(200, {"ok": True, "plugin": saved})
+
+    @_route_post("/host/plugins/toggle")
+    def _h_plugins_toggle(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        plugin_id = str(data.get("id") or "").strip()
+        enabled = bool(data.get("enabled", True))
+        ok = _toggle_canvas_plugin_enabled(plugin_id, enabled)
+        if not ok:
+            self._json(404, {"ok": False, "message": "plugin not found"})
+            return
+        self._json(200, {"ok": True, "id": plugin_id, "enabled": enabled})
+
+    @_route_post("/host/plugins/uninstall")
+    def _h_plugins_uninstall(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        plugin_id = str(data.get("id") or "").strip()
+        ok = _remove_canvas_plugin(plugin_id)
+        if not ok:
+            self._json(404, {"ok": False, "message": "plugin not found"})
+            return
+        self._json(200, {"ok": True, "id": plugin_id})
+
+    # ── 分镜记忆规划：把记忆衰减模型换算成「每镜该给多少秒」─────────────
+    # 类型由人在画布上选（细节/意义/情绪），后端只算保留率与建议时长。
+    # 数学在 app/core/ai/storyboard_memory.py，校验 _verify/check_storyboard_memory.py。
+    @_route_post("/host/storyboard-memory-plan")
+    def _h_storyboard_memory_plan(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        if not isinstance(body, dict):
+            self._json(400, {"ok": False, "message": "body must be an object"})
+            return
+        rows = body.get("rows")
+        if rows is None:
+            rows = []
+        if not isinstance(rows, list):
+            self._json(400, {"ok": False, "message": "rows must be an array"})
+            return
+        try:
+            result = _storyboard_memory.plan(
+                rows,
+                t_hours=float(body.get("t_hours", _storyboard_memory.DEFAULT_T_HOURS)),
+                min_duration=float(body.get("minDuration", _storyboard_memory.MIN_DURATION)),
+                max_duration=float(body.get("maxDuration", _storyboard_memory.MAX_DURATION)),
+            )
+        except (TypeError, ValueError) as exc:
+            self._json(400, {"ok": False, "message": f"参数非法: {exc}"})
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[/host/storyboard-memory-plan] 失败")
+            self._json(500, {"ok": False, "message": str(exc)})
+            return
+        # V4.15.2 P0-1 补强：apply=true 时把 plan 真的落回 _clips（不再只回字符串）
+        applied_info: Optional[Dict[str, Any]] = None
+        if body.get("apply") is True:
+            plan_rows = result.get("rows") or []
+            # 把 plan 行投影成 {clip_id, duration} 列表
+            durations: List[Dict[str, Any]] = []
+            for pr in plan_rows:
+                if not isinstance(pr, dict):
+                    continue
+                cid = pr.get("id")
+                dur = pr.get("suggestedDuration")
+                if isinstance(cid, str) and cid and isinstance(dur, (int, float)):
+                    durations.append({"clip_id": cid, "duration": float(dur)})
+            # 调 EditorModule 的公开 agent 方法（无 provider 时诚实失败）
+            from app.core.project_snapshot import get_full_clips  # 触发 editor 加载
+            # 关键路径：写回 _clips 必须有 provider（set_clips_writer 在 editor 启动时注册）
             try:
-                data = json.loads(raw.decode("utf-8") or "{}")
+                from app.core.project_snapshot import write_clips
             except Exception:
-                self._json(400, {"ok": False, "message": "invalid json"})
-                return
-            plugin_id = str(data.get("id") or "").strip()
-            if not plugin_id:
-                self._json(400, {"ok": False, "message": "plugin id required"})
-                return
-            preset = next((p for p in _BUILTIN_PLUGIN_REGISTRY if p.get("id") == plugin_id), None)
-            entry: Dict[str, Any] = {
-                "name": str(data.get("name") or (preset.get("name") if preset else "") or plugin_id),
-                "version": str(data.get("version") or (preset.get("version") if preset else "") or "0.0.0"),
-                "description": str(data.get("description") or (preset.get("description") if preset else "") or ""),
-                "url": str(data.get("url") or (preset.get("url") if preset else "") or ""),
-                "nodes": data.get("nodes") or (preset.get("nodes") if preset else []) or [],
-                "official": bool(data.get("official", (preset.get("official") if preset else False))),
-                "enabled": True,
-            }
-            saved = _upsert_canvas_plugin(plugin_id, **entry)
-            self._json(200, {"ok": True, "plugin": saved})
+                write_clips = None  # type: ignore
+            # 走 agent 公开方法（agent_apply_storyboard_durations）需要 EditorModule 实例
+            # 桥上不直接 import EditorModule（避免循环 + 桥层不应依赖上帝类）。
+            # 方案：通过 /host/project-snapshot 的 writer 通道（已注册）+ 临时合约：
+            # 把 {clip_id, duration} 转成 [{id, duration, ...} + 原 _clips 的其它字段] → 写回。
+            # 这一步由本端点直接做（因为它能读 get_full_clips 拿到完整 _clips）。
+            existing = get_full_clips() or []
+            existing_by_id = {c.get("id"): c for c in existing if isinstance(c, Mapping) and c.get("id")}
+            if not existing_by_id:
+                # 没有可写回的 _clips（剪辑未就绪或未注册）
+                applied_info = {"ok": False, "message": "剪辑模块未就绪或未注册时间线 writer"}
+            else:
+                new_clips: List[Dict[str, Any]] = []
+                applied = 0
+                unmatched: List[str] = []
+                for d in durations:
+                    cid = d["clip_id"]
+                    base = existing_by_id.get(cid)
+                    if not base:
+                        unmatched.append(cid)
+                        continue
+                    new_c = dict(base)
+                    new_c["duration"] = d["duration"]
+                    # out_point 跟着改（in_point 起点不动）
+                    try:
+                        in_pt = float(base.get("in_point", 0) or 0)
+                        new_c["out_point"] = in_pt + d["duration"]
+                    except Exception:
+                        logger.debug("解析 in_point 失败，跳过 out_point 计算", exc_info=True)
+                    new_clips.append(new_c)
+                    applied += 1
+                # 没改的也带上（保证不丢片段）
+                applied_ids = {c.get("id") for c in new_clips}
+                for c in existing:
+                    if c.get("id") not in applied_ids:
+                        new_clips.append(dict(c))
+                if write_clips is None:
+                    applied_info = {"ok": False, "message": "project_snapshot 模块缺失"}
+                else:
+                    wres = write_clips(new_clips)
+                    applied_info = {
+                        "ok": wres.get("ok") is True,
+                        "applied": applied,
+                        "unmatched": unmatched,
+                        "message": wres.get("message") or f"已应用 {applied} 个片段",
+                    }
+        out: Dict[str, Any] = {"ok": True, "plan": result}
+        if applied_info is not None:
+            out["applied"] = applied_info
+        # V4.15.2: result 本身是 plan 字典（rows / totalSuggested / ok）
+        # 为向后兼容既有调用（直接读 result.rows）直接平铺 result 字段
+        if isinstance(result, dict):
+            for k, v in result.items():
+                out.setdefault(k, v)
+        self._json(200, out)
+
+    # ── 生成任务：异步 · 真实进度 · 可取消 ──────────────────────────────
+    # 背景：生图/生视频原先是一次阻塞 POST（超时档 120~300s），前端全程转圈、
+    # 无法取消；批量还是串行 for。这里改造成任务制：
+    #     submit 立即返回 job_id → status/list 轮询 → cancel 中断在途请求。
+    #
+    # 进度诚实性（与「诚实失败」同源）：上游 provider 只给一次阻塞响应、没有进度
+    # 信号时，`progress` 必须保持 null，前端只显示「阶段 + 已用时」；
+    # 只有生视频的后处理（超分/补帧）有真回调，才写真实百分比。
+    #
+    # 任务表与线程池在 app/core/canvas_gen_jobs.py（新模块，冻结区零改动）。
+
+    _GEN_KINDS = ("image", "video", "audio", "music")
+
+    _GEN_PAYLOAD_KEYS: Dict[str, Tuple[str, ...]] = {
+        "image": ("prompt", "model", "channel_id", "size", "reference_image", "strength", "quality"),
+        "video": (
+            "prompt", "model", "channel_id", "duration", "size",
+            "reference_image", "reference_video", "first_frame", "last_frame", "quality",
+            "referenceVideo", "firstFrame", "lastFrame",
+        ),
+        "audio": ("prompt", "model", "channel_id", "voice"),
+        "music": ("prompt", "model", "channel_id", "style", "lyrics", "title", "instrumental"),
+    }
+
+    def _ng_count(self) -> None:
+        """生成失败时累计 NG 计数（与老端点行为一致，失败也要记账）。"""
+        try:
+            from app.core.ai_engine import AIEngine
+
+            AIEngine().increment_ng_count(1)
+        except Exception:
+            logger.debug("increment_ng_count failed", exc_info=True)
+
+    def _build_gen_callable(self, kind: str, kwargs: Dict[str, Any]):
+        """把「kind + 白名单参数」编译成一个 ``fn(report)`` 交给任务表执行。
+
+        ⚠️ 这里是老端点 ``/host/generate-image`` ``/host/generate-video`` 的**保真搬运**：
+        画质档 → size 换算、NG 计数、GFPGAN 后台预载、后处理任务注册，
+        一个都不能少，否则异步化会静默丢功能。
+        """
+        port = int(getattr(self.server, "bridge_port", DEFAULT_PORT))
+
+        def _run_image(report) -> Dict[str, Any]:
+            quality = str(kwargs.get("quality") or "standard")
+            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_IMAGE)["size"]
+            report.stage("await_provider", "等待模型返回图像")
+            res = generate_image_openai_compatible(
+                prompt=str(kwargs.get("prompt") or ""),
+                model=str(kwargs.get("model") or ""),
+                size=size,
+                channel_id=str(kwargs.get("channel_id") or ""),
+                reference_image=str(kwargs.get("reference_image") or ""),
+                strength=float(kwargs.get("strength") or 0.65),
+                quality=quality,
+            )
+            if not res.get("ok"):
+                self._ng_count()
+            # 画质档含人脸修复时后台预载 GFPGAN（真进度，前端按 job_id 轮询）
+            try:
+                if isinstance(res, dict) and translate_quality(quality, CAPABILITY_IMAGE).get("face_restore"):
+                    preload_job_id = start_gfpgan_preload()
+                    res["preload_job_id"] = preload_job_id
+                    with _MODEL_PRELOAD_LOCK:
+                        _pjob = _MODEL_PRELOAD_JOBS.get(preload_job_id)
+                    res["face_restore_ready"] = bool(_pjob and _pjob.get("ready"))
+            except Exception as exc:
+                logger.debug("GFPGAN 预载触发失败: %s", exc)
+            return res
+
+        def _run_video(report) -> Dict[str, Any]:
+            quality = str(kwargs.get("quality") or "standard")
+            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_VIDEO)["size"]
+            quality_params = translate_quality(quality, CAPABILITY_VIDEO)
+
+            postprocess_job_id = ""
+            progress_cb = None
+            done_cb = None
+            if quality_params.get("frame_interpolate") or quality_params.get("upscale"):
+                postprocess_job_id = uuid.uuid4().hex[:12]
+                with _POSTPROCESS_LOCK:
+                    _POSTPROCESS_JOBS[postprocess_job_id] = {
+                        "job_id": postprocess_job_id,
+                        "status": "processing",
+                        "progress": 0,
+                        "message": "等待后处理...",
+                        "video_path": "",
+                        "video_url": "",
+                        "postprocessed": False,
+                        "created_at": time.time(),
+                        "updated_at": time.time(),
+                    }
+
+                def progress_cb(pct: int, message: str) -> None:
+                    with _POSTPROCESS_LOCK:
+                        _pjob = _POSTPROCESS_JOBS.get(postprocess_job_id)
+                        if _pjob:
+                            _pjob["progress"] = int(pct)
+                            _pjob["message"] = message or ""
+                            _pjob["updated_at"] = time.time()
+                    # 后处理是整条链路里唯一有真实百分比的阶段，如实上报给任务表
+                    report.stage("postprocess", "后处理（超分/补帧）")
+                    report.progress(pct)
+                    if message:
+                        report.note(message)
+
+                def done_cb(src_path: str, final_path: str) -> None:
+                    with _POSTPROCESS_LOCK:
+                        _pjob = _POSTPROCESS_JOBS.get(postprocess_job_id)
+                        if not _pjob:
+                            return
+                        if final_path and final_path != src_path and os.path.isfile(final_path):
+                            _pjob["video_path"] = final_path
+                            _pjob["video_url"] = (
+                                f"http://127.0.0.1:{int(port)}/inbox_file/"
+                                f"{os.path.basename(final_path)}"
+                            )
+                            _pjob["postprocessed"] = True
+                        _pjob["status"] = "done"
+                        _pjob["progress"] = 100
+                        _pjob["message"] = "后处理完成"
+                        _pjob["updated_at"] = time.time()
+
+            report.stage("await_provider", "等待模型返回视频")
+            res = generate_video_via_host(
+                prompt=str(kwargs.get("prompt") or ""),
+                model=str(kwargs.get("model") or ""),
+                channel_id=str(kwargs.get("channel_id") or ""),
+                duration=float(kwargs.get("duration") or 5.0),
+                size=size,
+                reference_image=str(kwargs.get("reference_image") or ""),
+                reference_video=str(kwargs.get("reference_video") or kwargs.get("referenceVideo") or ""),
+                first_frame=str(kwargs.get("first_frame") or kwargs.get("firstFrame") or ""),
+                last_frame=str(kwargs.get("last_frame") or kwargs.get("lastFrame") or ""),
+                bridge_port=int(port),
+                quality=quality,
+                postprocess_progress_callback=progress_cb,
+                postprocess_done_callback=done_cb,
+            )
+            if postprocess_job_id and res.get("ok") and res.get("postprocessing"):
+                res["postprocess_job_id"] = postprocess_job_id
+            elif postprocess_job_id:
+                with _POSTPROCESS_LOCK:
+                    _POSTPROCESS_JOBS.pop(postprocess_job_id, None)
+            if not res.get("ok"):
+                self._ng_count()
+            return res
+
+        def _run_audio(report) -> Dict[str, Any]:
+            report.stage("await_provider", "等待模型返回音频")
+            res = generate_audio_via_host(
+                prompt=str(kwargs.get("prompt") or ""),
+                model=str(kwargs.get("model") or ""),
+                channel_id=str(kwargs.get("channel_id") or ""),
+                voice=str(kwargs.get("voice") or ""),
+                bridge_port=int(port),
+            )
+            if not res.get("ok"):
+                self._ng_count()
+            return res
+
+        def _run_music(report) -> Dict[str, Any]:
+            report.stage("await_provider", "等待模型返回音乐")
+            res = generate_music_via_host(
+                prompt=str(kwargs.get("prompt") or ""),
+                model=str(kwargs.get("model") or ""),
+                channel_id=str(kwargs.get("channel_id") or ""),
+                style=str(kwargs.get("style") or ""),
+                lyrics=str(kwargs.get("lyrics") or ""),
+                title=str(kwargs.get("title") or ""),
+                instrumental=bool(kwargs.get("instrumental")),
+                bridge_port=int(port),
+            )
+            if not res.get("ok"):
+                self._ng_count()
+            return res
+
+        return {
+            "image": _run_image,
+            "video": _run_video,
+            "audio": _run_audio,
+            "music": _run_music,
+        }.get(kind, lambda report: {"ok": False, "message": f"未知生成类型: {kind}"})
+
+    @_route_post("/host/video-storyboard")
+    def _h_video_storyboard(self, parsed, raw: bytes, ctype: str) -> None:
+        """一键拉片：参考视频 → 可编辑分镜表。
+
+        接受 { path }（本地绝对路径）或 { url }（/inbox_file/ 或 http inbox URL）。
+        后端检测镜头边界 + 抽代表帧 + 算色调/亮度 + 推断景别，返回 shots 数组。
+        """
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized", "shots": []})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json", "shots": []})
+            return
+        if not isinstance(body, dict):
+            self._json(400, {"ok": False, "message": "body must be an object", "shots": []})
             return
 
-        if parsed.path == "/host/plugins/toggle":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                data = json.loads(raw.decode("utf-8") or "{}")
-            except Exception:
-                self._json(400, {"ok": False, "message": "invalid json"})
-                return
-            plugin_id = str(data.get("id") or "").strip()
-            enabled = bool(data.get("enabled", True))
-            ok = _toggle_canvas_plugin_enabled(plugin_id, enabled)
-            if not ok:
-                self._json(404, {"ok": False, "message": "plugin not found"})
-                return
-            self._json(200, {"ok": True, "id": plugin_id, "enabled": enabled})
+        local_path = str(body.get("path") or "")
+        if not local_path:
+            src = str(body.get("url") or "")
+            if "/inbox_file/" in src:
+                name = _safe_filename(src.split("/inbox_file/", 1)[-1])
+                local_path = os.path.join(canvas_inbox_dir(), name)
+        if not local_path or not os.path.isfile(local_path):
+            self._json(400, {"ok": False, "message": "视频文件不存在，请先上传参考片", "shots": []})
             return
 
-        if parsed.path == "/host/plugins/uninstall":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                data = json.loads(raw.decode("utf-8") or "{}")
-            except Exception:
-                self._json(400, {"ok": False, "message": "invalid json"})
-                return
-            plugin_id = str(data.get("id") or "").strip()
-            ok = _remove_canvas_plugin(plugin_id)
-            if not ok:
-                self._json(404, {"ok": False, "message": "plugin not found"})
-                return
-            self._json(200, {"ok": True, "id": plugin_id})
+        port = getattr(self.server, "bridge_port", DEFAULT_PORT)
+        try:
+            res = video_storyboard_breakdown(
+                local_path,
+                use_llm=bool(body.get("use_llm")),
+                max_shots=int(body.get("max_shots") or 30),
+                frames_dir=canvas_inbox_dir(),
+                frame_url_prefix=f"http://127.0.0.1:{int(port)}/inbox_file",
+            )
+        except Exception as e:
+            logger.exception("[/host/video-storyboard] 失败")
+            self._json(500, {"ok": False, "message": str(e), "shots": []})
             return
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+
+    @_route_post("/host/still-video")
+    def _h_still_video(self, parsed, raw: bytes, ctype: str) -> None:
+        """图 → 静帧视频（成片闭环 · 伪真图卡）。
+
+        接受三类输入，统一转成本地 .mp4 路径数组：
+          - /inbox_file/xxx.png 或 http://127.0.0.1:port/inbox_file/xxx.png（inbox URL）
+          - data:image/...;base64,xxx（data URL）
+          - 本地绝对路径（已是 .mp4 的视频原样返回）
+        图片复用 canvas_bridge._image_to_still_video 转静帧视频（失败跳过并记 warning）。
+        """
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        if not isinstance(body, dict):
+            self._json(400, {"ok": False, "message": "body 必须是对象"})
+            return
+        raw_items = body.get("items")
+        if raw_items is None:
+            raw_items = body.get("paths")
+        if raw_items is None:
+            raw_items = body.get("urls")
+        if raw_items is None:
+            raw_items = []
+        if not isinstance(raw_items, list):
+            self._json(400, {"ok": False, "message": "items 必须是数组"})
+            return
+        try:
+            duration = float(body.get("duration") or 3.0)
+        except (TypeError, ValueError):
+            duration = 3.0
+
+        import base64 as _b64
+
+        results: List[Dict[str, Any]] = []
+        for item in raw_items:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            src = item.strip()
+            local_path = ""
+            # 1) inbox URL → 本地路径
+            if "/inbox_file/" in src:
+                name = _safe_filename(src.split("/inbox_file/", 1)[-1])
+                local_path = os.path.join(canvas_inbox_dir(), name)
+            # 2) data URL → 落盘 inbox
+            elif src.startswith("data:image/") and ";base64," in src:
+                try:
+                    head, b64 = src.split(";base64,", 1)
+                    ext = "png"
+                    if "jpeg" in head or "jpg" in head:
+                        ext = "jpg"
+                    elif "webp" in head:
+                        ext = "webp"
+                    payload = _b64.b64decode(b64)
+                    name = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.{ext}"
+                    dest = os.path.join(canvas_inbox_dir(), name)
+                    with open(dest, "wb") as f:
+                        f.write(payload)
+                    local_path = dest
+                except Exception as exc:
+                    logger.warning("[still-video] data URL 落盘失败: %s", exc)
+                    continue
+            # 3) 本地绝对路径
+            else:
+                local_path = src
+
+            if not os.path.isfile(local_path):
+                logger.warning("[still-video] 文件不存在，跳过: %s", local_path)
+                continue
+            ext = os.path.splitext(local_path)[1].lower()
+            if ext in (".mp4", ".mov", ".webm", ".m4v", ".mkv"):
+                # 已是视频，原样返回
+                results.append({"ok": True, "path": os.path.abspath(local_path), "kind": "video"})
+                continue
+            if ext not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+                logger.warning("[still-video] 不支持的图片格式，跳过: %s", local_path)
+                continue
+            out = _image_to_still_video(local_path, duration_sec=duration)
+            if out:
+                results.append({"ok": True, "path": os.path.abspath(out), "kind": "still"})
+            else:
+                results.append({"ok": False, "path": local_path, "kind": "still", "error": "转视频失败"})
+
+        self._json(200, {
+            "ok": True,
+            "count": len(results),
+            "results": results,
+            "paths": [r["path"] for r in results if r.get("ok")],
+        })
+
+    @_route_post("/host/generation/submit")
+    def _h_generation_submit(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        if not isinstance(body, dict):
+            self._json(400, {"ok": False, "message": "body must be an object"})
+            return
+        kind = str(body.get("kind") or "").strip().lower()
+        if kind not in self._GEN_KINDS:
+            self._json(400, {"ok": False, "message": f"kind 必须是 {list(self._GEN_KINDS)} 之一"})
+            return
+        raw_payload = body.get("payload")
+        if raw_payload is None:
+            raw_payload = {}
+        if not isinstance(raw_payload, dict):
+            self._json(400, {"ok": False, "message": "payload must be an object"})
+            return
+        allowed = self._GEN_PAYLOAD_KEYS.get(kind, ())
+        kwargs = {k: raw_payload[k] for k in allowed if k in raw_payload and raw_payload[k] is not None}
+        if not str(kwargs.get("prompt") or kwargs.get("lyrics") or "").strip():
+            self._json(400, {"ok": False, "message": "提示词为空"})
+            return
+        try:
+            max_attempts = int(body.get("max_attempts") or 1)
+        except (TypeError, ValueError):
+            max_attempts = 1
+        label = str(body.get("label") or "").strip()
+        if not label:
+            label = (str(kwargs.get("prompt") or "") or "生成任务")[:24]
+        job = _gen_jobs.submit(
+            kind,
+            self._build_gen_callable(kind, kwargs),
+            label=label,
+            meta={
+                "model": str(kwargs.get("model") or ""),
+                "channel_id": str(kwargs.get("channel_id") or ""),
+                "size": str(kwargs.get("size") or ""),
+                "duration": kwargs.get("duration"),
+            },
+            max_attempts=max_attempts,
+        )
+        self._json(200, {"ok": True, "job": job})
+
+    @_route_get("/host/generation/status")
+    def _h_generation_status(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        qs = parse_qs(parsed.query)
+        job_id = str((qs.get("job_id") or [""])[0]).strip()
+        if not job_id:
+            self._json(400, {"ok": False, "message": "job_id required"})
+            return
+        job = _gen_jobs.get_job(job_id)
+        if job is None:
+            self._json(404, {"ok": False, "message": "任务不存在或已过期"})
+            return
+        self._json(200, {"ok": True, "job": job})
+
+    @_route_get("/host/generation/list")
+    def _h_generation_list(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        qs = parse_qs(parsed.query)
+        try:
+            limit = int((qs.get("limit") or ["30"])[0])
+        except (TypeError, ValueError):
+            limit = 30
+        self._json(200, {
+            "ok": True,
+            "jobs": _gen_jobs.list_jobs(limit),
+            "stats": _gen_jobs.queue_stats(),
+        })
+
+    @_route_post("/host/generation/cancel")
+    def _h_generation_cancel(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        job_id = str((body or {}).get("job_id") or "").strip()
+        if not job_id:
+            self._json(400, {"ok": False, "message": "job_id required"})
+            return
+        res = _gen_jobs.cancel(job_id, str((body or {}).get("reason") or "用户取消"))
+        self._json(200 if res.get("ok") else 404, res)
+
+    # ── 工程级快照（P1-4）────────────────────────────────────────────
+    # 把剪辑器时间线（完整 _clips，非摘要）与画布 bundle 一起打包成工程快照，
+    # 支持「可回滚 / 可 diff / 可直导剪辑器」。时间线读写经 project_snapshot 的
+    # provider 回调落到 EditorModule，桥不直接 import 上帝类。
+    # 前端（generationQueue 同款）通过 /host/project-snapshot/* 合入 exportProjectZip。
+
+    @_route_get("/host/project-snapshot/export")
+    def _h_project_snapshot_export(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        clips = _proj_snap.get_full_clips()
+        if clips is None:
+            # 未注册完整 provider：回退到摘要快照，至少让「直导」不炸
+            snap = get_timeline_snapshot()
+            clips = list(snap.get("clips") or [])
+        timeline = _proj_snap.snapshot_timeline(clips)
+        self._json(200, {
+            "ok": True,
+            "timeline": timeline,
+            "meta": {
+                "schema": "project-snapshot/v1",
+                "taken_at": timeline["taken_at"],
+                "clip_count": timeline["clip_count"],
+            },
+        })
+
+    @_route_post("/host/project-snapshot/import")
+    def _h_project_snapshot_import(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        if not isinstance(body, dict):
+            self._json(400, {"ok": False, "message": "body must be an object"})
+            return
+        clips = body.get("clips")
+        if clips is None and isinstance(body.get("timeline"), dict):
+            clips = body["timeline"].get("clips")
+        if not isinstance(clips, list):
+            self._json(400, {"ok": False, "message": "clips 必须是数组"})
+            return
+        # 导入前自动压一条回滚快照（可撤销）
+        store = _proj_snap.get_snapshot_store()
+        before = _proj_snap.get_full_clips() or []
+        store.push(before, label="导入前自动快照", meta={"source": "project-snapshot/import"})
+        res = _proj_snap.write_clips(clips)
+        if res.get("ok") is False:
+            self._json(500, {"ok": False, "message": res.get("message") or "写回失败"})
+            return
+        self._json(200, {
+            "ok": True,
+            "message": res.get("message") or f"已导入 {len(clips)} 个片段",
+            "imported": len(clips),
+        })
+
+    @_route_get("/host/project-snapshot/history")
+    def _h_project_snapshot_history(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        self._json(200, {"ok": True, "snapshots": _proj_snap.get_snapshot_store().list()})
+
+    @_route_post("/host/project-snapshot/restore")
+    def _h_project_snapshot_restore(self, parsed, raw: bytes, ctype: str) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        snapshot_id = str((body or {}).get("snapshot_id") or "").strip()
+        if not snapshot_id:
+            self._json(400, {"ok": False, "message": "snapshot_id required"})
+            return
+        entry = _proj_snap.get_snapshot_store().get(snapshot_id)
+        if entry is None:
+            self._json(404, {"ok": False, "message": "快照不存在"})
+            return
+        res = _proj_snap.write_clips(entry.get("clips") or [])
+        if res.get("ok") is False:
+            self._json(500, {"ok": False, "message": res.get("message") or "回滚失败"})
+            return
+        self._json(200, {
+            "ok": True,
+            "message": f"已回滚到快照「{entry.get('label')}」（{entry.get('clip_count')} 片段）",
+            "restored": entry.get("clip_count"),
+        })
 
 
 def _build_inject_js() -> str:
