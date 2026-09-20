@@ -32,8 +32,7 @@ def reset_core_singletons():
     """每个测试前重置三大核心单例，避免测试间污染。
 
     在无 GUI 栈(如 PyQt6 缺失)的无头/CI 环境中，core 模块无法导入，
-    此时静默跳过重置，避免阻断不依赖 GUI 的单元测试（例如对
-    ai_clip_flow 步骤契约的孤立测试，其通过 sys.modules 桩件加载模块）。
+    此时静默跳过重置，避免阻断不依赖 GUI 的单元测试。
     """
     try:
         from app.modules.lego.core import EventBus, MasterClock, DataBus

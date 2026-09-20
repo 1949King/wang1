@@ -345,57 +345,7 @@
       "download_url": "",
       "is_installed": true,
       "is_official": true
-    },
-    {
-      "id": "account-ops",
-      "name": "账号运营",
-      "type": "plugin",
-      "category": "运营工具",
-      "version": "1.0.0",
-      "author": "官方",
-      "description": "多平台账号矩阵与发布队列（原主导航模块，已迁拓展中心）。无真 API 时本地导出/队列。",
-      "icon": "👤",
-      "price": 0.0,
-      "is_free": true,
-      "rating": 0.0,
-      "downloads": 0,
-      "tags": [
-        "账号",
-        "发布",
-        "矩阵",
-        "运营",
-        "爆款"
-      ],
-      "min_version": "1.0.0",
-      "download_url": "",
-      "is_installed": true,
-      "is_official": true
-    },
-    {
-      "id": "drama-finder",
-      "name": "短剧筛选",
-      "type": "plugin",
-      "category": "运营工具",
-      "version": "1.1.1",
-      "author": "官方",
-      "description": "多平台热门短剧筛选：封面卡片墙 + 详情预览；静态缓存优先，可选 Playwright 真爬。",
-      "icon": "🎭",
-      "price": 0.0,
-      "is_free": true,
-      "rating": 0.0,
-      "downloads": 0,
-      "tags": [
-        "短剧",
-        "筛选",
-        "榜单",
-        "佣金",
-        "可视化"
-      ],
-      "min_version": "1.0.0",
-      "download_url": "",
-      "is_installed": true,
-      "is_official": true
     }
   ],
-  "updated_at": "2026-08-22T03:18:20.829930"
+  "updated_at": "2026-09-21T04:03:44.517522"
 }

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Agent 业务分流器单元测试（纯数据层，无 GUI）。
 
-对应 docs/Agent诊断与优化方案.md 第三步（P1-4 补测试）。
+对应 docs/_archive/docs/Agent诊断与优化方案.md 第三步（P1-4 补测试）。
 """
 
 import pytest

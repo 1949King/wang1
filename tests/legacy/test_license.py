@@ -24,7 +24,8 @@ import webbrowser
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox
+    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox,
+    QGridLayout
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon

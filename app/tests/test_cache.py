@@ -5,7 +5,7 @@
 """
 
 import pytest
-from core.cache_system import LRUCache, LFUCache, HybridCache, cached
+from app.core.cache_system import LRUCache, LFUCache, HybridCache, cached
 
 
 class TestLRUCache:

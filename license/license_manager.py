@@ -17,8 +17,8 @@ import webbrowser
 logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox, QWidget
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon

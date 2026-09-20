@@ -55,11 +55,8 @@ def main():
     core_modules = [
         ("app.core.editor_scheduler", "双内核调度器"),
         ("app.core.project_manager", "项目管理系统"),
-        ("app.core.asset_manager", "素材管理系统"),
         ("app.core.timeline_manager", "时间线管理系统"),
         ("app.core.effect_manager", "特效管理系统"),
-        ("app.core.transition_manager", "转场管理系统"),
-        ("app.core.audio_manager", "音频管理系统"),
         ("app.core.subtitle_manager", "字幕管理系统"),
         ("app.core.history_manager", "历史记录管理"),
         ("app.core.preview_manager", "预览管理"),

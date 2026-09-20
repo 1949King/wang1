@@ -5,7 +5,7 @@
 """
 
 import pytest
-from core.security import (
+from app.core.security import (
     PasswordHasher,
     InputValidator,
     LoginAttemptManager,

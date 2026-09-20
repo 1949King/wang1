@@ -107,6 +107,25 @@ class TestClipSourceRemap:
         }
         assert source_time_for_clip_at_timeline(clip, 1.0) == pytest.approx(2.0, abs=1e-3)
 
+    def test_speed_ramp_respects_in_point(self):
+        # 2026-09-13 回归：裁剪片段（in_point>0）挂 ramp 时，源时间必须含裁剪偏移
+        from app.core.speed_ramping import instant_speed_for_clip_at_timeline
+        ramp = SpeedRamp(enabled=True)
+        ramp.add_keyframe(0.0, 2.0)
+        ramp.add_keyframe(10.0, 2.0)
+        clip = {
+            "start_time": 5.0,
+            "in_point": 30.0,
+            "speed": 1.0,
+            "speed_ramp": ramp.to_dict(),
+        }
+        # timeline 5 → local 0 → ramp 源时间 0，再加 in_point=30
+        assert source_time_for_clip_at_timeline(clip, 5.0) == pytest.approx(30.0, abs=1e-3)
+        # timeline 6 → local 1 → ramp 源时间 2，再加 in_point=30
+        assert source_time_for_clip_at_timeline(clip, 6.0) == pytest.approx(32.0, abs=1e-3)
+        # 瞬时倍率采样点同样落在源轴（in_point 之后恒 2.0x）
+        assert instant_speed_for_clip_at_timeline(clip, 6.0) == pytest.approx(2.0, abs=0.05)
+
     def test_instant_speed_follows_ramp(self):
         from app.core.speed_ramping import instant_speed_for_clip_at_timeline
         ramp = SpeedRamp(enabled=True)

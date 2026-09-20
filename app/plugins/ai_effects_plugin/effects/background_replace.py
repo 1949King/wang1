@@ -8,7 +8,6 @@ import logging
 import numpy as np
 import cv2
 from typing import Any, Dict, Optional, Tuple
-from PIL import Image
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@
 """
 
 import pytest
-from core.config_manager import ConfigManager, SecureStorage
+from app.core.config_manager import ConfigManager, SecureStorage
 
 
 class TestConfigManager:
