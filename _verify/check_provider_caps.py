@@ -57,7 +57,7 @@ def main() -> int:
     check("首尾帧请求 → seedance 在候选", "seedance" in order)
     check("local 永远兜底", order[-1] == "local")
     check("无 spec → 默认顺序全保留",
-          pc.resolve_order("auto") == ["seedance", "cogvideo", "local"])
+          pc.resolve_order("auto") == ["dashscope", "seedance", "cogvideo", "local"])
 
     # ── 2. 时长筛选（验收②）──
     order = pc.resolve_order("auto", spec={"duration": 12.0})

@@ -52,4 +52,4 @@
 - **代码健康度基线**（2026-09-19 全库实测 228,583 行、`editor_module.py` 9,479 行）→ `docs/_reports/2026-09-19-全库代码评价报告.md`
 - **Agent 定位「知心秘书」+ 温度开关** → `app/core/agent_persona.py`
 - **冷启动性能**（MainWindow 8.24s→0.191s）→ `docs/冷启动性能诊断报告.md` + 技能 `~/.workbuddy/skills/python-coldstart-profiling/`
-- **视频代码化 / 词锚定**（`timeline_dsl.py` 死代码 / `timeline_source.py` 工程源码层 / 阶段1 完成、阶段3 未做）→ `docs/_reports/2026-09-20-工程源码化与词锚定阶段1.md`（**尚未沉淀进知识库**）
+- **视频代码化 / 词锚定**（`timeline_dsl.py` 死代码 / `timeline_source.py` 工程源码层 / 阶段1 完成；**阶段3 已完成**：`app/core/dialogue_anchor.py` 重锚引擎 + 能力 `重锚` 已接线 `capability_handlers.py:657`，2026-09-21 代码核实）→ `docs/_reports/2026-09-20-工程源码化与词锚定阶段1.md`（**尚未沉淀进知识库**）

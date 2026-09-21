@@ -174,6 +174,7 @@ class VideoGenerationClient:
             logger.debug("[VideoGenerationClient] 额度池不可用，健康信息缺省", exc_info=True)
         rows: List[Dict[str, Any]] = []
         for pid, name in (
+            ("dashscope", "阿里云百炼 万相（Wan）"),
             ("seedance", "火山引擎 Seedance"),
             ("cogvideo", "智谱 CogVideo"),
             ("local", "本地占位生成（FFmpeg 色块）"),
@@ -310,6 +311,8 @@ class VideoGenerationClient:
                 handler = self._load_seedance()
             elif name == "cogvideo":
                 handler = self._load_cogvideo()
+            elif name == "dashscope":
+                handler = self._load_dashscope()
         except Exception as e:
             logger.debug(f"[VideoGenerationClient] 加载 {name} 失败: {e}")
         self._providers[name] = handler
@@ -344,6 +347,24 @@ class VideoGenerationClient:
                 return client.generate(prompt=prompt, duration=duration, count=count)
             return _cog
         except Exception:
+            return None
+
+    def _load_dashscope(self) -> Optional[Callable]:
+        """加载阿里云百炼万相（Wan）客户端。
+
+        key 缺失时返回 None（路由自动跳过该渠道，走 seedance/cogvideo/local）；
+        key 存在但模型未开通时 generate_videos 抛 RuntimeError，
+        由 generate() 记为 provider 失败进额度池（指数退避），不静默。
+        """
+        try:
+            from app.core.ai.dashscope_video import generate_videos as _wan
+            from app.core.ai.dashscope_video import get_api_key
+            if not get_api_key():
+                logger.info("[VideoGenClient] DASHSCOPE_API_KEY 未配置，跳过 dashscope")
+                return None
+            return _wan
+        except Exception as e:
+            logger.debug(f"[VideoGenClient] 加载 DashScope 万相失败: {e}")
             return None
 
     # ────────────── 本地占位生成 ──────────────

@@ -36,6 +36,17 @@ logger = logging.getLogger("AI短剧编辑器.core.ai.provider_caps")
 #                   实际以渠道账单为准；新渠道可用 register_caps 覆盖
 
 PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
+    "dashscope": {
+        "name": "阿里云百炼 万相（Wan）",
+        "text_to_video": True,
+        "image_to_video": False,   # wan2.2-i2v-flash 系列存在，后续接线后改 True
+        "first_last_frame": False,  # wan2.2-kf2v-flash 系列存在，后续接线后改 True
+        "lip_sync": False,
+        "max_duration": 5.0,        # 万相 t2v 系当前固定 5 秒/段
+        "resolutions": ["480p", "720p", "1080p"],
+        "quality_tier": 1,
+        "price_per_clip": 1.5,      # 估算（5s 段）；实际以百炼账单为准
+    },
     "seedance": {
         "name": "火山引擎 Seedance",
         "text_to_video": True,
@@ -72,7 +83,8 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
 }
 
 # auto 模式下真实 provider 的基础顺序（local 由 resolve_order 统一追加，不写在这）
-DEFAULT_REAL_ORDER: List[str] = ["seedance", "cogvideo"]
+# dashscope 排最前：2026-09-22 实测它是唯一有可用客户端模块 + key 的渠道
+DEFAULT_REAL_ORDER: List[str] = ["dashscope", "seedance", "cogvideo"]
 
 # 能力位 → 人话（筛选理由用）
 _CAP_LABELS = {

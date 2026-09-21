@@ -1,5 +1,132 @@
 # 拾光剪影 — 变更日志
 
+## V4.37.3 (2026-09-22) — 云端视频渠道接线：DashScope 万相（探测 + 掌控验证）
+
+> **触发**：用户要求「找免费视频生成 API + 测云端可用性 + 测渠道掌控」。
+> 结论：**不需要第三方集成站**——项目已有的 `DASHSCOPE_API_KEY`（阿里云百炼）
+> 自带万相文生视频，key 已实测有效；缺的最后一步是控制台开通模型（需用户手动）。
+
+### 一、渠道调研与选型
+
+- 国际站（fal.ai $10 / LinkModel 16 段 Kling / Runway 125 credit）：要海外卡、有墙、额度一次性；
+- **阿里云百炼（选型胜出）**：国内直连、万相（Wan）系列、新账号免费 50s 视频/90 天
+  （仅北京地域）、项目 key 从 2026-04 起就在 `API Keys.env`（该文件已于前一提交停止 git 跟踪）。
+
+### 二、新模块 `app/core/ai/dashscope_video.py`（纯模块，不 import app 包）
+
+| 项 | 内容 |
+|---|---|
+| 协议 | legacy 异步：POST `video-synthesis`（`X-DashScope-Async: enable`）→ GET `tasks/{id}` 轮询（5s 间隔/360s 超时）→ SUCCEEDED 后**当场下载**（video_url 24h 有效不缓存） |
+| 模型回退链 | `wan2.2-t2v-flash` → `wanx2.1-t2v-turbo` → `wanx2.1-t2v-plus`（命名坑：**wan2.1 系带 x**，官方模型广场核对） |
+| 降档判定 | `_is_model_error` 含 `Model not exist / 无权限 / AccessDenied`——实测老账号对未开通模型返 **403 AccessDenied**（≠ key 失效） |
+| 零成本探测 | `probe()`：用非法模型名触发 400——拿到结构化错误即证明认证+端点通（实测 PASS） |
+| 诚实降级 | 认证失败/额度耗尽/超时 → 抛 RuntimeError 带平台原始 message，由额度池记账，不静默 |
+
+### 三、三处接线（渠道掌控的实体层）
+
+1. `provider_caps.py`：声明表加 `dashscope`（t2v=True / i2v·kf2v 暂 False 待接线 / 5s 段 /
+   480p-1080p / tier 1 / 估价 ¥1.5/段）+ `DEFAULT_REAL_ORDER` 排首位（唯一有模块+key 的渠道）；
+2. `video_generation_client.py`：`_load_dashscope` 延迟加载（**key 缺失返回 None 自动跳过**，
+   省一次注定失败的 HTTP 往返）+ `list_providers` 展示行；
+3. `provider_pool.py`：降级回退顺序表补 dashscope。
+
+### 四、实测结果（三个证据）
+
+| 测试 | 结果 | 证据 |
+|---|---|---|
+| 零成本探测 | ✅ 通 | 非法模型 → `400 InvalidParameter: Model not exist`（认证+端点可达） |
+| 鉴别诊断 | ✅ 账号健康 | `qwen-turbo` 文本调用成功（说明不是 key 失效/欠费/百炼未开通） |
+| 真实生成 | ❌ 模型未开通 | 三个模型 ID 全 `403 AccessDenied` → **需用户在百炼控制台模型广场开通 wan2.2-t2v-flash**（开通即送 50s/90 天免费额度） |
+
+### 五、渠道掌控验证（`app/temp/test_channel_control.py`，20 项全过）
+
+- **A 能力路由**：auto 文生视频首选 dashscope、报价 ¥1.5×段、i2v 请求正确筛除（人话理由）；
+- **B 延迟加载**：handler 可用、list_providers 带 caps/单价；
+- **C 额度池记账**：credential 掩码、健康号可选中、三连败进冷却退避；
+- **D 端到端回退**：真实 403 被记录 → 无中断降级 seedance/cogvideo（缺模块跳过）→ **本地占位照常出片**（掌控链不中断的核心证据）。
+
+### 六、教训（同一文件并行 Edit = 丢失更新）
+
+本次三次踩中：同文件两个 Edit 并行执行时后写覆盖前写（`provider_caps` 声明表丢失、
+`_load_dashscope` 方法体丢失、检查断言丢失）。**同一文件的多处修改必须串行发送。**
+
+### 七、验证
+
+- `check_provider_caps` 24 项 / `check_quote_health` 30 项全过（断言随渠道表更新）；
+- `run_all_checks` 41 项中除已知基线 GUARD/styles.css 外全过。
+
+---
+
+## V4.37.2 (2026-09-22) — 撤销反馈回路 + LLM 降级指标化（报告 B1 + A4）
+
+> **触发**：《2026-09-22 bug猎捕与优化方向报告》建议的下一批。B1 是把用户每天的
+> 撤销行为变成免费训练数据；A4 是把「质量在暗处打折」变成数字。不触碰冻结区。
+
+### 一、B1 撤销反馈回路（用户 Ctrl+Z = 最诚实的负反馈）
+
+| 项 | 内容 |
+|---|---|
+| 问题 | Agent 的 Hebbian 学习（成功+Δ/失败-Δ）已就位，但异常路径之外**没有任何负反馈信号源**——用户撤销 Agent 操作时，这个最强信号白白流失，Agent 下次还犯 |
+| 方案 | **来源标记 → 盖章 → 撤销钩子**三段式：① 新模块 `app/core/agent_origin.py`（线程局部 `agent_origin_scope`，不 import app 包）；② `capability_dispatcher.invoke` 用 scope 包住 handler 执行——handler 内落到撤销栈的任何动作都算 Agent 来源（含委托链 `_resize_clip`/`move_clip`）；③ `EditorModule._record_action` 盖 `origin` 章（agent/user） |
+| 撤销/重做 | `_undo` 撤到 agent 动作 → `_on_agent_action_undone` 触发 Hebbian 弱化（quality/medium），提示语标注「Agent 操作 · 已反馈学习」；`_redo` → `_on_agent_action_redone` 收回负反馈（净学习量归零） |
+| 精确打击 | 新增 `_infer_agent_action_capabilities`：把撤销栈动作映射回具体 capability——label 关键词 > type 关键词 > `edit_clip` 的 before/after diff（start_time 变→move / duration 变→trim / 其他→properties）> compound 步骤递归；映射不出走文本推断兜底 |
+| 兼容 | `_agent_brain_learn` 加可选 `related` 覆写参数（不传行为不变）；线程局部保证 Agent 能力与用户 UI 操作并发时互不污染 |
+
+### 二、A4 LLM 降级指标化（降级不再是暗处打折）
+
+| 项 | 内容 |
+|---|---|
+| 问题 | LLM 优先 + 关键词降级（8 维情绪向量，`drama_understanding_engine.py`）在 LLM 不可用时静默降级——功能没断、质量打折，且无任何指标能回答「最近降级了多少次」 |
+| 方案 | 新模块 `app/core/ai/llm_fallback_stats.py`：纯内存滚动窗口（24h，deque+锁，5000 条上限），`record(site, degraded, reason)` / `summary()`；记录失败绝不抛出（指标不拖垮主链路） |
+| 埋点 | `_get_emotion_vector` 三处：LLM 成功（degraded=False）/ LLM 异常（reason=llm_error:类型）/ 未探测（reason=ollama_not_probed） |
+| Agent 暴露 | 新只读能力 `pipeline.llm_health`（safe/left）四处接线：各站点近 24h 尝试数/降级数/降级率/最近原因 + 最差站点；高降级率 = 该查 Ollama/模型渠道 |
+
+### 三、验证与回归资产
+
+- 新增 `_verify/check_undo_feedback_llm_health.py`（**31 项**，已注册 run_all_checks → **40 项**）：
+  agent_origin 作用域/嵌套/线程隔离 · editor 静态接线断言 · `_infer_agent_action_capabilities`
+  推断矩阵（AST 提取动态测试，不 import Qt 重模块）· fake brain 捕获 feedback ·
+  llm_fallback_stats 统计/窗口裁剪/重置 · 情绪向量三埋点 · pipeline.llm_health 四处接线 + invoke 真跑
+- `py_compile` 八文件全过 · 冻结区唯一漂移仍为已知历史项（styles.css，待决策）
+
+---
+
+## V4.37.1 (2026-09-22) — 全库 bug 猎捕 · AST 作用域扫描入回归
+
+> **触发**：用户要求「抓取项目里存在的 bug + 深度思考算法优化与能力迭代方向」。
+> 产出：`docs/_reports/2026-09-22-bug猎捕与优化方向.md`。
+
+### 一、新增：AST 作用域扫描器（防 NameError 类硬缺陷）
+
+- `_verify/scan_nameerror_scope.py`：真词法作用域链 Frame（非扁平集合）；
+  `global`/`nonlocal` 只在本 frame 收；推导式**最外层 iter** 按外围作用域判定
+  （`{e: i for i, e in enumerate(D)}` 合法 / `[D[0] for _ in range(1)]` NameError）；
+  读文件 `utf-8-sig`；含 `import *` 文件跳过并列出；模块级「使用先于赋值」单独检测。
+  命中时退出码 1。
+- `_verify/selftest_scan_nameerror_scope.py`：10 个合成用例正反双向验证检测能力
+  （5 阳性必命中 + 5 阴性必静默）——扫描器报 0 时靠它反证「不是检测器瞎了」。
+- **全库结果：386 个 .py，SCOPE 0 命中 / ORDER 0 命中 / 跳过 0**——
+  一跑就崩的 NameError 类硬缺陷为零。
+- 已注册进 `run_all_checks`（SCOPE 项，38→**39 项**），防未来回归。
+
+### 二、修复：2 处违反不变量 #9 的静默 except
+
+| 位置 | 问题 | 修复 |
+|---|---|---|
+| `app/core/agent_runtime.py:169` | **状态机** `agent_tasks.transition(task_id, RUNNING)` 失败静默 `pass`——状态机路径按纪律必须 `logger.debug(exc_info=True)` | 已补 |
+| `app/modules/lego/editor_module.py:8182`（`agent_apply_storyboard_durations`） | `out_point` 联动失败静默——`duration` 已改而 `out_point` 未同步会留**数据不一致**；同函数 `:8188` 本就有正确写法 | 已补 `logger.debug` |
+
+> 语义级扫描全量：P1 可变默认参数 **0** · P2 裸 except **0** · P3 静默吞没 **127 处**
+> （抽查 8 处高风险：除上述 2 处外，其余为幂等 unregister / 二次异常兜底 / UI 绘制 /
+> 清理兜底 / 回调隔离等可接受模式；完整分级见报告）。
+
+### 验证
+
+`py_compile` 双过 · STORYAPPLY **17/17** · 扫描器自测 **10/10** · 全库扫描 EXIT=0 ·
+`run_all_checks` 39 项除已知历史项（GUARD/styles.css 基线漂移，待决策）外全通过。
+
+---
+
 ## V4.37.0 (2026-09-21) — 异步任务模型：submit / status / cancel（P1-3）
 
 > **触发**：升级任务清单第 3 批首项。全链路执行从「一发不可取消的阻塞调用」

@@ -287,7 +287,7 @@ class ProviderPool:
         except Exception:
             logger.debug("[provider_pool] 能力路由不可用，仅做池内重排", exc_info=True)
             order = [provider, "local"] if provider and provider != "auto" \
-                else ["seedance", "cogvideo", "local"]
+                else ["dashscope", "seedance", "cogvideo", "local"]
         return self.reorder_providers(order, remember=remember)
 
     def quote(self, provider: str = "auto", *, count: int = 1,
