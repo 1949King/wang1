@@ -75,6 +75,8 @@ CHECKS = [
     # ── 报价 + 健康（V4.36.0 P1-1/P1-2）──
     ("QUOTEHEALTH", "_verify/check_quote_health.py", "生成前报价 + 渠道健康"),
     ("PIPEJOBS", "_verify/check_pipeline_jobs.py", "管线异步任务（submit/status/cancel）"),
+    ("SCOPE", "_verify/scan_nameerror_scope.py", "AST 作用域扫描（NameError 类硬缺陷）"),
+    ("UNDOFB", "_verify/check_undo_feedback_llm_health.py", "撤销反馈回路 + LLM 降级指标"),
 ]
 
 failed = []

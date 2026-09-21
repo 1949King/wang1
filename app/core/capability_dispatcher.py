@@ -245,7 +245,12 @@ class CapabilityDispatcher:
             )
         else:
             try:
-                result = entry.handler(request)
+                # B1 撤销反馈回路：能力链执行期间标记「Agent 来源」——
+                # handler 内部落到编辑器撤销栈的动作会盖上 origin=agent 章，
+                # 用户事后 Ctrl+Z 即触发 AgentBrain 负反馈。线程局部，零签名改动。
+                from app.core.agent_origin import agent_origin_scope
+                with agent_origin_scope():
+                    result = entry.handler(request)
                 result.capability_id = request.capability_id
                 result.request_id = request.request_id
             except _GenCancelled:

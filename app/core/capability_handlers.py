@@ -974,6 +974,32 @@ class PipelineCapabilityHandlers:
             },
         )
 
+    def llm_health(self, req: CapabilityRequest) -> CapabilityResult:
+        """LLM 降级率查询（A4）：各 LLM 优先站点的近 24h 降级统计 —— 只读。
+
+        降级 = LLM 不可用回退关键词/本地降级路径（功能没断但质量在暗处打折）。
+        无参数；返回按站点汇总 + 最差站点。
+        """
+        from app.core.ai.llm_fallback_stats import summary
+
+        data = summary() or {}
+        worst = ""
+        worst_rate = -1.0
+        for site, info in data.items():
+            rate = float(info.get("degradation_rate", 0.0))
+            if rate > worst_rate:
+                worst_rate, worst = rate, site
+        return CapabilityResult(
+            req.request_id, True,
+            output={
+                "sites": data,
+                "site_count": len(data),
+                "worst_site": worst,
+                "worst_degradation_rate": round(max(worst_rate, 0.0), 1),
+                "note": "降级=LLM不可用回退关键词匹配；持续高降级率应检查本地 Ollama/模型渠道",
+            },
+        )
+
     def submit_pipeline(self, req: CapabilityRequest) -> CapabilityResult:
         """全链路异步提交（P1-3）：立即返回任务号，进度可查、可取消、不阻塞。
 
@@ -1453,6 +1479,9 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("pipeline.job_cancel", CapabilityCategory.PIPELINE,
                         pipeline_handlers.job_cancel,
                         "取消管线任务：排队真取消；运行中段间生效、结果丢弃")
+    dispatcher.register("pipeline.llm_health", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.llm_health,
+                        "LLM 降级率查询：各 LLM 站点近24h降级统计（只读）")
     dispatcher.register("pipeline.tts_polish", CapabilityCategory.PIPELINE,
                         pipeline_handlers.tts_polish,
                         "TTS 正音：长台词语义切段 + 多音字注音")

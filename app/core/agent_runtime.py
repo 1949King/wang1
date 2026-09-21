@@ -167,7 +167,7 @@ def _dispatch_one_tool(
         try:
             agent_tasks.transition(task_id, STATUS_RUNNING)
         except Exception:
-            pass
+            logger.debug("agent_tasks.transition(%s, RUNNING) 失败", task_id, exc_info=True)
 
     evt = push_to_canvas(
         "task.create",

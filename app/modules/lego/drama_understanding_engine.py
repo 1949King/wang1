@@ -603,15 +603,28 @@ class DramaUnderstandingEngine:
         获取文本的连续情绪向量 [8维, 0-1]。
 
         优先 LLM 语义分析，降级为关键词密度向量。
+        降级事件登记 llm_fallback_stats（A4：降级率指标化，不再暗处打折）。
         """
         if not text or not text.strip():
             return None
+        try:
+            from app.core.ai.llm_fallback_stats import record as _record_fb
+        except Exception:
+            _record_fb = None
         # 尝试 LLM
         if _ensure_ollama_probed():
             try:
-                return self._llm_emotion_vector(text)
+                vec = self._llm_emotion_vector(text)
+                if _record_fb:
+                    _record_fb("emotion_vector", degraded=False)
+                return vec
             except Exception as e:
                 logger.debug("LLM emotion vector failed, fallback to keyword: %s", e)
+                if _record_fb:
+                    _record_fb("emotion_vector", degraded=True,
+                               reason=f"llm_error:{type(e).__name__}")
+        elif _record_fb:
+            _record_fb("emotion_vector", degraded=True, reason="ollama_not_probed")
         # fallback
         return self._keyword_emotion_vector(text)
 

@@ -3581,6 +3581,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             self._action_history = []
         if not hasattr(self, '_redo_history'):
             self._redo_history = []
+        # B1 撤销反馈回路：盖来源章（agent=能力链做的 / user=用户手动）。
+        # 线程局部判定，Agent 能力与用户 UI 操作并发时互不污染；判定失败按 user 兜底。
+        try:
+            from app.core.agent_origin import is_agent_origin
+            action.setdefault("origin", "agent" if is_agent_origin() else "user")
+        except Exception:
+            action.setdefault("origin", "user")
         self._action_history.append(action)
         self._redo_history.clear()
         if len(self._action_history) > getattr(self, 'MAX_UNDO_DEPTH', 100):
@@ -3788,7 +3795,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             action = self._action_history.pop()
             self._redo_history.append(action)
             self._apply_action(action, mode='undo')
-            self._notify_edit(f"已撤销: {action.get('type')}")
+            if action.get("origin") == "agent":
+                self._notify_edit(f"已撤销: {action.get('type')}（Agent 操作 · 已反馈学习）")
+                self._on_agent_action_undone(action)
+            else:
+                self._notify_edit(f"已撤销: {action.get('type')}")
         else:
             self._notify_edit("没有可撤销的操作")
         self._update_undo_redo_state()
@@ -3799,6 +3810,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             action = self._redo_history.pop()
             self._action_history.append(action)
             self._apply_action(action, mode='do')
+            if action.get("origin") == "agent":
+                self._on_agent_action_redone(action)
             self._notify_edit(f"已重做: {action.get('type')}")
         else:
             self._notify_edit("没有可重做的操作")
@@ -8180,7 +8193,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     in_pt = float(target.get("in_point", 0) or 0)
                     target["out_point"] = in_pt + float(dur)
                 except Exception:
-                    pass
+                    logger.debug("storyboard duration apply: out_point 联动失败 (clip=%s)", cid, exc_info=True)
                 applied += 1
             # 同步内核 + 刷新
             try:
@@ -8415,7 +8428,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     # [Mixin] _on_edit_agent_finished 已迁移至 editor_agent_runtime_mixin.py
 
     # ────────────── AgentBrain 学习机制（P0 激活）──────────────
-    def _agent_brain_learn(self, success: bool, user_text: str = "", error: str = ""):
+    def _agent_brain_learn(self, success: bool, user_text: str = "", error: str = "",
+                           related: Optional[List[str]] = None):
         """激活 AgentBrain Hebbian 学习机制（P0）。
 
         根据本次 Agent 调用的成败，调整相关神经元的突触权重：
@@ -8428,20 +8442,97 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             success: 本次 Agent 调用是否成功
             user_text: 用户原始输入文本（用于推断相关 capability）
             error: 失败时的错误信息（仅用于日志）
+            related: 显式指定相关 capability（优先于文本推断；撤销反馈回路用）
         """
         try:
             from app.core.agent_brain import agent_brain
-            related = self._extract_related_capabilities(user_text)
+            related_caps = related if related else self._extract_related_capabilities(user_text)
             feedback = {
                 "type": "success" if success else "quality",
-                "related_capabilities": related,
+                "related_capabilities": related_caps,
                 "severity": "low" if success else "medium",
             }
             agent_brain.learn_from_feedback(feedback)
-            logger.debug(f"[Agent] AgentBrain 学习触发: success={success}, related={related}")
+            logger.debug(f"[Agent] AgentBrain 学习触发: success={success}, related={related_caps}")
         except Exception as e:
             # 学习失败不能影响主流程（异常隔离）
             logger.warning(f"[Agent] AgentBrain 学习失败: {e}")
+
+    # ---- B1 撤销反馈回路：用户 Ctrl+Z 是最诚实的负反馈 ----
+
+    def _on_agent_action_undone(self, action: dict) -> None:
+        """用户撤销了一条 Agent 来源的编辑 → Hebbian 负反馈（弱化相关突触）。
+
+        用户没说一句话，但用 Ctrl+Z 投了票——这比任何文字反馈都诚实。
+        尝试把撤销栈动作映射回具体 capability，让弱化打得更准；
+        映射不出也不影响学习（_extract_related_capabilities 有兜底）。
+        """
+        label = action.get("label") or action.get("type") or "unknown"
+        try:
+            related = self._infer_agent_action_capabilities(action)
+            self._agent_brain_learn(
+                success=False,
+                user_text=f"撤销 Agent 的 {label} 操作",
+                error=f"user_undo:{label}",
+                related=related or None,
+            )
+            logger.debug(f"[Agent] 撤销负反馈已触发: {label} → {related}")
+        except Exception:
+            logger.debug("[Agent] 撤销负反馈失败（不影响撤销主流程）", exc_info=True)
+
+    def _on_agent_action_redone(self, action: dict) -> None:
+        """撤销后又被重做 → 收回负反馈（净学习量归零，符合直觉）。"""
+        label = action.get("label") or action.get("type") or "unknown"
+        try:
+            related = self._infer_agent_action_capabilities(action)
+            self._agent_brain_learn(
+                success=True,
+                user_text=f"重做 Agent 的 {label} 操作",
+                related=related or None,
+            )
+        except Exception:
+            logger.debug("[Agent] 重做正反馈失败（不影响重做主流程）", exc_info=True)
+
+    def _infer_agent_action_capabilities(self, action: dict) -> List[str]:
+        """把撤销栈动作（type/label/before-after diff）映射回 capability_id 列表。
+
+        映射顺序：label 关键词 > type 关键词 > edit_clip 的 before/after diff >
+        compound 步骤递归。全部落空返回 []（由调用方走文本推断兜底）。
+        """
+        caps: List[str] = []
+        t = (action.get("type") or "").lower()
+        label = (action.get("label") or "").lower()
+        text = f"{t} {label}"
+        if "delete" in text:
+            caps.append("editor.ripple_delete_range")
+        if "split" in text:
+            caps.append("editor.split_clip")
+        if "trim" in text or "resize" in text:
+            caps.append("editor.trim_clip")
+        if "move" in text:
+            caps.append("editor.move_clip")
+        if "volume" in text or "audio" in text:
+            caps.append("editor.set_clip_properties")
+        if "lut" in text or "color" in text or "filter" in text:
+            caps.append("editor.apply_filter")
+        if "transition" in text:
+            caps.append("editor.add_transition")
+        if not caps and t == "edit_clip":
+            before = action.get("before") or {}
+            after = action.get("after") or {}
+            if (before.get("start_time") != after.get("start_time")
+                    or before.get("track") != after.get("track")):
+                caps.append("editor.move_clip")
+            elif any(before.get(k) != after.get(k)
+                     for k in ("duration", "in_point", "out_point")):
+                caps.append("editor.trim_clip")
+            else:
+                caps.append("editor.set_clip_properties")
+        if not caps and action.get("type") == "compound":
+            for step in action.get("steps") or []:
+                caps.extend(self._infer_agent_action_capabilities(step))
+        seen: set = set()
+        return [c for c in caps if not (c in seen or seen.add(c))]
 
     def _extract_related_capabilities(self, user_text: str) -> List[str]:
         """从用户输入文本推断相关 capability_id（用于 AgentBrain 学习）。

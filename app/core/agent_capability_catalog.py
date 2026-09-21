@@ -189,6 +189,9 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("pipeline.job_cancel", "pipeline", "read", False,
      "取消管线任务：排队真取消；运行中段间生效、结果丢弃", "left", "取消任务",
      ["取消任务", "中止任务", "别生成了", "job_cancel"]),
+    ("pipeline.llm_health", "pipeline", "read", False,
+     "LLM 降级率：各站点近24h降级统计", "left", "LLM降级率",
+     ["降级", "降级率", "LLM健康", "关键词匹配", "质量打折"]),
     # ── 生成质量守护（治 AI 生成「长文本漂移 / 表情夸张 / 人物漂移 / 武器畸形」）──
     # effect=read：只出计划不写数据（切段/注音/回读质检均为只读计算）
     ("pipeline.tts_polish", "pipeline", "read", False,

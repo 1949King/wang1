@@ -64,6 +64,8 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
      "管线任务状态/进度/结果查询（无任务号则列近期任务+队列统计）"),
     ("job_cancel", "safe", "pipeline.job_cancel",
      "取消管线任务（排队真取消；运行中当前段跑完后生效、结果丢弃不落盘）"),
+    ("llm_health", "safe", "pipeline.llm_health",
+     "LLM 降级率查询（各站点近24h降级统计；高降级率=质量在暗处打折，只读）"),
 )
 
 # 画布侧 action（前端 executeRemoteTask 本地执行，无后端 capability）。
@@ -299,6 +301,9 @@ def build_agent_actions_help_block() -> str:
         "（查单任务状态/进度/结果，done 时附完整产出；不给 job_id 则列近期任务+队列统计）。",
         "job_cancel 参数: {\"job_id\":\"...\"}"
         "（取消任务：排队中真取消；运行中当前段跑完后生效、结果丢弃不落盘，已花的钱不退）。",
+        "llm_health 参数: {}"
+        "（查各 LLM 站点近24h降级率；高降级率=LLM 常不可用、在用关键词降级兜底，"
+        "该查 Ollama/模型渠道了）。",
         "禁止生成 add_clip / import_media（尚未开放）。",
         "咨询类用 answer，params.message 写给人看的说明。",
         build_clipskills_layers_block(),
