@@ -1,4 +1,10 @@
 # ====== 顶层：Windows 用户系统目录（防止在 C:\Users\xxx 错误 git init）======
+
+# ====== 密钥文件（2026-09-22 安全处置：真实 DASHSCOPE key 曾被跟踪，勿再入库）======
+.env
+API Keys.env
+*.env.local
+
 # 如果这些出现在项目根，100% 是 cd 错目录导致，直接忽略避免灾难级提交
 /3D Objects/
 /AppData/
