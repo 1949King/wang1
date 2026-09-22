@@ -454,7 +454,7 @@ class VideoGenerationClient:
             # 模式计划（观测用；D/L→C 执行体在后续切片接线，当前执行语义
             # 仍是既有 provider 链 = C→L 回退）。打分不改分、投影只删项。
             try:
-                from .execution_modes import choose_mode, collect_infeasible
+                from .execution_modes import MODE_D, choose_mode, collect_infeasible
                 from .provider_caps import PROVIDER_CAPS
 
                 chain_preview = resolve_order(provider, spec=merged,
@@ -463,15 +463,32 @@ class VideoGenerationClient:
                 q_cloud = float((priors or {}).get(first_real, 0.5)) if first_real else 0.0
                 cost_cloud = float((PROVIDER_CAPS.get(first_real) or {})
                                    .get("price_per_clip") or 0.0)
-                self._tls.last_mode_plan = choose_mode(
+                infeasible = collect_infeasible(cloud_available=bool(first_real))
+                # 切片⑥（V4.37.9）：A 模块分歧度探针——Δ 未超自适应阈值时
+                # 把 D 投影删除（探针只筛候选，不改打分；§16「不直接决策路由」
+                # 指的是不改收益分，删候选走投影层，归因可查）。
+                probe_verdict: Dict[str, Any] = {}
+                try:
+                    from .divergence_probe import get_probe
+
+                    verdict = get_probe().is_dual_candidate("video")
+                    probe_verdict = verdict
+                    if not verdict.get("candidate") and MODE_D not in infeasible:
+                        infeasible[MODE_D] = "探针：" + str(verdict.get("reason", ""))
+                except Exception:
+                    logger.debug("[VideoGenerationClient] 分歧探针不可用（不阻断）",
+                                 exc_info=True)
+                plan = choose_mode(
                     q_local=0.3,  # 本地占位质量低但成本=0（基线锚点）
                     q_cloud=q_cloud,
                     cost_local=0.0,
                     cost_cloud=cost_cloud,
                     lambda_c=float(lam) if lam is not None else 0.2,
-                    infeasible=collect_infeasible(
-                        cloud_available=bool(first_real)),
+                    infeasible=infeasible,
                 )
+                if probe_verdict:
+                    plan["probe"] = probe_verdict
+                self._tls.last_mode_plan = plan
             except Exception:
                 logger.debug("[VideoGenerationClient] 模式计划不可用（不阻断）", exc_info=True)
             return resolve_order(provider, spec=merged, priors=priors, lambda_price=lam)
@@ -582,6 +599,14 @@ class VideoGenerationClient:
             price = float(caps.get("price_per_clip") or 0.0)
             if price > 0:
                 get_pacer().record_spend(price * segments)
+                # 切片⑥：单元成本进探针预算分母（§16.1 探针成本 ≤2% 单元成本）
+                try:
+                    from .divergence_probe import get_probe
+
+                    get_probe().note_unit_cost(price * segments)
+                except Exception:
+                    logger.debug("[VideoGenerationClient] 探针成本记账失败（不阻断）",
+                                 exc_info=True)
         except Exception:
             logger.debug("[VideoGenerationClient] 花费记账失败（不阻断主链路）",
                          exc_info=True)

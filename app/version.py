@@ -10,28 +10,27 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.37.8"
+__version__ = "4.37.9"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 37,
-    "patch": 8,
-    "codename": "六种执行模式 + 可行集投影（异构协作引擎规格书切片⑤）",
+    "patch": 9,
+    "codename": "A 模块分歧度探针（异构协作引擎规格书切片⑥）",
     "release_date": "2026-09-23",
     "description": (
-        "V4.37.8: 规格书切片⑤——第三篇模型调度器的「单元由谁执行」形式化。"
-        "★ 新模块 app/core/ai/execution_modes.py（纯模块）：Mode∈{L,C,D,L→C,"
-        "C→L,SkipMerge} 六枚举；§11 定稿收益函数 V=q̂−λ_c·(ĉ−c_base)−λ_l·(l̂−l_base)"
-        "−κ_sw·1{switch}——基线写死为本地（本地惩罚恒 0，宽松预算自然收敛本地，"
-        "杜绝 v4.0 D 模式泛滥/λ 顶饱和）；融合质量上界 q_D=1−(1−q_L)(1−q_C)；"
-        "L→C/C→L 按达标概率求期望。"
-        "★ §12 可行集投影正交铁律：打分层纯收益最大化，投影层只删不可行选项、"
-        "绝不修改打分（快照断言守护）；collect_infeasible 把断网/无 key/显存不足"
-        "翻译成模式删除清单；choose_mode 返回完整归因字典（分数/删除理由/λ/基线）。"
-        "★ 接线：client 选路时产出模式计划存 TLS（last_mode_plan），generate 末尾"
-        "记录实际执行模式（last_execution_mode：C / C→L / L），计划 vs 实际可审计。"
-        "执行体语义不变（既有 provider 链 = C→L），D 执行体待切片⑦接线。"
-        "验证：check_execution_modes 27 项全过；run_all_checks 44→45 项。"
+        "V4.37.9: 规格书切片⑥——第四篇 A 模块。量化本地/云端输出差异 Δ，"
+        "仅筛 D 模式候选、不改收益打分（删候选走投影层，归因可查）。"
+        "★ 新模块 app/core/ai/divergence_probe.py（纯模块，RLock+原子写）："
+        "分介质独立指标（§17：文本=结构化字段差异率；视频/音频=确定性廉价代理"
+        "哈希0.6+体积0.25+时长0.15，接口留升级位）；"
+        "自适应阈值（§16.3：τ=clamp(0.5−(var_q+var_Δ), 0.15, 0.8)，"
+        "不确定越高越易开双路）；D 开启条件 Δ>τ（§16.4）；"
+        "成本保护（§16.1/§18：累计探针成本≤2%单元成本，超限自动降级"
+        "抽样探针复用 EMA 估计）；分歧 EMA 入库（§19）。"
+        "★ 接线：client 模式计划带 probe 裁决，非候选时 D 被投影删除且理由"
+        "带「探针：」前缀；_record_spend 顺带把单元成本喂给探针预算分母。"
+        "验证：check_divergence_probe 32 项全过；run_all_checks 45→46 项。"
     ),
 }
