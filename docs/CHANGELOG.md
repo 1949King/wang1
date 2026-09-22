@@ -1,5 +1,52 @@
 # 拾光剪影 — 变更日志
 
+## V4.37.4 (2026-09-23) — 质量先验库 + 收益函数选路（规格书切片①）
+
+> **触发**：用户提供《异构动态协作引擎 — 完整开发规格说明书》v4.3（微信附件），
+> 指令「优化进项目里面」。策略：**最小可行切片**——取规格书 §11（收益函数）、
+> §14（质量先验库）、§39（冷启动不确定度）三段思想落地，与现有 provider 体系对接。
+
+### 一、新模块 `app/core/ai/quality_prior.py`（质量先验库）
+
+| 项 | 内容 |
+|---|---|
+| 分桶 | (provider, kind) 键，kind 预留介质/模型版本分桶（默认 default） |
+| EMA | mean += α·(x−mean)，var = (1−α)·(var + α·δ²)，α=0.3；样本夹紧 [0,1] |
+| 冷启动 | 首样本 var=0.25；`inherit()` 新桶继承均值、方差×4（规格 §39 不确定度） |
+| 持久化 | JSON + 原子写（tempfile+os.replace）到 `data/quality_prior.json`；损坏文件按空库启动 |
+| 纪律 | 纯模块不 import app 包；记录异常绝不抛出（不拖垮生成主链路）；**RLock**——首版 Lock 嵌套 `_ensure_loaded` 自我死锁（SIGTERM 挂死），与 `_clips_lock` 同款约束，已修 |
+
+### 二、收益函数选路（provider_caps）
+
+- `resolve_order` 加可选 `priors: Dict[str, float]` 参数（**additive 向后兼容**）：
+  给了先验 → `V = q̂ − λ_c·price` 排序（λ_c=0.2，「每元愿牺牲多少期望质量」）；
+  q̂ 缺失用中性 0.5（冷启动探索位）；tier 做平局 tiebreak；不给 → 旧 tier 降序不变。
+- `local` 永远兜底、显式 provider 路径、quote() 行为均不受影响。
+
+### 三、闭环回写（video_generation_client）
+
+- 每次生成成败后 `_record_prior` 回写先验（成功 1.0 / 失败 0.0）；
+  **local 占位不记录**（占位成功 ≠ 质量信号）；先验库异常静默降级。
+- 选路时从先验库快照构建 priors 传入 resolve_order；先验库为空自动退回 tier 排序。
+- **诚实边界**：当前样本是执行成败（可用性先验）；待 B 模块评分器接入后
+  `record_outcome(quality=五维分)` 直接改喂真值，路由零改动——通道已就位。
+
+### 四、验证
+
+- 新增 `_verify/check_quality_prior_routing.py`（**28 项全过**）：EMA 数学精确值断言
+  （0.7/0.385）、样本夹紧、inherit 三性质、原子写+重载+损坏容错、λ_c 常量、
+  priors 反超排序（seedance 0.9 反杀 dashscope）、向后兼容、端到端假 provider
+  成败回写、local 门控。
+- 注册 run_all_checks（**41→42 项**），全量回归除已知 GUARD 基线外全绿。
+
+### 五、踩坑记录
+
+- **threading.Lock 嵌套持锁 = 自我死锁**：record 持锁调 `_ensure_loaded`（也持锁），
+  进程挂死零输出（SIGTERM）。定位手法：`-u` 无缓冲仍零输出 ⇒ 挂在第一个 print 之前。
+  修法同 `_clips_lock`：RLock。
+
+---
+
 ## V4.37.3 (2026-09-22) — 云端视频渠道接线：DashScope 万相（探测 + 掌控验证）
 
 > **触发**：用户要求「找免费视频生成 API + 测云端可用性 + 测渠道掌控」。

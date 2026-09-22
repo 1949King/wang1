@@ -134,10 +134,12 @@ class VideoGenerationClient:
                     results.extend(paths)
                     if pool is not None:
                         pool.report_success(name, segments=len(paths))
+                    self._record_prior(name, ok=True)
                     logger.info(f"[VideoGenerationClient] {name} 成功生成 {len(paths)} 段")
                     break  # 成功即停止尝试后续 provider
                 if pool is not None and name != "local":
                     pool.report_failure(name, error="返回空结果")
+                self._record_prior(name, ok=False)
             except _GenCancelled:
                 raise  # 取消是控制流，不记 provider 失败（P1-3）
             except Exception as e:
@@ -145,6 +147,7 @@ class VideoGenerationClient:
                 last_error = str(e)
                 if pool is not None and name != "local":
                     pool.report_failure(name, error=str(e))
+                self._record_prior(name, ok=False)
 
         # 所有真实 provider 失败 → 回退本地占位生成（保证业务流程可演示）
         if not results:
@@ -284,15 +287,29 @@ class VideoGenerationClient:
         """解析 provider 调用顺序。
 
         V4.35.0 起走**能力声明路由**（provider_caps.resolve_order）：
-        按本次请求 spec 筛掉不支持的 provider，再按 quality_tier 排序，
-        local 永远兜底。声明模块不可用时**诚实降级**回旧的名字顺序。
+        按本次请求 spec 筛掉不支持的 provider，再排序，local 永远兜底。
+        V4.37.4 起排序升级为**收益函数**（规格书切片）：q̂ − λ_c·price，
+        q̂ 来自 quality_prior 质量先验库；先验库不可用则退回 tier 排序。
+        声明模块不可用时**诚实降级**回旧的名字顺序。
         """
         try:
             from .provider_caps import normalize_spec, resolve_order
 
             # 合并：显式 spec 优先，未提的字段由 generate() 的 duration/分辨率补上
             merged = normalize_spec(spec, duration=duration, width=width, height=height)
-            return resolve_order(provider, spec=merged)
+            priors: Optional[Dict[str, float]] = None
+            try:
+                from .quality_prior import get_store
+
+                store = get_store()
+                snap = store.summary()
+                if snap:
+                    priors = {
+                        k.split("::", 1)[0]: float(v.get("mean", 0.5))
+                        for k, v in snap.items() if "::default" in k}
+            except Exception:
+                logger.debug("[VideoGenerationClient] 质量先验库不可用，退回 tier 排序", exc_info=True)
+            return resolve_order(provider, spec=merged, priors=priors)
         except Exception:
             logger.debug("[VideoGenerationClient] 能力路由不可用，回退名字顺序", exc_info=True)
             if provider and provider != "auto":
@@ -366,6 +383,23 @@ class VideoGenerationClient:
         except Exception as e:
             logger.debug(f"[VideoGenClient] 加载 DashScope 万相失败: {e}")
             return None
+
+    def _record_prior(self, name: str, ok: bool) -> None:
+        """回写质量先验（V4.37.4，规格书 §14 切片）。
+
+        local 占位不记录（占位成功 ≠ 质量信号）；先验库异常绝不抛出。
+        当前观测样本是执行成败（1.0/0.0）；待 B 模块评分器接入后
+        改为经 record_outcome(quality=五维分) 喂真值，路由无需改动。
+        """
+        if name == "local":
+            return
+        try:
+            from .quality_prior import get_store
+
+            get_store().record_outcome(name, ok)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 质量先验回写失败（不阻断主链路）",
+                         exc_info=True)
 
     # ────────────── 本地占位生成 ──────────────
 

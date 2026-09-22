@@ -77,6 +77,8 @@ CHECKS = [
     ("PIPEJOBS", "_verify/check_pipeline_jobs.py", "管线异步任务（submit/status/cancel）"),
     ("SCOPE", "_verify/scan_nameerror_scope.py", "AST 作用域扫描（NameError 类硬缺陷）"),
     ("UNDOFB", "_verify/check_undo_feedback_llm_health.py", "撤销反馈回路 + LLM 降级指标"),
+    # ── 质量先验 + 收益选路（V4.37.4 规格书切片）──
+    ("QPRIOR", "_verify/check_quality_prior_routing.py", "质量先验库 + 收益函数选路"),
 ]
 
 failed = []

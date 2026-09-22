@@ -86,6 +86,10 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
 # dashscope 排最前：2026-09-22 实测它是唯一有可用客户端模块 + key 的渠道
 DEFAULT_REAL_ORDER: List[str] = ["dashscope", "seedance", "cogvideo"]
 
+# 收益函数 λ_c：每元单价愿意牺牲多少期望质量（规格书 §11 V = q̂ − λ_c·ĉ）
+# 语义：两个渠道期望质量差 > λ_c×价差 时，贵的才排前面
+_LAMBDA_PRICE = 0.2
+
 # 能力位 → 人话（筛选理由用）
 _CAP_LABELS = {
     "text_to_video": "文生视频",
@@ -223,10 +227,14 @@ def filter_by_caps(order: List[str], spec: Optional[Dict[str, Any]] = None
 
 
 def resolve_order(provider: str = "auto",
-                  spec: Optional[Dict[str, Any]] = None) -> List[str]:
-    """**主入口**：解析 provider 调用顺序（能力筛选 + tier 排序 + local 兜底）。
+                  spec: Optional[Dict[str, Any]] = None,
+                  priors: Optional[Dict[str, float]] = None) -> List[str]:
+    """**主入口**：解析 provider 调用顺序（能力筛选 + 排序 + local 兜底）。
 
-    * ``provider="auto"``：声明表满足 spec 的真实 provider，按 quality_tier 降序；
+    * ``provider="auto"``：声明表满足 spec 的真实 provider；
+    * 排序规则：给了 ``priors``（{provider: 期望质量 q̂}）→ **收益函数排序**
+      V = q̂ − λ_c·price（规格书 §11 切片，V4.37.4）；否则退回 quality_tier
+      降序（旧行为，向后兼容）；
     * 显式 provider：能力满足才进候选（不满足 → 只剩 local，理由进日志）；
     * ``local`` 永远在最后（保证无网络/无 Key 仍可演示）。
     """
@@ -241,8 +249,18 @@ def resolve_order(provider: str = "auto",
     order = [p for p in DEFAULT_REAL_ORDER if p != "local"]
     filtered = filter_by_caps(order, s)
     kept = filtered["kept"]
-    # quality_tier 降序（同档保持声明表顺序，结果稳定可复现）
-    kept.sort(key=lambda p: -int((PROVIDER_CAPS.get(p) or {}).get("quality_tier") or 0))
+    if priors:
+        # 收益函数排序：q̂ 缺失用中性 0.5（冷启动探索位）；tier 做平局 tiebreak
+        def _utility(p: str) -> float:
+            q = float(priors.get(p, 0.5))
+            price = float((PROVIDER_CAPS.get(p) or {}).get("price_per_clip") or 0.0)
+            return q - _LAMBDA_PRICE * price
+        kept.sort(key=lambda p: (
+            -_utility(p),
+            -int((PROVIDER_CAPS.get(p) or {}).get("quality_tier") or 0)))
+    else:
+        # quality_tier 降序（同档保持声明表顺序，结果稳定可复现）
+        kept.sort(key=lambda p: -int((PROVIDER_CAPS.get(p) or {}).get("quality_tier") or 0))
     return kept + ["local"]
 
 
