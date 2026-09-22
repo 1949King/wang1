@@ -367,6 +367,9 @@ class AIVideoGenerationPipeline:
                     logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 守护质检未过：{g_issues}")
             if passed:
                 self._record_quality_prior(provider, passed=True, skipped=skipped)
+                self._sampling_hook(provider, current_prompt, path, duration,
+                                    passed=True, skipped=skipped,
+                                    scene_index=scene_index)
                 return GeneratedClip(
                     clip_id=uuid.uuid4().hex[:10], path=path, prompt=current_prompt,
                     visual_description=visual_description, dialogue=dialogue,
@@ -376,6 +379,9 @@ class AIVideoGenerationPipeline:
 
             # 不合格：广播 + 回溯（先记真值观测，再走回溯）
             self._record_quality_prior(provider, passed=False, skipped=skipped)
+            self._sampling_hook(provider, current_prompt, path, duration,
+                                passed=False, skipped=skipped,
+                                scene_index=scene_index)
             self._emit_inspection_failed(scene_index, current_prompt, issues, suggestion, request_id)
             logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 初检未过，回溯重写提示词 "
                         f"(retries={retries}): {issues}")
@@ -394,6 +400,59 @@ class AIVideoGenerationPipeline:
                 inspection_passed=False, inspection_issues=issues, retries=retries,
             )
         return None
+
+    def _sampling_hook(self, provider: str, prompt: str, path: str,
+                       duration: float, passed: bool, skipped: bool,
+                       scene_index: int) -> None:
+        """AI 辅助抽检钩（V4.38.2，规格书第十四篇 §73 流水线入口）。
+
+        单元完成 → 自适应抽样（残差/分歧放大、去重、新题材必检）→
+        抽中则规则预审 + 预填表单入池（等人工复核）。**红线：AI 打分只入池
+        标记风险，绝不写质量先验**（写先验唯一通道 = submit_human_label）。
+        任何异常绝不抛出——抽检是旁路，不能拖垮生成主链路。
+        """
+        try:
+            from app.core.ai.quality_prior import get_store, quality_from_inspection
+            from app.core.ai.sampling_review import get_review
+            from app.core.ai.video_generation_client import video_generation_client
+
+            machine_q = quality_from_inspection(passed, skipped)
+            if machine_q is None:
+                return  # 初检跳过 = 无有效观测（与先验回写同一条门控）
+            actual = video_generation_client.last_used_provider() or provider
+            if not actual or actual == "local":
+                return
+            import hashlib
+            import time as _time
+
+            residual = abs(machine_q - get_store().route_mean(actual))
+            divergence = 0.0
+            try:
+                from app.core.ai.divergence_probe import get_probe
+
+                divergence = get_probe().estimate("video")
+            except Exception:
+                pass
+            sig = hashlib.md5(prompt.encode("utf-8", errors="replace")).hexdigest()[:16]
+            uid = f"{actual}_s{scene_index + 1}_{int(_time.time() * 1000)}"
+            review = get_review()
+            decision = review.should_sample(
+                uid, "video", residual=residual, divergence=divergence,
+                prompt_sig=sig)
+            if decision.get("sample"):
+                verdict = review.submit_ai_score({
+                    "unit_id": uid, "kind": "video", "path": path,
+                    "duration": duration, "expected_duration": duration,
+                    "machine_score": machine_q, "divergence": divergence,
+                    "mode": video_generation_client.last_execution_mode(),
+                    "model_version": "", "provider": actual, "prompt_sig": sig})
+                if verdict.get("risk") == "高":
+                    logger.warning("[AIVideoGenerationPipeline] 抽检预审高风险："
+                                   "场景%d %s（%s）", scene_index + 1, uid,
+                                   verdict.get("defects"))
+        except Exception:
+            logger.debug("[AIVideoGenerationPipeline] 抽检钩失败（不阻断主链路）",
+                         exc_info=True)
 
     def _record_quality_prior(self, provider: str, passed: bool,
                               skipped: bool) -> None:
@@ -424,6 +483,17 @@ class AIVideoGenerationPipeline:
             target = actual or (provider if provider and provider != "auto" else "")
             if not target or target == "local":
                 return  # 本地占位不产生质量信号（与可用性回写同一条纪律）
+            # V4.38.2（切片⑨，规格 §29/§76）：残差漂移超标 → 闭环冻结，
+            # 机器观测停写先验（仅人工标签可写、可解冻）
+            try:
+                from app.core.ai.sampling_review import get_review
+
+                if get_review().is_frozen():
+                    logger.info("[AIVideoGenerationPipeline] 闭环已冻结（残差超标），"
+                                "机器观测停写先验（§29）")
+                    return
+            except ImportError:
+                pass  # 抽检子系统不存在时按旧行为
             get_store().record_outcome(target, ok=True, quality=q, kind="quality")
         except Exception:
             logger.debug("[AIVideoGenerationPipeline] 质量先验回写失败（不阻断主链路）",

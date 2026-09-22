@@ -91,6 +91,8 @@ CHECKS = [
     ("FUSION", "_verify/check_fusion.py", "置信度融合器三分 + D 双路执行体"),
     # ── L0 全局价格层 + 配额拍卖（V4.38.1 规格书切片⑧）──
     ("GPrice", "_verify/check_global_price.py", "L0 全局价格层 + 配额拍卖 + 观测门控"),
+    # ── AI 辅助人工抽检子系统（V4.38.2 规格书切片⑨）──
+    ("REVIEW", "_verify/check_sampling_review.py", "AI 辅助人工抽检子系统"),
 ]
 
 failed = []
