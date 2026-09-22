@@ -108,6 +108,9 @@ def main() -> int:
     try:
         bp_mod = _load("budget_pacer.py")
         bp_mod._PACER = bp_mod.BudgetPacer(store_path=os.path.join(tmpdir, "bp.json"))
+        gp_mod = _load("global_price.py")
+        gp_mod._GLOBAL = gp_mod.GlobalPriceController(
+            store_path=os.path.join(tmpdir, "gp.json"))
     except Exception:
         bp_mod = None
     client = vgc.VideoGenerationClient()

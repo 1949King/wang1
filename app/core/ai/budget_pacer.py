@@ -97,6 +97,24 @@ class BudgetPacer:
         self._e_prev = 0.0
         self._last_update = 0.0
         self._pi_ready = False  # 首次迭代只建误差基线不动作（防启动比例踢，规格 §35）
+        self._obs_valid = True  # 观测门控（§35）：断网/暂停冻结 λ 更新
+
+    # ────────────── 观测门控（V4.38.1 切片⑧，规格 §35） ──────────────
+
+    def set_observation(self, valid: bool, reason: str = "") -> None:
+        """断网/暂停 → 冻结 λ 更新；恢复后首个周期只建基线（防阶跃抖动）。
+
+        恢复时把 _pi_ready 置 False：下一拍只重采 e_prev、不动作——
+        冻结期间的误差跳变不进控制器（与「指数回退而非清零」同精神）。
+        """
+        with self._lock:
+            was = self._obs_valid
+            self._obs_valid = bool(valid)
+            if was and not valid:
+                logger.info("[budget_pacer] 观测无效（%s）→ λ 冻结", reason)
+            elif valid and not was:
+                self._pi_ready = False  # 恢复首拍只建基线
+                logger.info("[budget_pacer] 观测恢复 → 首拍建基线（防阶跃）")
 
     # ────────────── 持久化 ──────────────
 
@@ -186,6 +204,8 @@ class BudgetPacer:
         if not force and (now - self._last_update) < self._interval:
             return
         self._last_update = now
+        if not self._obs_valid:          # §35 观测门控：冻结但不推进控制器状态
+            return
         e = self._error_locked()
         if not self._pi_ready:
             # 首次迭代：只建立误差基线，不动作——杜绝启动时 e_prev=0 造成的

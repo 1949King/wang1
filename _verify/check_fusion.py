@@ -127,6 +127,7 @@ def main() -> int:
     bp = _load("budget_pacer.py")
     dpm = _load("divergence_probe.py")
     qp2 = _load("quality_prior.py")
+    gpm = _load("global_price.py")
     vgc = _load("video_generation_client.py")
     # 隔离真实数据（同 QPRIOR/DEGRAD 做法）——路由排序依赖先验库，
     # 不隔离会被真实库里的历史失败记录带偏
@@ -135,6 +136,8 @@ def main() -> int:
     dpm._PROBE = dpm.DivergenceProbe(store_path=os.path.join(tmpdir, "probe.json"))
     qp2._STORE = qp2.QualityPriorStore(
         store_path=os.path.join(tmpdir, "qp.json"))
+    gpm._GLOBAL = gpm.GlobalPriceController(
+        store_path=os.path.join(tmpdir, "gp.json"))
     client = vgc.VideoGenerationClient.get_instance()
     cloud_file = os.path.join(tmpdir, "cloud_seg.bin")
     with open(cloud_file, "wb") as f:

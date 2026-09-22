@@ -89,6 +89,8 @@ CHECKS = [
     ("PROBE", "_verify/check_divergence_probe.py", "A 模块分歧度探针"),
     # ── 融合器三分 + D 双路（V4.38.0 规格书切片⑦）──
     ("FUSION", "_verify/check_fusion.py", "置信度融合器三分 + D 双路执行体"),
+    # ── L0 全局价格层 + 配额拍卖（V4.38.1 规格书切片⑧）──
+    ("GPrice", "_verify/check_global_price.py", "L0 全局价格层 + 配额拍卖 + 观测门控"),
 ]
 
 failed = []

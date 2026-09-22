@@ -155,6 +155,12 @@ def main() -> int:
     bp._PACER = iso_bp
     iso_qp = qp.QualityPriorStore(store_path=os.path.join(tmpdir, "gq.json"))
     qp._STORE = iso_qp
+    try:
+        gp_mod = _load("global_price.py")
+        gp_mod._GLOBAL = gp_mod.GlobalPriceController(
+            store_path=os.path.join(tmpdir, "g_gp.json"))
+    except Exception:
+        gp_mod = None
     client = vgc.VideoGenerationClient()
 
     def _ok(prompt, duration, count, width, height):

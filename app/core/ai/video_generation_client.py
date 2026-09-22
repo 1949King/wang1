@@ -465,9 +465,18 @@ class VideoGenerationClient:
             try:
                 from .budget_pacer import get_pacer
 
-                lam = get_pacer().get_lambda()  # 动态影子价格（切片④）
+                lam = get_pacer().get_lambda()  # L1 任务层 λ^τ（切片④）
             except Exception:
                 logger.debug("[VideoGenerationClient] 预算控制器不可用，静态 λ 兜底", exc_info=True)
+            # 切片⑧（V4.38.1）：λ_eff = λ^G + λ^τ（§2 有效价格叠加规则）——
+            # L0 全局层管月度账单，积分主导慢环；两层正交各自归因。
+            try:
+                from .global_price import get_global_price
+
+                lam = (lam if lam is not None else 0.2) + get_global_price().get_lambda()
+            except Exception:
+                logger.debug("[VideoGenerationClient] 全局价格层不可用（仅 L1）",
+                             exc_info=True)
             # 切片⑤（V4.37.8）：六模式收益打分 + 可行集投影，产出**可归因**的
             # 模式计划（观测用；D/L→C 执行体在后续切片接线，当前执行语义
             # 仍是既有 provider 链 = C→L 回退）。打分不改分、投影只删项。
@@ -616,7 +625,16 @@ class VideoGenerationClient:
             caps = get_caps(name) or {}
             price = float(caps.get("price_per_clip") or 0.0)
             if price > 0:
-                get_pacer().record_spend(price * segments)
+                amount = price * segments
+                get_pacer().record_spend(amount)
+                # 切片⑧：同一笔花费同步进 L0 全局账单（两层各算各的误差）
+                try:
+                    from .global_price import get_global_price
+
+                    get_global_price().record_spend(amount)
+                except Exception:
+                    logger.debug("[VideoGenerationClient] 全局账单记账失败（不阻断）",
+                                 exc_info=True)
                 # 切片⑥：单元成本进探针预算分母（§16.1 探针成本 ≤2% 单元成本）
                 try:
                     from .divergence_probe import get_probe
