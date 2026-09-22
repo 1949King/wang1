@@ -81,6 +81,8 @@ CHECKS = [
     ("QPRIOR", "_verify/check_quality_prior_routing.py", "质量先验库 + 收益函数选路"),
     # ── 六级降级（V4.37.6 规格书切片③）──
     ("DEGRAD", "_verify/check_degradation.py", "六级降级体系 + L3 降质重试"),
+    # ── PI 预算控制（V4.37.7 规格书切片④）──
+    ("PACER", "_verify/check_budget_pacer.py", "PI 预算影子价格控制器"),
 ]
 
 failed = []

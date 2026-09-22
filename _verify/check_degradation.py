@@ -105,6 +105,11 @@ def main() -> int:
     qp._STORE = iso
     dstats = dg.DegradationStats()
     dg._STATS = dstats
+    try:
+        bp_mod = _load("budget_pacer.py")
+        bp_mod._PACER = bp_mod.BudgetPacer(store_path=os.path.join(tmpdir, "bp.json"))
+    except Exception:
+        bp_mod = None
     client = vgc.VideoGenerationClient()
 
     def _ok(prompt, duration, count, width, height):

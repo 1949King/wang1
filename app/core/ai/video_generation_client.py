@@ -154,6 +154,7 @@ class VideoGenerationClient:
                             if pool is not None:
                                 pool.report_success(first_real_provider, segments=len(paths))
                             self._record_prior(first_real_provider, ok=True)
+                            self._record_spend(first_real_provider, len(paths))
                             self._tls.last_provider = first_real_provider
                             if session is not None:
                                 session.mark(3, f"{first_real_provider} 480p 重试成功")
@@ -182,6 +183,7 @@ class VideoGenerationClient:
                     if pool is not None:
                         pool.report_success(name, segments=len(paths))
                     self._record_prior(name, ok=True)
+                    self._record_spend(name, len(paths))  # 切片④：实际花费记账
                     self._tls.last_provider = name  # 归因：本线程实际用了谁
                     # local 兜底在链内交付：被动降级记 L6（显式选 local 是主动选择不记）
                     if name == "local" and provider != "local" and session is not None:
@@ -399,6 +401,7 @@ class VideoGenerationClient:
             # 合并：显式 spec 优先，未提的字段由 generate() 的 duration/分辨率补上
             merged = normalize_spec(spec, duration=duration, width=width, height=height)
             priors: Optional[Dict[str, float]] = None
+            lam: Optional[float] = None
             try:
                 from .quality_prior import get_store
 
@@ -410,7 +413,13 @@ class VideoGenerationClient:
                     priors = {p: store.route_mean(p) for p in providers}
             except Exception:
                 logger.debug("[VideoGenerationClient] 质量先验库不可用，退回 tier 排序", exc_info=True)
-            return resolve_order(provider, spec=merged, priors=priors)
+            try:
+                from .budget_pacer import get_pacer
+
+                lam = get_pacer().get_lambda()  # 动态影子价格（切片④）
+            except Exception:
+                logger.debug("[VideoGenerationClient] 预算控制器不可用，静态 λ 兜底", exc_info=True)
+            return resolve_order(provider, spec=merged, priors=priors, lambda_price=lam)
         except Exception:
             logger.debug("[VideoGenerationClient] 能力路由不可用，回退名字顺序", exc_info=True)
             if provider and provider != "auto":
@@ -500,6 +509,26 @@ class VideoGenerationClient:
             get_store().record_outcome(name, ok)
         except Exception:
             logger.debug("[VideoGenerationClient] 质量先验回写失败（不阻断主链路）",
+                         exc_info=True)
+
+    def _record_spend(self, name: str, segments: int) -> None:
+        """实际花费记账（V4.37.7 切片④）：price_per_clip × 段数 → budget_pacer。
+
+        local 占位免费不记；金额取自能力声明表的估算单价（实际以渠道账单为准，
+        账单回写属后续 A2 方向）；控制器异常绝不抛出。
+        """
+        if name == "local" or segments <= 0:
+            return
+        try:
+            from .budget_pacer import get_pacer
+            from .provider_caps import get_caps
+
+            caps = get_caps(name) or {}
+            price = float(caps.get("price_per_clip") or 0.0)
+            if price > 0:
+                get_pacer().record_spend(price * segments)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 花费记账失败（不阻断主链路）",
                          exc_info=True)
 
     # ────────────── 本地占位生成 ──────────────

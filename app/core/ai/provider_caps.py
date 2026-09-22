@@ -228,13 +228,16 @@ def filter_by_caps(order: List[str], spec: Optional[Dict[str, Any]] = None
 
 def resolve_order(provider: str = "auto",
                   spec: Optional[Dict[str, Any]] = None,
-                  priors: Optional[Dict[str, float]] = None) -> List[str]:
+                  priors: Optional[Dict[str, float]] = None,
+                  lambda_price: Optional[float] = None) -> List[str]:
     """**主入口**：解析 provider 调用顺序（能力筛选 + 排序 + local 兜底）。
 
     * ``provider="auto"``：声明表满足 spec 的真实 provider；
     * 排序规则：给了 ``priors``（{provider: 期望质量 q̂}）→ **收益函数排序**
       V = q̂ − λ_c·price（规格书 §11 切片，V4.37.4）；否则退回 quality_tier
       降序（旧行为，向后兼容）；
+    * ``lambda_price``：动态影子价格（V4.37.6 切片④，由 budget_pacer 按预算
+      消耗连续调节）；不传用静态 ``_LAMBDA_PRICE`` 兜底；
     * 显式 provider：能力满足才进候选（不满足 → 只剩 local，理由进日志）；
     * ``local`` 永远在最后（保证无网络/无 Key 仍可演示）。
     """
@@ -250,11 +253,13 @@ def resolve_order(provider: str = "auto",
     filtered = filter_by_caps(order, s)
     kept = filtered["kept"]
     if priors:
+        lam = float(lambda_price) if lambda_price is not None else _LAMBDA_PRICE
+
         # 收益函数排序：q̂ 缺失用中性 0.5（冷启动探索位）；tier 做平局 tiebreak
         def _utility(p: str) -> float:
             q = float(priors.get(p, 0.5))
             price = float((PROVIDER_CAPS.get(p) or {}).get("price_per_clip") or 0.0)
-            return q - _LAMBDA_PRICE * price
+            return q - lam * price
         kept.sort(key=lambda p: (
             -_utility(p),
             -int((PROVIDER_CAPS.get(p) or {}).get("quality_tier") or 0)))

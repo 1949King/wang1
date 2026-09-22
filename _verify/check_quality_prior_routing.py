@@ -132,9 +132,14 @@ def main() -> int:
 
     # ════════════ E. 端到端：假 provider 成败 → 先验回写 ════════════
     vgc = _load("video_generation_client.py")
-    # 注入隔离先验库（不碰真 data/quality_prior.json）
+    # 注入隔离先验库与预算控制器（不碰真 data/*.json）
     iso = qp.QualityPriorStore(store_path=os.path.join(tmpdir, "e.json"))
     qp._STORE = iso
+    try:
+        bp_mod = _load("budget_pacer.py")
+        bp_mod._PACER = bp_mod.BudgetPacer(store_path=os.path.join(tmpdir, "e_bp.json"))
+    except Exception:
+        bp_mod = None
     client = vgc.VideoGenerationClient()
 
     def _fail(prompt, duration, count, width, height):
