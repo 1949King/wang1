@@ -75,6 +75,9 @@ class VideoGenerationClient:
             return
         self._initialized = True
         self._providers: Dict[str, Optional[Callable]] = {}  # 延迟加载缓存
+        # 线程局部：记录「本线程最近一次 generate 实际用了哪个 provider」——
+        # 切片② 质量真值回写的归因依据（Provenance）；多并发生成任务互不串扰
+        self._tls = threading.local()
         self._output_dir = os.path.join(tempfile.gettempdir(), "shiguangyx_ai_gen")
         try:
             os.makedirs(self._output_dir, exist_ok=True)
@@ -135,6 +138,7 @@ class VideoGenerationClient:
                     if pool is not None:
                         pool.report_success(name, segments=len(paths))
                     self._record_prior(name, ok=True)
+                    self._tls.last_provider = name  # 归因：本线程实际用了谁
                     logger.info(f"[VideoGenerationClient] {name} 成功生成 {len(paths)} 段")
                     break  # 成功即停止尝试后续 provider
                 if pool is not None and name != "local":
@@ -156,11 +160,20 @@ class VideoGenerationClient:
                 logger.warning(f"[VideoGenerationClient] 真实 provider 全部失败，回退占位生成 ({last_error})")
             results = self._call_local_fallback(prompt=prompt, duration=duration,
                                                 count=count, width=width, height=height)
+            self._tls.last_provider = "local"  # 归因：兜底层也要标清来源
 
         # 广播生成完成（便于 pipeline 层追踪）
         self._emit_generation_done(results, prompt=prompt)
 
         return results[:count] if results else []
+
+    def last_used_provider(self) -> str:
+        """本线程最近一次 generate 实际使用的 provider（切片② 归因查询）。
+
+        调用方必须在**同一线程**的 generate 之后立刻读（生成管线正是如此）；
+        未曾生成过返回空字符串。
+        """
+        return str(getattr(self._tls, "last_provider", "") or "")
 
     def list_providers(self) -> List[Dict[str, Any]]:
         """列出可用生成器及其可用状态 + 能力/单价/健康摘要（供 UI 展示）"""
@@ -304,9 +317,9 @@ class VideoGenerationClient:
                 store = get_store()
                 snap = store.summary()
                 if snap:
-                    priors = {
-                        k.split("::", 1)[0]: float(v.get("mean", 0.5))
-                        for k, v in snap.items() if "::default" in k}
+                    # route_mean：quality 真值桶优先，default 可用性桶兜底（切片②）
+                    providers = {k.split("::", 1)[0] for k in snap}
+                    priors = {p: store.route_mean(p) for p in providers}
             except Exception:
                 logger.debug("[VideoGenerationClient] 质量先验库不可用，退回 tier 排序", exc_info=True)
             return resolve_order(provider, spec=merged, priors=priors)

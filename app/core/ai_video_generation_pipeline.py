@@ -366,6 +366,7 @@ class AIVideoGenerationPipeline:
                     skipped = False
                     logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 守护质检未过：{g_issues}")
             if passed:
+                self._record_quality_prior(provider, passed=True, skipped=skipped)
                 return GeneratedClip(
                     clip_id=uuid.uuid4().hex[:10], path=path, prompt=current_prompt,
                     visual_description=visual_description, dialogue=dialogue,
@@ -373,7 +374,8 @@ class AIVideoGenerationPipeline:
                     inspection_passed=True, retries=retries, inspection_skipped=skipped,
                 )
 
-            # 不合格：广播 + 回溯
+            # 不合格：广播 + 回溯（先记真值观测，再走回溯）
+            self._record_quality_prior(provider, passed=False, skipped=skipped)
             self._emit_inspection_failed(scene_index, current_prompt, issues, suggestion, request_id)
             logger.info(f"[AIVideoGenerationPipeline] 场景{scene_index + 1} 初检未过，回溯重写提示词 "
                         f"(retries={retries}): {issues}")
@@ -392,6 +394,40 @@ class AIVideoGenerationPipeline:
                 inspection_passed=False, inspection_issues=issues, retries=retries,
             )
         return None
+
+    def _record_quality_prior(self, provider: str, passed: bool,
+                              skipped: bool) -> None:
+        """真值质量观测回写（V4.37.5，规格书切片② B 模块评分器最小落地）。
+
+        初检（+守护质检）就是本项目的质量观测器：通过/不通过即真值样本，
+        写入 quality_prior 的 "quality" 桶——route_mean 真值桶优先，一记录
+        就自动接管后续路由，可用性先验（default 桶）退居兜底。
+
+        归因：provider="auto" 时实际渠道在 client 内部解析，用
+        ``last_used_provider()``（线程局部）取真名；取不到且参数是显式渠道
+        时才用参数兜底。skipped=初检跳过=无有效观测 → 不记录（观测门控）。
+        任何异常绝不抛出——先验是优化项，不能拖垮生成主链路。
+        """
+        try:
+            from app.core.ai.quality_prior import get_store, quality_from_inspection
+
+            q = quality_from_inspection(passed, skipped)
+            if q is None:
+                return
+            actual = ""
+            try:
+                from app.core.ai.video_generation_client import video_generation_client
+
+                actual = video_generation_client.last_used_provider()
+            except Exception:
+                logger.debug("[AIVideoGenerationPipeline] 渠道归因读取失败", exc_info=True)
+            target = actual or (provider if provider and provider != "auto" else "")
+            if not target or target == "local":
+                return  # 本地占位不产生质量信号（与可用性回写同一条纪律）
+            get_store().record_outcome(target, ok=True, quality=q, kind="quality")
+        except Exception:
+            logger.debug("[AIVideoGenerationPipeline] 质量先验回写失败（不阻断主链路）",
+                         exc_info=True)
 
     def _inspect(self, prompt: str, visual_description: str) -> tuple:
         """后台初检：检测穿模/手部畸形/肢体错误/逻辑混乱/画风崩坏

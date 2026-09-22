@@ -156,6 +156,44 @@ def main() -> int:
     check("local 占位不写先验", iso.predict("local") is None)
     qp._STORE = None  # 还原单例
 
+    # ════════════ F. 切片②：真值质量观测（B 模块评分器最小落地） ════════════
+    # F1：初检结论 → 质量样本映射（观测门控）
+    check("初检通过 → 1.0", qp.quality_from_inspection(True, False) == 1.0)
+    check("初检未过 → 0.3（非零，区别于没生成）",
+          qp.quality_from_inspection(False, False) == 0.3)
+    check("初检跳过 → None（不记录，观测门控）",
+          qp.quality_from_inspection(True, True) is None)
+    check("未过+跳过 → None", qp.quality_from_inspection(False, True) is None)
+    # F2：route_mean 真值桶优先
+    store6 = qp.QualityPriorStore(store_path=os.path.join(tmpdir, "f.json"))
+    store6.record("seedance", 0.2)                                  # default 桶（可用性差）
+    store6.record_outcome("seedance", True, quality=0.95, kind="quality")  # quality 桶（真值好）
+    check("route_mean：quality 真值桶优先于 default 可用性桶",
+          abs(store6.route_mean("seedance") - 0.95) < 1e-9)
+    store7 = qp.QualityPriorStore(store_path=os.path.join(tmpdir, "f2.json"))
+    store7.record("cogvideo", 0.4)  # 只有 default 桶
+    check("route_mean：无真值桶退回可用性桶", abs(store7.route_mean("cogvideo") - 0.4) < 1e-9)
+    check("route_mean：全无数据中性 0.5", abs(store7.route_mean("nope") - 0.5) < 1e-9)
+    # F3：TLS 渠道归因
+    iso2 = qp.QualityPriorStore(store_path=os.path.join(tmpdir, "f3.json"))
+    qp._STORE = iso2
+    client2 = vgc.VideoGenerationClient()
+    client2._tls.last_provider = ""  # 单例+同线程：清掉 E 段留下的归因再测
+    check("未生成时 last_used_provider 为空", client2.last_used_provider() == "")
+    client2._providers = {"dashscope": None, "seedance": _fail, "cogvideo": _ok}
+    client2.generate(prompt="归因测试", duration=3.0, count=1)
+    check("generate 后归因到实际渠道 cogvideo",
+          client2.last_used_provider() == "cogvideo")
+    qp._STORE = None
+    # F4：管线静态接线（不 import 重模块，文本断言）
+    pipe_src = open(os.path.join(ROOT, "app", "core", "ai_video_generation_pipeline.py"),
+                    encoding="utf-8").read()
+    check("管线有 _record_quality_prior 方法", "def _record_quality_prior" in pipe_src)
+    check("管线通过/未过两路都回写真值",
+          pipe_src.count("_record_quality_prior(provider, passed=") >= 2)
+    check("管线用 last_used_provider 归因", "last_used_provider()" in pipe_src)
+    check("管线用 quality_from_inspection 门控", "quality_from_inspection" in pipe_src)
+
     print(f"\n{'ALL PASS' if not FAILS else 'FAILED'} ({TOTAL} checks)")
     for f in FAILS:
         print(f"  - {f}")

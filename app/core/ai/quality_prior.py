@@ -148,6 +148,23 @@ class QualityPriorStore:
         p = self.predict(provider, kind)
         return float(p["mean"]) if p else default
 
+    def route_mean(self, provider: str) -> float:
+        """路由用 q̂（切片②）：**真值桶优先**——有 "quality" 桶（初检/评分器真值）
+        用真值，否则退回 "default" 桶（可用性先验），都没有返回中性 0.5。
+
+        规格 §14「分类型分版本分桶」的落地：真值信号一到位就自动接管路由，
+        可用性信号兜底，无需改任何路由代码。
+        """
+        with self._lock:
+            self._ensure_loaded()
+            q = self._buckets.get(_bucket_key(provider, "quality"))
+            if q is not None:
+                return float(q["mean"])
+            d = self._buckets.get(_bucket_key(provider, "default"))
+            if d is not None:
+                return float(d["mean"])
+            return 0.5
+
     def inherit(self, provider: str, from_kind: str, to_kind: str) -> None:
         """新桶继承旧桶（规格 §39）：继承均值、方差 ×4 体现冷启动不确定度。"""
         with self._lock:
@@ -180,6 +197,19 @@ class QualityPriorStore:
 
 _STORE: Optional[QualityPriorStore] = None
 _STORE_LOCK = threading.Lock()
+
+
+def quality_from_inspection(passed: bool, skipped: bool) -> Optional[float]:
+    """把初检结论映射为真值质量样本（切片②，纯函数）。
+
+    - passed → 1.0（通过初检+守护质检）
+    - 未通过 → 0.3（内容生成出来了但质量不达标，非零——区别于「根本没生成」）
+    - skipped → **None（不记录）**：观测门控思想（规格 §35）——
+      初检被跳过 = 无有效观测，不污染先验库。
+    """
+    if skipped:
+        return None
+    return 1.0 if passed else 0.3
 
 
 def get_store() -> QualityPriorStore:
