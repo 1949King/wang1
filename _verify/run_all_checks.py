@@ -97,6 +97,8 @@ CHECKS = [
     ("MSCHED", "_verify/check_module_scheduler.py", "模块调度器 DAG 核心"),
     # ── 端到端仿真器（V4.38.4 规格书切片⑪）──
     ("SIM", "_verify/check_simulator.py", "端到端仿真器（零成本/可复现/故障注入）"),
+    # ── 引擎接口规范 + 错误码（V4.38.5 规格书切片⑫）──
+    ("EAPI", "_verify/check_engine_api.py", "引擎对外接口规范 + 错误码体系"),
 ]
 
 failed = []
