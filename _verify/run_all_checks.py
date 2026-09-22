@@ -93,6 +93,8 @@ CHECKS = [
     ("GPrice", "_verify/check_global_price.py", "L0 全局价格层 + 配额拍卖 + 观测门控"),
     # ── AI 辅助人工抽检子系统（V4.38.2 规格书切片⑨）──
     ("REVIEW", "_verify/check_sampling_review.py", "AI 辅助人工抽检子系统"),
+    # ── 模块调度器 DAG（V4.38.3 规格书切片⑩）──
+    ("MSCHED", "_verify/check_module_scheduler.py", "模块调度器 DAG 核心"),
 ]
 
 failed = []
