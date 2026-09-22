@@ -10,32 +10,28 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.37.7"
+__version__ = "4.37.8"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 37,
-    "patch": 7,
-    "codename": "PI 预算影子价格控制器（异构协作引擎规格书切片④ C模块）",
+    "patch": 8,
+    "codename": "六种执行模式 + 可行集投影（异构协作引擎规格书切片⑤）",
     "release_date": "2026-09-23",
     "description": (
-        "V4.37.7: 规格书切片④——C 模块 PI 控制器最小落地，静态 λ 变连续调节。"
-        "规格书核心论断：静态 λ 是 v4.0 的缺陷（长期饱和）。V4.37.4 引入收益函数时 "
-        "λ_c 写死 0.2，本版由 budget_pacer 按预算消耗连续调节："
-        "★ 新模块 app/core/ai/budget_pacer.py（纯模块）：日预算窗口（默认 ¥50，"
-        "自然日滚动）；剩余法误差 e=剩余预算比−剩余时间比（无量纲天然归一化）；"
-        "PI 迭代——比例与积分都作用于 −e（e<0 超支 → λ 升偏好便宜渠道；"
-        "e>0 富余 → λ 降偏好质量渠道）；λ∈[0.05,1.0] 钳位 + 撞界冻结积分抗卷绕；"
-        "首读只建误差基线不动作（防启动比例踢）；观测门控（30s 最小更新周期）；"
-        "跨日结转：预算重置 + λ 指数回退×0.5（不清零杜绝阶跃）；JSON 原子写持久化。"
-        "★ 接线：provider_caps.resolve_order 加 additive lambda_price 参数；"
-        "client 选路传 pacer.get_lambda()（静态 0.2 降级为控制器不可用时兜底）；"
-        "真实渠道成功按 price_per_clip×段数记账（local 免费不记）。"
-        "★ 端到端证据：λ=0.05（富余）时贵而好的 dashscope 排前，λ=1.0（紧张）时被反超——"
-        "同一个先验库，预算松紧直接改变路由决策。"
-        "踩坑：首版比例项符号写反（超支反而 λ 降）+ 首读 e_prev=0 比例踢——"
-        "测试驱动双双抓获。验证：check_budget_pacer 20 项全过；"
-        "run_all_checks 43→44 项（QPRIOR/DEGRAD 同步注入隔离 pacer 防污染真数据）。"
+        "V4.37.8: 规格书切片⑤——第三篇模型调度器的「单元由谁执行」形式化。"
+        "★ 新模块 app/core/ai/execution_modes.py（纯模块）：Mode∈{L,C,D,L→C,"
+        "C→L,SkipMerge} 六枚举；§11 定稿收益函数 V=q̂−λ_c·(ĉ−c_base)−λ_l·(l̂−l_base)"
+        "−κ_sw·1{switch}——基线写死为本地（本地惩罚恒 0，宽松预算自然收敛本地，"
+        "杜绝 v4.0 D 模式泛滥/λ 顶饱和）；融合质量上界 q_D=1−(1−q_L)(1−q_C)；"
+        "L→C/C→L 按达标概率求期望。"
+        "★ §12 可行集投影正交铁律：打分层纯收益最大化，投影层只删不可行选项、"
+        "绝不修改打分（快照断言守护）；collect_infeasible 把断网/无 key/显存不足"
+        "翻译成模式删除清单；choose_mode 返回完整归因字典（分数/删除理由/λ/基线）。"
+        "★ 接线：client 选路时产出模式计划存 TLS（last_mode_plan），generate 末尾"
+        "记录实际执行模式（last_execution_mode：C / C→L / L），计划 vs 实际可审计。"
+        "执行体语义不变（既有 provider 链 = C→L），D 执行体待切片⑦接线。"
+        "验证：check_execution_modes 27 项全过；run_all_checks 44→45 项。"
     ),
 }

@@ -243,6 +243,21 @@ class VideoGenerationClient:
         # 广播生成完成（便于 pipeline 层追踪）
         self._emit_generation_done(results, prompt=prompt)
 
+        # 切片⑤：记录**实际**执行模式（与计划对照，审计用）
+        try:
+            used = str(getattr(self._tls, "last_provider", "") or "")
+            if used == "local" and provider == "local":
+                executed = "L"
+            elif used == "local":
+                executed = "C→L"  # 云端失败后回退本地
+            elif used:
+                executed = "C"
+            else:
+                executed = ""
+            self._tls.last_mode_executed = executed
+        except Exception:
+            pass
+
         return results[:count] if results else []
 
     def last_used_provider(self) -> str:
@@ -264,6 +279,22 @@ class VideoGenerationClient:
             return dict(d)
         return {"level": 0, "level_name": "full",
                 "level_label": "完整交付（首选渠道按原规格出齐）", "events": []}
+
+    def last_mode_plan(self) -> Dict[str, Any]:
+        """本线程最近一次 generate 的**模式计划**（切片⑤，规格书 §10-12）。
+
+        Returns:: {"mode", "label", "scores", "kept", "dropped", "baseline",
+        "lambda_c", ...}；未曾计划过返回空 dict。
+        """
+        p = getattr(self._tls, "last_mode_plan", None)
+        return dict(p) if isinstance(p, dict) else {}
+
+    def last_execution_mode(self) -> str:
+        """本线程最近一次 generate **实际执行**的模式（"C"/"C→L"/"L"）。
+
+        与 last_mode_plan() 对照可审计「计划 vs 实际」偏差；未曾生成返回 ""。
+        """
+        return str(getattr(self._tls, "last_mode_executed", "") or "")
 
     def list_providers(self) -> List[Dict[str, Any]]:
         """列出可用生成器及其可用状态 + 能力/单价/健康摘要（供 UI 展示）"""
@@ -419,6 +450,30 @@ class VideoGenerationClient:
                 lam = get_pacer().get_lambda()  # 动态影子价格（切片④）
             except Exception:
                 logger.debug("[VideoGenerationClient] 预算控制器不可用，静态 λ 兜底", exc_info=True)
+            # 切片⑤（V4.37.8）：六模式收益打分 + 可行集投影，产出**可归因**的
+            # 模式计划（观测用；D/L→C 执行体在后续切片接线，当前执行语义
+            # 仍是既有 provider 链 = C→L 回退）。打分不改分、投影只删项。
+            try:
+                from .execution_modes import choose_mode, collect_infeasible
+                from .provider_caps import PROVIDER_CAPS
+
+                chain_preview = resolve_order(provider, spec=merged,
+                                              priors=priors, lambda_price=lam)
+                first_real = next((p for p in chain_preview if p != "local"), "")
+                q_cloud = float((priors or {}).get(first_real, 0.5)) if first_real else 0.0
+                cost_cloud = float((PROVIDER_CAPS.get(first_real) or {})
+                                   .get("price_per_clip") or 0.0)
+                self._tls.last_mode_plan = choose_mode(
+                    q_local=0.3,  # 本地占位质量低但成本=0（基线锚点）
+                    q_cloud=q_cloud,
+                    cost_local=0.0,
+                    cost_cloud=cost_cloud,
+                    lambda_c=float(lam) if lam is not None else 0.2,
+                    infeasible=collect_infeasible(
+                        cloud_available=bool(first_real)),
+                )
+            except Exception:
+                logger.debug("[VideoGenerationClient] 模式计划不可用（不阻断）", exc_info=True)
             return resolve_order(provider, spec=merged, priors=priors, lambda_price=lam)
         except Exception:
             logger.debug("[VideoGenerationClient] 能力路由不可用，回退名字顺序", exc_info=True)

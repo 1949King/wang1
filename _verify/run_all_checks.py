@@ -83,6 +83,8 @@ CHECKS = [
     ("DEGRAD", "_verify/check_degradation.py", "六级降级体系 + L3 降质重试"),
     # ── PI 预算控制（V4.37.7 规格书切片④）──
     ("PACER", "_verify/check_budget_pacer.py", "PI 预算影子价格控制器"),
+    # ── 六执行模式 + 可行集投影（V4.37.8 规格书切片⑤）──
+    ("MODES", "_verify/check_execution_modes.py", "六种执行模式 + 可行集投影"),
 ]
 
 failed = []
