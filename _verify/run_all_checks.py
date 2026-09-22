@@ -87,6 +87,8 @@ CHECKS = [
     ("MODES", "_verify/check_execution_modes.py", "六种执行模式 + 可行集投影"),
     # ── A 模块分歧度探针（V4.37.9 规格书切片⑥）──
     ("PROBE", "_verify/check_divergence_probe.py", "A 模块分歧度探针"),
+    # ── 融合器三分 + D 双路（V4.38.0 规格书切片⑦）──
+    ("FUSION", "_verify/check_fusion.py", "置信度融合器三分 + D 双路执行体"),
 ]
 
 failed = []

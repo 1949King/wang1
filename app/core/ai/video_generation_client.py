@@ -94,7 +94,9 @@ class VideoGenerationClient:
                  count: int = 1, provider: str = "auto",
                  width: int = _DEFAULT_RESOLUTION[0],
                  height: int = _DEFAULT_RESOLUTION[1],
-                 spec: Optional[Dict[str, Any]] = None) -> List[str]:
+                 spec: Optional[Dict[str, Any]] = None,
+                 mode: Optional[str] = None,
+                 allow_dual: bool = False) -> List[str]:
         """
         生成视频片段
 
@@ -106,6 +108,10 @@ class VideoGenerationClient:
             width/height: 分辨率
             spec:      本次请求的**能力需求**（如 first_last_frame=True /
                        image_to_video=True / resolution="1080p"）；未提的字段不参与筛选
+            mode:      显式执行模式（切片⑤/⑦）："D" 强制双路；None=按既有链
+            allow_dual: 允许自动双路（切片⑦）——True 且模式计划选中 D 且探针
+                       判候选时执行本地+云端双路融合；默认 False（双路=双倍
+                       云端花费，必须显式开）
 
         返回：
             生成的视频文件路径列表（全部失败返回空列表）
@@ -115,6 +121,18 @@ class VideoGenerationClient:
         providers = self._resolve_provider_order(provider, spec=spec,
                                                  duration=duration,
                                                  width=width, height=height)
+        # ── D 双路模式（V4.38.0 切片⑦）：显式 mode="D"，或 allow_dual 且
+        # 模式计划选中 D（探针已判候选）时走双路融合通道；失败内部回退单路链。
+        if mode == "D" or (allow_dual and mode is None):
+            plan = getattr(self._tls, "last_mode_plan", None)
+            if mode == "D" or (isinstance(plan, dict) and plan.get("mode") == "D"):
+                dual = self._execute_dual(prompt=prompt, duration=duration,
+                                          count=count, width=width, height=height,
+                                          providers=providers)
+                if dual:
+                    return dual[:count]
+                if mode == "D":
+                    logger.warning("[VideoGenerationClient] 显式 D 双路失败，回退单路链")
         # 额度池重排（P0-1）：有健康账号的 provider 优先；无账号配置时透传
         pool = None
         try:
@@ -610,6 +628,125 @@ class VideoGenerationClient:
         except Exception:
             logger.debug("[VideoGenerationClient] 花费记账失败（不阻断主链路）",
                          exc_info=True)
+
+    # ────────────── D 双路执行体（V4.38.0 切片⑦）──────────────
+
+    def _execute_dual(self, prompt: str, duration: float, count: int,
+                      width: int, height: int,
+                      providers: Optional[List[str]] = None) -> List[str]:
+        """D 模式：本地+云端双路 → 分歧度实测入库 → 融合（关键帧择优+时序拼接）。
+
+        规格书 §10 D 定义：分歧高、关键单元启用。桌面单机版用**顺序双路**
+        （本地占位秒出，云端异步本来就慢）替代并行——语义等价、实现可靠。
+
+        云端失败 → 退化为本地单路（记 C→L，不冒充 D 交付）；
+        融合后溯源存 ``last_fusion()``；任一环异常 → 返回 [] 让调用方回退单路链。
+        """
+        try:
+            from .divergence_probe import get_probe, media_divergence
+            from .fusion import plan_video_fusion
+        except Exception:
+            logger.debug("[VideoGenerationClient] 双路依赖不可用", exc_info=True)
+            return []
+        order = providers or self._resolve_provider_order("auto")
+        first_real = next((p for p in order if p != "local"), "")
+        cloud = self._get_provider(first_real) if first_real else None
+        local = self._get_provider("local")
+        if local is None:
+            return []
+        # 本地路（快，先跑；占位生成就是基线锚点）
+        local_paths: List[str] = []
+        try:
+            local_paths = local(prompt=prompt, duration=duration, count=count,
+                                width=width, height=height) or []
+        except _GenCancelled:
+            raise
+        except Exception as e:
+            logger.warning(f"[VideoGenerationClient] 双路-本地路失败: {e}")
+        # 云端路
+        cloud_paths: List[str] = []
+        if cloud is not None:
+            try:
+                cloud_paths = cloud(prompt=prompt, duration=duration, count=count,
+                                    width=width, height=height) or []
+            except _GenCancelled:
+                raise
+            except Exception as e:
+                logger.warning(f"[VideoGenerationClient] 双路-云端路失败: {e}")
+                self._record_prior(first_real, ok=False)
+                try:
+                    from .provider_pool import get_pool
+
+                    get_pool().report_failure(first_real, error=str(e))
+                except Exception:
+                    pass
+        if not cloud_paths:
+            # 云端挂 → 双路退化为本地单路（诚实标记 C→L，不冒充 D）
+            if local_paths:
+                self._tls.last_provider = "local"
+                self._tls.last_mode_executed = "C→L"
+                try:
+                    from .degradation import DegradationSession, get_stats
+
+                    s = DegradationSession()
+                    s.mark(6, "D 双路云端失败，退化本地单路")
+                    get_stats().record(s.final_level)
+                    self._tls.last_degradation = s.summary()
+                except Exception:
+                    pass
+            return local_paths
+        # ── 双路都成：分歧实测（成本门控内才入库，§18） ──
+        probe = get_probe()
+        delta = media_divergence(local_paths[0], cloud_paths[0],
+                                 duration, duration) if local_paths else 1.0
+        try:
+            if probe.cost_gate(0.0).get("allowed", True):
+                probe.record("video", delta)
+        except Exception:
+            logger.debug("[VideoGenerationClient] 分歧入库失败（不阻断）", exc_info=True)
+        # ── 融合：逐槽关键帧择优 + 时序拼接计划（§42 视频算子） ──
+        q_cloud = 0.5
+        try:
+            from .quality_prior import get_store
+
+            q_cloud = get_store().route_mean(first_real)
+        except Exception:
+            pass
+        segments: List[Dict[str, Any]] = []
+        for i in range(max(1, int(count))):
+            if i < len(cloud_paths):
+                segments.append({"slot": i, "source": "cloud",
+                                 "path": cloud_paths[i], "quality": q_cloud,
+                                 "duration": duration, "keyframe_ok": True})
+            if i < len(local_paths):
+                segments.append({"slot": i, "source": "local",
+                                 "path": local_paths[i], "quality": 0.3,
+                                 "duration": duration, "keyframe_ok": True})
+        plan, provenance = plan_video_fusion(segments, prefer="cloud")
+        out = [p["path"] for p in plan if p.get("path")]
+        if not out:
+            return cloud_paths
+        # ── 记账 / 归因 / 溯源 ──
+        self._record_prior(first_real, ok=True)
+        self._record_spend(first_real, len(cloud_paths))
+        try:
+            from .provider_pool import get_pool
+
+            get_pool().report_success(first_real, segments=len(cloud_paths))
+        except Exception:
+            pass
+        self._tls.last_provider = first_real
+        self._tls.last_mode_executed = "D"
+        self._tls.last_fusion = provenance
+        self._emit_generation_done(out, prompt=prompt)
+        chosen = [f"{p['slot']}:{p['source']}" for p in plan]
+        logger.info(f"[VideoGenerationClient] D 双路融合完成 Δ={delta:.2f} 选源 {chosen}")
+        return out
+
+    def last_fusion(self) -> Dict[str, Any]:
+        """本线程最近一次 D 双路融合的溯源（§42 Provenance）；未融合过返回 {}。"""
+        f = getattr(self._tls, "last_fusion", None)
+        return dict(f) if isinstance(f, dict) else {}
 
     # ────────────── 本地占位生成 ──────────────
 
