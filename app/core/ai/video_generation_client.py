@@ -125,11 +125,55 @@ class VideoGenerationClient:
         except Exception:
             logger.debug("[VideoGenerationClient] 额度池不可用，跳过重排", exc_info=True)
         last_error = ""
+        failures: List[tuple] = []  # (provider, error_class) —— L3 降质重试的判据
+        session = None
+        try:
+            from .degradation import DegradationSession
+
+            session = DegradationSession()
+        except Exception:
+            logger.debug("[VideoGenerationClient] 降级追踪不可用", exc_info=True)
+        first_real_provider = ""  # 首个非 local 渠道（L3 重试目标）
+        used_fallback_provider = False  # 非首选真实渠道成功 → L2
         for name in providers:
             _raise_if_cancelled()  # P1-3：provider 尝试之间响应取消
+            # ── L3 质量降级（V4.37.6）：在本地兜底之前最后一搏——全部真实渠道
+            # 失败、含资源类错误（超时/OOM/429——降分辨率可能救回来）、原请求
+            # 高于 480p 时，用首个真实渠道 480p 重试**一次**（只试一次只降一档）。
+            if name == "local" and not results and first_real_provider \
+                    and min(width, height) > 480 \
+                    and any(cls == "resource" for _, cls in failures):
+                handler_l3 = self._get_provider(first_real_provider)
+                if handler_l3 is not None:
+                    try:
+                        logger.info(f"[VideoGenerationClient] L3 质量降级：{first_real_provider} 480p 重试")
+                        paths = handler_l3(prompt=prompt, duration=duration, count=count,
+                                           width=854, height=480)
+                        if paths:
+                            results.extend(paths)
+                            if pool is not None:
+                                pool.report_success(first_real_provider, segments=len(paths))
+                            self._record_prior(first_real_provider, ok=True)
+                            self._tls.last_provider = first_real_provider
+                            if session is not None:
+                                session.mark(3, f"{first_real_provider} 480p 重试成功")
+                            break
+                    except _GenCancelled:
+                        raise
+                    except Exception as e:
+                        logger.warning(f"[VideoGenerationClient] L3 480p 重试仍失败: {e}")
+                        last_error = str(e)
+                        if pool is not None:
+                            pool.report_failure(first_real_provider, error=str(e))
+                        self._record_prior(first_real_provider, ok=False)
             handler = self._get_provider(name)
             if handler is None:
                 continue
+            if name != "local":
+                if not first_real_provider:
+                    first_real_provider = name
+                elif not results:
+                    used_fallback_provider = True  # 走到非首选真实渠道 = 云端降级
             try:
                 paths = handler(prompt=prompt, duration=duration, count=count,
                                 width=width, height=height)
@@ -139,21 +183,35 @@ class VideoGenerationClient:
                         pool.report_success(name, segments=len(paths))
                     self._record_prior(name, ok=True)
                     self._tls.last_provider = name  # 归因：本线程实际用了谁
+                    # local 兜底在链内交付：被动降级记 L6（显式选 local 是主动选择不记）
+                    if name == "local" and provider != "local" and session is not None:
+                        session.mark(6, f"本地占位兜底（{last_error[:80]}）")
                     logger.info(f"[VideoGenerationClient] {name} 成功生成 {len(paths)} 段")
                     break  # 成功即停止尝试后续 provider
                 if pool is not None and name != "local":
                     pool.report_failure(name, error="返回空结果")
+                if name != "local":
+                    failures.append((name, "unknown"))
                 self._record_prior(name, ok=False)
             except _GenCancelled:
                 raise  # 取消是控制流，不记 provider 失败（P1-3）
             except Exception as e:
                 logger.warning(f"[VideoGenerationClient] {name} 执行失败: {e}")
                 last_error = str(e)
+                if name != "local":
+                    try:
+                        from .degradation import classify_error
+
+                        failures.append((name, classify_error(str(e))))
+                    except Exception:
+                        failures.append((name, "unknown"))
                 if pool is not None and name != "local":
                     pool.report_failure(name, error=str(e))
                 self._record_prior(name, ok=False)
 
-        # 所有真实 provider 失败 → 回退本地占位生成（保证业务流程可演示）
+        # 所有真实 provider 失败 → 回退本地占位生成（保证业务流程可演示；
+        # 注意：provider 链正常含 local，占位通常已在循环内交付，这里是
+        # 「local 返回空 / 链中无 local」的安全网）
         if not results:
             _raise_if_cancelled()  # P1-3：占位生成前响应取消（不白跑 ffmpeg）
             if provider not in ("local",):
@@ -161,6 +219,24 @@ class VideoGenerationClient:
             results = self._call_local_fallback(prompt=prompt, duration=duration,
                                                 count=count, width=width, height=height)
             self._tls.last_provider = "local"  # 归因：兜底层也要标清来源
+            # 显式 provider="local" 是用户主动选择，不算降级（规格：降级是被动行为）
+            if session is not None and results and provider != "local":
+                session.mark(6, f"本地占位兜底（{last_error[:80]}）")
+
+        # ── 降级终态定级 + 统计 + 本线程可查（V4.37.6 切片③） ──
+        if session is not None:
+            if results:
+                if len(results) < max(1, int(count)):
+                    session.mark(5, f"部分交付 {len(results)}/{count} 段")
+                elif used_fallback_provider and session.final_level == 0:
+                    session.mark(2, "非首选渠道交付")
+            try:
+                from .degradation import get_stats
+
+                get_stats().record(session.final_level)
+                self._tls.last_degradation = session.summary()
+            except Exception:
+                logger.debug("[VideoGenerationClient] 降级统计失败（不阻断）", exc_info=True)
 
         # 广播生成完成（便于 pipeline 层追踪）
         self._emit_generation_done(results, prompt=prompt)
@@ -174,6 +250,18 @@ class VideoGenerationClient:
         未曾生成过返回空字符串。
         """
         return str(getattr(self._tls, "last_provider", "") or "")
+
+    def last_degradation(self) -> Dict[str, Any]:
+        """本线程最近一次 generate 的降级终态（切片③ 可观测性查询）。
+
+        Returns:: {"level", "level_name", "level_label", "events"}；
+        未曾生成过返回 {"level": 0, ...} 完整交付。
+        """
+        d = getattr(self._tls, "last_degradation", None)
+        if isinstance(d, dict):
+            return dict(d)
+        return {"level": 0, "level_name": "full",
+                "level_label": "完整交付（首选渠道按原规格出齐）", "events": []}
 
     def list_providers(self) -> List[Dict[str, Any]]:
         """列出可用生成器及其可用状态 + 能力/单价/健康摘要（供 UI 展示）"""

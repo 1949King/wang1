@@ -79,6 +79,8 @@ CHECKS = [
     ("UNDOFB", "_verify/check_undo_feedback_llm_health.py", "撤销反馈回路 + LLM 降级指标"),
     # ── 质量先验 + 收益选路（V4.37.4 规格书切片）──
     ("QPRIOR", "_verify/check_quality_prior_routing.py", "质量先验库 + 收益函数选路"),
+    # ── 六级降级（V4.37.6 规格书切片③）──
+    ("DEGRAD", "_verify/check_degradation.py", "六级降级体系 + L3 降质重试"),
 ]
 
 failed = []
