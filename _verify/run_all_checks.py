@@ -95,6 +95,8 @@ CHECKS = [
     ("REVIEW", "_verify/check_sampling_review.py", "AI 辅助人工抽检子系统"),
     # ── 模块调度器 DAG（V4.38.3 规格书切片⑩）──
     ("MSCHED", "_verify/check_module_scheduler.py", "模块调度器 DAG 核心"),
+    # ── 端到端仿真器（V4.38.4 规格书切片⑪）──
+    ("SIM", "_verify/check_simulator.py", "端到端仿真器（零成本/可复现/故障注入）"),
 ]
 
 failed = []
