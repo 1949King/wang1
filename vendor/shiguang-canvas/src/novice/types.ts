@@ -23,7 +23,14 @@ export const TIER_STORAGE_KEY = "shiguang-canvas:tier:v1";
 /** 卡片几何规格（对齐 spec 4.1；圆角 2026-09-18 由 4 改 16——用户裁定「1+4 结合」大圆角色块，对齐商用磁贴观感） */
 export const CARD_GEOMETRY = {
   width: 240,
-  minHeight: 200,
+  /**
+   * 固定高度（2026-09-23 用户裁定「卡片大小不统一」修复）：
+   * 原为 `minHeight: 200` —— 内容（缩略图 + 提示 + 正文 + 元信息）会把卡片撑到
+   * 300px 上下，导致画布上卡片高矮不一，且**违反冻结不变量「卡片实尺寸必须
+   * 240×200（磁吸落位基准）」**。改为 fixed height：DOM 实尺寸恒 240×200。
+   * 内容超出由 `.nv-card-body` 的 overflow:hidden + 缩略图弹性收缩承担。
+   */
+  height: 200,
   radius: 16,
   headerHeight: 40,
   minBodyHeight: 120,

@@ -101,5 +101,45 @@
 ## 八、改动须知
 
 - 本页内容与 `frozen_zones.json` 的 zone `canvas-magnetic-intent` 一一对应，**未解冻勿改**。
-- V4.13.0 新增的 `magnetic/bonds.ts`、`magnetic/SnapSeam.tsx` **尚未登记**进该 zone 的 `files` 清单，
-  解冻时应一并补入，否则后续改动不会被 `frozen_zone_guard.py` 守门。
+- ✅ `magnetic/bonds.ts`、`magnetic/SnapSeam.tsx` 已于 2026-09-13 解冻时**补登记**进该 zone 的 `files`（早期版本的「尚未登记」提示已失效）。
+- ⚠️ 全文出现「240×200」处一律理解为 **DOM 实尺寸固定值**（不是「最小尺寸」）——见下节。
+
+---
+
+## 九、2026-09-23 修订：卡片尺寸统一 + 顶边对齐（V4.38.6 / 画布 0.3.1）
+
+用户反馈两条缺陷，均为既有实现问题，同轮修复：
+
+### 9.1 卡片大小不统一（修复：minHeight → 固定 height）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `CARD_GEOMETRY`（`novice/types.ts`） | `minHeight: 200` | **`height: 200`**（固定） |
+| `NoviceCard.tsx` 内联 | `minHeight: CARD_GEOMETRY.minHeight` | `height: CARD_GEOMETRY.height`（并移除 body 内联 `minHeight`） |
+| `.nv-card-body` | `flex:1`（可被内容撑高） | `+ min-height:0; overflow:hidden` |
+| `.nv-card-thumb img/video` | `height: 96px` | `height:100%; max-height:72px` + 容器 `flex:1 1 auto; min-height:40px`（弹性收缩） |
+| `.nv-card-text` | `-webkit-line-clamp: 3` | `2` |
+
+**实测根因**：正文区内容叠加（hint ≈31 + 缩略图 96 + 正文 3 行 ≈72 + meta ≈17 + padding/gap）≈ **306px**，
+而空卡只有 200px ⇒ 同屏卡片高矮差超过 100px。这同时**违反了冻结不变量「DOM 实尺寸必须 240×200（磁吸落位基准）」**
+——所以本次修复是**恢复**不变量，而非放宽它。
+
+### 9.2 最上端吸附没对齐（修复：top/bottom 改为顶边对齐）
+
+- 修复前：`getSnapPosition` 的 `top`/`bottom` 分支 `x: keepX`（= 拖拽卡当前 x，2026-09-18 单轴吸附裁定）。
+- 表现：上下吸附后 y 贴住了，两卡**左右边缘各在各自位置**，不成列 —— 用户观感就是「上端那条缝没对齐」。
+- 修复后：`top`/`bottom` 的 `x` 取 **`targetPos.x`**（顶边对齐成列）。水平位移受磁吸范围约束
+  （edge-gap < `weakDistance` 120px），不产生「瞬移」观感。
+- **`left`/`right` 的单轴语义保持不变**（`y` 仍取拖拽当前位置）——2026-09-18 修掉的那个真实 bug
+  （横吸时 y 被拽走一整卡高）不在本次修订范围内。
+
+### 9.3 本次未动的部分（仍在保护）
+
+磁吸阈值 120/50/60/instant10、落位 `gap=-2`、阻力三段式（30/50/0.28）、跟手浮起、
+松手落座动画、整列让位、Bond 判据（2px/40px）、圆角 16、大圆角色块与选中态、交互分级。
+
+### 9.4 验证记录
+
+vitest 8 文件 **76 例全绿**（含修订后的顶边对齐断言）；`tsc` 37 处错误
+（= `Stage3D.tsx` 16 + `riggedHumanoid.ts` 21，文档基线；本次改动文件 0 命中）；
+`vite build` 成功；画布版本 0.3.0 → **0.3.1** 并同步副库；双库无新增漂移；守卫 **85 locks intact**。

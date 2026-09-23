@@ -100,13 +100,18 @@ describe("单轴吸附（2026-09-18 借鉴手机主屏手感：吸一轴不拽�
     expect(r.snapY).not.toBeCloseTo(target.position.y);
   });
 
-  it("吸上下轴时，x 必须保持拖拽卡当前位置（不被拽到目标 x）", () => {
+  it("吸上下轴时，x 必须对齐目标 x（顶边对齐成列，2026-09-23 用户裁定）", () => {
     /**
      * ⚠️ 本用例同时暴露一个已知几何约束（见排查报告「根因 5」）：
      * computeMagnetic 用 hypot(gapX, gapY) 与 weakDistance(120) 比对，两轴被合并。
      * 因此「水平中心差 240 才让垂直方向主导」与「垂直边距需 < 120 才进磁吸范围」
      * 无法同时满足（240-200=40 边距可行，但需 target.y ≥ 340；此时边距 140 > 120）。
      * 故此处取斜向工况：垂直优势足以判 bottom，且总边距在范围内。
+     *
+     * 历史：2026-09-18 裁定「单轴吸附」时本处断言 x 保持不变（= dragX），
+     * 但用户实测反馈「卡片最上端的吸附没有对齐」——上下贴住后左右边缘错开、
+     * 不成列。2026-09-23 用户裁定修订：top/bottom 的 x 改为 targetPos.x
+     * （left/right 的单轴语义保持不变，仍不拽 y）。
      */
     const dragX = 1240;
     const drag = mk("a", dragX, 0); // 中心 (1360, 100)
@@ -116,9 +121,9 @@ describe("单轴吸附（2026-09-18 借鉴手机主屏手感：吸一轴不拽�
     expect(r.direction).toBe("bottom");
     // y 被吸附到目标上方：targetPos.y - H - gap（gap=-2 → 实际 +2）
     expect(r.snapY).toBeCloseTo(target.position.y - H + 2);
-    // x 保持不变 —— 本次修复的核心断言
-    expect(r.snapX).toBeCloseTo(dragX);
-    expect(r.snapX).not.toBeCloseTo(target.position.x);
+    // x 对齐目标 —— 本次修订的核心断言
+    expect(r.snapX).toBeCloseTo(target.position.x);
+    expect(r.snapX).not.toBeCloseTo(dragX);
   });
 
   it("旧行为反例自证：同轴（y 相等）时新旧结果一致，不引入回归", () => {

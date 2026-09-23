@@ -10,27 +10,32 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.38.5"
+__version__ = "4.38.6"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 38,
-    "patch": 5,
-    "codename": "引擎接口规范 + 错误码体系（异构协作引擎规格书切片⑫·终篇）",
+    "patch": 6,
+    "codename": "画布卡片尺寸统一 + 上端吸附对齐（画布 0.3.1）",
     "release_date": "2026-09-23",
     "description": (
-        "V4.38.5: 规格书切片⑫——第十篇接口规范，异构引擎 12 切片全部落地。"
-        "★ 新模块 app/core/ai/engine_api.py（统一门面）：四大标准接口——"
-        "create_task（模块校验→DAG 提交）、submit_unit（月账单硬闸→生成→"
-        "归因五件套：渠道/实际模式/模式计划/降级终态/融合溯源）、"
-        "route_callback（凭 unit_id 取全归因，LRU 200 条）、"
-        "resource_report（L1 预算/L0 账单/调度/抽检四视图）；"
-        "统一响应信封 {ok,code,message,data}；错误码单一来源 11 个 ERR_*"
-        "（禁裸字符串，同 agent_constants 纪律），全部带人话标签。"
-        "★ 至此规格书 14 篇全部有落点（详见 CHANGELOG 完成度对照表）："
-        "V4.37.4~4.37.7 四片（先验/真值/降级/PI）+ V4.37.8~4.38.5 八片"
-        "（模式/探针/融合D/两层λ/抽检/模块DAG/仿真器/接口）。"
-        "验证：check_engine_api 19 项全过；run_all_checks 51→52 项。"
+        "V4.38.6: 画布缺陷修复（用户反馈两条，冻结区 canvas-magnetic-intent "
+        "授权解冻后实施）。"
+        "① **卡片大小不统一**：小白卡原为 minHeight:200，正文区内容叠加"
+        "（提示语+缩略图 96+正文 3 行+元信息）实测把卡片撑到 ≈306px，同屏高矮差"
+        "超 100px，且违反冻结不变量「DOM 实尺寸必须 240×200（磁吸落位基准）」"
+        "——本次是**恢复**不变量：CARD_GEOMETRY.minHeight→height:200，"
+        "NoviceCard 内联改 height、移除 body 内联 minHeight，.nv-card-body 补"
+        " min-height:0 + overflow:hidden，缩略图 96→72 且弹性收缩"
+        "（flex:1 1 auto / min 40），正文 clamp 3→2 行。"
+        "② **最上端吸附没对齐**：getSnapPosition 的 top/bottom 分支原为"
+        "「x 取拖拽卡当前值」（2026-09-18 单轴吸附裁定），导致上下贴住后左右边缘"
+        "错开不成列；改为 x 取 targetPos.x（顶边对齐）；left/right 单轴语义保持"
+        "不变（保留 09-18 修掉的「横吸时 y 瞬移一整卡高」修复）。"
+        "验证：vitest 8 文件 76 例全绿；tsc 37 处 = 文档基线（改动文件 0 命中）；"
+        "vite build 成功；双库无新增漂移（canvasVersion.ts 已同步副库）；"
+        "守卫 85 locks intact；已同步 frozen_zones.json 不变量 + 现行技术文档 §5 "
+        "+ 知识库 17 号专文。"
     ),
 }

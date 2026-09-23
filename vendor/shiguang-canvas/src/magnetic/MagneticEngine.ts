@@ -225,15 +225,20 @@ function getSnapPosition(
   const gap = -2;
 
   /**
-   * 单轴吸附（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」）：
+   * 单轴吸附（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」；
+   * 2026-09-23 用户裁定修订 top/bottom 分支）：
    *
-   * 旧实现把非吸附轴的坐标硬取 targetPos，导致「吸左右轴时 y 被强行拽到目标 y」——
-   * 几何实测：目标 T=(1000,1000)，拖拽卡在 T 右侧水平间隙 10px、垂直错开 180px 时，
-   * 落点 y 被拉回 1000，等于瞬移一整个卡高（200px）。这正是「上下吸附不对」的真实来源。
+   * 【left/right｜保持不动】旧实现把非吸附轴的坐标硬取 targetPos，导致
+   * 「吸左右轴时 y 被强行拽到目标 y」——几何实测：目标 T=(1000,1000)，拖拽卡在
+   * T 右侧水平间隙 10px、垂直错开 180px 时，落点 y 被拉回 1000，等于瞬移一整个
+   * 卡高（200px）。这正是「上下吸附不对」的真实来源。故 left/right 只动 x，
+   * y 取拖拽卡当前值（与 tldraw Snapping「分轴独立判定」一致）。
    *
-   * 新规则：**只动被吸附的那一轴，另一轴保持拖拽卡当前位置**（与 tldraw Snapping
-   * 的「分轴独立判定、只调被吸附的那一轴」一致）。手机主屏手感同理：横向平移时
-   * 图标不会纵向跳走。
+   * 【top/bottom｜改为顶边对齐】2026-09-23 用户反馈「卡片最上端的吸附没有对齐」：
+   * 上下吸附时若 x 仍取拖拽卡当前值，两卡的左右边缘各在各自位置，视觉上是
+   * 「上下贴住了但左边缘错开」，不成列。故 top/bottom 改为 **x 对齐 targetPos.x**
+   * （左边缘对齐成列，Windows 磁贴式观感）。水平位移量受磁吸范围约束
+   * （edge-gap < weakDistance=120px），不会产生「瞬移」观感。
    *
    * 无 dragPos（未传入）时回退旧行为，保证调用方兼容。
    */
@@ -253,12 +258,14 @@ function getSnapPosition(
       };
     case "top":
       return {
-        x: keepX !== null ? keepX : targetPos.x,
+        // 顶边对齐（2026-09-23）：x 对齐目标，形成整齐一列
+        x: targetPos.x,
         y: targetPos.y - dragSize.height - gap,
       };
     case "bottom":
       return {
-        x: keepX !== null ? keepX : targetPos.x,
+        // 顶边对齐（2026-09-23）：x 对齐目标，形成整齐一列
+        x: targetPos.x,
         y: targetPos.y + targetSize.height + gap,
       };
     case "stack":

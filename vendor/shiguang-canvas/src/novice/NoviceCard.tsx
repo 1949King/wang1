@@ -225,7 +225,14 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
       data-depth={depth}
       style={{
         width: CARD_GEOMETRY.width,
-        minHeight: CARD_GEOMETRY.minHeight,
+        /**
+         * 固定高度（2026-09-23 用户裁定修复「卡片大小不统一」）：
+         * 原 minHeight 会被内容撑高（实测最高 ≈306px），既让画布上卡片高矮不一，
+         * 也违反冻结不变量「卡片实尺寸必须 240×200（磁吸落位基准）」。
+         * 现为 fixed height，超出部分由 .nv-card-body 的 overflow:hidden +
+         * 缩略图弹性收缩（flex:1 1 auto）承担，DOM 实尺寸恒 240×200。
+         */
+        height: CARD_GEOMETRY.height,
         /* 圆角交由 .nv-card（16px）控制；此前内联 borderRadius 会压过圆角规则，故移除 */
         ["--nv-accent" as string]: style.color,
       }}
@@ -243,7 +250,7 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
         </span>
       </header>
 
-      <div className="nv-card-body" style={{ minHeight: CARD_GEOMETRY.minBodyHeight }}>
+      <div className="nv-card-body">
         <p className="nv-card-hint">{hint}</p>
         {thumb.url ? (
           <div className="nv-card-thumb">

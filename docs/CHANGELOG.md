@@ -1,5 +1,64 @@
 # 拾光剪影 — 变更日志
 
+## V4.38.6 (2026-09-23) — 画布卡片尺寸统一 + 上端吸附对齐（画布 0.3.1）
+
+> **性质**：画布缺陷修复（用户反馈两条）。冻结区 `canvas-magnetic-intent`
+> **已获用户授权解冻**，改完重锁（85 locks intact）。
+
+### 行为变更表
+
+| 位置 | 变更前 | 变更后 | 依据 |
+|---|---|---|---|
+| `novice/types.ts` `CARD_GEOMETRY` | `minHeight: 200` | **`height: 200`** | 用户裁定「卡片大小不统一」 |
+| `novice/NoviceCard.tsx` 内联样式 | `minHeight`；body 内联 `minHeight` | `height`；body 无内联 | 同上 |
+| `novice/novice-cards.css` `.nv-card-body` | `flex:1`（可被撑高） | `+ min-height:0; overflow:hidden` | 同上 |
+| `.nv-card-thumb` / `img,video` | 固定 `height: 96px` | 容器 `flex:1 1 auto; min-height:40px`；媒体 `height:100%; max-height:72px` | 用户裁定「缩略图 96→72 + 文字 3→2 行」 |
+| `.nv-card-text` | `-webkit-line-clamp: 3` | `2` | 同上 |
+| `magnetic/MagneticEngine.ts` `getSnapPosition` `top`/`bottom` | `x: keepX`（拖拽卡当前 x） | **`x: targetPos.x`**（顶边对齐） | 用户裁定「最上端的吸附没有对齐」 |
+
+### 修复的实际缺陷（带证据）
+
+1. **卡片大小不统一** — `NoviceCard.tsx:226-231` 原为 `minHeight`；正文区内容
+   叠加实测 ≈**306px**（hint 31 + 缩略图 96 + 正文 3 行 72 + meta 17 + padding/gap），
+   空卡仅 200px。**同时违反冻结不变量「DOM 实尺寸必须 240×200（磁吸落位基准）」**
+   ⇒ 本次修复属**恢复**不变量。
+2. **最上端吸附没对齐** — `MagneticEngine.ts:254-263` 原 `top`/`bottom` 保留拖拽
+   卡 x，上下贴合后两卡左右边缘错开、不成列。改为 `targetPos.x` 后成列；
+   水平位移受磁吸范围约束（edge-gap < 120px），无瞬移观感。
+
+### 保留不变量（本次未动）
+
+磁吸阈值 120/50/60/instant10 · 落位 `gap=-2` · 阻力三段式（30/50/0.28）·
+跟手浮起 · 松手落座 `animateNodeTo(200ms)` + 强吸 `overshootPx(5)` · 整列让位 ·
+Bond 判据（2px/40px）· 圆角 16 · 大圆角色块与选中态 · 交互分级 ·
+`left`/`right` 单轴语义（09-18 修掉的「横吸 y 瞬移一整卡高」保留）。
+
+### 验证表
+
+| 检查 | 结果 |
+|---|---|
+| `vitest run` | 8 文件 **76 例全绿**（含修订后的顶边对齐断言） |
+| `tsc --noEmit` | **37 处** = `Stage3D.tsx` 16 + `riggedHumanoid.ts` 21（文档基线），**改动文件 0 命中** |
+| `vite build` | ✓ built in 6.64s |
+| 冻结区守卫 | `--update` 重锁后 **OK frozen zones intact (85 locks)** |
+| 双库漂移 | **无新增**（`canvasVersion.ts` 已同步副库；一致 64 / 分叉 22 / 缺失 16 = 基线） |
+| 副库 tsc | 54 行 / 6 文件（记录基线 55/7，未超） |
+| 漂移清单核对 | = 本次 5 个改动文件 + 遗留 `styles.css`（`git diff` 证实与 HEAD 一致，属基线哈希过期，随本次重锁吸收） |
+
+### 文档同步
+
+`docs/knowledge/frozen_zones.json`（不变量 316 补固定高度、341 改写 top/bottom、
+新增「卡片尺寸统一」条、reason 追加解冻记录）· `docs/现行技术文档.md` §5（文件数
+29→33 修正 + 两条不变量更新）· `docs/_archive/knowledge/17-canvas-magnetic-invariants.md`
+（新增第九节修订记录，并修正已失效的「bonds.ts 未登记」提示）。
+
+### 已知未做 / 取舍
+
+- 极拥挤组合（提示语 + 缩略图 + 正文 + 元信息同时存在）时，正文底部可能被裁 1 行
+  ——固定 200 是硬约束，取舍按「尺寸统一优先」。
+
+---
+
 ## V4.38.5 (2026-09-23) — 引擎接口规范 + 错误码体系（规格书切片⑫·终篇）
 
 > **收官**：异构动态协作引擎 12 切片全部落地。本版给引擎装上统一门面——
