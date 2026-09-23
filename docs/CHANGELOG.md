@@ -15,6 +15,11 @@
 | `.nv-card-thumb` / `img,video` | 固定 `height: 96px` | 容器 `flex:1 1 auto; min-height:40px`；媒体 `height:100%; max-height:72px` | 用户裁定「缩略图 96→72 + 文字 3→2 行」 |
 | `.nv-card-text` | `-webkit-line-clamp: 3` | `2` | 同上 |
 | `magnetic/MagneticEngine.ts` `getSnapPosition` `top`/`bottom` | `x: keepX`（拖拽卡当前 x） | **`x: targetPos.x`**（顶边对齐） | 用户裁定「最上端的吸附没有对齐」 |
+| `.nv-card-hint` | flex 默认（**可收缩**，被压扁裁字） | `flex: 0 0 auto` | 渲染实测抓获（见下） |
+| `.nv-card-meta` | 无约束 | `flex: 0 0 auto` + 单行省略号 | 同上 |
+| `.nv-card-body:has(.nv-card-thumb) .nv-card-hint` | 显示 | **折叠**（`display:none`） | 渲染实测：四层内容在 200px 内数学上装不下 |
+| `.nv-card-body:has(.nv-card-thumb) .nv-card-text` | 2 行 | 1 行 | 同上 |
+| `.nv-card-thumb` `min-height` | 40px | 24px | 同上（让预览图吃满剩余空间） |
 
 ### 修复的实际缺陷（带证据）
 
@@ -25,6 +30,15 @@
 2. **最上端吸附没对齐** — `MagneticEngine.ts:254-263` 原 `top`/`bottom` 保留拖拽
    卡 x，上下贴合后两卡左右边缘错开、不成列。改为 `targetPos.x` 后成列；
    水平位移受磁吸范围约束（edge-gap < 120px），无瞬移观感。
+3. **渲染实测又抓出两处**（本轮「必须渲染出来亲眼看」纪律的收益，见证据图
+   `docs/_reports/2026-09-23-画布卡片尺寸实测.png`）：
+   - `.nv-card-hint` 作为 flex 子项**默认可收缩**，卡片固定高后空间紧张时被压扁裁字
+     ⇒ 提示语/元信息补 `flex: 0 0 auto`（让缩略图独自承担收缩）；
+   - **四层内容在 200px 内数学上装不下**：正文区可用高度实测仅 **106px**
+     （200 − header 40 − footer 32 − border 2 − padding 20），而「提示语 31 +
+     缩略图下限 40 + 正文 2 行 44 + 元信息 17 + 间隙 16」需 **148px** ⇒ 实测裁切 **45px**。
+     故有图时按信息价值收敛：**提示语折叠 + 正文收 1 行**（缩略图获 ≈51px 可见高度）。
+     收敛后复测：4 张卡全部 **240.0×200.0**、正文区裁切 **0px**、底栏贴底 ✓。
 
 ### 保留不变量（本次未动）
 
@@ -37,7 +51,8 @@ Bond 判据（2px/40px）· 圆角 16 · 大圆角色块与选中态 · 交互�
 
 | 检查 | 结果 |
 |---|---|
-| `vitest run` | 8 文件 **76 例全绿**（含修订后的顶边对齐断言） |
+| `vitest run` | **8 文件 76 例全绿**（含修订后的顶边对齐断言）。注：本沙箱下批量运行偶发只收集部分文件（vitest 写 `%TEMP%\…\ssr\` 模块缓存被文件代理拒绝，EPERM，**发生在 vitest 内部缓存写入、不是测试失败**）；实测拆批亦可累计全覆盖：批量 6 文件 46 例 + `stage3dPoseVideo` 18 例 + `comfyToCanvas` 12 例 = 76 例 |
+| **渲染实测**（Edge 无头截图 + `getBoundingClientRect`） | 探针页引用真实 `novice-cards.css`，4 种卡片形态（空卡/典型/带缩略图/选中长文本）：全部 **240.0×200.0**、正文区裁切 **0px**、底栏贴底 ✓ |
 | `tsc --noEmit` | **37 处** = `Stage3D.tsx` 16 + `riggedHumanoid.ts` 21（文档基线），**改动文件 0 命中** |
 | `vite build` | ✓ built in 6.64s |
 | 冻结区守卫 | `--update` 重锁后 **OK frozen zones intact (85 locks)** |
@@ -54,8 +69,10 @@ Bond 判据（2px/40px）· 圆角 16 · 大圆角色块与选中态 · 交互�
 
 ### 已知未做 / 取舍
 
-- 极拥挤组合（提示语 + 缩略图 + 正文 + 元信息同时存在）时，正文底部可能被裁 1 行
-  ——固定 200 是硬约束，取舍按「尺寸统一优先」。
+- 有缩略图的卡片：提示语折叠、正文收 1 行（实测驱动，非拍脑袋）——若希望
+  「保留提示语、接受正文裁 1 行」，删掉两条 `:has()` 规则即可回退。
+- 探针页（引用真实 CSS 的独立 HTML）为一次性验证工具，已删除；如需复测，
+  重建方式见本轮做法：`novice-cards.css` + 4 种卡片 DOM + JS 测 `scrollHeight`。
 
 ---
 

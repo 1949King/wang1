@@ -117,12 +117,22 @@
 | `CARD_GEOMETRY`（`novice/types.ts`） | `minHeight: 200` | **`height: 200`**（固定） |
 | `NoviceCard.tsx` 内联 | `minHeight: CARD_GEOMETRY.minHeight` | `height: CARD_GEOMETRY.height`（并移除 body 内联 `minHeight`） |
 | `.nv-card-body` | `flex:1`（可被内容撑高） | `+ min-height:0; overflow:hidden` |
-| `.nv-card-thumb img/video` | `height: 96px` | `height:100%; max-height:72px` + 容器 `flex:1 1 auto; min-height:40px`（弹性收缩） |
-| `.nv-card-text` | `-webkit-line-clamp: 3` | `2` |
+| `.nv-card-hint` / `.nv-card-meta` | flex 默认（**可收缩**，被压扁裁字） | `flex: 0 0 auto`（meta 另加单行省略号） |
+| `.nv-card-thumb img/video` | `height: 96px` | `height:100%; max-height:72px` + 容器 `flex:1 1 auto; min-height:24px`（弹性收缩） |
+| `.nv-card-text` | `-webkit-line-clamp: 3` | `2`（无图）／`1`（有图，`:has` 规则） |
+| 有缩略图时 | 四层内容全显示 | **提示语折叠** + 正文 1 行（见下） |
 
 **实测根因**：正文区内容叠加（hint ≈31 + 缩略图 96 + 正文 3 行 ≈72 + meta ≈17 + padding/gap）≈ **306px**，
 而空卡只有 200px ⇒ 同屏卡片高矮差超过 100px。这同时**违反了冻结不变量「DOM 实尺寸必须 240×200（磁吸落位基准）」**
 ——所以本次修复是**恢复**不变量，而非放宽它。
+
+**渲染实测（Edge 无头截图 + `getBoundingClientRect`）进一步证明**：卡片固定 200 后，
+正文区可用高度只有 **106px**（200 − header 40 − footer 32 − border 2 − padding 20），
+而「提示语 31 + 缩略图下限 40 + 正文 2 行 44 + 元信息 17 + 间隙 16」需 **148px**
+⇒ 四层内容在 200px 内**数学上装不下**（实测裁切 45px）。
+故有图时按信息价值收敛：**提示语（新手引导文案）折叠 + 正文收 1 行**，
+缩略图获得 ≈51px 可见高度。收敛后复测：4 种形态全部 240.0×200.0、正文区裁切 **0px**。
+证据图：`docs/_reports/2026-09-23-画布卡片尺寸实测.png`。
 
 ### 9.2 最上端吸附没对齐（修复：top/bottom 改为顶边对齐）
 
