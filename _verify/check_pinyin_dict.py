@@ -131,6 +131,68 @@ def main() -> int:
     check("接线4 帮助文案含参数说明", f"{ACT} 参数:" in a_src)
     check("接线4 L2 执行段提到该动作", f"{ACT} 可查汉字读音" in a_src)
 
+    # ════════════ G. 人工校订表（专名 / 易错词）════════════
+    # 这些是 pypinyin 开箱**实测会读错**的条目（2026-09-25 体检：专名 20% 错）
+    PROPER = {
+        "大宛": "dà yuān", "皋陶": "gāo yáo", "金日磾": "jīn mì dī",
+        "樊於期": "fán wū jī", "曹参": "cáo shēn", "龟兹": "qiū cí",
+        "月氏": "yuè zhī", "可汗": "kè hán", "吐蕃": "tǔ bō",
+        "单于": "chán yú", "冒顿": "mò dú", "郦食其": "lì yì jī",
+        "尉迟": "yù chí", "万俟": "mò qí", "吐谷浑": "tǔ yù hún",
+        "蚌埠": "bèng bù", "六安": "lù ān", "铅山": "yán shān",
+        "台州": "tāi zhōu", "番禺": "pān yú", "涪陵": "fú líng",
+        "阿房宫": "ē páng gōng", "会稽": "kuài jī", "阆中": "làng zhōng",
+        "华佗": "huà tuó",
+    }
+    bad = []
+    for w, expect in PROPER.items():
+        got = pyd.annotate(w)["annotated"]
+        if got != expect:
+            bad.append((w, expect, got))
+            print(f"      ✗ {w}: 期望 {expect} | 实际 {got}")
+    check(f"专名校订 {len(PROPER)} 例全部正确", not bad)
+
+    TRICKY = {
+        "削苹果": "xiāo píng guǒ", "一模一样": "yī mú yī yàng",
+        "螳臂当车": "táng bì dāng chē", "方兴未艾": "fāng xīng wèi ài",
+        "博闻强识": "bó wén qiáng zhì", "倔强": "jué jiàng",
+        "牵强附会": "qiān qiǎng fù huì", "呼天抢地": "hū tiān qiāng dì",
+        "屡见不鲜": "lǚ jiàn bù xiān", "鲜为人知": "xiǎn wéi rén zhī",
+        "载歌载舞": "zài gē zài wǔ", "三年五载": "sān nián wǔ zǎi",
+        "审时度势": "shěn shí duó shì", "以己度人": "yǐ jǐ duó rén",
+        "拐弯抹角": "guǎi wān mò jiǎo", "乳臭未干": "rǔ xiù wèi gān",
+        "称心如意": "chèn xīn rú yì", "磨坊": "mò fáng",
+        "鸭绿江": "yā lù jiāng", "刹那": "chà nà",
+        "魑魅魍魉": "chī mèi wǎng liǎng", "参差": "cēn cī",
+        "骠骑": "piào qí", "般若": "bō rě",
+    }
+    bad2 = []
+    for w, expect in TRICKY.items():
+        got = pyd.annotate(w)["annotated"]
+        if got != expect:
+            bad2.append((w, expect, got))
+            print(f"      ✗ {w}: 期望 {expect} | 实际 {got}")
+    check(f"易错词校订 {len(TRICKY)} 例全部正确", not bad2)
+
+    ov = pyd.stats()["overrides"]
+    check(f"校订表规模充足（词组 {ov['phrases']} 条 / 单字 {ov['singles']} 条）",
+          ov["phrases"] >= 120 and ov["singles"] >= 20)
+    check("校订表无字数不符条目（skipped 为空）", ov["skipped"] == [])
+    check("自定义词表模板可用（项目可名统一读音）",
+          "phrases" in pyd.override_template())
+    st = pyd.stats()
+    check("stats 诚实标注分区覆盖率（含扩展 B 缺口）",
+          "扩展 B 区" in str(st.get("coverage_measured_2026_09_25", {})))
+
+    # ════════════ H. lip_sync 挂载（口型与配音同源）════════════
+    lip_src = _read("app", "core", "lip_sync.py")
+    check("lip_sync 不再直接 import pypinyin（改走字典入口）",
+          "import pypinyin" not in lip_src)
+    check("lip_sync 调用 pinyin_dict.annotate",
+          "pinyin_dict import annotate" in lip_src)
+    check("lip_sync 用 chars 详情过滤非汉字（防 'abc123' 当音素）",
+          'c.get("cjk") and c.get("known")' in lip_src)
+
     # ════════════ F. 能力端到端（走 dispatcher） ════════════
     try:
         import app.core.agent_action_registry as reg

@@ -10,34 +10,39 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.39.0"
+__version__ = "4.39.1"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 39,
-    "patch": 0,
-    "codename": "汉字注音字典（离线确定性）+ 四处接线",
+    "patch": 1,
+    "codename": "注音字典补齐（专名校订 + lip_sync 挂载）",
     "release_date": "2026-09-25",
     "description": (
-        "V4.39.0: 新增离线汉字注音字典并挂载到 TTS 正音与 Agent 能力面。"
-        "★ 痛点（真实缺陷）：tts_guard 的「多音字注音」原本让 LLM 现场猜拼音，"
-        "LLM 不可用/失败 → 「降级为不注音」→ 整段注音静默消失，且同字两次调用"
-        "可能不同（不可复现）。"
-        "★ 新模块 app/core/ai/pinyin_dict.py（纯模块，只标准库 + 惰性 pypinyin）："
-        "annotate/lookup/polyphones/to_sapi/to_ssml/stats；多音字给出**候选集**"
-        "（把 LLM 的「填空」降级成「选择题」）；to_ssml 按**位置**标注"
-        "（同一字多处不同音各自正确，优于 build_ssml 的首次出现替换）。"
-        "★ 实测覆盖：常用字/生僻字（龘靐齉爨彧）/词组消歧（重庆 chóng qìng、"
-        "银行 yín háng）全部正确；**CJK 扩展 B 区（𠀋𠮷）未覆盖 → 标 unknown，"
-        "绝不编造读音**（红线）。"
-        "★ 挂载：① tts_guard 加字典兜底（新增 annotated_source 字段；"
-        "改前 llm=None → 零注音，改后字典接管仍出 phoneme SSML）；"
-        "② Agent 能力 pipeline.pinyin_lookup 四处接线齐全（目录表/handler+register/"
-        "action 白名单/帮助文案，effect=read、半球=left），action=pinyin_lookup。"
+        "V4.39.1: 注音字典齐全度体检 + 针对性补齐。"
+        "★ 体检实测（硬数据）：CJK 基本区 99.7%（20924/20992）、扩展 A 87.7%、"
+        "扩展 B **31.1%**；**专名读音错误率 20%**（25 例错 5：大宛→wǎn 应 yuān、"
+        "皋陶→táo 应 yáo、金日磾→rì 应 mì、樊於期→yú qī 应 wū jī、"
+        "曹参→cān 应 shēn）、易错词「削苹果」→xuē 应 xiāo —— 古装短剧里"
+        "古人名/地名密度极高，不校订会成片读错。"
+        "★ 补齐①：内置人工校订表（**169 词组 + 24 单字**）经 "
+        "pypinyin.load_phrases_dict/load_single_dict 注入，覆盖古人名、复姓、"
+        "地名、成语易错词；**字数不符的条目自动跳过并报告**（绝不静默错位）；"
+        "校订后专名 25/25、易错词 24/24（原 20/25、25/26）。"
+        "★ 补齐②：新增项目自定义读音表 `data/pinyin_overrides.json`"
+        "（`override_template()` 给模板）—— 剧中人名/门派名读音可全项目统一，"
+        "优先级最高可覆盖内置条目。"
+        "★ 补齐③：**lip_sync 改走字典入口**（原直接 import pypinyin 拿不到校订）"
+        "⇒ 口型与 TTS 正音**同源**，消除「配音读 chóng、口型按 zhòng」的音画不一致；"
+        "并用 chars 详情过滤非汉字，修掉「'abc123' 被当成一个音素传下游」。"
         "★ 依赖：pypinyin>=0.53.0 入 requirements.txt 与 app/requirements-optional.txt"
         "（可选语义：缺失诚实降级不阻断启动）+ DependencyChecker.OPTIONAL_PACKAGES。"
-        "验证：check_pinyin_dict 40/40 全过；check_tts_guard 47 项全过"
-        "（3 条断言按新行为升级）；三向一致核对全绿；守卫 85 locks intact。"
+        "★ 诚实边界：**扩展 A/B 区未补齐**（补齐需引入 Unihan 数据约 8MB，"
+        "而扩展 B 字在实际字幕中几乎不出现）——覆盖率缺口已在 stats() 显式标注，"
+        "查不到的字标 unknown、绝不编造读音。"
+        "验证：check_pinyin_dict 49/49 全过（新增专名 25 例 + 易错词 24 例 + "
+        "lip_sync 3 项接线断言）；check_tts_guard 47 项全过；"
+        "三向一致核对全绿；守卫 85 locks intact（改动全在冻结区外）。"
     ),
 }

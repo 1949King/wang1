@@ -502,10 +502,27 @@ class LipSyncEngine:
         """将中文文本粗略分解为拼音音素列表"""
         phonemes = []
         try:
-            import pypinyin
-            pinyin_list = pypinyin.lazy_pinyin(
-                text, style=pypinyin.Style.NORMAL, errors="ignore"
-            )
+            # 2026-09-25 改走离线注音字典（app/core/ai/pinyin_dict），三个理由：
+            #   ① 直接调 pypinyin 拿不到人工校订（古人名/地名/多音字），
+            #      例：大宛 dà yuān、皋陶 gāo yáo、曹参 cáo shēn；
+            #   ② 与 TTS 正音**同源** —— 避免「配音读 chóng、口型按 zhòng」
+            #      的音画不一致（同一份词典同一次判定）；
+            #   ③ 字典不可用时诚实降级到字符级兜底（行为与旧版一致）。
+            from app.core.ai.pinyin_dict import annotate as _annotate
+
+            res = _annotate(text, style="normal")
+            if not res.get("ok"):
+                raise RuntimeError(str(res.get("message") or "注音不可用"))
+            # 只取「汉字 + 字典有读音」的项（等价旧实现 errors="ignore"）：
+            # 英文/数字/标点**不进音素**，否则 'abc123' 会被当成一个音素
+            # 传给下游 Viseme 查表（查不到 → 无效嘴型）。
+            # 用 chars 详情过滤比「py != 原字符」可靠：lazy_pinyin 对纯英文串
+            # 会整串返回，逐字比较识别不出来。
+            pinyin_list = [
+                str(c.get("pinyin"))
+                for c in res.get("chars", [])
+                if c.get("cjk") and c.get("known") and c.get("pinyin")
+            ]
             for py in pinyin_list:
                 # 拆分声母和韵母
                 if py and len(py) >= 1:
@@ -517,8 +534,8 @@ class LipSyncEngine:
                         phonemes.append(py[1:])
                     else:
                         phonemes.append(py)
-        except ImportError:
-            # pypinyin未安装，用字符级兜底
+        except Exception:
+            # 注音字典 / pypinyin 不可用；或文本无有效汉字 → 字符级兜底
             for ch in text:
                 if '\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf':
                     # 汉字→默认A类嘴型(张开)
