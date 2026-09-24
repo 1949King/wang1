@@ -10,35 +10,40 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.39.2"
+__version__ = "4.39.3"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 39,
-    "patch": 2,
-    "codename": "Unihan 补丁表（A）+ LLM 消歧候选约束（B）",
+    "patch": 3,
+    "codename": "全项目官方补丁排查与打补丁（数据源 + 依赖库）",
     "release_date": "2026-09-25",
     "description": (
-        "V4.39.2: 用户选定「A 和 B 同时」。两条均由实测数据驱动，"
-        "并纠正了上版抽样得出的两个不准口径。"
-        "★ A：从 Unicode 官方 Unihan 数据库 kMandarin（44355 条）筛出"
-        "pypinyin 查不到的 2517 字，生成 app/core/ai/pinyin_unihan_patch.py"
-        "（编译进代码，64KB，零打包配置）；仅在主词典查不到时兜底"
-        "（不覆盖 pypinyin，避免官方读音被常用读音顶掉）。"
-        "生成工具 scripts/gen_unihan_pinyin_patch.py（正式工具可重跑）。"
-        "**精确实测（逐字遍历）纠正上版口径**：扩展 B 实为 34.0%（上版抽样"
-        "误报 31.1%）；三区合计 58.6% → 含补丁 58.8%。"
-        "**诚实边界**：补丁分布极冷门（扩展 G 1098 · E 705 · C 386 · I 99 · "
-        "B 94 · D 64 · F 61 · A 9 · H 1），与影视字幕实际相关仅约 103 字，"
-        "对总覆盖率提升仅 +0.2% ⇒ 是「成本极低、遇到就赚到」，"
-        "**不等于补齐扩展区**（彻底补齐需汉语大字典级非开源数据）。"
-        "★ B：tts_guard 的 LLM 消歧从「填空」改为「选择题 + 判卷」——"
-        "① _candidate_hint 把字典检出的多音字及**全部合法候选**写进提示词"
-        "（如 重 ∈ [zhòng, chóng, tóng]）；② _validate_polys 判卷，"
-        "读音越界一律丢弃（防 LLM 编造）；③ 批量模式额外校验「字在本段」"
-        "（防跨段串味）。LLM 产出全被废时字典兜底接管。"
-        "验证：check_pinyin_dict 64/64 全过（新增 15 项）；check_tts_guard 47 项全过；"
-        "判卷实测 chóng 保留 / zhǒng 丢弃 / zhòng 保留；守卫 85 locks intact。"
+        "V4.39.3: 按用户要求排查「所有可打的官方补丁」，两个维度都做了，"
+        "并明确区分「已打」与「刻意不打（附理由）」。"
+        "★ 维度一 · 数据源：Unihan 其他拼音字段全部排查 —— "
+        "kHanyuPinyin(34130)/kXHC1983(11072)/kTGHZ2013(8105) 对 pypinyin 缺口的"
+        "补充均为 **0**（它们覆盖的字 pypinyin 全认识；价值仅在多音字候选交叉校验）。"
+        "⇒ 数据源侧已榨干，kMandarin 2517 字补丁即为上限（V4.39.2 已完成）。"
+        "★ 维度二 · Python 依赖：28 个直接依赖 vs 89 个可升级包求交分级 —— "
+        "**已打 4 个安全补丁**：cryptography 50.0.0→50.0.1、imageio 2.37.3→2.37.4、"
+        "Pillow 12.2.0→12.3.0、requests 2.32.5→2.34.2（含安全相关库）。"
+        "**刻意不打 6 个 MAJOR**：numpy 1.26.4（被 numba 0.64 与 opencv/torch ABI "
+        "钉死，升 2.x 会连锁炸）、moviepy 1.0→2.2（API 大改）、opencv 4→5、"
+        "librosa 0.11→1.0、mediapipe 0.10→1.0、anthropic 0.25→1.8。"
+        "**待评估 12 个 minor**（PyQt6 三件套 / transformers / dashscope / "
+        "onnxruntime / aiohttp / numba 等）—— 需专项回归，未擅自升级。"
+        "★ 维度三 · 前端依赖（画布 vendor/shiguang-canvas）：已打 semver 内全部"
+        "官方补丁（npm update）—— react/react-dom 19.2.8→19.3.0、"
+        "**@xyflow/react（磁吸核心）12.11.2→12.11.6**、zustand 5.0.14→5.0.15、"
+        "@types/react* →19.3.0。"
+        "**npm audit 报 5 个漏洞（1 critical + 1 high + 3 moderate）全部在 "
+        "vitest 测试工具链**（dev-only，不进发布包；触发场景是本地 vitest UI server "
+        "监听），唯一修复路径是 vitest 2→5 + vite 6→8 双 major 跳跃 —— "
+        "**刻意不打**（dev-only 收益 << 破坏面风险），已提供一键命令供决策。"
+        "★ 验证：Python 侧 run_all_checks 全绿；前端 vitest 8 文件 76 例全过、"
+        "tsc 37 处 = 文档基线（Stage3D 16 + riggedHumanoid 21，零新增）、"
+        "vite build 成功、双库无新增漂移。"
     ),
 }

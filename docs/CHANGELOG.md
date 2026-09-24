@@ -1,5 +1,91 @@
 # 拾光剪影 — 变更日志
 
+## V4.39.3 (2026-09-25) — 全项目官方补丁排查与打补丁
+
+> 按用户要求排查「所有可打的官方补丁」。**两个维度都查了**，
+> 并严格区分「已打」与「刻意不打（附理由）」——不盲目升级。
+
+### 维度一 · 数据源（延续 V4.39.2 的 Unihan 工作）
+
+把 Unihan 的**其他拼音字段**全部排查了一遍：
+
+| 字段 | 条目数 | 对 pypinyin 缺口的补充 |
+|---|---|---|
+| `kMandarin` | 44355 | **2517**（V4.39.2 已用） |
+| `kHanyuPinyin` | 34130 | **0** |
+| `kXHC1983` | 11072 | **0** |
+| `kTGHZ2013` | 8105 | **0** |
+
+⇒ **数据源侧已榨干**：后三个字段覆盖的字 pypinyin 全都认识
+（价值仅在「多音字候选交叉校验」，不能扩大覆盖面）。
+kMandarin 的 2517 字补丁即为开源数据的上限。
+
+### 维度二 · Python 依赖（28 个直接依赖 × 89 个可升级包求交）
+
+**✅ 已打 4 个安全补丁**（patch 级 + API 极稳定的安全相关库）：
+
+| 包 | 升级 |
+|---|---|
+| `cryptography` | 50.0.0 → **50.0.1**（安全库） |
+| `imageio` | 2.37.3 → **2.37.4** |
+| `Pillow` | 12.2.0 → **12.3.0**（图像库，CVE 高发区） |
+| `requests` | 2.32.5 → **2.34.2**（网络库） |
+
+**⛔ 刻意不打 6 个 MAJOR**（会连锁炸）：
+
+| 包 | 现状 | 为什么不能升 |
+|---|---|---|
+| `numpy` | 1.26.4 → 2.5.3 | **被钉死**：numba 0.64 要求 numpy<2.1，opencv/torch 的 ABI 建立在 1.x |
+| `moviepy` | 1.0.3 → 2.2.1 | API 大改（视频合成主链路） |
+| `opencv-python-headless` | 4.13 → 5.0 | 大版本，图像链路 |
+| `librosa` | 0.11 → 1.0 | 大版本，音频分析 |
+| `mediapipe` | 0.10 → 1.0 | 大版本，姿态检测 |
+| `anthropic` | 0.25 → 1.8 | SDK API 大改 |
+
+**⏸ 待评估 12 个 minor**（需专项回归，未擅自升级）：
+PyQt6/PyQt6-Qt6/PyQt6-sip（GUI 核心）· transformers（AI 核心）·
+dashscope（视频生成）· onnxruntime · aiohttp · numba · pillow✅已升 · playwright · zhipuai 等。
+
+### 维度三 · 前端依赖（画布 `vendor/shiguang-canvas`）
+
+**✅ 已打 semver 范围内全部官方补丁**（`npm update`）：
+
+| 包 | 升级 |
+|---|---|
+| `@xyflow/react` | 12.11.2 → **12.11.6**（**画布磁吸核心依赖**） |
+| `react` / `react-dom` | 19.2.8 → **19.3.0** |
+| `zustand` | 5.0.14 → **5.0.15** |
+| `@types/react` / `@types/react-dom` | 19.2.x → **19.3.0** |
+
+**⚠️ npm audit 报 5 个漏洞（1 critical + 1 high + 3 moderate）→ 刻意不打**：
+
+全部集中在 **`vitest` 测试工具链**（vitest / vite / @vitest/mocker / vite-node / esbuild）：
+- critical：`vitest` — "Vitest UI server 监听时可任意读/执行文件"
+- high：`vite` — Optimized Deps `.map` 路径穿越 / launch-editor NTLMv2 哈希泄露
+
+判定依据（三点）：
+1. **全是 devDependencies**（测试工具链），**不进发布包** ⇒ 对发布版零影响；
+2. 触发场景是**本地 vitest UI server 在监听**，而本项目只用 `vitest run`（不启 UI server）；
+3. 唯一修复路径是 **vitest 2→5 + vite 6→8 双 major 跳跃** —— 会改动测试配置与构建链，
+   收益（修 dev-only 漏洞）**远小于**破坏面风险。
+
+⇒ 保持现状，并把决策所需信息留在案。若确需修复：
+`npm audit fix --force`（一次性升 vitest 5 + vite 8，之后需重跑测试与构建回归）。
+
+**⛔ 不能升的前端 major**：vite 6→8 · typescript 5→7 · vitest 2→5 · @vitejs/plugin-react 4→6 · three 0.185→0.186。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| Python `run_all_checks` | **全绿**（4 个补丁升级后） |
+| 前端 `vitest run` | **8 文件 76 例全过** |
+| 前端 `tsc --noEmit` | **37 处 = 文档基线**（Stage3D 16 + riggedHumanoid 21），**零新增** |
+| 前端 `vite build` | ✓ built in 4.29s |
+| 双库漂移 | **无新增**（一致 64 / 分叉 22 / 缺失 16 = 基线） |
+
+---
+
 ## V4.39.2 (2026-09-25) — A：Unihan 补丁表 + B：LLM 消歧候选约束
 
 > 用户选定「A 和 B 同时」。两条都在**实测数据**驱动下完成，并纠正了上版
