@@ -193,6 +193,63 @@ def main() -> int:
     check("lip_sync 用 chars 详情过滤非汉字（防 'abc123' 当音素）",
           'c.get("cjk") and c.get("known")' in lip_src)
 
+    # ════════════ I. Unihan 补丁（A）+ 候选约束判卷（B）════════════
+    # A：补丁表补的是「主词典查不到的冷门字」
+    from app.core.ai.pinyin_unihan_patch import (  # noqa: E402
+        UNIHAN_K_MANDARIN_PATCH as _PATCH)
+
+    check(f"Unihan 补丁表已随包（{len(_PATCH)} 条）", len(_PATCH) > 2000)
+    rp = pyd.annotate("㟥㡎")      # 扩展 A 补丁字
+    check("补丁字可注音且标 source=unihan",
+          rp["patched"] == 2
+          and all(c["source"] == "unihan" for c in rp["chars"]))
+    b_patch = [c for c in _PATCH if 0x20000 <= ord(c) <= 0x2A6DF][:3]
+    ok_b = all(pyd.annotate(c)["patched"] == 1 for c in b_patch)
+    check(f"扩展 B 补丁字抽样可注（{len(b_patch)} 例）", ok_b)
+    sap = pyd.to_sapi("㟥")
+    check("补丁字在 SAPI 模式下转数字式", sap["annotated"] == "cen1")
+    check("补丁表自身说明含「不等于补齐扩展区」（诚实边界）",
+          "不等于" in _read("app", "core", "ai",
+                            "pinyin_unihan_patch.py"))
+    # 诚实边界：两库皆无的字仍标 unknown，不编造
+    r_unk = pyd.annotate("𠀂")      # 实测两库皆无
+    check("两库皆无的字仍标 unknown（不编造）",
+          r_unk["unknowns"] == ["𠀂"] and r_unk["coverage"] == 0.0)
+    check("stats 含精确覆盖率与补丁分布",
+          "扩展 B 区" in str(pyd.stats()["coverage_measured_2026_09_25"])
+          and "扩展 G" in str(pyd.stats()["coverage_measured_2026_09_25"]))
+
+    # B：候选约束 + 判卷
+    hint = tg._candidate_hint("我们去了重庆")
+    check("候选约束已生成（含合法候选列出）", "重 ∈ [" in hint and "zhòng" in hint)
+    check("候选约束含「只能从候选里选择」", "只能从上面给出的候选里选择" in hint)
+    GOOD = '[{"word":"重庆","char":"重","pinyin":"chóng","reason":"地名"}]'
+    BAD = '[{"word":"重庆","char":"重","pinyin":"zhǒng","reason":"编造读音"}]'
+    check("合法读音被保留",
+          len(tg.detect_polyphones("我们去了重庆", lambda p: GOOD)) == 1)
+    check("**越界读音被丢弃**（判卷生效）",
+          tg.detect_polyphones("我们去了重庆", lambda p: BAD) == [])
+    cap = {}
+
+    def _cap(p: str) -> str:
+        cap["p"] = p
+        return "[]"
+
+    tg.detect_polyphones("我们去了重庆", _cap)
+    check("prompt 真注入候选约束", "重 ∈ [" in cap.get("p", ""))
+    leak = '[{"index":0,"char":"重","pinyin":"chóng","reason":"串段"}]'
+    bres = tg.detect_polyphones_batch(["今天天气不错", "我们去了重庆"],
+                                      lambda p: leak)
+    check("批量模式：字不在本段 → 丢弃（防跨段串味）",
+          bres[0] == [] and bres[1] == [])
+    okb = '[{"index":1,"char":"重","pinyin":"chóng","reason":"地名"}]'
+    check("批量模式：正确段保留",
+          len(tg.detect_polyphones_batch(["今天天气不错", "我们去了重庆"],
+                                         lambda p: okb)[1]) == 1)
+    plan_bad = tg.plan_tts("我们去了重庆。", llm=lambda p: BAD)
+    check("LLM 全越界 → 字典兜底接管（llm=0 / dict>0）",
+          plan_bad["llm_annotated"] == 0 and plan_bad["dict_annotated"] > 0)
+
     # ════════════ F. 能力端到端（走 dispatcher） ════════════
     try:
         import app.core.agent_action_registry as reg

@@ -272,6 +272,79 @@ def _load_ready():
     return mod, err
 
 
+# ── Unihan 补丁（pypinyin 缺口兜底，2026-09-25 V4.39.2 补齐）──
+_UNIHAN_PATCH: Dict[str, str] = {}
+_UNIHAN_LOADED = False
+_UNIHAN_STATS: Dict[str, Any] = {}
+
+# 声调符号 → (无调字母, 调号)；供补丁字转 SAPI 数字式
+_TONE_MAP: Dict[str, Tuple[str, int]] = {
+    "ā": ("a", 1), "á": ("a", 2), "ǎ": ("a", 3), "à": ("a", 4),
+    "ē": ("e", 1), "é": ("e", 2), "ě": ("e", 3), "è": ("e", 4),
+    "ī": ("i", 1), "í": ("i", 2), "ǐ": ("i", 3), "ì": ("i", 4),
+    "ō": ("o", 1), "ó": ("o", 2), "ǒ": ("o", 3), "ò": ("o", 4),
+    "ū": ("u", 1), "ú": ("u", 2), "ǔ": ("u", 3), "ù": ("u", 4),
+    "ǖ": ("v", 1), "ǘ": ("v", 2), "ǚ": ("v", 3), "ǜ": ("v", 4),
+    "ü": ("v", 0), "ń": ("n", 2), "ň": ("n", 3), "ǹ": ("n", 4),
+    "ḿ": ("m", 2),
+}
+
+
+def _to_sapi_tone(py: str) -> str:
+    """带声调拼音（chóng）→ SAPI 数字式（chong2）；已是数字式则原样返回。
+
+    用于补丁表条目（Unihan 给带声调形式，而 SAPI/SSML 需要数字式）。
+    """
+    s = (py or "").strip().lower()
+    if not s:
+        return ""
+    tone = 0
+    out: List[str] = []
+    for ch in s:
+        if ch in _TONE_MAP:
+            base, t = _TONE_MAP[ch]
+            out.append(base)
+            tone = t
+        else:
+            out.append(ch)
+    joined = "".join(out)
+    if tone and not joined[-1:].isdigit():
+        return joined + str(tone)
+    return joined
+
+
+def _load_unihan_patch() -> Dict[str, str]:
+    """惰性载入 Unihan 补丁表（pypinyin 未覆盖字的**官方**读音）。
+
+    仅在主词典查不到时兜底 —— 补丁表 2517 条全部是 pypinyin 缺失的字，
+    故不重复、不覆盖主词典。
+
+    ⚠️ 价值边界（精确实测 2026-09-25）：补丁分布**极冷门** ——
+    扩展 G 1098 · 扩展 E 705 · 扩展 C 386 · 扩展 B 94 · 扩展 I 99 ·
+    扩展 D 64 · 扩展 F 61 · 扩展 A 9 · 扩展 H 1。
+    与影视字幕实际相关的仅约 103 字（扩展 A/B），其余为甲骨文/金文级罕用字。
+    对 CJK 三区总覆盖率提升仅 +0.2%（58.6% → 58.8%）——
+    保留它是「成本极低（64KB + 惰性加载）、遇到就赚到」，**不是**「补齐了扩展区」。
+
+    载入失败时返回空表（诚实降级：未知字仍标 unknown，不编造读音）。
+    """
+    global _UNIHAN_PATCH, _UNIHAN_LOADED, _UNIHAN_STATS
+    if _UNIHAN_LOADED:
+        return _UNIHAN_PATCH
+    _UNIHAN_LOADED = True
+    try:
+        from .pinyin_unihan_patch import UNIHAN_K_MANDARIN_PATCH
+
+        _UNIHAN_PATCH = UNIHAN_K_MANDARIN_PATCH
+        _UNIHAN_STATS = {"count": len(_UNIHAN_PATCH),
+                         "source": "Unicode 官方 Unihan 数据库 kMandarin 字段"}
+        logger.info("[pinyin_dict] Unihan 补丁表已载入：%d 字", len(_UNIHAN_PATCH))
+    except Exception:
+        logger.debug("[pinyin_dict] Unihan 补丁表不可用（未知字仍标 unknown）",
+                     exc_info=True)
+    return _UNIHAN_PATCH
+
+
 
 def _load_pypinyin():
     """惰性载入 pypinyin；不可用时返回 (None, 原因)。只做一次。"""
@@ -379,30 +452,48 @@ def annotate(text: str, *, style: str = STYLE_TONE) -> Dict[str, Any]:
     unknowns: List[str] = []
     need = 0
     known = 0
+    patched = 0
+    out_list: List[str] = []
+    patch = _load_unihan_patch()
+    is_tone3 = (st == mod.Style.TONE3)
     for ch, py in zip(raw, py_list):
         if not _is_cjk(ch):
             chars.append({"char": ch, "pinyin": "", "known": True,
-                          "polyphone": False, "cjk": False})
+                          "polyphone": False, "cjk": False, "source": ""})
+            out_list.append(py)
             continue
         need += 1
         # pypinyin 对查不到的字会**原样返回字符**（不抛错）→ 以此判定未知
         is_known = bool(py) and py != ch
+        src = "pypinyin" if is_known else ""
+        if not is_known:
+            # Unihan 官方 kMandarin 兜底（2026-09-25）：补 pypinyin 覆盖缺口
+            ub = patch.get(ch)
+            if ub:
+                py = _to_sapi_tone(ub) if is_tone3 else ub
+                is_known = True
+                src = "unihan"
+                patched += 1
         if is_known:
             known += 1
         else:
             unknowns.append(ch)
+        out_list.append(py)
         chars.append({"char": ch, "pinyin": py, "known": is_known,
-                      "polyphone": is_polyphone(ch), "cjk": True})
+                      "polyphone": is_polyphone(ch), "cjk": True,
+                      "source": src})
 
     coverage = (known / need) if need else 1.0
     msg = f"已注音 {known}/{need} 个汉字"
+    if patched:
+        msg += f"（其中 {patched} 个来自 Unihan 官方补丁表）"
     if unknowns:
-        msg += (f"；{len(unknowns)} 个查不到（CJK 扩展区，字典未覆盖，"
+        msg += (f"；{len(unknowns)} 个查不到（主词典与 Unihan 均未收录，"
                 f"未编造读音）：{''.join(dict.fromkeys(unknowns))}")
     return {"ok": need == 0 or known > 0, "text": raw,
-            "annotated": " ".join(x for x in py_list if x),
-            "pinyin_list": py_list, "chars": chars, "unknowns": unknowns,
-            "coverage": round(coverage, 4), "message": msg}
+            "annotated": " ".join(x for x in out_list if x),
+            "pinyin_list": out_list, "chars": chars, "unknowns": unknowns,
+            "coverage": round(coverage, 4), "patched": patched, "message": msg}
 
 
 def lookup(text: str) -> Dict[str, Any]:
@@ -479,22 +570,19 @@ def to_ssml(text: str, *, only_polyphones: bool = True,
     raw = text or ""
     if not raw:
         return {"ok": False, "ssml": "", "marked": 0, "message": "文本为空"}
-    mod, err = _load_ready()
-    if mod is None:
-        return {"ok": False, "ssml": raw, "marked": 0, "message": err}
-    try:
-        tone = [str(x) for x in mod.lazy_pinyin(raw, style=mod.Style.TONE)]
-        tone3 = [str(x) for x in mod.lazy_pinyin(raw, style=mod.Style.TONE3)]
-    except Exception as e:
-        logger.debug("[pinyin_dict] SSML 生成失败", exc_info=True)
-        return {"ok": False, "ssml": raw, "marked": 0, "message": f"生成失败：{e}"}
+    # 走 annotate（而非直接调 pypinyin）：自动获得校订表 + Unihan 补丁兜底，
+    # 并保证 SSML 与实际注音同源（避免「注音串有、SSML 没有」的不一致）
+    ann = annotate(raw, style=STYLE_TONE3)
+    if not ann.get("ok"):
+        return {"ok": False, "ssml": raw, "marked": 0,
+                "message": str(ann.get("message") or "注音不可用")}
 
     parts: List[str] = []
     marked = 0
-    for idx, ch in enumerate(raw):
-        py = tone[idx] if idx < len(tone) else ""
-        ph = tone3[idx] if idx < len(tone3) else ""
-        known = bool(ph) and ph != ch
+    for c in ann.get("chars", []):
+        ch = str(c.get("char") or "")
+        ph = str(c.get("pinyin") or "")
+        known = bool(c.get("known")) and bool(ph) and ph != ch
         want = known and (not only_polyphones or is_polyphone(ch))
         if want:
             parts.append(
@@ -533,11 +621,26 @@ def stats() -> Dict[str, Any]:
             "note": "人工校订表（依据普通话异读词审音表常见条目）；"
                     "可用 data/pinyin_overrides.json 覆盖",
         },
+        "unihan_patch": {
+            "count": len(_load_unihan_patch()),
+            "source": "Unicode 官方 Unihan 数据库 kMandarin 字段",
+            "role": "仅主词典查不到时兜底（不覆盖 pypinyin，避免官方读音被 "
+                    "pypinyin 的常用读音顶掉）",
+            "generated": "2026-09-25（编译进 pinyin_unihan_patch.py，零打包配置）",
+        },
         "coverage_measured_2026_09_25": {
-            "CJK 基本区": "99.7%（20924/20992，缺口多为度量衡合字如 兙兡嗧）",
+            "CJK 基本区": "99.7%（20924/20992）",
             "扩展 A 区": "87.7%（5779/6592）",
-            "扩展 B 区": "31.1%（抽样；未覆盖字标 unknown，不编造读音）",
-            "专名（姓氏/地名/古人名）": "校订前 80% → 校订后经检查脚本断言",
+            "扩展 B 区": "**34.0%**（14529/42720，逐字精确测量）",
+            "三区合计": "58.6%（41232/70304）→ 含补丁 58.8%",
+            "补丁表回写": "共补 2517 字（原『完全无法注音』的字），"
+                        "但**分布极冷门**：扩展 G 1098 · 扩展 E 705 · 扩展 C 386 "
+                        "· 扩展 B 94 · 扩展 I 99 · 扩展 D 64 · 扩展 F 61 · "
+                        "扩展 A 9 · 扩展 H 1 ⇒ 与影视字幕实际相关的仅约 103 字",
+            "专名（姓氏/地名/古人名）": "校订前 20/25 → 校订后 25/25",
+            "说明": "两库（pypinyin + Unihan kMandarin）对 CJK 扩展区覆盖均有限："
+                    "Unihan 全库仅 44355 条。真正补齐扩展区需《汉语大字典》级数据"
+                    "（非开源）⇒ 查不到的字一律标 unknown，**绝不编造读音**",
         },
         "covers": ["CJK 基本区", "扩展 A 大部", "常用/生僻/三叠字",
                    "词组级多音字消歧", "古人名/地名/复姓人工校订"],

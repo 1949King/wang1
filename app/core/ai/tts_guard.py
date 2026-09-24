@@ -177,6 +177,7 @@ _POLYPHONE_PROMPT = (
     "只输出 JSON 数组，不要任何解释、不要 markdown 代码块。\n"
     '格式：[{"word": "重庆", "char": "重", "pinyin": "chóng", "reason": "地名"}]\n'
     "（word 为该字所在的词，char 为单字，pinyin 带声调符号，reason 一句话说明）\n"
+    "{constraints}"
     "若该句没有多音字，输出 []。\n\n"
     "台词：{text}"
 )
@@ -188,9 +189,84 @@ _BATCH_POLYPHONE_PROMPT = (
     "只输出 JSON 数组，不要任何解释、不要 markdown 代码块。\n"
     '格式：[{"index": 0, "word": "重庆", "char": "重", "pinyin": "chóng", "reason": "地名"}]\n'
     "（index 为段落编号；word 为该字所在的词；pinyin 带声调符号；某段无多音字则不输出该段项）\n"
+    "{constraints}"
     "若全部段落都没有多音字，输出 []。\n\n"
     "段落：\n{segments}"
 )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 候选约束（2026-09-25 V4.39.2）——把 LLM 的「填空」变成「选择题」
+#
+# 原实现让 LLM 直接"写出正确读音"（填空）：模型可能编造不存在的拼音，
+# 且同一个字两次调用可能给出不同结果。现改为：
+#   ① 由离线字典先检出文本中的多音字，并给出**全部合法候选读音**；
+#   ② 提示词要求 LLM **只能从候选中选**；
+#   ③ 返回后**判卷** —— 读音不在候选集内的一律丢弃（以字典为准）。
+# 没有第 ③ 步，候选约束就只是提示词里的礼貌用语（LLM 未必遵守）。
+# ═══════════════════════════════════════════════════════════════════
+
+def _candidate_hint(text: str) -> str:
+    """构造候选约束段。字典不可用/无多音字时返回空串（prompt 退化为旧版）。"""
+    try:
+        from .pinyin_dict import polyphones
+
+        r = polyphones(text)
+        lines = [
+            f"  {it['char']} ∈ [{', '.join(it['candidates'])}]"
+            for it in r.get("items", [])
+            if it.get("candidates")
+        ]
+        if not lines:
+            return ""
+        return ("字典已检出下列多音字及其**全部合法读音**：\n"
+                + "\n".join(lines) + "\n"
+                "你的 pinyin **只能从上面给出的候选里选择**，"
+                "不得使用候选之外的读音；未列出的字不要输出。\n")
+    except Exception:
+        logger.debug("[tts_guard] 候选约束生成失败（退化为无约束）", exc_info=True)
+        return ""
+
+
+def _validate_polys(items: List[Dict], text: str) -> List[Dict]:
+    """判卷：丢弃读音越界的项（**以字典为准**，防 LLM 编造）。
+
+    合法集合 = 单字候选（heteronym）∪ 字典对该句上下文消歧后的确定音。
+    字典不可用时**原样放行**（诚实降级：不因守卫自身故障吃掉 LLM 结果）。
+    """
+    if not items:
+        return items
+    try:
+        from .pinyin_dict import annotate as _ann
+        from .pinyin_dict import candidates as _cand
+
+        ann = _ann(text)
+        dict_py = {str(c.get("char")): str(c.get("pinyin") or "")
+                   for c in ann.get("chars", []) if c.get("cjk")}
+    except Exception:
+        logger.debug("[tts_guard] 判卷依赖不可用，原样放行", exc_info=True)
+        return items
+
+    out: List[Dict] = []
+    for it in items:
+        ch = str(it.get("char") or "")
+        py = str(it.get("pinyin") or "").strip()
+        if not ch or not py:
+            continue
+        # 字必须真出现在本段文本里 —— 防批量模式下 LLM 把别段的字标进本段
+        # （批量 prompt 的候选约束是全局的，跨段串味是真实风险）
+        if ch not in text:
+            logger.info("[tts_guard] 丢弃不在本段的字：%s", ch)
+            continue
+        allowed = set(_cand(ch) or [])
+        if dict_py.get(ch):
+            allowed.add(dict_py[ch])
+        if allowed and py not in allowed:
+            logger.info("[tts_guard] 丢弃越界读音 %s→%s（合法候选：%s）",
+                        ch, py, "、".join(sorted(allowed)))
+            continue
+        out.append(it)
+    return out
 
 
 def _to_sapi_pinyin(py: str) -> str:
@@ -230,11 +306,17 @@ def detect_polyphones(text: str, llm: Optional[LlmCall]) -> List[Dict]:
         # 用 replace 而非 str.format：prompt 里的 JSON 示例含 {}，
         # format 会把 {"word": ...} 当占位符解析并抛 KeyError，
         # 导致注音在接真 LLM 时**静默失效**（本 bug 由 check 脚本抓出）。
-        reply = llm(_POLYPHONE_PROMPT.replace("{text}", text))
+        # 2026-09-25：先注入候选约束（字典检出多音字 + 合法候选），
+        # 再注入文本 —— 顺序不可反（先填 constraints，避免其内容被二次替换）。
+        prompt = (_POLYPHONE_PROMPT
+                  .replace("{constraints}", _candidate_hint(text))
+                  .replace("{text}", text))
+        reply = llm(prompt)
     except Exception:
         logger.debug("[tts_guard] 多音字消歧 LLM 调用失败，降级为不注音", exc_info=True)
         return []
-    return _extract_json_array(reply)
+    # 判卷：读音越界 / 字不在文本中 → 丢弃（以字典为准）
+    return _validate_polys(_extract_json_array(reply), text)
 
 
 def detect_polyphones_batch(segments: List[str], llm: Optional[LlmCall]) -> List[List[Dict]]:
@@ -253,8 +335,13 @@ def detect_polyphones_batch(segments: List[str], llm: Optional[LlmCall]) -> List
     if n == 0 or llm is None:
         return empty
     body = "\n".join(f"[{i}] {s}" for i, s in enumerate(segments))
+    # 候选约束用**全段合并文本**生成（跨段上下文更准）；判卷时再按段逐段校验
+    hint = _candidate_hint("\n".join(segments))
     try:
-        reply = llm(_BATCH_POLYPHONE_PROMPT.replace("{segments}", body))
+        prompt = (_BATCH_POLYPHONE_PROMPT
+                  .replace("{constraints}", hint)
+                  .replace("{segments}", body))
+        reply = llm(prompt)
     except Exception:
         logger.debug("[tts_guard] 批量多音字消歧失败，降级为不注音", exc_info=True)
         return empty
@@ -269,7 +356,8 @@ def detect_polyphones_batch(segments: List[str], llm: Optional[LlmCall]) -> List
             idx = 0
         if 0 <= idx < n:
             out[idx].append({k: v for k, v in r.items() if k != "index"})
-    return out
+    # 判卷（逐段）：读音越界 / 字不在本段 → 丢弃（以字典为准）
+    return [_validate_polys(out[i], segments[i]) for i in range(n)]
 
 
 def build_ssml(text: str, polyphones: List[Dict], *, alphabet: str = "pinyin") -> str:
