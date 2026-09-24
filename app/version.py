@@ -10,37 +10,34 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.38.6"
+__version__ = "4.39.0"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
-    "minor": 38,
-    "patch": 6,
-    "codename": "画布卡片尺寸统一 + 上端吸附对齐（画布 0.3.1）",
-    "release_date": "2026-09-23",
+    "minor": 39,
+    "patch": 0,
+    "codename": "汉字注音字典（离线确定性）+ 四处接线",
+    "release_date": "2026-09-25",
     "description": (
-        "V4.38.6: 画布缺陷修复（用户反馈两条，冻结区 canvas-magnetic-intent "
-        "授权解冻后实施）。"
-        "① **卡片大小不统一**：小白卡原为 minHeight:200，正文区内容叠加"
-        "（提示语+缩略图 96+正文 3 行+元信息）实测把卡片撑到 ≈306px，同屏高矮差"
-        "超 100px，且违反冻结不变量「DOM 实尺寸必须 240×200（磁吸落位基准）」"
-        "——本次是**恢复**不变量：CARD_GEOMETRY.minHeight→height:200，"
-        "NoviceCard 内联改 height、移除 body 内联 minHeight，.nv-card-body 补"
-        " min-height:0 + overflow:hidden，缩略图 96→72 且弹性收缩"
-        "（flex:1 1 auto / min 40），正文 clamp 3→2 行。"
-        "② **最上端吸附没对齐**：getSnapPosition 的 top/bottom 分支原为"
-        "「x 取拖拽卡当前值」（2026-09-18 单轴吸附裁定），导致上下贴住后左右边缘"
-        "错开不成列；改为 x 取 targetPos.x（顶边对齐）；left/right 单轴语义保持"
-        "不变（保留 09-18 修掉的「横吸时 y 瞬移一整卡高」修复）。"
-        "验证：vitest 8 文件 76 例全绿（首轮一次跑全；后续批量运行受沙箱 SSR 缓存写"
-        "限制偶发少收集文件，拆批累计仍 76 例，非测试失败）；tsc 37 处 = 文档基线"
-        "（改动文件 0 命中）；vite build 成功；**渲染实测**（Edge 无头截图 + "
-        "getBoundingClientRect）：4 种卡片形态全部 240.0×200.0、正文区裁切 0px —— "
-        "该实测又抓出两处（hint/meta 被 flex 压扁裁字；四层内容在 200px 内装不下、"
-        "实测裁 45px），已按「有图时提示语折叠 + 正文 1 行」收敛；"
-        "双库无新增漂移（canvasVersion.ts 已同步副库）；守卫 85 locks intact；"
-        "已同步 frozen_zones.json 不变量 + 现行技术文档 §5 + 知识库 17 号专文。"
-        "证据图：docs/_reports/2026-09-23-画布卡片尺寸实测.png。"
+        "V4.39.0: 新增离线汉字注音字典并挂载到 TTS 正音与 Agent 能力面。"
+        "★ 痛点（真实缺陷）：tts_guard 的「多音字注音」原本让 LLM 现场猜拼音，"
+        "LLM 不可用/失败 → 「降级为不注音」→ 整段注音静默消失，且同字两次调用"
+        "可能不同（不可复现）。"
+        "★ 新模块 app/core/ai/pinyin_dict.py（纯模块，只标准库 + 惰性 pypinyin）："
+        "annotate/lookup/polyphones/to_sapi/to_ssml/stats；多音字给出**候选集**"
+        "（把 LLM 的「填空」降级成「选择题」）；to_ssml 按**位置**标注"
+        "（同一字多处不同音各自正确，优于 build_ssml 的首次出现替换）。"
+        "★ 实测覆盖：常用字/生僻字（龘靐齉爨彧）/词组消歧（重庆 chóng qìng、"
+        "银行 yín háng）全部正确；**CJK 扩展 B 区（𠀋𠮷）未覆盖 → 标 unknown，"
+        "绝不编造读音**（红线）。"
+        "★ 挂载：① tts_guard 加字典兜底（新增 annotated_source 字段；"
+        "改前 llm=None → 零注音，改后字典接管仍出 phoneme SSML）；"
+        "② Agent 能力 pipeline.pinyin_lookup 四处接线齐全（目录表/handler+register/"
+        "action 白名单/帮助文案，effect=read、半球=left），action=pinyin_lookup。"
+        "★ 依赖：pypinyin>=0.53.0 入 requirements.txt 与 app/requirements-optional.txt"
+        "（可选语义：缺失诚实降级不阻断启动）+ DependencyChecker.OPTIONAL_PACKAGES。"
+        "验证：check_pinyin_dict 40/40 全过；check_tts_guard 47 项全过"
+        "（3 条断言按新行为升级）；三向一致核对全绿；守卫 85 locks intact。"
     ),
 }

@@ -50,6 +50,7 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
     ("add_keyframe", "safe", "editor.set_keyframes", "写入关键帧（单点或批量）"),
     ("set_keyframes", "safe", "editor.set_keyframes", "批量写入关键帧+插值+缓动"),
     ("reanchor_clips", "safe", "editor.reanchor_clips", "改文案后按新台词重排片段（默认只出计划）"),
+    ("pinyin_lookup", "safe", "pipeline.pinyin_lookup", "汉字注音查询：逐字注音+多音字候选+生僻字（离线字典，不依赖 LLM）"),
     ("tts_polish", "safe", "pipeline.tts_polish", "长台词正音+切段（治配音长文本漂移；可回读质检）"),
     ("character_anchor", "safe", "pipeline.character_anchor", "角色一致性锚定+漂移检测（治人物跨镜头漂移）"),
     ("expression_clamp", "safe", "pipeline.expression_clamp", "表情幅度钳制+质检（治鼓腮等表情夸张）"),
@@ -259,6 +260,7 @@ def build_clipskills_layers_block() -> str:
         "L2 执行：只能输出白名单 action；执行结果必须能写回时间线或仅回答。"
         "精剪动作（move_clip/change_speed/add_keyframe/set_keyframes）已开放，"
         "reanchor_clips 可整批重排（默认 dry_run 只出计划，须用户确认再落地），"
+        "pinyin_lookup 可查汉字读音（逐字注音+多音字候选，离线字典确定性注音），"
         "tts_polish 可对长台词正音切段（配音前处理，治长文本漂移），"
         "character_anchor/expression_clamp/prop_consistency 三守护可治人物漂移/表情夸张/武器畸形，"
         "guard_all 是它们与 tts_polish 的总入口，"
@@ -280,6 +282,10 @@ def build_agent_actions_help_block() -> str:
         "set_keyframes 参数: {\"clip_index\":0,\"keyframes\":[{\"time\":1.0,\"prop\":\"opacity\",\"value\":0.5,\"easing\":\"ease_in_out\"}]}。",
         "reanchor_clips 参数: {\"dry_run\":true}（改文案后用新台词重排片段；dry_run 默认 true 只出计划，"
         "确认后再传 dry_run:false 落地，Ctrl+Z 一次整包撤销）。",
+        "pinyin_lookup 参数: {\"text\":\"要注音的字/词/句\",\"mode\":\"lookup|annotate|sapi|ssml\","
+        "\"style\":\"tone|tone3|normal\"}（查汉字读音：默认逐字+多音字候选；"
+        "annotate 出整段注音串、sapi 出数字式 chong2、ssml 出按位置标注的 SSML；"
+        "离线字典确定性注音，不依赖 LLM；CJK 扩展区查不到会标 unknown 不编造）。",
         "tts_polish 参数: {\"text\":\"台词原文\",\"max_chars\":40,\"use_llm\":true}（长台词先切段+多音字注音再配音，"
         "治长视频「后面发音错/与字幕不符」；可选传 asr_texts:[\"...\"] 回读质检，返回需重生成的段）。",
         "character_anchor 参数: {\"character\":{角色字段},\"shot_prompts\":[\"镜头1提示词\",…]}"

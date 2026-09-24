@@ -32,5 +32,8 @@ PyQt6>=6.6.0
 librosa>=0.10.0
 numba>=0.58.0
 
+# 中文语言（离线注音字典：字→读音，供 TTS 正音 / 口型 / Agent 查询）
+pypinyin>=0.53.0
+
 # 打包（可选）
 # pyinstaller>=6.0.0

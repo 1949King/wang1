@@ -192,6 +192,12 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("pipeline.llm_health", "pipeline", "read", False,
      "LLM 降级率：各站点近24h降级统计", "left", "LLM降级率",
      ["降级", "降级率", "LLM健康", "关键词匹配", "质量打折"]),
+    # ── 汉字注音（离线确定性字典，2026-09-25）──
+    # effect=read：只查表不写数据。左脑（语言/逻辑类，与 tts_polish 的 right 区分）
+    ("pipeline.pinyin_lookup", "pipeline", "read", False,
+     "汉字注音查询：逐字注音 + 多音字候选 + 生僻字，离线字典不依赖 LLM", "left", "注音查询",
+     ["注音", "拼音", "怎么读", "读音", "多音字", "生僻字", "念什么", "pinyin",
+      "注音字典", "发音"]),
     # ── 生成质量守护（治 AI 生成「长文本漂移 / 表情夸张 / 人物漂移 / 武器畸形」）──
     # effect=read：只出计划不写数据（切段/注音/回读质检均为只读计算）
     ("pipeline.tts_polish", "pipeline", "read", False,

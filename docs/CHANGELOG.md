@@ -1,5 +1,79 @@
 # 拾光剪影 — 变更日志
 
+## V4.39.0 (2026-09-25) — 汉字注音字典（离线确定性）+ 四处接线
+
+> **痛点**：`tts_guard` 的「多音字注音」原本**让 LLM 现场猜拼音**——LLM 不可用/
+> 调用失败即「降级为不注音」，**整段注音静默消失**，配音「后面发音错/与字幕不符」
+> 的老问题随之复发；且同字两次调用可能给出不同拼音（不可复现）。
+
+### 新模块：`app/core/ai/pinyin_dict.py`（离线字典服务层）
+
+纯模块（只标准库 + 惰性 import pypinyin），异常不抛，**不 import `app.*`**。
+
+| API | 用途 |
+|---|---|
+| `is_available()` | 可用性 + 人话原因（库缺失时不抛错、不返假数据） |
+| `annotate(text, style)` | 整段注音（词组级消歧）；`style` = tone / tone3 / normal |
+| `lookup(text)` | 逐字：读音 + **全部候选** + 是否多音字 + 未知标记 |
+| `polyphones(text)` | 多音字清单（**带候选集** → 把 LLM 的「填空」降级成「选择题」） |
+| `to_sapi(text)` | SAPI 数字式（`chong2`），对接 TTS |
+| `to_ssml(text)` | **按位置**标注多音字的 SSML（同一字多处不同音各自正确） |
+| `stats()` | 覆盖自述（含**不覆盖**的诚实边界） |
+
+### 实测覆盖能力（pypinyin 0.55.0，2026-09-25）
+
+| 场景 | 结果 |
+|---|---|
+| 常用字 | ✓ 中国导演 → zhōng guó dǎo yǎn |
+| **多音字词组消歧** | ✓ 重庆→chóng qìng · 银行→yín háng · 长大→zhǎng dà · 音乐→yīn yuè |
+| 生僻字 | ✓ 鑫淼焱垚犇 / **龘靐齉爨彧** / 三叠字 羴猋麤 全部注出 |
+| **CJK 扩展 B 区**（𠀋𠮷） | ✗ **字典未覆盖 → 标 `unknown`，绝不编造读音**（`coverage=0.0` + 人话提示） |
+| 英文/数字/标点 | ✓ 原样保留，不误标 |
+
+### 挂载到相关模块（用户要求「挂到相关模块里面去」）
+
+**① tts_guard（离线兜底，性质变化）**
+- 新增 `TtsSegment.annotated_source`（`llm` / `dict` / `""`）——注音来源可审计；
+- `plan_tts` 加字典兜底：LLM 未产出或未接 LLM 时，字典按位置标注多音字。
+  **改前**：`llm=None` → `annotated=""`，一个字的注音都没有；
+  **改后**：字典接管，`dict_annotated > 0`，仍产出 `<phoneme>` SSML；
+- 新增返回字段 `llm_annotated` / `dict_annotated`，`message` 诚实标明来源。
+- 检查脚本期望同步升级为更强断言（原断言要求「降级后零注音」，现要求
+  「不崩 + 字典确有注音 + 来源标 dict」）。
+
+**② Agent 能力 4 处接线（`pipeline.pinyin_lookup`）**
+| # | 位置 | 内容 |
+|---|---|---|
+| 1 | `agent_capability_catalog.py` | 目录行（effect=`read`，半球=**left** 语言/逻辑） |
+| 2 | `capability_handlers.py` | `pinyin_lookup` handler + `dispatcher.register` |
+| 3 | `agent_action_registry.py` | `_AGENT_ACTION_ROWS` 加 action（★ 守卫不覆盖，漏了 Agent 不会调） |
+| 4 | `agent_action_registry.py` | 帮助文案参数说明 + L2 执行段（★ 守卫不覆盖） |
+
+### 依赖
+
+`pypinyin>=0.53.0` 加入 `requirements.txt` 与 **`app/requirements-optional.txt`**
+（可选语义：缺失时注音能力**诚实降级**、不影响其他功能，故不进 REQUIRED）；
+`main_qt6.DependencyChecker.OPTIONAL_PACKAGES` 同步登记（缺失不报错）。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `_verify/check_pinyin_dict.py`（新） | **40/40 全过**（含确定性、SSML 按位置、四处接线静态断言、dispatcher 端到端） |
+| 三向一致手工核对 | catalog↔dispatcher OK · `ACTION_TO_CAPABILITY` 正确 · 在白名单 · 神经元表含它 |
+| 端到端调用 | `重庆银行` → chóng qìng yín háng，多音字 `['重','行']` |
+| `check_tts_guard.py` | 47 项全过（含升级后的 3 条字典断言） |
+| 冻结区守卫 | `85 locks intact`（改动全在冻结区外） |
+
+### 已知未做 / 边界
+
+- **CJK 扩展 B 区及以后不覆盖**（如 𠀋𠮷）→ 标 unknown，需人工/外部数据补；
+- LLM 消歧路径**尚未接入候选约束**（字典已提供 `candidates`，可作为 prompt 约束
+  提升 LLM 准确率，属下一步）；
+- 字典未参与 `lip_sync` 口型链路（其拼音→Viseme 映射目前独立）。
+
+---
+
 ## V4.38.6 (2026-09-23) — 画布卡片尺寸统一 + 上端吸附对齐（画布 0.3.1）
 
 > **性质**：画布缺陷修复（用户反馈两条）。冻结区 `canvas-magnetic-intent`

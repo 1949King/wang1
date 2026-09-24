@@ -54,10 +54,13 @@ class TtsSegment:
     index: int
     text: str
     char_count: int
-    # LLM 产出的注音文本（SSML 或原样文本）；未接 LLM 时为空
+    # 注音文本（SSML）；未接 LLM 时由离线字典兜底（2026-09-25 起不再为空）
     annotated: str = ""
     # 多音字消歧记录：[{"word","char","pinyin","reason"}]
     polyphones: List[Dict] = field(default_factory=list)
+    # 注音来源（2026-09-25 新增，便于审计与排查）：
+    #   "llm"  = LLM 消歧产出；"dict" = 离线字典上下文消歧；"" = 无注音
+    annotated_source: str = ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -390,8 +393,60 @@ def verify_segments(
     }
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 4) 离线字典兜底（2026-09-25）——注音不再随 LLM 一起消失
+#
+# 此前：注音 100% 来自 LLM 消歧，LLM 不可用/失败即「降级为不注音」
+#       ⇒ 长台词一旦没注音，配音发音与字幕不符的问题**静默复发**。
+# 现在：字典先给确定性注音（词组级消歧，可复现），LLM 只在有字典**候选**
+#       约束时参与语境判断；LLM 缺席也有注音，只是少了语境兜底。
+# 红线：字典查不到的字（CJK 扩展区）标 unknown，**绝不编造读音**。
+# ═══════════════════════════════════════════════════════════════════
+
+def _dict_ssml(text: str) -> Dict:
+    """离线字典生成 SSML（按位置精确标注多音字）。失败返回空结果，绝不抛。"""
+    try:
+        from .pinyin_dict import to_ssml
+
+        return to_ssml(text)
+    except Exception:
+        logger.debug("[tts_guard] 字典 SSML 不可用（跳过字典兜底）", exc_info=True)
+        return {"ok": False, "ssml": text, "marked": 0, "message": "字典不可用"}
+
+
+def _dict_available() -> bool:
+    """离线注音字典是否可用（不可用时 message 要诚实说明"仅切段"）。"""
+    try:
+        from .pinyin_dict import is_available
+
+        return bool(is_available()[0])
+    except Exception:
+        return False
+
+
+def _dict_polys(text: str) -> List[Dict]:
+    """离线字典检出的多音字（与 LLM 输出同格式，便于上层统一消费）。"""
+    try:
+        from .pinyin_dict import polyphones
+
+        r = polyphones(text)
+        out: List[Dict] = []
+        for it in r.get("items", []):
+            out.append({
+                "word": it.get("char", ""),      # 字典已按整句上下文消歧
+                "char": it.get("char", ""),
+                "pinyin": it.get("pinyin", ""),
+                "reason": "离线字典上下文消歧",
+                "candidates": it.get("candidates", []),
+            })
+        return out
+    except Exception:
+        logger.debug("[tts_guard] 字典多音字查询不可用", exc_info=True)
+        return []
+
+
 # ═══════════════════════════════════════════════════════════
-# 4) 统一入口：生成 TTS 计划（切段 + 注音）
+# 5) 统一入口：生成 TTS 计划（切段 + 注音）
 # ═══════════════════════════════════════════════════════════
 
 
@@ -421,14 +476,39 @@ def plan_tts(
     poly_lists = detect_polyphones_batch(raw_segments, llm)
     segments: List[TtsSegment] = []
     poly_total = 0
+    llm_marked = 0
+    dict_marked = 0
     for i, s in enumerate(raw_segments):
         seg = TtsSegment(index=i, text=s, char_count=len(s))
         polys = poly_lists[i] if i < len(poly_lists) else []
         if polys:
             seg.polyphones = polys
             seg.annotated = build_ssml(s, polys)
+            seg.annotated_source = "llm"
             poly_total += len(polys)
+            llm_marked += len(polys)
+        else:
+            # 离线字典兜底（2026-09-25）：LLM 未产出 / 未接 LLM 时，
+            # 仍给多音字确定注音 —— 注音不随 LLM 一起消失
+            ds = _dict_ssml(s)
+            if ds.get("marked"):
+                seg.annotated = ds["ssml"]
+                seg.polyphones = _dict_polys(s)
+                seg.annotated_source = "dict"
+                poly_total += len(seg.polyphones)
+                dict_marked += len(seg.polyphones)
         segments.append(seg)
+    if poly_total:
+        detail = []
+        if llm_marked:
+            detail.append(f"LLM {llm_marked} 处")
+        if dict_marked:
+            detail.append(f"字典 {dict_marked} 处")
+        msg = f"已切分为 {len(segments)} 段，标注 {poly_total} 处多音字（{' + '.join(detail)}）"
+    else:
+        msg = (f"已切分为 {len(segments)} 段"
+               + ("（未检出多音字）" if llm is not None or _dict_available()
+                  else "（注音字典不可用，仅切段）"))
     return {
         "ok": bool(segments),
         "segments": [asdict(s) for s in segments],
@@ -437,8 +517,7 @@ def plan_tts(
         "max_chars": max_chars,
         "used_llm": llm is not None,
         "polyphone_total": poly_total,
-        "message": (
-            f"已切分为 {len(segments)} 段"
-            + (f"，标注 {poly_total} 处多音字" if poly_total else "（未接 LLM，仅切段）")
-        ),
+        "llm_annotated": llm_marked,
+        "dict_annotated": dict_marked,
+        "message": msg,
     }

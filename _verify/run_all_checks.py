@@ -99,6 +99,8 @@ CHECKS = [
     ("SIM", "_verify/check_simulator.py", "端到端仿真器（零成本/可复现/故障注入）"),
     # ── 引擎接口规范 + 错误码（V4.38.5 规格书切片⑫）──
     ("EAPI", "_verify/check_engine_api.py", "引擎对外接口规范 + 错误码体系"),
+    # ── 汉字注音字典 + 四处接线（V4.39.0）──
+    ("PINYIN", "_verify/check_pinyin_dict.py", "汉字注音字典（离线确定性）+ 四处接线"),
 ]
 
 failed = []

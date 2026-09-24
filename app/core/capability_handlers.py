@@ -1190,6 +1190,47 @@ class PipelineCapabilityHandlers:
 
         return _call
 
+    def pinyin_lookup(self, req: CapabilityRequest) -> CapabilityResult:
+        """汉字注音查询：逐字注音 + 多音字候选 + 生僻字（离线字典，不依赖 LLM）。
+
+        只读查询（effect=read），不改任何数据。字典能力边界：CJK 扩展 B 区及
+        以后（如 𠀋𠮷）标 `unknown` 并**不编造读音**；字典库缺失时诚实报错。
+
+        params:
+          text  要注音的字 / 词 / 句子（必填）
+          mode  lookup（默认，逐字 + 多音字候选）| annotate（整段注音串）
+                | ssml（按位置标注多音字的 SSML）| sapi（SAPI 数字式）
+          style 注音风格：tone（默认，带声调符号）/ tone3 / normal
+        """
+        from app.core.ai import pinyin_dict
+
+        text = str(req.params.get("text", "") or "")
+        mode = str(req.params.get("mode", "lookup") or "lookup").lower()
+        style = str(req.params.get("style", pinyin_dict.STYLE_TONE)
+                    or pinyin_dict.STYLE_TONE)
+        if not text:
+            return CapabilityResult(req.request_id, False,
+                                    output={"ok": False, "text": ""},
+                                    error="text 不能为空")
+        avail, reason = pinyin_dict.is_available()
+        if not avail:
+            return CapabilityResult(req.request_id, False,
+                                    output={"ok": False, "text": text,
+                                            "message": reason},
+                                    error=reason)
+        if mode == "annotate":
+            out = pinyin_dict.annotate(text, style=style)
+        elif mode == "ssml":
+            out = pinyin_dict.to_ssml(text)
+        elif mode == "sapi":
+            out = pinyin_dict.to_sapi(text)
+        else:
+            out = pinyin_dict.lookup(text)
+        return CapabilityResult(
+            req.request_id, bool(out.get("ok")), output=out,
+            error=None if out.get("ok") else str(out.get("message") or "注音失败"),
+        )
+
     def tts_polish(self, req: CapabilityRequest) -> CapabilityResult:
         """TTS 正音：长台词切段 + 多音字注音（治「长视频后面发音错/与字幕不符」）。
 
@@ -1482,6 +1523,9 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("pipeline.llm_health", CapabilityCategory.PIPELINE,
                         pipeline_handlers.llm_health,
                         "LLM 降级率查询：各 LLM 站点近24h降级统计（只读）")
+    dispatcher.register("pipeline.pinyin_lookup", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.pinyin_lookup,
+                        "汉字注音查询：逐字注音 + 多音字候选 + 生僻字（离线字典）")
     dispatcher.register("pipeline.tts_polish", CapabilityCategory.PIPELINE,
                         pipeline_handlers.tts_polish,
                         "TTS 正音：长台词语义切段 + 多音字注音")

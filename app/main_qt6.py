@@ -216,6 +216,8 @@ class DependencyChecker:
         "zhipuai": "zhipuai",
         "gTTS": "gtts",
         "pynvml": "pynvml",
+        # 离线注音字典（2026-09-25）：缺失时 agent 注音能力诚实降级不报错
+        "pypinyin": "pypinyin",
     }
     
     @classmethod

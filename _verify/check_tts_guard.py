@@ -111,13 +111,32 @@ def main() -> int:
         raise RuntimeError("模拟 LLM 挂掉")
 
     plan3 = tg.plan_tts("我们去了重庆。", llm=boom)
-    check("LLM 抛错 → 降级不崩", plan3["ok"] and plan3["polyphone_total"] == 0)
+    # 2026-09-25 行为升级：原期望「降级后零注音」（polyphone_total == 0），
+    # 现由离线字典接管 ⇒ 断言升级为「不崩 + 字典确有注音 + 来源标 dict」。
+    # 强于旧断言：既证明降级不崩，又证明注音没丢。
+    check("LLM 抛错 → 不崩且字典接管注音",
+          plan3["ok"] and plan3["dict_annotated"] > 0
+          and plan3["llm_annotated"] == 0)
+    check("LLM 抛错 → 注音来源标 dict",
+          any(s["annotated_source"] == "dict" for s in plan3["segments"]))
+    check("LLM 抛错 → 仍产出 SSML phoneme",
+          any("<phoneme" in s["annotated"] for s in plan3["segments"]))
 
     def garbage(prompt: str) -> str:
         return "这不是 JSON，随便写的"
 
     plan4 = tg.plan_tts("我们去了重庆。", llm=garbage)
-    check("LLM 返回非 JSON → 降级", plan4["ok"] and plan4["polyphone_total"] == 0)
+    check("LLM 返回非 JSON → 不崩且字典接管",
+          plan4["ok"] and plan4["dict_annotated"] > 0
+          and plan4["llm_annotated"] == 0)
+    # LLM 可用时字典不抢夺（LLM 产出优先，来源标 llm）
+    def ok_llm(prompt: str) -> str:
+        return '[{"index": 0, "word": "重庆", "char": "重", "pinyin": "chóng", "reason": "地名"}]'
+
+    plan5 = tg.plan_tts("我们去了重庆。", llm=ok_llm)
+    check("LLM 正常时优先用 LLM（来源标 llm）",
+          plan5["llm_annotated"] > 0
+          and any(s["annotated_source"] == "llm" for s in plan5["segments"]))
 
     # ── 5. 拼音 / SSML 工具 ──
     check("声调符号→SAPI", tg._to_sapi_pinyin("chóng") == "chong2")
