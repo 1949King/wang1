@@ -1,5 +1,80 @@
 # 拾光剪影 — 变更日志
 
+## V4.39.4 (2026-09-25) — 技术债止血：单文件规模守卫 + UI 归属/依赖纪律固化
+
+> 用户要求「明确的技术债，能优化一点就优化一点」。
+> 本轮**只做零风险高价值项**，高风险重构（拆 9,717 行文件）不动。
+
+### ① 新增：单文件规模守卫 `_verify/check_file_size.py`（阈值 2000 行）
+
+**为什么**：`editor_module.py` 已 **9,717 行**（09-19 时 9,479 → **仍在涨**），
+而项目**没有任何机制阻止它继续变大**。每加一个功能，认知负荷就再涨一截。
+
+**做法**（不要求立刻拆，先止血）：
+
+| 情形 | 结果 |
+|---|---|
+| 基线内文件增长 > 容差 30 行 | ✗ 失败（债务增长） |
+| 基线外新文件 > 2000 行 | ✗ 失败（新增超标） |
+| 基线内文件变小 > 30 行 | ✓ PASS + 提示「已收敛，可下调基线」 |
+| 基线文件消失 | · 提示确认后从基线移除 |
+
+**冻结为基线的 12 个文件**：
+
+| 文件 | 行数 |
+|---|---|
+| `app/modules/lego/editor_module.py` | **9,717** |
+| `vendor/shiguang-canvas/src/Stage3D.tsx` | 4,660 |
+| `vendor/shiguang-canvas/src/riggedHumanoid.ts` | 3,707 |
+| `vendor/shiguang-canvas/src/CanvasShell.tsx` | 3,199 |
+| `app/core/canvas_server.py` | 3,273 |
+| `app/core/canvas_aigc.py` | 2,905 |
+| `app/modules/lego/settings_module.py` | 2,823 |
+| `app/modules/lego/video_processor.py` | 2,732 |
+| `vendor/shiguang-canvas/src/store.ts` | 2,452 |
+| `app/modules/lego/editor_agent_panel_mixin.py` | 2,330 |
+| `app/modules/lego/extensions_module.py` | 2,198 |
+| `app/modules/lego/drama_understanding_engine.py` | 2,160 |
+
+**已通过负向测试**（造 2100 行文件 → 正确 FAIL 并给出拆分指引）——
+证明它不是"永远 PASS 的假守卫"。已注册进 `run_all_checks`（第 53 项）。
+
+### ② 固化两条被反复误读的事实（写进《现行技术文档》§2b）
+
+**(a) UI 归属真相 —— 不是「双前端」**
+
+| 角色 | 位置 |
+|---|---|
+| Qt 桌面壳 | `app/main_qt6.py` + `app/modules/lego/`（PyQt6） |
+| **画布前端（唯一源码）** | `vendor/shiguang-canvas/`（102 文件 / 38,707 行） |
+| 宿主 A（默认） | `engine=shiguang` → WebEngine **嵌入** Qt6 |
+| 宿主 B | `engine=tauri` → `vendor/AI-Canvas-tauri/` **独立进程** |
+
+⇒ 准确表述：**「一个 Qt 桌面壳 + 一份 React 画布源码 × 两个宿主」**。
+切换见 `app/core/canvas_runtime.py`。⚠️ 副库**未被 git 跟踪** ⇒ 改前必须备份。
+
+**(b) 依赖升级纪律**：patch 直接打 · minor 需回归 · **MAJOR 禁止盲升**。
+硬约束：**`numpy 1.26.4` 被钉死**（numba 0.64 要 numpy<2.1；opencv/torch ABI 绑 1.x）。
+
+### ③ 待授权的债（本轮未动，附理由）
+
+**前端 37 处 tsc 存量错误** —— 性质已查明：绝大多数是
+`Object3D | null` 与 `Object3D | undefined` 的**类型标注不一致**（TS2322 ×20 / TS2345 ×7 /
+TS2556 ×4 / TS18048 ×3 / TS2339 ×2 / TS2554 ×1），**纯类型问题、运行时零影响**。
+受影响文件 `Stage3D.tsx` / `riggedHumanoid.ts` **位于冻结区 `stage3d-core`** ⇒
+**须获「解冻 stage3d-core」授权**方可修复。修完的好处：A/B 对比流程可简化
+（基线清零后，任何新错都是真错）。
+
+**其余债（本轮未做，非零风险）**：`editor_module.py` 拆分（大工程）、
+两套插件系统合并（需架构决策）、lego 81 模块分层、副库纳入 git（15.8 万行）、
+双库 22 分叉收敛（需逐项判定是否「有意不同步」）。
+
+### 验证
+
+`SIZE` 守卫 PASS（含负向测试）· `run_all_checks` 全绿（53 项）。
+
+---
+
 ## V4.39.3 (2026-09-25) — 全项目官方补丁排查与打补丁
 
 > 按用户要求排查「所有可打的官方补丁」。**两个维度都查了**，

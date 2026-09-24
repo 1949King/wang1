@@ -101,6 +101,8 @@ CHECKS = [
     ("EAPI", "_verify/check_engine_api.py", "引擎对外接口规范 + 错误码体系"),
     # ── 汉字注音字典 + 四处接线（V4.39.0）──
     ("PINYIN", "_verify/check_pinyin_dict.py", "汉字注音字典（离线确定性）+ 四处接线"),
+    # ── 单文件规模守卫（V4.39.4）──
+    ("SIZE", "_verify/check_file_size.py", "单文件规模守卫（存量冻结，只许减不许增）"),
 ]
 
 failed = []
