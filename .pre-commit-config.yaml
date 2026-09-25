@@ -77,3 +77,17 @@ repos:
         language: system
         pass_filenames: false
         files: ^app/
+
+      # ⑤ 双库一致性（S1 的核心卡点 —— 缺了它，漂移必然复发）
+      #    背景：项目曾把双库合并到「分叉 0」，之后因为没有卡点又漂回 24 个文件。
+      #    ⇒ 卡点才是解决方案，「合并一次」不是。
+      #    ⚠️ 必须 always_run：副库 vendor/AI-Canvas-tauri/ 在主仓被 gitignore，
+      #       它的改动永远不会出现在主仓的暂存清单里，靠 files: 过滤会永不触发。
+      #    判据是「不超过基线」（当前分叉 0 / 缺失 7），不是「等于 0」——
+      #    避免阻塞正常开发，同时任何新增漂移立即变红。
+      - id: canvas-dual-repo
+        name: 双库一致性（防复漂，基线 分叉0 / 缺失7）
+        entry: python _verify/check_canvas_dual_repo.py
+        language: system
+        pass_filenames: false
+        always_run: true
