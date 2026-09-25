@@ -189,7 +189,7 @@ export const DEFAULT_PROMPT_SOURCES: PromptSource[] = [
   ),
   localAssetSource(
     "shiguang-mascot-pack",
-    "拾光·Q版兽耳娘形象包（小拾）",
+    "拾光·狐耳形象包（拾岚）",
     "shiguang-mascot.json",
     false,
   ),
