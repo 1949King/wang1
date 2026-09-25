@@ -432,7 +432,7 @@ class AIVideoGenerationPipeline:
 
                 divergence = get_probe().estimate("video")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: ai_video_generation_pipeline.py", exc_info=True)
             sig = hashlib.md5(prompt.encode("utf-8", errors="replace")).hexdigest()[:16]
             uid = f"{actual}_s{scene_index + 1}_{int(_time.time() * 1000)}"
             review = get_review()
@@ -493,7 +493,7 @@ class AIVideoGenerationPipeline:
                                 "机器观测停写先验（§29）")
                     return
             except ImportError:
-                pass  # 抽检子系统不存在时按旧行为
+                logger.debug("忽略异常（原为 pass）: ai_video_generation_pipeline.py", exc_info=True)  # 抽检子系统不存在时按旧行为
             get_store().record_outcome(target, ok=True, quality=q, kind="quality")
         except Exception:
             logger.debug("[AIVideoGenerationPipeline] 质量先验回写失败（不阻断主链路）",

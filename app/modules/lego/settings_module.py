@@ -1163,7 +1163,7 @@ class SettingsModule(BaseModule):
                     try:
                         winreg.DeleteValue(key, app_name)
                     except FileNotFoundError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: settings_module.py", exc_info=True)
             return True
         except Exception as e:
             logger.warning(f"设置开机自启动注册表失败: {e}")

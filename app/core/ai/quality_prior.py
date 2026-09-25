@@ -98,7 +98,7 @@ class QualityPriorStore:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: quality_prior.py", exc_info=True)
         except Exception:
             logger.debug("[quality_prior] 持久化失败（不阻断主链路）", exc_info=True)
 

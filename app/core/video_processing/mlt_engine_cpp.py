@@ -78,7 +78,7 @@ def _find_mlt_dll() -> Optional[str]:
                     if name in filenames:
                         candidates.append(os.path.join(dirpath, name))
         except (PermissionError, FileNotFoundError):
-            pass
+            logger.debug("忽略异常（原为 pass）: mlt_engine_cpp.py", exc_info=True)
 
     # 补短 P0#3 第 2 刀：按顺序检查，第一个存在的就是 C 库（不再用 set 错乱）
     seen = set()
@@ -127,7 +127,7 @@ def _load_mlt() -> bool:
             try:
                 os.add_dll_directory(d)
             except (AttributeError, OSError):
-                pass
+                logger.debug("忽略异常（原为 pass）: mlt_engine_cpp.py", exc_info=True)
             os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
     # 补短 P0#3：_load_mlt 会把 Shotcut 目录塞到 PATH 最前，但 Shotcut 自带 ffmpeg
@@ -179,7 +179,7 @@ def _load_mlt() -> bool:
                 try:
                     os.add_dll_directory(abs_path)
                 except (AttributeError, OSError):
-                    pass
+                    logger.debug("忽略异常（原为 pass）: mlt_engine_cpp.py", exc_info=True)
         
         # 添加原有的 PATH 作为兜底
         new_path_parts.append(current_path)

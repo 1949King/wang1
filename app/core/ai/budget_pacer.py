@@ -159,7 +159,7 @@ class BudgetPacer:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: budget_pacer.py", exc_info=True)
         except Exception:
             logger.debug("[budget_pacer] 持久化失败（不阻断主链路）", exc_info=True)
 

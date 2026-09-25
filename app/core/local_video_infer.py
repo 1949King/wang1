@@ -22,6 +22,10 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 LOCAL_MODELS_DIR_CANDIDATES = [
     os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"),
@@ -263,9 +267,9 @@ def _save_video_frames(
                 try:
                     os.remove(wav_path)
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
     url = f"http://127.0.0.1:{int(bridge_port)}/inbox_file/{name}"
     return {
@@ -330,7 +334,7 @@ def _infer_minimax_h3(
     try:
         pipe.enable_vae_slicing()
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
     steps = steps if steps is not None else (28 if vram_gb >= 24 else 22)
     frames = []
@@ -455,7 +459,7 @@ def _infer_wan(
     try:
         pipe.enable_vae_slicing()
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
     steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 5.0
@@ -524,7 +528,7 @@ def _infer_cogvideox(
     try:
         pipe.enable_vae_slicing()
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
     steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
     cfg = 6.0
@@ -769,7 +773,7 @@ def generate_video_local(
 
         torch.cuda.empty_cache() if device == "cuda" else None
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
     fn_kwargs = dict(
         prompt=prompt,

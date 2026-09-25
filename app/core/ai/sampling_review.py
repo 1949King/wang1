@@ -151,7 +151,7 @@ class SamplingReview:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: sampling_review.py", exc_info=True)
         except Exception:
             logger.debug("[sampling_review] 持久化失败（不阻断）", exc_info=True)
 

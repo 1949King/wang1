@@ -744,7 +744,7 @@ class Application:
             try:
                 logger.info("Tauri 画布窗口已关闭，UI 状态已刷新")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: main_qt6.py", exc_info=True)
 
         eb.on(EventType.VIDEO_LOADED, on_video_loaded)  # type: ignore[reportAttributeAccessIssue]
         eb.on(EventType.TASK_STARTED, on_task_started)  # type: ignore[reportAttributeAccessIssue]
@@ -817,7 +817,7 @@ class Application:
                 probe.waitForBytesWritten(300)
                 probe.disconnectFromServer()
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: main_qt6.py", exc_info=True)
             logger.info("检测到已运行的编辑器实例，已请求其激活窗口，本实例退出")
             return False
 
@@ -825,7 +825,7 @@ class Application:
         try:
             QLocalServer.removeServer(key)  # 清理崩溃残留的陈旧命名管道
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: main_qt6.py", exc_info=True)
         if self._instance_server.listen(key):
             self._instance_server.newConnection.connect(self._on_instance_activated)
             logger.debug("单实例守卫已就位（成为主实例）")
@@ -841,7 +841,7 @@ class Application:
                 if conn is not None:
                     conn.disconnectFromServer()
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: main_qt6.py", exc_info=True)
         try:
             mw = self._main_window
             if mw is not None:

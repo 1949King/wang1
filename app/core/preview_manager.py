@@ -142,7 +142,7 @@ class FrameReaderThread(QThread):
                 try:
                     self._frame_queue.put((frame.copy(), frame_time), timeout=0.1)
                 except queue.Full:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: preview_manager.py", exc_info=True)
 
                 self.frame_ready.emit(frame.copy(), frame_time)
 
@@ -217,7 +217,7 @@ class EffectsWorkerThread(QThread):
         try:
             self._frame_queue.put((frame.copy(), frame_time), timeout=0.1)
         except queue.Full:
-            pass
+            logger.debug("忽略异常（原为 pass）: preview_manager.py", exc_info=True)
 
     def update_effects(self, effects: Dict):
         self._current_effects = effects
@@ -522,7 +522,7 @@ class PreviewManager(QObject):
                 if self._video_capture is not None and CV2_AVAILABLE:
                     self._video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: preview_manager.py", exc_info=True)
             logger.info(f"视频已打开: {video_path} "
                         f"({self._video_width}x{self._video_height}, "
                         f"{self._video_fps:.1f}fps, "
@@ -674,7 +674,7 @@ class PreviewManager(QObject):
                 # ok, 接近预期
                 return
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: preview_manager.py", exc_info=True)
 
         # 二分找最后一个能 read 成功的帧
         for _ in range(20):  # 最多 20 次 seek

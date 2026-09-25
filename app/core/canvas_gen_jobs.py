@@ -116,7 +116,7 @@ class GenCancelToken:
             try:
                 self._closables.remove(closable)
             except ValueError:
-                pass
+                logger.debug("忽略异常（原为 pass）: canvas_gen_jobs.py", exc_info=True)
 
     def cancel(self, reason: str = "用户取消") -> bool:
         with self._lock:

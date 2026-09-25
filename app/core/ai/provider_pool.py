@@ -120,7 +120,7 @@ class ProviderPool:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: provider_pool.py", exc_info=True)
         except OSError:
             logger.warning("[provider_pool] 账号池写盘失败", exc_info=True)
 

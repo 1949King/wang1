@@ -150,7 +150,7 @@ class EngineAPI:
             if get_review().is_frozen():
                 frozen_note = err_label(ERR_LOOP_FROZEN)
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: engine_api.py", exc_info=True)
         try:
             from .video_generation_client import VideoGenerationClient
 

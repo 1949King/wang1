@@ -25,6 +25,10 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 保守默认：查不到模型窗口时用它 —— 与改造前的硬编码值一致，保证零行为变化
 DEFAULT_MAX_CHARS = 12000
 
@@ -165,7 +169,7 @@ def resolve_max_chars(
             if n > 0:
                 return n
         except (TypeError, ValueError):
-            pass
+            logger.debug("忽略异常（原为 pass）: context_budget.py", exc_info=True)
     w = window_for(model, provider)
     return chars_budget(w) if w else DEFAULT_MAX_CHARS
 

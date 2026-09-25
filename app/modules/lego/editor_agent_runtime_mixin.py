@@ -98,7 +98,7 @@ class EditorAgentRuntimeMixin:
             if getattr(self, "_agent_platform_edit", None) is not None:
                 self._agent_platform_edit.setText(str(ctx.get("platform") or ""))
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
 
     # 抽取自 editor_module.py L7605-7622
     def _save_agent_project_context(self):
@@ -141,7 +141,7 @@ class EditorAgentRuntimeMixin:
                     platform=platform,
                 )
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
 
     # 抽取自 editor_module.py L7666-7672
     def _append_agent_message(self, role: str, text: str):
@@ -286,7 +286,7 @@ class EditorAgentRuntimeMixin:
             try:
                 agent_tasks.transition(tid, "paused", pausedReason="user")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
         worker = getattr(self, "_edit_agent_worker", None)
         if worker and worker.isRunning():
             worker.request_stop()
@@ -306,7 +306,7 @@ class EditorAgentRuntimeMixin:
             try:
                 agent_tasks.transition(tid, "running")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
         self._append_agent_message("系统", "已继续。可以发送下一条或等待队列。")
 
     # 抽取自 editor_module.py L8042-8051
@@ -333,7 +333,7 @@ class EditorAgentRuntimeMixin:
             try:
                 agent_tasks.transition(tid, "stopped")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
         worker = getattr(self, '_edit_agent_worker', None)
         if worker and worker.isRunning():
             worker.request_stop()
@@ -356,7 +356,7 @@ class EditorAgentRuntimeMixin:
             if active:
                 return active, ""
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: editor_agent_runtime_mixin.py", exc_info=True)
         return "", ""
 
     # 抽取自 editor_module.py L8090-8092

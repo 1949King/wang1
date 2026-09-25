@@ -122,7 +122,7 @@ class EditorAgentPanelMixin:
             try:
                 self._append_agent_message("系统", f"{tip} · 右栏 {target}px。")
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: editor_agent_panel_mixin.py", exc_info=True)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[Agent] 切换面板宽度失败: {e}")
 
@@ -1092,7 +1092,7 @@ class EditorAgentPanelMixin:
         try:
             agent_tasks.transition(task["id"], "running")
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: editor_agent_panel_mixin.py", exc_info=True)
         self._append_agent_message("你", user_text)
         using = provider or "自动降级"
         if model:

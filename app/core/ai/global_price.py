@@ -146,7 +146,7 @@ class GlobalPriceController:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: global_price.py", exc_info=True)
         except Exception:
             logger.debug("[global_price] 持久化失败（不阻断）", exc_info=True)
 

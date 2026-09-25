@@ -122,7 +122,7 @@ class ScoreBook:
                     try:
                         os.remove(tmp)
                     except OSError:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: score_book.py", exc_info=True)
         except OSError:
             logger.warning("[score_book] 评分簿写盘失败", exc_info=True)
 

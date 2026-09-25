@@ -22,6 +22,10 @@ from typing import Callable, Optional, Set, Tuple
 
 from PyQt6.QtCore import QObject, QTimer, QEvent, pyqtSignal, Qt
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Shuttle 可用的速率档位（从 -8× 到 +8×，步进 1×/2×/4×/8×）
 _SHUTTLE_SPEEDS: Tuple[float, ...] = (0.0, -1.0, 1.0, -2.0, 2.0, -4.0, 4.0, -8.0, 8.0)
@@ -157,7 +161,7 @@ class PlaybackShuttle(QObject):
             try:
                 self._app.removeEventFilter(self)
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: playback_shuttle.py", exc_info=True)
             self._app = None
         self.stop()
         self._installed = False
@@ -350,14 +354,14 @@ class PlaybackShuttle(QObject):
             try:
                 host._media_player.setPlaybackRate(max(0.05, abs(rate)))
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: playback_shuttle.py", exc_info=True)
         if hasattr(host, "_rebasing_playback_clock"):
             try:
                 host._rebasing_playback_clock(
                     float(getattr(host, "_playhead_position", 0) or 0)
                 )
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: playback_shuttle.py", exc_info=True)
 
     def _sync_host_pause(self) -> None:
         host = self._host
@@ -371,7 +375,7 @@ class PlaybackShuttle(QObject):
             try:
                 host._media_player.setPlaybackRate(1.0)
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: playback_shuttle.py", exc_info=True)
 
     # ── 状态查询 ──────────────────────────────────────────────────
 

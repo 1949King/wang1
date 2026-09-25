@@ -34,7 +34,19 @@ SCAN_ROOT = ROOT / "app"
 BASELINE = ROOT / "docs" / "knowledge" / "stability_gate_baseline.json"
 
 # product 代码扫描需跳过的目录（测试/第三方/缓存）
-SKIP_DIRS = {"tests", "thirdparty", "__pycache__", "node_modules"}
+# 2026-09-25 补：加入 gitignore 的草稿/缓存目录。
+# 背景（实测）：本门禁自称扫描 product 代码，但 SKIP_DIRS 漏了 ``app/temp``，
+# 而 app/temp 是 gitignore 的草稿目录（临时分析脚本都丢在那里）。
+# 后果：写一次临时脚本就带进几十条 print 违规，把门禁顶红、
+# 把真实违规淹没在噪声里（实测 631 项新增违规中 564 项来自草稿目录）
+# ⇒ 门禁长期处于红状态、无人执行，等于没有门禁。
+# 修复：把草稿/缓存类目录全部排除，让门禁只对 product 代码说话。
+SKIP_DIRS = {
+    "tests", "thirdparty", "__pycache__", "node_modules",
+    # —— gitignore 的草稿/缓存/数据目录（非 product 源码）——
+    "temp", "temp_ai_editor", "logs", "cache", "data", "models", "output",
+    "openclow_data", "packaging_env", ".vscode", "素材库", "短剧AI剪辑输出",
+}
 
 _RULE_BARE = "bare-except"
 _RULE_SWALLOW = "swallow-except"

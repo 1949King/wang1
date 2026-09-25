@@ -304,7 +304,7 @@ def _resolve_chat_provider(provider: str, model: str, editor: Any) -> Tuple[str,
         try:
             provider, model = editor._get_selected_edit_agent_model()  # noqa: SLF001
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: project_agent_host.py", exc_info=True)
     if not provider:
         try:
             from app.modules.lego.model_config import load_active_provider
@@ -356,7 +356,7 @@ def project_agent_chat(
     try:
         agent_tasks.transition(task["id"], "running")
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: project_agent_host.py", exc_info=True)
 
     if amode == MODE_PLAN:
         apply = False
@@ -460,7 +460,7 @@ def project_agent_chat(
         try:
             agent_tasks.transition(task["id"], "failed", errorCode="model_error")
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: project_agent_host.py", exc_info=True)
         push_to_canvas(
             "chat.done",
             {"stream_id": sid, "ok": False, "error": str(e), "path": path},
@@ -570,7 +570,7 @@ def project_agent_chat(
             "completed" if not canvas_tool_results or all(r.get("ok") for r in canvas_tool_results) else "failed",
         )
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: project_agent_host.py", exc_info=True)
 
     return {
         "ok": True,
@@ -602,7 +602,7 @@ def list_project_tools(agent_mode: str = "") -> Dict[str, Any]:
 
         ensure_external_skills_registered()
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: project_agent_host.py", exc_info=True)
 
     editor = get_editor_module()
     if editor is not None and hasattr(editor, "_get_agent_extensions_context"):

@@ -451,7 +451,7 @@ class AgentLoop:
                         kwargs["tools"] = schemas
                         kwargs["tool_choice"] = "auto"
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: agent_loop.py", exc_info=True)
             try:
                 if provider:
                     chunks = list(ai_engine.chat(provider, messages, model=model or None, **kwargs))

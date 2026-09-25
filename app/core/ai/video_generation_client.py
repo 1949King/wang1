@@ -274,7 +274,7 @@ class VideoGenerationClient:
                 executed = ""
             self._tls.last_mode_executed = executed
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: video_generation_client.py", exc_info=True)
 
         return results[:count] if results else []
 
@@ -697,7 +697,7 @@ class VideoGenerationClient:
 
                     get_pool().report_failure(first_real, error=str(e))
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: video_generation_client.py", exc_info=True)
         if not cloud_paths:
             # 云端挂 → 双路退化为本地单路（诚实标记 C→L，不冒充 D）
             if local_paths:
@@ -711,7 +711,7 @@ class VideoGenerationClient:
                     get_stats().record(s.final_level)
                     self._tls.last_degradation = s.summary()
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: video_generation_client.py", exc_info=True)
             return local_paths
         # ── 双路都成：分歧实测（成本门控内才入库，§18） ──
         probe = get_probe()
@@ -729,7 +729,7 @@ class VideoGenerationClient:
 
             q_cloud = get_store().route_mean(first_real)
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: video_generation_client.py", exc_info=True)
         segments: List[Dict[str, Any]] = []
         for i in range(max(1, int(count))):
             if i < len(cloud_paths):
@@ -752,7 +752,7 @@ class VideoGenerationClient:
 
             get_pool().report_success(first_real, segments=len(cloud_paths))
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: video_generation_client.py", exc_info=True)
         self._tls.last_provider = first_real
         self._tls.last_mode_executed = "D"
         self._tls.last_fusion = provenance

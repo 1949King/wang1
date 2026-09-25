@@ -792,7 +792,7 @@ class AIEngine:
                 cost=cost, cached=cached,
             )
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: ai_engine.py", exc_info=True)
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """缓存命中统计（本次会话内存累计）。"""

@@ -115,7 +115,7 @@ def _kill_stale_agent_processes() -> int:
         if result.returncode == 0:
             killed = 1
     except Exception:
-        pass
+        logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
     return killed
 
 
@@ -214,7 +214,7 @@ class CanvasAgentRuntime:
                 try:
                     on_progress(msg)
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
 
         with self._lock:
             if self.is_listening() and self.token:
@@ -304,7 +304,7 @@ class CanvasAgentRuntime:
                         if p.port:
                             self.port = int(p.port)
                     except Exception:
-                        pass
+                        logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
                     self._save_session()
                     for _ in range(40):
                         if self.is_listening():
@@ -345,7 +345,7 @@ class CanvasAgentRuntime:
                             if p.port:
                                 self.port = int(p.port)
                         except Exception:
-                            pass
+                            logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
                         self._save_session()
                         return True, f"Agent 已连接就绪: {self.url}"
             time.sleep(0.25)
@@ -379,7 +379,7 @@ class CanvasAgentRuntime:
             try:
                 self._proc.terminate()
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
         self._proc = None
 
     def warmup_async(
@@ -395,7 +395,7 @@ class CanvasAgentRuntime:
                 try:
                     on_done(ok, msg)
                 except Exception:
-                    pass
+                    logger.debug("忽略异常（原为 pass）: canvas_agent_runtime.py", exc_info=True)
 
         threading.Thread(target=_run, name="CanvasAgentWarmup", daemon=True).start()
 

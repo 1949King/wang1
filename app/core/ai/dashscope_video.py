@@ -91,7 +91,7 @@ def _http_json(method: str, url: str, headers: Dict[str, str],
         try:
             detail = e.read().decode("utf-8", errors="replace")[:400]
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: dashscope_video.py", exc_info=True)
         raise RuntimeError(f"DashScope HTTP {e.code}: {detail}") from e
 
 

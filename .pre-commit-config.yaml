@@ -8,6 +8,23 @@
 #   3) 之后每次 commit 自动跑；首次会下载 ruff，稍慢。
 # 详见 docs/现行技术文档.md §11「代码审查标准」（单一事实源）
 # ============================================================
+#
+# ── 2026-09-25 增补：把项目自带的「守卫」接进卡点 ──────────────
+# 背景（技术债报告 §2.2 S1 的教训）：本项目的守卫脚本一直存在，
+# 但**全靠手动执行**，结果是「有守卫的地方守住了，没守的地方全漂了」。
+# 典型证据：冻结区 85 锁点因为有纪律而完好；而单文件规模、稳定性、
+# 双库一致性三个守卫长期没跑 ⇒ 双库已复漂 23 个文件。
+#
+# 本次增补的四道本地卡点（都用 language: system 直接跑仓库内脚本）：
+#   1. frozen-zone-guard  冻结区哈希      —— 动了保护区立刻红
+#   2. stability-gate     稳定性棘轮      —— 只许减不许增（含静默异常/裸print）
+#   3. glue-contract      粘合层契约等价性 —— 跨线字段改坏立刻红
+#   4. arch-guard         架构分层纪律    —— 跨层调用拦截
+#
+# 注意：需要 python 在 PATH 上；本项目请用 .venv312\Scripts\python.exe
+#   Windows:  set PATH=D:\拾光剪影\.venv312\Scripts;%PATH%
+#   或直接把 entry 改成绝对路径。
+# ============================================================
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -20,3 +37,43 @@ repos:
         files: ^(app/modules/lego|app/core|ai_tools)/
       - id: ruff-format
         files: ^(app/modules/lego|app/core|ai_tools)/
+
+  - repo: local
+    hooks:
+      # ① 冻结区：9 zone / 85 锁点的哈希基线。动了保护区直接红。
+      - id: frozen-zone-guard
+        name: 冻结区守护（85 锁点哈希）
+        entry: python scripts/frozen_zone_guard.py
+        language: system
+        pass_filenames: false
+        files: ^(app/|vendor/shiguang-canvas/src/|scripts/)
+
+      # ② 稳定性棘轮：存量入基线，只许减不许增。
+      #    覆盖 裸except / 静默except / product-print / 未定义名 四类。
+      #    注意：app/temp 等 gitignore 草稿目录已在脚本内排除（见 SKIP_DIRS 注释）。
+      - id: stability-gate
+        name: 稳定性门禁（存量棘轮，只减不增）
+        entry: python scripts/stability_gate.py
+        language: system
+        pass_filenames: false
+        files: \.py$
+
+      # ③ 粘合层契约：剪辑↔画布↔生成 三线交汇处的字段与溯源。
+      #    核心是「等价性断言」——契约层输出必须与既有实现逐字段一致，
+      #    保证「只新增不改行为」。改坏立刻红。
+      - id: glue-contract
+        name: 粘合层契约（跨线字段等价性）
+        entry: python _verify/check_glue_contract.py
+        language: system
+        pass_filenames: false
+        files: ^(app/core/(glue|editor_canvas_link|canvas_bridge|canvas_server|canvas_gen_jobs|canvas_aigc)|vendor/shiguang-canvas/src/(bridge|projectZip|comfyToCanvas))\.(py|ts)$
+
+      # ④ 架构守护：分层黑白名单（UI 层不得写业务逻辑等）。
+      #    ⚠️ 必须传 --scan，否则脚本只打印 usage 空转（实测发现：
+      #       无参时 exit=0 但一次都没扫，是「看起来有守卫」的典型）。
+      - id: arch-guard
+        name: 架构守护（分层纪律）
+        entry: python scripts/arch_guard.py --scan app
+        language: system
+        pass_filenames: false
+        files: ^app/

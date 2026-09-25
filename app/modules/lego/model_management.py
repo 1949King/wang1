@@ -236,7 +236,7 @@ class ModelManagementModule(QWidget):
             from app.modules.lego.model_config import save_active_provider
             save_active_provider(provider_id)
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: model_management.py", exc_info=True)
         try:
             from .core import EventBus, EventType
             EventBus.get_instance().emit(
@@ -244,7 +244,7 @@ class ModelManagementModule(QWidget):
                 {"provider": provider_id, "name": provider_name},
             )
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: model_management.py", exc_info=True)
 
     def _on_config_saved(self, provider_id: str, config: dict[str, Any]):
         provider_name = (PROVIDERS.get(provider_id) or self._custom_providers.get(provider_id) or {}).get("name", provider_id)
@@ -266,7 +266,7 @@ class ModelManagementModule(QWidget):
                 from app.modules.lego.model_config import save_active_provider
                 save_active_provider(provider_id)
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: model_management.py", exc_info=True)
             try:
                 from .core import EventBus, EventType
                 EventBus.get_instance().emit(
@@ -274,7 +274,7 @@ class ModelManagementModule(QWidget):
                     {"provider": provider_id, "name": provider_name},
                 )
             except Exception:
-                pass
+                logger.debug("忽略异常（原为 pass）: model_management.py", exc_info=True)
         else:
             self._status_bar.showMessage(f"✅ {provider_name} 配置已保存", 3000)
 
@@ -404,7 +404,7 @@ class ModelManagementModule(QWidget):
             if switched:
                 self._active_provider = switched
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: model_management.py", exc_info=True)
         self._restore_active_state()
 
     def on_deactivated(self):

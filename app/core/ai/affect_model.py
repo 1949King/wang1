@@ -42,6 +42,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "AffectWeights",
     "AffectState",
@@ -485,7 +489,7 @@ class AffectState:
                 score=self.last.get("trust", 0.5),
             )
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: affect_model.py", exc_info=True)
 
     def load(self) -> None:
         """启动时恢复最近一条内心状态（只调一次）。"""
@@ -500,7 +504,7 @@ class AffectState:
                     self.restore(content)
                 break
         except Exception:
-            pass
+            logger.debug("忽略异常（原为 pass）: affect_model.py", exc_info=True)
 
 
 # 模块级单例
