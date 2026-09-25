@@ -10,10 +10,8 @@ import stat
 import hashlib
 import time
 import random
-import string
 import secrets
 from typing import Optional, List, Dict, Any, Set, Tuple
-from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -241,7 +239,7 @@ class PathSecurityChecker:
         
         if not is_allowed:
             result.errors.append(
-                f"文件路径不在允许的目录范围内"
+                "文件路径不在允许的目录范围内"
             )
     
     def _check_filename(self, result: PathSecurityResult):
@@ -666,7 +664,7 @@ class PasswordHasher:
         if not hashed:
             return True
         try:
-            import bcrypt
+            import bcrypt  # noqa: F401  仅检测可用性：能 import 即说明 bcrypt 路径可走
             return not hashed.startswith("$2")
         except ImportError:
             return False  # bcrypt不可用，无需升级
@@ -878,9 +876,9 @@ class DataSanitizer:
     
     @staticmethod
     def mask_api_key(api_key: str) -> str:
-        """掩码API密钥"""
+        """掩码API密钥：保留前 4 位（如 sk-1）便于用户辨认是哪把 key，展示后 4 位供校验"""
         if len(api_key) >= 8:
-            return f"{api_key[:2]}***{api_key[-4:]}"
+            return f"{api_key[:4]}***{api_key[-4:]}"
         return api_key
 
 

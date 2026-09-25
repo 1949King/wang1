@@ -148,6 +148,31 @@ class PluginStore:
         # 初始化官方商品
         init_official_items(self)
     
+    @staticmethod
+    def _write_json_if_changed(path: str, items: list) -> bool:
+        """内容没变就不写盘（忽略 updated_at）。
+
+        背景：模块级 `plugin_store = PluginStore()` 会在 import 时经
+        init_official_items → _save_* 无条件重写 updated_at，
+        导致任何只读引用（校验脚本、门禁、E2E）都弄脏 git 工作区。
+        这里与磁盘内容对比 items 本体，未变则跳过写盘。
+        """
+        data = {
+            "items": items,
+            "updated_at": datetime.now().isoformat()
+        }
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    old = json.load(f)
+                if old.get("items") == items:
+                    return False
+        except Exception as e:
+            logger.debug("读取旧商店数据失败（将直接写入）: %s", e)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+
     def _load_local_items(self):
         """加载本地商品数据"""
         items_file = os.path.join(self._data_dir, "items.json")
@@ -160,16 +185,12 @@ class PluginStore:
                     self._items[item.id] = item
             except Exception as e:
                 logger.warning(f"加载商品数据失败: {e}")
-    
+
     def _save_local_items(self):
-        """保存本地商品数据"""
+        """保存本地商品数据（内容未变则不写盘）"""
         items_file = os.path.join(self._data_dir, "items.json")
-        data = {
-            "items": [item.to_dict() for item in self._items.values()],
-            "updated_at": datetime.now().isoformat()
-        }
-        with open(items_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        self._write_json_if_changed(
+            items_file, [item.to_dict() for item in self._items.values()])
     
     def _load_installed_items(self):
         """加载已安装商品"""
@@ -188,14 +209,10 @@ class PluginStore:
                 logger.warning(f"加载已安装商品失败: {e}")
     
     def _save_installed_items(self):
-        """保存已安装商品"""
+        """保存已安装商品（内容未变则不写盘）"""
         installed_file = os.path.join(self._data_dir, "installed.json")
-        data = {
-            "items": [item.to_dict() for item in self._installed_items.values()],
-            "updated_at": datetime.now().isoformat()
-        }
-        with open(installed_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        self._write_json_if_changed(
+            installed_file, [item.to_dict() for item in self._installed_items.values()])
     
     def fetch_store_items(self, force: bool = False) -> List[StoreItem]:
         """从商店获取商品列表"""

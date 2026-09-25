@@ -86,12 +86,17 @@ class TestBeatSplit:
         assert cuts == [2.0, 4.0]
 
     def test_funclip_autoclip_call_highlight_helpers(self):
-        src = Path(__file__).resolve().parents[1] / "modules" / "lego" / "editor_module.py"
-        text = src.read_text(encoding="utf-8")
-        assert "detect_scene_segments" in text
-        assert "detect_motion_segments" in text
+        # autoclip 调用点随 mixin 拆分从 editor_module.py 迁到 editor_ai_process_mixin.py；
+        # 断言「调用点存在 + 实现函数存在」而非绑定单一文件
+        base = Path(__file__).resolve().parents[1] / "modules" / "lego"
+        mixin_text = (base / "editor_ai_process_mixin.py").read_text(encoding="utf-8")
+        assert "detect_scene_segments" in mixin_text, "autoclip 场景检测调用点丢失"
+        assert "detect_motion_segments" in mixin_text, "autoclip 运动检测调用点丢失"
         grab = Path(__file__).resolve().parents[1] / "core" / "highlight_detect.py"
-        assert "cap.grab()" in grab.read_text(encoding="utf-8")
+        grab_text = grab.read_text(encoding="utf-8")
+        assert "def detect_scene_segments(" in grab_text
+        assert "def detect_motion_segments(" in grab_text
+        assert "cap.grab()" in grab_text
 
 
 @pytest.mark.unit

@@ -49,7 +49,8 @@ if sys.platform == "win32":
         # DEBUG: 暂时不禁用控制台，方便排查问题
         # ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
     except Exception as e:
-        print(f"[main_qt6] Windows API 初始化警告: {e}")
+        # logger 在下方 :59 才初始化，此处用 lastResort 保障可见
+        logging.getLogger(__name__).warning("[main_qt6] Windows API 初始化警告: %s", e)
 
 from .core.log_manager import setup_logging
 
@@ -380,7 +381,7 @@ class DependencyChecker:
         if gpu["available"]:
             logger.info(f"GPU: ✅ {gpu['type']} - {gpu['name']}")
         else:
-            logger.warning(f"GPU: ⚠️ 未检测到GPU加速")
+            logger.warning("GPU: ⚠️ 未检测到GPU加速")
 
         logger.info("=" * 50)
 
@@ -860,11 +861,11 @@ class Application:
     def _safe_print(msg: str) -> None:
         """安全打印，自动处理 GBK 编码问题"""
         try:
-            print(msg)
+            print(msg)  # stability-gate: allow-print（有意：GBK 控制台兜底工具的实现本体）
         except UnicodeEncodeError:
             # 回退：用 ASCII 安全字符替换
             safe = msg.encode('gbk', errors='replace').decode('gbk', errors='replace')
-            print(safe)
+            print(safe)  # stability-gate: allow-print（有意：同上）
 
     def _acquire_single_instance(self) -> bool:
         """单实例守卫：若已有实例在跑，通知其激活窗口并让本进程退出。
@@ -1027,9 +1028,9 @@ def main():
     except Exception as e:
         logger.critical(f"应用启动失败: {e}", exc_info=True)
         try:
-            print(f"\n应用启动失败: {e}")
+            print(f"\n应用启动失败: {e}")  # stability-gate: allow-print（有意：logger 也可能未就绪时的最后可见输出）
         except UnicodeEncodeError:
-            print(f"\n[ERROR] 应用启动失败: {e}")
+            print(f"\n[ERROR] 应用启动失败: {e}")  # stability-gate: allow-print（有意：同上）
         traceback.print_exc()
         return 1
 

@@ -13,7 +13,7 @@ import io
 import json
 import os
 import sys
-import threading
+import tempfile
 import time
 import types
 import urllib.error
@@ -55,8 +55,14 @@ class _FakeStore:
 stub.CharacterStore = _FakeStore
 sys.modules.setdefault("app.modules.lego.character_management_module", stub)
 
-import app.core.canvas_bridge as cb  # noqa: E402  先导入，避开循环导入
-import app.core.canvas_server as cs  # noqa: E402
+import app.core.canvas_bridge as cb  # 先导入，避开循环导入
+import app.core.canvas_server as cs
+
+# 校验只读化：把画布插件清单重定向到临时目录。
+# 直接跑生产路径会写 ~/.video_editor_cache/canvas_plugins.json（用户真实插件清单），
+# 既污染环境，又在受限沙箱里 Permission denied 让 install/toggle/uninstall 假失败。
+_TMP_PLUGINS_DIR = tempfile.mkdtemp(prefix="canvas_plugins_e2e_")
+cb._CANVAS_PLUGINS_JSON = os.path.join(_TMP_PLUGINS_DIR, "canvas_plugins.json")
 
 TOKEN = cs._SESSION_TOKEN
 

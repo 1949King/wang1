@@ -135,7 +135,7 @@ def main() -> int:
         return 0
 
     if not HASHES.is_file():
-        print(f"缺少基线，请先: python scripts/frozen_zone_guard.py --update")
+        print("缺少基线，请先: python scripts/frozen_zone_guard.py --update")
         return 2
 
     baseline = json.loads(HASHES.read_text(encoding="utf-8")).get("hashes") or {}

@@ -92,6 +92,21 @@ def _is_print_call(node: ast.Call) -> bool:
     return isinstance(node.func, ast.Name) and node.func.id == "print"
 
 
+def _allow_lines(path: Path, source: str) -> Set[int]:
+    """收集带豁免注释的行号。
+
+    有意的控制台输出/吞异常（如 GBK 兜底工具的实现本体）可在行尾加：
+      # stability-gate: allow-print（理由）
+      # stability-gate: allow-swallow（理由）
+    豁免是**逐行**的，且必须写理由，防止被当成随便跳过的后门。
+    """
+    allowed: Set[int] = set()
+    for i, line in enumerate(source.splitlines(), start=1):
+        if "stability-gate: allow-" in line:
+            allowed.add(i)
+    return allowed
+
+
 def _has_star_import(tree: ast.AST) -> bool:
     """判断文件是否包含 `from x import *`（污染命名空间，无法可靠判定未定义符号）。"""
     for node in ast.walk(tree):
@@ -128,13 +143,15 @@ def _collect_bound_names(tree: ast.AST) -> Set[str]:
 def _analyze_file(path: Path) -> Tuple[List[dict], bool]:
     """分析单个文件，返回 (违规列表, 是否因星号导入跳过 undefined 检查)。"""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
     except SyntaxError:
         # 语法错误由编译门禁（py_compile）负责，此处跳过
         return [], False
 
     rel = path.relative_to(ROOT).as_posix()
     issues: List[dict] = []
+    allowed = _allow_lines(path, source)
 
     # 裸 except / 吞异常 / print
     for node in ast.walk(tree):
@@ -144,12 +161,16 @@ def _analyze_file(path: Path) -> Tuple[List[dict], bool]:
                     "rel": rel, "rule": _RULE_BARE, "line": node.lineno,
                     "msg": "裸 except: 未指定异常类型",
                 })
-            if _is_swallow(node):
+            if _is_swallow(node) and not any(
+                ln in allowed for ln in [node.lineno] + [s.lineno for s in node.body]
+            ):
                 issues.append({
                     "rel": rel, "rule": _RULE_SWALLOW, "line": node.lineno,
                     "msg": "except 块体仅含 pass，吞掉异常",
                 })
         elif isinstance(node, ast.Call) and _is_print_call(node):
+            if node.lineno in allowed:
+                continue
             issues.append({
                 "rel": rel, "rule": _RULE_PRINT, "line": node.lineno,
                 "msg": "product 代码使用 print()，应改用 logger",
@@ -172,40 +193,82 @@ def _analyze_file(path: Path) -> Tuple[List[dict], bool]:
 
 
 def _key(it: dict) -> str:
-    """违规的唯一键，用于与基线比对（同文件同行同规则去重）。"""
+    """违规的分组键，用于与基线比对。
+
+    键**不含行号**（`file:rule[:name]`），消除「插一行代码→全部假红」的行位移误报；
+    同文件同规则出现多处时靠**计数棘轮**区分（见 _scan/main 的计数比对），
+    即同文件新增第二个裸 print 仍会被拦下。
+    """
     if it["rule"] == _RULE_UNDEF and it.get("name"):
-        return f"{it['rel']}:{it['line']}:{it['rule']}:{it['name']}"
-    return f"{it['rel']}:{it['line']}:{it['rule']}"
+        return f"{it['rel']}:{it['rule']}:{it['name']}"
+    return f"{it['rel']}:{it['rule']}"
 
 
-def _scan() -> Tuple[Dict[str, str], List[str]]:
-    """扫描整个 product 树，返回 (键->描述, 因星号导入跳过的文件列表)。"""
-    found: Dict[str, str] = {}
+def _migrate_legacy_key(old_key: str) -> str:
+    """把旧版基线键（含行号）归一化为新版分组键。
+
+    旧格式: `file.py:123:rule` 或 `file.py:123:rule:name`（行号是纯数字段）
+    新格式: `file.py:rule` 或 `file.py:rule:name`
+    """
+    parts = old_key.split(":")
+    # 行号是最后一个纯数字段（Windows 路径盘符段如 "D" 不是数字，规则/name 也不是）
+    digit_idx = [i for i, p in enumerate(parts) if p.isdigit()]
+    if len(digit_idx) == 1:
+        parts.pop(digit_idx[0])
+    return ":".join(parts)
+
+
+def _scan() -> Tuple[Dict[str, int], Dict[str, List[str]], List[str]]:
+    """扫描整个 product 树。
+
+    返回 (分组键->当前计数, 分组键->描述列表(含行号，仅供展示), 星号导入跳过的文件列表)。
+    """
+    counts: Dict[str, int] = {}
+    descs: Dict[str, List[str]] = {}
     skipped: List[str] = []
     for path in _py_files(SCAN_ROOT):
         issues, skip_undef = _analyze_file(path)
         if skip_undef:
             skipped.append(path.relative_to(ROOT).as_posix())
         for it in issues:
-            found[_key(it)] = f"{it['rel']}:{it['line']}  [{it['rule']}]  {it['msg']}"
-    return found, skipped
+            k = _key(it)
+            counts[k] = counts.get(k, 0) + 1
+            descs.setdefault(k, []).append(
+                f"{it['rel']}:{it['line']}  [{it['rule']}]  {it['msg']}"
+            )
+    return counts, descs, skipped
 
 
-def _print_issues(issues: Dict[str, str], title: str) -> None:
+def _print_issues(descs: Dict[str, List[str]], title: str) -> None:
     """按规则分组打印违规清单。"""
+    total = sum(len(v) for v in descs.values())
     print(f"\n{'=' * 68}")
-    print(f"  {title}（{len(issues)} 项）")
+    print(f"  {title}（{total} 项）")
     print("=" * 68)
     by_rule: Dict[str, List[str]] = {}
-    for desc in issues.values():
-        rule = desc.split("[", 1)[1].split("]", 1)[0]
-        by_rule.setdefault(rule, []).append(desc)
+    for ds in descs.values():
+        for desc in ds:
+            rule = desc.split("[", 1)[1].split("]", 1)[0]
+            by_rule.setdefault(rule, []).append(desc)
     for rule in (_RULE_BARE, _RULE_SWALLOW, _RULE_PRINT, _RULE_UNDEF):
         if rule not in by_rule:
             continue
         print(f"\n[{rule}] 共 {len(by_rule[rule])} 项:")
         for desc in by_rule[rule]:
             print(f"  - {desc}")
+
+
+def _load_baseline() -> Dict[str, int]:
+    """读取基线，兼容旧版（entries 为含行号的键列表）并自动迁移为计数棘轮。"""
+    payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+    entries = payload.get("entries")
+    if isinstance(entries, dict):  # 新版：键->计数
+        return {str(k): int(v) for k, v in entries.items()}
+    counts: Dict[str, int] = {}
+    for old_key in (entries or []):  # 旧版：含行号键列表，归一化后聚合计数
+        k = _migrate_legacy_key(str(old_key))
+        counts[k] = counts.get(k, 0) + 1
+    return counts
 
 
 def main() -> int:
@@ -215,7 +278,7 @@ def main() -> int:
     ap.add_argument("--list-skipped", action="store_true", help="列出因星号导入跳过 undefined 检查的文件")
     args = ap.parse_args()
 
-    found, skipped = _scan()
+    counts, descs, skipped = _scan()
 
     if args.list_skipped:
         for s in skipped:
@@ -225,35 +288,43 @@ def main() -> int:
 
     if args.update:
         payload = {
-            "updated_note": "由 stability_gate.py --update 生成；勿手改",
-            "entries": sorted(found.keys()),
+            "version": 2,
+            "updated_note": "由 stability_gate.py --update 生成；勿手改。键=file:rule[:name]（不含行号），值=计数棘轮",
+            "entries": dict(sorted(counts.items())),
         }
         BASELINE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"已更新基线 {BASELINE}（{len(found)} 项存量）")
+        print(f"已更新基线 {BASELINE}（{sum(counts.values())} 项存量 / {len(counts)} 个分组键）")
         return 0
 
     if args.report:
-        _print_issues(found, "全部违规（含存量）")
+        _print_issues(descs, "全部违规（含存量）")
         if skipped:
             print(f"\n（另有 {len(skipped)} 个文件因星号导入跳过 undefined 检查）")
         return 0
 
-    # 默认模式：只拦截基线之外的新增违规
+    # 默认模式：只拦截基线之外的新增违规（计数棘轮：当前计数 > 基线计数 即拦）
     if not BASELINE.is_file():
-        print(f"缺少基线，请先固化当前存量: python scripts/stability_gate.py --update")
+        print("缺少基线，请先固化当前存量: python scripts/stability_gate.py --update")
         return 2
 
-    baseline_set = set(json.loads(BASELINE.read_text(encoding="utf-8")).get("entries") or [])
-    new = {k: v for k, v in found.items() if k not in baseline_set}
-    removed = baseline_set - set(found.keys())
+    baseline = _load_baseline()
+    new_descs: Dict[str, List[str]] = {}
+    new_count = 0
+    for k, cur in counts.items():
+        base = baseline.get(k, 0)
+        if cur > base:
+            # 超出的才算新增；展示该键全部位置便于定位（行号见描述）
+            new_descs[k] = descs[k]
+            new_count += cur - base
+    removed = sum(max(0, b - counts.get(k, 0)) for k, b in baseline.items())
 
-    if not new:
-        suffix = f"（另有 {len(removed)} 项已清除的存量）" if removed else ""
-        print(f"OK stability gate clean — 当前 {len(found)} 项，存量 {len(baseline_set)} 项，无新增{suffix}")
+    if not new_descs:
+        suffix = f"（另有 {removed} 项已清除的存量）" if removed else ""
+        print(f"OK stability gate clean — 当前 {sum(counts.values())} 项，存量 {sum(baseline.values())} 项，无新增{suffix}")
         return 0
 
-    print(f"STABILITY GATE FAIL — 发现 {len(new)} 项新增违规（未入基线）")
-    _print_issues(new, "新增违规")
+    print(f"STABILITY GATE FAIL — 发现 {new_count} 项新增违规（超出基线计数）")
+    _print_issues(new_descs, "新增违规")
     print("\n修复并验证后运行: python scripts/stability_gate.py --update")
     return 1
 

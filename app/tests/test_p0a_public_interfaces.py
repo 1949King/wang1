@@ -7,7 +7,6 @@ P0-A 验证：EditorCapabilityHandlers 走的是 agent_xxx 公开接口
 from __future__ import annotations
 
 import inspect
-from typing import Any
 
 
 def _import_capability_handlers():
@@ -43,13 +42,24 @@ def test_editor_handler_source_calls_public_methods():
         assert pat in src, f"handler 应调用公开方法: {pat}"
 
 
+def _editor_full_src() -> str:
+    """EditorModule 的「全量源码」：editor_module.py + 全部 editor_*_mixin.py。
+
+    方法随 mixin 拆分分布在多个文件（如 _get_agent_timeline_context 在
+    editor_agent_panel_mixin.py），单文件源码 grep 必然腐化；
+    拼接后「公开方法存在 + 委托私有方法」的结构断言仍然有效。
+    """
+    import pathlib as _pl
+    base = _pl.Path(__file__).resolve().parent.parent / "modules" / "lego"
+    src = (base / "editor_module.py").read_text(encoding="utf-8")
+    for mixin in sorted(base.glob("editor_*_mixin.py")):
+        src += "\n" + mixin.read_text(encoding="utf-8")
+    return src
+
+
 def test_editor_module_has_all_agent_public_methods():
     """EditorModule 上应存在 5 个 agent_xxx 公开方法。"""
-    # 不直接 import EditorModule（太重），改用源码检查
-    import subprocess as _sp
-    import pathlib as _pl
-    editor_path = _pl.Path(__file__).resolve().parent.parent / "modules" / "lego" / "editor_module.py"
-    src = editor_path.read_text(encoding="utf-8")
+    src = _editor_full_src()
 
     expected_methods = [
         "def agent_split_clip(",
@@ -64,9 +74,7 @@ def test_editor_module_has_all_agent_public_methods():
 
 def test_agent_methods_delegate_to_private():
     """每个 agent_xxx 方法应 try/except + 委托私有方法。"""
-    import pathlib as _pl
-    editor_path = _pl.Path(__file__).resolve().parent.parent / "modules" / "lego" / "editor_module.py"
-    src = editor_path.read_text(encoding="utf-8")
+    src = _editor_full_src()
 
     pairs = [
         ("agent_split_clip", "_split_clip_at_time"),

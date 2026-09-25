@@ -19,7 +19,6 @@
 """
 from __future__ import annotations
 
-import argparse
 import io
 import os
 import re
@@ -31,8 +30,8 @@ CORE = os.path.join(ROOT, "app", "core")
 if CORE not in sys.path:
     sys.path.insert(0, CORE)
 
-import glue  # noqa: E402
-import editor_canvas_link as ecl  # noqa: E402
+import glue
+import editor_canvas_link as ecl
 
 PASS = []
 FAIL = []

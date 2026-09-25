@@ -15,7 +15,7 @@ import sys
 import re
 import json
 import argparse
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -176,7 +176,7 @@ class ArchitectureGuard:
     def scan_directory(self, directory: str, action: str = "modify") -> List[Dict[str, Any]]:
         """扫描目录"""
         results = []
-        for root, dirs, files in os.walk(os.path.join(self.project_root, directory)):
+        for root, _dirs, files in os.walk(os.path.join(self.project_root, directory)):
             for file in files:
                 file_path = os.path.join(root, file)
                 result = self.scan_file(file_path, action)

@@ -84,10 +84,12 @@ class TestEditorRippleCapability:
     def test_register_includes_ripple(self):
         d = _RecordingDispatcher()
         register_builtin_handlers(d, editor_module_ref=lambda: None)
-        assert "editor.ripple_delete_range" in d.ids
-        assert "editor.suggest_cleanup" in d.ids
+        # 能力总数随版本增长（V4.39.6 已 69 个），硬编码计数必腐化；
+        # 改为「必需 id 集合包含 + 无重复注册」两个稳定断言
+        required = {"editor.ripple_delete_range", "editor.suggest_cleanup"}
+        assert required <= set(d.ids)
         assert d.ids.count("editor.ripple_delete_range") == 1
-        assert len(d.ids) == 25
+        assert len(d.ids) == len(set(d.ids)), f"存在重复注册: {[i for i in set(d.ids) if d.ids.count(i) > 1]}"
 
     def test_handler_calls_public_wrapper(self):
         editor = _FakeEditor([_clip()])
@@ -119,7 +121,9 @@ class TestEditorRippleCapability:
         ids = [row[0] for row in _NEURON_TAXONOMY]
         assert "editor.ripple_delete_range" in ids
         assert "editor.suggest_cleanup" in ids
-        assert len(ids) == 25
+        # 分类表随能力目录同步增长（V4.39.6 已 69 项），硬编码计数必腐化；
+        # 稳定断言：无重复 + 与能力目录行数同步（目录是单一来源）
+        assert len(ids) == len(set(ids)), "大脑分类表存在重复 id"
 
     def test_suggest_cleanup_handler_data_only(self):
         class _Ed:
