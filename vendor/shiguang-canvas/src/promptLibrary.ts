@@ -182,6 +182,12 @@ export const DEFAULT_PROMPT_SOURCES: PromptSource[] = [
     false,
   ),
   localAssetSource(
+    "shiguang-avatar-pack",
+    "拾光·虚拟形象包",
+    "shiguang-avatar.json",
+    false,
+  ),
+  localAssetSource(
     "shiguang-adult-18plus",
     "拾光·成人向 18+（细分类）",
     "shiguang-adult-18plus.json",

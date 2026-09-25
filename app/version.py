@@ -10,36 +10,40 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.39.4"
+__version__ = "4.39.5"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 39,
-    "patch": 4,
-    "codename": "技术债止血：单文件规模守卫 + UI 归属与依赖纪律固化",
+    "patch": 5,
+    "codename": "虚拟形象提示词包（12 条：定妆卡 / 动态视频 / 首帧图）",
     "release_date": "2026-09-25",
     "description": (
-        "V4.39.4: 按用户要求「明确的技术债能优化一点就优化一点」，"
-        "本轮做**零风险高价值**的两件（不动高风险重构）。"
-        "★ ① 新增单文件规模守卫 `_verify/check_file_size.py`（阈值 2000 行）："
-        "把存量 12 个超标文件（editor_module.py 9,717 · Stage3D.tsx 4,660 · "
-        "riggedHumanoid.ts 3,707 · CanvasShell.tsx 3,199 · canvas_server.py 3,273 · "
-        "canvas_aigc.py 2,905 · store.ts 2,452 · settings_module.py 2,823 · "
-        "video_processor.py 2,732 · editor_agent_panel_mixin.py 2,330 · "
-        "extensions_module.py 2,198 · drama_understanding_engine.py 2,160）"
-        "**冻结为基线，只许减不许增**，并已通过**负向测试**（造 2100 行文件 → 正确 FAIL）。"
-        "这是**唯一能阻止 9,717 行继续变大的机制**（09-19 时 9,479 → 仍在涨）。"
-        "★ ② 在《现行技术文档》新增 §2b，固化两件被反复误读的事实："
-        "（a）**UI 归属真相**——不是「双前端」，而是「一个 Qt 桌面壳 + 一份 React 画布"
-        "源码（vendor/shiguang-canvas）× 两个宿主」（engine=shiguang 走 WebEngine 嵌入 / "
-        "engine=tauri 走独立进程），且副库 vendor/AI-Canvas-tauri **未被 git 跟踪**，"
-        "改前必须备份；（b）**依赖升级纪律**——patch 直接打 / minor 需回归 / MAJOR 禁盲升，"
-        "含「numpy 1.26.4 被 numba 与 opencv/torch ABI 钉死」这条硬约束。"
-        "★ 待用户授权的债：前端 37 处 tsc 存量错误性质已查明（绝大多数是 "
-        "`Object3D | null` vs `| undefined` 的类型标注不一致，**纯类型、运行时零影响**），"
-        "但受影响文件 Stage3D.tsx / riggedHumanoid.ts **在冻结区 stage3d-core 内**，"
-        "须获「解冻 stage3d-core」授权才能修。"
-        "★ 验证：SIZE 守卫 PASS（含负向测试）；run_all_checks 全绿。"
+        "V4.39.5: 新增「拾光·虚拟形象包」——供项目生成女性虚拟形象动态视频的"
+        "参考提示词库（用户需求：漂亮好看的女性虚拟形象动态视频）。"
+        "★ 产出 `vendor/shiguang-canvas/public/prompts/shiguang-avatar.json`"
+        "（12 条，三组）："
+        "① 定妆三视图 / 面部锚定特写 / 全身比例设定（category=consistency，"
+        "供 character_anchor 跨镜头一致性锚定）；"
+        "② 7 条动态视频（口播播报 / 窗边侧光静立 / 转身回眸 / 走向镜头 / "
+        "微笑抬头特写 / 霓虹光影扫过 / 国风执扇回眸），每条都含**动作 + 动态细节"
+        "（发丝/衣料/呼吸/微表情）+ 镜头运动**；"
+        "③ 2 条图生视频首帧（半身正面留白 / 动态预备姿势）。"
+        "★ 格式严格对齐现有包：5 字段（id/title/category/tags/prompt），"
+        "已实测**字段集合与 shiguang-drama.json 完全一致**；"
+        "技术提示（画幅/时长/渠道类型）写进 tags（t2v/i2v、5s/10s、9:16/16:9）"
+        "以保持格式兼容。"
+        "★ 两个质量校验：全部条目 prompt **明确标注「成年女性」**（合规，"
+        "沿用项目既有惯例）；7 条动态条目**全部含动态要素**（动作/镜头/飘动/变化）。"
+        "★ 关键接线：新提示词包必须注册进 `promptLibrary.ts` 的本地包清单，"
+        "否则前端**读不到**（与 Agent 能力四处接线同理）——已注册 `shiguang-avatar-pack`。"
+        "★ 双库同步：先 diff 证明副库 `src/libtv/promptLibrary.ts` 与主库本次改动前"
+        "完全一致（仅差本次 6 行）⇒ 安全同步（备份 `.bak-avatar` + 补 6 行 + 复制"
+        "提示词包到副库 public/prompts 与 dist/prompts）⇒ 双库校验回到基线"
+        "（一致 64 / 分叉 22 / 缺失 16，exit=0）。"
+        "★ 验证：vitest 76 例全过（批量 7 文件 68 例 + MagneticEngine 单跑 8 例，"
+        "沙箱少收集为已知现象）；tsc 37 处 = 文档基线；vite build 成功；"
+        "守卫 85 locks intact。"
     ),
 }
