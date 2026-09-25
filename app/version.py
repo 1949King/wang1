@@ -10,40 +10,37 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.39.5"
+__version__ = "4.39.7"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 39,
-    "patch": 5,
-    "codename": "虚拟形象提示词包（12 条：定妆卡 / 动态视频 / 首帧图）",
-    "release_date": "2026-09-25",
+    "patch": 7,
+    "codename": "P0 整改：卡点真生效 + 门禁去假红 + 红测试清零",
+    "release_date": "2026-09-26",
     "description": (
-        "V4.39.5: 新增「拾光·虚拟形象包」——供项目生成女性虚拟形象动态视频的"
-        "参考提示词库（用户需求：漂亮好看的女性虚拟形象动态视频）。"
-        "★ 产出 `vendor/shiguang-canvas/public/prompts/shiguang-avatar.json`"
-        "（12 条，三组）："
-        "① 定妆三视图 / 面部锚定特写 / 全身比例设定（category=consistency，"
-        "供 character_anchor 跨镜头一致性锚定）；"
-        "② 7 条动态视频（口播播报 / 窗边侧光静立 / 转身回眸 / 走向镜头 / "
-        "微笑抬头特写 / 霓虹光影扫过 / 国风执扇回眸），每条都含**动作 + 动态细节"
-        "（发丝/衣料/呼吸/微表情）+ 镜头运动**；"
-        "③ 2 条图生视频首帧（半身正面留白 / 动态预备姿势）。"
-        "★ 格式严格对齐现有包：5 字段（id/title/category/tags/prompt），"
-        "已实测**字段集合与 shiguang-drama.json 完全一致**；"
-        "技术提示（画幅/时长/渠道类型）写进 tags（t2v/i2v、5s/10s、9:16/16:9）"
-        "以保持格式兼容。"
-        "★ 两个质量校验：全部条目 prompt **明确标注「成年女性」**（合规，"
-        "沿用项目既有惯例）；7 条动态条目**全部含动态要素**（动作/镜头/飘动/变化）。"
-        "★ 关键接线：新提示词包必须注册进 `promptLibrary.ts` 的本地包清单，"
-        "否则前端**读不到**（与 Agent 能力四处接线同理）——已注册 `shiguang-avatar-pack`。"
-        "★ 双库同步：先 diff 证明副库 `src/libtv/promptLibrary.ts` 与主库本次改动前"
-        "完全一致（仅差本次 6 行）⇒ 安全同步（备份 `.bak-avatar` + 补 6 行 + 复制"
-        "提示词包到副库 public/prompts 与 dist/prompts）⇒ 双库校验回到基线"
-        "（一致 64 / 分叉 22 / 缺失 16，exit=0）。"
-        "★ 验证：vitest 76 例全过（批量 7 文件 68 例 + MagneticEngine 单跑 8 例，"
-        "沙箱少收集为已知现象）；tsc 37 处 = 文档基线；vite build 成功；"
-        "守卫 85 locks intact。"
+        "V4.39.7: 按实测整改方案完成 P0 全部六项（接线和止血）。"
+        "★ P0-2 门禁去假红：stability_gate 基线键 file:line:rule → file:rule[:name]"
+        " + 计数棘轮，行位移不再假红（实测插空行 exit=0、加裸 print 必拦）；"
+        "旧基线自动迁移；新增逐行豁免注释 # stability-gate: allow-print/allow-swallow。"
+        "★ P0-3 清 11 项真违规：main_qt6 5 处 print（1 改 logger + 4 处有意的"
+        "控制台兜底加豁免注释）；director_skill/video_editing_skill 6 处"
+        " except:pass 补 logger.debug(exc_info=True)；基线 --update 后 269=269。"
+        "★ P0-4 红测试清零：能力计数硬编码 ==25 ×2 改集合包含+无重复断言；"
+        "两个源码 grep 测试改结构断言（mixin 拼接全量源码 / 跟随 mixin 迁移的"
+        "真实调用点）；mask_api_key 按裁定改留前 4 位（sk-1***cdef）。"
+        "pytest 349/349 全绿。"
+        "★ P0-5 守卫 UTF-8 化：frozen_zone_guard / stability_gate / arch_guard /"
+        " check_glue_contract 加 stdout reconfigure，GBK 控制台不再 UnicodeEncodeError。"
+        "★ P0-6 校验只读化：plugin_store 模块级单例 import 即写盘的根因修复"
+        "（_write_json_if_changed 内容未变不写）；e2e 画布插件清单重定向临时目录"
+        "（顺带修复 venv 沙箱下 install/toggle/uninstall 三项假失败）。"
+        "一键回归 53/53 全绿（venv312 解释器）。"
+        "★ P0-1 卡点真生效：pip 被沙箱硬杀装不了 pre-commit，按 §11 退路手写"
+        " .git/hooks/pre-commit 六道卡点（ruff 仅暂存文件不炸存量 + 冻结区/"
+        "稳定性/粘合层/架构/双库五守卫），空提交与真实提交均实测跑通。"
+        "★ 事故记录：ruff 0.16.3 --fix 曾意外修改 167 个存量文件，已全部还原"
+        "（保留文件经 import 级排查，仅 3 处死 import 删除保留，全文核实零使用）。"
     ),
 }

@@ -5,11 +5,13 @@
 """
 
 from .skill_engine import Skill, skill_registry, StepResult
-from typing import Dict, Any
 import os
 import subprocess
 import json
-from datetime import datetime
+import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AutoSubtitleSkill(Skill):
@@ -209,7 +211,7 @@ class SmartClipSkill(Skill):
                         "is_estimated": False,
                     }
         except Exception:
-            pass
+            logger.debug("ffprobe 探测视频信息失败，使用估计值兜底: %s", input_file, exc_info=True)
         # ffprobe 不可用/失败时的诚实兜底：明确标注为估计值，不冒充真实探测结果
         return {"duration": 60.0, "resolution": "未知（ffprobe 不可用）", "fps": 0, "is_estimated": True}
 
@@ -291,7 +293,7 @@ class SmartClipSkill(Skill):
                 try:
                     os.remove(seg_path)
                 except OSError:
-                    pass
+                    logger.debug("清理临时分段文件失败（不影响结果）: %s", seg_path, exc_info=True)
 
     def _complete(self, context):
         """完成"""
@@ -304,15 +306,31 @@ class SmartClipSkill(Skill):
 
 
 class CoverGeneratorSkill(Skill):
-    """智能生成封面图技能"""
-    
+    """智能生成封面图技能（v1.1：真实画质打分选帧 + 可选片头标题卡）
+
+    输入参数（inputs）：
+        - input_file:        str  必填，视频文件路径
+        - output_file:       str  可选，封面输出路径（默认 <视频名>_cover.jpg）
+        - title_text:        str  可选，提供后追加生成片头标题卡
+        - subtitle_text:     str  可选，标题卡副标题
+        - title_card_output: str  可选，标题卡输出路径（默认 <视频名>_titlecard.jpg）
+    """
+
     skill_id = "cover-generator"
     skill_name = "智能生成封面图"
-    skill_description = "根据视频内容智能生成封面图"
+    skill_description = "按真实画质打分（清晰度/曝光/对比度/饱和度）从 3 个候选帧选最优作封面，可选生成片头标题卡"
     skill_category = "视频处理"
     skill_icon = "🖼️"
-    skill_version = "1.0.0"
-    
+    skill_version = "1.1.0"
+
+    # CJK 字体候选（标题卡用；找不到时若标题含中文则如实跳过，不画豆腐块）
+    _FONT_CANDIDATES = (
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\msyh.ttf",
+        r"C:\Windows\Fonts\simhei.ttf",
+        r"C:\Windows\Fonts\simsun.ttc",
+    )
+
     def _setup_steps(self):
         self.add_step(
             name="检查输入文件",
@@ -327,38 +345,67 @@ class CoverGeneratorSkill(Skill):
             name="生成封面图",
             handler=self._generate_cover
         ).add_step(
+            name="生成片头卡",
+            handler=self._make_title_card,
+            condition=self._should_make_title_card,
+            dependencies=["生成封面图"]
+        ).add_step(
             name="完成",
             handler=self._complete
         )
-    
+
     def _check_input_file(self, context):
-        """检查输入文件"""
+        """检查输入文件，并同步可选输入（condition 只读 variables，参照 DirectorSkill 的写法）"""
         input_file = context.get_input("input_file")
         if not input_file or not os.path.exists(input_file):
             return StepResult(success=False, error="输入文件不存在")
         context.set_variable("input_file", input_file)
+        context.set_variable("_title_text", str(context.get_input("title_text") or "").strip())
+        context.set_variable("_subtitle_text", str(context.get_input("subtitle_text") or "").strip())
+        context.set_variable("_title_card_output", str(context.get_input("title_card_output") or "").strip())
         return StepResult(success=True)
-    
-    def _extract_keyframes(self, context):
-        """提取关键帧
 
-        修复：此前不管视频多长都写死 10s/25s/40s 三个时间点、且从不真正
-        提取任何图片文件——短视频（比如 20 秒）会挑出超出实际时长的时间点。
-        这里先用 ffprobe 读真实时长，按比例选取候选时间点；真正的图片提取
-        放到 _generate_cover 里对最终选中的一帧执行（没必要为三个候选都真提
-        取，只在确定用哪帧当封面时才落盘）。
+    def _extract_keyframes(self, context):
+        """提取关键帧候选（时间点 + 320px 代理图，供真实打分）。
+
+        修复链：
+          ① 更早版本写死 10s/25s/40s 且不抽帧（短视频会越界）；
+          ② 上一版按真实时长取 20%/50%/75% 时间点但**不抽帧**，分析步只能
+             "取中间"占位；
+          ③ 本版把 3 个候选帧**真抽成 320px 代理 JPEG**，让分析步能做
+             像素级画质打分；最终封面仍按选中时间点全分辨率重截（画质不降级）。
         """
         input_file = context.get_variable("input_file")
 
         try:
             duration = self._probe_duration(input_file)
             candidates = [round(duration * r, 2) for r in (0.2, 0.5, 0.75)]
-            keyframes = [{"time": t, "path": None} for t in candidates]
+            tmp_dir = tempfile.mkdtemp(prefix="cover_kf_")
+            keyframes = []
+            for idx, t in enumerate(candidates):
+                proxy = os.path.join(tmp_dir, f"kf_{idx}.jpg")
+                ok = self._extract_frame_file(input_file, t, proxy, width=320)
+                keyframes.append({"time": t, "path": proxy if ok else None})
             context.set_variable("keyframes", keyframes)
+            context.set_variable("_kf_tmp_dir", tmp_dir)
             context.set_variable("video_duration", duration)
             return StepResult(success=True, output={"keyframes": keyframes})
         except Exception as e:
             return StepResult(success=False, error=f"提取关键帧失败: {e}")
+
+    @staticmethod
+    def _extract_frame_file(input_file: str, t: float, out_path: str, width: int = 0) -> bool:
+        """用 ffmpeg 在 t 秒截一帧；width>0 时按比例缩宽（打分代理用小图提速）。"""
+        cmd = ["ffmpeg", "-y", "-ss", str(t), "-i", input_file, "-frames:v", "1"]
+        if width > 0:
+            cmd += ["-vf", f"scale={width}:-2"]
+        cmd += ["-q:v", "4", out_path]
+        try:
+            r = subprocess.run(cmd, shell=False, capture_output=True, timeout=30,
+                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            return r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0
+        except Exception:
+            return False
 
     def _probe_duration(self, input_file: str) -> float:
         try:
@@ -370,28 +417,113 @@ class CoverGeneratorSkill(Skill):
                 if duration > 0:
                     return duration
         except Exception:
-            pass
+            logger.debug("ffprobe 探测时长失败，使用保守默认值: %s", input_file, exc_info=True)
         return 30.0  # ffprobe 不可用时的保守默认值
 
-    def _analyze_content(self, context):
-        """分析内容
+    # ── 像素级画质打分（P1-3，2026-09-26 LibTV 对标）──────────────
 
-        如实说明：没有接入真实的计算机视觉模型分析画面内容，这里只是
-        固定的占位标签，仅用于决定选取哪个候选关键帧（取中间时间点），
-        不代表对视频内容的真实理解。
+    @staticmethod
+    def _frame_metrics(path: str):
+        """算单帧画质指标：清晰度(Laplacian方差)/平均亮度/对比度(灰度std)/饱和度。
+
+        优先 cv2（快），PIL 兜底；都不可用返回 None（调用方如实降级）。
+
+        注意：cv2.imread 在 Windows 上打不开**中文路径**（本项目目录就含
+        「拾光剪影」），必须用 np.fromfile + imdecode 读文件，否则含中文的
+        素材路径会静默返回 None、整条打分链退回占位。
         """
-        keyframes = context.get_variable("keyframes")
+        try:
+            import cv2
+            import numpy as np
+            buf = np.fromfile(path, dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_COLOR) if buf.size else None
+            if img is None:
+                return None
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            brightness = float(gray.mean())
+            contrast = float(gray.std())
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            saturation = float(hsv[..., 1].mean())
+            return {"sharpness": sharpness, "brightness": brightness,
+                    "contrast": contrast, "saturation": saturation, "engine": "cv2"}
+        except ImportError:
+            logger.debug("cv2 不可用，帧打分降级到 PIL 引擎")
+        except Exception:
+            return None
+        try:
+            from PIL import Image, ImageFilter, ImageStat
+            img = Image.open(path).convert("L")
+            stat = ImageStat.Stat(img)
+            brightness = float(stat.mean[0])
+            contrast = float(stat.stddev[0])
+            edges = img.filter(ImageFilter.FIND_EDGES)
+            sharpness = float(ImageStat.Stat(edges).mean[0]) * 10.0  # 与 cv2 量级对齐（近似）
+            # PIL 灰度图无饱和度通道，用彩色图重开
+            rgb = Image.open(path).convert("HSV")
+            saturation = float(ImageStat.Stat(rgb).mean[1])
+            return {"sharpness": sharpness, "brightness": brightness,
+                    "contrast": contrast, "saturation": saturation, "engine": "pil"}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _frame_score(m: dict) -> float:
+        """画质启发式打分（0~1）。
+
+        如实说明：这是**技术画质**打分（清晰不糊 / 曝光不崩 / 有层次 / 有色彩），
+        不是语义理解（不知道画面里是谁、美不美）。
+        """
+        s_sharp = min(1.0, m["sharpness"] / 300.0)
+        s_expo = max(0.0, 1.0 - abs(m["brightness"] - 128.0) / 128.0)
+        s_contrast = min(1.0, m["contrast"] / 64.0)
+        s_sat = min(1.0, m["saturation"] / 100.0)
+        return round(0.45 * s_sharp + 0.20 * s_expo + 0.20 * s_contrast + 0.15 * s_sat, 4)
+
+    def _analyze_content(self, context):
+        """分析内容：对 3 个候选帧做像素级画质打分，选最优作封面。
+
+        修复：上一版三个字段全是「未识别（未接入CV模型，占位值）」且策略是
+        「取候选中间的一帧」——选帧是假的。本版：cv2/PIL 真打分选最优；
+        打分引擎全部不可用时才回退中间帧，并保持 is_placeholder=True 的诚实标注。
+        """
+        keyframes = context.get_variable("keyframes") or []
 
         try:
+            scored = []
+            for kf in keyframes:
+                path = kf.get("path")
+                metrics = self._frame_metrics(path) if path and os.path.exists(path) else None
+                scored.append({
+                    "time": kf.get("time"),
+                    "path": path,
+                    "metrics": metrics,
+                    "score": self._frame_score(metrics) if metrics else -1.0,
+                })
+            best = max(scored, key=lambda s: s["score"], default=None)
+            engine = (best or {}).get("metrics", {}).get("engine") if best else None
+
+            if best and best["score"] >= 0:
+                chosen = {"time": best["time"], "path": best.get("path"),
+                          "score": best["score"], "metrics": best["metrics"]}
+                is_placeholder = False
+            else:
+                # 打分不可用（无 cv2/PIL 或抽帧全失败）→ 回退中间帧，如实标注
+                chosen = keyframes[len(keyframes) // 2] if keyframes else {"time": 1.0}
+                is_placeholder = True
+
             content_analysis = {
-                "main_subject": "未识别（未接入CV模型，占位值）",
-                "scene": "未识别（未接入CV模型，占位值）",
-                "mood": "未识别（未接入CV模型，占位值）",
+                "main_subject": "未接入语义识别（v1.1 为像素级画质选帧，非内容理解）",
+                "scene": "未接入语义识别",
+                "mood": "未接入语义识别",
                 "keywords": [],
-                "is_placeholder": True,
+                "frame_scores": [
+                    {"time": s["time"], "score": s["score"],
+                     "metrics": s["metrics"]} for s in scored
+                ],
+                "score_engine": engine or "unavailable",
+                "is_placeholder": is_placeholder,
             }
-            # 占位策略：选取候选关键帧中间的一帧作为封面
-            chosen = keyframes[len(keyframes) // 2] if keyframes else {"time": 1.0}
             context.set_variable("chosen_keyframe", chosen)
             context.set_variable("content_analysis", content_analysis)
             return StepResult(success=True, output={"content_analysis": content_analysis})
@@ -407,7 +539,6 @@ class CoverGeneratorSkill(Skill):
         返回 success=False。
         """
         input_file = context.get_variable("input_file")
-        content_analysis = context.get_variable("content_analysis")
         chosen = context.get_variable("chosen_keyframe") or {"time": 1.0}
         output_file = context.get_input("output_file") or os.path.splitext(input_file)[0] + "_cover.jpg"
 
@@ -427,13 +558,121 @@ class CoverGeneratorSkill(Skill):
         except Exception as e:
             return StepResult(success=False, error=f"生成封面图失败: {e}")
 
+    # ── 片头标题卡（P1-3 连接器第一步：选中帧 + 片名 → 创意片头图）────
+
+    def _should_make_title_card(self, variables) -> bool:
+        return bool(variables.get("_title_text"))
+
+    def _load_cjk_font(self, size: int):
+        """加载第一个可用的 CJK TTF/TTC；全不可用返回 None。"""
+        from PIL import ImageFont
+        for fp in self._FONT_CANDIDATES:
+            if os.path.isfile(fp):
+                try:
+                    return ImageFont.truetype(fp, size)
+                except Exception:
+                    continue
+        return None
+
+    def _make_title_card(self, context):
+        """片头标题卡：选中封面帧 + 底部渐变带 + 片名/副题（PIL，零外部进程）。
+
+        诚实边界：字体缺失时若标题含非 ASCII 字符则不硬画（避免豆腐块），
+        输出 generated=False 并说明原因；这是「选一帧 → 设计片头」的第一步
+        （静态标题卡），文字动效/版式模板包属后续 P1 工作。
+        """
+        title = context.get_variable("_title_text")
+        subtitle = context.get_variable("_subtitle_text")
+        cover = context.get_variable("output_file")
+        input_file = context.get_variable("input_file")
+        out = (context.get_variable("_title_card_output")
+               or os.path.splitext(input_file)[0] + "_titlecard.jpg")
+
+        if not cover or not os.path.exists(cover):
+            return StepResult(success=False, error="封面不存在，无法生成片头卡")
+
+        try:
+            from PIL import Image, ImageDraw
+            base = Image.open(cover).convert("RGB")
+            w, h = base.size
+
+            # 底部渐变带（alpha 0→200）
+            overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            band_h = max(int(h * 0.30), 120)
+            px = overlay.load()
+            for y in range(h - band_h, h):
+                alpha = int(200 * (y - (h - band_h)) / band_h)
+                for x in range(w):
+                    px[x, y] = (0, 0, 0, alpha)
+            card = Image.alpha_composite(base.convert("RGBA"), overlay)
+            draw = ImageDraw.Draw(card)
+
+            has_cjk = any(ord(ch) > 127 for ch in (title + subtitle))
+            title_size = max(28, min(96, h // 14))
+            font = self._load_cjk_font(title_size)
+            if font is None and has_cjk:
+                context.set_variable("title_card_file", "")
+                return StepResult(success=True, output={
+                    "generated": False,
+                    "reason": "未找到可用中文字体（C:/Windows/Fonts 下无 msyh/simhei），"
+                              "为避免显示豆腐块未生成标题卡"})
+            sub_font = self._load_cjk_font(max(18, int(title_size * 0.55))) if subtitle else None
+
+            def _text_w(text, f):
+                if f is None:
+                    return 0
+                try:
+                    box = draw.textbbox((0, 0), text, font=f, stroke_width=2)
+                    return box[2] - box[0]
+                except Exception:
+                    return draw.textlength(text, font=f)
+
+            # 标题过宽则逐级缩字号到 90% 宽以内
+            while font is not None and _text_w(title, font) > w * 0.9 and title_size > 24:
+                title_size = int(title_size * 0.9)
+                font = self._load_cjk_font(title_size)
+                sub_font = self._load_cjk_font(max(18, int(title_size * 0.55))) if subtitle else None
+
+            cur_y = h - band_h + int(band_h * 0.22)
+            if font is not None:
+                tw = _text_w(title, font)
+                draw.text(((w - tw) / 2, cur_y), title, font=font, fill=(255, 255, 255, 255),
+                          stroke_width=2, stroke_fill=(0, 0, 0, 200))
+                cur_y += int(title_size * 1.35)
+            if subtitle and sub_font is not None:
+                sw = _text_w(subtitle, sub_font)
+                draw.text(((w - sw) / 2, cur_y), subtitle, font=sub_font,
+                          fill=(235, 235, 235, 255), stroke_width=1,
+                          stroke_fill=(0, 0, 0, 180))
+
+            card.convert("RGB").save(out, "JPEG", quality=92)
+            context.set_variable("title_card_file", out)
+            return StepResult(success=True, output={"generated": True, "title_card_file": out})
+        except Exception as e:
+            return StepResult(success=False, error=f"生成片头卡失败: {e}")
+
     def _complete(self, context):
-        """完成"""
+        """完成（汇总并写 context.outputs —— Skill 工坊只展示 outputs）"""
         output_file = context.get_variable("output_file")
         content_analysis = context.get_variable("content_analysis")
+        title_card = context.get_variable("title_card_file")
+        chosen = context.get_variable("chosen_keyframe") or {}
         result_msg = f"封面图已提取，保存到 {output_file}"
-        if content_analysis and content_analysis.get("is_placeholder"):
-            result_msg += "（选帧策略为占位策略，非真实内容理解）"
+        score = chosen.get("score")
+        if isinstance(score, float) and score >= 0:
+            result_msg += (f"（画质打分选帧：t={chosen.get('time')}s, 得分 {score:.3f}，"
+                           f"引擎 {content_analysis.get('score_engine')}）")
+        elif content_analysis and content_analysis.get("is_placeholder"):
+            result_msg += "（打分引擎不可用，回退中间帧，非画质选帧）"
+        if title_card:
+            result_msg += f"；片头标题卡: {title_card}"
+        # 修复：本 Skill 此前从不调 set_output，Skill 工坊展示 outputs 恒为 {}。
+        context.set_output("result", result_msg)
+        context.set_output("output_file", output_file)
+        context.set_output("chosen_keyframe", chosen)
+        context.set_output("content_analysis", content_analysis)
+        if title_card:
+            context.set_output("title_card_file", title_card)
         return StepResult(success=True, output={"result": result_msg, "content_analysis": content_analysis})
 
 

@@ -215,6 +215,15 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("pipeline.guard_all", "pipeline", "read", False,
      "生成质量守护总入口：一次跑多个守护 + 合并全量负面词", "cc", "守护总入口",
      ["守护", "质检", "生成质量", "负面词", "guard_all"]),
+    # ── 导演分身·可调用能力（LibTV 对标，2026-09-26）──
+    # effect=read：只拆解/规划，不写画布、不落时间线（落地走 ext.run_skill director 的
+    # source_dir 通路或画布节点）。与画布 /host/storyboard-* 同一实现。
+    ("pipeline.director_breakdown", "pipeline", "read", False,
+     "导演分身·拆分镜：剧本→结构化分镜表（默认启发式零成本，可选 LLM）", "right", "导演拆分镜",
+     ["拆分镜", "分镜", "拉片", "拆解", "导演", "breakdown", "storyboard", "director"]),
+    ("pipeline.director_camera_plan", "pipeline", "read", False,
+     "导演分身·机位/运镜规划：分镜表→机位+运镜路径（可喂 Stage3D）", "left", "导演机位规划",
+     ["机位", "运镜", "相机", "提示词", "camera", "camera_plan", "导演", "导演分身"]),
 ] + _canvas_node_catalog_rows()
 
 # 策略层专属工具：只在 agent_policy 有 effect/paid，**没有** dispatcher handler，
@@ -279,7 +288,7 @@ def verify_catalog_consistency(registered_ids: Optional[set]) -> List[str]:
         )
 
     # 目录自身字段合法性
-    for cid, cat, eff, paid, desc, hemi, label, kw in CAPABILITY_ROWS:
+    for cid, _cat, eff, _paid, desc, hemi, _label, _kw in CAPABILITY_ROWS:
         if eff not in _VALID_EFFECTS:
             problems.append(f"{cid} effect 非法：{eff!r}")
         if hemi not in _VALID_HEMI:

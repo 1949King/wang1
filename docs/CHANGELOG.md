@@ -1,5 +1,125 @@
 # 拾光剪影 — 变更日志
 
+## V4.39.7 (2026-09-26) — P0 整改：卡点真生效 + 门禁去假红 + 红测试清零
+
+> 依据实测整改方案（合格线 8 绿 / 11 失守，其中 6 条是「标准写了没接线」）。
+> P0 六项全部完成，核心是 **F1：卡点此前一道都没在跑，是所有问题的放大器**。
+
+### P0-1 提交前卡点真生效
+
+- `pip install pre-commit` 被沙箱硬杀（SIGTERM），按 §11 退路**手写** `.git/hooks/pre-commit`：
+  ruff（仅暂存文件，存量不炸/增量严格）+ 冻结区/稳定性/粘合层/架构/双库五守卫。
+- 空提交与真实提交均实测跑通；紧急跳过仍可用 `--no-verify`。
+- ⚠️ 事故记录：曾用系统 ruff 0.16.3 `--fix` 意外修改 **167 个存量文件**，已全部还原；
+  保留文件经 import 级排查，仅 3 处死 import 删除被保留（全文核实零使用）。
+
+### P0-2 stability_gate 去假红（基线键去行号化）
+
+- 基线键 `file:line:rule` → **`file:rule[:name]` + 计数棘轮**：插一行代码不再全红；
+  同文件新增第二个同类违规仍被拦。旧基线加载时自动迁移。
+- 新增逐行豁免：`# stability-gate: allow-print / allow-swallow`（必须附理由）。
+- 验收实测：插空行 exit=0 ✓；加裸 print 必拦 ✓。
+
+### P0-3 清 11 项真违规
+
+- `main_qt6.py` 5 处 print：1 处改 `logging.getLogger`；4 处是**有意的控制台兜底**
+  （`_safe_print` 实现本体 ×2、启动崩溃最后输出 ×2）→ 豁免注释保行为。
+- `director_skill.py` / `video_editing_skill.py` 6 处 `except:pass` →
+  `logger.debug(..., exc_info=True)`（JSON 降级链、ffprobe 兜底、临时文件清理、cv2→PIL 降级）。
+- 基线 `--update` 固化：269 = 269，无新增。
+
+### P0-4 红测试清零（pytest 349/349）
+
+| 测试 | 病因 | 修法 |
+|---|---|---|
+| `test_register_includes_ripple` / `test_brain_taxonomy_has_ripple` | `len(ids)==25` 硬编码，能力已 69 个 | 改「必需集合包含 + 无重复注册」 |
+| `test_funclip_autoclip_call_highlight_helpers` | 源码 grep 单文件，调用点已迁 mixin | 跟随真实调用点（`editor_ai_process_mixin.py`）+ 实现函数存在性 |
+| `test_agent_methods_delegate_to_private` | 同上（mixin 拆分） | 拼接 `editor_module.py + editor_*_mixin.py` 全量源码断言 |
+| `test_mask_api_key` | 实现 `[:2]` vs 语义裁定 | **按裁定改实现留前 4 位**（`sk-1***cdef`，便于辨认哪把 key） |
+
+### P0-5 守卫 UTF-8 化
+
+- `frozen_zone_guard.py` / `stability_gate.py` / `arch_guard.py` / `check_glue_contract.py`
+  开头加 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`，
+  GBK 控制台不设环境变量也能跑（pre-commit 钩子环境必需）。
+
+### P0-6 校验只读化 + e2e 假失败修复
+
+- **根因 1**：`plugin_store` 模块级单例 `plugin_store = PluginStore()`，import 即
+  `init_official_items` → 无条件 `_save_*` 刷 `updated_at` ⇒ 任何只读引用都弄脏 git。
+  修复：`_write_json_if_changed`（内容未变不写盘）。
+- **根因 2**：e2e 写 `~/.video_editor_cache/canvas_plugins.json`，venv 沙箱下
+  Permission denied 让 install/toggle/uninstall 三项假失败。
+  修复：e2e 把 `cb._CANVAS_PLUGINS_JSON` 重定向 `tempfile.mkdtemp`（也符合「校验不污染真实数据」）。
+- 一键回归 **53/53 全绿**（注意：须用 `.venv312`，managed 3.13 缺 numpy/pypinyin 会假红 6 项）。
+
+---
+
+## V4.39.6 (2026-09-26) — LibTV 1.5 对标升级（四件落地）
+
+> 依据：`docs/_reports/2026-09-26-LibTV1.5对标升级方案.md`。
+> 核心判断：LibTV 1.5 的五件事，拾光剪影已有四件半的零件，缺的是三根连接线。
+> 本版本落地全部**非冻结区**升级；冻结区项列在文末待用户解冻。
+
+### ① P0-1 导演分身落时间线（`director_skill.py` v1.1.0）
+
+- 新增技能步骤「落地时间线」：传入 `source_dir`（素材目录）且有分镜表时触发，
+  按分镜顺序把目录内媒体文件（循环映射）批量送入剪辑时间线。
+- **复用已接线路由** `EventType.MATERIAL_TO_TIMELINE`（素材库拖入/画布回流同一条），
+  不新造旁路；先检查订阅者存在，剪辑模块未打开时**诚实跳过**（`applied=False` + 原因），不阻塞技能。
+- 报告字段 `edit_instructions_applied_to_timeline` 由硬编码 `False` 改为真实执行结果，
+  新增 `timeline_apply_note`。
+- 验证：`_verify/test_director_timeline_apply.py` **13/13**（含空目录、无订阅者两条诚实跳过路径）。
+
+### ② 导演分身能力化（两个新 Agent 能力）
+
+| 能力 | 作用 | effect | 验证 |
+|---|---|---|---|
+| `pipeline.director_breakdown` | 剧本→分镜表（LLM 优先 / 启发式降级） | read · 免费 | 启发式产出 3 个镜头 ✓ |
+| `pipeline.director_camera_plan` | 分镜→机位/运镜/提示词（可直传 shots 或从剧本级联） | read · 免费 | cameras==shots、键齐全 ✓ |
+
+- 已登记 `agent_capability_catalog.py`（大脑分类：breakdown→右脑 / camera_plan→左脑），
+  通过目录↔注册双向启动自检。验证：`_verify/check_director_capabilities.py` **15/15**。
+
+### ③ P1-3 封面选帧变真 + 片头标题卡（`CoverGeneratorSkill` v1.1.0）
+
+- **选帧变真**：真实抽取 3 帧代理图（320px JPEG），cv2 打分选最优——
+  清晰度(Laplacian) 0.45 / 曝光 0.20 / 对比度 0.20 / 饱和度 0.15；
+  替代原「永远取中间帧」的占位实现；引擎不可用时**诚实标记 placeholder** 不冒充。
+- **片头标题卡**（新步骤，可选）：PIL 底部 30% 渐变条 + 居中描边中文标题 + 副标题，
+  字号自动收缩防溢出；无中文字体且标题含非 ASCII 时诚实跳过。
+- 修复 **cv2 中文路径静默失败**（`np.fromfile`+`imdecode`，本项目路径含「拾光剪影」必踩）。
+- 顺带修复历史 bug：技能从未 `set_output`，Skill 工坊报告恒为空——现已输出全部关键结果。
+- 验证：`_verify/test_cover_scoring.py` **11/11**（含真机素材端到端 + 片头卡目视确认中文渲染正确）。
+
+### ④ 题材设定包 `shiguang-genre.json`（8 题材）
+
+- 8 条：**末世生存基建 / 重生复仇爽剧 / 非遗国潮视觉 / 仙门团宠日常**（LibTV UI 对标四题材）
+  + 都市甜宠契约 / 赘婿逆袭龙王 / 悬疑反转单元剧 / 古风权谋虐恋。
+- 每条 prompt 内嵌**四要素：世界观 / 主线 / 角色位 / 禁忌**（禁忌即合规护栏）。
+- 与分镜层 `shiguang-drama.json` **分层不合并**；格式同为 5 字段（`id/title/category/tags/prompt`）。
+- 已注册 `promptLibrary.ts`（`shiguang-genre-pack`），双库 `public/prompts` + 副库 `dist/prompts` 三处字节一致。
+- 验证：`_verify/check_genre_pack.py` **10/10**。
+
+### ⚠️ 冻结区待解冻项（本次未动）
+
+| 升级项 | 涉及冻结区 | 说明 |
+|---|---|---|
+| P0-2 角色形象图入库 | `stage3d-core` | `CHARACTER_FIELD_SCHEMA` 无形象图字段，加字段必碰 `character_management_module.py` |
+| P0-3 画布绑角色丢字段 | `canvas-magnetic-intent` | 节点绑定角色时 visual/inner 字段丢失 |
+| P1-1 剧本设定器 UI | `canvas-magnetic-intent` | ScriptNode 现为纯文本框，设定器需改 `nodes.tsx` 等 33 整文件锁范围 |
+| P2 3D 体型↔角色库 / 白模入轨 | `stage3d-core` | `riggedHumanoid.ts` HUMAN_PRESETS 与角色库互通 |
+
+另：画布版本号 `canvasVersion.ts` 属整文件锁，本次**不递增**，待解冻画布改动时一并 bump。
+
+### 质量门
+
+- 冻结区守卫：`OK frozen zones intact (85 locks)` ✓
+- 双库校验：`check_canvas_dual_repo.py` exit=0，无新增漂移 ✓
+- 画布 tsc：与文档基线一致，错误全部位于 stage3d-core 冻结区文件，与本次改动无关 ✓
+
+---
+
 ## V4.39.5 (2026-09-25) — 虚拟形象提示词包（12 条）
 
 > 用户需求：给项目做「漂亮好看的女性的虚拟形象动态视频」的**参考提示词**。

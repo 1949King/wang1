@@ -2,7 +2,7 @@
 AI 导演技能模块（全功能型）
 ========================
 直接调 LLM 从零生成剧本/分镜表/剪辑指令/字幕，
-可选 Blender MCP 渲染 3D 片头。
+可选 Blender MCP 渲染 3D 片头，可选把素材按分镜顺序落地剪辑时间线。
 
 设计原则：
     - 全功能型：不依赖现有 SmartClip/AutoSubtitle，独立完成导演全链路
@@ -14,14 +14,19 @@ AI 导演技能模块（全功能型）
     - app.core.ai_engine.AIEngine.chat_with_fallback (L533)
     - app.core.mcp_client.McpClientManager + BLENDER_MCP_CONFIG (L81/L454)
     - app.modules.lego.skill_engine.Skill 基类 (L87)
+    - EventBus MATERIAL_TO_TIMELINE（与画布回流同一条「素材→时间线」总线事件，
+      editor_module.py:582 订阅 _on_material_dropped 落到 EditorModule._clips）
 """
 
 import json
+import logging
 import os
 import time
-from typing import Dict, Any, List
+from typing import Dict, List
 
 from .skill_engine import Skill, StepResult
+
+logger = logging.getLogger(__name__)
 
 
 class DirectorSkill(Skill):
@@ -34,14 +39,18 @@ class DirectorSkill(Skill):
         - topic:   str  主题/题材（如 "30秒科技产品介绍"）
         - script:  str  可选，直接提供剧本跳过生成
         - use_blender: bool 可选，True 时尝试连 Blender MCP 渲染 3D 片头
+        - source_dir: str 可选，素材目录（含视频文件）。提供后新增「落地时间线」
+            步骤：按分镜顺序把素材加入剪辑时间线（经 EventBus
+            MATERIAL_TO_TIMELINE，与画布回流同一条总线）。
+            不提供则保持只出导演报告（edit_instructions_applied_to_timeline=False）。
     """
 
     skill_id = "director"
     skill_name = "AI 导演（全功能）"
-    skill_description = "输入主题，LLM 从零生成剧本→分镜表→剪辑指令→字幕，可选 Blender 3D 片头"
+    skill_description = "输入主题，LLM 从零生成剧本→分镜表→剪辑指令→字幕，可选 Blender 3D 片头、可选素材落时间线"
     skill_category = "AI 导演"
     skill_icon = "🎬"
-    skill_version = "1.0.0"
+    skill_version = "1.1.0"
 
     def _setup_steps(self):
         """设置导演流程步骤（顺序执行，3D片头为条件步骤）"""
@@ -66,6 +75,11 @@ class DirectorSkill(Skill):
             condition=self._should_use_blender,
             dependencies=["生成剧本"]
         ).add_step(
+            name="落地时间线",
+            handler=self._apply_to_timeline,
+            condition=self._should_apply_timeline,
+            dependencies=["生成剪辑指令"]
+        ).add_step(
             name="合成导演报告",
             handler=self._compose_final,
             dependencies=["生成剪辑指令", "提取字幕"]
@@ -79,6 +93,9 @@ class DirectorSkill(Skill):
         # 步骤1 是最早执行的，在此同步 use_blender 标志到 variables
         # 供步骤5的 _should_use_blender condition 读取（condition 在步骤执行前求值）
         context.set_variable("_use_blender", bool(context.get_input("use_blender", False)))
+        # 同理同步 source_dir，供「落地时间线」步骤的 condition 读取
+        context.set_variable(
+            "_source_dir", str(context.get_input("source_dir") or "").strip())
         # 优先用用户提供的剧本
         user_script = context.get_input("script")
         if user_script and user_script.strip():
@@ -212,7 +229,7 @@ class DirectorSkill(Skill):
             if start >= 0 and end > start:
                 return json.loads(cleaned[start:end + 1])
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.debug("分镜表 LLM 输出 JSON 解析失败，走启发式降级", exc_info=True)
         return []
 
     def _fallback_storyboard(self, script: str) -> List[Dict]:
@@ -297,7 +314,7 @@ class DirectorSkill(Skill):
             if start >= 0 and end > start:
                 return json.loads(cleaned[start:end + 1])
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.debug("剪辑指令 LLM 输出 JSON 解析失败，走模板降级", exc_info=True)
         return {}
 
     def _fallback_edit_instructions(self, storyboard: List[Dict]) -> Dict:
@@ -410,6 +427,99 @@ class DirectorSkill(Skill):
             return StepResult(success=False, error=f"3D 片头渲染失败: {e}")
 
     # ────────────────────────────────────────────────────────────────
+    # 步骤 5.5：落地时间线（条件执行，2026-09-26 LibTV 对标 P0-1）
+    # ────────────────────────────────────────────────────────────────
+    # 视频扩展名白名单（音频不进时间线片段，避免把 BGM 当成镜头素材）
+    _MEDIA_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts",
+                   ".flv", ".wmv", ".mpg", ".mpeg")
+
+    def _should_apply_timeline(self, variables: Dict) -> bool:
+        """条件：inputs 给了 source_dir 且已有分镜表。"""
+        return bool(variables.get("_source_dir") and variables.get("storyboard"))
+
+    def _collect_media_files(self, source_dir: str, cap: int = 200) -> List[str]:
+        """递归收集素材目录里的视频文件（按路径排序，数量封顶）。"""
+        found: List[str] = []
+        for root, _dirs, files in os.walk(source_dir):
+            for f in sorted(files):
+                if os.path.splitext(f)[1].lower() in self._MEDIA_EXTS:
+                    found.append(os.path.join(root, f))
+                    if len(found) >= cap:
+                        return found
+        return found
+
+    def _apply_to_timeline(self, context) -> StepResult:
+        """把素材按分镜顺序加入剪辑时间线。
+
+        机制：发 EventBus ``MATERIAL_TO_TIMELINE`` 批量载荷 —— 与画布回流
+        （canvas_bridge.push_to_timeline）和 Agent 预览闭环
+        （preview_validation_loop）用的是同一条总线事件，
+        ``editor_module.py:582`` 订阅 ``_on_material_dropped`` 批量分支
+        （载荷 ``{"clips":[{"path":...}...], "source":...}``），
+        最终落到 ``EditorModule._clips``（时间线真相源）。
+
+        线程说明：Skill 在工坊子线程执行，emit 同步触发订阅者 —— 与
+        画布 HTTP 服务线程的既有调用路径一致，不引入新的线程模型。
+
+        如实边界：
+          - 加入的片段按**素材原始时长**排布；分镜表的精确裁剪点仍在
+            剪辑指令里（可用「裁剪片段/重锚片段」能力二次调整）。
+          - 若剪辑模块未打开（无订阅者），不落地，报告如实标注。
+        """
+        source_dir = context.get_variable("_source_dir") or ""
+        storyboard = context.get_variable("storyboard") or []
+
+        def _skip(reason: str) -> StepResult:
+            context.set_variable("timeline_applied", False)
+            context.set_variable("timeline_apply_note", reason)
+            return StepResult(success=True, output={"applied": False, "reason": reason})
+
+        if not os.path.isdir(source_dir):
+            return _skip(f"素材目录不存在: {source_dir}")
+
+        files = self._collect_media_files(source_dir)
+        if not files:
+            return _skip(f"素材目录中没有可用视频文件: {source_dir}")
+
+        # 分镜 → 素材循环映射（素材少于分镜数时循环复用）
+        clips_payload = []
+        for i, shot in enumerate(storyboard):
+            f = files[i % len(files)]
+            desc = str(shot.get("description") or "").strip()
+            clips_payload.append({
+                "path": f,
+                "title": f"镜{shot.get('id', i + 1)} {desc[:12]}".strip(),
+            })
+
+        # 订阅者检查：剪辑模块未打开时不发事件（否则静默丢失）
+        from .core import EventBus, EventType
+        bus = EventBus.get_instance()
+        listeners = getattr(bus, "_listeners", {}).get(
+            EventType.MATERIAL_TO_TIMELINE, []) or []
+        if not listeners:
+            return _skip("剪辑模块未打开（时间线无 MATERIAL_TO_TIMELINE 订阅者）")
+
+        self._report_progress(90, f"正在把 {len(clips_payload)} 个素材按分镜顺序加入时间线...")
+        try:
+            bus.emit(
+                EventType.MATERIAL_TO_TIMELINE,
+                {"clips": clips_payload, "source": "director_skill"},
+                source="director_skill",
+            )
+        except Exception as e:
+            return _skip(f"发送时间线事件失败: {e}")
+
+        context.set_variable("timeline_applied", True)
+        context.set_variable("timeline_apply_note",
+                             f"已按分镜顺序加入 {len(clips_payload)} 段素材（素材原始时长）")
+        return StepResult(success=True, output={
+            "applied": True,
+            "clips": len(clips_payload),
+            "files_used": min(len(files), len(clips_payload)),
+            "total_files_found": len(files),
+        })
+
+    # ────────────────────────────────────────────────────────────────
     # 步骤 6：合成导演报告
     # ────────────────────────────────────────────────────────────────
     def _compose_final(self, context) -> StepResult:
@@ -425,6 +535,10 @@ class DirectorSkill(Skill):
         edit_is_template = bool(context.get_variable("edit_instructions_is_template", False))
         any_template = script_is_template or storyboard_is_template or edit_is_template
 
+        # 落地时间线结果（步骤「落地时间线」写入；条件未触发时为默认 False）
+        timeline_applied = bool(context.get_variable("timeline_applied", False))
+        timeline_apply_note = str(context.get_variable("timeline_apply_note", ""))
+
         report = {
             "topic": context.get_variable("topic", ""),
             "script": context.get_variable("script", ""),
@@ -436,10 +550,11 @@ class DirectorSkill(Skill):
             "script_is_template": script_is_template,
             "storyboard_is_template": storyboard_is_template,
             "edit_instructions_is_template": edit_is_template,
-            # 如实说明：edit_instructions 目前只是文本形式的剪辑指令建议，
-            # 本 Skill 不会自动把它写入编辑器时间线——需要用户参照指令手动
-            # 剪辑，或后续接入真实的指令→时间线转换器。
-            "edit_instructions_applied_to_timeline": False,
+            # 素材是否已落地剪辑时间线：
+            #   True  = 经 MATERIAL_TO_TIMELINE 总线按分镜顺序加入（需 source_dir）
+            #   False = 只出报告（未提供 source_dir / 目录无素材 / 剪辑模块未打开）
+            "edit_instructions_applied_to_timeline": timeline_applied,
+            "timeline_apply_note": timeline_apply_note,
         }
 
         # 输出最终报告到 context.outputs
@@ -460,15 +575,21 @@ class DirectorSkill(Skill):
                 parts.append("剪辑指令")
             template_note = f"\n  ⚠️ LLM 不可用或解析失败，以下内容为本地模板占位（非真实生成）：{'/'.join(parts)}"
 
+        timeline_note = (
+            f"（{timeline_apply_note}）" if timeline_applied
+            else (f"（未落地：{timeline_apply_note}）" if timeline_apply_note
+                  else "（未提供素材目录 source_dir，仅出指令建议，可手动剪辑）")
+        )
         summary = (
             f"导演报告生成完成\n"
             f"  主题: {report['topic']}\n"
             f"  剧本: {len(report['script'])} 字\n"
             f"  分镜: {len(report['storyboard'])} 镜\n"
             f"  剪辑指令: {len(report['edit_instructions'].get('clips', []))} 段"
-            f"（仅供参考，未自动应用到剪辑时间线，需手动剪辑）\n"
+            f"{timeline_note}\n"
             f"  字幕: {len(report['srt'].splitlines()) // 4} 条\n"
             f"  3D片头: {report['intro_path'] or '未渲染（use_blender未开启或连接失败）'}"
+            f"{'\n  ✅ 素材已按分镜顺序加入剪辑时间线' if timeline_applied else ''}"
             f"{template_note}"
         )
         return StepResult(success=True, output={"result": summary, "report": report})

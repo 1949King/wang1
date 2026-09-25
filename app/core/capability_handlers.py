@@ -1119,6 +1119,42 @@ class PipelineCapabilityHandlers:
         )
         return CapabilityResult(req.request_id, True, output=script.to_dict())
 
+    def director_breakdown(self, req: CapabilityRequest) -> CapabilityResult:
+        """导演分身·拆分镜：剧本 → 结构化分镜表（LibTV 对标 P0-2，2026-09-26）。
+
+        复用画布 ``/host/storyboard-breakdown`` 的同一实现
+        （``canvas_aigc.storyboard_breakdown``）：默认启发式拆解（零成本、
+        不改剧本原文），``use_llm=True`` 时走 LLM 结构化拆解。
+        """
+        from app.core.canvas_aigc import storyboard_breakdown
+        script = str(req.params.get("script") or "")
+        use_llm = bool(req.params.get("use_llm", False))
+        res = storyboard_breakdown(script, use_llm=use_llm)
+        ok = bool(res.get("ok"))
+        return CapabilityResult(req.request_id, ok, output=res,
+                                error=None if ok else str(res.get("message") or "拆分镜失败"))
+
+    def director_camera_plan(self, req: CapabilityRequest) -> CapabilityResult:
+        """导演分身·机位/运镜规划：分镜表（或剧本）→ 每镜机位 + 运镜路径。
+
+        复用画布 ``/host/storyboard-camera-plan`` 的同一实现
+        （``canvas_aigc.storyboard_to_camera_plan``）：景别 → 机位预设
+        （position/lookAt/fov/shotSize）+ 运镜 pathPoints/pathDuration，
+        可直接喂给画布 Stage3D 自动摆机位。
+        """
+        from app.core.canvas_aigc import storyboard_breakdown, storyboard_to_camera_plan
+        shots = req.params.get("shots")
+        if isinstance(shots, list) and shots:
+            res = storyboard_to_camera_plan(shots)
+        else:
+            breakdown = storyboard_breakdown(
+                str(req.params.get("script") or ""),
+                use_llm=bool(req.params.get("use_llm", False)))
+            res = storyboard_to_camera_plan(breakdown.get("shots") or [])
+        ok = bool(res.get("ok"))
+        return CapabilityResult(req.request_id, ok, output=res,
+                                error=None if ok else str(res.get("message") or "机位规划失败"))
+
     def execute_editing(self, req: CapabilityRequest) -> CapabilityResult:
         """
         执行精修剪辑 + 成片输出
@@ -1507,6 +1543,14 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         pipeline_handlers.score, "五维量化打分+分级筛选")
     dispatcher.register("pipeline.generate_script", CapabilityCategory.PIPELINE,
                         pipeline_handlers.generate_script, "剪辑创意脚本生成")
+    # 导演分身·可调用能力（LibTV 对标，2026-09-26）：拆分镜 / 机位规划，
+    # 与画布 /host/storyboard-breakdown、/host/storyboard-camera-plan 同一实现。
+    dispatcher.register("pipeline.director_breakdown", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.director_breakdown,
+                        "导演分身·拆分镜：剧本→结构化分镜表（默认启发式零成本）")
+    dispatcher.register("pipeline.director_camera_plan", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.director_camera_plan,
+                        "导演分身·机位/运镜规划：分镜表→机位+运镜路径（可喂 Stage3D）")
     dispatcher.register("pipeline.execute_editing", CapabilityCategory.PIPELINE,
                         pipeline_handlers.execute_editing, "精修剪辑+成片输出")
     dispatcher.register("pipeline.run_full", CapabilityCategory.PIPELINE,
