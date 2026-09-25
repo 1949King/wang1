@@ -28,6 +28,7 @@ AI短剧编辑器 - Qt6 主程序入口
 import os
 import sys
 import json
+import importlib.util
 import traceback
 import logging
 from pathlib import Path
@@ -195,7 +196,23 @@ class AppConfig:
 
 
 class DependencyChecker:
-    """依赖检查器"""
+    """依赖检查器
+
+    ⚠️ 陷阱备忘（2026-09-25 实测，勿踩）：
+    **不要在 PyQt6 已加载之后，在本进程内 `import mediapipe`** ——
+    实测必然失败：`ImportError: DLL load failed while importing _framework_bindings:
+    动态链接库(DLL)初始化例程失败`。顺序敏感，反过来（mediapipe 先、PyQt6 后）则正常；
+    与 cv2 / torch / easyocr / transformers 的任意组合也正常。
+    ⇒ 这是「PyQt6 与 mediapipe 的 DLL 加载顺序冲突」。
+
+    当前架构**没有踩到这个坑**：姿态解析走独立子进程
+    （`app/core/ai/pose_extract_service.py` 用 `subprocess` 跑 `pose_worker.py`），
+    子进程不加载 PyQt6，故正常。
+    但本类的 ``check_dependencies`` 历史实现在**本进程内**真导入了 mediapipe，
+    于是把它误报成「未安装」（装了的！）—— 这也是改用 ``find_spec`` 的附带收益：
+    它只定位不执行，顺带消掉了这个误诊。
+    若将来要把媒体的姿态推理搬进主进程，**必须先解决此 DLL 冲突**。
+    """
     
     REQUIRED_PACKAGES: dict[str, str] = {
         "PyQt6": "PyQt6",
@@ -220,25 +237,47 @@ class DependencyChecker:
         "pypinyin": "pypinyin",
     }
     
+    # 严格模式：置 1 时退化为「真导入」探测（排查环境问题时才用）
+    STRICT_ENV = "SHIGUANG_STRICT_DEPS"
+
+    @classmethod
+    def _probe_installed(cls, import_name: str) -> bool:
+        """探测某个包是否**已安装**。
+
+        ⚠️ 默认用 ``importlib.util.find_spec`` —— 它只**定位**模块，不执行模块代码。
+        历史实现是 ``__import__(import_name)``，那会把整个 AI 栈真的导一遍：
+        实测 torch 11.2s · transformers 33.7s · mediapipe 4.3s（冷启动时更久），
+        而调用方 ``_check_environment`` **只用到其中一项**（PyQt6 的存在性）。
+        ⇒ 冷启动白等约 50s。2026-09-25 修。
+
+        代价说明：find_spec 判「装了」，不判「装好且能导入」（例如二进制损坏时
+        spec 存在但 import 会失败）。这对「依赖是否存在」的语义是够的，且各功能
+        都有诚实降级；若需排查这类问题，置 ``SHIGUANG_STRICT_DEPS=1`` 恢复旧行为。
+        """
+        if os.environ.get(cls.STRICT_ENV) == "1":
+            try:
+                __import__(import_name)
+                return True
+            except Exception as e:
+                logger.debug("依赖(%s)严格模式导入失败: %s", import_name, e)
+                return False
+        try:
+            return importlib.util.find_spec(import_name) is not None
+        except (ImportError, ValueError, AttributeError) as e:
+            logger.debug("依赖(%s)定位失败: %s", import_name, e)
+            return False
+
     @classmethod
     def check_dependencies(cls) -> dict[str, dict[str, bool]]:
-        """检查依赖"""
+        """检查依赖（只定位、不导入，见 ``_probe_installed``）。"""
         results: dict[str, dict[str, bool]] = {"required": {}, "optional": {}}
-        
+
         for package, import_name in cls.REQUIRED_PACKAGES.items():
-            try:
-                __import__(import_name)
-                results["required"][package] = True
-            except Exception:
-                results["required"][package] = False
-        
+            results["required"][package] = cls._probe_installed(import_name)
+
         for package, import_name in cls.OPTIONAL_PACKAGES.items():
-            try:
-                __import__(import_name)
-                results["optional"][package] = True
-            except Exception:
-                results["optional"][package] = False
-        
+            results["optional"][package] = cls._probe_installed(import_name)
+
         return results
     
     @classmethod
@@ -266,9 +305,41 @@ class DependencyChecker:
     
     @classmethod
     def check_gpu(cls) -> dict[str, bool | str | None]:
-        """检查 GPU"""
+        """检查 GPU。
+
+        优化（2026-09-25）：**先走 pynvml 轻量路径**（实测 0.47s），
+        只有 pynvml 不可用时才退回 ``import torch``（实测 11.2s，冷启动更久）。
+        探测目的只是「有没有 GPU、叫什么名字」，不需要把整个 torch 拉起来
+        —— 后者会让冷启动白等十几秒。
+
+        行为保持：命中 NVIDIA 时仍返回 type="NVIDIA CUDA" 与真实设备名，
+        与 torch 路径一致。
+        """
         gpu_info: dict[str, bool | str | None] = {"available": False, "type": None, "name": None}
-        
+
+        # ① 轻量路径：pynvml（快约 20 倍）
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            try:
+                if pynvml.nvmlDeviceGetCount() > 0:
+                    gpu_info["available"] = True
+                    gpu_info["type"] = "NVIDIA CUDA"
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    raw_name = pynvml.nvmlDeviceGetName(handle)
+                    if isinstance(raw_name, bytes):
+                        raw_name = raw_name.decode("utf-8", "replace")
+                    gpu_info["name"] = str(raw_name)
+                    return gpu_info
+            finally:
+                try:
+                    pynvml.nvmlShutdown()
+                except Exception as e:
+                    logger.debug("nvmlShutdown 失败，忽略: %s", e)
+        except Exception as e:
+            logger.debug("pynvml 探测不可用，回退 torch 路径: %s", e)
+
+        # ② 回退路径：torch（慢，但能覆盖 Apple Metal / ROCm 等 pynvml 不管的场景）
         try:
             import torch  # type: ignore[reportMissingImports]
             if hasattr(torch, 'cuda') and callable(getattr(torch.cuda, 'is_available', None)) and torch.cuda.is_available():
@@ -281,7 +352,7 @@ class DependencyChecker:
                 gpu_info["name"] = "Apple GPU"
         except Exception as e:
             logger.debug(f"GPU 检测失败，按未检测到处理: {e}")
-        
+
         return gpu_info
     
     @classmethod
