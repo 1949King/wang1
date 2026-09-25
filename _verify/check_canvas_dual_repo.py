@@ -43,7 +43,6 @@ BASELINE_DIVERGED = {
 }
 # 副库尚未同步（主库独有）：咬合缝/槽位高亮 + 整个小白模式
 BASELINE_MISSING = {
-    "bridge.test.ts",
     "comfyToCanvas.test.ts",
     "magnetic/MagneticEngine.test.ts",
     "magnetic/bonds.test.ts",

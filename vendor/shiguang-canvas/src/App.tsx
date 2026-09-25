@@ -45,6 +45,7 @@ import {
   type AudioModelOption,
   type MusicModelOption,
 } from "./bridge";
+import { type GenJob } from "./generationQueue";
 import { buildCameraPromptBlock, multiAngleBatch, type AnglePreset } from "./shotCamera";
 import type { PromptItem } from "./promptLibrary";
 import { buildWorkflowSkill, downloadWorkflowSkill, readWorkflowSkillFile, skillToProjectBundle } from "./workflowSkill";
@@ -245,6 +246,9 @@ export default function App() {
   const [templates, setTemplates] = useState(() => listTemplates());
   const [breakdownDraft, setBreakdownDraft] = useState("");
   const batchAbortRef = useRef(false);
+  /** 单节点生成的取消控制器（「中断」按钮复用：同时取消在飞的单节点/批量任务） */
+  const genAbortRef = useRef<AbortController | null>(null);
+  const batchGenAbortRef = useRef<AbortController | null>(null);
 
   const pickDefaultKey = (
     models: ImageModelOption[],
@@ -539,13 +543,19 @@ export default function App() {
   const generateForNode = async (
     node: Node,
     data: NodeData,
+    genOpts?: { signal?: AbortSignal; onProgress?: (job: GenJob) => void },
   ): Promise<{ ok: boolean; message: string }> => {
+    // 异步任务化透传：传了 genOpts 的调用可取消、可收到阶段/进度上报；
+    // 不传（插件运行时、对比生成等）则行为与旧同步端点完全一致。
+    const awaitOpts = genOpts
+      ? { signal: genOpts.signal, onProgress: genOpts.onProgress, maxAttempts: 1 }
+      : undefined;
     if (data.kind === "config") {
       const mode = data.generationMode || "image";
       const count = Math.max(1, Math.min(4, Number(data.count) || 1));
       const basePrompt = data.prompt || buildPromptFor(node, data).prompt;
       const pseudoGen = { ...data, kind: "generator" as const, mode, prompt: basePrompt, count };
-      return generateForNode(node, pseudoGen);
+      return generateForNode(node, pseudoGen, genOpts);
     }
 
     if (data.kind === "text") {
@@ -593,6 +603,7 @@ export default function App() {
           model,
           channel_id,
           duration: 5,
+          awaitOpts,
         });
         if (res.ok && res.video_url) {
           addStudioNode("video", {
@@ -624,6 +635,7 @@ export default function App() {
         channel_id,
         n: count,
         reference_image: assetRef || "",
+        awaitOpts,
       });
       const urls = res.images?.length
         ? res.images
@@ -751,6 +763,7 @@ export default function App() {
         size: "720x1280",
         reference_image,
         quality: data.qualityTier || "standard",
+        awaitOpts,
       });
       if (res.ok && res.video_url) {
         setNodeVideo(node.id, res.video_url, data.posterUrl || data.firstFrameUrl);
@@ -771,6 +784,7 @@ export default function App() {
       n: 1,
       quality: (data as any).qualityTier || "standard",
       onPreloadProgress: (p) => setStatus(`人脸修复模型预载 ${p.progress}%：${p.message}`),
+      awaitOpts,
     });
     if (res.ok && (res.image_data_url || res.image_url || res.images?.length)) {
       const urls = res.images?.length
@@ -1031,9 +1045,37 @@ export default function App() {
         ? "正在调用 AIGC 生视频（可能需要 1–3 分钟）…"
         : "正在调用 AIGC…",
     );
+    const ctrl = new AbortController();
+    genAbortRef.current = ctrl;
+    const nodeId = selected.id;
     try {
-      const { ok, message } = await generateForNode(selected, selectedData);
-      useCanvasStore.getState().updateNodeData(selected.id, {
+      const { ok, message } = await generateForNode(selected, selectedData, {
+        signal: ctrl.signal,
+        onProgress: (job) => {
+          // 如实上报：progress 为 null 表示上游没有真实进度信号，
+          // 只显示阶段与已用时，绝不编造百分比（契约见 generationQueue.ts）
+          const secs = Math.round((job.elapsed_ms || 0) / 1000);
+          setStatus(
+            job.progress != null
+              ? `${job.stage_label} ${job.progress}%（已用时 ${secs}s）`
+              : `${job.stage_label} · 已用时 ${secs}s`,
+          );
+          if (job.progress != null) {
+            useCanvasStore.getState().updateNodeData(nodeId, { progress: job.progress });
+          }
+        },
+      });
+      if (!ok && message === "已取消") {
+        // 用户主动中断：回 idle，不亮红、不残留错误
+        useCanvasStore.getState().updateNodeData(nodeId, {
+          status: "idle",
+          progress: 0,
+          errorMessage: "",
+        });
+        setStatus("已取消生成");
+        return;
+      }
+      useCanvasStore.getState().updateNodeData(nodeId, {
         status: ok ? "success" : "failed",
         progress: ok ? 100 : 0,
         errorMessage: ok ? "" : String(message || "生成失败").slice(0, 200),
@@ -1041,12 +1083,13 @@ export default function App() {
       setStatus(message);
     } catch (e) {
       const errMsg = String(e);
-      useCanvasStore.getState().updateNodeData(selected.id, {
+      useCanvasStore.getState().updateNodeData(nodeId, {
         status: "failed",
         errorMessage: errMsg.slice(0, 200),
       });
       setStatus(`生成异常: ${e}`);
     } finally {
+      genAbortRef.current = null;
       setGenerating(false);
     }
   };
@@ -1103,6 +1146,8 @@ export default function App() {
     });
     setGenerating(true);
     batchAbortRef.current = false;
+    const batchCtrl = new AbortController();
+    batchGenAbortRef.current = batchCtrl;
     let ok = 0;
     let skipped = 0;
     for (let i = 0; i < shots.length; i++) {
@@ -1131,12 +1176,19 @@ export default function App() {
         progress: Math.round(((i + 1) / shots.length) * 100),
       });
       try {
-        const res = await generateForNode(n, d);
+        const res = await generateForNode(n, d, { signal: batchCtrl.signal });
         if (res.ok) {
           ok += 1;
           useCanvasStore.getState().updateNodeData(n.id, {
             status: "success",
             progress: 100,
+            errorMessage: "",
+          });
+        } else if (res.message === "已取消") {
+          // 中断按钮取消了在飞任务：回 idle，不计失败
+          useCanvasStore.getState().updateNodeData(n.id, {
+            status: "idle",
+            progress: 0,
             errorMessage: "",
           });
         } else {
@@ -1160,6 +1212,7 @@ export default function App() {
       // 一键成片：只收集「本次批量生成」的成功节点媒体，拼成一条成片
       await tryConcatToFilm(shots.map((s) => s.id), ok);
     }
+    batchGenAbortRef.current = null;
     setGenerating(false);
   };
 
@@ -1506,6 +1559,9 @@ export default function App() {
 
   const onAbortBatch = () => {
     batchAbortRef.current = true;
+    // 同时取消在飞的异步生成任务（单节点 + 批量当前节点），后端任务一并取消
+    genAbortRef.current?.abort();
+    batchGenAbortRef.current?.abort();
     setStatus("正在中断批量…");
   };
 

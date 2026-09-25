@@ -10,37 +10,39 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.39.7"
+__version__ = "4.39.8"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 39,
-    "patch": 7,
-    "codename": "P0 整改：卡点真生效 + 门禁去假红 + 红测试清零",
+    "patch": 8,
+    "codename": "优秀三件事①：画布生成异步化（generateForNode → runGeneration）",
     "release_date": "2026-09-26",
     "description": (
-        "V4.39.7: 按实测整改方案完成 P0 全部六项（接线和止血）。"
-        "★ P0-2 门禁去假红：stability_gate 基线键 file:line:rule → file:rule[:name]"
-        " + 计数棘轮，行位移不再假红（实测插空行 exit=0、加裸 print 必拦）；"
-        "旧基线自动迁移；新增逐行豁免注释 # stability-gate: allow-print/allow-swallow。"
-        "★ P0-3 清 11 项真违规：main_qt6 5 处 print（1 改 logger + 4 处有意的"
-        "控制台兜底加豁免注释）；director_skill/video_editing_skill 6 处"
-        " except:pass 补 logger.debug(exc_info=True)；基线 --update 后 269=269。"
-        "★ P0-4 红测试清零：能力计数硬编码 ==25 ×2 改集合包含+无重复断言；"
-        "两个源码 grep 测试改结构断言（mixin 拼接全量源码 / 跟随 mixin 迁移的"
-        "真实调用点）；mask_api_key 按裁定改留前 4 位（sk-1***cdef）。"
-        "pytest 349/349 全绿。"
-        "★ P0-5 守卫 UTF-8 化：frozen_zone_guard / stability_gate / arch_guard /"
-        " check_glue_contract 加 stdout reconfigure，GBK 控制台不再 UnicodeEncodeError。"
-        "★ P0-6 校验只读化：plugin_store 模块级单例 import 即写盘的根因修复"
-        "（_write_json_if_changed 内容未变不写）；e2e 画布插件清单重定向临时目录"
-        "（顺带修复 venv 沙箱下 install/toggle/uninstall 三项假失败）。"
-        "一键回归 53/53 全绿（venv312 解释器）。"
-        "★ P0-1 卡点真生效：pip 被沙箱硬杀装不了 pre-commit，按 §11 退路手写"
-        " .git/hooks/pre-commit 六道卡点（ruff 仅暂存文件不炸存量 + 冻结区/"
-        "稳定性/粘合层/架构/双库五守卫），空提交与真实提交均实测跑通。"
-        "★ 事故记录：ruff 0.16.3 --fix 曾意外修改 167 个存量文件，已全部还原"
-        "（保留文件经 import 级排查，仅 3 处死 import 删除保留，全文核实零使用）。"
+        "V4.39.8: 代码评价报告「距离优秀只差三件事」之第一件事落地——"
+        "画布主生成路径从同步阻塞改为异步任务化（submit → 轮询 → 终态映射），"
+        "可取消、有诚实进度。"
+        "★ bridge.ts 接线层改造：generateImageViaHost / generateVideoViaHost"
+        " 新增可选 awaitOpts（signal/onProgress/timeoutMs/maxAttempts），"
+        "count==1 分支从同步 POST /host/generate-image 改走 runGeneration；"
+        "count>1 批量循环自动继承。服务端 _GEN_PAYLOAD_KEYS 白名单与旧同步端点"
+        "逐键一致（已核对 image 7 键 / video 10 键），_build_gen_callable 为"
+        "保真搬运（画质换算 / NG 计数 / GFPGAN 预载 / 后处理注册全保留），"
+        "GFPGAN 预载轮询块原样保留。不传 awaitOpts 的老调用点行为完全不变。"
+        "★ 失败/取消语义映射：任务 failed → {ok:false, message:上游原文}；"
+        "AbortError → {ok:false, message:'已取消'}，与旧返回形状兼容。"
+        "★ App.tsx 诚实进度 + 取消：onGenerate 持 AbortController，"
+        "onProgress 如实上报（progress 为 null 只显示「阶段 · 已用时 Ns」，"
+        "绝不编造百分比；有真值才写节点 progress）；「中断」按钮复用为"
+        "取消在飞任务（单节点 + 批量当前节点，后端任务一并取消）；"
+        "已取消节点回 idle 不亮红。批量生成每个在飞节点同样可被取消。"
+        "★ 测试：bridge.test.ts 新增 5 个异步接线用例（payload 键一致性/"
+        "失败映射/取消映射/视频透传），10/10 绿；全套 8 文件 76 断言逐文件"
+        "跑全绿；tsc 主库 37 冻结区基线零新增、副库 0 错；双库检查无新增漂移"
+        "（bridge.test.ts 顺带收敛，副库缺失 7→6）。"
+        "★ 双库同步：bridge.ts / App.tsx / bridge.test.ts 已逐字节同步至"
+        " vendor/AI-Canvas-tauri/src/libtv/。"
+        "注：canvasVersion.ts 整文件冻结，画布版本号三件套待解冻后补。"
     ),
 }

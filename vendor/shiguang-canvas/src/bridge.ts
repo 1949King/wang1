@@ -1,5 +1,9 @@
 /** 与拾光剪影 canvas_bridge (:18765) 对接 */
 
+// 注意：与 generationQueue 存在「延迟引用」循环 import（双方模块顶层均不触碰对方绑定，
+// 仅在函数调用时使用），ESM 下安全。
+import { runGeneration, type AwaitOptions } from "./generationQueue";
+
 // 默认后端地址（兼容 Qt WebEngine 嵌入场景）；Tauri 模式下由
 // ensureTauriBridgeCredentials() 通过 invoke 拿到 Python 后端实际端口后覆盖。
 export let BRIDGE = "http://127.0.0.1:18765";
@@ -180,6 +184,9 @@ export async function generateImageViaHost(opts: {
   quality?: string;
   /** 人脸修复模型后台预载进度回调（GFPGAN 下载期间异步上报，不阻塞生图返回） */
   onPreloadProgress?: (p: { progress: number; message: string }) => void;
+  /** 异步任务化选项：signal 可取消，onProgress 如实上报阶段/进度（progress 为 null 时只有阶段与已用时）。
+   *  不传则行为等价于旧同步端点（await 到底、无中途进度、不可取消）。 */
+  awaitOpts?: AwaitOptions & { maxAttempts?: number };
 }): Promise<{
   ok: boolean;
   message?: string;
@@ -195,25 +202,8 @@ export async function generateImageViaHost(opts: {
   /** 触发时人脸修复模型是否已就绪（true=可走 GFPGAN，false=本次暂时回退区域超分） */
   face_restore_ready?: boolean;
 }> {
-  const token = bridgeToken();
   const count = Math.max(1, Math.min(4, opts.n || 1));
   if (count === 1) {
-    const res = await fetch(
-      `${BRIDGE}/host/generate-image?token=${encodeURIComponent(token)}`,
-      {
-        method: "POST",
-        headers: authHeaders(true),
-        body: JSON.stringify({
-          prompt: opts.prompt,
-          model: opts.model || "",
-          channel_id: opts.channel_id || "",
-          size: opts.size || "1024x576",
-          reference_image: opts.reference_image || "",
-          strength: opts.strength ?? 0.65,
-          quality: opts.quality || "standard",
-        }),
-      },
-    );
     let data: {
       ok: boolean;
       message?: string;
@@ -228,9 +218,38 @@ export async function generateImageViaHost(opts: {
       face_restore_ready?: boolean;
     };
     try {
-      data = await res.json();
-    } catch {
-      return { ok: false, message: `HTTP ${res.status}`, fallback_placeholder: true };
+      // 异步任务化（submit + 轮询等待）：服务端 _GEN_PAYLOAD_KEYS 白名单与旧同步端点
+      // 逐键一致，_build_gen_callable 为保真搬运（画质换算 / NG 计数 / GFPGAN 预载全保留）。
+      const { result } = await runGeneration(
+        "image",
+        {
+          prompt: opts.prompt,
+          model: opts.model || "",
+          channel_id: opts.channel_id || "",
+          size: opts.size || "1024x576",
+          reference_image: opts.reference_image || "",
+          strength: opts.strength ?? 0.65,
+          quality: opts.quality || "standard",
+        },
+        {
+          signal: opts.awaitOpts?.signal,
+          onProgress: opts.awaitOpts?.onProgress,
+          timeoutMs: opts.awaitOpts?.timeoutMs,
+          maxAttempts: opts.awaitOpts?.maxAttempts ?? 1,
+          label: (opts.prompt || "").slice(0, 24),
+        },
+      );
+      data = result as typeof data;
+    } catch (e: any) {
+      // runGeneration 约定：失败抛 Error(上游原文)，取消抛 DOMException(AbortError)
+      if (e?.name === "AbortError") {
+        return { ok: false, message: "已取消", fallback_placeholder: true };
+      }
+      return {
+        ok: false,
+        message: String(e?.message || e || "生成失败"),
+        fallback_placeholder: true,
+      };
     }
     // 命中人脸修复档且模型未就绪时，后台轮询预载进度（幂等去重），不阻塞本次生图返回
     const preloadJobId = data?.preload_job_id;
@@ -925,6 +944,9 @@ export async function generateVideoViaHost(opts: {
   first_frame?: string;
   last_frame?: string;
   quality?: string;
+  /** 异步任务化选项：signal 可取消，onProgress 如实上报阶段/进度
+   * （视频后处理超分/补帧是整条链路唯一有真实百分比的阶段）。 */
+  awaitOpts?: AwaitOptions & { maxAttempts?: number };
 }): Promise<{
   ok: boolean;
   message?: string;
@@ -940,13 +962,11 @@ export async function generateVideoViaHost(opts: {
   /** 后处理任务 id，前端据此轮询 /host/video-postprocess */
   postprocess_job_id?: string;
 }> {
-  const token = bridgeToken();
-  const res = await fetch(
-    `${BRIDGE}/host/generate-video?token=${encodeURIComponent(token)}`,
-    {
-      method: "POST",
-      headers: authHeaders(true),
-      body: JSON.stringify({
+  try {
+    // 异步任务化（submit + 轮询等待）：白名单与旧同步端点逐键一致，保真搬运。
+    const { result } = await runGeneration(
+      "video",
+      {
         prompt: opts.prompt,
         model: opts.model || "",
         channel_id: opts.channel_id || "",
@@ -957,13 +977,33 @@ export async function generateVideoViaHost(opts: {
         first_frame: opts.first_frame || "",
         last_frame: opts.last_frame || "",
         quality: opts.quality || "standard",
-      }),
-    },
-  );
-  try {
-    return await res.json();
-  } catch {
-    return { ok: false, message: `HTTP ${res.status}` };
+      },
+      {
+        signal: opts.awaitOpts?.signal,
+        onProgress: opts.awaitOpts?.onProgress,
+        timeoutMs: opts.awaitOpts?.timeoutMs,
+        maxAttempts: opts.awaitOpts?.maxAttempts ?? 1,
+        label: (opts.prompt || "").slice(0, 24),
+      },
+    );
+    return result as {
+      ok: boolean;
+      message?: string;
+      video_url?: string;
+      video_path?: string;
+      model?: string;
+      channel_id?: string;
+      channel_name?: string;
+      supports_motion_ref?: boolean;
+      reference_video_url?: string;
+      postprocessing?: boolean;
+      postprocess_job_id?: string;
+    };
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      return { ok: false, message: "已取消" };
+    }
+    return { ok: false, message: String(e?.message || e || "生成失败") };
   }
 }
 

@@ -1,5 +1,50 @@
 # 拾光剪影 — 变更日志
 
+## V4.39.8 (2026-09-26) — 优秀三件事①：画布生成异步化（generateForNode → runGeneration）
+
+> 代码评价报告（综合 6.9/10）结论「距离优秀只差三件事」之**第一件事**，也是报告认定的
+> 「整个体验整改里性价比最高的一项」：服务端 `/host/generation/*` 与前端 `generationQueue.ts`
+> 都是现成的，断点只剩主路径 `App.tsx:generateForNode` 走同步阻塞端点。
+
+### 接线层（bridge.ts）—— 一处改动，全部调用点异步化
+
+- `generateImageViaHost` / `generateVideoViaHost` 新增可选 `awaitOpts`
+  （`signal` / `onProgress` / `timeoutMs` / `maxAttempts`）：
+  count==1 分支从同步 `POST /host/generate-image|video` 改走 `runGeneration`
+  （submit → 轮询 status → 终态取 result）；count>1 批量循环递归自身、自动继承。
+- **契约已逐键核对**：服务端 `_GEN_PAYLOAD_KEYS` 白名单（image 7 键 / video 10 键）
+  与旧同步端点发送键完全一致；`_build_gen_callable` 为保真搬运
+  （画质档→size 换算、NG 计数、GFPGAN 后台预载、视频后处理注册一个不少）。
+  GFPGAN 预载轮询块（幂等去重）原样保留。
+- **语义映射**：任务 `failed` → `{ok:false, message:上游原文}`；
+  `AbortError` → `{ok:false, message:"已取消"}` —— 旧返回形状不变，
+  11 个现有调用点（App.tsx ×9、mediaExtraNodes、VideoStudio）零改动直接获益。
+
+### 交互层（App.tsx）—— 诚实进度 + 真取消
+
+- `onGenerate` 持 `AbortController`；`onProgress` **如实上报**：
+  `job.progress` 为 null（上游无真实信号）时只显示「阶段 · 已用时 Ns」，
+  绝不编造百分比；仅视频后处理回传真值时才写节点 progress。
+- 「中断」按钮复用升级：除原有的批量轮次中断外，现在同时 `abort()` 在飞的
+  单节点任务与批量当前节点任务（`awaitGeneration` 收到 signal 后会调后端 cancel，
+  后端任务一并取消、结果不落盘）。
+- 取消语义：节点回 `idle`、不亮红、不残留 errorMessage；批量中被取消的节点
+  同样回 idle 不计失败。
+
+### 验证
+
+- 新增 5 个异步接线单测（payload 键一致性 / done 映射 / 失败映射 / 取消映射 /
+  视频 postprocess_job_id 透传），`bridge.test.ts` 10/10 绿；
+  全套 8 个测试文件 76 断言逐文件跑全绿（整跑受沙箱 fs-shim 影响收集数抖动，
+  逐文件确定性全绿）。
+- tsc：主库 37 个冻结区基线报错零新增（App/bridge/generationQueue 零错误）；
+  副库 0 错。
+- 双库：`bridge.ts` / `App.tsx` / `bridge.test.ts` 已逐字节同步
+  `vendor/AI-Canvas-tauri/src/libtv/`；双库检查 exit=0（bridge.test.ts 顺带收敛，
+  副库缺失 7→6，基线已同步清理）。
+- 冻结区守卫 85 锁点完好（本版本改动文件均不在冻结区）。
+- 注：`canvasVersion.ts` 整文件冻结，画布版本号三件套待解冻后补。
+
 ## V4.39.7 (2026-09-26) — P0 整改：卡点真生效 + 门禁去假红 + 红测试清零
 
 > 依据实测整改方案（合格线 8 绿 / 11 失守，其中 6 条是「标准写了没接线」）。
