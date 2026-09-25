@@ -188,6 +188,12 @@ export const DEFAULT_PROMPT_SOURCES: PromptSource[] = [
     false,
   ),
   localAssetSource(
+    "shiguang-mascot-pack",
+    "拾光·Q版兽耳娘形象包（小拾）",
+    "shiguang-mascot.json",
+    false,
+  ),
+  localAssetSource(
     "shiguang-adult-18plus",
     "拾光·成人向 18+（细分类）",
     "shiguang-adult-18plus.json",
