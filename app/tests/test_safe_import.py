@@ -1,6 +1,5 @@
 import pytest
-import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 @pytest.fixture(autouse=True)
@@ -100,20 +99,44 @@ class TestSafeImport:
     
     def test_attribute_missing_tries_alternate_path(self):
         """测试属性缺失时尝试替代路径，但最终失败"""
+        import importlib.util
         from app.core.editor_scheduler import _safe_import
-        
+
+        # 确定性前提：两条候选路径各自对应 sys.modules 里独立的模块对象。
+        # conftest 把 app/ 加进 sys.path 后，core.editor_scheduler 随时可解析；
+        # 若它恰好已被缓存（或被现场导入成功）且属性完好，_safe_import 会在
+        # 替代路径上意外成功 → 用例抖动（DID NOT RAISE）。故预导入两条路径、
+        # 把属性从两个模块对象上一并摘除，并在结束后还原，杜绝顺序依赖。
+        import app.core.editor_scheduler as mod_app
+        saved_app = mod_app.__dict__["EditorKernel"]
+        mod_alt = None
+        saved_alt = None
+        if importlib.util.find_spec("core.editor_scheduler") is not None:
+            import core.editor_scheduler as mod_alt
+            if mod_alt is not mod_app:
+                saved_alt = mod_alt.__dict__["EditorKernel"]
+            else:
+                mod_alt = None
+
         real_import = __import__
         attempts = []
-        
+
         def mock_import(name, fromlist):
             attempts.append(name)
-            mod = real_import(name, fromlist=fromlist)
-            if name == "app.core.editor_scheduler":
-                del mod.__dict__["EditorKernel"]
-            return mod
-        
-        with patch("builtins.__import__", side_effect=mock_import):
-            with pytest.raises(ImportError) as exc_info:
-                _safe_import("app.core.editor_scheduler", ["EditorKernel"])
-            assert "缺少属性" in str(exc_info.value)
-            assert "EditorKernel" in str(exc_info.value)
+            return real_import(name, fromlist=fromlist)
+
+        try:
+            del mod_app.__dict__["EditorKernel"]
+            if mod_alt is not None:
+                del mod_alt.__dict__["EditorKernel"]
+            with patch("builtins.__import__", side_effect=mock_import):
+                with pytest.raises(ImportError) as exc_info:
+                    _safe_import("app.core.editor_scheduler", ["EditorKernel"])
+                assert "缺少属性" in str(exc_info.value)
+                assert "EditorKernel" in str(exc_info.value)
+            # 两条路径（app.core.* 与 core.*）都被实际尝试过
+            assert attempts == ["app.core.editor_scheduler", "core.editor_scheduler"]
+        finally:
+            mod_app.__dict__["EditorKernel"] = saved_app
+            if mod_alt is not None:
+                mod_alt.__dict__["EditorKernel"] = saved_alt

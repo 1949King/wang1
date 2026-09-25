@@ -2,13 +2,12 @@ from enum import Enum
 from app.modules.utils.logger import logger
 from typing import Optional, Dict, Any, Tuple, List, Callable
 from pathlib import Path
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QThread, QSemaphore, QMutex
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QThread
+from PyQt6.QtGui import QImage
 import threading
 import time
 from collections import OrderedDict
 import gc
-import os
 import queue
 
 import numpy as np
@@ -18,6 +17,77 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning("cv2 未安装，将使用降级模式")
+
+
+# ── 基础调色 LUT 化（V4.39.9）────────────────────────────────────────
+# 把「只依赖单像素值」的点操作（亮度/对比度/曝光/gamma/高光/阴影/色温）
+# 折叠成 256 入口查找表：每帧建表一次（256 个值）+ 一趟查表，
+# 替代原先每趟全分辨率 float32 运算（1080p 每趟 ~200 万像素读写）。
+# 与原浮点链的差异仅限中间量化（≤2 LSB），视觉不可区分；
+# 导出 / GL 路径数学不变（见 gl_filter_widget.py 的对齐注释）。
+
+
+def _pointwise_lut(steps: List[Callable[[np.ndarray], np.ndarray]]) -> np.ndarray:
+    """把一串点操作按序折叠成 uint8 (256,) 共享查找表。
+
+    每个 step 接收/返回 float32 的 x（0..255 允许中间溢出），与原链一致
+    不在步骤间截断，只在最终表落盘时 round+clip（单次量化）。
+    """
+    x = np.arange(256, dtype=np.float32)
+    with np.errstate(invalid="ignore"):
+        # 极端调色档下中间值可为负（如负亮度+gamma 幂）→ NaN 入口与旧浮点链
+        # 同语义落 0（astype(uint8)），属既有行为而非新引入
+        for fn in steps:
+            x = fn(x)
+        return np.clip(np.round(x), 0, 255).astype(np.uint8)
+
+
+def _lut_apply_f32(sl: np.ndarray, table: np.ndarray) -> np.ndarray:
+    """对 float32 帧（或其通道切片）应用共享 LUT，返回 float32。
+
+    入口做一次 clip+round 量化（LUT 的固有代价），之后链路仍以 float32 接续。
+    """
+    u8 = np.clip(sl, 0, 255).astype(np.uint8)
+    if CV2_AVAILABLE:
+        return cv2.LUT(u8, table).astype(np.float32)
+    return table[u8].astype(np.float32)
+
+
+def _lut_entry_safe(steps: List[Callable[[np.ndarray], np.ndarray]]) -> bool:
+    """判断「整段折叠成 256 入口 LUT」对越界中间值是否输出不变。
+
+    LUT 入口必须先 clip 到 [0,255]；旧浮点链的中间值无界（如饱和度可把
+    通道推出 255）。该 clip 不影响最终输出的充要条件（各 step 均单调不减）：
+      F(255) ≥ 255  —— 任何 >255 的输入反正最终 clip 到 255
+      F(0)   ≤ 0    —— 任何 <0 的输入反正最终 clip 到 0
+    不满足则回退旧浮点链（宁可慢，不可偏）。注意 F(0)≤0 场景旧链在 gamma
+    处产生 NaN 垃圾像素，LUT 输出的是有定义的 0 —— 属顺带修复，不算偏差。
+    """
+    x = np.array([0.0, 255.0], dtype=np.float32)
+    for fn in steps:
+        x = fn(x)
+    return bool(np.isfinite(x).all() and x[0] <= 0.0 and x[1] >= 255.0)
+
+
+# 暗角遮罩只取决于 (h, w, vignette)，与帧内容无关 —— 缓存避免每帧 ogrid+sqrt。
+# 跨线程只读/原子写（CPython GIL 下 dict get/set/clear 均原子），最坏情况是重复计算。
+_VIGNETTE_MASK_CACHE: Dict[tuple, np.ndarray] = {}
+
+
+def _vignette_mask(h: int, w: int, vignette: float) -> np.ndarray:
+    key = (h, w, round(float(vignette), 4))
+    m = _VIGNETTE_MASK_CACHE.get(key)
+    if m is None:
+        yy, xx = np.ogrid[:h, :w]
+        cx, cy = w / 2, h / 2
+        dx = (xx - cx) / cx
+        dy = (yy - cy) / cy
+        dist = np.sqrt(dx * dx + dy * dy)
+        m = np.clip(1.0 - dist * float(vignette), 0.2, 1.0)
+        if len(_VIGNETTE_MASK_CACHE) >= 8:
+            _VIGNETTE_MASK_CACHE.clear()
+        _VIGNETTE_MASK_CACHE[key] = m
+    return m
 
 
 def _lazy_get_memory_pool():
@@ -226,39 +296,69 @@ class EffectsWorkerThread(QThread):
         try:
             result = frame.astype(np.float32)
 
+            # ── 基础调色（点操作）LUT 化（V4.39.9）─────────────────────
+            # 策略（平价优先，安全性证明见 _lut_entry_safe docstring）：
+            #  ① 无饱和度/色相打断 → 亮度+对比度+曝光+gamma+高光+阴影全链折叠成
+            #     单张 256 表：输入必为 uint8（零入口损失）、内部 float 无中间量化，
+            #     与旧浮点链偏差 ≤1 LSB（仅末端一次 round）。
+            #  ② 有饱和度/色相 → 亮度对比度保持旧浮点（LUT 输出域 [0,255] 会丢失
+            #     无界中间值、污染饱和度灰度耦合）；曝光+gamma+高光+阴影段经
+            #     _lut_entry_safe 判定安全才折叠，否则整段回退旧浮点。
             brightness = effects.get('brightness', 0)
-            if brightness != 0:
-                result = result + brightness
-
             contrast = effects.get('contrast', 1.0)
-            if contrast != 1.0:
-                mean = result.mean()
-                result = (result - mean) * contrast + mean
-
             saturation = effects.get('saturation', 1.0)
-            if saturation != 1.0 and result.shape[2] >= 3:
-                gray = result[:, :, :3].mean(axis=2, keepdims=True)
-                result[:, :, :3] = gray + (result[:, :, :3] - gray) * saturation
-
             exposure = effects.get('exposure', 0)
-            if exposure != 0:
-                result = result * (2.0 ** exposure)
-
             gamma = effects.get('gamma', 1.0)
-            if gamma != 1.0:
-                result = 255.0 * ((result / 255.0) ** (1.0 / gamma))
-
             highlights = effects.get('highlights', 0)
-            if highlights != 0 and result.shape[2] >= 3:
-                mask = result[:, :, :3] > 128
-                result[:, :, :3][mask] = result[:, :, :3][mask] + highlights
-
             shadows = effects.get('shadows', 0)
-            if shadows != 0 and result.shape[2] >= 3:
-                mask = result[:, :, :3] <= 128
-                result[:, :, :3][mask] = result[:, :, :3][mask] + shadows
-
             hue_shift = effects.get('hue', 0)
+
+            bc_active = brightness != 0 or contrast != 1.0
+            pt_active = (exposure != 0 or gamma != 1.0
+                         or highlights != 0 or shadows != 0)
+
+            steps_bc: List[Callable[[np.ndarray], np.ndarray]] = []
+            if bc_active:
+                b = float(brightness) if brightness != 0 else 0.0
+                c = float(contrast) if contrast != 1.0 else 1.0
+                # 对比度均值 = 加亮度后的全帧均值 = frame.mean() + b（与原式严格同值）
+                mean_after = result.mean() + b
+                steps_bc.append(lambda x: (x + b - mean_after) * c + mean_after)
+
+            steps_pt: List[Callable[[np.ndarray], np.ndarray]] = []
+            if pt_active:
+                if exposure != 0:
+                    e_mul = 2.0 ** float(exposure)
+                    steps_pt.append(lambda x: x * e_mul)
+                if gamma != 1.0:
+                    g_inv = 1.0 / float(gamma)
+                    steps_pt.append(lambda x: 255.0 * ((x / 255.0) ** g_inv))
+                if highlights != 0:
+                    hl = float(highlights)
+                    steps_pt.append(lambda x: np.where(x > 128, x + hl, x))
+                if shadows != 0:
+                    shd = float(shadows)
+                    steps_pt.append(lambda x: np.where(x <= 128, x + shd, x))
+
+            if (bc_active or pt_active) and saturation == 1.0 and hue_shift == 0:
+                # ① 全链单表：一趟查表完成整段基础调色
+                result = _lut_apply_f32(result, _pointwise_lut(steps_bc + steps_pt))
+            else:
+                # ② 分段：bc 浮点（保无界中间值）→ 饱和度 → pt 段安全才 LUT
+                if bc_active:
+                    result = steps_bc[0](result)
+                if saturation != 1.0 and result.shape[2] >= 3:
+                    gray = result[:, :, :3].mean(axis=2, keepdims=True)
+                    result[:, :, :3] = gray + (result[:, :, :3] - gray) * saturation
+                if pt_active and result.shape[2] >= 3:
+                    if _lut_entry_safe(steps_pt):
+                        result[:, :, :3] = _lut_apply_f32(
+                            result[:, :, :3], _pointwise_lut(steps_pt))
+                    else:
+                        # 回退旧浮点链（越界中间值会改变最终输出的参数组合）
+                        for fn in steps_pt:
+                            result[:, :, :3] = fn(result[:, :, :3])
+
             if hue_shift != 0 and CV2_AVAILABLE and result.shape[2] >= 3:
                 hsv = cv2.cvtColor(result.astype(np.uint8), cv2.COLOR_RGB2HSV)
                 hsv[:, :, 0] = (hsv[:, :, 0].astype(np.float32) + float(hue_shift)) % 180
@@ -271,9 +371,9 @@ class EffectsWorkerThread(QThread):
                     [-1, 9 + sharpen, -1],
                     [-1, -1, -1]
                 ], dtype=np.float32) / (1.0 + abs(sharpen) * 0.1)
-                for c in range(min(3, result.shape[2])):
-                    result[:, :, c] = cv2.filter2D(
-                        result[:, :, c].astype(np.uint8), -1, kernel)
+                # 整帧一次 filter2D（多通道独立卷积，与逐通道循环逐位一致），替代 3 次调用
+                result[:, :, :3] = cv2.filter2D(
+                    result[:, :, :3].astype(np.uint8), -1, kernel)
 
             blur_radius = effects.get('blur', 0)
             if blur_radius > 0 and CV2_AVAILABLE:
@@ -284,13 +384,8 @@ class EffectsWorkerThread(QThread):
             vignette = effects.get('vignette', 0)
             if vignette > 0 and CV2_AVAILABLE:
                 h, w = result.shape[:2]
-                yy, xx = np.ogrid[:h, :w]
-                cx, cy = w / 2, h / 2
-                dx = (xx - cx) / cx
-                dy = (yy - cy) / cy
-                dist = np.sqrt(dx * dx + dy * dy)
-                mask = 1.0 - dist * vignette
-                mask = np.clip(mask, 0.2, 1.0)
+                # 遮罩与帧内容无关，走缓存（原每帧 ogrid+sqrt）
+                mask = _vignette_mask(h, w, vignette)
                 result = result * mask[:, :, np.newaxis]
 
             result = np.clip(result, 0, 255).astype(np.uint8)
@@ -1069,51 +1164,100 @@ class PreviewManager(QObject):
                     np.clip(result, 0, 255).astype(np.uint8), str(fname), intens
                 ).astype(np.float32)
 
+            # ── 基础调色（点操作）LUT 化（V4.39.9，策略同 _apply_effects）──
+            # ① 无饱和度/色相打断 → 全链（亮度+对比度+曝光+gamma+色温）折叠成
+            #    单表（色温非零时每通道一张），偏差 ≤1 LSB；
+            # ② 有饱和度/色相 → bc 保持旧浮点，曝光+gamma 段经 _lut_entry_safe
+            #    判定安全才折叠，否则回退旧浮点；色温走每通道 LUT（数学等价）。
             brightness = effects.get('brightness', 0)
-            if brightness != 0:
-                b = float(brightness)
-                if abs(b) > 1.5:
-                    b = b / 100.0 * 80.0
-                else:
-                    b = b * 80.0
-                result = result + b
-
             contrast = effects.get('contrast', 1.0)
-            if contrast != 1.0:
-                mean = result.mean()
-                result = (result - mean) * float(contrast) + mean
-
             saturation = effects.get('saturation', 1.0)
-            if saturation != 1.0 and result.shape[2] >= 3:
-                gray = result[:, :, :3].mean(axis=2, keepdims=True)
-                result[:, :, :3] = gray + (result[:, :, :3] - gray) * float(saturation)
-
             cp = effects.get("color_params") if isinstance(effects.get("color_params"), dict) else {}
+            exposure = effects.get('exposure', 0) if not preview_fast else 0
+            gamma = effects.get('gamma', 1.0) if not preview_fast else 1.0
+            hue_shift = effects.get('hue', 0) if not preview_fast else 0
+            temperature = (cp.get('temperature', 0) if cp else 0) if not preview_fast else 0
 
-            if not preview_fast:
-                exposure = effects.get('exposure', 0)
+            bc_active = brightness != 0 or contrast != 1.0
+            pt_active = exposure != 0 or gamma != 1.0
+            temp_active = bool(temperature) and result.shape[2] >= 3
+
+            steps_bc: List[Callable[[np.ndarray], np.ndarray]] = []
+            if bc_active:
+                b = 0.0
+                if brightness != 0:
+                    # 保留本路径的亮度换算规则
+                    b = float(brightness)
+                    if abs(b) > 1.5:
+                        b = b / 100.0 * 80.0
+                    else:
+                        b = b * 80.0
+                c = float(contrast) if contrast != 1.0 else 1.0
+                # 对比度均值 = 加亮度后的全帧均值 = frame.mean() + b（与原式严格同值）
+                mean_after = result.mean() + b
+                steps_bc.append(lambda x: (x + b - mean_after) * c + mean_after)
+
+            steps_pt: List[Callable[[np.ndarray], np.ndarray]] = []
+            if pt_active:
                 if exposure != 0:
-                    result = result * (2.0 ** exposure)
-
-                gamma = effects.get('gamma', 1.0)
+                    e_mul = 2.0 ** float(exposure)
+                    steps_pt.append(lambda x: x * e_mul)
                 if gamma != 1.0:
-                    result = 255.0 * ((np.clip(result, 0, 255) / 255.0) ** (1.0 / float(gamma)))
+                    g_inv = 1.0 / float(gamma)
+                    # 保留本路径 gamma 前先 clip 的语义
+                    steps_pt.append(lambda x: 255.0 * ((np.clip(x, 0, 255) / 255.0) ** g_inv))
 
-                hue_shift = effects.get('hue', 0)
-                if hue_shift != 0 and CV2_AVAILABLE and result.shape[2] >= 3:
-                    hsv = cv2.cvtColor(np.clip(result, 0, 255).astype(np.uint8), cv2.COLOR_RGB2HSV)
-                    shift = float(hue_shift)
-                    if abs(shift) > 180:
-                        shift = shift / 2.0
-                    hsv[:, :, 0] = (hsv[:, :, 0].astype(np.float32) + shift / 2.0) % 180
-                    result = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB).astype(np.float32)
-
-                temperature = cp.get('temperature', 0) if cp else 0
-                if temperature and result.shape[2] >= 3:
-                    # 色温：正值偏暖（R↑B↓），负值偏冷（R↓B↑），R/B 通道假设为 RGB 序
+            if (bc_active or pt_active or temp_active) \
+                    and saturation == 1.0 and hue_shift == 0:
+                # ① 全链单表（色温非零 → 每通道一张）
+                if temp_active:
                     shift = float(temperature) / 100.0 * 40.0
-                    result[:, :, 0] = result[:, :, 0] + shift
-                    result[:, :, 2] = result[:, :, 2] - shift
+                    tab_r = _pointwise_lut(steps_bc + steps_pt + [lambda x: x + shift])
+                    tab_g = _pointwise_lut(steps_bc + steps_pt)
+                    tab_b = _pointwise_lut(steps_bc + steps_pt + [lambda x: x - shift])
+                    u8 = np.clip(result[:, :, :3], 0, 255).astype(np.uint8)
+                    u8[:, :, 0] = tab_r[u8[:, :, 0]]
+                    u8[:, :, 1] = tab_g[u8[:, :, 1]]
+                    u8[:, :, 2] = tab_b[u8[:, :, 2]]
+                    result[:, :, :3] = u8.astype(np.float32)
+                else:
+                    result = _lut_apply_f32(result, _pointwise_lut(steps_bc + steps_pt))
+            else:
+                # ② 分段：bc 浮点（保无界中间值）→ 饱和度 → 后续段
+                if bc_active:
+                    result = steps_bc[0](result)
+                if saturation != 1.0 and result.shape[2] >= 3:
+                    gray = result[:, :, :3].mean(axis=2, keepdims=True)
+                    result[:, :, :3] = gray + (result[:, :, :3] - gray) * float(saturation)
+
+                if not preview_fast:
+                    if pt_active:
+                        if _lut_entry_safe(steps_pt):
+                            result = _lut_apply_f32(result, _pointwise_lut(steps_pt))
+                        else:
+                            # 回退旧浮点链（越界中间值会改变最终输出的参数组合）
+                            for fn in steps_pt:
+                                result = fn(result)
+
+                    if hue_shift != 0 and CV2_AVAILABLE and result.shape[2] >= 3:
+                        hsv = cv2.cvtColor(np.clip(result, 0, 255).astype(np.uint8), cv2.COLOR_RGB2HSV)
+                        shift = float(hue_shift)
+                        if abs(shift) > 180:
+                            shift = shift / 2.0
+                        hsv[:, :, 0] = (hsv[:, :, 0].astype(np.float32) + shift / 2.0) % 180
+                        result = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB).astype(np.float32)
+
+                    if temp_active:
+                        # LUT-C：色温每通道表（R+shift / G 恒等 / B-shift），
+                        # 一趟查表替代两趟全帧切片加法（R/B 通道假设为 RGB 序）
+                        shift = float(temperature) / 100.0 * 40.0
+                        x = np.arange(256, dtype=np.float32)
+                        tab_r = np.clip(np.round(x + shift), 0, 255).astype(np.uint8)
+                        tab_b = np.clip(np.round(x - shift), 0, 255).astype(np.uint8)
+                        u8 = np.clip(result[:, :, :3], 0, 255).astype(np.uint8)
+                        u8[:, :, 0] = tab_r[u8[:, :, 0]]
+                        u8[:, :, 2] = tab_b[u8[:, :, 2]]
+                        result[:, :, :3] = u8.astype(np.float32)
 
             # 预设 LUT（调色页接线）；拖动/播放可用半分辨率快速路径
             lut_name = effects.get("lut")
@@ -1176,9 +1320,9 @@ class PreviewManager(QObject):
                     [-1, 9 + sharpen, -1],
                     [-1, -1, -1]
                 ], dtype=np.float32) / (1.0 + abs(float(sharpen)) * 0.1)
-                for c in range(min(3, result.shape[2])):
-                    result[:, :, c] = cv2.filter2D(
-                        result[:, :, c].astype(np.uint8), -1, kernel)
+                # 整帧一次 filter2D（多通道独立卷积，与逐通道循环逐位一致），替代 3 次调用
+                result[:, :, :3] = cv2.filter2D(
+                    result[:, :, :3].astype(np.uint8), -1, kernel)
 
             blur_radius = effects.get('blur', 0)
             if blur_radius > 0 and CV2_AVAILABLE:
@@ -1189,13 +1333,8 @@ class PreviewManager(QObject):
             vignette = effects.get('vignette', 0)
             if vignette > 0 and CV2_AVAILABLE:
                 h, w = result.shape[:2]
-                yy, xx = np.ogrid[:h, :w]
-                cx, cy = w / 2, h / 2
-                dx = (xx - cx) / cx
-                dy = (yy - cy) / cy
-                dist = np.sqrt(dx * dx + dy * dy)
-                mask = 1.0 - dist * float(vignette)
-                mask = np.clip(mask, 0.2, 1.0)
+                # 遮罩与帧内容无关，走缓存（原每帧 ogrid+sqrt）
+                mask = _vignette_mask(h, w, vignette)
                 result = result * mask[:, :, np.newaxis]
 
             result = np.clip(result, 0, 255).astype(np.uint8)
