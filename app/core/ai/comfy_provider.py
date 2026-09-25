@@ -418,8 +418,74 @@ class ComfyEngineProvider:
         return 0
 
     @staticmethod
+    def _common_install_candidates() -> List[str]:
+        """常见安装位置候选（有限深度，只做一次 listdir，不做全盘递归）。
+
+        背景（2026-09-25 实测）：本机装了秋叶整合包
+        ``~/Desktop/ComfyUI-aki-v1.7/ComfyUI`` 与源码版 ``D:/_comfy_compare/ComfyUI``，
+        但两者都不在原固定候选里 ⇒ 画布顶栏误报「引擎未安装」。
+        这里补「桌面下的 ComfyUI*/ComfyUI」与「项目同级目录」两类常见位置。
+        """
+        found: List[str] = []
+        try:
+            home = os.path.expanduser("~")
+            for base in (os.path.join(home, "Desktop"), os.path.join(home, "桌面")):
+                if not os.path.isdir(base):
+                    continue
+                for name in sorted(os.listdir(base)):
+                    d = os.path.join(base, name, "ComfyUI")
+                    if os.path.isfile(os.path.join(d, "main.py")):
+                        found.append(d)
+        except OSError as e:
+            logger.debug("扫描桌面 ComfyUI 安装失败: %s", e)
+        try:
+            parent = os.path.dirname(_PROJECT_ROOT)
+            for name in sorted(os.listdir(parent)):
+                d = os.path.join(parent, name, "ComfyUI")
+                if os.path.isfile(os.path.join(d, "main.py")):
+                    found.append(d)
+        except OSError as e:
+            logger.debug("扫描项目同级 ComfyUI 安装失败: %s", e)
+        return found
+
+    @staticmethod
+    def _own_python_candidates(engine_dir: str) -> List[str]:
+        """引擎**自带**解释器的候选路径（含整合包的常见布局）。
+
+        覆盖三类布局：
+          · ``<引擎>/python_embeded/``  —— 官方便携包
+          · ``<引擎>/venv/``            —— 源码版自建虚拟环境
+          · ``<引擎>/../python/``       —— **秋叶整合包**（解释器在引擎上一级）
+        """
+        if sys.platform == "win32":
+            rel = [
+                ("python_embeded", "python.exe"),
+                ("venv", os.path.join("Scripts", "python.exe")),
+                (os.path.join("..", "python"), "python.exe"),
+                (os.path.join("..", "python_embeded"), "python.exe"),
+            ]
+        else:
+            rel = [
+                ("python_embeded", os.path.join("bin", "python")),
+                ("venv", os.path.join("bin", "python")),
+                (os.path.join("..", "python"), os.path.join("bin", "python")),
+            ]
+        return [os.path.normpath(os.path.join(engine_dir, a, b)) for a, b in rel]
+
+    @classmethod
+    def _has_own_python(cls, engine_dir: str) -> bool:
+        """引擎是否自带可用解释器（决定它能不能被直接拉起）。"""
+        return any(os.path.isfile(p) for p in cls._own_python_candidates(engine_dir))
+
+    @staticmethod
     def _find_engine_dir() -> Optional[str]:
-        """探测 ComfyUI 引擎目录（含 main.py）。依次检查环境变量与项目内候选。"""
+        """探测 ComfyUI 引擎目录（含 main.py）。
+
+        优先级：环境变量 → 项目内 → 常见安装位置（桌面 / 项目同级）。
+        在候选中**优先返回自带解释器的那一个**，因为只有它才拉得起来；
+        若都没自带解释器，则返回首个命中项（由 ``_find_engine_python`` 回退当前解释器）。
+        选中的目录会记 INFO 日志，避免「不知道用的是哪一份」。
+        """
         candidates: List[str] = []
         env_dir = os.environ.get("SHIGUANG_COMFY_HOME")
         if env_dir:
@@ -429,10 +495,20 @@ class ComfyEngineProvider:
             os.path.join(_PROJECT_ROOT, "comfyui"),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "comfyui"),
         ]
+        candidates += ComfyEngineProvider._common_install_candidates()
+
+        fallback: Optional[str] = None
         for directory in candidates:
-            if directory and os.path.isfile(os.path.join(directory, "main.py")):
+            if not directory or not os.path.isfile(os.path.join(directory, "main.py")):
+                continue
+            if ComfyEngineProvider._has_own_python(directory):
+                logger.info("ComfyUI 引擎目录: %s（自带解释器，可直接拉起）", directory)
                 return directory
-        return None
+            if fallback is None:
+                fallback = directory
+        if fallback:
+            logger.info("ComfyUI 引擎目录: %s（未发现自带解释器，将回退当前解释器）", fallback)
+        return fallback
 
     @staticmethod
     def _install_hint() -> str:
@@ -450,20 +526,18 @@ class ComfyEngineProvider:
 
     @staticmethod
     def _find_engine_python(engine_dir: str) -> str:
-        """定位引擎侧 Python 解释器（便携版 / venv），回退当前解释器。"""
-        if sys.platform == "win32":
-            candidates = [
-                os.path.join(engine_dir, "python_embeded", "python.exe"),
-                os.path.join(engine_dir, "venv", "Scripts", "python.exe"),
-            ]
-        else:
-            candidates = [
-                os.path.join(engine_dir, "python_embeded", "bin", "python"),
-                os.path.join(engine_dir, "venv", "bin", "python"),
-            ]
-        for candidate in candidates:
+        """定位引擎侧 Python 解释器（便携版 / venv / **整合包上一级**），回退当前解释器。
+
+        修正（2026-09-25）：原实现只找 ``<引擎>/python_embeded`` 与 ``<引擎>/venv``，
+        于是**秋叶整合包**（解释器在 ``<引擎>/../python/python.exe``）命中不了 ⇒
+        静默回退到当前解释器（拾光剪影 venv，缺 ComfyUI 依赖）⇒ 拉起必然失败。
+        现复用 ``_own_python_candidates``，与 ``_has_own_python`` 口径一致。
+        """
+        for candidate in ComfyEngineProvider._own_python_candidates(engine_dir):
             if os.path.isfile(candidate):
                 return candidate
+        logger.info(
+            "引擎目录 %s 未发现自带解释器，回退当前解释器（可能缺引擎依赖）", engine_dir)
         return sys.executable
 
 
