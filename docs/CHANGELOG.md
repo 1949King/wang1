@@ -1,5 +1,72 @@
 # 拾光剪影 — 变更日志
 
+## V4.40.0 (2026-09-26) — 优秀三件事③：5 个真转场（ffmpeg 金标准对齐）
+
+> 代码评价报告「距离优秀只差三件事」之**第三件事（收官）**：新增 5 个
+> 真转场插件，预览与导出语义对齐——不信 ffmpeg 文档，抓 n9.0 源码推公式、
+> 用本机二进制实测渲染做金标准逐像素验证。至此三件事全部落地：
+> ① runGeneration（V4.39.8）② 调色 LUT（V4.39.9）③ 真转场（本版）。
+
+### 新增 5 个转场插件（`app/plugins/`）
+
+| 插件 | 效果 | 导出模式 | 依据 |
+|---|---|---|---|
+| `transition_radial` | 径向/时钟擦除（12 点起顺时针） | **exact**（xfade 直出） | 与 n9.0 公式+本机渲染 ≤4 LSB |
+| `transition_diag` | 对角擦除（tl/tr/bl/br 四方向） | **exact**（xfade 直出） | 同上 ≤4 LSB |
+| `transition_fadeblack` | 黑场过渡（经黑闪切） | **bake**（预览同码烘焙） | n9.0 公式与本机二进制漂移 ~13 LSB |
+| `transition_fadewhite` | 白场过渡（经白闪切） | **bake** | 同上 |
+| `transition_page` | 翻页（左/右，带脊线阴影带） | **bake** | 无 xfade 等价物，回退 coverleft/right（标注近似） |
+
+- bake = 导出用**预览同一份代码**烘焙重叠窗 ⇒ 预览==导出由构造保证，
+  免疫 ffmpeg 版本漂移；`export_degradation_note` 如实写明回退近似。
+- exact 两者由**金标准测试常驻锁定 ≤6 LSB**（radial + diag×4 方向，
+  与本机 ffmpeg 实际渲染逐像素对比，ffmpeg 缺失时自动 skip）。
+
+### 关键发现与锁定
+
+- **P↔帧号标定**：fade 线性探针确立 duration=1/offset=1/10fps 下
+  f(n) 的 P=(n-11)/10（R+B=254 恒等），金标准采样 P∈{0.1,0.2,0.5,0.8,0.9}。
+- **diag 命名反向**：ffmpeg `diagtl/tr/bl/br` 的命名角是**残留角**而非
+  揭示起始角（`diagtl` 新画面从右下进入）。插件 direction（揭示起始角）→
+  xfade 名做反转映射（tl→diagbr 等），`_DIAG_XFADE` 注释 + 测试双重锁定，
+  禁止「顺手改正」。
+- **radial 固有细缝**：P=1 时 12 点左侧残留 ~3% atan2 间断细缝
+  （ffmpeg 同源行为），测试放宽为 `frac_b>0.9` 并注释记录。
+- **fadeblack 本机行为**（实测，与 n9.0 源码不同）：红通道 ≈clip(1-6P)
+  快降、P∈[0.2,0.3] 全黑驻留、谷底在 P≈0.3；中点蓝通道精确 86。
+
+### 注册表扩展（`transition_plugin_registry.py`）
+
+- 11 个中文标签（黑场/黑场过渡/白场/白场过渡/径向/径向擦除/时钟擦除/
+  对角/对角擦除/翻页/翻页转场）→ 新插件；UI 下拉自动可见。
+- `_PLUGIN_TO_XFADE` +3、`_DIAG_XFADE`（反向）、`_PAGE_XFADE`（回退）、
+  `_EXPORT_FIDELITY` +5、`_KNOWN_XFADE` +4（diag 四名）。
+- 映射表全员 ⊆ 本机 ffmpeg 实装 xfade 名单（测试硬编码 58 名核对，
+  防止指向不存在的滤镜名）。
+
+### 顺带修复存量地雷 ×2
+
+- **根 `core/__init__.py` 空包遮蔽**：初始提交遗留的空壳包在 pytest
+  路径序下遮蔽 `app/core`，导致全部旧式 `core.*` 插件导入静默失败
+  （存量潜伏 bug，pytest 下插件从未真正加载过）。改为 `__path__` 转发
+  shim（追加 app/core 为命名空间路径），两种路径序均可解析，无 bare
+  `import core` 消费者（grep 核实）。
+- **cv2.imread 中文路径坑**（4.11.0/Windows）：打不开**任何**含中文的
+  绝对路径（fopen 按 ANSI 解释 UTF-8 字节序列），ffmpeg 写文件本身正常。
+  金标准测试读取改 `read_bytes()+cv2.imdecode` 绕过（pathlib 走宽字符
+  API）；相对 ASCII 路径不受影响——三场景对照实验定位（`_verify` 探针）。
+
+### 测试与门禁
+
+- 新增 `app/tests/test_transition_new_plugins.py` **19 项全绿**：注册发现、
+  映射表核对（×10 方向 ⊆ ffmpeg 名单）、diag 反向映射、page 回退、
+  fidelity 模式/降级说明/可烘焙性、中文标签解析、fadeblack 端点+中点+
+  深降恢复、fadewhite 中点、radial 死区+顺时针象限+端点、diag 揭示角+
+  软渐变带+端点、page 揭示/阴影/端点、**金标准 radial + diag×4（≤6 LSB）**。
+- **全量 377/377**（358+19）；ruff 触碰文件全净（顺手清 registry 2 处：
+  死 import numpy、C416）；冻结区 85 锁完好；稳定性门禁 269=269；
+  粘合层契约 18/0；架构守护 0 警告；双库无新增漂移。
+
 ## V4.39.9 (2026-09-26) — 优秀三件事②：基础调色全量 LUT 化
 
 > 代码评价报告「距离优秀只差三件事」之**第二件事**：预览调色链逐点浮点运算

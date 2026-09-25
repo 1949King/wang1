@@ -26,6 +26,17 @@ LEGACY_LABEL_TO_PLUGIN: Dict[str, str] = {
     "推入": "transition_slide",
     "旋转": "transition_spin",
     "故障": "transition_glitch",
+    "黑场": "transition_fadeblack",
+    "黑场过渡": "transition_fadeblack",
+    "白场": "transition_fadewhite",
+    "白场过渡": "transition_fadewhite",
+    "径向": "transition_radial",
+    "径向擦除": "transition_radial",
+    "时钟擦除": "transition_radial",
+    "对角": "transition_diag",
+    "对角擦除": "transition_diag",
+    "翻页": "transition_page",
+    "翻页转场": "transition_page",
 }
 
 _CURVE_TO_EASING: Dict[str, str] = {
@@ -147,8 +158,6 @@ def apply_frames(
     progress = max(0.0, min(1.0, float(progress)))
     params = dict(params or {})
     try:
-        import numpy as np
-
         a = from_frame
         b = to_frame
         if hasattr(a, "shape") and hasattr(b, "shape") and a.shape[:2] != b.shape[:2]:
@@ -182,7 +191,7 @@ def display_entries() -> List[Tuple[str, str]]:
     if _infos:
         return [(i["name"], i["id"]) for i in _infos]
     # 扫描失败时回退中文内置
-    return [(label, pid) for label, pid in LEGACY_LABEL_TO_PLUGIN.items()]
+    return list(LEGACY_LABEL_TO_PLUGIN.items())
 
 
 # plugin_id / UI 文案 → ffmpeg xfade 名（导出与预览语义对齐）
@@ -194,6 +203,9 @@ _PLUGIN_TO_XFADE: Dict[str, str] = {
     "transition_flip": "squeezeh",  # bake 失败回退
     "transition_spin": "radial",  # bake 失败回退
     "transition_glitch": "pixelize",
+    "transition_fadeblack": "fadeblack",
+    "transition_fadewhite": "fadewhite",
+    "transition_radial": "radial",
 }
 
 _SLIDE_XFADE = {
@@ -215,6 +227,11 @@ _HORZ_XFADE = {"open": "horzopen", "close": "horzclose"}
 _COVER_XFADE = {"left": "coverleft", "right": "coverright", "up": "coverup", "down": "coverdown"}
 _REVEAL_XFADE = {"left": "revealleft", "right": "revealright", "up": "revealup", "down": "revealdown"}
 _SMOOTH_XFADE = {"left": "smoothleft", "right": "smoothright", "up": "smoothup", "down": "smoothdown"}
+# 新增真转场（2026-09-26 优秀三件事③）：对角起始角 / 翻页方向 → ffmpeg xfade 短名
+# 注意：ffmpeg diag* 命名与「B 揭示起始角」相反（diagtl 的 B 来自右下）——
+# 已用本机 ffmpeg 金标准渲染验证（≤4 LSB），勿按字面改回 tl→diagtl。
+_DIAG_XFADE = {"tl": "diagbr", "tr": "diagbl", "bl": "diagtr", "br": "diagtl"}
+_PAGE_XFADE = {"left": "coverleft", "right": "coverright"}  # bake 失败回退近似
 
 # 兼容旧中文短名 / 插件显示名
 _LABEL_TO_XFADE: Dict[str, str] = {
@@ -235,6 +252,17 @@ _LABEL_TO_XFADE: Dict[str, str] = {
     "旋转转场": "radial",
     "故障": "pixelize",
     "故障转场": "pixelize",
+    "黑场": "fadeblack",
+    "黑场过渡": "fadeblack",
+    "白场": "fadewhite",
+    "白场过渡": "fadewhite",
+    "径向": "radial",
+    "径向擦除": "radial",
+    "时钟擦除": "radial",
+    "对角": "diagtl",
+    "对角擦除": "diagtl",
+    "翻页": "coverleft",
+    "翻页转场": "coverleft",
 }
 
 # mode: exact | approx | bake
@@ -310,6 +338,31 @@ _EXPORT_FIDELITY: Dict[str, Dict[str, str]] = {
         "xfade": "",
         "note": "",
     },
+    "transition_fadeblack": {
+        "mode": "bake",
+        "xfade": "fadeblack",  # bake 失败回退（本机 xfade 曲线与插件有版本漂移，属近似）
+        "note": "导出将烘焙黑场效果（失败则近似为 xfade fadeblack）",
+    },
+    "transition_fadewhite": {
+        "mode": "bake",
+        "xfade": "fadewhite",
+        "note": "导出将烘焙白场效果（失败则近似为 xfade fadewhite）",
+    },
+    "transition_radial": {
+        "mode": "exact",
+        "xfade": "radial",  # 金标准验证：预览 vs 本机 xfade ≤4 LSB
+        "note": "",
+    },
+    "transition_diag": {
+        "mode": "exact",
+        "xfade": "",  # 起始角在 xfade_name_for_transition 解析（金标准验证 ≤4 LSB）
+        "note": "",
+    },
+    "transition_page": {
+        "mode": "bake",
+        "xfade": "coverleft",  # bake 失败回退（方向在 xfade_name_for_transition 解析）
+        "note": "导出将烘焙翻页效果（失败则近似为 cover 覆盖）",
+    },
 }
 
 _KNOWN_XFADE = frozenset({
@@ -320,6 +373,7 @@ _KNOWN_XFADE = frozenset({
     "circleopen", "circleclose", "fadeblack", "fadewhite",
     "coverleft", "coverright", "coverup", "coverdown",
     "revealleft", "revealright", "revealup", "revealdown",
+    "diagtl", "diagtr", "diagbl", "diagbr",
 })
 
 
@@ -346,6 +400,10 @@ def xfade_name_for_transition(trans: Optional[Dict[str, Any]]) -> str:
         return _REVEAL_XFADE.get(direction, "revealleft")
     if pid == "transition_smooth":
         return _SMOOTH_XFADE.get(direction, "smoothleft")
+    if pid == "transition_diag":
+        return _DIAG_XFADE.get(direction, "diagtl")
+    if pid == "transition_page":
+        return _PAGE_XFADE.get(direction, "coverleft")
     if pid and pid in _PLUGIN_TO_XFADE:
         return _PLUGIN_TO_XFADE[pid]
     label = str(trans.get("type") or trans.get("name") or "").strip()
