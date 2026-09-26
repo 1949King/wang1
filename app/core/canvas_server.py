@@ -230,6 +230,41 @@ def _write_prompt_image_cache(url: str, raw: bytes, content_type: str) -> None:
         logger.debug("prompt-image cache write skipped", exc_info=True)
 
 
+# 失败负缓存（现行技术文档 §2d.3）：同一 URL 拉取失败后在 TTL 内不再重试。
+# 此前失败无记录 ⇒ 每次启动对同一批死链（pbs.twimg.com 等）重复多轮
+# 45s 超时轰炸、刷 warning 日志、拖慢启动。TTL 取 6h：覆盖一次工作会话，
+# 隔天重启允许重试一次，远端恢复后可自愈（成功后主动清除标记）。
+_PROMPT_IMAGE_FAIL_TTL_SEC = 6 * 3600
+
+
+def _prompt_image_fail_path(url: str) -> Path:
+    return _PROMPT_IMAGE_CACHE_DIR / f"{_prompt_image_cache_key(url)}.fail"
+
+
+def _prompt_image_failed_recently(url: str) -> bool:
+    """TTL 内曾拉取失败 → True（端点不再重试）。判定本身出错时不拦（宁可重试）。"""
+    try:
+        fp = _prompt_image_fail_path(url)
+        return fp.is_file() and (time.time() - fp.stat().st_mtime) < _PROMPT_IMAGE_FAIL_TTL_SEC
+    except Exception:
+        return False
+
+
+def _mark_prompt_image_failed(url: str) -> None:
+    try:
+        _PROMPT_IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _prompt_image_fail_path(url).write_text(f"{time.time():.0f}\n", encoding="utf-8")
+    except Exception:
+        logger.debug("prompt-image fail-cache write skipped", exc_info=True)
+
+
+def _clear_prompt_image_failed(url: str) -> None:
+    try:
+        _prompt_image_fail_path(url).unlink(missing_ok=True)
+    except Exception:
+        logger.debug("prompt-image fail-cache clear skipped", exc_info=True)
+
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROMPTS_PUBLIC = _REPO_ROOT / "vendor" / "shiguang-canvas" / "public" / "prompts"
 _LOCAL_PROMPT_BY_ID: Dict[str, Path] = {
@@ -302,10 +337,10 @@ def _route_post(path: str):
 class _BridgeHandler(BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
-    def log_message(self, fmt: str, *args) -> None:  # noqa: A003
+    def log_message(self, fmt: str, *args) -> None:
         logger.debug("bridge %s - %s", self.address_string(), fmt % args)
 
-    def handle(self) -> None:  # noqa: D401
+    def handle(self) -> None:
         try:
             super().handle()
         except (OSError, ConnectionResetError):
@@ -340,7 +375,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_OPTIONS(self) -> None:  # noqa: N802
+    def do_OPTIONS(self) -> None:
         self.send_response(204)
         self._cors()
         self.end_headers()
@@ -359,7 +394,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return False
         try:
             handler(**kw)
-        except Exception as exc:  # noqa: BLE001 - 桥接层统一兜底，避免连接崩掉
+        except Exception as exc:  # 桥接层统一兜底，避免连接崩掉
             logger.exception("[%s] 路由处理失败", path)
             try:
                 self._json(500, {"ok": False, "message": str(exc)})
@@ -367,7 +402,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 logger.debug("写 500 响应失败", exc_info=True)
         return True
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -466,7 +501,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             with _EVT_SUBS_LOCK:
                 _EVT_SUBS.append(sub_q)
 
-            last_ping = time.time()
             try:
                 while True:
                     try:
@@ -487,7 +521,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                         break
                     except Exception:
                         break
-                    last_ping = time.time()
             finally:
                 with _EVT_SUBS_LOCK:
                     try:
@@ -588,7 +621,15 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 if cached:
                     raw, content_type = cached
                 else:
-                    raw, content_type = _fetch_remote_bytes(url)
+                    if _prompt_image_failed_recently(url):
+                        self._json(502, {"ok": False, "message": "图片此前拉取失败，负缓存 TTL 内不再重试"})
+                        return
+                    try:
+                        raw, content_type = _fetch_remote_bytes(url)
+                    except Exception:
+                        _mark_prompt_image_failed(url)
+                        raise
+                    _clear_prompt_image_failed(url)
                     if len(raw) <= 12 * 1024 * 1024:
                         _write_prompt_image_cache(url, raw, content_type)
                 if len(raw) > 12 * 1024 * 1024:
@@ -833,7 +874,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     }
                 )
             # fix urls relative
-            for it, raw in zip(items, list_editor_outbox()):
+            for it, raw in zip(items, list_editor_outbox(), strict=False):
                 it["url"] = f"http://127.0.0.1:{getattr(self.server, 'bridge_port', DEFAULT_PORT)}{raw['url']}"
                 for key in (
                     "clip_id",
@@ -1042,7 +1083,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         self._json(404, {"ok": False, "message": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length > 0 else b""
@@ -1728,7 +1769,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                                 job["concat_status"] = "failed"
                         else:
                             job["concat_status"] = "skipped"
-                except Exception as e:
+                except Exception:
                     job["status"] = "failed"
                     logger.exception("batch %s 执行异常", job_id)
                 finally:
@@ -2300,7 +2341,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError) as exc:
             self._json(400, {"ok": False, "message": f"参数非法: {exc}"})
             return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[/host/storyboard-memory-plan] 失败")
             self._json(500, {"ok": False, "message": str(exc)})
             return

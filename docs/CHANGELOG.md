@@ -1,5 +1,51 @@
 # 拾光剪影 — 变更日志
 
+## V4.40.1 (2026-09-26) — 整改 P1：前端三卡点接线 + prompt-image 负缓存
+
+> 实测整改方案 P1 剩余三项之前两项落地（第三项 needs_log 25 处另行推进）。
+
+### 前端三卡点（pre-commit 第⑦道，§2f.3 P0-a 闭环）
+
+画布改动此前只有「双库一致性」一道卡点，类型检查与单测都没强制。
+已把已有脚本接进手写 hook（零新增检查代码，只接线），**仅暂存画布文件时触发**
+（与 ① ruff 增量哲学一致，不拖慢纯 Python 提交）：
+
+- **⑦a tsc 类型棘轮**：错误数 ≤37 只减不增。基线 37 个错误全部位于
+  stage3d-core 冻结区 2 文件（`Stage3D.tsx` / `riggedHumanoid.ts`），
+  清零需解冻，解冻后下调基线。
+- **⑦b vitest 单测**：81/81 失败即拦截。必须 `--pool=threads`——
+  默认 forks pool 会把 SSR 编译结果写临时目录供 worker 读取，被
+  fs-shim 拦截（EPERM）造成假失败；threads 走内存通道不写盘。
+- **⑦c 质量棘轮**：`check_canvas_frontend_quality.mjs`（此前纯摆设）
+  改造为卡点：dupNames ≤8 / fnOver300 ≤9 / cycloOver60 ≤5 只减不增。
+  基线 8 组同名已人工定性＝启发式误报（`const next = arr.map((n) => {`
+  多行箭头回调被识别为函数定义），非模块级静默覆盖；新增同名即拦。
+
+### prompt-image 失败负缓存（§2d.3 P0-b 闭环）
+
+- 端点实际在 `canvas_server.py`（非 canvas_bridge；**不在冻结区**，无需解冻）。
+- 拉取失败写 `{sha256(url)}.fail` 标记（mtime 判定），TTL **6 小时**内
+  同一 URL 不再重试（502 + 明确 message「负缓存 TTL 内不再重试」）——
+  根治每次启动对 `pbs.twimg.com` 等死链重复多轮 45s 超时轰炸、刷日志拖慢启动。
+- TTL 取 6h：覆盖一次工作会话；隔天重启允许重试一次；拉取成功主动
+  清除标记（远端恢复自愈）。判定/写入出错一律不拦不炸（宁可重试）。
+- 测试 `test_prompt_image_negative_cache.py` 6 项：未标记/标记命中/
+  过期不命中/成功清除/幂等刷新/判定出错 fail-open。
+  （import 顺序坑：直接 import canvas_server 触发部分初始化循环，
+  需先 import canvas_bridge 全量初始化桥接层。）
+
+### 顺带清理
+
+- `canvas_server.py` 存量 ruff 11 处（增量门禁拦下即清先例）：
+  死 `# noqa` ×7（A003/D401/N802×4/BLE001×2，对应规则集未启用）、
+  死变量 `last_ping` ×2（SSE 循环内外各一）、`except as e` 未用、
+  `zip()` 补 `strict=False`。
+
+### 测试与门禁
+
+- 全量 **383/383**；ruff 触碰文件全净；冻结区 85 锁完好；
+  稳定性 269=269；粘合层 18/0；双库无新增漂移。
+
 ## V4.40.0 (2026-09-26) — 优秀三件事③：5 个真转场（ffmpeg 金标准对齐）
 
 > 代码评价报告「距离优秀只差三件事」之**第三件事（收官）**：新增 5 个
