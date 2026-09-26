@@ -1,5 +1,59 @@
 # 拾光剪影 — 变更日志
 
+## V4.40.5 (2026-09-27) — A4 路由巨石拆分完成（批次 2/3：POST 全迁）
+
+> 评价报告架构债 #2「`do_POST` 1,048 行 / ~45 端点串一条 if 链」**拆解完成**。
+
+### 批次 2/3 · POST 29 端点全迁
+
+新增 `app/core/canvas_routes_post.py`（`CanvasPostRoutesMixin`，1,183 行）承接：
+`/host/tauri-closing` · `agent/{session,reply,start,chat}` · `compliance-check` ·
+`video-generate` · `budget/set` · `/ingest` · `/ingest_path` · `/push_from_editor` ·
+`generate-image|video|audio|music` · `comfyui/run` · `pose-extract` ·
+`pose-video-encode` · `inpaint` · `video-batch` · `interpolate` · `video-concat` ·
+`batch-to-timeline` · `project-agent/chat` · `upload-asset` · `tools/run` ·
+`storyboard-breakdown` · `storyboard-camera-plan` · `canvas-ai-review`
+
+| 指标 | 原始 | 现在 |
+|---|---|---|
+| `canvas_server.py` | 3,273 行 | **1,740 行（−47%）** |
+| `do_GET` / `do_POST` | 678 / 1,048 行 if 链 | 各约 10 行薄分发 |
+| 老 if 链残留 | 61 个端点 | **1 条（404 兜底）** |
+| 路由表 | GET 4 / POST 10 | **GET 30 / POST 39** |
+
+**搬移手法**：AST 辅助脚本自动完成 —— 提取块（含块首注释）、缩进 −4、
+给模块级符号的裸引用加 `cs.` 前缀、注入 `cs = _cs()`。1,040 行机械搬移零手抄。
+
+### ⚠️ 踩坑与加固（本版最重要的产出）
+
+**批次 1 埋的雷**：A4 把端点迁走后，`ruff --fix` 把「canvas_server 不再直接
+使用、但被 mixin 经 `cs.xxx` 引用」的 import **当死代码删除**，导致 4 个符号
+失效：
+
+| 被删符号 | 受影响端点 |
+|---|---|
+| `_load_canvas_plugins_manifest` | `/host/plugins` |
+| `build_character_prompt` | `/host/characters` |
+| `list_editor_outbox` | `/editor_outbox` |
+| `build_host_ai_config_patch` | 5 个 `*-models` 端点（**当时无测试覆盖**） |
+
+**处置（三道防线）**：
+1. 两处 import 块加**语句级 `noqa: F401`** + 详细说明（为什么不能删）。
+2. 新增常驻守卫 **`_verify/check_canvas_route_attrs.py`** —— 纯静态，校验
+   mixin 里每个 `cs.xxx` 都能在 canvas_server 顶层绑定中找到，找不到即失败并
+   给出修法。已注册 `run_all_checks`（ROUTEATTR）并进 hook **第⑨道**（卡点 8 → 9）。
+3. 顺手修 mixin 的 `Any` 缺失（4 处 F821）与冗余 import；
+   另修一处误删：`threading` 被 F401 误判（实际在 `CanvasBridgeServer` 用），已恢复。
+
+### 验证
+
+e2e 真起服务**全过** · 路由契约 65 条不重叠（老链仅 404）· 全量 **383/383** ·
+ruff 全净 · 冻结区 85 锁 · 稳定性 249 ≤ 269 · 粘合层 18/0 · 架构 0 警告 ·
+双库无漂移 · 文件规模守卫通过。
+
+> 至此 A4 收尾：**路由巨石消失**，加端点不再改千行方法。
+> 报告架构债 #2 清除；剩余债 #1（`EditorModule` 上帝类）、#3（双库）。
+
 ## V4.40.4 (2026-09-27) — A4 路由巨石拆分（批次 0+1：GET 全迁）
 
 > 评价报告架构债 #2「`do_POST` 1,048 行 / ~45 端点串一条 if 链」的拆解起点。

@@ -47,9 +47,10 @@ _TARGETS = [
 BASELINE: dict = {
     # app/（8 个）
     "app/modules/lego/editor_module.py": 9717,
-    # A4 批次 1（2026-09-27）：25 个 GET 端点迁出到 canvas_routes_get.py（650 行）
-    # → 3273 降至 2757，**下调基线**（债务收敛，守卫指引的正反馈）
-    "app/core/canvas_server.py": 2757,
+    # A4 批次 1+2/3（2026-09-27）：GET 25 端点迁到 canvas_routes_get.py（650 行）、
+    # POST 29 端点迁到 canvas_routes_post.py（1,183 行）
+    # → 3,273 → **1,740**，两次下调基线（债务收敛，守卫指引的正反馈）
+    "app/core/canvas_server.py": 1740,
     "app/core/canvas_aigc.py": 2905,
     "app/modules/lego/settings_module.py": 2823,
     "app/modules/lego/video_processor.py": 2732,

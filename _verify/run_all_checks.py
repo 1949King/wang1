@@ -105,6 +105,8 @@ CHECKS = [
     ("SIZE", "_verify/check_file_size.py", "单文件规模守卫（存量冻结，只许减不许增）"),
     # ── 长对白 scrub 压测（报告 §6.1 补项，2026-09-27）──
     ("SCRUBPERF", "_verify/check_scrub_perf.py", "长对白 scrub 压测（命中查找层）"),
+    # ── 路由 mixin 属性可解析性（A4 迁移踩坑后置守卫，2026-09-27）──
+    ("ROUTEATTR", "_verify/check_canvas_route_attrs.py", "路由 mixin 的 cs.* 可解析"),
 ]
 
 failed = []
