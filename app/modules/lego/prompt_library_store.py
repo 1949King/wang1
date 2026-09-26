@@ -407,7 +407,7 @@ class PromptLibraryStore:
             try:
                 return json.loads(cache.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                logger.debug("提示词缓存读取失败，改走远端拉取: %s", cache, exc_info=True)
         req = urllib.request.Request(source.url, headers={"User-Agent": "ShiguangPromptLib/1.0"})
         with urllib.request.urlopen(req, timeout=90) as resp:
             raw = resp.read()
@@ -415,7 +415,7 @@ class PromptLibraryStore:
         try:
             cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         except Exception:
-            pass
+            logger.debug("提示词缓存写入失败（不影响本次结果）", exc_info=True)
         return data
 
     def load_source(self, source: PromptSource) -> List[PromptItem]:
@@ -443,7 +443,7 @@ class PromptLibraryStore:
                         self._items_by_source[source.id] = items
                     return items
                 except Exception:
-                    pass
+                    logger.debug("提示词源降级缓存同样不可用: %s", source.id, exc_info=True)
             with self._lock:
                 self._items_by_source[source.id] = []
             return []

@@ -11,8 +11,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Dict, Mapping, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # UI 标签 → PreviewManager.preview_quality
 QUALITY_LABEL_TO_PM = {
@@ -75,12 +78,12 @@ def resolve_preview_media_path(
         try:
             original = resolve_abs(original) or original
         except Exception:
-            pass
+            logger.debug("resolve_abs 展开原始路径失败，保留原值", exc_info=True)
         try:
             if proxy:
                 proxy = resolve_abs(proxy) or proxy
         except Exception:
-            pass
+            logger.debug("resolve_abs 展开代理路径失败，保留原值", exc_info=True)
     if prefer_proxy and proxy and os.path.isfile(proxy):
         return os.path.normpath(proxy)
     if original and os.path.isfile(original):
@@ -108,7 +111,7 @@ def is_proxy_path(path: str, cache_dir: Optional[str] = None) -> bool:
     if cache_dir:
         try:
             root = os.path.normcase(os.path.abspath(cache_dir))
-            return ap.startswith(root + os.sep) or ap.startswith(root + "/")
+            return ap.startswith((root + os.sep, root + "/"))
         except Exception:
-            pass
+            logger.debug("cache_dir 绝对化失败，按 proxies 关键字判定", exc_info=True)
     return "proxies" in ap.replace("\\", "/").lower()

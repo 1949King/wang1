@@ -1,5 +1,53 @@
 # 拾光剪影 — 变更日志
 
+## V4.40.2 (2026-09-26) — 整改 P1③：needs_log 静默异常补日志
+
+> 实测整改方案 P1 第三项（收官）。`check_glue_contract` 判定的 needs_log
+> 静默 except **25 处全部处置**：22 处补日志，3 处在冻结区转入待解冻队列。
+> 至此整改 P1 全部落地（①②=V4.40.1，③=本版）。
+
+### 22 处补 `logger.debug(..., exc_info=True)`（14 文件）
+
+| 文件 | 处 | 语义 |
+|---|---|---|
+| `llm_editor.py` | 3 | LLM 响应三级降级解析（直接→代码块→数组），排查 LLM 问题的关键线索 |
+| `editor_preview_ux.py` | 3 | resolve_abs 展开失败回退、cache_dir 绝对化失败 |
+| `prompt_library_store.py` | 3 | 提示词缓存读损坏走远端、写失败、降级缓存也不可用 |
+| `editor_timeline_tools.py` | 2 | clip speed 非数值按 1.0、清样式 UI 容错 |
+| `i18n.py` / `copywriting_module.py` / `deformity_repair_skill.py` / `editor_ai_process_mixin.py` / `editor_ai_tools_mixin.py` / `editor_export.py` / `model_config.py` / `performance_module.py` / `video_processor.py` | 各 1 | 占位符替换失败 / Provider 配置读取 / LLM JSON 提取 / busy 框关闭 / 历史插入 / 导出代理路径检查 / 激活配置读取 / 渲染统计刷新 / 烘焙临时文件清理 |
+| `test_render_fallback.py` | 2 | 源码收集 OSError 跳过（C 扩展不可得） |
+
+- 5 文件补 `logger = logging.getLogger(__name__)` 定义。
+- **冻结区 3 处转入待解冻队列**：`canvas_bridge.py` L144、
+  `character_management_module.py` L793/847（stage3d-core 整文件锁）。
+
+### 纪律事件（如实记录）
+
+P1-③ 中途误改 `character_management_module.py`（stage3d-core 整文件锁，
+files 清单成员），冻结区守卫报 `FROZEN ZONE DRIFT` 后**立即全量回滚**，
+守卫恢复 85 锁完好。教训：needs_log 清单动手前应先逐文件核对冻结区
+files 清单（canvas_bridge 拦下了，漏了同区的 character_management）。
+
+### 增量门禁拦下即清：15 文件存量 ruff 120 处全清
+
+- **F401 死 import ×96**：限定规则安全 `--fix`（F401/F541/B009/RUF100），
+  全量测试验证零破坏（import 级错误会立刻炸）。
+- **F811 函数内冗余 re-import ×8**（copywriting_module）：顶部已有
+  QFileDialog/QMessageBox/QApplication/os/json，函数内重复——手动删除
+  （不跑 --fix，防误删 BYOX 类覆盖地雷）。
+- **F841 死变量 ×7**：逐个定性——有副作用的保留调用去赋值
+  （`smgr.add_subtitle`、`subprocess.run`、`SceneChangeDetector()` 可用性
+  实例化），纯死的删行（`clip_id`、`content_summary`、`cpu_indicators`）。
+- PIE810 startswith 合并元组 ×2、B905 zip 补 `strict=False` ×2。
+- `canvas_runtime` 可用性探测 import 加 `# noqa: F401` 保留
+  （改 `find_spec` 会跳过模块初始化，行为不等价）。
+
+### 测试与门禁
+
+- 全量 **383/383**；ruff 15 文件全净；冻结区 85 锁完好；
+  **稳定性门禁 269→249（清除 20 项存量静默，棘轮只减不增方向正确）**；
+  粘合层 18/0；双库无新增漂移。
+
 ## V4.40.1 (2026-09-26) — 整改 P1：前端三卡点接线 + prompt-image 负缓存
 
 > 实测整改方案 P1 剩余三项之前两项落地（第三项 needs_log 25 处另行推进）。

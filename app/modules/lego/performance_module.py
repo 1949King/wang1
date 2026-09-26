@@ -14,12 +14,10 @@
 """
 
 import json
-import os
-import time
 import logging
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QFrame, QGroupBox, QTextEdit, QPushButton,
     QListWidget, QFileDialog, QMessageBox,
 )
@@ -264,7 +262,6 @@ class PerformanceModule(BaseModule):
     
     def _refresh_stats(self):
         """实时刷新系统性能数据（CPU / 内存 / GPU 利用率+显存+温度 / 任务队列）"""
-        import threading
         
         def _poll():
             cpu = ""; mem = ""; gpu = ""; tasks = ""
@@ -475,7 +472,6 @@ class PerformanceModule(BaseModule):
     def _refresh_render_perf(self):
         """从 RenderManager 拉取渲染性能统计并更新 UI"""
         try:
-            from app.core.render_manager import RenderManager
             # 尝试获取全局实例
             mgr = None
             try:
@@ -516,7 +512,7 @@ class PerformanceModule(BaseModule):
                 )
 
         except Exception:
-            pass  # 渲染统计非关键，静默失败
+            logger.debug("渲染统计刷新失败（非关键）", exc_info=True)
     
     def _query_gpu_stats(self) -> str:
         """查询 GPU 利用率、显存、温度（支持 NVIDIA / AMD / Intel）"""

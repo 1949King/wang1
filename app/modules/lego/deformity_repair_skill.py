@@ -19,11 +19,14 @@
 """
 
 import json
+import logging
 import os
 import time
-from typing import Dict, Any, List
+from typing import Dict, List
 
 from .skill_engine import Skill, StepResult
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -325,9 +328,9 @@ class DeformityRepairSkill(Skill):
     def _try_real_interpolation(self, clips: List[Dict]) -> Dict:
         """尝试调真实 ai_interpolation.SceneChangeDetector（失败降级）"""
         try:
-            from app.core.ai_interpolation import SceneChangeDetector, FrameDifferenceType
+            from app.core.ai_interpolation import SceneChangeDetector
             # 真实调用需要帧数据，当前 clips 是描述无帧，故仅验证可导入
-            detector = SceneChangeDetector()
+            SceneChangeDetector()  # 仅实例化验证引擎可用
             return {"used": False, "reason": "clips 无帧数据，仅验证引擎可用", "engine": "linear_blend"}
         except Exception as e:
             return {"used": False, "reason": f"ai_interpolation 不可用: {e}", "engine": "none"}
@@ -475,7 +478,7 @@ class DeformityRepairSkill(Skill):
         repairs = context.get_variable("repairs", [])
 
         cases = []
-        for issue, repair in zip(issues, repairs):
+        for issue, repair in zip(issues, repairs, strict=False):
             if issue.get("type") in ("limb", "logic"):
                 cases.append({
                     "case_id": f"case_{int(time.time())}_{len(cases)}",
@@ -577,5 +580,5 @@ class DeformityRepairSkill(Skill):
             if start >= 0 and end > start:
                 return json.loads(cleaned[start:end + 1])
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.debug("畸形修复 LLM 响应 JSON 提取失败，返回空清单", exc_info=True)
         return []

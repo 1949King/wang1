@@ -7,20 +7,12 @@ EditorAiProcessMixin: 从 editor_module.py 抽出的 AI 处理方法。
 迁移的方法（共 7 个, 约 472 行）。
 """
 
-from typing import Dict, Any, Optional, List
-import os, json, logging, subprocess, threading, time
+import os, logging, subprocess, threading
 import sys as _sys
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
-    QListWidgetItem, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
-    QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFileDialog, QMessageBox, QInputDialog, QTabWidget, QCheckBox, QSlider,
-    QTreeWidget, QTreeWidgetItem, QMenu, QToolButton, QApplication, QSizePolicy,
-    QFormLayout, QSpacerItem, QToolTip, QStackedLayout
+    QMessageBox, QApplication
 )
 
 logger = logging.getLogger("AI短剧编辑器.editor")
@@ -56,7 +48,7 @@ class EditorAiProcessMixin:
             if busy_box is not None:
                 busy_box.close()
         except Exception:
-            pass
+            logger.debug("关闭 busy 提示框失败（UI 容错）", exc_info=True)
         from app.modules.lego.suggest_checklist import pick_checked_indices
 
         labels = []

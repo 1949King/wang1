@@ -15,11 +15,11 @@ test_render_fallback.py
 - 不实际执行渲染，只验证链路选择逻辑
 - 遵循 .trae/rules/2.md §七 TDD 规则
 """
-import os
+import logging
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
 from pathlib import Path
-from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────── 导入受测模块 ───────────────
@@ -114,7 +114,7 @@ class TestHardwareEncoderDetection:
         try:
             src_parts.append(inspect.getsource(mlt_engine_cpp))
         except OSError:
-            pass
+            logger.debug("模块源码不可得（C 扩展/动态模块），仅收集类源码", exc_info=True)
         # 补充类源码
         for name in dir(mlt_engine_cpp):
             obj = getattr(mlt_engine_cpp, name, None)
@@ -122,7 +122,7 @@ class TestHardwareEncoderDetection:
                 try:
                     src_parts.append(inspect.getsource(obj))
                 except OSError:
-                    pass
+                    logger.debug("类源码不可得，跳过: %s", name, exc_info=True)
 
         combined_src = "\n".join(src_parts)
         # 检查硬件编码器关键词
@@ -176,8 +176,7 @@ class TestFFmpegCommandLocation:
                 for i, line in enumerate(lines, 1):
                     stripped = line.strip()
                     # 跳过注释和 import
-                    if stripped.startswith("#") or stripped.startswith("from ") \
-                       or stripped.startswith("import "):
+                    if stripped.startswith(("#", "from ", "import ")):
                         continue
                     # 检测直接拼 ffmpeg 命令字符串
                     if 'f"ffmpeg' in line or "f'ffmpeg" in line:
@@ -208,7 +207,6 @@ class TestRenderPipelinePriority:
             # 检查关键 fallback 标识
             cpp_indicators = ['cpp', 'c++', 'mlt_engine_cpp', 'CppEngine']
             ffmpeg_indicators = ['ffmpeg', 'cli', 'subprocess']
-            cpu_indicators = ['cpu', 'fallback', 'soft', 'pyav']
 
             has_cpp = any(ind.lower() in src.lower() for ind in cpp_indicators)
             has_ffmpeg = any(ind.lower() in src.lower() for ind in ffmpeg_indicators)

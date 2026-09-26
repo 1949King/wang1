@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable, Optional, Sequence, Set, Tuple
 
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QFrame, QWidget
+
+logger = logging.getLogger(__name__)
 
 # 吸附线淡出（ms）
 SNAP_GUIDE_FADE_MS = 180
@@ -37,7 +40,7 @@ def clip_looks_heavy(clip_data) -> bool:
         if abs(float(clip_data.get("speed", 1) or 1) - 1.0) > 1e-3:
             return True
     except (TypeError, ValueError):
-        pass
+        logger.debug("clip speed 非数值，按 1.0 处理: %r", clip_data.get("speed"), exc_info=True)
     return False
 
 
@@ -255,7 +258,7 @@ class SnapGuideController:
             x = int(tl.content_x_for_time(t))
         else:
             x = 100 + int(float(t) * max(1e-6, tl.px_per_sec()))
-        fr.setFixedHeight(max(1, getattr(tl, "_track_viewport").height()))
+        fr.setFixedHeight(max(1, tl._track_viewport.height()))
         fr.move(x, 0)
         fr.show()
         fr.raise_()
@@ -328,7 +331,7 @@ class DropTrackFeedbackController:
                 try:
                     cc.setStyleSheet(self._CLEAR_CSS)
                 except Exception:
-                    pass
+                    logger.debug("清除 clip 容器样式失败（UI 容错）", exc_info=True)
 
 
 class RazorGuideController(SnapGuideController):

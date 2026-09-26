@@ -527,7 +527,7 @@ class LLMEditor:
             if isinstance(data, dict):
                 return [data]
         except json.JSONDecodeError:
-            pass
+            logger.debug("LLM 响应直接 JSON 解析失败，降级尝试代码块提取", exc_info=True)
 
         # 尝试提取 ```json ... ``` 块
         json_block = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw, re.DOTALL)
@@ -539,7 +539,7 @@ class LLMEditor:
                 if isinstance(data, dict):
                     return [data]
             except json.JSONDecodeError:
-                pass
+                logger.debug("LLM 响应代码块 JSON 解析失败，降级尝试数组提取", exc_info=True)
 
         # 尝试提取最外层 [...] 数组
         array_match = re.search(r'\[.*\]', raw, re.DOTALL)
@@ -549,7 +549,7 @@ class LLMEditor:
                 if isinstance(data, list):
                     return data
             except json.JSONDecodeError:
-                pass
+                logger.debug("LLM 响应数组 JSON 解析失败，放弃提取", exc_info=True)
 
         return None
 
@@ -660,7 +660,6 @@ class LLMEditor:
 
         clip_index = p.get("clip_index", 0)
         track_id = p.get("track_id", "track_1")
-        clip_id = p.get("clip_id")
 
         # ── 路由到具体操作 ──
 
@@ -706,7 +705,7 @@ class LLMEditor:
             new_duration = p.get("new_duration")
             if new_duration:
                 tm.resize_clip(timeline_id, tid, cid, new_duration)
-            return {"action": cmd.action, "success": True, "message": f"片段已裁剪"}
+            return {"action": cmd.action, "success": True, "message": "片段已裁剪"}
 
         elif cmd.action == "split_clip":
             tid, cid = _resolve_clip(clip_index)
@@ -819,7 +818,7 @@ class LLMEditor:
                 font_size = p.get("font_size", 36)
                 color = p.get("color", "#FFFFFF")
                 style = {"position": position, "font_size": font_size, "color": color}
-            result = smgr.add_subtitle(text, start_time, end_time, style)
+            smgr.add_subtitle(text, start_time, end_time, style)
             return {"action": cmd.action, "success": True, "message": f"字幕已添加: {text[:30]}"}
 
         elif cmd.action == "change_speed":
@@ -870,7 +869,7 @@ class LLMEditor:
         elif cmd.action == "ripple_delete":
             tid, cid = _resolve_clip(clip_index)
             if not cid:
-                return {"action": cmd.action, "success": False, "message": f"未找到片段"}
+                return {"action": cmd.action, "success": False, "message": "未找到片段"}
             tm.ripple_delete_clip(timeline_id, tid, cid)
             return {"action": cmd.action, "success": True, "message": "波纹删除完成"}
 

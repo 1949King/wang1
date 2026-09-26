@@ -18,15 +18,15 @@ import json
 import logging
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QComboBox, QGroupBox, QTabWidget,
     QListWidget, QListWidgetItem, QApplication,
     QMessageBox, QFileDialog,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 
 from .base_module import BaseModule
-from .core import EventBus, EventType
+from .core import EventType
 
 logger = logging.getLogger("AI短剧编辑器.copywriting")
 
@@ -320,9 +320,6 @@ class CopywritingModule(BaseModule):
     
     def _import_video(self):
         """导入视频并进行真实帧提取和元数据分析"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        from PyQt6.QtCore import QThread, pyqtSignal
-        import os
 
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择视频文件", "",
@@ -381,8 +378,6 @@ class CopywritingModule(BaseModule):
 
     def _analyze_video_content(self, file_path: str, fps: float, total_frames: int, duration_sec: float) -> str:
         """从视频提取关键帧并分析内容，提取元数据描述"""
-        import os
-
         parts = []
         video_name = os.path.basename(file_path)
 
@@ -457,7 +452,6 @@ class CopywritingModule(BaseModule):
 
     def _confirm_template_fallback(self) -> bool:
         """云端失败时征得用户同意再走模板，避免静默假 AI。"""
-        from PyQt6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             self,
             "LLM 不可用",
@@ -474,8 +468,6 @@ class CopywritingModule(BaseModule):
         失败返回空字符串，并由 `_last_llm_error` 说明原因。
         不再在此层静默回退模板（由 UI 征得用户同意）。
         """
-        import os, json
-
         self._last_llm_error = ""
 
         # ── 检查是否有激活的 AI 模型 ──
@@ -493,7 +485,7 @@ class CopywritingModule(BaseModule):
                     with open(active_file, "r", encoding="utf-8") as f:
                         provider_id = json.load(f).get("active_provider", "")
             except (OSError, json.JSONDecodeError, KeyError):
-                pass
+                logger.debug("读取 active_provider.json 失败，按未激活处理", exc_info=True)
 
         if not provider_id:
             self._last_llm_error = "未设置激活 Provider。请到「模型管理」保存并点击圆形按钮激活 DeepSeek 等云端模型"
@@ -638,7 +630,6 @@ class CopywritingModule(BaseModule):
                     break
             return text[:cut]
 
-        content_summary = smart_truncate(content, 40)
         post_summary = smart_truncate(content, 80)
 
         title = f"{emoji} {smart_truncate(content, 25)}，{tag1}！"
@@ -818,7 +809,6 @@ class CopywritingModule(BaseModule):
         text = self._output_tabs.widget(tab_index).toPlainText().strip()
         if not text:
             return
-        from PyQt6.QtWidgets import QApplication
         QApplication.clipboard().setText(text)
         # 短暂高亮提示
         btns = [self._copy_title_btn, self._copy_desc_btn,

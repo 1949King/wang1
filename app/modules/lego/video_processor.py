@@ -6,13 +6,10 @@
 
 import os
 import subprocess
-import threading
-import gc
 import tempfile
 import shutil
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from dataclasses import dataclass
-from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
@@ -517,12 +514,8 @@ def collect_clip_keyframes(clip: Dict[str, Any], prop: str) -> List[Tuple[float,
 
 
 # 变换模型已抽到 clip_transform；此处再导出以保持旧 import 路径
-from app.modules.lego.clip_transform import (  # noqa: E402
+from app.modules.lego.clip_transform import (
     normalize_clip_transform,
-    apply_normalized_transform,
-    resolve_anchor,
-    composite_overlay_bgr,
-    ANCHOR_NAMES,
 )
 
 
@@ -1663,7 +1656,7 @@ def merge_with_transitions(segment_paths: List[str],
                 if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(output_path):
                     os.remove(p)
             except Exception:
-                pass
+                logger.debug("清理烘焙临时文件失败: %s", p, exc_info=True)
 
 
 def trim_video(
@@ -2214,8 +2207,8 @@ def extract_frames(
             "-y",
             output_pattern
         ]
-        
-        result = subprocess.run(
+
+        subprocess.run(
             cmd,
             capture_output=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0

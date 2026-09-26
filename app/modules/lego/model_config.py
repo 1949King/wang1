@@ -5,9 +5,12 @@
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -497,7 +500,7 @@ def load_active_provider() -> str:
                 data = json.load(f)
             return str(data.get("active_provider") or "")
     except Exception:
-        pass
+        logger.debug("读取激活 Provider 配置失败，按未激活处理", exc_info=True)
     return ""
 
 

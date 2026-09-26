@@ -15,7 +15,6 @@ import json
 import logging
 import threading
 from typing import Dict, Optional
-from dataclasses import dataclass
 
 logger = logging.getLogger("AI短剧编辑器.i18n")
 
@@ -299,7 +298,7 @@ class I18n:
             try:
                 return text.format(**kwargs)
             except (KeyError, IndexError):
-                pass
+                logger.debug("i18n 占位符替换失败，返回未替换文本: %s", key, exc_info=True)
         return text
 
     def available_locales(self) -> list:

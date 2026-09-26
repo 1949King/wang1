@@ -15,11 +15,11 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QListWidget, QListWidgetItem, QCheckBox, QFileDialog, QMessageBox,
     QApplication,
 )
@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 try:
     from .viral_optimization_engine import ViralOptimizationEngine, Platform, VideoFeatures
     VIRAL_ENGINE_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     ViralOptimizationEngine = None  # type: ignore
     Platform = VideoFeatures = None  # type: ignore
     VIRAL_ENGINE_AVAILABLE = False
@@ -205,7 +205,7 @@ class EditorAiToolsMixin:
             while history_list.count() > 50:
                 history_list.takeItem(history_list.count() - 1)
         except Exception:
-            pass
+            logger.debug("AI 历史记录插入失败（UI 容错）", exc_info=True)
 
     # 抽取自 editor_module.py L5409-5439
     def _refresh_ollama_diagnose_ui(self):

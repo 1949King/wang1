@@ -11,7 +11,7 @@ import logging
 import subprocess
 import shutil
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Protocol
+from typing import Any, Callable, List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +425,7 @@ def build_edited_video(editor, output_path: str) -> bool:
                         logger.error("导出跳过疑似代理路径片段: %s", src)
                         continue
             except Exception:
-                pass
+                logger.debug("导出前代理路径检查异常，按原路径继续: %s", src, exc_info=True)
             dur = editor._probe_video_duration(src) or 0.0
             in_p = float(clip.get("in_point", 0))
             out_p = float(clip.get("out_point", dur))
