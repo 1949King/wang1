@@ -1,5 +1,74 @@
 # 拾光剪影 — 变更日志
 
+## V4.40.4 (2026-09-27) — A4 路由巨石拆分（批次 0+1：GET 全迁）
+
+> 评价报告架构债 #2「`do_POST` 1,048 行 / ~45 端点串一条 if 链」的拆解起点。
+> 分 4 批做，本轮完成**批次 0（基建）+ 批次 1（GET 全迁）**。
+
+### 批次 0 · 路由表下沉（解循环导入）
+
+- 新增 `app/core/canvas_route_registry.py`：路由表（`_ROUTES_GET/_ROUTES_POST`）
+  + `@_route_get/@_route_post` + `dispatch_table`。
+- **为什么必须下沉**：端点按域拆到 mixin 模块后，mixin 需要装饰器；若从
+  `canvas_server` 导入即形成「canvas_server → mixin → canvas_server」循环。
+  两边都从 registry 取即解。
+- `canvas_server._dispatch_table` 变薄转发（行为不变）。
+
+### 批次 1 · GET 全迁（25 个端点 / 约 520 行）
+
+新增 `app/core/canvas_routes_get.py`（`CanvasGetRoutesMixin`，650 行）承接：
+`/host/budget` · `calls` · `compliance-check` · `characters` · `prefs` ·
+`prompt-fetch` · `prompt-bundled` · `prompt-image` · `providers` ·
+`ai-config-patch` · `comfyui/status` · `image|video|audio|music|chat-models` ·
+`tools` · `agent/session` · `agent/tasks` · `agent` · `editor_outbox` ·
+`timeline-snapshot` · `plugins` · `video-batch` · `video-postprocess` ·
+
+| 指标 | 前 | 后 |
+|---|---|---|
+| `canvas_server.py` | 3,314 行 | **2,757 行（−557）** |
+| `do_GET` | 678 行 if 链 | 约 150 行（薄分发 + 5 个兜底块） |
+| 路由表注册 | GET 4 / POST 10 | **GET 30 / POST 10** |
+| 单文件规模基线 | 3,273（且实际 +41 越界） | **2,757（同步下调）** |
+
+**行为等价优先**：每个 handler 与迁出前逐行等价；401 响应体的差异
+（`chat-models` 带 `providers: []`、`tools` 带 `tools: []`）原样保留，不统一。
+依赖的模块级符号经函数内 `_cs()` 取 `canvas_server` 模块访问（同一对象）。
+
+**未迁出**（有意保留在 `do_GET`）：`/` 与 `/health`、`/inject.js`、
+`/host/agent/events`（SSE 长连接，结构特殊）、`/editor_file/*` 与
+`/inbox_file/*`（前缀路由，路由表是精确匹配）、404 兜底。
+
+### 契约守卫同步升级（`check_canvas_routes.py`）
+
+迁出端点会让守卫**失真**，两处必须同步改，否则等于给契约检查开天窗：
+
+1. **服务端路由来源从单文件改为 `SERVER_FILES` 多文件** —— 否则迁出的
+   端点从「服务端路由」集合里消失，前端调用它反而被判「静默 404」
+   （实测误报 16 个）。修后服务端精确路由 41 → **63**。
+2. **「路由表 vs 老链重复注册」检测按 HTTP 方法分离** —— `do_GET`/`do_POST`
+   同名端点（如 `/host/video-batch` 的查询与启动）是正常设计，整文件扫描
+   会误判（实测误报 3 个）。新增 `method_bodies()` 用 AST 切分方法体。
+
+### 门禁补漏（hook 第⑧道）
+
+**单文件规模守卫此前不在 pre-commit 里** —— 导致「写代码把文件撑过 2000 行」
+无人拦（`canvas_server.py` 因负缓存 +41 行越界即是一例，直到本次才被发现）。
+现加入第⑧道，**卡点 7 → 8 道**。
+
+### 顺带
+
+- `bridge.ts`（2,016 行，V4.39.8 异步接线后越线 2000）作为**存量冻结**入
+  规模基线，标注 `⚠️ 待拆分`（异步编排宜独立成模块），未在本轮动它
+  （画布真源改动需同步副库，另立任务更稳）。
+
+### 验证
+
+端到端 `check_canvas_bridge_e2e.py`（**真起服务打端点**，含 401 鉴权、
+快照端点、诚实语义）**全过** · 路由契约 OK · 全量 **383/383** · ruff 全净 ·
+冻结区 85 锁 · 稳定性 249 ≤ 269 · 粘合层 18/0 · 架构守护 0 警告 · 双库无漂移。
+
+> 剩余：**批次 2/3**（`do_POST` 29 个端点 / 约 1,046 行，按域分两批迁）。
+
 ## V4.40.3 (2026-09-27) — 整改 P2 起步：文档数字回正 + CI 全量 + scrub 压测
 
 > 按「未修清单」推进其中**无冻结区、零/低风险**的三项（A1-A3）。

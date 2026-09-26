@@ -32,7 +32,6 @@ from app.core.canvas_aigc import (
     CAPABILITY_IMAGE,
     CAPABILITY_VIDEO,
     agent_chat_proxy,
-    build_host_ai_config_patch,
     generate_audio_via_host,
     generate_image_openai_compatible,
     generate_music_via_host,
@@ -63,7 +62,6 @@ from app.core.canvas_bridge import (
     _EVT_SUBS,
     _EVT_SUBS_LOCK,
     _SESSION_TOKEN,
-    _load_canvas_plugins_manifest,
     _probe_duration,
     _remove_canvas_plugin,
     _run_concat_demuxer,
@@ -73,17 +71,27 @@ from app.core.canvas_bridge import (
     _upsert_canvas_plugin,
     _image_to_still_video,
     broadcast_agent_event,
-    build_character_prompt,
     canvas_inbox_dir,
     canvas_outbox_dir,
     emit_canvas_to_editor,
     get_timeline_snapshot,
     ingest_local_file,
-    list_editor_outbox,
     make_agent_event,
     push_editor_to_canvas,
     replay_agent_events,
 )
+
+# 路由表下沉到 canvas_route_registry（整改 A4 批次 0）：端点 mixin 也需要
+# @_route_get/@_route_post，从本文件导入会形成循环 → 双方都从 registry 取。
+# 本文件内仍用 _route_get / _route_post 注册既有 handler，故一并 re-export。
+from app.core.canvas_route_registry import (
+    _ROUTES_GET,
+    _ROUTES_POST,
+    _route_get,
+    _route_post,
+    dispatch_table as _dispatch_table_impl,
+)
+from app.core.canvas_routes_get import CanvasGetRoutesMixin
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
 
@@ -296,45 +304,19 @@ def _read_local_prompt_json(source_id: str) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# ── 路由表（P1-1 · 绞杀者模式）────────────────────────────────────────
-# 历史包袱：`do_GET` / `do_POST` 各是一条 600~950 行的 `if path == ...` 链。
-# 全量重写风险太高，这里改成：
-#     **新端点一律用 @_route_get / @_route_post 注册进路由表**，
-#     请求进来先查表，未命中才回落老的 if 链（老链行为完全不变）。
-# 这样加端点不用再往千行链里塞，老链后续可逐条迁出。
+# ── 路由表（P1-1 · 绞杀者模式；2026-09-27 整改 A4 下沉到 canvas_route_registry）
+# 历史包袱：`do_GET` / `do_POST` 曾各是一条 600~1050 行的 `if path == ...` 链。
+# 绞杀者做法：新端点一律用 @_route_get / @_route_post 注册进路由表，请求进来
+# 先查表，未命中才回落 if 链；老链端点在 A4 整改中**逐条迁出**到
+# `canvas_routes_get.py`（GET 25 个）/ `canvas_routes_post.py`（POST）。
 #
 # ⚠️ 曾经的教训：端点被追加到文件末尾 → 落进上一个函数体内、且在 `return` 之后
 #    → 语法合法、静态检查全绿、但永远走不到（`/host/plugins/install` 就是这样死的）。
 #    `_verify/check_canvas_routes.py` 现在会用 AST 检测这类不可达路由。
-_ROUTES_GET: Dict[str, str] = {}
-_ROUTES_POST: Dict[str, str] = {}
+# 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-def _route_get(path: str):
-    """把一个 _BridgeHandler 方法注册为 GET 路由。"""
-
-    def _deco(fn):
-        if path in _ROUTES_GET:
-            raise ValueError(f"GET 路由重复注册: {path}")
-        _ROUTES_GET[path] = fn.__name__
-        return fn
-
-    return _deco
-
-
-def _route_post(path: str):
-    """把一个 _BridgeHandler 方法注册为 POST 路由。"""
-
-    def _deco(fn):
-        if path in _ROUTES_POST:
-            raise ValueError(f"POST 路由重复注册: {path}")
-        _ROUTES_POST[path] = fn.__name__
-        return fn
-
-    return _deco
-
-
-class _BridgeHandler(BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
@@ -381,26 +363,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _dispatch_table(self, table: Dict[str, str], path: str, **kw) -> bool:
-        """路由表分发：命中则执行并返回 True，未命中返回 False（交给老 if 链）。
+        """路由表分发（实现已下沉 canvas_route_registry.dispatch_table）。
 
-        统一在这里兜异常，路由表里的 handler 不用各自写 try/except 大网。
+        命中则执行并返回 True，未命中返回 False（交给 if 链兜底）。
         """
-        name = table.get(path)
-        if not name:
-            return False
-        handler = getattr(self, name, None)
-        if handler is None:
-            logger.error("路由表指向了不存在的方法: %s -> %s", path, name)
-            return False
-        try:
-            handler(**kw)
-        except Exception as exc:  # 桥接层统一兜底，避免连接崩掉
-            logger.exception("[%s] 路由处理失败", path)
-            try:
-                self._json(500, {"ok": False, "message": str(exc)})
-            except Exception:
-                logger.debug("写 500 响应失败", exc_info=True)
-        return True
+        return _dispatch_table_impl(self, table, path, **kw)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -431,41 +398,14 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(js)
             return
-        # ── AI NG 预算追踪：返回聚合成本仪表盘数据 ────────────────
-        if path == "/host/budget":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                from app.core.ai_engine import AIEngine
-                report = AIEngine().check_budget()
-                self._json(200, {"ok": True, "data": report})
-            except Exception as e:
-                self._json(500, {"ok": False, "message": str(e)})
-            return
-        # ── AI NG 预算追踪：最近 N 次调用明细 ──────────────────────
-        if path == "/host/calls":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                qd = parse_qs(parsed.query or "")
-                limit = min(100, max(1, int((qd.get("limit") or ["20"])[0])))
-                from app.core.ai_engine import AIEngine
-                calls = AIEngine().get_recent_calls(limit)
-                self._json(200, {"ok": True, "data": calls})
-            except Exception as e:
-                logger.exception("[/host/calls] 失败")
-                self._json(500, {"ok": False, "message": str(e)})
-            return
-        # ── 剧本合规守护：POST /host/compliance-check ──────────────
-        if path == "/host/compliance-check":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            # 这个端点实际是 POST，但 do_GET 里先拦一下返回友好错误
-            self._json(405, {"ok": False, "message": "use POST"})
-            return
+
+        # ── A4 批次 1（2026-09-27）：以下 25 个 GET 端点已迁出到
+        #    canvas_routes_get.py（经 @_route_get 注册，上面路由表分发即可命中）──
+        # /host/budget · calls · compliance-check · characters · prefs · prompt-fetch ·
+        # prompt-bundled · prompt-image · providers · ai-config-patch · comfyui/status ·
+        # image|video|audio|music|chat-models · tools · agent/session · agent/tasks ·
+        # agent · editor_outbox · timeline-snapshot · plugins · video-batch ·
+        # video-postprocess · model-preload
         # ── SSE: Agent ↔ Canvas 双向事件流 ──────────────────────
         if path == "/host/agent/events":
             if not _check_host_token(self):
@@ -528,389 +468,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     except ValueError:
                         logger.debug("event subscriber removal failed", exc_info=True)
             return
-        # ── Character Library（对接 CharacterStore）─────────────
-        if path == "/host/characters":
-            from app.modules.lego.character_management_module import (
-                CHARACTER_FIELD_SCHEMA,
-                CharacterStore,
-            )
-            try:
-                store = CharacterStore()
-                raw = store.all()
-                # 裁剪为 CharacterEntry 结构（与前端对齐）。
-                # 字段白名单由 CHARACTER_FIELD_SCHEMA 派生 —— 新增角色字段时此处无需手工同步，
-                # 否则会出现「库里存了、前端看不到」的静默漏传。
-                # 一致性校验：_verify/check_character_schema.py
-                characters = []
-                for c in raw:
-                    entry = {"id": c.get("id", "")}
-                    for key in [f[0] for f in CHARACTER_FIELD_SCHEMA]:
-                        entry[key] = c.get(key) or ""
-                    entry["tags"] = c.get("tags") or []      # 列表字段不能退化成空串
-                    # 由 Python 侧唯一真相源拼好的生图提示片段（含 visual 组全部 4 个字段）。
-                    # 前端直接用它，不要自己再拼一遍 —— 两份拼装逻辑必然漂移。
-                    # 一致性校验：_verify/check_character_schema.py
-                    entry["prompt"] = build_character_prompt(c)
-                    entry["media_dir"] = c.get("media_dir", "")
-                    entry["avatar_url"] = c.get("avatar_url", "")
-                    entry["created_at"] = c.get("created_at", "")
-                    entry["updated_at"] = c.get("updated_at", "")
-                    characters.append(entry)
-                self._json(200, characters)
-            except Exception as exc:
-                logger.warning(f"/host/characters 读取失败: {exc}")
-                self._json(200, [])
-            return
-        if path == "/host/prefs":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            self._json(200, {"ok": True, **_BRIDGE_PREFS})
-            return
-        if path == "/host/prompt-fetch":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            qs = parse_qs(parsed.query)
-            url = (qs.get("url") or [""])[0].strip()
-            if not url:
-                self._json(400, {"ok": False, "message": "缺少 url 参数"})
-                return
-            if not _is_allowed_prompt_fetch_url(url):
-                self._json(400, {"ok": False, "message": "不允许的提示词源域名"})
-                return
-            try:
-                data = _fetch_remote_json(url)
-                self._json(200, {"ok": True, "data": data})
-            except Exception as e:
-                logger.warning("prompt-fetch failed: %s — %s", url[:120], e)
-                self._json(502, {"ok": False, "message": str(e)})
-            return
-        if path == "/host/prompt-bundled":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            qs = parse_qs(parsed.query)
-            source_id = (qs.get("source_id") or qs.get("id") or [""])[0].strip()
-            if not source_id:
-                self._json(400, {"ok": False, "message": "缺少 source_id 参数"})
-                return
-            try:
-                data = _read_local_prompt_json(source_id)
-                self._json(200, {"ok": True, "data": data})
-            except FileNotFoundError as e:
-                self._json(404, {"ok": False, "message": str(e)})
-            except Exception as e:
-                logger.warning("prompt-bundled failed: %s — %s", source_id, e)
-                self._json(502, {"ok": False, "message": str(e)})
-            return
-        if path == "/host/prompt-image":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            qs = parse_qs(parsed.query)
-            url = (qs.get("url") or [""])[0].strip()
-            if not url:
-                self._json(400, {"ok": False, "message": "缺少 url 参数"})
-                return
-            if not _is_allowed_prompt_image_url(url):
-                self._json(400, {"ok": False, "message": "不允许的图片域名"})
-                return
-            try:
-                cached = _read_prompt_image_cache(url)
-                if cached:
-                    raw, content_type = cached
-                else:
-                    if _prompt_image_failed_recently(url):
-                        self._json(502, {"ok": False, "message": "图片此前拉取失败，负缓存 TTL 内不再重试"})
-                        return
-                    try:
-                        raw, content_type = _fetch_remote_bytes(url)
-                    except Exception:
-                        _mark_prompt_image_failed(url)
-                        raise
-                    _clear_prompt_image_failed(url)
-                    if len(raw) <= 12 * 1024 * 1024:
-                        _write_prompt_image_cache(url, raw, content_type)
-                if len(raw) > 12 * 1024 * 1024:
-                    self._json(413, {"ok": False, "message": "图片过大"})
-                    return
-                self._bytes(200, raw, content_type, cache=True)
-            except Exception as e:
-                logger.warning("prompt-image failed: %s — %s", url[:120], e)
-                self._json(502, {"ok": False, "message": str(e)})
-            return
-        if path in ("/host/providers", "/host/ai-config-patch"):
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            patch = build_host_ai_config_patch()
-            self._json(200, {"ok": True, **patch})
-            return
-        if path == "/host/comfyui/status":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                from app.core.ai.comfy_provider import comfy_provider
-
-                status = comfy_provider.engine_status()
-            except Exception as e:
-                logger.exception("[/host/comfyui/status] 失败")
-                self._json(500, {"ok": False, "message": str(e)})
-                return
-            self._json(200, {"ok": True, "status": status})
-            return
-        if path == "/host/image-models":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            patch = build_host_ai_config_patch()
-            models = []
-            for ch in patch.get("channels") or []:
-                if not (ch.get("apiKey") or "").strip():
-                    continue
-                for m in ch.get("models") or []:
-                    if m.get("capability") != "image":
-                        continue
-                    models.append(
-                        {
-                            "channel_id": ch.get("id"),
-                            "channel_name": ch.get("name"),
-                            "model": m.get("name"),
-                            "label": f"{ch.get('name')} / {m.get('name')}",
-                        }
-                    )
-            self._json(
-                200,
-                {
-                    "ok": True,
-                    "models": models,
-                    "default": (patch.get("defaults") or {}).get("imageModel") or "",
-                    "warnings": patch.get("warnings") or [],
-                    "configured_providers": patch.get("configured_providers") or [],
-                    "active_provider": patch.get("active_provider") or "",
-                    "active_provider_label": patch.get("active_provider_label") or "",
-                    "has_image_models": bool(models),
-                },
-            )
-            return
-        if path == "/host/video-models":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            patch = build_host_ai_config_patch()
-            models = []
-            for ch in patch.get("channels") or []:
-                if not (ch.get("apiKey") or "").strip():
-                    continue
-                for m in ch.get("models") or []:
-                    if m.get("capability") != "video":
-                        continue
-                    models.append(
-                        {
-                            "channel_id": ch.get("id"),
-                            "channel_name": ch.get("name"),
-                            "model": m.get("name"),
-                            "label": f"{ch.get('name')} / {m.get('name')}",
-                        }
-                    )
-            self._json(
-                200,
-                {
-                    "ok": True,
-                    "models": models,
-                    "default": (patch.get("defaults") or {}).get("videoModel") or "",
-                    "warnings": patch.get("warnings") or [],
-                    "configured_providers": patch.get("configured_providers") or [],
-                    "active_provider": patch.get("active_provider") or "",
-                    "active_provider_label": patch.get("active_provider_label") or "",
-                    "has_video_models": bool(models),
-                },
-            )
-            return
-        if path == "/host/audio-models":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            patch = build_host_ai_config_patch()
-            models = []
-            for ch in patch.get("channels") or []:
-                if not (ch.get("apiKey") or "").strip():
-                    continue
-                for m in ch.get("models") or []:
-                    if m.get("capability") != "audio":
-                        continue
-                    models.append(
-                        {
-                            "channel_id": ch.get("id"),
-                            "channel_name": ch.get("name"),
-                            "model": m.get("name"),
-                            "label": f"{ch.get('name')} / {m.get('name')}",
-                        }
-                    )
-            self._json(
-                200,
-                {
-                    "ok": True,
-                    "models": models,
-                    "default": (patch.get("defaults") or {}).get("audioModel") or "",
-                    "warnings": patch.get("warnings") or [],
-                    "configured_providers": patch.get("configured_providers") or [],
-                    "active_provider": patch.get("active_provider") or "",
-                    "active_provider_label": patch.get("active_provider_label") or "",
-                    "has_audio_models": bool(models),
-                },
-            )
-            return
-        if path == "/host/music-models":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            patch = build_host_ai_config_patch()
-            models = []
-            for ch in patch.get("channels") or []:
-                if not (ch.get("apiKey") or "").strip():
-                    continue
-                for m in ch.get("models") or []:
-                    if m.get("capability") != "music":
-                        continue
-                    models.append(
-                        {
-                            "channel_id": ch.get("id"),
-                            "channel_name": ch.get("name"),
-                            "model": m.get("name"),
-                            "label": f"{ch.get('name')} / {m.get('name')}",
-                        }
-                    )
-            self._json(
-                200,
-                {
-                    "ok": True,
-                    "models": models,
-                    "default": (patch.get("defaults") or {}).get("musicModel") or "",
-                    "warnings": patch.get("warnings") or [],
-                    "configured_providers": patch.get("configured_providers") or [],
-                    "active_provider": patch.get("active_provider") or "",
-                    "active_provider_label": patch.get("active_provider_label") or "",
-                    "has_music_models": bool(models),
-                },
-            )
-            return
-        if path == "/host/chat-models":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized", "providers": []})
-                return
-            try:
-                from app.core.project_agent_host import list_chat_models
-            except ImportError:
-                from core.project_agent_host import list_chat_models  # type: ignore
-            self._json(200, list_chat_models())
-            return
-        if path == "/host/tools":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized", "tools": []})
-                return
-            try:
-                from app.core.project_agent_host import list_project_tools
-            except ImportError:
-                from core.project_agent_host import list_project_tools  # type: ignore
-            qs = parse_qs(parsed.query)
-            agent_mode = (qs.get("agent_mode") or [""])[0]
-            self._json(200, list_project_tools(agent_mode=agent_mode))
-            return
-        if path == "/host/agent/session":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            from app.core.agent_session import agent_sessions
-
-            qs = parse_qs(parsed.query)
-            sid = (qs.get("session_id") or ["canvas"])[0]
-            self._json(200, {"ok": True, **agent_sessions.snapshot(sid)})
-            return
-        if path == "/host/agent/tasks":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized", "tasks": []})
-                return
-            from app.core.agent_task_store import agent_tasks
-
-            qs = parse_qs(parsed.query)
-            sid = (qs.get("session_id") or ["canvas"])[0]
-            self._json(200, {"ok": True, "tasks": agent_tasks.list_for_session(sid)})
-            return
-        if path == "/host/agent":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            try:
-                from app.core.canvas_agent_runtime import get_canvas_agent_runtime
-            except ImportError:
-                from core.canvas_agent_runtime import get_canvas_agent_runtime  # type: ignore
-            rt = get_canvas_agent_runtime()
-            self._json(
-                200,
-                {
-                    "ok": True,
-                    "url": rt.url,
-                    "token": rt.token,
-                    "listening": rt.is_listening(),
-                    "message": "已连接" if (rt.is_listening() and rt.token) else "画布 MCP（:17371）未启动，请点「连接画布MCP」",
-                    "kind": "canvas_mcp",
-                },
-            )
-            return
-        if path == "/editor_outbox":
-            items = []
-            for it in list_editor_outbox():
-                items.append(
-                    {
-                        "id": it["id"],
-                        "title": it["title"],
-                        "filename": it["filename"],
-                        "ext": it["ext"],
-                        "url": f"{getattr(self.server, 'base_url', f'http://127.0.0.1:{DEFAULT_PORT}')}{it['url']}",
-                        "created_at": it.get("created_at"),
-                    }
-                )
-            # fix urls relative
-            for it, raw in zip(items, list_editor_outbox(), strict=False):
-                it["url"] = f"http://127.0.0.1:{getattr(self.server, 'bridge_port', DEFAULT_PORT)}{raw['url']}"
-                for key in (
-                    "clip_id",
-                    "canvas_node_id",
-                    "kind",
-                    "in_point",
-                    "out_point",
-                    "start_time",
-                    "duration",
-                    "source",
-                ):
-                    if raw.get(key) is not None:
-                        it[key] = raw.get(key)
-            self._json(200, {"ok": True, "items": items})
-            return
-        if path == "/host/timeline-snapshot":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized", "clips": [], "clip_count": 0})
-                return
-            snap = get_timeline_snapshot()
-            try:
-                from app.core.editor_canvas_link import suggest_canvas_roundtrip
-            except ImportError:
-                from core.editor_canvas_link import suggest_canvas_roundtrip  # type: ignore
-            snap = dict(snap)
-            snap["suggestions"] = suggest_canvas_roundtrip(snap)
-            self._json(200, snap)
-            return
-        if path == "/host/plugins":
-            """画布节点插件列表（从 Qt 端 plugin-store 读取）"""
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            plugins = _load_canvas_plugins_manifest()
-            self._json(200, {"ok": True, "plugins": plugins, "builtin": _BUILTIN_PLUGIN_REGISTRY})
-            return
         if path.startswith("/editor_file/"):
             name = _safe_filename(path.split("/editor_file/", 1)[-1])
             fpath = os.path.join(canvas_outbox_dir(), name)
@@ -941,120 +498,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        # ── GET /host/video-batch?job_id=xxx：查询批量视频任务状态 ──
-        if path == "/host/video-batch":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            qs = parse_qs(parsed.query)
-            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
-            if not job_id:
-                with _BATCH_LOCK:
-                    summary = [
-                        {
-                            "job_id": jid,
-                            "status": j["status"],
-                            "total": j["total"],
-                            "done": j["done"],
-                            "failed": j["failed"],
-                            "model": j["model"],
-                            "created_at": j["created_at"],
-                            "concat_status": j["concat_status"],
-                            "output_path": j["output_path"],
-                        }
-                        for jid, j in list(_BATCH_JOBS.items())[-20:]
-                    ]
-                self._json(200, {"ok": True, "jobs": summary})
-                return
-            with _BATCH_LOCK:
-                job = _BATCH_JOBS.get(job_id)
-            if not job:
-                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
-                return
-            segs = [
-                {
-                    "index": s["index"],
-                    "camera_name": s["camera_name"],
-                    "status": s["status"],
-                    "local_path": s["local_path"],
-                    "video_url": s["video_url"],
-                    "error": s["error"][:200] if s["error"] else "",
-                }
-                for s in job["segments"]
-            ]
-            self._json(200, {
-                "ok": True,
-                "job_id": job_id,
-                "status": job["status"],
-                "total": job["total"],
-                "done": job["done"],
-                "failed": job["failed"],
-                "concat_status": job["concat_status"],
-                "output_path": job["output_path"],
-                "segments": segs,
-                "updated_at": job["updated_at"],
-            })
-            return
-
-        # ── GET /host/video-postprocess?job_id=xxx：查询单视频后处理任务进度 ──
-        if path == "/host/video-postprocess":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            qs = parse_qs(parsed.query)
-            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
-            if not job_id:
-                self._json(400, {"ok": False, "message": "job_id 不能为空"})
-                return
-            with _POSTPROCESS_LOCK:
-                job = _POSTPROCESS_JOBS.get(job_id)
-            if not job:
-                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
-                return
-            self._json(200, {
-                "ok": True,
-                "job_id": job_id,
-                "status": job["status"],
-                "progress": job["progress"],
-                "message": job["message"],
-                "video_path": job["video_path"],
-                "video_url": job["video_url"],
-                "postprocessed": job["postprocessed"],
-                "updated_at": job["updated_at"],
-            })
-            return
-
-        # ── GET/POST /host/model-preload：本地模型（GFPGAN）后台预载进度轮询 / 触发 ──
-        if path == "/host/model-preload":
-            if not _check_host_token(self):
-                self._json(401, {"ok": False, "message": "unauthorized"})
-                return
-            if self.command == "POST":
-                job_id = start_gfpgan_preload()
-                self._json(200, {"ok": True, "job_id": job_id})
-                return
-            qs = parse_qs(parsed.query)
-            job_id = (qs.get("job_id") or [""])[0] if hasattr(parsed, "query") else ""
-            if not job_id:
-                self._json(400, {"ok": False, "message": "job_id 不能为空"})
-                return
-            with _MODEL_PRELOAD_LOCK:
-                job = _MODEL_PRELOAD_JOBS.get(job_id)
-            if not job:
-                self._json(404, {"ok": False, "message": f"job {job_id} not found"})
-                return
-            self._json(200, {
-                "ok": True,
-                "job_id": job_id,
-                "kind": job.get("kind"),
-                "status": job.get("status"),
-                "progress": job.get("progress"),
-                "message": job.get("message"),
-                "ready": job.get("ready"),
-                "updated_at": job.get("updated_at"),
-            })
-            return
-
         if path.startswith("/inbox_file/"):
             name = _safe_filename(path.split("/inbox_file/", 1)[-1])
             fpath = os.path.join(canvas_inbox_dir(), name)

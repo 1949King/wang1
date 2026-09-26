@@ -36,6 +36,15 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SERVER = os.path.join("app", "core", "canvas_server.py")
+# 2026-09-27 整改 A4：端点按域迁出 canvas_server.py 到独立路由模块后，
+# 只读单文件会让迁出的端点从「服务端路由」里消失 → 前端调用它反而误报
+# 「静默 404」（契约检查开天窗）。这里把服务端路由来源列全。
+# ⚠️ 约定：以后再拆出新的路由模块（如 canvas_routes_post.py），一并加进此列表。
+SERVER_FILES = [
+    SERVER,
+    os.path.join("app", "core", "canvas_routes_get.py"),
+    os.path.join("app", "core", "canvas_routes_post.py"),
+]
 CLIENTS = [
     os.path.join("vendor", "shiguang-canvas", "src", "bridge.ts"),
     os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv", "bridge.ts"),
@@ -140,11 +149,34 @@ def legacy_routes(src: str) -> set:
 
     用来查「同一个端点既在路由表又留在老链里」—— 表是优先分发的，
     老链那条会变成死代码（和插件端点当年一模一样的死法）。
+
+    ⚠️ 必须传**单个方法体**（见 method_bodies）：GET 与 POST 同名端点
+    （如 /host/video-batch 的查询与启动）是合法的，整文件扫描会误判。
     """
     exact = set(re.findall(r'path\s*==\s*' + _PATH_LIT, src))
     for group in re.findall(r'path\s+in\s+\(([^)]*)\)', src):
         exact |= set(re.findall(_PATH_LIT, group))
     return exact
+
+
+def method_bodies(src: str) -> dict:
+    """按 do_GET / do_POST 切出方法体源码 → {方法名: 源码}。
+
+    重复注册检测必须**按 HTTP 方法**分别做：同名不同方法是正常设计。
+    """
+    out: dict = {}
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in (
+            "do_GET",
+            "do_POST",
+        ):
+            seg = ast.get_source_segment(src, node) or ""
+            out[node.name] = out.get(node.name, "") + "\n" + seg
+    return out
 
 
 def table_routes(src: str) -> set:
@@ -160,8 +192,19 @@ def covered(path: str, exact: set, prefixes: set) -> bool:
 
 
 def main() -> int:
-    server_src = _read(SERVER)
-    exact, prefixes = server_routes(server_src)
+    exact, prefixes = set(), set()
+    srcs = []
+    for rel in SERVER_FILES:
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            continue
+        text = _read(rel)
+        srcs.append(f"# ==== {rel} ====\n{text}")
+        e, p = server_routes(text)
+        exact |= e
+        prefixes |= p
+    # [3]/[4] 走 AST + 正则，需要完整源码 —— 拼接全部服务端路由文件
+    # （各文件顶层结构独立，拼接后 AST 仍可解析；行号含各文件自身上下文）。
+    server_src = "\n".join(srcs)
 
     client_all = set()
     per_client = {}
@@ -206,13 +249,22 @@ def main() -> int:
         print("  ✓ 无")
 
     print("\n[4] 路由表与老 if 链重复注册（老链那条会变成死代码）")
-    dup = sorted(table_routes(server_src) & legacy_routes(server_src))
+    # 按 HTTP 方法分别比对：GET 表 vs do_GET 老链、POST 表 vs do_POST 老链。
+    bodies = method_bodies(server_src)
+    dup = set()
+    for _method, _deco in (("do_GET", "get"), ("do_POST", "post")):
+        table_m = set(re.findall(r'@_route_' + _deco + r'\(\s*' + _PATH_LIT, server_src))
+        legacy_m = legacy_routes(bodies.get(_method, ""))
+        dup |= table_m & legacy_m
+    dup = sorted(dup)
     if dup:
         for p in dup:
             print(f"  ✗ {p}  同时在路由表和老链里 —— 迁进表后请把老链的分支删掉")
     else:
-        print(f"  ✓ 无（路由表 {len(table_routes(server_src))} 条 / 老链 "
-              f"{len(legacy_routes(server_src))} 条，不重叠）")
+        n_table = len(re.findall(r'@_route_(?:get|post)\(\s*' + _PATH_LIT, server_src))
+        n_legacy = len(legacy_routes(bodies.get("do_GET", ""))
+                       | legacy_routes(bodies.get("do_POST", "")))
+        print(f"  ✓ 无（路由表 {n_table} 条 / 老链 {n_legacy} 条，按方法比对不重叠）")
 
     print()
     if broken:
