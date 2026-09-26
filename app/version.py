@@ -10,35 +10,34 @@
 变更日志见 docs/CHANGELOG.md
 """
 
-__version__ = "4.40.2"
+__version__ = "4.40.3"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 40,
-    "patch": 2,
-    "codename": "整改 P1③：needs_log 静默异常补日志",
-    "release_date": "2026-09-26",
+    "patch": 3,
+    "codename": "整改 P2 起步：文档数字回正 + CI 全量 + scrub 压测",
+    "release_date": "2026-09-27",
     "description": (
-        "V4.40.2: 实测整改方案 P1 第三项落地——check_glue_contract 判定的"
-        " needs_log 静默 except 25 处全部处置：22 处补 logger.debug(...,"
-        " exc_info=True)（14 文件，含 LLM 响应三级降级解析、提示词缓存读写、"
-        " Provider 配置读取、导出代理路径检查、烘焙临时文件清理等状态机/"
-        " 资源路径），3 处位于冻结区（canvas_bridge L144、"
-        " character_management L793/847）转入待解冻队列。"
-        "★ 5 文件补 logger 定义（editor_preview_ux/editor_timeline_tools/"
-        " deformity_repair_skill/model_config/test_render_fallback）。"
-        "★ 增量门禁拦下即清：15 文件存量 ruff 120 处全清——F401 死 import"
-        " ×96（限定规则安全 --fix + 全量测试验证零破坏）、F811 函数内冗余"
-        " re-import ×8（copywriting，顶部已有）、F841 死变量 ×7（逐个定性："
-        " 有副作用的保留调用去赋值，纯死的删行）、F541/B009/RUF100/PIE810/"
-        " B905 若干；canvas_runtime 可用性探测 import 加 noqa 保留"
-        " （find_spec 会跳过模块初始化，行为不等价）。"
-        "★ 纪律事件：P1-③ 中途误改 character_management_module.py"
-        " （stage3d-core 整文件锁），守卫报漂移后立即全量回滚，"
-        " 该文件 2 处 needs_log 转入待解冻队列。"
-        "★ 稳定性门禁 269→249（清除 20 项存量静默）。"
-        "★ 测试 383/383；ruff 15 文件全净；冻结区 85；粘合层 18/0；"
-        " 双库无漂移。——至此整改 P1 全部落地（①②=V4.40.1，③=本版）。"
+        "V4.40.3: 按「未修清单」推进无冻结区、零/低风险三项（A1-A3）。"
+        "★ A1 文档数字回正（评价报告点名「单一事实源自身三处失准」）："
+        " editor_module 8,553→9,718 行（并补 371 函数）· except:pass 173→38 处"
+        "/8 文件（ok 25·ui 1·needs_log 3·frozen 9）· tsc 40→37 处且全部在冻结区"
+        " （bridge.ts 3 处已于 V4.39.8 修完）；顺带回正 §2f 真源 43,210→43,603、"
+        " 副库 42,533→42,954（99→100 文件）；§10 优先级条目同步现状。"
+        "★ A2 CI 改造为真回归：单测从「只跑 tests/test_buses.py」改为全量"
+        " app/tests（383 项）；新增 guards job（冻结区/棘轮/契约/分层/双库五守卫）"
+        " 与 frontend job（npm ci + vitest）；去掉对 app/temp 草稿脚本的依赖；"
+        " 触发路径补 tests/**·vendor/**·_verify/**·scripts/**；关键修正："
+        " 必须在仓库根跑 pytest（app/ 下无 conftest.py，原 cd app 会假红）；"
+        " continue-on-error 只保留在 build-smoke（单测/守卫/前端/集成四 job 真拦截）。"
+        "★ A3 长对白 scrub 压测（报告 §6.1「四个未达标点」第 3 条，§10 列为立刻做）："
+        " 新增 _verify/check_scrub_perf.py 并注册进一键回归。用 AST 从 editor_module "
+        " 提取 _clips_at_playhead/_clip_at_playhead 真实函数体执行（不 import app，"
+        " 绕开 wmic 沙箱链），实测 150/300/600 段：均值 0.094/0.196/0.389 ms "
+        " ——精确线性、600 段仅占 30fps 帧预算 1.2% ⇒ **查找层不是长对白掉帧源**，"
+        " 瓶颈若存在在解码/合成层（脚本如实标注未覆盖面）；函数指纹随源码变动，"
+        " 可作回归。全量 383/383；ruff 全净；冻结区 85；稳定性 249≤269。"
     ),
 }

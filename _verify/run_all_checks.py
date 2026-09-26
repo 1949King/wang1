@@ -103,6 +103,8 @@ CHECKS = [
     ("PINYIN", "_verify/check_pinyin_dict.py", "汉字注音字典（离线确定性）+ 四处接线"),
     # ── 单文件规模守卫（V4.39.4）──
     ("SIZE", "_verify/check_file_size.py", "单文件规模守卫（存量冻结，只许减不许增）"),
+    # ── 长对白 scrub 压测（报告 §6.1 补项，2026-09-27）──
+    ("SCRUBPERF", "_verify/check_scrub_perf.py", "长对白 scrub 压测（命中查找层）"),
 ]
 
 failed = []
