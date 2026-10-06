@@ -234,3 +234,24 @@ e2e_test_output.txt
 # 代码审查报告（临时文档）
 代码审查与优化建议报告_*.md
 
+# ── 临时产物（tempfile.gettempdir() 在受限环境回退到 cwd，会在仓库根堆积）──
+# 2026-10-07 固化时清理：这些目录/文件此前一直以「未跟踪」状态挂在 `git status` 上，
+# 稍不留神就会被 `git add -A` 卷进历史。
+/lutbake_*/
+/pip-*/
+/tmplk_*/
+/sg_*/
+/cover_*/
+/pytest-of-*/
+
+# vite/vitest 写出的临时配置快照
+vendor/shiguang-canvas/vitest.config.ts.timestamp-*.mjs
+
+# 源文件的本地备份
+vendor/shiguang-canvas/src/*.bak
+
+# 抽卡原图输出（本机素材，不入库；已定稿的形象素材在 assets/mascot、assets/avatar）
+/generated-images/
+
+# 验证脚本的报告型 JSON 产出
+/_verify/out_*.json
