@@ -201,7 +201,8 @@ class LLMClipper:
             if report.get("service_running"):
                 models = client.list_models()
                 if not models:
-                    msg += "\n\n服务已运行但未安装模型。请执行: ollama pull qwen2.5:7b"
+                    msg += ("\n\n服务已运行但未安装模型。请执行: "
+                            "ollama pull <模型名>（例如 ollama pull qwen3）")
             return msg
         except Exception as e:
             return f"无法诊断 Ollama: {e}"

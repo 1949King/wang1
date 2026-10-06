@@ -46,6 +46,16 @@ _DEFAULT_STORE = os.path.join(
         os.path.dirname(os.path.abspath(__file__))))),
     "data", "quality_prior.json")
 
+# 测试隔离：QUALITY_PRIOR_PATH 存在时优先使用（缺省仍是 data/quality_prior.json）。
+# 与 draw_book 同款纪律：测试不得写入正式先验库。
+_STORE_ENV = "QUALITY_PRIOR_PATH"
+
+
+def _resolve_store_path() -> str:
+    """解析先验库路径：环境变量 > 默认（data/quality_prior.json）。"""
+    env = os.environ.get(_STORE_ENV)
+    return env.strip() if env and env.strip() else _DEFAULT_STORE
+
 
 def _bucket_key(provider: str, kind: str = "default") -> str:
     return f"{provider}::{kind}"
@@ -55,7 +65,7 @@ class QualityPriorStore:
     """分桶 EMA 质量先验库（线程安全，持久化原子写）。"""
 
     def __init__(self, store_path: str = "", alpha: float = _ALPHA):
-        self._path = store_path or _DEFAULT_STORE
+        self._path = store_path or _resolve_store_path()
         self._alpha = max(0.01, min(1.0, float(alpha)))
         self._buckets: Dict[str, Dict[str, float]] = {}
         # RLock：record/predict 等公开方法持锁后会再调 _ensure_loaded/_save_locked
