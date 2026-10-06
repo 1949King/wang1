@@ -89,34 +89,35 @@ class EditorAgentPanelMixin:
     # ======================================================================
     # 抽取自 editor_module.py L10353-10699
     # ======================================================================
-    # ── 空间策略常量（V4.34.1）────────────────────────────────────────────
+    # ── 空间策略常量（V4.34.1，V4.40.50 对齐 LibTV 档）──────────────────────
     # 不预设「唯一最佳宽度」，而是提供两档随时切：
-    #   默认档 380 = 与右侧工具栏同宽，剪片时**不挤压预览**
-    #   展开档 620 = 从预览区借空间，对话区舒展
+    #   默认档 360 = **与画布 Agent 面板同宽**（两边统一），剪片时不挤压预览
+    #   展开档 560 = 从预览区借空间，对话区舒展
     # 宽度偏好用 QSettings 记忆（跨会话）。
-    _AGENT_PANEL_NORMAL = 380
-    _AGENT_PANEL_WIDE = 620
+    # ⚠️ 旧值 380/620（V4.34.1）已废止：与画布 300~360 不一致，两边观感对不齐。
+    _AGENT_PANEL_NORMAL = 360
+    _AGENT_PANEL_WIDE = 560
 
     def _toggle_agent_panel_width(self) -> None:
-        """在「默认档 380」与「展开档 620」之间切换右栏宽度。
+        """在「默认档 360」与「展开档 560」之间切换 Agent 竖栏宽度。
 
         **空间策略**（V4.34.1）：Agent 与剪辑的空间矛盾没有「唯一解」——
         剪片时它该窄（让位给预览/时间线），对话时它该宽。故做成**用户随时可切**，
         而不是我替你定死一个宽度。
         """
-        sp = getattr(self, "_top_splitter", None)
+        sp = getattr(self, "_agent_dock_splitter", None)
         if sp is None:
             return
         try:
             sizes = list(sp.sizes())
-            if len(sizes) < 3:
+            if len(sizes) < 2:
                 return
             cur = sizes[-1]
             mid = (self._AGENT_PANEL_WIDE + self._AGENT_PANEL_NORMAL) // 2
             target = self._AGENT_PANEL_NORMAL if cur >= mid else self._AGENT_PANEL_WIDE
             delta = target - cur
-            # 从「预览区」借/还空间（预览是最大的一栏，伸缩最无痛）
-            sp.setSizes([sizes[0], max(240, sizes[1] - delta), target])
+            # 从「主体区」借/还空间（主体最大，伸缩最无痛）
+            sp.setSizes([max(400, sizes[0] - delta), target])
             self._persist_agent_panel_width()
             tip = "已回归默认宽度（剪辑优先）" if target == self._AGENT_PANEL_NORMAL else "已展开对话区（对话优先）"
             try:
@@ -127,36 +128,40 @@ class EditorAgentPanelMixin:
             logger.debug(f"[Agent] 切换面板宽度失败: {e}")
 
     def _persist_agent_panel_width(self) -> None:
-        """记住右栏宽度偏好（QSettings，跨会话）。"""
+        """记住 Agent 竖栏宽度偏好（QSettings，跨会话）。
+
+        只在竖栏**可见**时记录：收起时 splitter 第二栏宽度会被 Qt 重置为 0，
+        写进去会把偏好污染成 0。
+        """
         try:
             from PyQt6.QtCore import QSettings
 
-            sp = getattr(self, "_top_splitter", None)
-            if sp is None:
+            sp = getattr(self, "_agent_dock_splitter", None)
+            if sp is None or not self._is_agent_dock_visible():
                 return
             sizes = list(sp.sizes())
-            if len(sizes) >= 3:
+            if len(sizes) >= 2 and sizes[-1] > 0:
                 QSettings("ShiguangEditor", "AgentPanel").setValue("right_width", int(sizes[-1]))
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[Agent] 保存宽度偏好失败: {e}")
 
     def _restore_agent_panel_width(self) -> None:
-        """恢复上次的右栏宽度（默认 380；夹在 300~760 防记忆值把布局搞坏）。"""
+        """恢复上次的竖栏宽度（默认 360；夹在 300~720 防记忆值把布局搞坏）。"""
         try:
             from PyQt6.QtCore import QSettings
 
-            sp = getattr(self, "_top_splitter", None)
-            if sp is None:
+            sp = getattr(self, "_agent_dock_splitter", None)
+            if sp is None or not self._is_agent_dock_visible():
                 return
             w = QSettings("ShiguangEditor", "AgentPanel").value("right_width", self._AGENT_PANEL_NORMAL)
             try:
-                w = max(300, min(760, int(w)))
+                w = max(300, min(720, int(w)))
             except (TypeError, ValueError):
                 w = self._AGENT_PANEL_NORMAL
             sizes = list(sp.sizes())
-            if len(sizes) >= 3 and abs(sizes[-1] - w) > 8:
+            if len(sizes) >= 2 and abs(sizes[-1] - w) > 8:
                 delta = w - sizes[-1]
-                sp.setSizes([sizes[0], max(240, sizes[1] - delta), w])
+                sp.setSizes([max(400, sizes[0] - delta), w])
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[Agent] 恢复宽度偏好失败: {e}")
 
@@ -358,11 +363,39 @@ class EditorAgentPanelMixin:
         self._agent_expand_btn.clicked.connect(self._toggle_agent_panel_width)
         head.addWidget(self._agent_expand_btn)
 
+        # ⛶ 对话优先模式（V4.40.52）：一键隐藏状态卡/折叠区/快捷与全链路区，
+        # 对话区占 ≈85%；再点还原。逻辑在 editor_agent_dock_mixin.py（本文件行数受限）。
+        self._agent_focus_btn = QPushButton("⛶")
+        self._agent_focus_btn.setToolTip(
+            "对话优先：隐藏状态卡与折叠区，对话区占满；再点还原（跑全链路时自动退出）"
+        )
+        self._agent_focus_btn.setFixedWidth(30)
+        self._agent_focus_btn.setCheckable(True)
+        self._agent_focus_btn.setStyleSheet(S["btn"])
+        self._agent_focus_btn.clicked.connect(self._toggle_agent_focus_mode)
+        head.addWidget(self._agent_focus_btn)
+
         close_btn = QPushButton("收起")
         close_btn.setStyleSheet(S["btn_close"])
         close_btn.clicked.connect(self._close_agent_tab)
         head.addWidget(close_btn)
         layout.addLayout(head)
+
+        # ── V4.40.51 LibTV 格式：头部极简、对话区当主角 ──
+        # 「多集上下文 + 大脑状态」收进**默认折叠**区（≈70px 还给对话区），
+        # 点开「▸ 多集上下文 · 大脑状态」才展开。用户反馈：对话框有点小。
+        self._agent_ctx_toggle = QToolButton()
+        self._agent_ctx_toggle.setText("▸ 多集上下文 · 大脑状态")
+        self._agent_ctx_toggle.setCheckable(True)
+        self._agent_ctx_toggle.setChecked(False)
+        self._agent_ctx_toggle.setStyleSheet(S["btn_ghost"])
+        layout.addWidget(self._agent_ctx_toggle)
+        ctx_body = QWidget()
+        ctx_lo = QVBoxLayout(ctx_body)
+        ctx_lo.setContentsMargins(4, 2, 4, 2)
+        ctx_lo.setSpacing(6)
+        ctx_body.setVisible(False)
+        self._agent_ctx_body = ctx_body  # ⛶ 对话优先模式要隐藏它
 
         # 多集上下文（Dify 式应用变量，写入 MemoryStore）
         # 紧凑化：去掉「剧名」「集数」「平台」三个文字标签，语义交给 placeholder + tooltip
@@ -391,7 +424,7 @@ class EditorAgentPanelMixin:
         save_ctx_btn.setStyleSheet(S["btn"])
         save_ctx_btn.clicked.connect(self._save_agent_project_context)
         proj_row.addWidget(save_ctx_btn)
-        layout.addLayout(proj_row)
+        ctx_lo.addLayout(proj_row)
         self._load_agent_project_context_fields()
         self._subscribe_provider_activated()
 
@@ -399,20 +432,29 @@ class EditorAgentPanelMixin:
         self._agent_brain_status_label = QLabel("大脑初始化中…")
         self._agent_brain_status_label.setStyleSheet(S["card_label"])
         self._agent_brain_status_label.setWordWrap(True)
-        layout.addWidget(self._agent_brain_status_label)
+        ctx_lo.addWidget(self._agent_brain_status_label)
         # 启动时首次刷新 + 定时器周期刷新（每 5 秒）
         QTimer.singleShot(0, self._refresh_agent_brain_status)
         self._agent_brain_refresh_timer = QTimer(self)
         self._agent_brain_refresh_timer.setInterval(5000)
         self._agent_brain_refresh_timer.timeout.connect(self._refresh_agent_brain_status)
         self._agent_brain_refresh_timer.start()
+        layout.addWidget(ctx_body)
+        self._agent_ctx_toggle.toggled.connect(
+            lambda on: (
+                ctx_body.setVisible(on),
+                self._agent_ctx_toggle.setText(
+                    "▾ 多集上下文 · 大脑状态" if on else "▸ 多集上下文 · 大脑状态"
+                ),
+            )
+        )
 
         # ── ★ 对话区（主角，弹性占满剩余空间）──
         # 原实现把它塞进滚动区且 setFixedHeight(72) —— 面板叫「Agent」，对话区却最小，
         # 这是「对话体验非常难受」的直接原因。现移出滚动区、由面板布局直接给空间。
         self._edit_agent_chat = QTextEdit()
         self._edit_agent_chat.setReadOnly(True)
-        self._edit_agent_chat.setMinimumHeight(220)
+        self._edit_agent_chat.setMinimumHeight(420)
         self._edit_agent_chat.setPlaceholderText("在这里和 Agent 对话 —— 结果与状态也会显示在这里。")
         self._edit_agent_chat.setStyleSheet(S["text_readonly"])
         layout.addWidget(self._edit_agent_chat, 1)
@@ -425,6 +467,7 @@ class EditorAgentPanelMixin:
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(0, 4, 0, 4)
         scroll_layout.setSpacing(6)
+        self._agent_scroll_layout = scroll_layout  # ⛶ 模式按索引隐藏前 5 张状态卡
 
         # ── 新增 1：执行参数配置卡（P0 痛点1+8）──
         self._build_agent_config_card(scroll_layout)
@@ -485,14 +528,9 @@ class EditorAgentPanelMixin:
         interaction_layout.setContentsMargins(10, 10, 10, 10)
         interaction_layout.setSpacing(8)
 
-        title_row = QHBoxLayout()
-        title_row.setSpacing(6)
-        interaction_title = QLabel("输入剪辑指令")
-        interaction_title.setStyleSheet(S["title"])
-        title_row.addWidget(interaction_title)
-        title_row.addStretch()
-
-        # 知心秘书温度开关（默认关=轻量；开=完整，多耗 token）
+        # V4.40.52：删「输入剪辑指令」标题行（输入框 placeholder 已含语义），
+        # 知心秘书/称呼挪进「⋯」菜单 —— 交互卡压扁 ≈50px 还给对话区。
+        # 按钮保留为**不可见宿主**：`_toggle_agent_persona` 会对它 setText，避免 AttributeError。
         self._agent_persona_btn = QPushButton(self._persona_btn_label())
         self._agent_persona_btn.setToolTip(
             "开启「知心秘书」后我会记得你、更主动关心，但每次对话会多消耗一些 token；"
@@ -500,18 +538,20 @@ class EditorAgentPanelMixin:
         )
         self._agent_persona_btn.setStyleSheet(S["btn_ghost"])
         self._agent_persona_btn.clicked.connect(self._toggle_agent_persona)
-        title_row.addWidget(self._agent_persona_btn)
-
-        # 自定义称呼
+        self._agent_persona_btn.setVisible(False)
         self._agent_nickname_btn = QPushButton("称呼")
-        self._agent_nickname_btn.setToolTip("设置希望我怎么称呼你")
-        self._agent_nickname_btn.setStyleSheet(S["btn_ghost"])
-        self._agent_nickname_btn.clicked.connect(self._set_agent_nickname)
-        title_row.addWidget(self._agent_nickname_btn)
+        self._agent_nickname_btn.setVisible(False)
 
-        interaction_layout.addLayout(title_row)
-
-        quick_row = QHBoxLayout()
+        # V4.40.52：快捷指令收进默认折叠（💡 快捷指令 ▸），再省 ≈30px 给对话区
+        self._agent_quick_toggle = QToolButton()
+        self._agent_quick_toggle.setText("💡 快捷指令 ▸")
+        self._agent_quick_toggle.setCheckable(True)
+        self._agent_quick_toggle.setChecked(False)
+        self._agent_quick_toggle.setStyleSheet(S["btn_ghost"])
+        interaction_layout.addWidget(self._agent_quick_toggle)
+        quick_body = QWidget()
+        quick_row = QHBoxLayout(quick_body)
+        quick_row.setContentsMargins(0, 0, 0, 0)
         quick_row.setSpacing(6)
         quick_prompts = [
             ("分析当前片段", "分析当前选中片段，给出可执行的剪辑建议"),
@@ -525,10 +565,20 @@ class EditorAgentPanelMixin:
             btn.clicked.connect(lambda _, text=prompt: self._fill_edit_agent_prompt(text))
             quick_row.addWidget(btn)
         quick_row.addStretch()
-        interaction_layout.addLayout(quick_row)
+        quick_body.setVisible(False)
+        interaction_layout.addWidget(quick_body)
+        self._agent_quick_body = quick_body
+        self._agent_quick_toggle.toggled.connect(
+            lambda on: (
+                quick_body.setVisible(on),
+                self._agent_quick_toggle.setText("💡 快捷指令 ▾" if on else "💡 快捷指令 ▸"),
+            )
+        )
 
         # 全链路一键执行按钮（Agent 全量双向闭环：生成→预览→打分→精剪→成片）
-        pipeline_row = QHBoxLayout()
+        pipeline_row_w = QWidget()          # 包一层：⛶ 对话优先模式要整体隐藏本行
+        pipeline_row = QHBoxLayout(pipeline_row_w)
+        pipeline_row.setContentsMargins(0, 0, 0, 0)
         pipeline_row.setSpacing(6)
         pipeline_btn = QPushButton("全链路执行（生成→预览→打分→精剪→成片）")
         pipeline_btn.setObjectName("edit_agent_pipeline_btn")
@@ -547,7 +597,8 @@ class EditorAgentPanelMixin:
         pipeline_row.addWidget(pipeline_cancel_btn)
         self._pipeline_job_id = ""   # 当前轮询的全链路任务号（空 = 无任务）
         pipeline_row.addStretch()
-        interaction_layout.addLayout(pipeline_row)
+        self._agent_pipeline_row_w = pipeline_row_w
+        interaction_layout.addWidget(pipeline_row_w)
 
         input_row = QHBoxLayout()
         input_row.setSpacing(6)
@@ -592,6 +643,12 @@ class EditorAgentPanelMixin:
         more_menu.addAction("继续任务", self._resume_edit_agent_task)
         more_menu.addSeparator()
         more_menu.addAction("重规划（切到 Plan 重来）", self._replan_edit_agent_task)
+        more_menu.addSeparator()
+        # V4.40.52：知心秘书/称呼从交互卡标题行挪到此处（标题行已删）
+        self._agent_persona_action = more_menu.addAction(
+            self._persona_btn_label(), self._toggle_agent_persona
+        )
+        more_menu.addAction("设置称呼", self._set_agent_nickname)
         more_btn.setMenu(more_menu)
         input_row.addWidget(more_btn)
         interaction_layout.addLayout(input_row)
@@ -600,6 +657,8 @@ class EditorAgentPanelMixin:
         # 设置 scrollArea 的 content 并加入主布局
         # stretch=0：卡片区不抢空间（对话区已拿到 stretch=1）；卡片折叠后只剩标题行
         scroll_area.setWidget(scroll_content)
+        # V4.40.52：卡片区（含交互卡）总高设上限 —— 卡片全展开时滚动，不吃对话区的空间
+        scroll_area.setMaximumHeight(400)
         layout.addWidget(scroll_area, 0)
 
         self._edit_agent_worker = None
@@ -660,12 +719,9 @@ class EditorAgentPanelMixin:
         return panel
 
     def _focus_agent_panel(self) -> None:
-        """快捷键 / 独立入口共用：切到 Agent 面板并把焦点交给输入框。"""
+        """快捷键（Ctrl+Shift+A）/ 工具栏直达按钮共用：展开 Agent 竖栏并聚焦输入框。"""
         try:
-            idx = getattr(self, "_agent_tab_index", -1)
-            tabs = getattr(self, "_tools_tabs", None)
-            if tabs is not None and idx is not None and idx >= 0:
-                tabs.setCurrentIndex(idx)      # 懒加载 Tab 会在此刻构建
+            self._show_agent_dock()  # 首次调用会懒构建面板本体
             inp = getattr(self, "_edit_agent_input", None)
             if inp is not None:
                 inp.setFocus()
@@ -822,103 +878,7 @@ class EditorAgentPanelMixin:
             except Exception:
                 hint.setText("")
 
-    # ======================================================================
-    # 抽取自 editor_module.py L11078-11191
-    # ======================================================================
-    def _build_agent_config_card(self, parent_layout: QVBoxLayout):
-        """构造参数配置卡（平台 / 目标时长 / 单段时长 / Provider 选择）。"""
-        card = QFrame()
-        card.setObjectName("agentConfigCard")
-        S = self._agent_panel_styles()
-        card.setStyleSheet(S["card"])
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(6)
-
-        head = QHBoxLayout()
-        t = QLabel("全链路执行参数")
-        t.setStyleSheet(S["title"])
-        head.addWidget(t)
-        head.addStretch()
-        toggle = QPushButton("展开")
-        toggle.setFixedHeight(24)
-        toggle.setStyleSheet(S["btn"])
-        head.addWidget(toggle)
-        lay.addLayout(head)
-
-        body = QWidget()
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(0, 0, 0, 0)
-        body_lay.setSpacing(6)
-        # 默认收起（V4.34.1）：这是唯一常驻展开的卡片，收起后给对话区让出空间
-        body.setVisible(False)
-
-        grid = QGridLayout()
-        grid.setSpacing(6)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-
-        # Row 1：平台 + 目标时长
-        lbl1 = QLabel("平台")
-        self._agent_platform_combo = QComboBox()
-        self._agent_platform_combo.addItem("抖音", "douyin")
-        self._agent_platform_combo.addItem("快手", "kuaishou")
-        self._agent_platform_combo.addItem("B站", "bilibili")
-        self._agent_platform_combo.addItem("小红书", "xiaohongshu")
-        self._agent_platform_combo.setCurrentIndex(0)
-        grid.addWidget(lbl1, 0, 0)
-        grid.addWidget(self._agent_platform_combo, 0, 1)
-
-        lbl2 = QLabel("目标时长")
-        self._agent_duration_combo = QComboBox()
-        self._agent_duration_combo.addItem("15秒", 15.0)
-        self._agent_duration_combo.addItem("30秒", 30.0)
-        self._agent_duration_combo.addItem("60秒", 60.0)
-        self._agent_duration_combo.addItem("90秒", 90.0)
-        self._agent_duration_combo.setCurrentIndex(1)  # 默认30秒
-        grid.addWidget(lbl2, 0, 2)
-        grid.addWidget(self._agent_duration_combo, 0, 3)
-
-        # Row 2：单段时长 + Provider
-        lbl3 = QLabel("单段时长")
-        self._agent_clip_duration_spin = QDoubleSpinBox()
-        self._agent_clip_duration_spin.setRange(0.5, 10.0)
-        self._agent_clip_duration_spin.setSingleStep(0.5)
-        self._agent_clip_duration_spin.setValue(5.0)
-        self._agent_clip_duration_spin.setSuffix(" 秒")
-        grid.addWidget(lbl3, 1, 0)
-        grid.addWidget(self._agent_clip_duration_spin, 1, 1)
-
-        lbl4 = QLabel("Provider")
-        self._agent_provider_combo = QComboBox()
-        self._agent_provider_combo.addItem("Auto（自动）", "auto")
-        self._agent_provider_combo.addItem("Seedance", "seedance")
-        self._agent_provider_combo.addItem("CogVideo", "cogvideo")
-        self._agent_provider_combo.addItem("本地占位", "local")
-        self._agent_provider_combo.setCurrentIndex(0)
-        grid.addWidget(lbl4, 1, 2)
-        grid.addWidget(self._agent_provider_combo, 1, 3)
-        body_lay.addLayout(grid)
-
-        # Provider 状态警告
-        self._agent_provider_status_lbl = QLabel("")
-        self._agent_provider_status_lbl.setStyleSheet(S["ok_hint"])
-        self._agent_provider_status_lbl.setWordWrap(True)
-        body_lay.addWidget(self._agent_provider_status_lbl)
-        self._agent_provider_combo.currentIndexChanged.connect(self._refresh_provider_status)
-        lay.addWidget(body)
-
-        def _toggle_config():
-            visible = body.isVisible()
-            body.setVisible(not visible)
-            toggle.setText("展开" if visible else "收起")
-
-        toggle.clicked.connect(_toggle_config)
-
-        parent_layout.addWidget(card)
-
-        # 首次加载时刷新 provider 状态
-        QTimer.singleShot(300, self._refresh_provider_status)
+    # [迁移] _build_agent_config_card 已迁至 editor_agent_dock_mixin.py（V4.40.52：size ratchet 余量不足，本文件只减不增）
 
     # ======================================================================
     # 抽取自 editor_module.py L11465-11516
@@ -1204,6 +1164,9 @@ class EditorAgentPanelMixin:
             btn = getattr(self, '_agent_persona_btn', None)
             if btn is not None:
                 btn.setText("🌡 知心秘书：开" if turning_on else "🌡 知心秘书：关")
+            act = getattr(self, '_agent_persona_action', None)
+            if act is not None:
+                act.setText("🌡 知心秘书：开" if turning_on else "🌡 知心秘书：关")
             if turning_on:
                 self._append_agent_message(
                     "系统", "已开启「知心秘书」。以后我会记得你、更主动关心你。"
@@ -1758,6 +1721,11 @@ class EditorAgentPanelMixin:
         全链路一键执行入口（按钮点击）。
         根据当前按钮状态决定是「启动新流程」还是「继续等待中的流程」。
         """
+        # V4.40.52：跑全链路要显示进度/预览等状态卡 ⇒ 自动退出 ⛶ 对话优先模式
+        focus_btn = getattr(self, "_agent_focus_btn", None)
+        if focus_btn is not None and focus_btn.isChecked():
+            focus_btn.setChecked(False)
+            self._set_agent_focus_mode(False)
         pipeline_btn = getattr(self, "_edit_agent_pipeline_btn", None)
         waiting_preview = False
         if pipeline_btn is not None:

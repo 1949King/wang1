@@ -133,6 +133,7 @@ from .skill_engine import SkillEngine, Skill
 from .ai_agent_panel import AiAgentPanelMixin  # P0 拆分：AI 方法 Mixin
 from .editor_export_panel import EditorExportPanelMixin  # P0 拆分：导出方法 Mixin
 from .editor_agent_panel_mixin import EditorAgentPanelMixin
+from .editor_agent_dock_mixin import EditorAgentDockMixin  # V4.40.50：Agent 右侧独立竖栏
 from .editor_effects_mixin import EditorEffectsMixin
 from .editor_ui_builder_mixin import EditorUiBuilderMixin
 from .editor_ai_process_mixin import EditorAiProcessMixin
@@ -437,7 +438,7 @@ def composite_overlay_bgr_blend(base_bgr, overlay_bgr, tf: dict, opacity: float 
     return result
 
 
-class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, EditorAgentPanelMixin, EditorEffectsMixin, EditorUiBuilderMixin, EditorAiProcessMixin, EditorAiToolsMixin, EditorAgentRuntimeMixin):
+class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, EditorAgentPanelMixin, EditorAgentDockMixin, EditorEffectsMixin, EditorUiBuilderMixin, EditorAiProcessMixin, EditorAiToolsMixin, EditorAgentRuntimeMixin):
     """
     视频剪辑模块
     - 轨道,预览,波形,切割,滤镜,转场,字幕
@@ -1074,9 +1075,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         top_splitter.addWidget(tools_panel)
         t_tools = time.perf_counter()
         
-        top_splitter.setSizes([280, 750, 380])
-        # 拖拽结束 → 记住宽度偏好（V4.34.1 空间策略：把空间调配权交给用户）
-        top_splitter.splitterMoved.connect(lambda *_: self._persist_agent_panel_width())
+        # 工具栏列 360（与 Agent 竖栏同宽，V4.40.50 统一 LibTV 档）
+        top_splitter.setSizes([280, 790, 360])
+        # 注：右栏宽度偏好的持久化已随 Agent 竖栏迁移到 _agent_dock_splitter
         main_splitter.addWidget(top_splitter)
         
         timeline_panel = self._create_timeline_panel()
@@ -1090,7 +1091,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         main_splitter.setStretchFactor(1, 1)
         main_splitter.setSizes([450, 350])
         
-        layout.addWidget(main_splitter, 1)
+        # V4.40.50：Agent 从工具栏 Tab 升级为最右侧独立竖栏（LibTV 档 360px，贯穿到底）
+        layout.addWidget(self._build_agent_dock(main_splitter), 1)
         logger.info(
             "editor _setup_ui total=%.0fms (toolbar=%.0f left=%.0f preview=%.0f tools=%.0f timeline=%.0f)",
             (t_timeline - t0) * 1000,
@@ -3575,6 +3577,20 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     # ---- 撤销/重做核心：历史栈 + 时间线感知的回滚（替代原被覆盖的死代码） ----
 
+    def _get_history_lock(self):
+        """撤销/重做栈的互斥锁（懒建）。
+
+        ★ A3（2026-10-05）：压栈（Agent 能力链，见 agent_reanchor_clips 在锁内
+        `_record_action`）与弹栈（UI 线程 `_undo`/`_redo`）此前**无互斥**——
+        list 的 append/pop 虽各自原子，但「pop 后立刻 append 到另一个栈」不是，
+        并发下会出现同一个 action 同时留在两条栈（或直接丢失）。
+        """
+        lock = getattr(self, "_history_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._history_lock = lock
+        return lock
+
     def _record_action(self, action: dict) -> None:
         """将一次编辑操作压入撤销栈，并清空重做栈、刷新按钮状态。"""
         if not hasattr(self, '_action_history'):
@@ -3588,10 +3604,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             action.setdefault("origin", "agent" if is_agent_origin() else "user")
         except Exception:
             action.setdefault("origin", "user")
-        self._action_history.append(action)
-        self._redo_history.clear()
-        if len(self._action_history) > getattr(self, 'MAX_UNDO_DEPTH', 100):
-            self._action_history.pop(0)
+        with self._get_history_lock():
+            self._action_history.append(action)
+            self._redo_history.clear()
+            if len(self._action_history) > getattr(self, 'MAX_UNDO_DEPTH', 100):
+                self._action_history.pop(0)
         self._touch_project_dirty()
         self._update_undo_redo_state()
 
@@ -3651,7 +3668,23 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                             logger.debug("换轨同步 UI 失败: %s", e)
 
     def _apply_action(self, action: dict, mode: str) -> None:
-        """执行一次操作或其逆操作。
+        """执行一次操作或其逆操作（**整段持 `_clips_lock`**）。
+
+        ★ A3（2026-10-05）加锁原因：本方法多步改 `self._clips`（delete/batch/split/
+        drop/add/edit_clip/stickers/compound），此前**不持锁**——画布桥线程的
+        `_clips_snapshot()` 与 autosave 会读到「半新半旧」的真相源（本文件 L473-479
+        自写的纪律要求所有非原子整段替换都持锁，此处此前是自违反）。
+        RLock 可重入 ⇒ 内部 `_sync_*` 与 compound 递归再取锁不会死锁。
+        """
+        lock = getattr(self, "_clips_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._clips_lock = lock
+        with lock:
+            self._apply_action_locked(action, mode)
+
+    def _apply_action_locked(self, action: dict, mode: str) -> None:
+        """（原实现保持不变；锁由 `_apply_action` 统一加，勿单独直调。）
 
         mode='do'  正向执行（用于重做 / 记录时的实做）
         mode='undo' 反向回滚（用于撤销）
@@ -3777,6 +3810,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._current_clip = c
                     break
 
+        elif atype == "stickers":
+            # ★ A3（2026-10-05）：贴纸整表快照回滚（贴纸挂在引擎上、不是 clip 字段，
+            #   故不能走 edit_clip；整表替换是最简单且不会漏项的还原方式）。
+            snap = action.get("after") if mode == "do" else action.get("before")
+            self._active_stickers = [dict(s) for s in (snap or [])]
+            self._refresh_sticker_list_ui()
+
         elif atype == "compound":
             steps = action.get("steps") or []
             ordered = steps if mode == "do" else reversed(steps)
@@ -3791,9 +3831,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _undo(self):
         """撤销最近一步操作（时间线感知，按钮自动 enable/disable）。"""
-        if getattr(self, '_action_history', []):
-            action = self._action_history.pop()
-            self._redo_history.append(action)
+        # ★ A3：栈操作持 _history_lock（与 Agent 线程的压栈互斥）；
+        #   _apply_action 在锁外执行，避免与 _clips_lock 形成长嵌套。
+        with self._get_history_lock():
+            action = self._action_history.pop() if getattr(self, '_action_history', []) else None
+            if action is not None:
+                self._redo_history.append(action)
+        if action is not None:
             self._apply_action(action, mode='undo')
             if action.get("origin") == "agent":
                 self._notify_edit(f"已撤销: {action.get('type')}（Agent 操作 · 已反馈学习）")
@@ -3806,9 +3850,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _redo(self):
         """重做最近撤销的操作（时间线感知，按钮自动 enable/disable）。"""
-        if getattr(self, '_redo_history', []):
-            action = self._redo_history.pop()
-            self._action_history.append(action)
+        with self._get_history_lock():
+            action = self._redo_history.pop() if getattr(self, '_redo_history', []) else None
+            if action is not None:
+                self._action_history.append(action)
+        if action is not None:
             self._apply_action(action, mode='do')
             if action.get("origin") == "agent":
                 self._on_agent_action_redone(action)
@@ -4626,10 +4672,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         from app.modules.lego.editor_subtitle_panel import apply_ripple_delete_range
         return apply_ripple_delete_range(self, t_in, t_out, track=track, record=record)
 
-    def _remove_fillers_and_silence(self):
-        from app.modules.lego.editor_subtitle_panel import remove_fillers_and_silence
-        remove_fillers_and_silence(self)
-
     def _toggle_subtitle_visibility(self):
         from app.modules.lego.editor_subtitle_panel import toggle_subtitle_visibility
         toggle_subtitle_visibility(self)
@@ -4673,24 +4715,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     # [Mixin] 已迁移至 editor_ai_tools_mixin.py
     
-    def _fallback_subtitle_generation(self, audio_path):
-        """已废弃：禁止生成与对白无关的占位字幕。"""
-        return []
-    
-
-    # ===== 数据闭环集成 =====
-    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
-    
-    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
-    
-    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
-    
-    # ===== AI能力增强 =====
-    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
-    
-    # [Mixin] 已迁移至 editor_ai_tools_mixin.py
-    
-    # ===== 时间线批量操作 =====
     def batch_add_clips(self, file_paths):
         """批量添加片段到时间线"""
         for file_path in file_paths:
@@ -7681,38 +7705,6 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         return payload
 
     # [Mixin] 已迁移至 editor_effects_mixin.py
-    def _optimize_workflow(self):
-        """ """
-        if self._clips:
-            clip_path = self._clips[0]['path']
-            platform = self._platform_var.currentText()
-            # 获取视频调节参数
-            video_adjust_params = {
-                "brightness": self._brightness_slider.value(),
-                "contrast": self._contrast_slider.value(),
-                "saturation": self._saturation_slider.value(),
-                "hue": self._hue_slider.value()
-            }
-            from .modules import video_processor as _video_processor
-            result = _video_processor.optimize_workflow(clip_path, platform, video_adjust_params)
-            QMessageBox.information(self, "智能剪辑", f"智能剪辑工作流已启动!{result}")
-        else:
-            _clear_msgbox("操作提示", "请先导入视频")
-    
-    # [Mixin] 已迁移至 editor_effects_mixin.py
-    # [Mixin] 已迁移至 editor_effects_mixin.py
-    # ═══════════════════════════════════════════════════════════════
-    # 画中画 (Picture-in-Picture)
-    # ═══════════════════════════════════════════════════════════════
-    # [Mixin] 已迁移至 editor_effects_mixin.py
-    # ═══════════════════════════════════════════════════════════════
-    # 智能抠像 (Chroma Key)
-    # ═══════════════════════════════════════════════════════════════
-    # [Mixin] 已迁移至 editor_effects_mixin.py
-    # ═══════════════════════════════════════════════════════════════
-    # 曲线变速 (Speed Ramping)
-    # ═══════════════════════════════════════════════════════════════
-    # [Mixin] 已迁移至 editor_effects_mixin.py
     def _build_speed_easing_expr(self, preset, duration, easing):
         """兼容旧调用；新路径优先 SpeedRamp 预设。"""
         if preset == "缓入":
@@ -7931,22 +7923,34 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             QMessageBox.warning(self, "提示", "请先点选贴纸库中的贴纸")
             return
         idx = self._selected_sticker_index()
+        # ★ A3（2026-10-05）：入撤销栈（此前贴纸参数改了撤不回）。
+        before = self._snapshot_stickers()
         stickers[idx].update(self._gather_sticker_params_from_ui())
+        self._record_action({"type": "stickers", "before": before,
+                             "after": self._snapshot_stickers(), "label": "贴纸参数"})
         self._touch_project_dirty()
         self._schedule_preview_refresh()
         self._notify_edit("贴纸参数已更新到预览")
 
     def _clear_stickers(self):
         """清除所有贴纸。"""
+        # ★ A3（2026-10-05）：入撤销栈 —— 「清空」是最需要后悔药的操作之一。
+        before = self._snapshot_stickers()
         if hasattr(self, "_active_stickers"):
             self._active_stickers.clear()
         else:
             self._active_stickers = []
         if hasattr(self, "_sticker_list") and self._sticker_list is not None:
             self._sticker_list.clear()
+        self._record_action({"type": "stickers", "before": before,
+                             "after": self._snapshot_stickers(), "label": "清除贴纸"})
         self._touch_project_dirty()
         self._schedule_preview_refresh()
         self._notify_edit("已清除贴纸")
+
+    def _snapshot_stickers(self) -> list:
+        """贴纸列表的深拷贝快照（撤销/重做用；贴纸是 dict，浅拷贝会串改）。"""
+        return [dict(s) for s in (getattr(self, "_active_stickers", None) or [])]
 
     def _burn_stickers_if_any(self, video_path: str) -> str:
         """导出后把贴纸烧进成片（实现见 editor_burn）。"""
@@ -9469,6 +9473,14 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         plugin_id: Optional[str] = None,
     ):
         """对指定片段写入转场元数据（含 plugin_id 供预览双帧混合）。"""
+        # ★ A3（2026-10-05）：**入撤销栈** —— 此前转场不可撤销（最大体验洞之一）。
+        #   复用既有 `edit_clip` 型 action：撤销走 _apply_action 的通用字段回写路径，
+        #   **零新分支**。before 里显式记「原本有没有这两个键」，撤到无转场时写回 None/[]，
+        #   `clip.get("transition")` 仍为假值 ⇒ 下游「有无转场」判定不受影响。
+        _before = {
+            "transition": clip.get("transition"),
+            "transitions": list(clip.get("transitions") or []),
+        }
         if not plugin_id:
             try:
                 from app.core.transition_plugin_registry import resolve_plugin_id
@@ -9488,6 +9500,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             transitions = []
         transitions.append(transition)
         clip["transitions"] = transitions
+        self._record_action({
+            "type": "edit_clip",
+            "clip_id": clip.get("id"),
+            "before": _before,
+            "after": {"transition": transition, "transitions": list(transitions)},
+            "label": f"转场 {transition_type}",
+        })
         self._sync_timeline_widget_state()
         self._refresh_preview_with_effects()
 

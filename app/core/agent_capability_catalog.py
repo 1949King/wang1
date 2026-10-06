@@ -98,11 +98,25 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     # ── 画布生成（Agent 可驱动后端 /host/* 生成链路，2026-09-15）──
     # effect=media_write：产媒体，协作模式需确认；generate_image/video 走模型广场付费渠道。
     ("canvas.generate_image", "canvas", "media_write", True,
-     "画布生图（模型广场 AIGC 渠道）", "right", "画布生图",
-     ["生图", "画图", "图片生成", "文生图", "generate_image"]),
+     "画布生图（模型广场 AIGC 渠道；可传 seed 复现）", "right", "画布生图",
+     ["生图", "画图", "图片生成", "文生图", "generate_image", "种子", "seed"]),
     ("canvas.generate_video", "canvas", "media_write", True,
      "画布生视频（模型广场 AIGC 渠道）", "right", "画布生视频",
      ["生视频", "视频生成", "文生视频", "generate_video"]),
+    # 本地生图（刀 A1，2026-10-04）：自部署 SD1.5/SDXL 双栈引擎，零调用费 ⇒ paid=False。
+    # 与 canvas.generate_image（云端付费渠道）刻意分列，语义同 /host/local-image-generate。
+    ("canvas.local_generate_image", "canvas", "media_write", False,
+     "本地生图（自部署 SD1.5/SDXL 双栈引擎，零调用费；可传 seed 复现）", "right", "本地生图",
+     ["本地生图", "本地文生图", "local_generate_image", "SDXL", "SD1.5", "本地模型"]),
+    # 刀 A2（2026-10-05）：抽卡闭环的「最后一环」——一次多张 + 代理分自动选优。
+    # paid=True：每张都是一次真实云端调用（n 张 = n 次额度），故与云端生图同列。
+    ("canvas.best_of_draw", "canvas", "media_write", True,
+     "抽卡选优：一次生成 n 张（≤6）→ 代理分逐张评分 → 取最优 + 全量入账", "right", "抽卡选优",
+     ["抽卡", "选优", "best_of", "best-of-n", "多张", "择优", "候选"]),
+    ("canvas.repair_image", "canvas", "media_write", True,
+     "局部重绘：自动定位坏区 → 蒙版 → inpaint → 合成（坏区外像素不动；会花一次额度）",
+     "right", "局部重绘",
+     ["局部重绘", "修图", "修复", "repair", "inpaint", "坏区", "重绘"]),
     ("canvas.comfyui_run", "canvas", "media_write", False,
      "运行 ComfyUI 工作流（本地引擎，支持 dry-run 演练）", "right", "ComfyUI 执行",
      ["comfyui", "工作流", "节点执行", "workflow"]),
@@ -112,6 +126,18 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("canvas.image_to_video", "canvas", "media_write", False,
      "静帧图转伪视频（成片闭环用）", "cc", "图转视频",
      ["图转视频", "静帧", "still", "图片转视频"]),
+    # ── YuE（乐）全曲生成（2026-09-28；本地/远程执行端 ⇒ 非云付费，paid=False）──
+    # 三段式对齐画布意图分层：plan 出可编辑谱=「你的意图」，render 出整曲=「系统的事」。
+    # ⚠️ 执行端未配置时诚实失败（返回安装指引），不造假音频。
+    ("canvas.yue_plan", "canvas", "read", False,
+     "YuE 符号规划：歌词+风格 → 可编辑的旋律+和弦乐谱（不出音频、不花钱）", "right", "YuE 规划乐谱",
+     ["谱面", "乐谱", "符号规划", "yue", "plan", "作曲", "写歌", "旋律"]),
+    ("canvas.yue_render", "canvas", "media_write", False,
+     "YuE 渲染整曲：乐谱（可被用户编辑）→ 48kHz 完整歌曲（含人声与伴奏）", "right", "YuE 渲染整曲",
+     ["整曲", "全曲", "生成歌曲", "yue", "render", "出歌", "唱一首"]),
+    ("canvas.yue_transcribe", "canvas", "read", False,
+     "YuE 翻唱前置：参考曲 → 旋律乐谱（SheetSage2，只留旋律去和弦）", "right", "YuE 转录旋律",
+     ["翻唱", "转录", "扒谱", "cover", "transcribe", "改编"]),
 
     # ── 剪辑 ──
     ("editor.split_clip", "editor", "canvas_write", False,

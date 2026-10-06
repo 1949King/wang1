@@ -137,6 +137,13 @@ class CanvasCapabilityHandlers:
         except Exception as e:
             return CapabilityResult(req.request_id, False, error=f"生图依赖不可用: {e}")
         p = req.params or {}
+        # seed 贯通（2026-09-27 深度求索 DEFECT B）：Agent 侧此前不吃 seed，
+        # 导致对话驱动生图不可复现。此处透传，与画布 /host/generate-image 对齐。
+        _seed_raw = p.get("seed")
+        try:
+            seed_arg = int(_seed_raw) if _seed_raw not in (None, "") else None
+        except Exception:
+            seed_arg = None
         try:
             res = generate_image_openai_compatible(
                 prompt=str(p.get("prompt") or ""),
@@ -146,6 +153,7 @@ class CanvasCapabilityHandlers:
                 reference_image=str(p.get("reference_image") or ""),
                 strength=float(p.get("strength") or 0.65),
                 quality=str(p.get("quality") or "standard"),
+                seed=seed_arg,
             )
         except Exception as e:
             return CapabilityResult(req.request_id, False, error=f"生图失败: {e}")
@@ -183,6 +191,113 @@ class CanvasCapabilityHandlers:
             error=None if ok else (res.get("message") or res.get("error") or "生视频失败"),
         )
 
+    def local_generate_image(self, req: CapabilityRequest) -> CapabilityResult:
+        """本地生图（刀 A1，2026-10-04）：复用 /host/local-image-generate 的引擎分派。
+
+        与 generate_image（云端付费渠道）刻意分列；主备引擎选择走
+        execution_decider.resolve_local_image_engine（R9 降级可见）。
+        params：model_id / prompt / negative_prompt / image_path / width / height /
+        seed / steps / cfg / engine（可选，显式指定 "diffsynth"/"builtin"）。
+        """
+        try:
+            from app.core.ai.execution_decider import resolve_local_image_engine
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"本地生图依赖不可用: {e}")
+        p = req.params or {}
+        sel = resolve_local_image_engine(prefer=str(p.get("engine") or ""))
+        if not sel.get("ok"):
+            return CapabilityResult(
+                req.request_id, False,
+                output={"reasons": sel.get("reasons")},
+                error=sel.get("message") or "本地图像引擎不可用",
+            )
+        try:
+            res = sel["backend"].generate(
+                str(p.get("model_id") or "sd15-t2i"),
+                prompt=str(p.get("prompt") or ""),
+                negative_prompt=str(p.get("negative_prompt") or ""),
+                image_path=str(p.get("image_path") or ""),
+                width=int(p.get("width") or 0),
+                height=int(p.get("height") or 0),
+                seed=int(p.get("seed") or 0),
+                steps=int(p.get("steps") or 0),
+                cfg=float(p.get("cfg") or 0.0),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"本地生图失败: {e}")
+        res["engine"] = sel["engine"]
+        res["engine_is_fallback"] = sel.get("is_fallback", False)
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "本地生图失败"),
+        )
+
+    def best_of_draw(self, req: CapabilityRequest) -> CapabilityResult:
+        """抽卡选优（刀 A2，2026-10-05）：一次生成 n 张 → 代理分选最优。
+
+        编排在 `ai/draw_orchestrator.py`（纯调用，零 HTTP）；n 张在各自生成收尾
+        **已自动入账**（draw_ledger），此处**绝不重复记账**。
+        params：prompt / n（≤6）/ model / size / channel_id / reference_image /
+        strength / quality / aspect / base_seed（给了即 base_seed+i，可复现）。
+        """
+        try:
+            from app.core.ai.draw_orchestrator import best_of_n
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"选优依赖不可用: {e}")
+        p = req.params or {}
+        try:
+            res = best_of_n(
+                prompt=str(p.get("prompt") or ""),
+                n=p.get("n", 4),
+                model=str(p.get("model") or ""),
+                size=str(p.get("size") or ""),
+                channel_id=str(p.get("channel_id") or ""),
+                reference_image=str(p.get("reference_image") or ""),
+                strength=float(p.get("strength") or 0.65),
+                quality=str(p.get("quality") or "standard"),
+                aspect=str(p.get("aspect") or ""),
+                base_seed=p.get("base_seed"),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"抽卡选优失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "抽卡选优失败"),
+        )
+
+    def repair_image(self, req: CapabilityRequest) -> CapabilityResult:
+        """局部重绘（刀 A2，2026-10-05）：复用 `/host/repair-image` 背后的同一函数。
+
+        与 `canvas.generate_image` 的区别：**不重抽整张**，只重画坏区（坏区外逐字节保留）。
+        无坏区时不发任何请求（不烧钱）。会花一次额度 ⇒ media_write + paid。
+        params：image（data URL）/ prompt / model / channel_id / size。
+        """
+        try:
+            from app.core.ai.inpaint_retry import repair_image as _repair
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"局部重绘依赖不可用: {e}")
+        p = req.params or {}
+        image = str(p.get("image") or p.get("image_data_url") or "")
+        if not image:
+            return CapabilityResult(req.request_id, False, error="缺少 image（原图 data URL）")
+        try:
+            res = _repair(
+                image,
+                prompt=str(p.get("prompt") or ""),
+                model=str(p.get("model") or ""),
+                channel_id=str(p.get("channel_id") or ""),
+                size=str(p.get("size") or "768x1344"),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"局部重绘失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "局部重绘失败"),
+        )
+
     def comfyui_run(self, req: CapabilityRequest) -> CapabilityResult:
         """运行 ComfyUI 工作流：复用 /host/comfyui/run 的 comfy_provider 入口。"""
         import json as _json
@@ -206,6 +321,69 @@ class CanvasCapabilityHandlers:
         return CapabilityResult(
             req.request_id, ok, output=res,
             error=None if ok else (res.get("error") or res.get("message") or "ComfyUI 执行失败"),
+        )
+
+    # ── YuE（乐）全曲生成：符号规划 / 渲染整曲 / 翻唱转录（2026-09-28）──
+    # 三层分工对齐画布「意图分层」：plan 出可编辑谱（意图）→ render 出整曲（实现）；
+    # transcribe 是翻唱前置。执行端未配置时**诚实失败**（回传安装指引，不造假产物）。
+    def yue_plan(self, req: CapabilityRequest) -> CapabilityResult:
+        """YuE 符号规划：歌词+风格 → 可编辑的旋律+和弦乐谱（不出音频、不花钱）。"""
+        p = req.params or {}
+        try:
+            from app.core.ai.yue_music import plan_song
+            res = plan_song(
+                lyrics=str(p.get("lyrics") or ""),
+                style=str(p.get("style") or p.get("prompt") or ""),
+                cot=str(p.get("cot") or "full"),
+                seed=p.get("seed"),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"YuE 规划失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "YuE 规划失败"),
+        )
+
+    def yue_render(self, req: CapabilityRequest) -> CapabilityResult:
+        """YuE 渲染整曲：乐谱（可为用户编辑过的）→ 48kHz 完整歌曲。"""
+        p = req.params or {}
+        try:
+            from app.core.ai.yue_music import render_song
+            res = render_song(
+                lyrics=str(p.get("lyrics") or ""),
+                style=str(p.get("style") or p.get("prompt") or ""),
+                abc=str(p.get("abc") or ""),
+                cot=str(p.get("cot") or "full"),
+                seed=p.get("seed"),
+                title=str(p.get("title") or ""),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"YuE 渲染失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "YuE 渲染失败"),
+        )
+
+    def yue_transcribe(self, req: CapabilityRequest) -> CapabilityResult:
+        """翻唱前置：参考曲 → 旋律乐谱（SheetSage2 独立环境，只留旋律去和弦）。"""
+        p = req.params or {}
+        audio = str(p.get("audio") or p.get("audio_url") or p.get("reference") or "")
+        if not audio:
+            return CapabilityResult(req.request_id, False, error="缺少参考曲（audio）")
+        try:
+            from app.core.ai.yue_music import transcribe_reference
+            res = transcribe_reference(
+                audio=audio,
+                melody_only=bool(p.get("melody_only", True)),
+            )
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"转录失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "转录失败"),
         )
 
     def concat_videos(self, req: CapabilityRequest) -> CapabilityResult:
@@ -1477,12 +1655,26 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         canvas_handlers.generate_image, "画布生图（模型广场 AIGC 渠道）")
     dispatcher.register("canvas.generate_video", CapabilityCategory.CANVAS,
                         canvas_handlers.generate_video, "画布生视频（模型广场 AIGC 渠道）")
+    dispatcher.register("canvas.local_generate_image", CapabilityCategory.CANVAS,
+                        canvas_handlers.local_generate_image, "本地生图（SD1.5/SDXL 双栈引擎）")
+    # 刀 A2：抽卡选优 + 局部重绘能力化（此前只有端点/前端按钮，Agent 侧调不到）
+    dispatcher.register("canvas.best_of_draw", CapabilityCategory.CANVAS,
+                        canvas_handlers.best_of_draw, "抽卡选优（n 张 → 代理分取最优）")
+    dispatcher.register("canvas.repair_image", CapabilityCategory.CANVAS,
+                        canvas_handlers.repair_image, "局部重绘（只修坏区，不重抽）")
     dispatcher.register("canvas.comfyui_run", CapabilityCategory.CANVAS,
                         canvas_handlers.comfyui_run, "运行 ComfyUI 工作流（本地引擎）")
     dispatcher.register("canvas.concat_videos", CapabilityCategory.CANVAS,
                         canvas_handlers.concat_videos, "拼接多段视频成片（FFmpeg）")
     dispatcher.register("canvas.image_to_video", CapabilityCategory.CANVAS,
                         canvas_handlers.image_to_video, "静帧图转伪视频（成片闭环用）")
+    # YuE（乐）全曲生成：符号规划 / 渲染整曲 / 翻唱转录（本地或远程执行端，非云付费）
+    dispatcher.register("canvas.yue_plan", CapabilityCategory.CANVAS,
+                        canvas_handlers.yue_plan, "YuE 规划可编辑乐谱（不出音频）")
+    dispatcher.register("canvas.yue_render", CapabilityCategory.CANVAS,
+                        canvas_handlers.yue_render, "YuE 渲染完整歌曲（乐谱→48kHz 整曲）")
+    dispatcher.register("canvas.yue_transcribe", CapabilityCategory.CANVAS,
+                        canvas_handlers.yue_transcribe, "YuE 翻唱前置：参考曲转录旋律乐谱")
     # 画布节点级操作（canvas_tools 后端化）：由 _CANVAS_ACTION_ROWS 派生，统一走 dispatcher。
     # 节点状态在前端，handler 统一是 canvas_handlers.node_action（经 task.create 桥接回执）。
     from app.core.agent_action_registry import canvas_node_capabilities as _canvas_node_caps

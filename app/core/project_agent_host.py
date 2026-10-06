@@ -162,9 +162,14 @@ def list_chat_models() -> Dict[str, Any]:
             PROVIDERS,
             ensure_active_provider_sensible,
             load_active_provider,
+            merge_local_models_into_providers,
         )
 
         ensure_active_provider_sensible()
+        # 惰性并入本机 Ollama 已装模型：静态表里 ollama.models 一直是空列表，
+        # 导致「对话模型」下拉列不出本地模型（本机装了 qwen3.5 也选不到）。
+        # 带 TTL 缓存 + 失败静默，**不在 import 期执行**（保冷启动）。
+        merge_local_models_into_providers()
     except Exception:
         PROVIDERS = {}
         load_active_provider = lambda: ""  # type: ignore

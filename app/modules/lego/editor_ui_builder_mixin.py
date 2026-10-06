@@ -422,7 +422,12 @@ class EditorUiBuilderMixin:
         _add_lazy("音频", self._make_audio_tab)
         _add_lazy("角色", self._create_character_tab)
         _add_lazy("AI", self._create_ai_tools_tab)
-        self._agent_tab_index = _add_lazy("🤖 Agent", self._create_edit_agent_panel)
+        # V4.40.50：Agent **不再是工具栏 Tab**。原先它只有上半区 ≈390px 高（对话憋屈），
+        # 且埋在第 9 个 Tab 里要翻找 → 升级为**最右侧独立竖栏**（宽 360，贯穿到底），
+        # 见 editor_agent_dock_mixin.py。移除后「导出」顺移到索引 8，
+        # 正好与 feature_search.TAB_EXPORT = 8 的既有映射对齐（此前 8 号位被 Agent 占了，
+        # 功能搜索点「导出」会跳到 Agent —— 顺带修掉的既有 bug）。
+        self._agent_tab_index = -1
         _add_lazy("导出", self._create_params_tab)
 
         tabs.currentChanged.connect(self._on_tools_tab_changed)

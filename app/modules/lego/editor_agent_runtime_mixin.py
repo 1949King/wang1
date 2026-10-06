@@ -19,10 +19,10 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import QPoint, QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QListWidget,
-    QProgressBar, QMessageBox, QListWidgetItem, QApplication,
+    QProgressBar, QMessageBox, QListWidgetItem,
 )
 
 logger = logging.getLogger("AI短剧编辑器.editor")
@@ -32,59 +32,25 @@ class EditorAgentRuntimeMixin:
     """Agent 面板运行时 UI 与任务控制 Mixin。"""
 
     # 抽取自 editor_module.py L7522-7536
+    # V4.40.50：Agent 不再是工具栏 Tab（只有上半区 ≈390px 高），改为最右侧独立竖栏
     def _toggle_edit_agent_panel(self, checked=None):
-        """切换到剪辑 Agent 标签页（嵌入右侧工具栏，不再使用浮动面板）。"""
-        tabs = getattr(self, '_tools_tabs', None)
-        if tabs is None:
+        """展开 / 收起剪辑 Agent 竖栏（LibTV 档：宽 360，贯穿到底）。"""
+        if checked is False:
+            self._hide_agent_dock()
+            return
+        if getattr(self, '_agent_dock', None) is None:
+            # 布局尚未建好（早于 _setup_ui 的调用），延后重试一次
             QTimer.singleShot(100, lambda: self._toggle_edit_agent_panel(checked))
             return
-        agent_idx = getattr(self, '_agent_tab_index', -1)
-        if agent_idx < 0:
-            return
-        tabs.setCurrentIndex(agent_idx)
-        # 懒挂载：切页会触发 _on_tools_tab_changed；若信号被挡住则手动确保
-        self._on_tools_tab_changed(agent_idx)
-        if hasattr(self, '_edit_agent_toggle_btn'):
-            self._edit_agent_toggle_btn.setChecked(True)
-            self._edit_agent_toggle_btn.setText("🤖 Agent")
+        self._show_agent_dock()
 
     # 抽取自 editor_module.py L7538-7549
     def _close_agent_tab(self):
-        """收起 Agent 标签页，切回上一个标签。"""
-        tabs = getattr(self, '_tools_tabs', None)
-        if tabs is None:
-            return
-        agent_idx = getattr(self, '_agent_tab_index', -1)
-        # 切回"属性"标签页
-        if agent_idx > 0:
-            tabs.setCurrentIndex(0)
-        if hasattr(self, '_edit_agent_toggle_btn'):
-            self._edit_agent_toggle_btn.setChecked(False)
-            self._edit_agent_toggle_btn.setText("🤖 剪辑 Agent")
+        """收起 Agent 竖栏（面板内「收起」按钮与兼容旧入口共用）。"""
+        self._hide_agent_dock()
 
-    # 抽取自 editor_module.py L7551-7572
-    def _position_edit_agent_panel(self):
-        """将剪辑 Agent 浮动面板定位到编辑器右上区域，不挤占时间线轨道高度。"""
-        panel = getattr(self, '_edit_agent_panel', None)
-        if panel is None:
-            return
-
-        panel_width = min(560, max(420, int(self.width() * 0.38)))
-        panel_height = min(300, max(220, int(self.height() * 0.32)))
-        panel.resize(panel_width, panel_height)
-
-        # 固定在编辑器右上角，避免跟随轨道标题按钮落到时间线主体上。
-        anchor = self.mapToGlobal(QPoint(self.width() - panel_width - 16, 64))
-
-        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
-        available = screen.availableGeometry() if screen else None
-        if available is None:
-            panel.move(anchor)
-            return
-
-        x = min(max(anchor.x(), available.left() + 8), available.right() - panel_width - 8)
-        y = min(max(anchor.y(), available.top() + 8), available.bottom() - panel_height - 8)
-        panel.move(x, y)
+    # 注：原 _position_edit_agent_panel（浮动面板定位）已随 V4.40.50 删除 ——
+    # 浮动面板早在 V4.34.1 就被嵌入工具栏取代，该方法是死代码。
 
     # 抽取自 editor_module.py L7592-7603
     def _load_agent_project_context_fields(self):

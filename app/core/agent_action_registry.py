@@ -42,6 +42,13 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
     ("suggest_cleanup", "safe", "editor.suggest_cleanup", "去水词/静音建议+确认 UI"),
     ("canvas_sync_models", "safe", "canvas.sync_models", "同步模型管理渠道到画布"),
     ("canvas_open", "safe", "canvas.open", "打开 AI 画布模块"),
+    # YuE（乐）全曲生成：本地/远程执行端（非云付费）⇒ safe；未配置时诚实失败
+    ("yue_plan", "safe", "canvas.yue_plan",
+     "YuE 符号规划：歌词+风格 → 可编辑的旋律+和弦乐谱（不出音频、不花钱；翻唱可先转录）"),
+    ("yue_render", "safe", "canvas.yue_render",
+     "YuE 渲染整曲：乐谱（可编辑）→ 48kHz 完整歌曲（耗时较长，首次需下模型）"),
+    ("yue_transcribe", "safe", "canvas.yue_transcribe",
+     "YuE 翻唱前置：参考曲 → 旋律乐谱（SheetSage2，只留旋律去和弦）"),
     ("remove_clip", "dangerous", None, "删除片段（本地）"),
     ("ripple_delete", "dangerous", "editor.ripple_delete_range", "无区间时降级为 remove_clip"),
     ("ripple_delete_range", "dangerous", "editor.ripple_delete_range", "波纹删 [t_in,t_out)"),
@@ -310,6 +317,20 @@ def build_agent_actions_help_block() -> str:
         "llm_health 参数: {}"
         "（查各 LLM 站点近24h降级率；高降级率=LLM 常不可用、在用关键词降级兜底，"
         "该查 Ollama/模型渠道了）。",
+        "yue_plan 参数: {\"lyrics\":\"歌词\",\"style\":\"city pop, female vocal\",\"cot\":\"full|melody|off\","
+        "\"seed\":42}（YuE 符号规划：只出**可编辑的旋律+和弦乐谱**，不出音频、不花钱；"
+        "先用它把「你的意图」给用户看，确认后再 yue_render）。",
+        "yue_render 参数: {\"lyrics\":\"歌词\",\"style\":\"风格\",\"abc\":\"X:1…（可留空）\","
+        "\"cot\":\"full|melody|off\",\"title\":\"曲名\",\"seed\":42}"
+        "（渲染完整歌曲；传 abc = 按用户改过的谱渲染（YuE2 编辑模式）；"
+        "不传 abc 由引擎自规划。**耗时较长**，首次会下模型；"
+        "cot 语义：full=旋律+和弦（新歌默认）/ melody=旋律+自由伴奏（翻唱）/ off=直接生成）。",
+        "yue_transcribe 参数: {\"audio\":\"参考曲（本地路径 / inbox URL / data URL）\","
+        "\"melody_only\":true}（**翻唱第一步**：参考曲 → 旋律乐谱，只留旋律去和弦；"
+        "拿到 abc 后必须让用户审阅（转录错误会带进翻唱），再用 "
+        "yue_render 传该 abc + cot:\"melody\" 出翻唱）。",
+        "⚠️ YuE 系列需先配置执行端（环境变量 SHIGUANG_YUE_ENDPOINT 远程 或 SHIGUANG_YUE_HOME 本地）；"
+        "未配置时会返回安装指引——**如实转告用户，不要假装生成成功或改用 Suno 顶替**。",
         "禁止生成 add_clip / import_media（尚未开放）。",
         "咨询类用 answer，params.message 写给人看的说明。",
         build_clipskills_layers_block(),
