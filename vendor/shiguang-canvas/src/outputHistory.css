@@ -1,0 +1,262 @@
+/* outputHistory.css — 输出历史面板（2026-10-06）
+ *
+ * 纪律：
+ *  · 深色为主（画布默认深色），但**浅色主题下必须可读**（不变量 #8：新控件两主题都要刷得到）。
+ *  · 面板固定在底部中偏右，宽度 ≤ 560px，不与右下桌宠、底部 dock 抢位。
+ *  · 只做面板外观；判据在 outputHistory.ts（已单测）。
+ */
+
+.oh-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 44;
+  border-radius: 12px;
+  background: #151a26;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: #edf3ff;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.oh-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(237, 243, 255, 0.12);
+}
+.oh-title {
+  font-weight: 500;
+}
+.oh-count {
+  font-size: 12px;
+  color: rgba(237, 243, 255, 0.6);
+}
+.oh-spacer {
+  flex: 1;
+}
+.oh-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: rgba(237, 243, 255, 0.75);
+  cursor: pointer;
+}
+.oh-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  background: transparent;
+  color: #edf3ff;
+  cursor: pointer;
+}
+
+.oh-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(237, 243, 255, 0.08);
+}
+.oh-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.oh-tab {
+  border: 1px solid rgba(237, 243, 255, 0.14);
+  background: transparent;
+  color: rgba(237, 243, 255, 0.8);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.oh-tab i {
+  font-style: normal;
+  margin-left: 4px;
+  opacity: 0.65;
+}
+.oh-tab.on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.oh-search {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(237, 243, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #edf3ff;
+  font-size: 12px;
+  outline: none;
+}
+.oh-search::placeholder {
+  color: rgba(237, 243, 255, 0.45);
+}
+
+.oh-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: rgba(237, 243, 255, 0.6);
+  font-size: 12px;
+}
+
+.oh-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.oh-row {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 7px 6px;
+  border-radius: 9px;
+}
+.oh-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.oh-thumb {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.oh-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.oh-thumb-tag {
+  font-size: 11px;
+  color: rgba(237, 243, 255, 0.7);
+}
+.oh-main {
+  flex: 1;
+  min-width: 0;
+}
+.oh-row-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oh-row-prompt {
+  font-size: 12px;
+  color: rgba(237, 243, 255, 0.66);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.oh-meta {
+  margin-top: 4px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.oh-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(237, 243, 255, 0.78);
+}
+.oh-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oh-actions button {
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  background: transparent;
+  color: #edf3ff;
+  border-radius: 7px;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oh-actions button:hover {
+  border-color: #2563eb;
+}
+
+/* 入口小胶囊（与桌宠同一角落簇） */
+.oh-open-chip {
+  position: fixed;
+  right: 18px;
+  bottom: 46px;
+  z-index: 45;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(237, 243, 255, 0.18);
+  background: rgba(21, 26, 38, 0.92);
+  color: #edf3ff;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+.oh-open-chip:hover {
+  border-color: #2563eb;
+}
+
+/* ── 浅色主题（不变量 #8：新控件必须两主题都刷得到）───────────────── */
+.theme-light .oh-panel,
+body[data-theme="light"] .oh-panel {
+  background: #ffffff;
+  color: #172033;
+  border-color: rgba(23, 32, 51, 0.16);
+}
+.theme-light .oh-count,
+.theme-light .oh-pin,
+.theme-light .oh-empty,
+.theme-light .oh-row-prompt,
+body[data-theme="light"] .oh-count,
+body[data-theme="light"] .oh-pin,
+body[data-theme="light"] .oh-empty,
+body[data-theme="light"] .oh-row-prompt {
+  color: rgba(23, 32, 51, 0.66);
+}
+.theme-light .oh-tab,
+.theme-light .oh-close,
+.theme-light .oh-actions button,
+.theme-light .oh-search,
+body[data-theme="light"] .oh-tab,
+body[data-theme="light"] .oh-close,
+body[data-theme="light"] .oh-actions button,
+body[data-theme="light"] .oh-search {
+  color: #172033;
+  border-color: rgba(23, 32, 51, 0.18);
+  background: transparent;
+}
+.theme-light .oh-chip,
+body[data-theme="light"] .oh-chip {
+  background: rgba(23, 32, 51, 0.06);
+  color: rgba(23, 32, 51, 0.78);
+}
+.theme-light .oh-open-chip,
+body[data-theme="light"] .oh-open-chip {
+  background: rgba(255, 255, 255, 0.94);
+  color: #172033;
+  border-color: rgba(23, 32, 51, 0.18);
+}

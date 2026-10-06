@@ -19,6 +19,8 @@
 import { useEffect, useState } from "react";
 import { useCanvasStore } from "../store";
 import { breakdownStoryboard } from "../bridge";
+import { repairImageViaHost } from "../canvasRepair";
+import { yuePlanViaHost, yueTranscribeViaHost } from "../canvasYue";
 import {
   APERTURES,
   CAMERA_MOTIONS,
@@ -29,6 +31,8 @@ import {
   QUALITY_PRESET,
   QUALITY_TIERS,
   SHOT_SIZES,
+  ASPECTS,
+  YUE_COT,
   intentHintFor,
   kindStyle,
   type IntentLayer,
@@ -41,6 +45,21 @@ type LooseData = Record<string, unknown> & {
   prompt?: string;
   duration?: number;
   qualityTier?: string;
+  aspect?: string;
+  /** YuE 全曲生成字段（2026-09-28）；style/lyrics 已在下方声明，勿重复 */
+  engine?: string;
+  abc?: string;
+  cot?: string;
+  yueMode?: string;
+  referenceAudioUrl?: string;
+  yueExecutor?: string;
+  /** 抽卡闭环产物（V4.40.10）：最近一次生成的推荐 / 代理分 / 坏区修复计划 */
+  lastSeed?: number;
+  lastSeedSent?: boolean;
+  proxyScore?: number;
+  isProxy?: boolean;
+  recommendation?: { best_seed?: number; mean?: number; n?: number; last_used?: number };
+  repairPlan?: { has_bad_regions?: boolean; boxes?: number[][]; region_count?: number };
   motionStrength?: number;
   consistency?: number;
   movement?: string;
@@ -100,6 +119,15 @@ export default function NoviceInspector() {
   const [intentOpen, setIntentOpen] = useState(false);
   const [intentText, setIntentText] = useState("");
   const [intentBusy, setIntentBusy] = useState(false);
+  // 局部重绘（P4）：进度/结果态。会真花一次云端额度，故须用户显式点击触发。
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairMsg, setRepairMsg] = useState("");
+  // YuE 符号规划：只出可编辑谱（不出音频）。慢，故显式点击 + 进度提示。
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planMsg, setPlanMsg] = useState("");
+  // YuE 翻唱前置：参考曲 → 旋律谱（独立环境 SheetSage2，慢）
+  const [trBusy, setTrBusy] = useState(false);
+  const [trMsg, setTrMsg] = useState("");
 
   // 双击卡片 = 打开精细编辑：订阅 store 的双击信号，自动展开进阶设置
   const proEditNonce = useCanvasStore((s) => s.proEditNonce);
@@ -360,6 +388,28 @@ export default function NoviceInspector() {
   }
 
   const quality = (d.qualityTier as string) || "standard";
+  // 画幅缺省 portrait（竖屏短剧）——与后端 DEFAULT_ASPECT 一致
+  const aspect = (d.aspect as string) || "portrait";
+  // YuE 全曲生成字段（2026-09-28）：引擎缺省 suno（向后兼容旧节点）
+  const engine = (d.engine as string) || "suno";
+  const cot = (d.cot as string) || "full";
+  const abc = (d.abc as string) || "";
+  const yueMode = (d.yueMode as string) || "original";
+  const refAudio = (d.referenceAudioUrl as string) || "";
+
+  // ── 抽卡闭环产物（V4.40.10 DEFECT C 修复：前端消费后端回传）──
+  const rec = d.recommendation as
+    | { best_seed?: number; mean?: number; n?: number; last_used?: number }
+    | undefined;
+  const proxyScore = typeof d.proxyScore === "number" ? (d.proxyScore as number) : undefined;
+  const isProxy = d.isProxy === true;
+  const repairPlan = d.repairPlan as
+    | { has_bad_regions?: boolean; boxes?: number[][]; region_count?: number }
+    | undefined;
+  const badCount =
+    repairPlan && repairPlan.has_bad_regions
+      ? repairPlan.region_count ?? (repairPlan.boxes?.length || 0)
+      : 0;
   const motion = Number(d.motionStrength ?? 55);
   const similarity = Number(d.consistency ?? 75);
   const duration = Number(d.duration ?? 5);
@@ -371,6 +421,7 @@ export default function NoviceInspector() {
   const GEN_WITH_DURATION = kind === "shot" || kind === "video" || kind === "audio" || kind === "music"; // duration
   const GEN_WITH_MOTION = kind === "video";                      // motionStrength
   const GEN_WITH_SIMILARITY = kind === "video";                  // consistency
+  const IS_MUSIC = kind === "music";                             // engine/abc/cot（YuE）
 
   /** 画质档位联动：只写该类型真实存在的字段（video 无 steps/补帧字段，不伪造） */
   const applyQuality = (tier: string) => {
@@ -384,6 +435,90 @@ export default function NoviceInspector() {
       });
     } else {
       updateSelectedData({ qualityTier: tier });
+    }
+  };
+
+  /** 局部重绘：把当前图片交给后端找坏区并修掉（只修坏区，其余像素保持原图）。 */
+  const doRepair = async () => {
+    const img = (d.imageUrl as string) || "";
+    if (!img || repairBusy) return;
+    setRepairBusy(true);
+    setRepairMsg("正在定位坏区并局部重绘…");
+    try {
+      const res = await repairImageViaHost({
+        image: img,
+        prompt: (d.prompt as string) || "",
+        size: "",
+      });
+      if (res.ok && res.repaired && res.image_data_url) {
+        updateSelectedData({ imageUrl: res.image_data_url, repairPlan: undefined });
+        setRepairMsg(`已修复 ${res.used || 0} 处坏区`);
+      } else if (res.ok && !res.repaired) {
+        setRepairMsg(res.message || "未检出坏区，无需修复");
+      } else {
+        setRepairMsg(res.message || "局部重绘失败");
+      }
+    } catch (e) {
+      setRepairMsg(`局部重绘异常: ${e}`);
+    } finally {
+      setRepairBusy(false);
+    }
+  };
+
+  /** YuE 符号规划：歌词+风格 → 可编辑的旋律/和弦 ABC 谱（不出音频，也不花钱渲染）。 */
+  const doYuePlan = async () => {
+    if (planBusy) return;
+    const lyrics = (d.lyrics as string) || "";
+    const style = (d.style as string) || (d.prompt as string) || "";
+    if (!lyrics.trim() && !style.trim()) {
+      setPlanMsg("先填风格或歌词，再生成谱面");
+      return;
+    }
+    setPlanBusy(true);
+    setPlanMsg("正在规划旋律与和弦…（首次会下载模型，较慢）");
+    try {
+      const res = await yuePlanViaHost({
+        lyrics,
+        style,
+        cot: (d.cot as any) || "full",
+        seed: typeof d.seed === "number" ? (d.seed as number) : undefined,
+      });
+      if (res.ok && res.abc) {
+        updateSelectedData({ engine: "yue", abc: res.abc, cot: res.cot || "full" });
+        setPlanMsg("谱面已生成，可在下方编辑后渲染整曲");
+      } else {
+        setPlanMsg(res.message || "谱面生成失败");
+      }
+    } catch (e) {
+      setPlanMsg(`谱面生成异常: ${e}`);
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  /** YuE 翻唱前置：参考曲 → 旋律乐谱（只留旋律去和弦，便于伴奏适配新风格）。 */
+  const doYueTranscribe = async () => {
+    if (trBusy) return;
+    const ref = (d.referenceAudioUrl as string) || "";
+    if (!ref.trim()) {
+      setTrMsg("先填参考曲（本地路径或 inbox 链接）");
+      return;
+    }
+    setTrBusy(true);
+    setTrMsg("正在转录旋律…（SheetSage2 独立环境，首次较慢）");
+    try {
+      const res = await yueTranscribeViaHost({ audio: ref, melodyOnly: true });
+      if (res.ok && res.abc) {
+        // 转录结果 = 旋律谱 → 自动切到 melody 模式，符合官方翻唱用法
+        updateSelectedData({ abc: res.abc, cot: "melody", engine: "yue", yueMode: "cover" });
+        setTrMsg("旋律谱已生成（已切到「旋律翻唱」模式）。请先审阅乐谱再渲染");
+      } else {
+        setTrMsg(res.message || "转录失败");
+      }
+    } catch (e) {
+      setTrMsg(`转录异常: ${e}`);
+    } finally {
+      setTrBusy(false);
     }
   };
 
@@ -451,6 +586,181 @@ export default function NoviceInspector() {
                 {q.label}
               </button>
             ))}
+          </div>
+        </div>
+      ) : null}
+
+      {GEN_WITH_QUALITY ? (
+        <div className="nv-insp-field">
+          <label>画幅</label>
+          <div className="nv-seg">
+            {ASPECTS.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className={aspect === a.id ? "on" : ""}
+                title={a.desc}
+                onClick={() => updateSelectedData({ aspect: a.id })}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* YuE（乐）全曲生成：引擎 / 规划模式 / 可编辑乐谱（2026-09-28 适配）
+          意图卡片在此承载「符号规划」——先给一张可改的谱，再谈渲染整曲。 */}
+      {IS_MUSIC ? (
+        <div className="nv-insp-field nv-insp-yue">
+          <label>音乐引擎</label>
+          <div className="nv-seg">
+            <button
+              type="button"
+              className={engine === "suno" ? "on" : ""}
+              title="Suno 黑盒：填风格/歌词直接出曲"
+              onClick={() => updateSelectedData({ engine: "suno" })}
+            >
+              Suno
+            </button>
+            <button
+              type="button"
+              className={engine === "yue" ? "on" : ""}
+              title="YuE：先出可编辑乐谱（旋律+和弦），改完再渲染整曲"
+              onClick={() => updateSelectedData({ engine: "yue" })}
+            >
+              YuE 乐
+            </button>
+          </div>
+          {engine === "yue" ? (
+            <div className="nv-yue-body">
+              <div className="nv-seg">
+                <button
+                  type="button"
+                  className={yueMode === "original" ? "on" : ""}
+                  title="原创：由引擎规划乐谱（或用下面「生成可编辑乐谱」自己规划）"
+                  onClick={() => updateSelectedData({ yueMode: "original" })}
+                >
+                  原创
+                </button>
+                <button
+                  type="button"
+                  className={yueMode === "cover" ? "on" : ""}
+                  title="翻唱：先把参考曲转录成旋律谱，再换风格/歌词重唱"
+                  onClick={() => updateSelectedData({ yueMode: "cover" })}
+                >
+                  翻唱
+                </button>
+              </div>
+              {yueMode === "cover" ? (
+                <div className="nv-yue-cover">
+                  <div className="nv-yue-abc-label">参考曲（本地路径或 inbox 链接）</div>
+                  <input
+                    type="text"
+                    className="nv-yue-ref nodrag"
+                    value={refAudio}
+                    spellCheck={false}
+                    placeholder="例：D:/素材/原曲.wav 或 http://127.0.0.1:18765/inbox_file/xxx.wav"
+                    onChange={(e) => updateSelectedData({ referenceAudioUrl: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="nv-yue-plan"
+                    disabled={trBusy}
+                    onClick={doYueTranscribe}
+                    title="转录参考曲的旋律（只留旋律去和弦，便于伴奏适配新风格）"
+                  >
+                    {trBusy ? "转录中…" : "转录旋律"}
+                  </button>
+                  {trMsg ? <div className="nv-loop-msg">{trMsg}</div> : null}
+                </div>
+              ) : null}
+              <div className="nv-seg">
+                {YUE_COT.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={cot === m.id ? "on" : ""}
+                    title={m.desc}
+                    onClick={() => updateSelectedData({ cot: m.id })}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="nv-yue-plan"
+                disabled={planBusy}
+                onClick={doYuePlan}
+                title="只生成可编辑乐谱，不出音频（不出钱渲染）"
+              >
+                {planBusy ? "规划中…" : "生成可编辑乐谱"}
+              </button>
+              {abc ? (
+                <>
+                  <div className="nv-yue-abc-label">乐谱（ABC，可直接改）</div>
+                  <textarea
+                    className="nv-yue-abc nodrag"
+                    rows={6}
+                    value={abc}
+                    spellCheck={false}
+                    onChange={(e) => updateSelectedData({ abc: e.target.value })}
+                  />
+                </>
+              ) : null}
+              {planMsg ? <div className="nv-loop-msg">{planMsg}</div> : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 抽卡闭环产物（V4.40.10）：推荐种子 / 代理分 / 坏区重绘。
+          此前这些字段只回传给 Agent、前端零消费（DEFECT C），现直接展示在卡片检查器里。 */}
+      {GEN_WITH_QUALITY && (rec || proxyScore !== undefined || badCount > 0) ? (
+        <div className="nv-insp-field nv-insp-loop">
+          <label>抽卡闭环</label>
+          <div className="nv-loop-body">
+            {rec && (rec.best_seed != null || rec.mean != null) ? (
+              <div className="nv-loop-row">
+                <span className="nv-loop-k">推荐</span>
+                <span className="nv-loop-v">
+                  {rec.best_seed != null ? `种子 ${rec.best_seed}` : "高分组"}
+                  {rec.mean != null ? ` · 均分 ${(rec.mean * 100).toFixed(0)}` : ""}
+                  {rec.n ? ` · ${rec.n} 次` : ""}
+                </span>
+              </div>
+            ) : null}
+            <div className="nv-loop-row">
+              <span className="nv-loop-k">代理分</span>
+              <span className="nv-loop-v">
+                {proxyScore !== undefined
+                  ? `${(proxyScore * 100).toFixed(0)} 分${isProxy ? "（仅供参考）" : ""}`
+                  : "—"}
+              </span>
+            </div>
+            {badCount > 0 ? (
+              <div className="nv-loop-row">
+                <span className="nv-loop-k">坏区</span>
+                <span className="nv-loop-v nv-loop-warn">
+                  检出 {badCount} 处，可局部重绘（只修坏区，不重抽整张）
+                </span>
+              </div>
+            ) : null}
+            {badCount > 0 && typeof d.imageUrl === "string" && d.imageUrl ? (
+              <div className="nv-loop-row">
+                <button
+                  type="button"
+                  className="nv-loop-repair"
+                  disabled={repairBusy}
+                  onClick={doRepair}
+                  title="只重绘坏区，其余像素保持原图；会消耗一次云端额度"
+                >
+                  {repairBusy ? "修复中…" : "局部重绘坏区"}
+                </button>
+              </div>
+            ) : null}
+            {repairMsg ? <div className="nv-loop-msg">{repairMsg}</div> : null}
           </div>
         </div>
       ) : null}

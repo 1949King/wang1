@@ -60,6 +60,11 @@ const INTENT_HINT_OVERRIDE: Record<string, Partial<Record<IntentLayer, string>>>
     semantic: "你的意图：写一段剧情，自动拆成角色 / 场景 / 分镜序列",
     implementation: "系统的事：宿主 LLM 拉片，产出下游分镜卡片",
   },
+  music: {
+    surface: "你看到的：可试听的整曲、风格标签、当前引擎（Suno / YuE 乐）",
+    semantic: "你的意图：风格与歌词；切「YuE 乐」还能先拿到一张可改的乐谱再渲染",
+    implementation: "系统的事：Suno 走黑盒文生音乐；YuE 走 plan → 编辑谱 → 渲染的三段式",
+  },
 };
 
 /** 取节点在某意图层的提示文案（有覆盖用覆盖，否则用通用） */
@@ -77,6 +82,27 @@ export const QUALITY_TIERS: { id: QualityTier; label: string; desc: string }[] =
   { id: "standard", label: "标准", desc: "720p-1080p" },
   { id: "fine", label: "精修", desc: "细节优先" },
   { id: "cinema", label: "电影级", desc: "1080p-4K" },
+];
+
+/** 画幅（2026-09-27 V4.40.10）：本产品是竖屏短剧，portrait 为默认；用户可切横屏/方形。
+ *  缺省（字段未设）时后端按 portrait 处理 —— 与后端 DEFAULT_ASPECT 保持一致。 */
+export type Aspect = "portrait" | "landscape" | "square";
+
+export const ASPECTS: { id: Aspect; label: string; desc: string }[] = [
+  { id: "portrait", label: "竖屏", desc: "9:16 — 短剧默认" },
+  { id: "landscape", label: "横屏", desc: "16:9 — 通用" },
+  { id: "square", label: "方形", desc: "1:1 — 头像/封面" },
+];
+
+/** YuE 规划模式（对齐官方 cot 语义，2026-09-28）：
+ *  full=生成可编辑的旋律+和弦规划（新歌默认）；melody=旋律规划+自由伴奏（翻唱）；
+ *  off=直接从歌词与风格生成（不先出谱）。 */
+export type YueCot = "full" | "melody" | "off";
+
+export const YUE_COT: { id: YueCot; label: string; desc: string }[] = [
+  { id: "full", label: "旋律+和弦", desc: "出可编辑的旋律与和弦谱（新歌默认）" },
+  { id: "melody", label: "旋律翻唱", desc: "旋律规划 + 自由伴奏，适合翻唱" },
+  { id: "off", label: "直接生成", desc: "不由谱规划，直接按歌词与风格生成" },
 ];
 
 /** 运动幅度（对齐 spec 7.2，落 motionStrength 0-100） */
@@ -154,7 +180,7 @@ export const KIND_TEXT_FIELD: Record<string, { field: string; placeholder: strin
   image: { field: "prompt", placeholder: "描述想要的画面…", rows: 4 },
   video: { field: "prompt", placeholder: "描述想要的视频画面…", rows: 4 },
   audio: { field: "prompt", placeholder: "写台词或声音风格…", rows: 4 },
-  music: { field: "prompt", placeholder: "描述音乐的风格和情绪…", rows: 4 },
+  music: { field: "prompt", placeholder: "写歌词与风格；切「YuE 乐」还能先生成可编辑乐谱…", rows: 4 },
   generator: { field: "prompt", placeholder: "写要生成的内容，会同时产出多张候选…", rows: 4 },
   animation: { field: "prompt", placeholder: "写角色和动作，生成逐帧动画…", rows: 4 },
   panorama: { field: "prompt", placeholder: "描述 360° 全景场景…", rows: 4 },
@@ -202,8 +228,9 @@ export function noviceHint(kind: string): string {
     case "video":
       return "镜头节点：填写 Prompt → 点底部「生成选中」开始生图/生视频";
     case "audio":
-    case "music":
       return "声音节点：写台词或风格 → 点底部「生成选中」开始配音/配乐";
+    case "music":
+      return "音乐节点：Suno 一键出曲；切「YuE 乐」可先生成可编辑乐谱，改完再渲染整曲";
     case "generator":
       return "生成器：写下要生成的内容 → 会同时产出多张候选，选一张入轨";
     case "markdown":

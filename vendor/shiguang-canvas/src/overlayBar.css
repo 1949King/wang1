@@ -1,0 +1,36 @@
+/* overlayBar.css — 画布浮层工具条（2026-10-06）
+ * 四个入口（输出历史 / 灯位 / 导演指导 / 上游引用）收成一条，避免右下角散落一堆胶囊。
+ * 站位于桌宠上方；`.oh-open-chip` 在条内改为**静态定位**（它本身是为"单个浮动胶囊"写的）。
+ */
+.ov-bar {
+  position: fixed;
+  right: 18px;
+  bottom: 44px;
+  z-index: 45;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ov-bar .oh-open-chip {
+  position: static;
+  right: auto;
+  bottom: auto;
+}
+.ov-bar .oh-open-chip.on {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.18);
+}
+.theme-light .ov-bar .oh-open-chip.on,
+body[data-theme="light"] .ov-bar .oh-open-chip.on {
+  background: rgba(37, 99, 235, 0.12);
+}
+/* V4.40.53 → V4.40.54：Agent 侧栏打开时的让位**不在这里做**。
+ *
+ * 曾写 `body:has(.workspace.agent-open) .ov-bar { right: calc(320px + 18px) }`，
+ * 规则本身没错、`querySelector` 也匹配，但**实测不生效**：本机 Qt WebEngine（Chromium 134）
+ * 对 `:has()` 的样式失效(invalidation)不可靠——给 `.workspace` 加上 `agent-open` 后，
+ * `.ov-bar` 的 computed right 仍是 18px，必须等别的样式改动触发一次全量重算才变成 338px
+ * （三步对照实测见 `.workbuddy/tmp/probe_has3.py`：step1 没变 / step2 强排后生效）。
+ *
+ * ⇒ 让位改由 `CanvasOverlays.tsx` 监听 `.workspace` class 变化后写**内联样式**（right/bottom），
+ *    并在 Agent 打开时把 4 个入口收成一枚「🧰 工具」胶囊，见该文件头 V4.40.54 说明。 */

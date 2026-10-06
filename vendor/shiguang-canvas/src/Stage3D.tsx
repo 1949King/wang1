@@ -57,6 +57,7 @@ import {
   type PosePresetId,
 } from "./riggedHumanoid";
 import { exportAllControlNetChannels } from "./stage3dControlNet";
+import { fovToFocalLength, setHelpersVisible, syncCameraGizmos } from "./stage3dCamGizmo";
 import {
   COCO18_CN,
   COCO18_SKELETON,
@@ -228,23 +229,6 @@ type Props = {
 
 function uid(p: string) {
   return `${p}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** 全画幅近似：f = 43.27 / (2 * tan(fov° / 2))，再取常见焦段 */
-function fovToFocalLength(fovDeg: number): number {
-  if (fovDeg <= 0) return 50;
-  const exact = 43.27 / (2 * Math.tan((fovDeg * Math.PI) / 360));
-  const COMMON = [14, 18, 24, 28, 35, 50, 58, 85, 135, 200];
-  let best = COMMON[0];
-  let bestDiff = Math.abs(exact - best);
-  for (const f of COMMON) {
-    const d = Math.abs(exact - f);
-    if (d < bestDiff) {
-      bestDiff = d;
-      best = f;
-    }
-  }
-  return best;
 }
 
 /** 光源预设 */
@@ -1066,6 +1050,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
     const axisHelper = new THREE.AxesHelper(1.2);
     axisHelper.visible = false;
+    axisHelper.userData.isHelper = true; // 导出/截图时被 setHelpersVisible 排除
     scene.add(axisHelper);
 
     // 全景图天空球（默认隐藏，加载 equirectangular 后显示为环境背景）
@@ -1598,40 +1583,12 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     });
   }, [actors, selectedId, selectedBoneKey, hoveredBoneKey]);
 
-  // Sync camera helpers
+  // Sync camera helpers（机身/视锥/标签/状态全部在 stage3dCamGizmo.ts，此处只留接线）
   useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
-    const keep = new Set(cameras.map((c) => c.id));
-    for (const [id, obj] of api.camHelpers) {
-      if (!keep.has(id)) {
-        api.scene.remove(obj);
-        api.camHelpers.delete(id);
-      }
-    }
-    for (const c of cameras) {
-      let helper = api.camHelpers.get(c.id);
-      if (!helper) {
-        const g = new THREE.Group();
-        const cone = new THREE.Mesh(
-          new THREE.ConeGeometry(0.18, 0.4, 12),
-          new THREE.MeshStandardMaterial({ color: "#fbbf24" }),
-        );
-        cone.rotation.x = Math.PI / 2;
-        const body = new THREE.Mesh(
-          new THREE.BoxGeometry(0.28, 0.2, 0.35),
-          new THREE.MeshStandardMaterial({ color: "#f59e0b" }),
-        );
-        body.position.z = 0.2;
-        g.add(cone, body);
-        api.scene.add(g);
-        api.camHelpers.set(c.id, g);
-        helper = g;
-      }
-      helper.position.set(c.position[0], c.position[1], c.position[2]);
-      helper.lookAt(c.lookAt[0], c.lookAt[1], c.lookAt[2]);
-    }
-  }, [cameras]);
+    syncCameraGizmos(api, cameras, activeCamId);
+  }, [cameras, activeCamId]);
 
   // Director vs camera view — 切回导演视角时恢复相机位姿（此前只开 Orbit，镜头停在机位上）
   useEffect(() => {
@@ -2417,7 +2374,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       generateMipmaps: false,
     });
     api.renderer.setRenderTarget(captureRt);
+    const restoreCsHelpers = setHelpersVisible(api.scene, false); // 拍到的画面不该有机位/坐标轴
     api.renderer.render(api.scene, api.camera);
+    restoreCsHelpers();
     api.renderer.setRenderTarget(null);
     const dataUrl = readRenderTargetToDataURL(api.renderer, captureRt, rw, rh);
     captureRt.dispose();
@@ -2591,7 +2550,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     let referenceActor = "";
 
     const renderScene = () => {
+      const restorePathHelpers = setHelpersVisible(api.scene, false); // 导出视频不带编辑辅助物
       composer ? composer.render(api.scene, api.camera) : api.renderer.render(api.scene, api.camera);
+      restorePathHelpers();
     };
 
     const firstPt = cam.pathPoints[0];
@@ -3390,8 +3351,10 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
             // 注意：EffectComposer.render() 的签名是 render(deltaTime?: number)，
             // scene/camera 在 RenderPass 构造时就已绑定（见本文件 new RenderPass(scene, camera)）。
             // 传 (scene, camera) 会被当成 deltaTime —— 类型不匹配（TS2554）且语义错误。
+            const restorePoseHelpers = setHelpersVisible(api.scene, false); // 白模视频不带编辑辅助物
             if (composer) composer.render();
             else api.renderer.render(api.scene, api.camera);
+            restorePoseHelpers();
           },
           readRTAsDataUrl: () => readRenderTargetToDataURL(api.renderer, rt, targetW, targetH),
         },

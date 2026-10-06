@@ -104,17 +104,20 @@ html, body, #root { margin: 0; height: 100%; width: 100%; overflow: hidden; }
 .workspace.left-collapsed.right-collapsed {
   grid-template-columns: 0 1fr 0;
 }
+/* V4.40.51 用户裁定「Agent 太大、占空间过多」：agent-open 时 inspector 恒不渲染
+   （冻结区不变量「Agent 打开时隐藏右侧设置面板」），第 3 列 240px 是死列 ⇒ 直接归 0；
+   Agent 宽度从「240 + 360 = 600」收敛为 minmax(280px, 320px) 单列。 */
 .workspace.agent-open {
-  grid-template-columns: 200px 1fr 240px minmax(300px, 360px);
+  grid-template-columns: 200px 1fr 0 minmax(280px, 320px);
 }
 .workspace.agent-open.left-collapsed {
-  grid-template-columns: 0 1fr 240px minmax(300px, 360px);
+  grid-template-columns: 0 1fr 0 minmax(280px, 320px);
 }
 .workspace.agent-open.right-collapsed {
-  grid-template-columns: 200px 1fr 0 minmax(300px, 360px);
+  grid-template-columns: 200px 1fr 0 minmax(280px, 320px);
 }
 .workspace.agent-open.left-collapsed.right-collapsed {
-  grid-template-columns: 0 1fr 0 minmax(300px, 360px);
+  grid-template-columns: 0 1fr 0 minmax(280px, 320px);
 }
 .workspace.space-pan {
   cursor: grab;

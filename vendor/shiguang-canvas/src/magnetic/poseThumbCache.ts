@@ -42,6 +42,11 @@ const POSE_META: Record<string, { label: string; category: PoseCategory; hint: s
   tpose:        { label: "T 字",   category: "static",   hint: "开发期 / 校准用" },
   walk:         { label: "行走",   category: "action",   hint: "动态行走" },
   kneel:        { label: "跪地",   category: "emotion",  hint: "投降 / 哀求" },
+  // ★ 2026-10-05 新增（补内旋轴后才成立的自然人姿）
+  stand_natural: { label: "自然站姿", category: "static", hint: "对话 / 日常 · 比 T 字更自然的基线" },
+  hands_behind: { label: "背手",   category: "static",   hint: "领导 / 训话 / 等待" },
+  hold_phone:   { label: "看手机", category: "static",   hint: "现代都市 · 低头看屏幕" },
+  handshake:    { label: "握手",   category: "static",   hint: "商务 / 社交 · 右手前伸" },
 };
 
 // ── 元数据查询 ──────────────────────────────────────────────

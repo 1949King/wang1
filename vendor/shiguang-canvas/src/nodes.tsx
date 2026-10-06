@@ -109,7 +109,7 @@ const HINT_MAP: Record<string, string> = {
   generator: "💡 生成器：一键批量生成下游所有镜头节点",
   group: "💡 编组节点：圈选多个节点后 Ctrl+G 编组，Ctrl+Shift+G 解组",
   audio: "💡 音频节点：拖入 BGM/配音 → 或导入音频文件",
-  music: "💡 音乐节点：填写风格/歌词 → 调 Suno 生成原创音乐",
+  music: "💡 音乐节点：Suno 一键出曲；切 YuE 可先生成可编辑乐谱再渲染整曲",
 };
 
 /** 记忆"某节点类型提示已关闭"的 hook（首次渲染读 localStorage，关闭后立即持久化） */
@@ -594,15 +594,17 @@ export const AudioNode = memo(function AudioNode({ id, data, selected }: NodePro
 
 export const MusicNode = memo(function MusicNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "music" }>;
+  const isYue = d.engine === "yue";
   return (
-    <Shell nodeId={id} selected={selected} kind="music" title={`🎵 ${d.title || "音乐"}`}
+    <Shell nodeId={id} selected={selected} kind="music"
+      title={`🎵 ${d.title || "音乐"}`}
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}>
       {d.audioUrl ? (
         <audio src={d.audioUrl} controls preload="metadata" />
       ) : (
         <div className="meta">未生成</div>
       )}
-      {d.model ? <span className="sg-shot-tag">{d.model}</span> : null}
+      <span className="sg-shot-tag">{isYue ? "YuE · 符号规划" : d.model || "Suno"}</span>
       <div className="sg-editable-label">风格</div>
       <EditableText nodeId={id} value={d.style || ""} field="style" rows={1}
         placeholder="双击输入音乐风格…" />
@@ -612,6 +614,15 @@ export const MusicNode = memo(function MusicNode({ id, data, selected }: NodePro
       <div className="sg-editable-label">歌词</div>
       <EditableText nodeId={id} value={d.lyrics || ""} field="lyrics" rows={3}
         placeholder="双击输入歌词（可选）…" />
+      {isYue ? (
+        <>
+          <div className="sg-editable-label">
+            乐谱（ABC）{d.cot === "melody" ? " · 旋律模式" : ""}
+          </div>
+          <EditableText nodeId={id} value={d.abc || ""} field="abc" rows={4}
+            placeholder="先点「生成谱面」，这里会出现可编辑的旋律+和弦谱…" />
+        </>
+      ) : null}
     </Shell>
   );
 }, nodePropsEqual);

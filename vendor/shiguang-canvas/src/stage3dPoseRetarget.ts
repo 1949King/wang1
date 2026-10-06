@@ -160,13 +160,21 @@ export function solveFramePose(frame: PoseFrame, prevPose?: JointPose | null): J
     spineX: get("spineX"), spineY: get("spineY"), spineZ: get("spineZ"),
     abdomenX: get("abdomenX"), abdomenY: get("abdomenY"), abdomenZ: get("abdomenZ"),
     headX: get("headX"), headY: get("headY"), headZ: get("headZ"),
-    lShoulderX: get("lShoulderX"), lShoulderZ: get("lShoulderZ"),
-    lElbowX: get("lElbowX"), lWristX: get("lWristX"),
-    rShoulderX: get("rShoulderX"), rShoulderZ: get("rShoulderZ"),
-    rElbowX: get("rElbowX"), rWristX: get("rWristX"),
-    lHipX: get("lHipX"), lHipZ: get("lHipZ"),
+    // ★ 2026-10-05 新增的内旋轴（Y）。
+    //   诚实边界：**2D 关键点无法可靠反推上臂扭转**（需要臂平面法向，2D 投影缺自由度）。
+    //   因此这里沿用 prevPose 的值（默认 0 = 中立），**不用不可靠的 2D 推测制造错误朝向**。
+    //   待办：接入带 3D 姿态的模型，或由用户手动微调内旋后写回关键帧。
+    lShoulderX: get("lShoulderX"), lShoulderY: get("lShoulderY"),
+    lShoulderZ: get("lShoulderZ"),
+    lElbowX: get("lElbowX"), lElbowY: get("lElbowY"), lWristX: get("lWristX"),
+    rShoulderX: get("rShoulderX"), rShoulderY: get("rShoulderY"),
+    rShoulderZ: get("rShoulderZ"),
+    rElbowX: get("rElbowX"), rElbowY: get("rElbowY"), rWristX: get("rWristX"),
+    lHipX: get("lHipX"), lHipY: get("lHipY"),
+    lHipZ: get("lHipZ"),
     lKneeX: get("lKneeX"), lAnkleX: get("lAnkleX"),
-    rHipX: get("rHipX"), rHipZ: get("rHipZ"),
+    rHipX: get("rHipX"), rHipY: get("rHipY"),
+    rHipZ: get("rHipZ"),
     rKneeX: get("rKneeX"), rAnkleX: get("rAnkleX"),
   };
 

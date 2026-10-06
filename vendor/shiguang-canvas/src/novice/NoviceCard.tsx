@@ -87,11 +87,20 @@ function summaryOf(d: LooseData, kind: string): string {
     case "image":
     case "video":
     case "audio":
-    case "music":
     case "generator":
     case "animation":
     case "panorama":
       return pick("prompt", "dialogue", "line");
+    case "music": {
+      // YuE 乐：卡片承载「意图」= 可编辑乐谱（而非空 prompt），
+      // 让「谱面」成为磁吸卡片上第一眼可见的东西（2026-09-28 适配）。
+      const abc = typeof d.abc === "string" ? d.abc.trim() : "";
+      if (d.engine === "yue" && abc) {
+        const seg = abc.split("\n").map((s) => s.trim()).filter(Boolean);
+        return seg.slice(0, 3).join(" · ").slice(0, 90);
+      }
+      return pick("prompt", "style", "lyrics", "dialogue", "line");
+    }
     case "prompt":
       return pick("text", "prompt");
     case "digitalHuman":
@@ -138,6 +147,14 @@ function metaOf(d: LooseData): string {
   if (typeof d.yaw === "number" && typeof d.pitch === "number") {
     parts.push(`视角 ${Math.round(d.yaw)}°/${Math.round(d.pitch)}°`);
   }
+  // 音乐：引擎 + 是否已规划出谱面（YuE 适配，2026-09-28）
+  if (typeof d.engine === "string" && d.engine) {
+    parts.push(d.engine === "yue" ? "YuE 乐" : "Suno");
+  }
+  if (d.engine === "yue" && typeof d.yueMode === "string" && d.yueMode === "cover") {
+    parts.push("翻唱");
+  }
+  if (typeof d.abc === "string" && d.abc.trim()) parts.push("有乐谱");
   return parts.join(" · ");
 }
 

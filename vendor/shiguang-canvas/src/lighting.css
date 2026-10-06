@@ -1,0 +1,90 @@
+/* lighting.css — 电影级灯位选择器（2026-10-06）
+ * 纪律：深色为主 + 浅色主题可读（不变量 #8）；布局不与桌宠/输出历史抢位（右下角簇已占，稍偏左）。
+ */
+.lp-panel {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 58px;
+  width: min(640px, calc(100vw - 32px));
+  max-height: 52vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 46;
+  border-radius: 12px;
+  background: #151a26;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: #edf3ff;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+  overflow: hidden;
+}
+.lp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(237, 243, 255, 0.12);
+}
+.lp-title { font-weight: 500; }
+.lp-sub { font-size: 12px; color: rgba(237, 243, 255, 0.55); }
+.lp-spacer { flex: 1; }
+.lp-x {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  background: transparent; color: #edf3ff; cursor: pointer;
+}
+.lp-body { display: flex; gap: 12px; padding: 10px; overflow-y: auto; }
+.lp-diagram { flex: 0 0 200px; }
+.lp-diagram-note { font-size: 12px; color: rgba(237, 243, 255, 0.7); margin-top: 4px; }
+.lp-controls { flex: 1; min-width: 0; }
+.lp-row-title { font-size: 12px; color: rgba(237, 243, 255, 0.6); margin: 6px 0 4px; }
+.lp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.lp-chip {
+  border: 1px solid rgba(237, 243, 255, 0.14);
+  background: transparent;
+  color: rgba(237, 243, 255, 0.82);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lp-chip.wide { border-radius: 8px; }
+.lp-chip.on { background: #f9c74f; border-color: #f9c74f; color: #241c05; }
+.lp-preview {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+  color: #f9c74f;
+  word-break: break-all;
+}
+.lp-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lp-apply {
+  border: 1px solid #2563eb; background: #2563eb; color: #fff;
+  border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.lp-clear {
+  border: 1px solid rgba(237, 243, 255, 0.18); background: transparent; color: #edf3ff;
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.lp-msg { font-size: 12px; color: rgba(237, 243, 255, 0.65); }
+
+/* 浅色主题 */
+.theme-light .lp-panel, body[data-theme="light"] .lp-panel {
+  background: #fff; color: #172033; border-color: rgba(23, 32, 51, 0.16);
+}
+.theme-light .lp-sub, .theme-light .lp-row-title, .theme-light .lp-diagram-note, .theme-light .lp-msg,
+body[data-theme="light"] .lp-sub, body[data-theme="light"] .lp-row-title,
+body[data-theme="light"] .lp-diagram-note, body[data-theme="light"] .lp-msg {
+  color: rgba(23, 32, 51, 0.65);
+}
+.theme-light .lp-chip, .theme-light .lp-x, .theme-light .lp-clear,
+body[data-theme="light"] .lp-chip, body[data-theme="light"] .lp-x, body[data-theme="light"] .lp-clear {
+  color: #172033; border-color: rgba(23, 32, 51, 0.18);
+}
+.theme-light .lp-preview, body[data-theme="light"] .lp-preview {
+  background: rgba(23, 32, 51, 0.05); color: #8a6a1f;
+}

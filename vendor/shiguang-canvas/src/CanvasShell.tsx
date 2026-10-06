@@ -30,6 +30,7 @@ import {
 } from "./bridge";
 import AppNav, { type AppRoute } from "./AppNav";
 import { CANVAS_VERSION_LABEL, CANVAS_VERSION_TITLE } from "./canvasVersion";
+import { MusicYueFields } from "./musicYueFields";
 import type { PromptItem } from "./promptLibrary";
 import HomeLanding from "./HomeLanding";
 import NodePalette, { buildAddNodeItems, isBuiltinNodeKind } from "./NodePalette";
@@ -260,6 +261,8 @@ export type CanvasShellProps = {
   onSetPrimaryVideo: (nodeId: string, videoId: string) => void;
   onBatchGenerate: () => void;
   onAbortBatch: () => void;
+  /** 「运行到此处」（刀 A4-3）：后端出计划(dry_run) → 确认 → 执行整图 */
+  onRunToHere: () => void;
   onSendToEditor: () => void;
   onSendAllToEditor: () => void;
   editorClipCount?: number;
@@ -351,6 +354,7 @@ export default function CanvasShell(props: CanvasShellProps) {
     onSetPrimaryVideo,
     onBatchGenerate,
     onAbortBatch,
+    onRunToHere,
     onSendToEditor,
     onSendAllToEditor,
     editorClipCount = 0,
@@ -1351,6 +1355,14 @@ export default function CanvasShell(props: CanvasShellProps) {
                 </button>
                 <button className="btn" onClick={onBatchGenerate} disabled={generating}>
                   批量生成
+                </button>
+                <button
+                  className="btn"
+                  onClick={onRunToHere}
+                  disabled={generating}
+                  title="先出执行计划（不消耗额度），确认后按依赖顺序整图执行；Ctrl+Shift+Enter"
+                >
+                  运行到此处
                 </button>
                 {generating ? (
                   <button className="btn" onClick={onAbortBatch}>
@@ -2722,6 +2734,7 @@ export default function CanvasShell(props: CanvasShellProps) {
                 )}
                 {selectedData.kind === "music" && (
                   <>
+                    <MusicYueFields data={selectedData as any} onUpdate={updateSelectedData as any} />
                     <div className="field">
                       <label>🎵 音乐提示词 / 风格描述</label>
                       <textarea
@@ -2768,7 +2781,7 @@ export default function CanvasShell(props: CanvasShellProps) {
                         🎹 纯音乐（Instrumental，无人声）
                       </label>
                     </div>
-                    <div className="field">
+                    <div className="field" style={{ display: (selectedData as any).engine === "yue" ? "none" : undefined }}>
                       <label>🤖 Suno 音乐模型</label>
                       {musicModels.length === 0 ? (
                         <p className="muted tiny">

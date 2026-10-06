@@ -515,3 +515,142 @@
   aspect-ratio: 1;
   object-fit: cover;
 }
+
+/* ── 抽卡闭环产物（V4.40.10）：推荐 / 代理分 / 坏区重绘 ── */
+.nv-insp-loop .nv-loop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 9px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+}
+
+.nv-loop-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.nv-loop-k {
+  flex: 0 0 42px;
+  color: #6b7288;
+}
+
+.nv-loop-v {
+  color: #c7cbd8;
+  word-break: break-all;
+}
+
+.nv-loop-warn {
+  color: #f0b84a;
+}
+
+.nv-loop-repair {
+  flex: 1;
+  padding: 5px 8px;
+  background: #1b2333;
+  border: 1px solid #3a4a6a;
+  border-radius: 6px;
+  color: #9dc0ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nv-loop-repair:hover:not(:disabled) {
+  border-color: #4d6ea8;
+  color: #c3dbff;
+}
+
+.nv-loop-repair:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.nv-loop-msg {
+  font-size: 11px;
+  color: #8b93a7;
+  padding-top: 2px;
+}
+
+/* ── YuE（乐）全曲生成面板（2026-09-28）── */
+.nv-insp-yue .nv-yue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.nv-yue-plan {
+  padding: 6px 8px;
+  background: #1b2333;
+  border: 1px solid #3a4a6a;
+  border-radius: 6px;
+  color: #9dc0ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nv-yue-plan:hover:not(:disabled) {
+  border-color: #4d6ea8;
+  color: #c3dbff;
+}
+
+.nv-yue-plan:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.nv-yue-abc-label {
+  font-size: 11px;
+  color: #8b93a7;
+}
+
+.nv-yue-abc {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+  color: #c7cbd8;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.nv-yue-abc:focus {
+  outline: none;
+  border-color: #3f465e;
+}
+
+/* ── YuE 翻唱前置（参考曲 → 旋律谱，2026-09-28）── */
+.nv-yue-cover {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+}
+
+.nv-yue-ref {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  background: #0d1017;
+  border: 1px solid #2a2f42;
+  border-radius: 5px;
+  color: #c7cbd8;
+  font-size: 11px;
+}
+
+.nv-yue-ref:focus {
+  outline: none;
+  border-color: #3f465e;
+}

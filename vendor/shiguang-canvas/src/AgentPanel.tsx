@@ -92,6 +92,10 @@ export default function AgentPanel({
   const [mcpUrl, setMcpUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinkSec, setThinkSec] = useState(0);
+  // V4.40.52：快捷提示词默认收起（对话区当主角，省 ≈50px）
+  const [chipsOpen, setChipsOpen] = useState(false);
+  // V4.40.53：画布引用卡默认收起成一行摘要（点标题行展开缩略图）
+  const [refOpen, setRefOpen] = useState(false);
   const streamBufRef = useRef<Record<string, string>>({});
   const activeStreamRef = useRef<string>("");
   const [input, setInput] = useState("");
@@ -116,15 +120,26 @@ export default function AgentPanel({
     resolve: (ok: boolean) => void;
   } | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      role: "system",
-      text:
-        "画布 Agent（快路径，无需先开剪辑）：① 选好对话模型 → ② 输入 → ③ 发送。" +
-        "回复会边生成边显示。快捷芯片=/指令；可 📎 附图视频。" +
-        "3D 姿势/机位请在导演台左侧栏手动调。",
-    },
-  ]);
+  // V4.40.53：欢迎语精简 —— 完整版只给第一次用的人看；之后一行就绪提示（LibTV 简洁）
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    let seen = false;
+    try {
+      seen = localStorage.getItem("shiguang-canvas:agent-im:welcomed") === "1";
+      localStorage.setItem("shiguang-canvas:agent-im:welcomed", "1");
+    } catch {
+      /* localStorage 不可用时按首次处理 */
+    }
+    return [
+      {
+        role: "system",
+        text: seen
+          ? "已就绪 · 选模型 → 输入 → 发送（/ 指令 · 📎 附件）"
+          : "画布 Agent（快路径，无需先开剪辑）：① 选好对话模型 → ② 输入 → ③ 发送。" +
+            "回复会边生成边显示。快捷芯片=/指令；可 📎 附图视频。" +
+            "3D 姿势/机位请在导演台左侧栏手动调。",
+      },
+    ];
+  });
 
   const addNode = useCanvasStore((s) => s.addNode);
   const addVideoReference = useCanvasStore((s) => s.addVideoReference);
@@ -277,7 +292,14 @@ export default function AgentPanel({
 
   const askConfirm = (title: string, message: string, danger = false) =>
     new Promise<boolean>((resolve) => {
-      setConfirmBox({ title, message, danger, resolve });
+      setConfirmBox({
+        title,
+        message,
+        danger,
+        resolve: (v: boolean) => {
+          resolve(v);
+        },
+      });
     });
 
   const executeRemoteTask = async (evt: AgentEventEnvelope) => {
@@ -901,10 +923,14 @@ export default function AgentPanel({
 
   if (!open) return null;
 
+  // 停靠规格（V4.40.50）：gridColumn 让它占最右两列。
+  // V4.40.51 用户裁定「太大、占空间过多」⇒ 宽度不再钉死，回 CSS 弹性 minmax(280px,320px)
+  // （比 LibTV 原档 300~360 收窄一档；剪辑 Agent 保持 360 —— 画布 Agent 是辅助，该小）。
   return (
     <aside
       className={`sg-agent-panel sg-agent-panel-wide${docked ? " sg-agent-dock" : ""}`}
       data-sg-no-autoclick="1"
+      style={docked ? { gridColumn: "3 / -1" } : undefined}
     >
       <div className="sg-agent-head">
         <div className="sg-agent-brand">
@@ -1032,29 +1058,39 @@ export default function AgentPanel({
             </select>
           </div>
 
-          <div className="sg-agent-chips">
-            {QUICK.map((q) => (
-              <button
-                key={q.id}
-                type="button"
-                className="chip"
-                disabled={busy}
-                onClick={() => void send(q.text)}
-              >
-                {q.label}
-              </button>
-            ))}
-            {onRequestBreakdown ? (
-              <button
-                type="button"
-                className="chip"
-                disabled={busy}
-                onClick={() => void send("/breakdown")}
-              >
-                拉片
-              </button>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="chip"
+            title="快捷提示词（点击展开/收起）"
+            onClick={() => setChipsOpen((v) => !v)}
+          >
+            💡 快捷 {chipsOpen ? "▾" : "▸"}
+          </button>
+          {chipsOpen ? (
+            <div className="sg-agent-chips">
+              {QUICK.map((q) => (
+                <button
+                  key={q.id}
+                  type="button"
+                  className="chip"
+                  disabled={busy}
+                  onClick={() => void send(q.text)}
+                >
+                  {q.label}
+                </button>
+              ))}
+              {onRequestBreakdown ? (
+                <button
+                  type="button"
+                  className="chip"
+                  disabled={busy}
+                  onClick={() => void send("/breakdown")}
+                >
+                  拉片
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="sg-agent-msgs">
             {msgs.map((m, i) => (
@@ -1103,9 +1139,15 @@ export default function AgentPanel({
             });
             const kindBadges = Object.entries(kindCount).slice(0, 5);
             if (showNodes.length === 0 && totalNodes === 0) return null;
+            const kindText = kindBadges.map(([k, c]) => `${k}×${c}`).join(" ");
             return (
               <div className="sg-agent-canvas-ref" title="Agent 即将把这些画布上下文发给模型">
-                <div className="sg-agent-ref-header">
+                {/* V4.40.53：默认收起成一行摘要（点标题行展开详情），底部不再挤一大张卡 */}
+                <div
+                  className="sg-agent-ref-header"
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  onClick={() => setRefOpen((v) => !v)}
+                >
                   <span className="sg-agent-ref-title">
                     📋 画布引用
                     <span className="muted tiny">
@@ -1115,10 +1157,10 @@ export default function AgentPanel({
                     </span>
                   </span>
                   <span className="sg-agent-ref-summary muted tiny">
-                    节点 {totalNodes} · 带图/视频 {withImg} · 连线 {edges.length}
+                    {kindText || `节点 ${totalNodes} · 带图/视频 ${withImg} · 连线 ${edges.length}`} {refOpen ? "▾" : "▸"}
                   </span>
                 </div>
-                {showNodes.length > 0 ? (
+                {!refOpen ? null : showNodes.length > 0 ? (
                   <div className="sg-agent-ref-grid">
                     {showNodes.slice(0, 6).map((n) => {
                       const d = n.data as NodeData;

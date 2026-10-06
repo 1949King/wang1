@@ -11,9 +11,14 @@
  *   0:nose  1:neck  2:rShoulder  3:rElbow  4:rWrist
  *   5:lShoulder  6:lElbow  7:lWrist  8:rHip  9:rKnee  10:rAnkle
  *   11:lHip  12:lKnee  13:lAnkle  14:rEye  15:lEye  16:rEar  17:lEar
+ *
+ * V4.40.55 修复：Depth / Normal 是**整场景重渲染**，此前会把机位视锥/坐标轴这类
+ * 编辑辅助物一起烘进图里（AI 会把"一个机位模型"当成场景内容学走）。
+ * 现在渲染前用 `setHelpersVisible(scene, false)` 摘掉所有 `userData.isHelper` 对象。
  */
 import * as THREE from "three";
 import { getPoseBones } from "./riggedHumanoid";
+import { setHelpersVisible } from "./stage3dCamGizmo";
 
 export type ControlNetResult = {
   depth: string | null;
@@ -83,10 +88,12 @@ export function captureDepthMap(
       const m = new THREE.MeshDepthMaterial();
       return m;
     });
+    const restoreHelpers = setHelpersVisible(scene, false); // 机位/坐标轴不得烘进深度图
     renderer.setRenderTarget(target);
     renderer.clear();
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+    restoreHelpers();
     restore();
     const url = readRenderTargetAsPNG(renderer, target, width, height);
     target.dispose();
@@ -113,10 +120,12 @@ export function captureNormalMap(
       type: THREE.UnsignedByteType,
     });
     const restore = swapSceneMaterials(scene, () => new THREE.MeshNormalMaterial());
+    const restoreHelpers = setHelpersVisible(scene, false); // 机位/坐标轴不得烘进法线图
     renderer.setRenderTarget(target);
     renderer.clear();
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+    restoreHelpers();
     restore();
     const url = readRenderTargetAsPNG(renderer, target, width, height);
     target.dispose();

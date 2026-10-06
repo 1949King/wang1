@@ -121,10 +121,122 @@ describe("generateImageViaHost 异步任务化", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].body.kind).toBe("image");
     expect(Object.keys(calls[0].body.payload).sort()).toEqual(
-      ["channel_id", "model", "prompt", "quality", "reference_image", "size", "strength"].sort(),
+      ["aspect", "channel_id", "model", "prompt", "quality", "reference_image", "size", "strength"].sort(),
     );
     expect(calls[0].body.payload.prompt).toBe("竖屏漫剧分镜");
+    // 画幅缺省为空串 → 由后端按 portrait（竖屏短剧）推导
+    expect(calls[0].body.payload.aspect).toBe("");
     expect(progressStages.length).toBeGreaterThan(0);
+  });
+
+  it("画幅透传（V4.40.10）：显式 aspect 进 payload", async () => {
+    const calls: { url: string; body?: any }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: any) => {
+      if (url.includes("/host/generation/submit")) {
+        calls.push({ url, body: JSON.parse(init.body) });
+        return jsonRes({ ok: true, job: makeJob({ status: "queued" }) });
+      }
+      if (url.includes("/host/generation/status")) {
+        return jsonRes({ ok: true, job: makeJob({ status: "done", progress: 100, result: { ok: true, image_data_url: "data:image/png;base64,AAA" } }) });
+      }
+      throw new Error(`意外请求: ${url}`);
+    }));
+
+    await generateImageViaHost({
+      prompt: "横屏封面",
+      model: "m1",
+      channel_id: "c1",
+      aspect: "landscape",
+      awaitOpts: { maxAttempts: 1 },
+    });
+
+    expect(calls[0].body.payload.aspect).toBe("landscape");
+  });
+
+  it("种子贯通（P0a）：显式 seed 进 payload 并回显；缺省不进 payload，由后端生成", async () => {
+    const calls: { url: string; body?: any }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: any) => {
+      if (url.includes("/host/generation/submit")) {
+        calls.push({ url, body: JSON.parse(init.body) });
+        return jsonRes({ ok: true, job: makeJob({ status: "queued" }) });
+      }
+      if (url.includes("/host/generation/status")) {
+        return jsonRes({
+          ok: true,
+          job: makeJob({
+            status: "done",
+            progress: 100,
+            result: {
+              ok: true,
+              image_data_url: "data:image/png;base64,AAA",
+              seed: 42,
+              seed_sent: true,
+            },
+          }),
+        });
+      }
+      throw new Error(`意外请求: ${url}`);
+    }));
+
+    // 显式 seed → 进 payload（抽卡复现 / 账本 best_seed），返回值原样带回
+    const res = await generateImageViaHost({
+      prompt: "复现",
+      seed: 42,
+      awaitOpts: { maxAttempts: 1 },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.seed).toBe(42);
+    expect(res.seed_sent).toBe(true);
+    expect(calls[0].body.payload.seed).toBe(42);
+
+    // 缺省 → payload 不含 seed 键（保持旧形状），由后端自动生成并回显
+    const res2 = await generateImageViaHost({
+      prompt: "自动",
+      awaitOpts: { maxAttempts: 1 },
+    });
+    expect(res2.ok).toBe(true);
+    expect("seed" in calls[1].body.payload).toBe(false);
+    expect(res2.seed).toBe(42); // 后端回显的自动种子
+  });
+
+  it("批量抽卡剥掉显式 seed：多候选共用同一种子会产出雷同图，违背抽卡语义", async () => {
+    const calls: { url: string; body?: any }[] = [];
+    let autoSeed = 100;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: any) => {
+      if (url.includes("/host/generation/submit")) {
+        calls.push({ url, body: JSON.parse(init.body) });
+        return jsonRes({ ok: true, job: makeJob({ status: "queued" }) });
+      }
+      if (url.includes("/host/generation/status")) {
+        autoSeed += 1;
+        return jsonRes({
+          ok: true,
+          job: makeJob({
+            status: "done",
+            progress: 100,
+            result: {
+              ok: true,
+              image_data_url: `data:image/png;base64,S${autoSeed}`,
+              seed: autoSeed,
+              seed_sent: true,
+            },
+          }),
+        });
+      }
+      throw new Error(`意外请求: ${url}`);
+    }));
+
+    const res = await generateImageViaHost({
+      prompt: "批量",
+      seed: 42, // 显式传入也必须在批量模式被剥掉
+      n: 2,
+      awaitOpts: { maxAttempts: 1 },
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect("seed" in calls[0].body.payload).toBe(false);
+    expect("seed" in calls[1].body.payload).toBe(false);
+    expect(res.seeds).toEqual([101, 102]); // 每张各自的种子，供账本记录
   });
 
   it("任务失败 → {ok:false, message:上游原文, fallback_placeholder:true}", async () => {

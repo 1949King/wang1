@@ -250,6 +250,23 @@ export type MusicData = {
   status?: NodeStatus;
   progress?: number;
   errorMessage?: string;
+  // ── YuE（乐）全曲生成适配（2026-09-28）──
+  // 与 Suno 黑盒链路正交：YuE 走「符号规划 → 可编辑 ABC 谱 → 渲染」三段式，
+  // 正好把「意图」与「实现」分开 —— 卡片上先给可改的谱，再谈渲染。
+  /** 生成引擎：suno（默认，黑盒文生音乐）| yue（符号规划，谱面可编辑） */
+  engine?: "suno" | "yue";
+  /** YuE 规划出的旋律+和弦 ABC 谱（可被用户编辑后再渲染） */
+  abc?: string;
+  /** YuE 规划模式：full=旋律+和弦可编辑；melody=旋律+自由伴奏（翻唱）；off=直接生成 */
+  cot?: "full" | "melody" | "off";
+  /** YuE 创作模式：original=原创（plan 自规划乐谱）；cover=翻唱（先转录参考曲→旋律谱） */
+  yueMode?: "original" | "cover";
+  /** 翻唱参考曲（本地路径 / inbox URL / data URL）——仅 yueMode=cover 用 */
+  referenceAudioUrl?: string;
+  /** YuE 执行端最近一次探测结果快照（'remote'/'local'），仅供卡片诚实展示 */
+  yueExecutor?: string;
+  /** 渲染用种子（YuE 支持复现；Suno 链路不用） */
+  seed?: number;
 };
 
 export type PromptData = {
@@ -674,6 +691,9 @@ export function makeNode(
       kind: "music",
       title: "音乐",
       prompt: "",
+      engine: "suno",   // 默认 Suno 黑盒；切 yue 走「符号规划 → 编辑谱 → 渲染」
+      cot: "full",
+      yueMode: "original",
       ...extra,
     } as MusicData,
     markdown: {

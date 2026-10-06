@@ -69,7 +69,7 @@ export function bridgeToken(): string {
   );
 }
 
-function authHeaders(json = false): HeadersInit {
+export function authHeaders(json = false): HeadersInit {
   const h: Record<string, string> = {
     "X-Shiguang-Token": bridgeToken(),
   };
@@ -178,10 +178,16 @@ export async function generateImageViaHost(opts: {
   model?: string;
   channel_id?: string;
   size?: string;
+  /** 画幅（portrait 竖屏短剧 / landscape 横屏 / square 方形）。
+   *  不传时后端缺省 portrait —— 本产品是竖屏短剧，横版默认是历史遗留缺陷（V4.40.10 修复）。 */
+  aspect?: string;
   reference_image?: string;
   strength?: number;
   n?: number;
   quality?: string;
+  /** 显式种子（抽卡复现 / 账本 best_seed 锁定）。不传则由后端自动生成随机种子并回显。
+   *  批量（n>1）时勿传——每次调用共用同一种子会产出雷同结果，抽卡意义全无。 */
+  seed?: number;
   /** 人脸修复模型后台预载进度回调（GFPGAN 下载期间异步上报，不阻塞生图返回） */
   onPreloadProgress?: (p: { progress: number; message: string }) => void;
   /** 异步任务化选项：signal 可取消，onProgress 如实上报阶段/进度（progress 为 null 时只有阶段与已用时）。
@@ -197,6 +203,12 @@ export async function generateImageViaHost(opts: {
   mode?: string;
   img2img_fallback?: boolean;
   fallback_placeholder?: boolean;
+  /** 实际使用的种子（后端缺省自动生成，恒回显） */
+  seed?: number;
+  /** 种子是否真发给了渠道（false=该渠道不支持/未透传，无法用种子复现，账本勿记 best_seed） */
+  seed_sent?: boolean;
+  /** 批量模式：每张图各自的种子（与 images 对齐） */
+  seeds?: number[];
   /** 画质档含人脸修复时后端自动触发的 GFPGAN 后台预载任务 id（据此轮询 /host/model-preload） */
   preload_job_id?: string;
   /** 触发时人脸修复模型是否已就绪（true=可走 GFPGAN，false=本次暂时回退区域超分） */
@@ -214,22 +226,31 @@ export async function generateImageViaHost(opts: {
       mode?: string;
       img2img_fallback?: boolean;
       fallback_placeholder?: boolean;
+      seed?: number;
+      seed_sent?: boolean;
       preload_job_id?: string;
       face_restore_ready?: boolean;
     };
     try {
       // 异步任务化（submit + 轮询等待）：服务端 _GEN_PAYLOAD_KEYS 白名单与旧同步端点
       // 逐键一致，_build_gen_callable 为保真搬运（画质换算 / NG 计数 / GFPGAN 预载全保留）。
+      // seed 仅在显式传入时进 payload（缺省保持旧 payload 形状，由后端自动生成并回显）。
+      const explicitSeed =
+        typeof opts.seed === "number" && Number.isFinite(opts.seed) && opts.seed > 0
+          ? Math.floor(opts.seed)
+          : null;
       const { result } = await runGeneration(
         "image",
         {
           prompt: opts.prompt,
           model: opts.model || "",
           channel_id: opts.channel_id || "",
-          size: opts.size || "1024x576",
+          size: opts.size || "",
+          aspect: opts.aspect || "",
           reference_image: opts.reference_image || "",
           strength: opts.strength ?? 0.65,
           quality: opts.quality || "standard",
+          ...(explicitSeed !== null ? { seed: explicitSeed } : {}),
         },
         {
           signal: opts.awaitOpts?.signal,
@@ -267,14 +288,18 @@ export async function generateImageViaHost(opts: {
     return data;
   }
   const images: string[] = [];
+  const seeds: number[] = [];
   let lastMsg = "";
   let okAny = false;
   for (let i = 0; i < count; i++) {
-    const one = await generateImageViaHost({ ...opts, n: 1 });
+    // 批量抽卡：显式剥掉 opts.seed——多候选共用同一种子会产出雷同图，违背抽卡语义；
+    // 每张由后端自动生成独立种子并回显，汇入 seeds[] 供账本记录。
+    const one = await generateImageViaHost({ ...opts, seed: undefined, n: 1 });
     lastMsg = one.message || lastMsg;
     const url = one.image_data_url || one.image_url;
     if (one.ok && url) {
       images.push(url);
+      if (typeof one.seed === "number") seeds.push(one.seed);
       okAny = true;
     }
   }
@@ -282,6 +307,7 @@ export async function generateImageViaHost(opts: {
     ok: okAny,
     images,
     image_data_url: images[0],
+    seeds,
     message: okAny
       ? `批量生图 ${images.length}/${count}`
       : lastMsg || "批量生图失败",
@@ -583,7 +609,7 @@ export async function inpaintViaHost(opts: {
           mask: opts.mask,
           model: opts.model || "",
           channel_id: opts.channel_id || "",
-          size: opts.size || "1024x576",
+          size: opts.size || "768x1344",
         }),
       },
     );
@@ -931,6 +957,7 @@ export async function listVideoModels(): Promise<{
     return { models: [], default: "" };
   }
 }
+
 
 export async function generateVideoViaHost(opts: {
   prompt: string;

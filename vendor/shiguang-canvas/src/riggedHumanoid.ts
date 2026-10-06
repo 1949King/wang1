@@ -282,583 +282,16 @@ export const HUMAN_PRESETS: Record<HumanVariant, HumanPreset> = {
 
 const JOINT = "#111111";
 
-/** 关节角（度）——导演摆姿，非完整 IK */
-export type JointPose = {
-  spineX: number;
-  spineY: number;
-  spineZ: number;
-  abdomenX: number;
-  abdomenY: number;
-  abdomenZ: number;
-  headX: number;
-  headY: number;
-  headZ: number;
-  lShoulderX: number;
-  lShoulderZ: number;
-  lElbowX: number;
-  lWristX: number;
-  rShoulderX: number;
-  rShoulderZ: number;
-  rElbowX: number;
-  rWristX: number;
-  lHipX: number;
-  lHipZ: number;
-  lKneeX: number;
-  lAnkleX: number;
-  rHipX: number;
-  rHipZ: number;
-  rKneeX: number;
-  rAnkleX: number;
-};
+/* ─────────────────────────────────────────────────────────────────────
+ * ★ 2026-10-05 姿势数据已抽到 `stage3dPoseLibrary.ts`
+ *   （单文件规模棘轮 + 职责分离）。这里 import 内部使用 + re-export 对外，
+ *   **既有导入方零改动**。
+ * ───────────────────────────────────────────────────────────────────── */
+import type { JointPose, PosePresetId } from "./stage3dPoseLibrary";
+import { defaultPose, JOINT_LABELS, POSE_PRESETS } from "./stage3dPoseLibrary";
 
-export const JOINT_LABELS: { key: keyof JointPose; label: string; min: number; max: number }[] = [
-  { key: "abdomenX", label: "身体前倾", min: -35, max: 35 },
-  { key: "abdomenY", label: "身体转身", min: -60, max: 60 },
-  { key: "abdomenZ", label: "身体侧倾", min: -40, max: 40 },
-  { key: "spineX", label: "躯干前倾", min: -40, max: 40 },
-  { key: "spineY", label: "躯干扭转", min: -50, max: 50 },
-  { key: "spineZ", label: "躯干侧倾", min: -40, max: 40 },
-  { key: "headX", label: "头部前倾", min: -45, max: 45 },
-  { key: "headY", label: "头部转身", min: -70, max: 70 },
-  { key: "headZ", label: "头部侧倾", min: -40, max: 40 },
-  { key: "lShoulderX", label: "左臂前后", min: -170, max: 80 },
-  { key: "lShoulderZ", label: "左臂侧举", min: -20, max: 170 },
-  { key: "lElbowX", label: "左肘", min: 0, max: 145 },
-  { key: "lWristX", label: "左腕", min: -60, max: 60 },
-  { key: "rShoulderX", label: "右臂前后", min: -170, max: 80 },
-  { key: "rShoulderZ", label: "右臂侧举", min: -170, max: 20 },
-  { key: "rElbowX", label: "右肘", min: 0, max: 145 },
-  { key: "rWristX", label: "右腕", min: -60, max: 60 },
-  { key: "lHipX", label: "左腿前后", min: -100, max: 90 },
-  { key: "lHipZ", label: "左腿侧展", min: -20, max: 80 },
-  { key: "lKneeX", label: "左膝", min: 0, max: 140 },
-  { key: "lAnkleX", label: "左踝", min: -40, max: 40 },
-  { key: "rHipX", label: "右腿前后", min: -100, max: 90 },
-  { key: "rHipZ", label: "右腿侧展", min: -80, max: 20 },
-  { key: "rKneeX", label: "右膝", min: 0, max: 140 },
-  { key: "rAnkleX", label: "右踝", min: -40, max: 40 },
-];
-
-/** 默认（中立）姿态：26 个关节角全 0。链式联动 / 姿势预设都以此为基线。 */
-const DEFAULT_POSE: JointPose = {
-  spineX: 0,
-  spineY: 0,
-  spineZ: 0,
-  abdomenX: 0,
-  abdomenY: 0,
-  abdomenZ: 0,
-  headX: 0,
-  headY: 0,
-  headZ: 0,
-  lShoulderX: 0,
-  lShoulderZ: 0,
-  lElbowX: 0,
-  lWristX: 0,
-  rShoulderX: 0,
-  rShoulderZ: 0,
-  rElbowX: 0,
-  rWristX: 0,
-  lHipX: 0,
-  lHipZ: 0,
-  lKneeX: 0,
-  lAnkleX: 0,
-  rHipX: 0,
-  rHipZ: 0,
-  rKneeX: 0,
-  rAnkleX: 0,
-};
-
-export function defaultPose(): JointPose {
-  return { ...DEFAULT_POSE };
-}
-
-export type PosePresetId =
-  | "idle"
-  | "wave"
-  | "think"
-  | "point"
-  | "hands_hips"
-  | "cross_arms"
-  | "sit"
-  | "fight"
-  | "bow"
-  | "jump_kick"
-  | "sword_up"
-  | "aim"
-  | "staff"
-  | "phone"
-  | "lean_wall"
-  | "hands_pockets"
-  | "stretch"
-  | "yawn"
-  | "cheer"
-  | "sad"
-  | "surprised"
-  | "punch"
-  | "block"
-  | "throw"
-  | "crouch"
-  | "step_turn"
-  | "tpose"
-  | "walk"
-  | "kneel";
-
-export const POSE_PRESETS: { id: PosePresetId; label: string; pose: Partial<JointPose> }[] = [
-  { id: "idle", label: "站立", pose: defaultPose() },
-  {
-    id: "wave",
-    label: "挥手",
-    pose: {
-      ...defaultPose(),
-      rShoulderZ: -95,
-      rShoulderX: -35,
-      rElbowX: 42,
-      headY: -10,
-      spineY: 6,
-    },
-  },
-  {
-    id: "think",
-    label: "思考",
-    pose: {
-      ...defaultPose(),
-      rShoulderX: -70,
-      rShoulderZ: -25,
-      rElbowX: 100,
-      rWristX: 15,
-      headX: 12,
-      headY: 18,
-      spineX: 4,
-    },
-  },
-  {
-    id: "point",
-    label: "指向",
-    pose: {
-      ...defaultPose(),
-      rShoulderX: -80,
-      rShoulderZ: -22,
-      rElbowX: 12,
-      headY: -12,
-      spineY: -6,
-    },
-  },
-  {
-    id: "hands_hips",
-    label: "叉腰",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: 12,
-      lShoulderZ: 52,
-      lElbowX: 88,
-      rShoulderX: 12,
-      rShoulderZ: -52,
-      rElbowX: 88,
-      spineX: 2,
-    },
-  },
-  {
-    id: "cross_arms",
-    label: "抱臂",
-    pose: {
-      ...defaultPose(),
-      // 先侧举再屈肘交叉，避免只抬肩导致前臂穿进脖子
-      lShoulderX: -40,
-      lShoulderZ: 42,
-      lElbowX: 100,
-      rShoulderX: -40,
-      rShoulderZ: -42,
-      rElbowX: 100,
-      spineX: 3,
-      headX: 2,
-    },
-  },
-  {
-    id: "sit",
-    label: "坐姿",
-    pose: {
-      ...defaultPose(),
-      abdomenX: 8,
-      spineX: 4,
-      lHipX: 70,
-      lKneeX: 98,
-      rHipX: 70,
-      rKneeX: 98,
-      lAnkleX: 10,
-      rAnkleX: 10,
-      lShoulderX: -14,
-      rShoulderX: -14,
-      lElbowX: 28,
-      rElbowX: 28,
-    },
-  },
-  {
-    id: "fight",
-    label: "戒备",
-    pose: {
-      ...defaultPose(),
-      spineX: -4,
-      spineY: 10,
-      lShoulderX: -85,
-      lShoulderZ: 28,
-      lElbowX: 70,
-      rShoulderX: -65,
-      rShoulderZ: -22,
-      rElbowX: 55,
-      lHipX: 22,
-      rHipX: -12,
-      lKneeX: 18,
-      rKneeX: 12,
-      headX: -2,
-      headY: 8,
-    },
-  },
-  {
-    id: "bow",
-    label: "鞠躬",
-    pose: {
-      ...defaultPose(),
-      abdomenX: 32,
-      spineX: 22,
-      headX: 18,
-      lShoulderX: 8,
-      rShoulderX: 8,
-      lHipX: 8,
-      rHipX: 8,
-    },
-  },
-  {
-    id: "jump_kick",
-    label: "飞踢",
-    pose: {
-      ...defaultPose(),
-      spineX: -8,
-      abdomenX: -4,
-      lShoulderX: -35,
-      lShoulderZ: 40,
-      rShoulderX: -70,
-      rElbowX: 35,
-      lHipX: -12,
-      lKneeX: 70,
-      rHipX: 62,
-      rKneeX: 28,
-      headX: -6,
-    },
-  },
-  {
-    id: "sword_up",
-    label: "举剑",
-    pose: {
-      ...defaultPose(),
-      rShoulderX: -150,
-      rShoulderZ: -35,
-      rElbowX: 20,
-      lShoulderX: -40,
-      lElbowX: 50,
-      spineY: -10,
-      lHipX: 15,
-      rHipX: -10,
-    },
-  },
-  {
-    id: "aim",
-    label: "瞄准",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -85,
-      lElbowX: 15,
-      rShoulderX: -85,
-      rElbowX: 15,
-      spineY: 18,
-      lHipX: 35,
-      rHipX: -25,
-      headY: 10,
-    },
-  },
-  {
-    id: "staff",
-    label: "持杖",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -55,
-      lElbowX: 70,
-      rShoulderX: -70,
-      rElbowX: 55,
-      spineY: -8,
-      lHipX: 12,
-      rHipX: -8,
-    },
-  },
-  // —— 日常类 ——
-  {
-    id: "phone",
-    label: "看手机",
-    pose: {
-      ...defaultPose(),
-      rShoulderX: -48,
-      rShoulderZ: -12,
-      rElbowX: 115,
-      lShoulderX: -12,
-      headX: 16,
-      spineX: 8,
-    },
-  },
-  {
-    id: "lean_wall",
-    label: "靠墙",
-    pose: {
-      ...defaultPose(),
-      // 背靠墙：轻度后仰 + 一腿承重一腿虚点，一手撑墙
-      spineX: -12,
-      abdomenX: -6,
-      spineZ: 8,
-      abdomenZ: 6,
-      rHipX: 4,
-      rHipZ: -8,
-      lHipX: 16,
-      lHipZ: 6,
-      lKneeX: 22,
-      rKneeX: 6,
-      rShoulderX: -22,
-      rShoulderZ: -30,
-      rElbowX: 70,
-      lShoulderX: 6,
-      lElbowX: 18,
-      headX: 4,
-      headY: 6,
-    },
-  },
-  {
-    id: "hands_pockets",
-    label: "手插兜",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: 4,
-      lShoulderZ: 22,
-      lElbowX: 45,
-      rShoulderX: 4,
-      rShoulderZ: -22,
-      rElbowX: 45,
-      abdomenX: 6,
-    },
-  },
-  {
-    id: "stretch",
-    label: "伸懒腰",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -155,
-      lShoulderZ: 42,
-      lElbowX: 10,
-      rShoulderX: -155,
-      rShoulderZ: -42,
-      rElbowX: 10,
-      spineX: -14,
-      headX: -12,
-    },
-  },
-  {
-    id: "yawn",
-    label: "打哈欠",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -120,
-      lElbowX: 55,
-      rShoulderX: -120,
-      rElbowX: 55,
-      headX: 28,
-      headY: -18,
-      spineX: 10,
-    },
-  },
-  // —— 情绪类 ——
-  {
-    id: "cheer",
-    label: "欢呼",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -160,
-      lShoulderZ: 60,
-      lElbowX: 25,
-      rShoulderX: -160,
-      rShoulderZ: -60,
-      rElbowX: 25,
-      spineX: -6,
-      headX: -6,
-      lHipX: 10,
-      rHipX: -10,
-    },
-  },
-  {
-    id: "sad",
-    label: "垂头",
-    pose: {
-      ...defaultPose(),
-      spineX: 18,
-      abdomenX: 12,
-      headX: 42,
-      headY: -20,
-      lShoulderX: 12,
-      lShoulderZ: 10,
-      rShoulderX: 12,
-      rShoulderZ: -10,
-    },
-  },
-  {
-    id: "surprised",
-    label: "惊讶",
-    pose: {
-      ...defaultPose(),
-      headX: -14,
-      headY: 6,
-      lShoulderX: -38,
-      lShoulderZ: 28,
-      lElbowX: 58,
-      rShoulderX: -38,
-      rShoulderZ: -28,
-      rElbowX: 58,
-      spineX: -4,
-    },
-  },
-  // —— 动作类 ——
-  {
-    id: "punch",
-    label: "出拳",
-    pose: {
-      ...defaultPose(),
-      spineY: 22,
-      spineX: -6,
-      rShoulderX: -10,
-      rShoulderZ: -8,
-      rElbowX: 6,
-      lShoulderX: -95,
-      lElbowX: 72,
-      lHipX: 22,
-      rHipX: -16,
-      headY: 14,
-    },
-  },
-  {
-    id: "block",
-    label: "格挡",
-    pose: {
-      ...defaultPose(),
-      lShoulderX: -85,
-      lShoulderZ: 32,
-      lElbowX: 95,
-      rShoulderX: -85,
-      rShoulderZ: -32,
-      rElbowX: 95,
-      spineY: 8,
-      lHipX: 18,
-      rHipX: -12,
-      headX: -6,
-    },
-  },
-  {
-    id: "throw",
-    label: "投掷",
-    pose: {
-      ...defaultPose(),
-      rShoulderX: -165,
-      rShoulderZ: -40,
-      rElbowX: 30,
-      lShoulderX: 20,
-      lShoulderZ: 12,
-      rWristX: 18,
-      spineY: -18,
-      spineX: -8,
-      lHipX: 22,
-      rHipX: -14,
-      headY: -10,
-    },
-  },
-  // —— 姿态类 ——
-  {
-    id: "crouch",
-    label: "蹲姿",
-    pose: {
-      ...defaultPose(),
-      lHipX: 72,
-      lKneeX: 110,
-      rHipX: 72,
-      rKneeX: 110,
-      lAnkleX: 22,
-      rAnkleX: 22,
-      abdomenX: 18,
-      spineX: 12,
-      headX: 4,
-      lShoulderX: -30,
-      rShoulderX: -30,
-      lShoulderZ: 14,
-      rShoulderZ: -14,
-      lElbowX: 42,
-      rElbowX: 42,
-    },
-  },
-  {
-    id: "step_turn",
-    label: "转身回头",
-    pose: {
-      ...defaultPose(),
-      spineY: -32,
-      headY: 42,
-      spineX: 6,
-      lShoulderX: -22,
-      lShoulderZ: 18,
-      rShoulderX: -22,
-      rShoulderZ: -18,
-      lHipX: 14,
-      rHipX: -10,
-    },
-  },
-  {
-    id: "tpose",
-    label: "T型",
-    pose: {
-      ...defaultPose(),
-      lShoulderZ: 90,
-      rShoulderZ: -90,
-      lElbowX: 0,
-      rElbowX: 0,
-    },
-  },
-  {
-    id: "kneel",
-    label: "单膝跪",
-    pose: {
-      ...defaultPose(),
-      lHipX: 55,
-      lKneeX: 105,
-      lAnkleX: -8,
-      rHipX: 12,
-      rKneeX: 95,
-      rAnkleX: 5,
-      abdomenX: 6,
-      spineX: 4,
-      lShoulderX: -10,
-      rShoulderX: -10,
-      headX: 2,
-    },
-  },
-  {
-    id: "walk",
-    label: "行走",
-    pose: {
-      ...defaultPose(),
-      lHipX: 24,
-      rHipX: -18,
-      lKneeX: 14,
-      rKneeX: 32,
-      lShoulderX: -18,
-      rShoulderX: 14,
-      lElbowX: 18,
-      rElbowX: 18,
-      spineX: 3,
-      spineY: 4,
-    },
-  },
-];
+export type { JointPose, PosePresetId };
+export { JOINT_LABELS, POSE_PRESETS, defaultPose };
 
 /* ─────────────────────────────────────────────────────────────────────
  * 基础动作轨迹库 / Motion Presets
@@ -2196,21 +1629,27 @@ export function applyPoseResolved(root: THREE.Object3D, resolvedPose: JointPose)
     const p = resolvedPose;
     const neg = (v: number) => -v;
 
-    bones.abdomen.rotation.set(deg(neg(p.abdomenX)), deg(p.abdomenY), deg(p.abdomenZ));
-    bones.spine.rotation.set(deg(neg(p.spineX)), deg(p.spineY), deg(p.spineZ));
-    bones.head.rotation.set(deg(neg(p.headX)), deg(p.headY), deg(p.headZ));
+    // ★ 2026-10-05 修躯干/头 X 轴符号：实测（bodykun.glb，脚趾朝 +Z 判为前方）
+    //   `neg(spineX)` 使 +30° 让头顶朝 **-Z（后）** 移动 ⇒ 与 UI 标签「前倾」相反，
+    //   导致「鞠躬」预设（躯干正值）实际表现为**后仰**。去掉 neg 后 +X = 前倾，标签语义成立。
+    bones.abdomen.rotation.set(deg(p.abdomenX), deg(p.abdomenY), deg(p.abdomenZ));
+    bones.spine.rotation.set(deg(p.spineX), deg(p.spineY), deg(p.spineZ));
+    bones.head.rotation.set(deg(p.headX), deg(p.headY), deg(p.headZ));
 
-    bones.lShoulder.rotation.set(deg(neg(p.lShoulderX)), 0, deg(p.lShoulderZ));
-    bones.lElbow.rotation.set(deg(neg(p.lElbowX)), 0, 0);
+    // ★ 2026-10-05 补内旋（Y 轴）：此前 Y 硬编码为 0，导致肩/髋被砍成 2 自由度，
+    //   肘弯曲平面锁死 ⇒「叉腰/抱臂/握手/背手」做不出、手臂像板子。
+    //   Y 正 = 内旋（与 JOINT_LABELS 的「左臂内旋/左腿内旋」一致；右侧镜像取负为对称）。
+    bones.lShoulder.rotation.set(deg(neg(p.lShoulderX)), deg(p.lShoulderY), deg(p.lShoulderZ));
+    bones.lElbow.rotation.set(deg(neg(p.lElbowX)), deg(p.lElbowY), 0);
     bones.lWrist.rotation.set(deg(neg(p.lWristX)), 0, 0);
-    bones.rShoulder.rotation.set(deg(neg(p.rShoulderX)), 0, deg(p.rShoulderZ));
-    bones.rElbow.rotation.set(deg(neg(p.rElbowX)), 0, 0);
+    bones.rShoulder.rotation.set(deg(neg(p.rShoulderX)), deg(p.rShoulderY), deg(p.rShoulderZ));
+    bones.rElbow.rotation.set(deg(neg(p.rElbowX)), deg(p.rElbowY), 0);
     bones.rWrist.rotation.set(deg(neg(p.rWristX)), 0, 0);
 
-    bones.lHip.rotation.set(deg(neg(p.lHipX)), 0, deg(p.lHipZ));
+    bones.lHip.rotation.set(deg(neg(p.lHipX)), deg(p.lHipY), deg(p.lHipZ));
     bones.lKnee.rotation.set(deg(neg(p.lKneeX)), 0, 0);
     bones.lAnkle.rotation.set(deg(neg(p.lAnkleX)), 0, 0);
-    bones.rHip.rotation.set(deg(neg(p.rHipX)), 0, deg(p.rHipZ));
+    bones.rHip.rotation.set(deg(neg(p.rHipX)), deg(p.rHipY), deg(p.rHipZ));
     bones.rKnee.rotation.set(deg(neg(p.rKneeX)), 0, 0);
     bones.rAnkle.rotation.set(deg(neg(p.rAnkleX)), 0, 0);
   }
@@ -3221,6 +2660,10 @@ function applyBoneDelta(
   xDeg: number,
   yDeg: number,
   zDeg: number,
+  /** ★ 旋转顺序（2026-10-05）：肢体用 "YXZ"（先扭转再摆动），
+   *  因为侧举 Z→±90° 时 "XYZ" 会让 X/Y 轴退化重合（万向节锁）导致肩部突然翻转；
+   *  躯干/头保持 "XYZ"。Y=0 时两种顺序结果完全相同 ⇒ 旧预设零回归。 */
+  order: "XYZ" | "YXZ" = "XYZ",
 ) {
   if (!bone) return;
   const rest = identity[key];
@@ -3228,7 +2671,9 @@ function applyBoneDelta(
   else bone.quaternion.identity();
   if (xDeg === 0 && yDeg === 0 && zDeg === 0) return;
   bone.quaternion.multiply(
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(deg(xDeg), deg(yDeg), deg(zDeg), "XYZ")),
+    new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(deg(xDeg), deg(yDeg), deg(zDeg), order),
+    ),
   );
 }
 
@@ -3271,29 +2716,37 @@ export function applyPoseToGLBResolved(
       : bones.spine && bones.spine !== bones.hips
         ? bones.spine
         : bones.spine2;
-  applyBoneDelta(abdomenBone, identity, "abdomen", neg(p.abdomenX), p.abdomenY, p.abdomenZ);
-  applyBoneDelta(bones.spine2 || bones.spine, identity, bones.spine2 ? "spine2" : "spine", neg(p.spineX), p.spineY, p.spineZ);
+  // ★ 2026-10-05 躯干/头 X 轴符号修正：去 neg ⇒ 正 = 前倾（与 UI 标签一致）。
+  //   实测依据（bodykun.glb + 脚趾朝 +Z 判前方）：原实现 +30° 让头顶朝 -Z（后）移动，
+  //   于是「鞠躬」预设（躯干全正值）实际是**后仰**——这是「姿势不像人」的直接来源之一。
+  applyBoneDelta(abdomenBone, identity, "abdomen", p.abdomenX, p.abdomenY, p.abdomenZ);
+  applyBoneDelta(bones.spine2 || bones.spine, identity, bones.spine2 ? "spine2" : "spine", p.spineX, p.spineY, p.spineZ);
   // neck 承担头部旋转的一半，让脖子蒙皮平滑过渡，避免头转脖子不跟导致"颈子凸出断裂"
-  applyBoneDelta(bones.neck, identity, "neck", neg(p.headX) * 0.5, p.headY * 0.5, p.headZ * 0.5);
-  applyBoneDelta(bones.head, identity, "head", neg(p.headX) * 0.5, p.headY * 0.5, p.headZ * 0.5);
+  applyBoneDelta(bones.neck, identity, "neck", p.headX * 0.5, p.headY * 0.5, p.headZ * 0.5);
+  applyBoneDelta(bones.head, identity, "head", p.headX * 0.5, p.headY * 0.5, p.headZ * 0.5);
 
+  // ★ 2026-10-05 补内旋（Y 轴）+ 肢体改 "YXZ" 顺序（消万向节锁）：
+  //   此前 lArm/lHip 的 Y 恒 0 ⇒ 肘弯曲平面锁死；现接 lShoulderY / lHipY / lElbowY。
+  //   侧举 Z 接近 ±90° 时 "XYZ" 会退化为二轴，改 "YXZ" 后无翻转。
   applyBoneDelta(bones.lShoulder, identity, "lShoulder", 0, 0, p.lShoulderZ * 0.35);
-  applyBoneDelta(bones.lArm, identity, "lArm", neg(p.lShoulderX), 0, p.lShoulderZ);
-  applyBoneDelta(bones.lForeArm, identity, "lForeArm", p.lElbowX, 0, 0);
-  applyBoneDelta(bones.lWrist, identity, "lWrist", p.lWristX, 0, 0);
+  applyBoneDelta(bones.lArm, identity, "lArm",
+                 neg(p.lShoulderX), p.lShoulderY, p.lShoulderZ, "YXZ");
+  applyBoneDelta(bones.lForeArm, identity, "lForeArm", p.lElbowX, p.lElbowY, 0, "YXZ");
+  applyBoneDelta(bones.lWrist, identity, "lWrist", p.lWristX, 0, 0, "YXZ");
 
   applyBoneDelta(bones.rShoulder, identity, "rShoulder", 0, 0, p.rShoulderZ * 0.35);
-  applyBoneDelta(bones.rArm, identity, "rArm", neg(p.rShoulderX), 0, p.rShoulderZ);
-  applyBoneDelta(bones.rForeArm, identity, "rForeArm", p.rElbowX, 0, 0);
-  applyBoneDelta(bones.rWrist, identity, "rWrist", p.rWristX, 0, 0);
+  applyBoneDelta(bones.rArm, identity, "rArm",
+                 neg(p.rShoulderX), p.rShoulderY, p.rShoulderZ, "YXZ");
+  applyBoneDelta(bones.rForeArm, identity, "rForeArm", p.rElbowX, p.rElbowY, 0, "YXZ");
+  applyBoneDelta(bones.rWrist, identity, "rWrist", p.rWristX, 0, 0, "YXZ");
 
-  applyBoneDelta(bones.lHip, identity, "lHip", neg(p.lHipX), 0, p.lHipZ);
-  applyBoneDelta(bones.lKnee, identity, "lKnee", p.lKneeX, 0, 0);
-  applyBoneDelta(bones.lAnkle, identity, "lAnkle", p.lAnkleX, 0, 0);
+  applyBoneDelta(bones.lHip, identity, "lHip", neg(p.lHipX), p.lHipY, p.lHipZ, "YXZ");
+  applyBoneDelta(bones.lKnee, identity, "lKnee", p.lKneeX, 0, 0, "YXZ");
+  applyBoneDelta(bones.lAnkle, identity, "lAnkle", p.lAnkleX, 0, 0, "YXZ");
 
-  applyBoneDelta(bones.rHip, identity, "rHip", neg(p.rHipX), 0, p.rHipZ);
-  applyBoneDelta(bones.rKnee, identity, "rKnee", p.rKneeX, 0, 0);
-  applyBoneDelta(bones.rAnkle, identity, "rAnkle", p.rAnkleX, 0, 0);
+  applyBoneDelta(bones.rHip, identity, "rHip", neg(p.rHipX), p.rHipY, p.rHipZ, "YXZ");
+  applyBoneDelta(bones.rKnee, identity, "rKnee", p.rKneeX, 0, 0, "YXZ");
+  applyBoneDelta(bones.rAnkle, identity, "rAnkle", p.rAnkleX, 0, 0, "YXZ");
 }
 
 let _sharedGLTFLoader: GLTFLoader | null = null;

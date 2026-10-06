@@ -22,7 +22,6 @@ import {
   generateImageViaHost,
   generateVideoViaHost,
   generateAudioViaHost,
-  generateMusicViaHost,
   generateTextViaHost,
   batchGenerateVideos,
   getBatchStatus,
@@ -45,6 +44,17 @@ import {
   type AudioModelOption,
   type MusicModelOption,
 } from "./bridge";
+import {
+  generateVideoUnified,
+  listLocalVideoModels,
+  mergeLocalVideoModels,
+} from "./localVideo";
+import { generateMusicForNode } from "./canvasMusic";
+import { primeAgentPolicy } from "./agentPolicy";
+import { runGraphWithConfirm } from "./canvasRun";
+import { useRunToHereShortcut } from "./useRunToHereShortcut";
+import CanvasOverlays from "./CanvasOverlays";
+import { isTypingTarget } from "./CommandPalette";
 import { type GenJob } from "./generationQueue";
 import { buildCameraPromptBlock, multiAngleBatch, type AnglePreset } from "./shotCamera";
 import type { PromptItem } from "./promptLibrary";
@@ -282,15 +292,19 @@ export default function App() {
   };
 
   const refreshModels = useCallback(async () => {
-    const [img, vid, aud, mus, chat] = await Promise.all([
+    const [img, vid, aud, mus, chat, localVid] = await Promise.all([
       listImageModels(),
       listVideoModels(),
       listAudioModels(),
       listMusicModels(),
       listChatModels(),
+      // 本机（diffusers）视频模型 —— 与云端并列展示，通道 id 固定为 "local"。
+      // 只读探测：不下载权重、不加载模型（慢的是生成，不是列清单）。
+      listLocalVideoModels(),
     ]);
     setImageModels(img.models);
-    setVideoModels(vid.models);
+    // 云端 + **本机**模型合并展示（标注体积/已下未下/显存内存需求，细节见 localVideo.ts）
+    setVideoModels(mergeLocalVideoModels(vid.models, localVid));
     setAudioModels(aud.models);
     setMusicModels(mus.models);
     const chatKeys: string[] = [];
@@ -340,6 +354,7 @@ export default function App() {
       }
       fetchPrefs().then(setPrefs);
       refreshModels();
+      void primeAgentPolicy();   // 拉取 Agent 策略（单一真源在后端；失败走保守兜底）
     });
     const t = setInterval(() => {
       fetchPrefs().then(setPrefs);
@@ -474,6 +489,7 @@ export default function App() {
     return { channel_id, model };
   };
 
+
   useEffect(() => {
     const modelKey = (m: { channel_id: string; model: string }) => `${m.channel_id}::${m.model}`;
     setPluginRuntimeAI({
@@ -597,12 +613,14 @@ export default function App() {
         if (!videoModels.length) {
           return { ok: false, message: "生成器·视频：无可用生视频模型" };
         }
-        const { channel_id, model } = resolveModel(selectedVideoModelKey);
-        const res = await generateVideoViaHost({
-          prompt: data.prompt || buildPromptFor(node, data).prompt,
-          model,
-          channel_id,
+        const bp = buildPromptFor(node, data);
+        const res = await generateVideoUnified({
+          parsed: resolveModel(selectedVideoModelKey),
+          prompt: data.prompt || bp.prompt,
+          // 原实现不传参考图（保持 ""）；若用本机图生视频模型，会如实提示「需要首帧图」
+          referenceImage: "",
           duration: 5,
+          quality: "standard",
           awaitOpts,
         });
         if (res.ok && res.video_url) {
@@ -709,28 +727,20 @@ export default function App() {
       if (data.audioUrl) {
         return { ok: true, message: "音乐节点已有文件；再次生成将覆盖" };
       }
-      if (!musicModels.length) {
-        return { ok: false, message: "无可用音乐模型，请在模型管理配置 Suno 渠道" };
-      }
+      // 音乐生成编排已抽到 canvasMusic.ts（Suno 黑盒 / YuE 符号规划两条链路）
       const { channel_id, model } = resolveModel(selectedMusicModelKey);
-      const res = await generateMusicViaHost({
-        prompt: data.prompt || "",
-        style: data.style || "",
-        lyrics: data.lyrics || "",
-        title: data.trackTitle || data.title || "",
-        instrumental: !!data.instrumental,
+      const out = await generateMusicForNode({
+        data: data as any,
+        channelId: channel_id,
         model,
-        channel_id,
+        musicModelCount: musicModels.length,
       });
-      if (res.ok && res.audio_url) {
-        setNodeAudio(node.id, res.audio_url);
-        useCanvasStore.getState().updateNodeData(node.id, {
-          title: res.title || data.title,
-          model: res.model || model,
-        } as any);
-        return { ok: true, message: res.message || "音乐生成成功" };
+      if (out.ok && out.audioUrl) {
+        setNodeAudio(node.id, out.audioUrl);
+        if (out.patch) useCanvasStore.getState().updateNodeData(node.id, out.patch as any);
+        return { ok: true, message: out.message };
       }
-      return { ok: false, message: res.message || "音乐生成失败" };
+      return { ok: false, message: out.message, hint: out.hint } as any;
     }
 
     const { prompt: fullPrompt, assetRef } = buildPromptFor(node, data);
@@ -753,16 +763,14 @@ export default function App() {
           message: "无可用生视频模型。请在模型管理配置视频渠道 Key，再同步模型池。",
         };
       }
-      const { channel_id, model } = resolveModel(selectedVideoModelKey);
       const duration = Math.max(2, Math.min(10, Number(data.duration) || 5));
-      const res = await generateVideoViaHost({
+      const res = await generateVideoUnified({
+        parsed: resolveModel(selectedVideoModelKey),
         prompt: fullPrompt || "竖屏漫剧镜头，电影感运镜",
-        model,
-        channel_id,
+        referenceImage: reference_image,
         duration,
-        size: "720x1280",
-        reference_image,
         quality: data.qualityTier || "standard",
+        size: "720x1280",
         awaitOpts,
       });
       if (res.ok && res.video_url) {
@@ -778,7 +786,8 @@ export default function App() {
       prompt: fullPrompt || "竖屏漫剧分镜",
       model,
       channel_id,
-      size: "1024x576",
+      // size 不传：交后端按 quality + aspect 推导（默认竖屏短剧 9:16）
+      aspect: (data as any).aspect || "",
       reference_image,
       strength: 0.65,
       n: 1,
@@ -792,6 +801,23 @@ export default function App() {
         : [res.image_data_url || res.image_url || ""];
       for (const u of urls) {
         if (u) setNodeImage(node.id, u);
+      }
+      // 抽卡闭环产物回写节点（V4.40.10）：推荐 / 代理分 / 种子 / 坏区修复计划
+      // 前端此前零消费这些字段（DEFECT C），现落到节点数据由 NoviceInspector 展示。
+      const rec = (res as any).recommendation;
+      const patch: Record<string, unknown> = {};
+      if (typeof res.seed === "number") patch.lastSeed = res.seed;
+      if (typeof res.seed_sent === "boolean") patch.lastSeedSent = res.seed_sent;
+      if (typeof (res as any).proxy_score === "number") {
+        patch.proxyScore = (res as any).proxy_score;
+        patch.isProxy = (res as any).is_proxy === true;
+      }
+      if (rec && (rec.best_seed != null || rec.mean != null)) {
+        patch.recommendation = rec;
+      }
+      if ((res as any).repair_plan) patch.repairPlan = (res as any).repair_plan;
+      if (Object.keys(patch).length) {
+        useCanvasStore.getState().updateNodeData(node.id, patch);
       }
       useCanvasStore.getState().reviewNode(node.id);
       return { ok: true, message: res.message || "生成成功" };
@@ -816,7 +842,8 @@ export default function App() {
       prompt: `${fullPrompt}${promptSuffix ? `；${promptSuffix}` : ""}` || "竖屏漫剧分镜",
       model,
       channel_id,
-      size: "1024x576",
+      // size 不传：交后端按 quality + aspect 推导（默认竖屏短剧 9:16）
+      aspect: (data as any).aspect || "",
       reference_image,
       strength: 0.65,
       n: 1,
@@ -838,15 +865,12 @@ export default function App() {
     const { prompt: fullPrompt, assetRef } = buildPromptFor(node, data);
     let reference_image = data.firstFrameUrl || "";
     if (!reference_image && assetRef) reference_image = assetRef;
-    const { channel_id, model } = resolveModel(modelKey);
     const duration = Math.max(2, Math.min(10, Number(data.duration) || 5));
-    const res = await generateVideoViaHost({
+    const res = await generateVideoUnified({
+      parsed: resolveModel(modelKey),
       prompt: fullPrompt || "竖屏漫剧镜头，电影感运镜",
-      model,
-      channel_id,
+      referenceImage: reference_image,
       duration,
-      size: "720x1280",
-      reference_image,
       quality: data.qualityTier || "standard",
     });
     return { res, url: res.video_url || "", modelKey };
@@ -1127,6 +1151,25 @@ export default function App() {
       setGenerating(false);
     }
   };
+
+  // 「运行到此处」：后端 /host/canvas-run 出计划→确认→执行；编排见 canvasRun.ts（App 顶到规模上限，逻辑外置）
+  const runToHere = useCallback(async () => {
+    await runGraphWithConfirm({
+      getGraph: () => {
+        const st = useCanvasStore.getState();
+        return { nodes: st.nodes as unknown[], edges: st.edges as unknown[] };
+      },
+      confirm: (text) => (typeof window === "undefined" ? false : window.confirm(text)),
+      onStatus: setStatus,
+      onNodePatch: (id, patch) =>
+        useCanvasStore.getState().updateNodeData(id, patch as never),
+      onBusy: setGenerating,
+    });
+  }, []);
+
+  useRunToHereShortcut(() => {
+    void runToHere();
+  });
 
   const onBatchGenerate = async () => {
     const shots = nodes.filter((n) => {
@@ -1674,6 +1717,7 @@ export default function App() {
       onImportSkill={onImportSkill}
       onSetPrimaryVideo={setPrimaryVideo}
       onBatchGenerate={onBatchGenerate}
+      onRunToHere={runToHere}
       onAbortBatch={onAbortBatch}
       onSendToEditor={onSendToEditor}
       onSendAllToEditor={onSendAllToEditor}
@@ -1947,6 +1991,8 @@ export default function App() {
         </Suspense>
       }
     />
+    {/* 画布浮层簇（桌宠 + 输出历史）：兄弟位置 ⇒ 零解冻；App 顶到规模上限，故收成一个入口 */}
+    <CanvasOverlays />
     </NodeActionsContext.Provider>
   );
 }
