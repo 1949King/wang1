@@ -157,15 +157,15 @@ class SecureStorage:
         
         try:
             if platform.system() == "Windows":
-                import subprocess
-                result = subprocess.run(
-                    ["wmic", "csproduct", "get", "UUID"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    uuid_line = [l.strip() for l in result.stdout.split('\n') if l.strip() and l.strip() != 'UUID']
-                    if uuid_line:
-                        components.append(uuid_line[0])
+                # ★ A-14（2026-10-05）：改用统一 WMI 助手（CIM 优先 / wmic 兜底）。
+                #   ⚠️ **取值形状必须逐字不变** —— 这个 UUID 参与机器码 → 加密密钥派生，
+                #   变了会让用户**已保存的加密配置解不开**。`machine_uuid()` 返回的正是
+                #   旧实现（wmic 输出过滤掉表头后那一行）的同一个值。
+                from app.core.win_query import machine_uuid
+
+                uuid = machine_uuid()
+                if uuid:
+                    components.append(uuid)
         except Exception as e:
             logger.debug(f"[ConfigManager] 获取机器UUID失败 (Windows): {e}")
         

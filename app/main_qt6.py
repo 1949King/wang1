@@ -768,6 +768,18 @@ class Application:
         mw = MainWindow()
         self._main_window = mw
 
+        # ★ 进入软件的首个提示（免责/风险告知）：本软件用机器指纹派生密钥加密配置、做设备绑定，
+        #   指纹变化（换硬件/重装系统/系统查询接口变化等）会导致旧密文解不开、设备绑定失效。
+        #   首次启动（或提示文本升版）弹一次讲清楚，并声明责任边界
+        #   （由此产生的数据损失与作者本人及本项目无关）。
+        #   放在 MainWindow 之后弹出 ⇒ 以主窗口为父窗口、居中显示；异常绝不阻断启动。
+        try:
+            from .modules.lego.notice_dialog import show_first_run_notice
+
+            show_first_run_notice(mw)
+        except Exception as _e:  # pragma: no cover - 兜底，绝不影响启动
+            logger.warning("首启提示未能显示（不影响使用）: %s", _e)
+
         # MainWindow.__init__() 已调用 _setup_default_modules()
         # 该方法从注册表读取启用状态，只注册已启用的模块导航按钮
         # 模块 widget 采用懒加载：首次点击时才实例化（大幅降低启动内存）

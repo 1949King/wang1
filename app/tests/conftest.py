@@ -6,6 +6,7 @@ app/tests/conftest.py - 测试共享配置与 fixtures
 
 import sys
 import os
+import tempfile
 from pathlib import Path
 
 # 确保 app 目录在 sys.path 中（解决 namespace package 问题）
@@ -18,9 +19,21 @@ ROOT_DIR = APP_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# 把 tempfile 基准目录钉到项目内 .workbuddy/tmp（2026-09-27 发现的问题）：
+# 沙箱环境拦截系统 Temp 写入 → tempfile.gettempdir() 回退到 cwd（项目根），
+# 导致每次跑测试都把 sg_*/cover_*/pytest-of-* 等临时目录漏进仓库根。
+# .workbuddy/ 已在 .gitignore（第 171 行），落此处既集中又不会污染 git。
+_TMP_BASE = ROOT_DIR / ".workbuddy" / "tmp"
+try:
+    _TMP_BASE.mkdir(parents=True, exist_ok=True)
+    tempfile.tempdir = str(_TMP_BASE)
+    os.environ.setdefault("TMPDIR", str(_TMP_BASE))
+    os.environ.setdefault("TEMP", str(_TMP_BASE))
+    os.environ.setdefault("TMP", str(_TMP_BASE))
+except Exception:
+    pass  # 极端只读环境下不阻断测试
+
 import pytest
-import threading
-import logging
 
 
 # ============================================================
@@ -51,6 +64,33 @@ def reset_core_singletons():
     EventBus._instance = None
     MasterClock._instance = None
     DataBus._instance = None
+
+
+@pytest.fixture(autouse=True)
+def isolate_ai_ledgers(tmp_path, monkeypatch):
+    """把抽卡账本 / 质量先验库重定向到临时目录，防止测试写入生产真相源。
+
+    背景（2026-09-27 深度求索 DEFECT A）：draw_book 与 quality_prior 默认路径
+    指向 data/*.json 正式文件；测试若直连会把 score=0.5 的假样本灌进真相源，
+    污染 P2 推荐 / quality_prior 路由。此 fixture 用环境变量 + 重置单例双保险，
+    让所有测试自动隔离，无需逐用例改动。
+    """
+    monkeypatch.setenv("DRAW_BOOK_STORE_PATH",
+                       str(tmp_path / "draw_book.json"))
+    monkeypatch.setenv("QUALITY_PRIOR_PATH",
+                       str(tmp_path / "quality_prior.json"))
+    # 重置进程级单例，确保新路径在本用例内生效（前一用例可能已建过单例）
+    try:
+        from app.core.ai import draw_book as _db
+        monkeypatch.setattr(_db, "_STORE", None)
+    except Exception:
+        pass
+    try:
+        from app.core.ai import quality_prior as _qp
+        monkeypatch.setattr(_qp, "_STORE", None)
+    except Exception:
+        pass
+    yield
 
 
 @pytest.fixture

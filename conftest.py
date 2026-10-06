@@ -23,6 +23,21 @@ APP_ROOT = Path(__file__).resolve().parent / "app"
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
+# 把 tempfile 基准目录钉到项目内 .workbuddy/tmp（2026-09-27）：
+# 沙箱拦截系统 Temp 写入 → tempfile.gettempdir() 回退到 cwd（项目根），
+# 每次跑测试都把 pytest-of-*/sg_* 等临时目录漏进仓库根。.workbuddy/ 已在
+# .gitignore（第 171 行），落此处既集中又不会污染 git。放在根 conftest，
+# 对 app/tests 与 tests 两个测试目录同时生效。
+_TMP_BASE = Path(__file__).resolve().parent / ".workbuddy" / "tmp"
+try:
+    _TMP_BASE.mkdir(parents=True, exist_ok=True)
+    tempfile.tempdir = str(_TMP_BASE)
+    os.environ["TMPDIR"] = str(_TMP_BASE)
+    os.environ["TEMP"] = str(_TMP_BASE)
+    os.environ["TMP"] = str(_TMP_BASE)
+except OSError:
+    pass
+
 
 @pytest.fixture(scope="session")
 def qt_app():
