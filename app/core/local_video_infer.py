@@ -32,6 +32,11 @@ LOCAL_MODELS_DIR_CANDIDATES = [
     os.path.join(os.path.expanduser("~"), ".cache", "modelscope"),
     os.path.join(os.path.expanduser("~"), "Downloads", "video_models"),
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "video"),
+    # ★ 2026-10-02 补：**项目自己的模型下载位**。
+    #   `neural/video_gen.py` 的 `pull()` 走 `neural_engine.repo_local_dir()`，
+    #   落盘在 `app/models/cache/<repo 去斜杠>/`。此前这里不含该目录，
+    #   导致「项目自己下载的模型，本模块扫不到」—— 属于两套本地视频实现并存时的典型脱节。
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "cache"),
 ]
 
 MODEL_KEYWORD_MAP: Dict[str, List[str]] = {
@@ -41,6 +46,10 @@ MODEL_KEYWORD_MAP: Dict[str, List[str]] = {
     "ltx": ["ltx", "ltx-video", "lightricks"],
     "mochi": ["mochi", "drmochi"],
     "minimax_h3": ["minimax-h3", "minimaxh3", "mini-max-h3", "hailuo-h3", "hailuo-h3.0", "h3-base"],
+    # ★ 2026-10-02 补 SVD（Stable Video Diffusion，图生视频）。
+    #   起因：`neural/video_gen.py` 只支持 SVD 且已下载，而本模块认不出它 ⇒ 两套实现脱节。
+    #   SVD 是 **i2v（图生视频）**，与上面几族的 t2v 语义不同：**不需要 prompt，但必须有输入图**。
+    "svd": ["svd", "stable-video-diffusion", "stablevideodiffusion", "svd-xt", "img2vid"],
 }
 
 PIPELINE_CLASS_MAP: Dict[str, str] = {
@@ -50,7 +59,11 @@ PIPELINE_CLASS_MAP: Dict[str, str] = {
     "ltx": "LTXVideoPipeline",
     "mochi": "MochiPipeline",
     "minimax_h3": "MiniMaxH3ModularPipeline",
+    "svd": "StableVideoDiffusionPipeline",
 }
+
+# 需要**输入图**（i2v）而非 prompt 的族 —— 校验逻辑据此放行「无 prompt 但有图」。
+I2V_KINDS: Tuple[str, ...] = ("svd",)
 
 
 @dataclass
@@ -106,8 +119,42 @@ def _guess_model_kind(name_or_path: str) -> Optional[str]:
     return None
 
 
+def _has_weights(path: str, max_depth: int = 3) -> bool:
+    """目录里是否**真的有模型权重**（而非只有 repo 元数据的空壳）。
+
+    为什么需要它（2026-10-02 实测踩到）：
+      HF 缓存布局下，一个**只下载失败/只建了索引**的仓库会留下
+      `models--xxx/refs/main` 这种 1KB 空壳。本模块的调用方取 `matches[0].path`
+      加载权重 —— 一旦扫到空壳就会「明明下载了却加载失败」，且报错指向模型不存在，
+      **极难排查**。实测本机同时存在：
+        · `~/.cache/huggingface/hub/models--stabilityai--...`（**1KB 空壳**）
+        · `app/models/cache/stabilityai_...`（**4.2GB 真实权重**）
+      ⇒ 只靠目录名判断会选错，必须在扫描阶段就按「有无权重文件」过滤。
+    """
+    try:
+        if not os.path.isdir(path):
+            return False
+        for root, dirs, files in os.walk(path):
+            depth = root[len(path):].count(os.sep)
+            if depth >= max_depth:
+                dirs[:] = []
+                continue
+            for f in files:
+                if f.endswith((".safetensors", ".bin", ".pth", ".ckpt")):
+                    # 排除 HF 的 blob 索引占位（0 字节）
+                    try:
+                        if os.path.getsize(os.path.join(root, f)) < 1024 * 1024:
+                            continue
+                    except OSError:
+                        continue
+                    return True
+        return False
+    except Exception:
+        return False
+
+
 def _scan_local_models() -> List[LocalModelInfo]:
-    """扫描本地可能存在的开源视频模型目录。"""
+    """扫描本地可能存在的开源视频模型目录（**只收真有权重的**）。"""
     results: List[LocalModelInfo] = []
     seen = set()
     for base in LOCAL_MODELS_DIR_CANDIDATES:
@@ -119,7 +166,9 @@ def _scan_local_models() -> List[LocalModelInfo]:
                 if not os.path.isdir(full):
                     continue
                 kind = _guess_model_kind(entry)
-                if kind and entry not in seen:
+                # ★ 权重存在性过滤：空壳目录（只有 refs/ 元数据）直接跳过，
+                #   否则会覆盖掉真实目录（调用方取 matches[0]）。
+                if kind and entry not in seen and _has_weights(full):
                     seen.add(entry)
                     results.append(LocalModelInfo(kind=kind, name=entry, path=full))
                 subscan = os.path.join(full, "snapshots")
@@ -129,7 +178,7 @@ def _scan_local_models() -> List[LocalModelInfo]:
                         if not os.path.isdir(sfull):
                             continue
                         kind2 = _guess_model_kind(snap)
-                        if kind2 and snap not in seen:
+                        if kind2 and snap not in seen and _has_weights(sfull):
                             seen.add(snap)
                             results.append(LocalModelInfo(kind=kind2, name=snap, path=sfull))
         except Exception:
@@ -630,6 +679,103 @@ def _infer_ltx(
     return _save_video_frames(frames, out_dir, bridge_port)
 
 
+def _load_input_image(src: str):
+    """把 data URL / 本地路径 / inbox URL 读成 PIL.Image（SVD 等 i2v 族用）。
+
+    三态统一收在这里，避免各族各写一份（本项目反模式清单里就有「同一件事两套实现」）。
+    """
+    from PIL import Image
+    import io
+    import base64
+
+    s = (src or "").strip()
+    if not s:
+        return None
+    if s.startswith("data:image/"):
+        b64 = s.split(",", 1)[-1]
+        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    p = s
+    if "/inbox_file/" in s:                     # inbox URL → 映射回本地
+        try:
+            from app.core.canvas_bridge import canvas_inbox_dir
+            p = os.path.join(canvas_inbox_dir(), s.rsplit("/", 1)[-1])
+        except Exception:
+            logger.debug("inbox URL 映射失败", exc_info=True)
+            return None
+    if os.path.isfile(p):
+        return Image.open(p).convert("RGB")
+    return None
+
+
+def _infer_svd(
+    *,
+    prompt: str = "",
+    model_path: str,
+    device: str,
+    vram_gb: int,
+    duration: int = 2,
+    size: str = "1024x576",
+    reference_image: str = "",
+    first_frame: str = "",
+    bridge_port: int = 8765,
+    out_dir: str = "",
+    steps: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Stable Video Diffusion 推理：**图生视频（i2v）**，不是文生视频。
+
+    ⚠️ 与其它族的语义差异（别照抄 t2v 族的写法）：
+      · **不需要 prompt**，但**必须有输入图**（`reference_image` / `first_frame`）；
+      · 默认参数取自 `neural/video_gen.TUNED` 的**本机实测调优**（下方逐项注明依据）。
+
+    实测调优（RTX 4060 Laptop 8GB，2026-10-01/02）：
+      · `decode_chunk_size=1` —— VAE 解码 37.5s→**2.4s**（小了反而快约 6 倍，且更省显存）
+      · **offload 保持开启** —— 实测全程不亏（更快且更省显存），且防帧数升高时 WDDM 分页
+      · `steps=14` —— 唯一的质量/速度旋钮；10 步与 25 步前段画面肉眼无差
+      · `motion_bucket_id=80`（SVD 默认 127 偏大）—— 实测**立绘主体 6 帧全程稳定**，
+        而 127/180 后段崩坏，且**三者耗时相同** ⇒ 纯赚的画质提升
+      · **CFG 必须显式给**（min=1.0/max=3.0）—— 关掉会快 1.85x 但输出报废（噪声糊满）
+    """
+    import torch
+
+    from diffusers import StableVideoDiffusionPipeline
+
+    img_src = (reference_image or first_frame or "").strip()
+    if not img_src:
+        return {
+            "ok": False,
+            "message": "SVD 是**图生视频**，必须提供 reference_image 或 first_frame（不支持纯文生视频）",
+        }
+    pil = _load_input_image(img_src)
+    if pil is None:
+        return {"ok": False, "message": f"输入图无法读取：{img_src[:80]}"}
+
+    dtype = torch.float16
+    pipe = StableVideoDiffusionPipeline.from_pretrained(
+        model_path, torch_dtype=dtype, variant="fp16", use_safetensors=True,
+    )
+    # 实测：offload 全程不亏（更快更省显存），且防大帧数分页 —— 无条件开启
+    try:
+        pipe.enable_model_cpu_offload()
+    except Exception:
+        logger.debug("cpu offload 不可用，直接上卡", exc_info=True)
+        pipe.to(device)
+
+    n_steps = int(steps) if steps is not None else 14
+    n_frames = max(2, int(round(float(duration) * 7)))       # SVD 训练 fps = 7
+    result = pipe(
+        image=pil,
+        num_frames=n_frames,
+        decode_chunk_size=1,                                  # ★ 实测关键项
+        num_inference_steps=n_steps,
+        motion_bucket_id=80,                                  # ★ 实测画质项
+        noise_aug_strength=0.02,
+        min_guidance_scale=1.0,                               # ★ CFG 必须显式给
+        max_guidance_scale=3.0,
+    )
+    frames = result.frames[0] if result.frames else []
+    return _save_video_frames(frames, out_dir, bridge_port)
+
+
 def _infer_mochi(
     *,
     prompt: str,
@@ -679,6 +825,7 @@ _INFER_FUNC_MAP = {
     "ltx": _infer_ltx,
     "mochi": _infer_mochi,
     "minimax_h3": _infer_minimax_h3,
+    "svd": _infer_svd,
 }
 
 
@@ -713,7 +860,10 @@ def generate_video_local(
     Returns:
         {ok, video_path, video_url, model, channel_id, channel_name, message}
     """
-    if not prompt.strip():
+    # ★ i2v 族（如 SVD）**不需要 prompt**，但必须有输入图。
+    #   所以在**有图**的情况下放行空 prompt；各族的「我要什么输入」由各族自己校验
+    #   （它们最清楚，例如 `_infer_svd` 会明确要求 reference_image/first_frame）。
+    if not prompt.strip() and not (reference_image or first_frame):
         return {"ok": False, "message": "提示词为空"}
 
     if not _torch_available():
@@ -786,7 +936,7 @@ def generate_video_local(
         bridge_port=bridge_port,
         out_dir=out_dir,
     )
-    if kind == "cogvideox":
+    if kind == "cogvideox" or kind in I2V_KINDS:
         fn_kwargs["first_frame"] = first_frame
         fn_kwargs["last_frame"] = last_frame
     if steps is not None:

@@ -4,7 +4,6 @@ GPU加速渲染模块
 实现GPU硬件加速渲染，提升渲染性能
 """
 
-import os
 import logging
 import threading
 import time
@@ -175,28 +174,22 @@ class GPUDetector:
     def _detect_intel(self) -> Optional[Dict[str, Any]]:
         """检测Intel GPU"""
         try:
-            import subprocess
-            
-            # 检查Intel GPU
-            result = subprocess.run(
-                ['wmic', 'path', 'win32_VideoController', 'get', 'name'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                gpu_names = [line.strip() for line in result.stdout.split('\n') if 'Intel' in line]
-                if gpu_names:
-                    return {
-                        'gpu_type': GPUType.INTEL,
-                        'name': gpu_names[0],
-                        'memory_mb': 0,  # Intel集成显卡内存通常与系统内存共享
-                        'driver_version': 'Intel',
-                        'cuda_available': False,
-                        'opencl_available': True,
-                        'quicksync_available': True
-                    }
+            # ★ A-14（2026-10-05）：改用统一 WMI 助手（CIM 优先 / wmic 兜底；wmic 在 Win11 已弃用）。
+            #   这里只读显卡名、不参与任何指纹派生 ⇒ 可安全换源。
+            from app.core.win_query import wmi_lines
+
+            names = wmi_lines("Win32_VideoController", "Name")
+            gpu_names = [n for n in names if "Intel" in n]
+            if gpu_names:
+                return {
+                    'gpu_type': GPUType.INTEL,
+                    'name': gpu_names[0],
+                    'memory_mb': 0,  # Intel集成显卡内存通常与系统内存共享
+                    'driver_version': 'Intel',
+                    'cuda_available': False,
+                    'opencl_available': True,
+                    'quicksync_available': True
+                }
             
         except Exception as e:
             logger.debug(f"Intel GPU检测失败: {e}")
