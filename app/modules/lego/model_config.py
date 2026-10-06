@@ -453,6 +453,78 @@ def merge_aigc_into_providers() -> None:
         info["has_aigc"] = bool(caps & {"image", "video", "audio"})
 
 
+# ────────────────────────── 本地模型动态发现 ──────────────────────────
+#
+# 解决的问题
+# ----------
+# PROVIDERS["ollama"]["models"] 一直是**静态空列表**（`[]`），
+# 于是「对话模型」下拉里 Ollama 一个模型都列不出来 ——
+# 用户本机装了 qwen3.5 也**选不到**，只能干看着「Ollama 本地」。
+# 而服务探测（/api/tags）明明是通的。
+#
+# 三条实现纪律
+# ------------
+# ① **绝不在 import 时探测**。`merge_aigc_into_providers()` 是 import 期执行的，
+#    若在这里同步探一次 Ollama（HTTP GET，实测约 2.1s），会把项目刚优化到 ~1s 的
+#    冷启动直接打回 ~3s（见 docs/现行技术文档.md §2d）。
+#    ⇒ 本函数**惰性调用**，只在「真的要看模型列表」时（画布面板打开）才跑。
+# ② **TTL 缓存**：面板可能被反复打开，不能每次都打 HTTP。
+# ③ **失败绝不抛**：Ollama 没装/没起/超时 → 返回空列表，保持原状（静态表不变）。
+
+# ⚠️ 实测本机 `/api/tags` 较慢：`is_available(force)` 约 2.0s，
+#    `list_models(force_refresh=True)` 约 4.1s（2026-09-30 实测，三次稳定复现）。
+#    ⇒ TTL 取 300s 而不是 60s：**已装模型在会话内几乎不变**，
+#      没必要每分钟重打一次 4 秒的 HTTP。需要立刻刷新时用 `force=True`
+#      （剪辑侧的模型卡已有「刷新模型」按钮；这里是画布只读列表）。
+_LOCAL_MODELS_TTL = 300.0       # 秒；5 分钟内复用上次探测结果
+_local_models_state: dict[str, Any] = {"at": 0.0, "models": []}
+
+
+def discover_local_models(force: bool = False,
+                          ttl: float = _LOCAL_MODELS_TTL) -> list[str]:
+    """动态列出本机 Ollama 已安装模型名（带 TTL 缓存，失败返回 []）。
+
+    **惰性**：只有显式调用才会发 HTTP；import 本模块不会触发任何网络。
+    """
+    import time
+    now = time.time()
+    if not force and (now - float(_local_models_state.get("at") or 0.0)) < ttl:
+        return list(_local_models_state.get("models") or [])
+    models: list[str] = []
+    try:
+        from app.modules.lego.ollama_client import ollama_client
+        for m in (ollama_client.list_models() or []):
+            name = str(getattr(m, "name", "") or "").strip()
+            if name and name not in models:
+                models.append(name)
+    except Exception:
+        logger.debug("本地 Ollama 模型探测失败（按无模型处理）", exc_info=True)
+        models = []
+    _local_models_state["at"] = now
+    _local_models_state["models"] = models
+    return list(models)
+
+
+def merge_local_models_into_providers(force: bool = False) -> list[str]:
+    """把**动态发现**的本地模型并入 is_local 的 provider（目前是 ollama）。
+
+    合并策略：**发现到的排在前面**（它们是真实可用的），静态表里已有的保留在后
+    （用于手工补充/别名）。发现为空则**完全不动**静态表 —— 不让「探测失败」
+    把用户原本手写的条目也抹掉。
+    """
+    models = discover_local_models(force=force)
+    if not models:
+        return []
+    for _pid, info in (PROVIDERS or {}).items():
+        if not isinstance(info, dict) or not info.get("is_local"):
+            continue
+        existing = [str(x) for x in (info.get("models") or []) if x]
+        merged = list(models) + [m for m in existing if m not in models]
+        info["models"] = merged
+        info["local_models"] = list(models)      # 供 UI 区分「本机已装」与云端条目
+    return models
+
+
 def provider_model_choices(provider_id: str, provider_info: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """返回 (显示文案, 真实模型名) 列表，AIGC 带能力标签。"""
     info = provider_info or PROVIDERS.get(provider_id) or {}

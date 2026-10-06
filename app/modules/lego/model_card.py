@@ -758,7 +758,7 @@ class ModelCardWidget(QFrame):
         model_names = result.get("model_names") or []
         display_names = result.get("display_names") or []
         if not model_names:
-            self._models_list.addItem(QListWidgetItem("（无模型）请执行: ollama pull qwen2.5:7b"))
+            self._models_list.addItem(QListWidgetItem("（无模型）请执行: ollama pull <模型名>（例如 qwen3）"))
         else:
             for name, display in zip(model_names, display_names):
                 item = QListWidgetItem(f" {display}")
@@ -773,7 +773,7 @@ class ModelCardWidget(QFrame):
             self._models_list.clear()
             if not models:
                 self._models_list.addItem(
-                    QListWidgetItem("（无模型）请执行: ollama pull qwen2.5:7b")
+                    QListWidgetItem("（无模型）请执行: ollama pull <模型名>（例如 qwen3）")
                 )
                 return
             for model in models:
@@ -893,8 +893,10 @@ class ModelCardWidget(QFrame):
             for model in RECOMMENDED_MODELS:
                 model_combo.addItem(f"{model['name']} ({model['size']}) - {model['description']}", model['name'])
         except ImportError as e:
-            logger.warning(f"加载推荐模型列表失败，使用默认列表: {e}")
-            model_combo.addItems(["llama3:8b", "qwen2:7b", "deepseek-coder:6.7b", "phi3:3.8b"])
+            logger.warning(f"加载推荐模型列表失败: {e}")
+            # 不再硬编码具体版本号（原先的 llama3:8b/qwen2:7b 早已过时，
+            # 且推荐一个本机/仓库里不存在的名字比不推荐更糟）。
+            model_combo.addItem("（推荐列表不可用，请手动填模型名，如 qwen3）", "")
         layout.addWidget(model_combo)
         
         hint = QLabel("提示: 大模型文件约4-8GB, 请确保网络稳定且磁盘空间充足")

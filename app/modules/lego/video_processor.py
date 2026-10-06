@@ -10,6 +10,7 @@ import tempfile
 import shutil
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from dataclasses import dataclass
+from app.modules.lego.lut_filter import build_lut_vf
 import logging
 
 logger = logging.getLogger(__name__)
@@ -362,6 +363,17 @@ def map_filter_to_vf(filter_name: str, intensity: float = 0.7,
         parts.append(_scale_numeric_vf(_FILTER_CATEGORY_VF[cat], intensity))
     elif cat:
         logger.warning("未知滤镜分类，已跳过: %s", cat)
+
+    # 3) ★ LUT（3D 查找表）—— 放在**链尾**，与预览端着色器顺序一致
+    #    （gl_filter_widget 片元着色器最后一步：`col = mix(col, applyLut2D(col), u_lut_intensity)`）
+    #
+    #    ⚠️ 修复（2026-10-05，刀 A3 第三项）：此前本函数**完全不处理 `lut` 键** ⇒
+    #    LUT 只在预览生效、导出**静默丢失**（「预览≠导出」—— 最难查的一类 bug）。
+    #    映射逻辑（含 ffmpeg 路径转义的真机校准结论）见 `lut_filter.py`；
+    #    抽出去是因为本文件在规模守卫基线内，40+ 行会破门禁（拆模块，不放宽基线）。
+    lut_vf = build_lut_vf(cp)
+    if lut_vf:
+        parts.append(lut_vf)
 
     return ",".join(parts)
 

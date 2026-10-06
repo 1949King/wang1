@@ -4,9 +4,9 @@ from typing import Optional, Dict, Any, Tuple, List, Callable
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QThread
 from PyQt6.QtGui import QImage
+from app.core.frame_cache import FrameCache
 import threading
 import time
-from collections import OrderedDict
 import gc
 import queue
 
@@ -522,10 +522,16 @@ class PreviewManager(QObject):
         self.preview_window = None
         self.timecode_visible = True
 
-        self.preview_cache = OrderedDict()
-        self.raw_frame_cache = {}
         self.max_cache_size = 300
         self.max_raw_cache_size = 100
+        # ★ A3.5（2026-10-05）：两个缓存换成**有界真 LRU**（`frame_cache.FrameCache`）。
+        #   原因：① 原 `raw_frame_cache` 用 `min(keys())` 淘汰**最小帧号** —— 往回拖动时
+        #   恰好丢掉用户正要去的帧（原注释「min() 淘汰顺序才正确」实际相反），且每次
+        #   插入多一次 O(n) 扫描；② 原 `preview_cache` 命中**不提权** ⇒ 实为 FIFO，
+        #   来回拖动会反复淘汰「刚用过、马上又要用」的帧。FrameCache 与 dict/OrderedDict
+        #   接口兼容（含 `popitem(last=False)`）⇒ **`get_frame_at` 等调用方一行未改**。
+        self.preview_cache = FrameCache(self.max_cache_size)
+        self.raw_frame_cache = FrameCache(self.max_raw_cache_size)
         self.proxy_preview_enabled = True
         self.preview_quality = 'high'
         self.render_mode = RenderMode.SOFTWARE
@@ -652,12 +658,13 @@ class PreviewManager(QObject):
             self._preloader_thread.start()
 
     def _cache_raw_frame(self, frame_idx: int, frame: np.ndarray):
-        """缓存原始帧数据（int 帧号做 key，min() 淘汰顺序才正确）"""
+        """缓存原始帧（int 帧号做 key）。
+
+        ★ A3.5：淘汰交给 `FrameCache`（**真 LRU**，O(1)）。原实现是
+        `min(keys())` 淘汰最小帧号 —— 往回拖动时恰好丢掉用户正要去的帧。
+        """
         with self._lock:
             self.raw_frame_cache[int(frame_idx)] = frame.copy()
-            while len(self.raw_frame_cache) > self.max_raw_cache_size:
-                oldest = min(self.raw_frame_cache.keys())
-                del self.raw_frame_cache[oldest]
 
     def _on_preload_complete(self, count: int):
         logger.debug(f"帧预加载完成: {count} 帧")
@@ -801,6 +808,105 @@ class PreviewManager(QObject):
         # 恢复到帧 0，不污染后续逻辑
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
+    # ── ★ A3.5（2026-10-05）：拖动/seek 后的**有界定窗预载** ──────────────
+    #
+    # 为什么做（实测，不是感觉）：
+    #   · `_verify/bench/bench_preview_cost.py`（长 GOP 30s/720p）：
+    #     顺序扫 3.28ms/帧 vs **反扫 11.02ms/帧（3.36×）**，单次后退 seek 16.13ms
+    #     ⇒ 瓶颈是 cv2 后退 seek，不是缓存策略。
+    #   · 而 `FramePreloaderThread.set_preload_range` **全仓无人调用** ⇒ 预载能力
+    #     一直是死代码（且 `_enable_preloading` 默认 False）。
+    #
+    # 设计（为什么不是"一开了之"）：
+    #   ① **防抖**：拖动中会连续 seek，只在停下 ~200ms 后发一次（否则解码线程被反复打断，
+    #      反而更卡）；② **去重**：与上次请求起点相距不足 1/3 窗宽则跳过；
+    #   ③ **内存有界**：原始帧是未压缩 RGB（1080p ≈ 6.2MB/帧，100 帧就是 620MB！），
+    #      故窗宽按「目标内存预算」自适应，不给无上限预载 —— 这很可能正是
+    #      `_enable_preloading` 被置 False 的原因；④ **懒启动**：首次请求才拉起线程，
+    #      不做常驻后台解码。
+
+    PRELOAD_MEMORY_BUDGET_MB = 96
+
+    def _ensure_preloader(self) -> bool:
+        """按需拉起预载线程。
+
+        为什么不复用 `_use_threaded_reading` 开关：那个开关（`__init__` 里**硬编码 False**）
+        管的是「主读取是否走 FrameReaderThread」这条**更激进的路径**；而预载线程
+        **自带独立的 cv2 句柄**（`FramePreloaderThread.run` 里自己 `VideoCapture`），
+        不依赖主读取线程。原先两道门（`_enable_preloading=False` + `_use_threaded_reading=False`）
+        叠加的结果是：预载能力**从未运行过**（`set_preload_range` 全仓无人调用的根因）。
+        """
+        if self._preloader_thread is not None:
+            return True
+        src = getattr(self, "_video_source", None)
+        if not src or not CV2_AVAILABLE:
+            return False
+        try:
+            self._preloader_thread = FramePreloaderThread(
+                src, self._video_fps, self._cache_raw_frame)
+            self._preloader_thread.preload_complete.connect(self._on_preload_complete)
+            self._preloader_thread.progress.connect(self._on_preload_progress)
+            self._preloader_thread.start()
+            logger.debug("[PreviewManager] 定窗预载线程已按需启动")
+            return True
+        except Exception as e:
+            logger.debug("预载线程启动失败（不影响预览）: %s", e)
+            self._preloader_thread = None
+            return False
+
+    def _preload_window_frames(self) -> int:
+        """按内存预算算窗宽（帧）：不放大、不小于 12 帧、不超过 raw 缓存上限。"""
+        vw = max(1, int(getattr(self, "_video_width", 0) or 1280))
+        vh = max(1, int(getattr(self, "_video_height", 0) or 720))
+        per_frame = vw * vh * 3                      # 未压缩 RGB
+        budget = self.PRELOAD_MEMORY_BUDGET_MB * 1024 * 1024
+        n = int(budget // max(1, per_frame))
+        # 预载线程会在 end 之后再补 10 帧 ⇒ 留 12 帧余量，避免窗口自我淘汰
+        cap = max(12, int(getattr(self, "max_raw_cache_size", 100) or 100) - 12)
+        return max(12, min(n, cap))
+
+    def request_preload_window(self, center_time: float, *, before_s: float = 1.0,
+                               debounce_ms: int = 200) -> None:
+        """在 playhead（``center_time``）附近请求一次**有界**预载；防抖 + 去重 + 懒启动。
+
+        窗口一律**从播放头之前起算、向后解码** —— 因为 H.264 只能正向解码，
+        「反扫」的性能问题只能靠「提前把前面那段解码进缓存」来解决。
+        """
+        if not getattr(self, "_video_source", None) or self._video_fps <= 0:
+            return
+        self._pending_preload_center = float(center_time)
+        timer = getattr(self, "_preload_debounce_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._do_preload_window)
+            self._preload_debounce_timer = timer
+        timer.start(max(50, int(debounce_ms)))
+
+    def _do_preload_window(self) -> None:
+        """防抖到点后真正下发窗口请求（一次最多一个，去重）。"""
+        center = getattr(self, "_pending_preload_center", None)
+        if center is None or not self._ensure_preloader():
+            return
+        fps = float(self._video_fps or 30.0)
+        n = self._preload_window_frames()
+        total = int(self._video_frame_count or 0)
+        if total <= 0:
+            return
+        start = int(center * fps) - int(n * 0.34)     # 播放头略偏窗内前段
+        start = max(0, min(start, total - 1))
+        end = min(total - 1, start + n)
+        last = getattr(self, "_last_preload_start", None)
+        if last is not None and abs(start - last) < max(1, n // 3):
+            return                                     # 与上次窗重叠过多 ⇒ 跳过
+        self._last_preload_start = start
+        try:
+            self._preloader_thread.set_preload_range(start / fps, end / fps)
+            logger.debug("[PreviewManager] 定窗预载请求: 帧 %d..%d（窗宽 %d，中心 %.2fs）",
+                         start, end, end - start, center)
+        except Exception as e:
+            logger.debug("定窗预载请求失败（不影响预览）: %s", e)
+
     def _seek_to(self, time_sec: float):
         frame_idx = int(time_sec * self._video_fps)
         frame_idx = max(0, min(frame_idx, self._video_frame_count - 1))
@@ -811,6 +917,11 @@ class PreviewManager(QObject):
             self._video_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
 
         self.current_time = time_sec
+        # ★ A3.5：seek 后请求定窗预载（防抖 ⇒ 拖动中只发一次，停稳后解码该窗口）
+        try:
+            self.request_preload_window(time_sec)
+        except Exception as e:
+            logger.debug("预载请求异常（不影响 seek）: %s", e)
 
     def _read_frame(self) -> Optional[np.ndarray]:
         """读一帧 RGB。失败返回 None（勿返回占位图，否则 UI 会当成「成功首帧」）。"""

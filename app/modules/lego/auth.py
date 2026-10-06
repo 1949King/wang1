@@ -103,16 +103,16 @@ class DeviceFingerprint:
         ]
         
         try:
-            import subprocess
             if platform.system() == "Windows":
-                result = subprocess.run(
-                    ["wmic", "csproduct", "get", "UUID"],
-                    capture_output=True,
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                if result.returncode == 0:
-                    components.append(result.stdout.strip())
+                # ★ A-14（2026-10-05）：改用统一 WMI 助手（CIM 优先 / wmic 兜底）。
+                #   ⚠️ 这里用的是 **machine_uuid_wmic_shape()** 而不是干净值 —— 因为旧实现取的是
+                #   `wmic stdout.strip()`，即带表头的 `"UUID\n<值>"`。设备指纹参与授权绑定，
+                #   换了形状会让**已绑定设备失效**。故原样复现（详见 win_query 的说明）。
+                from app.core.win_query import machine_uuid_wmic_shape
+
+                shaped = machine_uuid_wmic_shape()
+                if shaped:
+                    components.append(shaped)
         except Exception as e:
             logger.debug(f"获取磁盘序列号失败: {e}")
         

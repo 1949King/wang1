@@ -562,6 +562,9 @@ def build_editor_feature_index(editor) -> FeatureIndex:
     idx = FeatureIndex()
 
     # Tab 索引映射（与 _create_tools_panel 中 addTab 顺序一致）
+    # V4.40.50：Agent 已移出工具栏（升级为最右侧独立竖栏），其后各项顺移一位。
+    # 原先 TAB_EXPORT = 8 其实落在 Agent 身上（既有 bug：功能搜索点「导出」会开 Agent），
+    # 顺移后 8 号位正是「导出」，映射自动变正确。
     TAB_PROPERTY = 0    # 属性
     TAB_COLOR = 1       # 调色
     TAB_EFFECT = 2      # 特效

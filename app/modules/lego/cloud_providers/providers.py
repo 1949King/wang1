@@ -898,6 +898,12 @@ class YiProvider(BaseCloudProvider):
             yield f"错误: {str(e)}"
 
 
+# Ollama 默认模型的**最后兜底**：仅在「探测不到本机已装模型」时使用。
+# 正常路径由 `OllamaProvider.default_model` 动态取本机第一顺位模型。
+# 保留字面量只是为了不发出空 `model` 字段（那会被 Ollama 直接拒）。
+_OLLAMA_FALLBACK_MODEL = "qwen3:4b"
+
+
 class OllamaProvider(BaseCloudProvider):
     """Ollama 本地模型 API"""
 
@@ -909,7 +915,24 @@ class OllamaProvider(BaseCloudProvider):
     @property
     @override
     def default_model(self) -> str:
-        return "qwen2:7b"
+        """**跟随本机实况**取第一顺位已装模型；探测不到才回退字面量。
+
+        ⚠️ 不要写死版本号。原先硬编码 `qwen2:7b` —— 这个模型在本机**根本没装**
+        （实际装的是 qwen3.5），于是任何走「默认模型」的调用都会 404。
+        改为优先用 `discover_local_models()`（带 TTL 缓存，不会每次请求都打 HTTP）。
+
+        字面量仅在「Ollama 探测不到」时兜底；那种情况下连接本身就会失败并给出
+        更明确的错误，所以这里的兜底值只是避免发出空 model 字段。
+        """
+        try:
+            from app.modules.lego.model_config import discover_local_models
+
+            models = discover_local_models()
+            if models:
+                return models[0]
+        except Exception:
+            logger.debug("Ollama 默认模型探测失败，使用字面量兜底", exc_info=True)
+        return _OLLAMA_FALLBACK_MODEL
 
     @override
     def chat(self, messages: list[dict[str, str]], model: str | None = None,
