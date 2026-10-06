@@ -117,3 +117,24 @@
   机位可视化已抽成 `stage3dCamGizmo.ts`（Stage3D.tsx 只留一行接线，基线 4660→4623），
   **视锥真由 fov 推**、标签 mm 与截图元数据同源（`fovToFocalLength` 单一来源）。
   回归锁 `stage3dCamGizmo.test.ts`（15 项）。还原函数**只还原被自己改过的对象** ⇒ 别写成"全置 true"。
+
+## 八、2026-10-07 新增（持久约束）
+
+- **未提交改动已全量固化（仅本机，未 push）**：13 个提交 / 259 文件，工作区 `git status` 归零，
+  HEAD = `95b8e977`（V4.40.56「门禁加固」），起点 `23911b2b`(V4.40.5)。
+  统计未提交项**必须 `git status -uall`** —— 默认视图折叠未跟踪目录（实测 231 vs 257，差 26）。
+- **ruff 门禁 = 逐文件存量棘轮（V4.40.56 起）**：`scripts/ruff_gate.py` +
+  `docs/knowledge/ruff_gate_baseline.json`（167 文件 / 1016 项存量）。语义：**新文件必须 0 违规**、
+  已有文件只减不增、`--update` 抬高基线或为新文件建条目需 `--force`。
+  病根：旧实现「整文件判定」会拿历史债拦正当改动 —— 极端例 = 冻结区 `editor_module.py`
+  有 50 处存量违规 ⇒ **核心文件永不可提交**。**别再退回整文件 check。**
+- **提交必须由原生 bash 发起，不要用 Python 派生 git**：Python 会加载 WorkBuddy 的
+  `sitecustomize` 沙箱 shim 并**传递给子进程**，git 再派生 MSYS2 bash 时报
+  `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-…): 0xC0000022`（bash 起不来，看着像门禁炸了）。
+  **判别法**：`bash .git/hooks/pre-commit` 直接跑若全绿 ⇒ 链路问题，不是门禁问题。
+  正解 = 生成 `.sh`（`git commit -F 消息文件`）再由 bash 执行；顺带绕开多行中文引号转义。
+- **启发式误报的处置原则**：人工定性 + 登记到**受版本控制**处（hook 本身不入库 ⇒ 写 CHANGELOG /
+  现行技术文档）；**不要为了过计数去动代码结构**。例：⑦c `fnOver300` 9→10 ——
+  `stage3dPoseLibrary.ts` 的 `defaultPose()` 本体仅 3 行，其后 541 行 `POSE_PRESETS` 数据表
+  被 `len`（「到下一个函数起点」的近似）算进跨度；移除该文件**实测**回落 9。
+  若「拆模块」会打断既有校验器（`_verify/check_stage3d_pose_dof.mjs` **按源文本解析**该文件），就不硬拆。
