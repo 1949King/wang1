@@ -48,6 +48,15 @@ from app.core.canvas_aigc import (  # noqa: F401
     storyboard_to_camera_plan,
     translate_quality,
     video_storyboard_breakdown,
+    DEFAULT_ASPECT,
+)
+# YuE（乐）全曲生成适配：供 POST /host/yue/plan + /host/yue/generate 经 cs. 访问
+# （2026-09-28 接入画布音乐节点与意图卡片；未配置执行端时诚实失败，不造假音频）
+from app.core.ai.yue_music import (  # noqa: F401
+    probe_engine as yue_probe_engine,
+    plan_song as yue_plan_song,
+    render_song as yue_render_song,
+    transcribe_reference as yue_transcribe_reference,
 )
 from app.core import canvas_gen_jobs as _gen_jobs
 from app.core import project_snapshot as _proj_snap
@@ -860,10 +869,10 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
     _GEN_KINDS = ("image", "video", "audio", "music")
 
     _GEN_PAYLOAD_KEYS: Dict[str, Tuple[str, ...]] = {
-        "image": ("prompt", "model", "channel_id", "size", "reference_image", "strength", "quality"),
+        "image": ("prompt", "model", "channel_id", "size", "reference_image", "strength", "quality", "seed", "aspect"),
         "video": (
             "prompt", "model", "channel_id", "duration", "size",
-            "reference_image", "reference_video", "first_frame", "last_frame", "quality",
+            "reference_image", "reference_video", "first_frame", "last_frame", "quality", "aspect",
             "referenceVideo", "firstFrame", "lastFrame",
         ),
         "audio": ("prompt", "model", "channel_id", "voice"),
@@ -890,7 +899,8 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
 
         def _run_image(report) -> Dict[str, Any]:
             quality = str(kwargs.get("quality") or "standard")
-            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_IMAGE)["size"]
+            aspect = str(kwargs.get("aspect") or "") or DEFAULT_ASPECT
+            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_IMAGE, aspect)["size"]
             report.stage("await_provider", "等待模型返回图像")
             res = generate_image_openai_compatible(
                 prompt=str(kwargs.get("prompt") or ""),
@@ -900,12 +910,14 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
                 reference_image=str(kwargs.get("reference_image") or ""),
                 strength=float(kwargs.get("strength") or 0.65),
                 quality=quality,
+                seed=kwargs.get("seed"),
+                aspect=aspect,
             )
             if not res.get("ok"):
                 self._ng_count()
             # 画质档含人脸修复时后台预载 GFPGAN（真进度，前端按 job_id 轮询）
             try:
-                if isinstance(res, dict) and translate_quality(quality, CAPABILITY_IMAGE).get("face_restore"):
+                if isinstance(res, dict) and translate_quality(quality, CAPABILITY_IMAGE, aspect).get("face_restore"):
                     preload_job_id = start_gfpgan_preload()
                     res["preload_job_id"] = preload_job_id
                     with _MODEL_PRELOAD_LOCK:
@@ -917,8 +929,9 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
 
         def _run_video(report) -> Dict[str, Any]:
             quality = str(kwargs.get("quality") or "standard")
-            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_VIDEO)["size"]
-            quality_params = translate_quality(quality, CAPABILITY_VIDEO)
+            aspect = str(kwargs.get("aspect") or "") or DEFAULT_ASPECT
+            size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_VIDEO, aspect)["size"]
+            quality_params = translate_quality(quality, CAPABILITY_VIDEO, aspect)
 
             postprocess_job_id = ""
             progress_cb = None
@@ -981,6 +994,7 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
                 last_frame=str(kwargs.get("last_frame") or kwargs.get("lastFrame") or ""),
                 bridge_port=int(port),
                 quality=quality,
+                aspect=aspect,
                 postprocess_progress_callback=progress_cb,
                 postprocess_done_callback=done_cb,
             )

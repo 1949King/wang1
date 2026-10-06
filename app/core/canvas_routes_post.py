@@ -234,7 +234,7 @@ class CanvasPostRoutesMixin:
                     logger.debug("increment_ng_count failed", exc_info=True)
             self._json(code, res)
         except Exception as e:
-            logger.exception("[/host/video-generate] 调用异常")
+            logger.exception("[/host/local-video-generate] 调用异常")
             self._json(500, {"ok": False, "message": str(e)})
         return
 
@@ -346,7 +346,8 @@ class CanvasPostRoutesMixin:
             self._json(400, {"ok": False, "message": "invalid json"})
             return
         quality = str(data.get("quality") or "standard")
-        size = str(data.get("size") or "") or cs.translate_quality(quality, cs.CAPABILITY_IMAGE)["size"]
+        aspect = str(data.get("aspect") or "") or cs.DEFAULT_ASPECT
+        size = str(data.get("size") or "") or cs.translate_quality(quality, cs.CAPABILITY_IMAGE, aspect)["size"]
         res = cs.generate_image_openai_compatible(
             prompt=str(data.get("prompt") or ""),
             model=str(data.get("model") or ""),
@@ -355,6 +356,8 @@ class CanvasPostRoutesMixin:
             reference_image=str(data.get("reference_image") or ""),
             strength=float(data.get("strength") or 0.65),
             quality=quality,
+            seed=data.get("seed"),
+            aspect=aspect,
         )
         code = 200 if res.get("ok") else 400
         if not res.get("ok"):
@@ -364,7 +367,7 @@ class CanvasPostRoutesMixin:
                 logger.debug("increment_ng_count failed", exc_info=True)
         # 画质档位含人脸修复时，后台预载 GFPGAN（不阻塞本次生成，前端按 job_id 轮询进度）
         try:
-            if isinstance(res, dict) and cs.translate_quality(quality, cs.CAPABILITY_IMAGE).get("face_restore"):
+            if isinstance(res, dict) and cs.translate_quality(quality, cs.CAPABILITY_IMAGE, aspect).get("face_restore"):
                 preload_job_id = cs.start_gfpgan_preload()
                 res["preload_job_id"] = preload_job_id
                 with cs._MODEL_PRELOAD_LOCK:
@@ -423,10 +426,11 @@ class CanvasPostRoutesMixin:
             return
         port = getattr(self.server, "bridge_port", cs.DEFAULT_PORT)
         quality = str(data.get("quality") or "standard")
-        size = str(data.get("size") or "") or cs.translate_quality(quality, cs.CAPABILITY_VIDEO)["size"]
+        aspect = str(data.get("aspect") or "") or cs.DEFAULT_ASPECT
+        size = str(data.get("size") or "") or cs.translate_quality(quality, cs.CAPABILITY_VIDEO, aspect)["size"]
 
         # 需要后处理（超分/补帧）时创建后台任务，前端按 postprocess_job_id 轮询进度
-        quality_params = cs.translate_quality(quality, cs.CAPABILITY_VIDEO)
+        quality_params = cs.translate_quality(quality, cs.CAPABILITY_VIDEO, aspect)
         postprocess_job_id = ""
         progress_cb = None
         done_cb = None
@@ -482,6 +486,7 @@ class CanvasPostRoutesMixin:
             last_frame=str(data.get("last_frame") or data.get("lastFrame") or ""),
             bridge_port=int(port),
             quality=quality,
+            aspect=aspect,
             postprocess_progress_callback=progress_cb,
             postprocess_done_callback=done_cb,
         )
@@ -607,6 +612,46 @@ class CanvasPostRoutesMixin:
         self._json(code, res)
         return
 
+    @_route_post("/host/repair-image")
+    def _p_host_repair_image(self, parsed, raw: bytes, ctype: str) -> None:
+        """P4 局部重绘（抽卡闭环）：自动定位坏区 → 蒙版 → inpaint → 合成。
+
+        与 /host/inpaint 的分工：后者要求调用方自带蒙版（"我知道哪坏了"）；
+        本端点自己找坏区（"帮我看看哪坏了并修掉"），且**坏区外像素逐字节保持原图**。
+        坏区检测免费；本端点会真花一次云端额度 ⇒ 前端/Agent 需显式调用。
+        """
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        image = str(data.get("image") or data.get("image_data_url") or "")
+        if not image:
+            self._json(400, {"ok": False, "message": "缺少 image（原图 data URL）"})
+            return
+        try:
+            from app.core.ai.inpaint_retry import repair_image
+
+            res = repair_image(
+                image,
+                prompt=str(data.get("prompt") or ""),
+                model=str(data.get("model") or ""),
+                channel_id=str(data.get("channel_id") or ""),
+                size=str(data.get("size") or "768x1344"),
+                grid=int(data.get("grid") or 4),
+                threshold=float(data.get("threshold") or 0.35),
+            )
+        except Exception as exc:
+            logger.debug("repair_image 端点异常: %s", exc)
+            res = {"ok": False, "message": f"局部重绘异常: {exc}"}
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
     @_route_post("/host/generate-audio")
     def _p_host_generate_audio(self, parsed, raw: bytes, ctype: str) -> None:
         cs = _cs()
@@ -665,6 +710,97 @@ class CanvasPostRoutesMixin:
             except Exception:
                 logger.debug("increment_ng_count failed", exc_info=True)
         self._json(code, res)
+        return
+
+    # ── POST /host/yue/plan：YuE 符号规划（歌词+风格 → 可编辑旋律/和弦 ABC 谱） ──
+    # 与 /host/generate-music（Suno 黑盒）的分工：本端点**只出可编辑的谱**，
+    # 是「意图卡片」要展示的东西 —— 用户改完谱再走 /host/yue/generate 渲染。
+    # 执行端未配置时返回 unavailable + 安装指引（不造假谱）。
+    @_route_post("/host/yue/plan")
+    def _p_host_yue_plan(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        res = cs.yue_plan_song(
+            lyrics=str(data.get("lyrics") or ""),
+            style=str(data.get("style") or ""),
+            cot=str(data.get("cot") or "full"),
+            seed=data.get("seed"),
+        )
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
+    # ── POST /host/yue/generate：YuE 渲染整曲（可带用户编辑过的 ABC 谱） ──
+    # abc 非空 = YuE2 的「编辑模式」（按 --abc-file 语义渲染，产出全新录音）。
+    @_route_post("/host/yue/generate")
+    def _p_host_yue_generate(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        port = getattr(self.server, "bridge_port", cs.DEFAULT_PORT)
+        res = cs.yue_render_song(
+            lyrics=str(data.get("lyrics") or ""),
+            style=str(data.get("style") or ""),
+            abc=str(data.get("abc") or ""),
+            cot=str(data.get("cot") or "full"),
+            seed=data.get("seed"),
+            title=str(data.get("title") or ""),
+            bridge_port=int(port),
+        )
+        code = 200 if res.get("ok") else 400
+        if not res.get("ok") and not res.get("unavailable"):
+            try:
+                from app.core.ai_engine import AIEngine; AIEngine().increment_ng_count(1)
+            except Exception:
+                logger.debug("increment_ng_count failed", exc_info=True)
+        self._json(code, res)
+        return
+
+    # ── POST /host/yue/transcribe：翻唱前置（参考曲 → 旋律 ABC 谱） ──
+    # 官方用 SheetSage2 在独立环境转录，输出只留旋律、去和弦（便于伴奏适配新风格）。
+    # 转录质量决定翻唱质量 ⇒ 返回的谱应先给用户审阅，再走 /host/yue/generate。
+    @_route_post("/host/yue/transcribe")
+    def _p_host_yue_transcribe(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        res = cs.yue_transcribe_reference(
+            audio=str(data.get("audio") or data.get("audio_url") or data.get("reference") or ""),
+            melody_only=bool(data.get("melody_only", True)),
+        )
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
+    # ── POST /host/yue/probe：探测 YuE 执行端可用性（UI 据此决定是否显示入口） ──
+    @_route_post("/host/yue/probe")
+    def _p_host_yue_probe(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        self._json(200, {"ok": True, "engine": "yue", **cs.yue_probe_engine()})
         return
 
     # ── POST /host/video-batch：分镜批量生成（V2 多机位编排 + V3 完整时长入口） ──
@@ -1180,4 +1316,309 @@ class CanvasPostRoutesMixin:
             "status": card_status,
             "quality_score": review.get("weighted_score"),
         })
+        return
+
+    # ── POST /host/canvas-run：图执行（默认只出计划；dry_run=false 才真跑） ──
+    # 守北极星「确认后执行」：缺省 dry_run=True ⇒ 只返回执行计划，不消耗额度。
+    # 单节点失败不炸整图（跳过其下游）；诚实失败（绝不伪造产物）。
+    @_route_post("/host/canvas-run")
+    def _p_host_canvas_run(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        graph = body.get("graph")
+        if not isinstance(graph, dict):
+            self._json(400, {"ok": False,
+                             "message": "graph 必须是 {nodes, edges} 对象"})
+            return
+        # dry_run 缺省 True（只出计划）；显式传 false 才真正生成。
+        # bool("false") == True 是坑，故按「显式 false」判定。
+        raw_dry = body.get("dry_run", True)
+        dry_run = False if raw_dry is False or str(raw_dry).strip().lower() in ("false", "0", "no") else True
+        try:
+            from app.core import canvas_workflow_runner as runner
+            res = runner.run_graph(
+                graph,
+                dry_run=dry_run,
+                use_cache=bool(body.get("use_cache", True)),
+                quality=str(body.get("quality") or "standard"),
+                aspect=str(body.get("aspect") or cs.DEFAULT_ASPECT),
+            )
+        except Exception as e:
+            logger.exception("[/host/canvas-run] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+            return
+        logger.info("[/host/canvas-run] dry_run=%s counters=%s",
+                    dry_run, res.get("counters"))
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
+    # ── POST /host/canvas-cache：增量缓存管理（stats / clear） ──
+    @_route_post("/host/canvas-cache")
+    def _p_host_canvas_cache(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            body = {}
+        action = str(body.get("action") or "stats").strip().lower()
+        try:
+            from app.core import canvas_node_cache as cache
+            store = cache.get_store()
+            if action == "clear":
+                cleared = store.clear()
+                self._json(200, {"ok": True, "action": "clear",
+                                 "cleared": cleared, "stats": store.stats()})
+                return
+            self._json(200, {"ok": True, "action": "stats", "stats": store.stats()})
+        except Exception as e:
+            logger.exception("[/host/canvas-cache] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+        return
+
+    # ── POST /host/canvas-enhance：意图级增强（修复人脸/超分/抠像/风格/局部修图） ──
+    # 设计：**能力升格成「意图」，不是「节点」** —— 用户传一个有序列表，
+    # 系统选实现并**如实回报实际用了哪个引擎**（绝不把双三次插值说成 AI 超分）。
+    # ⚠️ 状态：**experimental**（刀 A4 第 4 项，2026-10-05 标注）。
+    #   现状 = 后端可用但**未接任何 UI**、也无前端调用方；保留它是因为意图分级
+    #   （repair/upscale/matting/style/inpaint）的设计有价值，将来做"一键增强"时是现成地基。
+    #   **明确不承诺**：不保证参数/返回结构稳定，不保证引擎可用性；**调用方需自行兜底**。
+    #   不要把它当稳定端点接进新功能，除非先把它从 experimental 毕业（补 UI + 前端调用 + 测试）。
+    @_route_post("/host/canvas-enhance")
+    def _p_host_canvas_enhance(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        image = str(body.get("image") or body.get("image_data_url") or "")
+        if not image:
+            self._json(400, {"ok": False, "message": "缺少 image（需 data URL）"})
+            return
+        intents = body.get("intents")
+        if isinstance(intents, str):
+            intents = [intents]
+        if not isinstance(intents, list) or not intents:
+            self._json(400, {"ok": False, "message": "intents 必须是非空列表"})
+            return
+        try:
+            from app.core import canvas_enhance as enhance
+            res = enhance.apply_intents(
+                image,
+                [str(i) for i in intents],
+                quality=str(body.get("quality") or "standard"),
+                params=body.get("params") if isinstance(body.get("params"), dict) else {},
+            )
+        except Exception as e:
+            logger.exception("[/host/canvas-enhance] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+            return
+        logger.info("[/host/canvas-enhance] applied=%s skipped=%s",
+                    [a.get("intent") for a in res.get("applied", [])],
+                    [s.get("intent") for s in res.get("skipped", [])])
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
+    # ── POST /host/local-video-generate：**本地**视频生成（SVD 图生视频）────
+    # ⚠️ 路径刻意带 local：既有 `/host/video-generate` 是**云端**渠道那条，
+    #    两者语义不同（云 AIGC 渠道 vs 本机 diffusers 模型），不可混用同一路径。
+    # 设计：**走项目原生链路**（neural_engine + models/cache），不经 ComfyUI。
+    # 三个 action：models（列注册表，只读）· pull（下载模型）· generate（生成）。
+    # 纪律：**不自动下载** —— generate 面对未下载的模型必须如实报错，绝不悄悄开拉几 GB。
+    @_route_post("/host/local-video-generate")
+    def _p_host_local_video_generate(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+
+        action = str(body.get("action") or "generate").strip().lower()
+        try:
+            from app.core.neural import video_gen as vg
+        except Exception as e:
+            self._json(500, {"ok": False, "message": f"视频模块加载失败: {e}"})
+            return
+
+        model_id = str(body.get("model_id") or "svd-xt-i2v").strip()
+
+        # ── models：只读列出可选模型（含实测体积/显存/内存需求）──
+        if action == "models":
+            self._json(200, {
+                "ok": True,
+                "models": vg.available_models(),
+                "available": vg.VideoGenEngine.is_available(),
+                "unavailable_reason": vg.VideoGenEngine.unavailable_reason(),
+                "downloaded": [m["id"] for m in vg.available_models()
+                               if vg.VideoGenEngine.is_downloaded(m["id"])],
+            })
+            return
+
+        # ── pull：下载模型（长耗时；前端应轮询或接受长请求）──
+        if action == "pull":
+            res = vg.get_video_engine().pull(model_id)
+            logger.info("[/host/local-video-generate] pull %s ok=%s", model_id, res.get("ok"))
+            self._json(200 if res.get("ok") else 400, res)
+            return
+
+        # ── generate：生成视频 ──
+        image_path = str(body.get("image_path") or "").strip()
+        image_data = str(body.get("image") or "").strip()
+        if not image_path and image_data:
+            # 画布传的是 data URL → 落成临时输入图（保持 generate() 单入口）
+            image_path = vg.write_data_url(
+                image_data, os.path.join("短剧AI剪辑输出", "_video_input"),
+                name_hint="canvas") or ""
+            if not image_path:
+                self._json(400, {"ok": False, "message": "image（data URL）解析失败"})
+                return
+        if not image_path:
+            self._json(400, {"ok": False,
+                             "message": "需要 image_path 或 image(data URL)（SVD 是图生视频）"})
+            return
+        try:
+            res = vg.get_video_engine().generate(
+                model_id,
+                prompt=str(body.get("prompt") or ""),
+                image_path=image_path,
+                seconds=float(body.get("seconds") or 1.5),
+                fps=int(body.get("fps") or 7),
+                seed=int(body.get("seed") or 0),
+                out_path=str(body.get("out_path") or ""),
+            )
+        except Exception as e:
+            logger.exception("[/host/local-video-generate] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+            return
+        logger.info("[/host/local-video-generate] generate %s ok=%s", model_id, res.get("ok"))
+        self._json(200 if res.get("ok") else 400, res)
+        return
+
+    # ── POST /host/local-image-generate：**本地**图像生成（SD1.5/SDXL 双栈）────
+    # 刀 A1（2026-10-04）：给 V4.40.26/27/28 落地的两个图像引擎**通生产电** ——
+    # 此前它们只有 bench 与测试在调（生产调用方为 0）。
+    # 与 /host/generate-image 的语义分界（刻意不同路径，同 local-video 的约定）：
+    #   generate-image       = **云端**模型广场渠道（付费，seed 贯通）
+    #   local-image-generate = **本机**扩散引擎（零调用费，主备双栈，不自动下载）
+    # 引擎分派：execution_decider.resolve_local_image_engine()（主备裁定的**真执行**，
+    # R9 降级可见）；body 可显式 engine="diffsynth"/"builtin" 覆盖。
+    # 三个 action：models（列注册表，只读）· pull（下载模型）· generate（生成）。
+    @_route_post("/host/local-image-generate")
+    def _p_host_local_image_generate(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+
+        action = str(body.get("action") or "generate").strip().lower()
+        try:
+            from app.core.ai.execution_decider import resolve_local_image_engine
+            from app.core.neural import diffusers_image as dfe
+            from app.core.neural import diffsynth_image as dse
+        except Exception as e:
+            self._json(500, {"ok": False, "message": f"图像模块加载失败: {e}"})
+            return
+
+        model_id = str(body.get("model_id") or "sd15-t2i").strip()
+
+        # ── models：只读列出双栈可选模型（含体积/显存/内存需求与已下载状态）──
+        if action == "models":
+            self._json(200, {
+                "ok": True,
+                "engines": [
+                    {"id": "diffsynth", "role": "主选",
+                     "available": dse.DiffsynthImageEngine.is_available(),
+                     "unavailable_reason": dse.DiffsynthImageEngine.unavailable_reason(),
+                     "models": dse.available_models()},
+                    {"id": "builtin", "role": "备选/自研",
+                     "available": dfe.DiffusersImageEngine.is_available(),
+                     "unavailable_reason": dfe.DiffusersImageEngine.unavailable_reason(),
+                     "models": dfe.available_models()},
+                ],
+                # 权重双栈共享 ⇒ 任一侧已下载即两侧可用（以自研侧严格校验为准，
+                # 它连 original_config/组件 config 一起验）
+                "downloaded": [m["id"] for m in dfe.available_models()
+                               if dfe.DiffusersImageEngine.is_downloaded(m["id"])],
+            })
+            return
+
+        # ── 引擎分派（pull/generate 共用）：主备裁定的**真执行**入口 ──
+        sel = resolve_local_image_engine(prefer=str(body.get("engine") or ""))
+        if not sel.get("ok"):
+            self._json(400, {"ok": False, "engine": sel.get("engine"),
+                             "reasons": sel.get("reasons"),
+                             "message": sel.get("message") or "本地图像引擎不可用"})
+            return
+        eng = sel["backend"]
+
+        # ── pull：下载模型（长耗时；权重双栈共享 ⇒ 拉一次两侧皆可用）──
+        if action == "pull":
+            res = eng.pull(model_id)
+            res["engine"] = sel["engine"]
+            logger.info("[/host/local-image-generate] pull %s engine=%s ok=%s",
+                        model_id, sel["engine"], res.get("ok"))
+            self._json(200 if res.get("ok") else 400, res)
+            return
+
+        # ── generate：生成图像（t2i；给 image_path 则 i2i）──
+        image_path = str(body.get("image_path") or "").strip()
+        image_data = str(body.get("image") or "").strip()
+        if not image_path and image_data:
+            # 画布传的是 data URL → 落成临时输入图（与 local-video 同一约定）
+            from app.core.neural.video_gen import write_data_url
+            image_path = write_data_url(
+                image_data, os.path.join("短剧AI剪辑输出", "_image_input"),
+                name_hint="canvas") or ""
+            if not image_path:
+                self._json(400, {"ok": False, "message": "image（data URL）解析失败"})
+                return
+        try:
+            res = eng.generate(
+                model_id,
+                prompt=str(body.get("prompt") or ""),
+                negative_prompt=str(body.get("negative_prompt") or ""),
+                image_path=image_path,
+                width=int(body.get("width") or 0),
+                height=int(body.get("height") or 0),
+                seed=int(body.get("seed") or 0),
+                steps=int(body.get("steps") or 0),
+                cfg=float(body.get("cfg") or 0.0),
+                out_path=str(body.get("out_path") or ""),
+            )
+        except Exception as e:
+            logger.exception("[/host/local-image-generate] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+            return
+        # R9：主备降级必须可见 —— 引擎选择与理由随响应下发
+        res["engine"] = sel["engine"]
+        res["engine_is_fallback"] = sel.get("is_fallback", False)
+        res["engine_reasons"] = sel.get("reasons", [])
+        logger.info("[/host/local-image-generate] generate %s engine=%s ok=%s",
+                    model_id, sel["engine"], res.get("ok"))
+        self._json(200 if res.get("ok") else 400, res)
         return

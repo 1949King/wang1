@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import parse_qs
 
-from app.core.canvas_route_registry import _route_get
+from app.core.canvas_route_registry import _route_get, _route_post
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +616,64 @@ class CanvasGetRoutesMixin:
         })
         return
 
+    # ── GET /host/agent-policy：把 Agent 工具策略**派生化下发**（★ 刀 A4 第 2 项）──
+    #
+    # 为什么必须有这个端点：前端 `agentPolicy.ts` 曾**硬编码一份 CANVAS 映射**
+    # （20+ 条 effect/paid），与后端 `agent_action_registry._CANVAS_ACTION_ROWS`
+    # 构成**两个真源** —— 后端加一个工具，前端不知道 ⇒ 落到默认分支，策略静默错判
+    # （轻则多问一次，重则少问一次）。项目纪律是「派生值一律后端下发，前端不要自己算」。
+    #
+    # 数据全部来自**单一事实来源** `agent_action_registry`，本端点**不重复定义任何映射**；
+    # 另附 `table_hash` 供前端/测试比对，便于发现两边版本不一致。
+    @_route_get("/host/agent-policy")
+    def _route_host_agent_policy(self, parsed=None):
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            from app.core import agent_action_registry as reg
+
+            tools = {}
+            for action, danger, effect, desc in reg._CANVAS_ACTION_ROWS:
+                tools[action] = {
+                    "effect": effect,
+                    "paid": effect == "media_write",
+                    "danger": danger,
+                    "desc": desc,
+                }
+            import hashlib
+            import json as _json
+
+            blob = _json.dumps(tools, ensure_ascii=False, sort_keys=True)
+            self._json(200, {
+                "ok": True,
+                "modes": ["plan", "collaborative", "autonomous"],
+                "tools": tools,
+                "write_effects": ["canvas_write", "file_write", "media_write",
+                                  "memory_write"],
+                "dangerous": sorted(reg._CANVAS_DANGEROUS_ACTIONS),
+                "table_hash": hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16],
+                # 模式语义（后端为准，前端只做展示与兜底）：
+                "mode_rules": {
+                    "plan": "只读；任何写/生成一律 deny",
+                    "collaborative": "写/生成需用户确认（paid 的必须确认）",
+                    "autonomous": "自动放行（dangerous 仍受 tool 白名单约束）",
+                },
+            })
+        except Exception as e:
+            logger.exception("[agent-policy] 下发失败")
+            self._json(500, {"ok": False, "message": f"策略下发失败: {e}"})
+        return
+
+
     # ── GET/POST /host/model-preload：本地模型（GFPGAN）后台预载进度轮询 / 触发 ──
+    # ★ A4（2026-10-05）修方法错配：前端 `bridge.ts::startModelPreload()` 用的是 **POST**，
+    #   而这里**只注册了 GET** ⇒ 请求根本到不了本 handler（handler 里 `self.command == "POST"`
+    #   那段分支成了**不可达代码**，前端拿到 404）。两个装饰器是两个独立注册表（可叠加），
+    #   故直接把同一 handler 同时登记到 GET（轮询）/POST（触发）⇒ 与 handler 内的分支一致。
+    #   守卫已同步升级为按 **(method, path) 二元组** 比对，同类错配以后会被拦下。
+    @_route_post("/host/model-preload")
     @_route_get("/host/model-preload")
     def _route_host_model_preload(self, parsed=None):
         cs = _cs()
@@ -647,4 +704,24 @@ class CanvasGetRoutesMixin:
             "ready": job.get("ready"),
             "updated_at": job.get("updated_at"),
         })
+        return
+
+    # ── GET /host/enhance-intents：意图目录（供 UI 渲染选择器，不加载模型） ──
+    # 只暴露「意图」（修复人脸/超分/抠像…），**不暴露模型名** —— 这是与 ComfyUI 的分歧点。
+    @_route_get("/host/enhance-intents")
+    def _route_host_enhance_intents(self, parsed=None):
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            from app.core import canvas_enhance as enhance
+            self._json(200, {
+                "ok": True,
+                "intents": enhance.available_intents(),
+                "quality_tiers": list(enhance.QUALITY_TIERS),
+            })
+        except Exception as e:
+            logger.exception("[/host/enhance-intents] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
         return

@@ -36,6 +36,10 @@ except ImportError:  # 兼容扁平导入（scripts/ 直跑）
         def _open_url_cancellable(req: Any, timeout: float, **kw: Any) -> Any:
             return _urllib_request.urlopen(req, timeout=timeout, **kw)
 
+# 抽卡闭环接线层（P0a 种子归一化 + P1 通电）住在 app/core/ai/draw_ledger.py：
+# 本文件已顶到规模守卫容差上限，故不在此处留扁平导入兜底（生成入口只经
+# canvas 桥在 app 包内调用，无扁平运行场景）。
+
 # 与 canvas_bridge.DEFAULT_PORT 保持一致（stage3d-core 冻结：端口 18765 不得更改）
 DEFAULT_PORT = 18765
 
@@ -186,7 +190,7 @@ class LocalVoiceBackend(LocalGenerationBackend):
             from app.core.voice_generator import VoiceGenerator
         except ImportError:
             try:
-                from core.voice_generator import VoiceGenerator  # type: ignore
+                from core.voice_generator import VoiceGenerator  # type: ignore  # noqa: F401 可用性探测（导入即判定）
             except ImportError:
                 return False
         return True
@@ -256,32 +260,25 @@ QUALITY_PRESET: Dict[str, Dict[str, Any]] = {
 # 语义运动幅度 → 强度（0-100，镜像 types.ts MOTION_LEVELS 的 value）
 MOTION_PRESET: Dict[str, int] = {"low": 20, "medium": 55, "high": 90}
 
-# 语义画质档位 → 默认分辨率（provider 无关，所有图片/视频生成 API 通用）
-_QUALITY_SIZE_IMAGE: Dict[str, str] = {
-    "draft": "1024x576",
-    "standard": "1024x576",
-    "fine": "1280x720",
-    "cinema": "1920x1080",
-}
-_QUALITY_SIZE_VIDEO: Dict[str, str] = {
-    "draft": "960x540",
-    "standard": "1280x720",
-    "fine": "1280x720",
-    "cinema": "1920x1080",
-}
+# 语义画质档位 → 默认分辨率：画幅维度（aspect）表已外置到 app/core/ai/canvas_aspect.py
+# （2026-09-27 V4.40.10：本文件顶到规模守卫容差，数据表独立成模块；缺省 portrait 竖屏短剧）
+from app.core.ai.canvas_aspect import DEFAULT_ASPECT, resolve
 
 
-def translate_quality(quality: str, capability: str = CAPABILITY_IMAGE) -> Dict[str, Any]:
+def translate_quality(quality: str, capability: str = CAPABILITY_IMAGE,
+                      aspect: str = DEFAULT_ASPECT) -> Dict[str, Any]:
     """把语义画质档位翻译成该能力下的「通用实现层参数」。
 
     返回：
-      - size：该档位默认分辨率（provider 无关）
+      - size：该档位 + 该画幅下的默认分辨率（provider 无关）
       - steps/upscale/face_restore/frame_interpolate：语义契约字段，供支持的后端选用。
-    未知档位退回 standard，保证不抛错、不越级降低质量。"""
+    未知档位退回 standard、未知画幅退回 DEFAULT_ASPECT（竖屏），
+    保证不抛错、不越级降低质量。"""
     tier = quality if quality in QUALITY_PRESET else "standard"
-    size_map = _QUALITY_SIZE_VIDEO if capability == CAPABILITY_VIDEO else _QUALITY_SIZE_IMAGE
     translated = dict(QUALITY_PRESET[tier])
-    translated["size"] = size_map[tier]
+    size, a = resolve(tier, capability == CAPABILITY_VIDEO, aspect or DEFAULT_ASPECT)
+    translated["size"] = size
+    translated["aspect"] = a
     return translated
 
 
@@ -603,28 +600,37 @@ def generate_image_openai_compatible(
     *,
     prompt: str,
     model: str = "",
-    size: str = "1024x576",
+    size: str = "",
     channel_id: str = "",
     reference_image: str = "",
     strength: float = 0.65,
     quality: str = "standard",
+    seed: Any = None,
+    aspect: str = DEFAULT_ASPECT,
 ) -> Dict[str, Any]:
     """用模型广场同步的 AIGC 渠道调用 OpenAI-compatible ``/images/generations``。
 
     供自研导演台「生成选中节点」走宿主代理（避免浏览器 CORS）。
     若提供 ``reference_image``（data URL / b64），优先尝试图生图；失败则降级文生图。
+
+    ``seed``（抽卡闭环 P0a）：显式传入 → 透传渠道；缺省 → 自动生成随机种子。
+    返回恒带 ``seed`` + ``seed_sent``（False=渠道未透传，不可复现，账本勿记 best_seed）。
+    发送策略：硅基恒发（含自动种子）；其他渠道仅显式时发（防严格校验 400）。
+
+    ``size`` 缺省（空）时由 ``quality`` + ``aspect`` 推导；``aspect`` 缺省竖屏短剧。
     """
     import base64
     import urllib.error
     import urllib.request
 
+    _t0 = time.time()
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "message": "提示词为空"}
 
     # 语义画质档位 → 实现层参数（size 作为 provider 无关兜底；steps 供支持的后端选用）
-    quality_params = translate_quality(quality, CAPABILITY_IMAGE)
-    size = size or (quality_params.get("size") or "1024x576")
+    quality_params = translate_quality(quality, CAPABILITY_IMAGE, aspect)
+    size = size or (quality_params.get("size") or "768x1344")
 
     patch = build_host_ai_config_patch()
     channels = list(patch.get("channels") or [])
@@ -666,6 +672,12 @@ def generate_image_openai_compatible(
     base = str(ch.get("baseUrl") or "").rstrip("/")
     if not base:
         return {"ok": False, "message": "渠道缺少 baseUrl"}
+
+    # 种子贯通（P0a）：硅基确认支持 seed → 恒发；其他渠道仅显式传入时发。
+    from app.core.ai.draw_ledger import normalize_seed as _normalize_seed
+
+    seed_used, seed_explicit = _normalize_seed(seed)
+    seed_sent = ("siliconflow" in base.lower()) or seed_explicit
 
     def _post(body: Dict[str, Any], endpoint: str = "/images/generations") -> Dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
@@ -765,15 +777,17 @@ def generate_image_openai_compatible(
             "image": f"data:{mime};base64,{ref_b64}",
             "strength": strength_clamped,
         }
+        if seed_sent: img2_body["seed"] = seed_used  # P0a 种子贯通
         if "siliconflow" in base.lower():
-            img2_body["image_size"] = size or "1024x576"
+            img2_body["image_size"] = size or "768x1344"
             img2_body["num_inference_steps"] = int(quality_params.get("steps") or 22)
         else:
-            img2_body["size"] = size or "1024x576"
+            img2_body["size"] = size or "768x1344"
         r2 = _post(img2_body)
         if r2.get("ok"):
             parsed = _parse_payload(r2.get("payload"), "img2img")
             if parsed.get("ok"):
+                parsed.update(seed=seed_used, seed_sent=seed_sent)  # P0a 回显
                 used_img2img = True
                 return parsed
             img2img_err = str(parsed.get("message") or "img2img 解析失败")
@@ -784,11 +798,12 @@ def generate_image_openai_compatible(
         "model": model,
         "prompt": prompt,
         "n": 1,
-        "size": size or "1024x576",
+        "size": size or "768x1344",
         "response_format": "b64_json",
     }
+    if seed_sent: body["seed"] = seed_used  # P0a 种子贯通
     if "siliconflow" in base.lower():
-        body["image_size"] = size or "1024x576"
+        body["image_size"] = size or "768x1344"
         body["num_inference_steps"] = int(quality_params.get("steps") or 22)
         body.pop("size", None)
 
@@ -805,6 +820,8 @@ def generate_image_openai_compatible(
             "fallback_placeholder": True,
         }
     parsed = _parse_payload(r.get("payload"), "txt2img")
+    if parsed.get("ok"):
+        parsed.update(seed=seed_used, seed_sent=seed_sent)  # P0a 回显
     if img2img_err and parsed.get("ok"):
         parsed["message"] = (
             f"{parsed.get('message')}；首帧 img2img 不可用已降级文生图（{img2img_err[:120]}）"
@@ -826,6 +843,15 @@ def generate_image_openai_compatible(
                 parsed["postprocessed"] = True
         except Exception as exc:
             logger.debug(f"生图后处理跳过: {exc}")
+
+    # P1 通电：评代理分（最终像素）→ 账本+代理桶+回写字段；纯记录、异常不阻断
+    if parsed.get("ok"):
+        from app.core.ai.draw_ledger import feed_draw_ledger
+
+        feed_draw_ledger(parsed, prompt=prompt, model=model, size=size,
+                         channel_id=str(ch.get("id") or ""), seed=seed_used,
+                         seed_sent=seed_sent,
+                         elapsed_ms=(time.time() - _t0) * 1000.0)
     return parsed
 
 
@@ -836,7 +862,7 @@ def inpaint_via_host(
     mask: str,
     model: str = "",
     channel_id: str = "",
-    size: str = "1024x576",
+    size: str = "768x1344",
 ) -> Dict[str, Any]:
     """局部重绘：优先 OpenAI-compatible ``/images/edits``；否则用 mask 提示 + img2img。
 
@@ -904,7 +930,7 @@ def inpaint_via_host(
         _add("model", model.encode("utf-8"))
         _add("prompt", prompt.encode("utf-8"))
         _add("n", b"1")
-        _add("size", (size or "1024x576").encode("utf-8"))
+        _add("size", (size or "768x1344").encode("utf-8"))
         _add("response_format", b"b64_json")
         _add("image", base64.b64decode(b64_i), "image.png", mime_i or "image/png")
         _add("mask", base64.b64decode(b64_m), "mask.png", mime_m or "image/png")
@@ -1231,7 +1257,7 @@ def _normalize_reference_video(
         return {"ok": True, "url": f"http://127.0.0.1:{int(bridge_port)}/inbox_file/{name}", "path": path}
 
     # 形态 2：画布 inbox URL（upload-asset 上传后的标准引用）→ 校验后透传
-    if value.startswith("http://") or value.startswith("https://"):
+    if value.startswith(("http://", "https://")):
         name = value.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
         path = os.path.join(inbox, name)
         if os.path.isfile(path):
@@ -1305,13 +1331,14 @@ def generate_video_via_host(
     model: str = "",
     channel_id: str = "",
     duration: float = 5.0,
-    size: str = "1280x720",
+    size: str = "",
     reference_image: str = "",
     reference_video: str = "",
     first_frame: str = "",
     last_frame: str = "",
     bridge_port: int = DEFAULT_PORT,
     quality: str = "standard",
+    aspect: str = DEFAULT_ASPECT,
     postprocess_progress_callback: Optional[Callable[[int, str], None]] = None,
     postprocess_done_callback: Optional[Callable[[str, str], None]] = None,
 ) -> Dict[str, Any]:
@@ -1333,8 +1360,8 @@ def generate_video_via_host(
         return {"ok": False, "message": "提示词为空"}
 
     # 语义画质档位 → 实现层参数（size 作为 provider 无关兜底；steps 供本地/支持的后端选用）
-    quality_params = translate_quality(quality, CAPABILITY_VIDEO)
-    size = size or (quality_params.get("size") or "1280x720")
+    quality_params = translate_quality(quality, CAPABILITY_VIDEO, aspect)
+    size = size or (quality_params.get("size") or "720x1280")
 
     def _apply_local_postprocess(result: Dict[str, Any]) -> Dict[str, Any]:
         """对已落盘的本地视频按画质档位做补帧/超分；后台线程执行，立即返回原始结果。"""
@@ -1409,7 +1436,20 @@ def generate_video_via_host(
         logger.info("[motion-ref] 参考视频已挂载 %s，走 %s / %s 生成", ref_url, channel_id, model)
 
     # ── 本地 GPU 推理 fallback：channel_id 以 "local/" 开头强制本地 ──
+    # 2026-10-02：改走 **L1 决策出口** `decide_execution()`。
+    # 行为与收敛前一致（同样是 resolve 本地后端），
+    # 差别是「选路」从此有了**单一出口 + 可解释的 reasons** ——
+    # 后续把预算/价格/渠道能力等治理切片挂进来时，只需改那一处。
     if channel_id and channel_id.startswith("local/"):
+        # ★ 惰性导入（不可提到模块级）：execution_decider 模块级 import 本模块，互导会成环。
+        from app.core.ai.execution_decider import decide_execution
+
+        _dec = decide_execution(capability=CAPABILITY_VIDEO, channel_id=channel_id,
+                                model=model, quality=quality, allow_local=True)
+        if not _dec.get("ok"):
+            return {"ok": False, "message": _dec.get("message") or "本地执行不可用"}
+        logger.info("[generate-video] L1 决策=%s reasons=%s",
+                    _dec.get("channel_id"), _dec.get("reasons"))
         local_backends = local_generation_registry.resolve(CAPABILITY_VIDEO)
         if not local_backends:
             return {
@@ -1429,23 +1469,14 @@ def generate_video_via_host(
             steps=quality_params.get("steps"),
         ))
 
-    patch = build_host_ai_config_patch()
-    channels = list(patch.get("channels") or [])
-    defaults = dict(patch.get("defaults") or {})
-
-    ch = None
-    if channel_id:
-        ch = next((c for c in channels if c.get("id") == channel_id), None)
+    # ── 云端渠道解析：收敛到 `_resolve_aigc_channel`（2026-10-02 消除此处内联重复）──
+    # 收敛前：本段把 `_resolve_aigc_channel` 的逻辑**内联重写了一遍**
+    #         （渠道查找 / shiguang-aigc 回退 / 按能力挑渠道，逐行复制）——
+    #         属项目反模式「同一件事两套实现」，改一处必漏另一处。
+    # 收敛后：只调既有函数；「渠道内挑首个可用模型」这一步也一并归位到该函数的下游。
+    ch, _auto_model, patch2 = _resolve_aigc_channel(
+        channel_id=channel_id, capability=CAPABILITY_VIDEO, default_model_key="videoModel")
     if ch is None:
-        ch = next((c for c in channels if c.get("id") == "shiguang-aigc"), None)
-    if ch is None:
-        for c in channels:
-            if not (c.get("apiKey") or "").strip():
-                continue
-            if any((m.get("capability") == "video") for m in (c.get("models") or [])):
-                ch = c
-                break
-    if ch is None or not (ch.get("apiKey") or "").strip():
         return {
             "ok": False,
             "message": (
@@ -1455,14 +1486,12 @@ def generate_video_via_host(
         }
 
     if not model:
-        raw = str(defaults.get("videoModel") or "")
-        if "::" in raw:
-            model = raw.split("::", 1)[-1]
-        if not model:
-            for m in ch.get("models") or []:
-                if m.get("capability") == "video":
-                    model = str(m.get("name") or "")
-                    break
+        model = _auto_model
+    if not model:
+        for m in ch.get("models") or []:
+            if m.get("capability") == "video":
+                model = str(m.get("name") or "")
+                break
     if not model:
         return {"ok": False, "message": "渠道内没有生视频模型"}
 
@@ -1560,7 +1589,7 @@ def generate_video_via_host(
                         f"data:{ml or 'image/png'};base64,{bl64}",
                     ],
                     "duration": int(max(5, min(15, duration))),
-                    "size": size or "1920x1080",
+                    "size": size or "1080x1920",
                     "fps": 30,
                     "quality": "quality" if quality in ("fine", "cinema") else "speed",
                     "with_audio": False,
@@ -1996,7 +2025,6 @@ def generate_video_via_host(
         ]
         deadline = time.time() + 240
         while time.time() < deadline:
-            last_err = ""
             for pf in poll_endpoints:
                 try:
                     st = _json_req_retryable("GET", base + pf(task_id), None, timeout=30)
@@ -2017,7 +2045,8 @@ def generate_video_via_host(
                     if status in ("failed", "error", "canceled", "cancelled"):
                         return {"ok": False, "message": f"通用轮询检测到失败: {status}"}
                 except Exception as e:
-                    last_err = str(e)
+                    # 轮询探测异常属网络/资源路径：记 debug 留痕（不静默），继续换下一个端点
+                    logger.debug("通用轮询探测异常（换下一端点）: %s", e, exc_info=True)
                     continue
             time.sleep(2.5)
         return None
