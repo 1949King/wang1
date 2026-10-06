@@ -4,6 +4,9 @@
 用法：
     python _verify/run_all_checks.py
 
+跑哪个解释器：**自动优先项目 venv（.venv312）**，见 _python() 注释——
+用系统 Python 跑会因缺 requirements.txt 里的依赖（如 pypinyin）误报失败。
+
 说明：沙箱下 pytest 启动链会触发硬件探测被拦截，故本项目的校验脚本都是
 「自包含可执行」的（直接 python 跑，不依赖 pytest）。
 """
@@ -17,6 +20,36 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# 把子进程的临时目录钉到项目内 .workbuddy/tmp（2026-09-27）：
+# 沙箱拦截系统 Temp 写入 → tempfile 回退到 cwd（项目根），导致校验脚本把
+# sg_*/cover_*/pip-* 等临时目录漏进仓库根。显式传 TMPDIR/TEMP/TMP 给子进程。
+# .workbuddy/ 已在 .gitignore，落此处不会污染 git。
+_TMP_BASE = os.path.join(ROOT, ".workbuddy", "tmp")
+try:
+    os.makedirs(_TMP_BASE, exist_ok=True)
+except OSError:
+    pass
+_CHILD_ENV = dict(os.environ, TMPDIR=_TMP_BASE, TEMP=_TMP_BASE, TMP=_TMP_BASE)
+
+
+def _python() -> str:
+    """定位 python：**优先项目 venv**，其次当前解释器。
+
+    为什么不能直接用 sys.executable（2026-10-05 血泪）：
+    本机系统 Python 3.14 只装了 PyQt6，`pypinyin` / `psutil` 等 requirements.txt
+    里的依赖都没有；用它跑校验会让 PINYIN / TTSGUARD 因「缺依赖」误报 FAIL，
+    看起来像产品回归，其实是**跑错了解释器**。项目真实运行时是 .venv312
+    （见「启动AI短剧编辑器.bat」回退链），校验必须跟它对齐。
+
+    与 _node() 同一套路：优先项目内、其次 PATH、最后才是当前解释器。
+    """
+    for rel in ("venv312", ".venv312", "venv", ".venv"):
+        for exe in ("Scripts/python.exe", "bin/python"):
+            cand = os.path.join(ROOT, rel, exe.replace("/", os.sep))
+            if os.path.isfile(cand):
+                return cand
+    return sys.executable
 
 
 def _node() -> str:
@@ -42,6 +75,7 @@ CHECKS = [
     ("BRAINROUTE", "_verify/check_brain_routing.py", "大脑路由（学习回路）"),
     ("WRITECAP", "_verify/check_editor_write_capabilities.py", "Agent 写能力门槛 ≥8"),
     ("AGENTMAP", "_verify/check_agent_action_mapping.py", "Agent 动作表一致性"),
+    ("YUECAP", "_verify/check_yue_capability.py", "YuE 能力四路接线 + 诚实失败纪律"),
     ("CHARBLOCK", "_verify/check_char_prompt_block.mjs", "角色设定块幂等（Node）"),
     ("STORYMEM", "_verify/check_storyboard_memory.py", "分镜记忆规划（模型换算）"),
     ("GENJOBS", "_verify/check_generation_jobs.py", "生成任务表（异步/进度/取消/并发）"),
@@ -49,6 +83,8 @@ CHECKS = [
     ("MAGLEVELS", "_verify/check_magnetic_levels.mjs", "磁吸等级 / 强度（前端纯函数）"),
     ("STAGE3D", "_verify/check_stage3d_scene.mjs", "3D 场景快照（Stage3D 配套）"),
     ("POSECACHE", "_verify/check_pose_thumb_cache.mjs", "数字人姿势元数据 + 缩略图 LRU"),
+    ("POSEDOF", "_verify/check_stage3d_pose_dof.mjs",
+     "3D 姿势自由度（真 GLB 算关节世界坐标：内旋轴/前倾符号/自然垂手/万向节）"),
     ("STORYAPPLY", "_verify/check_storyboard_apply.py", "分镜记忆回灌（apply 落回 _clips）"),
     ("CANVASROUTES", "_verify/check_canvas_routes.py", "画布端点契约 + 不可达路由"),
     ("CANVASE2E", "_verify/check_canvas_bridge_e2e.py", "画布端点端到端（起真服务）"),
@@ -107,7 +143,43 @@ CHECKS = [
     ("SCRUBPERF", "_verify/check_scrub_perf.py", "长对白 scrub 压测（命中查找层）"),
     # ── 路由 mixin 属性可解析性（A4 迁移踩坑后置守卫，2026-09-27）──
     ("ROUTEATTR", "_verify/check_canvas_route_attrs.py", "路由 mixin 的 cs.* 可解析"),
+    # ── 抽卡账本（生成抽卡闭环 P3，2026-09-27）──
+    ("GENLEDGER", "_verify/check_gen_ledger.py", "抽卡账本：往返/指纹/新鲜度/桶位隔离"),
+    ("EDITUNDO", "_verify/check_editor_undo.py",
+     "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
+    ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",
+     "LUT 导出烘焙真机验证（真跑 ffmpeg；ffmpeg 缺失时优雅跳过）"),
+    ("PRELOAD", "_verify/check_preview_preload.py",
+     "拖动静止后的定窗预载（接线/内存有界/防抖/死代码复活/冻结符号未动）"),
+    ("OVERLAYS", "_verify/check_canvas_overlays.py",
+     "画布浮层簇（接线/桌宠不随机动/状态真实驱动/形象资源轻量）"),
+    ("COREIMP", "_verify/check_core_importable.py",
+     "核心模块可导入性（version.py 语法 + import；防中文直引号事故）"),
+    ("FIRSTRUN", "_verify/check_first_run_notice.py",
+     "首启免责提示（入口接线/免责要点齐备/版本化重看/失败即显示/无内联样式）"),
+    ("WINQUERY", "_verify/check_win_query.py",
+     "WMI 统一（wmic 不再分散/指纹形状锁定/等价性测试在位）"),
+    ("CANVASRUN", "_verify/check_canvas_run.py",
+     "「运行到此处」接线（单一实现/默认只出计划/前端确认/契约登记）"),
+    ("AGENTPOL", "_verify/check_agent_policy.py",
+     "Agent 策略派生化（model-preload 双方法/单一真源/前端消费+保守兜底/端点真被调用）"),
+    # ── 画布图执行 + 增量缓存接线（2026-09-28）──
+    ("WFEXEC", "_verify/check_canvas_workflow.py", "画布图执行 + 增量缓存接线一致性"),
+    # ── 画布端口模型（typed slots，前端真源 ↔ 后端镜像）（2026-09-28）──
+    ("PORTMODEL", "_verify/check_port_model.py", "画布端口模型一致性 + 类型判据"),
+    # ── 画布意图级增强层（能力升格成意图而非节点）（2026-09-30）──
+    ("ENHANCE", "_verify/check_canvas_enhance.py", "意图级增强层：不泄漏模型名 + 诚实报告"),
+    # ── 本地（Ollama）模型接线（2026-09-30）──
+    ("LOCALMODEL", "_verify/check_local_model_wiring.py", "本地模型接线：画布可列出自部署模型"),
+    # ── 本地视频生成接线（2026-10-01）──
+    ("VIDEOGEN", "_verify/check_video_gen.py", "本地视频生成：镜像/免代理/Xet + 项目原生链路"),
 ]
+
+_py = _python()
+print(f"# 校验解释器: {_py}"
+      f"{'' if _py == sys.executable else '  （项目 venv，非当前解释器）'}")
+print(f"# 当前解释器: {sys.executable}")
+print(f"# 共 {len(CHECKS)} 项\n")
 
 failed = []
 for tag, rel, desc in CHECKS:
@@ -123,8 +195,8 @@ for tag, rel, desc in CHECKS:
             failed.append(tag)
             continue
     else:
-        runner = sys.executable
-    proc = subprocess.run([runner, path], cwd=ROOT,
+        runner = _python()
+    proc = subprocess.run([runner, path], cwd=ROOT, env=_CHILD_ENV,
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace")
     out = (proc.stdout or "") + (proc.stderr or "")

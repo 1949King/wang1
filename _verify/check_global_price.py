@@ -27,6 +27,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAILS = []
 TOTAL = 0
 
+# 临时目录钉到项目内 .workbuddy/tmp（2026-09-28）：沙箱拦截系统 Temp 写入 →
+# tempfile 回退到 cwd（项目根），直接单跑本脚本会把 sg_gp_test_* 漏进仓库根。
+# 规范入口 run_all_checks.py 已通过 TMPDIR 传递修好；此处覆盖「直接单跑」路径。
+try:
+    _TMP_BASE = os.path.join(ROOT, ".workbuddy", "tmp")
+    os.makedirs(_TMP_BASE, exist_ok=True)
+    tempfile.tempdir = _TMP_BASE
+except OSError:
+    pass
+
 
 def check(desc: str, cond: bool) -> None:
     global TOTAL
@@ -34,6 +44,19 @@ def check(desc: str, cond: bool) -> None:
     print(f"[{'PASS' if cond else 'FAIL'}] {desc}")
     if not cond:
         FAILS.append(desc)
+
+
+def over_paced_spend(budget: float, month_progress: float, margin: float = 5.0) -> float:
+    """返回一个「任何日期都判超支」的花费额。
+
+    为什么需要（2026-09-28 修日期炸弹）：λ^G 的超支判据是
+    `left - max(0.02, 1 - 本月已过比例)`，即拿「剩余预算比例」比「本月剩余时间比例」。
+    原先用例硬编码 `record_spend(90.0)`（预算 100）——只有当本月已过比例 < 0.90 时
+    才判超支；**一过每月约 90% 就必然失败**（实测 09-27 19:00 通过、09-28 01:00 变红）。
+    改为按当月进度反推：花掉「本月应花额度 + margin」，任何日期都稳定超支。
+    封顶到 budget 仍成立：此时 left=0，而判据下界 max(0.02,·) ≥ 0.02 ⇒ e ≤ −0.02 < 0。
+    """
+    return min(budget, budget * month_progress + margin)
 
 
 def _load(fname: str):
@@ -69,7 +92,8 @@ def main() -> int:
                                  store_path=os.path.join(tmpdir, "a.json"),
                                  update_interval=1)
     check("A1 初始 λ^G=0（无压力不加价）", abs(g.get_lambda()) < 1e-12)
-    g.record_spend(99.0)          # 月预算 100 花 99 → 必然超支趋势
+    # 按当月进度反推花费，保证任何日期都判超支（见 over_paced_spend 说明）
+    g.record_spend(over_paced_spend(100.0, gp._month_progress()))
     st = g.status()
     check("A2 月误差 e<0（超支趋势）", st["error"] < 0 and st["over_pacing"])
     time.sleep(1.1)
@@ -80,7 +104,7 @@ def main() -> int:
     g2 = gp.GlobalPriceController(monthly_budget=100.0,
                                   store_path=os.path.join(tmpdir, "b.json"),
                                   update_interval=1)
-    g2.record_spend(99.9)
+    g2.record_spend(over_paced_spend(100.0, gp._month_progress()))
     time.sleep(1.1)
     l1 = g2.get_lambda()          # 首拍建基线
     time.sleep(1.1)
@@ -113,7 +137,7 @@ def main() -> int:
     g4 = gp.GlobalPriceController(monthly_budget=100.0,
                                   store_path=os.path.join(tmpdir, "d.json"),
                                   update_interval=1)
-    g4.record_spend(90.0)
+    g4.record_spend(over_paced_spend(100.0, gp._month_progress()))
     g4.set_observation(False, "断网")
     time.sleep(1.1)
     lg_frozen = g4.get_lambda()
@@ -161,7 +185,7 @@ def main() -> int:
 
     # ════════════ F. λ_eff 叠加改变路由（§2） ════════════
     qp2 = _load("quality_prior.py")
-    pcm = _load("provider_caps.py")
+    _load("provider_caps.py")  # 副作用：注册模块供后续 import（勿因「未使用」删除）
     vgc = _load("video_generation_client.py")
     bp._PACER = bp.BudgetPacer(budget=100.0,
                                store_path=os.path.join(tmpdir, "f1.json"))

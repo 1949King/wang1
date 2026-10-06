@@ -6,7 +6,7 @@
 一个角色字段横跨 6 个地方：
     ① app/modules/lego/character_management_module.py  CHARACTER_FIELD_SCHEMA
     ② app/core/canvas_bridge.py                        build_character_prompt（仅 visual 组）
-    ③ app/core/canvas_server.py                        /host/characters（按 schema 派生 + 下发 prompt）
+    ③ app/core/canvas_server.py + canvas_routes_get.py /host/characters（按 schema 派生 + 下发 prompt；A4 后端点在 _routes_get）
     ④ vendor/shiguang-canvas/src/stores/node-factory.ts
     ⑤ vendor/AI-Canvas-tauri/src/libtv/stores/node-factory.ts
     ⑥ 两个 store.ts 的「角色设定块 → prompt」拼装（必须消费 ③ 下发的 prompt）
@@ -40,7 +40,10 @@ sys.path.insert(0, ROOT)
 
 MODULE = os.path.join(ROOT, "app", "modules", "lego", "character_management_module.py")
 BRIDGE = os.path.join(ROOT, "app", "core", "canvas_bridge.py")
+# ③ /host/characters 端点于 V4.40.4（A4 路由拆分）从 canvas_server.py 迁到
+# canvas_routes_get.py —— 两文件都扫，任一命中即算派生到位（防再次迁移造成盲区）。
 SERVER = os.path.join(ROOT, "app", "core", "canvas_server.py")
+SERVER_ROUTES = os.path.join(ROOT, "app", "core", "canvas_routes_get.py")
 FRONTENDS = [
     os.path.join(ROOT, "vendor", "shiguang-canvas", "src", "stores", "node-factory.ts"),
     os.path.join(ROOT, "vendor", "AI-Canvas-tauri", "src", "libtv", "stores", "node-factory.ts"),
@@ -102,12 +105,15 @@ def main() -> int:
             problems.append(f"visual 字段 {key} 未被 build_character_prompt 读取（进不了提示词）")
 
     # ---- ③ HTTP 端点必须按 schema 派生，并下发拼好的 prompt ----
-    server_src = read(SERVER)
+    # A4 后端点已迁 canvas_routes_get.py，两文件合并扫描（命中其一即可）。
+    server_src = read(SERVER) + "\n" + (
+        read(SERVER_ROUTES) if os.path.isfile(SERVER_ROUTES) else ""
+    )
     if "CHARACTER_FIELD_SCHEMA" not in server_src:
-        problems.append("canvas_server.py 的 /host/characters 未按 CHARACTER_FIELD_SCHEMA 派生，新增字段会漏传")
+        problems.append("canvas_server.py/canvas_routes_get.py 的 /host/characters 未按 CHARACTER_FIELD_SCHEMA 派生，新增字段会漏传")
     if "build_character_prompt" not in server_src:
         problems.append(
-            "canvas_server.py 的 /host/characters 未下发 build_character_prompt(c)，"
+            "canvas_server.py/canvas_routes_get.py 的 /host/characters 未下发 build_character_prompt(c)，"
             "前端只能自己拼字段（会漏 visual 组）"
         )
 

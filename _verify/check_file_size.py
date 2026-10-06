@@ -50,7 +50,8 @@ BASELINE: dict = {
     # A4 批次 1+2/3（2026-09-27）：GET 25 端点迁到 canvas_routes_get.py（650 行）、
     # POST 29 端点迁到 canvas_routes_post.py（1,183 行）
     # → 3,273 → **1,740**，两次下调基线（债务收敛，守卫指引的正反馈）
-    "app/core/canvas_server.py": 1740,
+    # 2026-10-05：canvas_server.py 已由路由拆分降到 1754 行（< 阈值 2000）⇒
+    # 基线项移除（守卫提示「已消失：确认后从 BASELINE 移除」）。若再涨破 2000 会重新报警。
     "app/core/canvas_aigc.py": 2905,
     "app/modules/lego/settings_module.py": 2823,
     "app/modules/lego/video_processor.py": 2732,
@@ -58,8 +59,10 @@ BASELINE: dict = {
     "app/modules/lego/extensions_module.py": 2198,
     "app/modules/lego/drama_understanding_engine.py": 2160,
     # vendor/shiguang-canvas/src（4 个）
-    "vendor/shiguang-canvas/src/Stage3D.tsx": 4660,
-    "vendor/shiguang-canvas/src/riggedHumanoid.ts": 3707,
+    # 2026-10-07：机位几何/标签/状态抽出 stage3dCamGizmo.ts 后 4660 → 4623（基线下调）
+    "vendor/shiguang-canvas/src/Stage3D.tsx": 4623,
+    # 2026-10-05：姿势数据抽到 stage3dPoseLibrary.ts 后由 3707 下调到 3159
+    "vendor/shiguang-canvas/src/riggedHumanoid.ts": 3159,
     "vendor/shiguang-canvas/src/CanvasShell.tsx": 3199,
     "vendor/shiguang-canvas/src/store.ts": 2452,
     # V4.39.8 异步接线（generateForNode→runGeneration）后越线 2000；

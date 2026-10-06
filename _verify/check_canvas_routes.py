@@ -59,6 +59,9 @@ CLIENTS = [
     os.path.join("vendor", "shiguang-canvas", "src", "stage3dScene.ts"),
     # 2026-09-14：poseThumbCache.ts（同上）
     os.path.join("vendor", "shiguang-canvas", "src", "magnetic", "poseThumbCache.ts"),
+    # 2026-10-05（刀 A4）：canvasRun.ts 承载 /host/canvas-run（「运行到此处」的后端规划）。
+    # 不登记它，新端点对契约检查就是隐身的（与 generationQueue 同一条约定）。
+    os.path.join("vendor", "shiguang-canvas", "src", "canvasRun.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'
@@ -90,15 +93,30 @@ def server_routes(src: str):
     return exact, prefixes
 
 
+def _strip_ts_comments(src: str) -> str:
+    """剥掉 TS/JS 的**整行注释**与 JSDoc 块注释，再拿去扫端点。
+
+    ★ 2026-10-05 加（踩到假阳性）：某前端模块在文档注释里写了 ``/host/generation/*``
+    说明数据流，守卫把它当成「前端调用了 /host/generation」并报「服务端没实现」。
+    **注释里的路径不是调用** —— 不剥注释的话，往后谁写文档提到端点都会误报，
+    最终逼着大家"绕开写文档"，比误报本身更糟。
+
+    ⚠️ 只能剥**行首**的 ``//``（含缩进）：URL 里的 ``http://`` 不能被误剥。
+    """
+    src = re.sub(r"/\*[\s\S]*?\*/", "", src)      # JSDoc / 块注释
+    src = re.sub(r"^[ \t]*//.*$", "", src, flags=re.M)   # 整行行注释
+    return src
+
+
 def client_paths(src: str):
-    """前端调用过的 /host/* 路径。
+    """前端调用过的 /host/* 路径（已剔除注释，见 `_strip_ts_comments`）。
 
     注意：bridge.ts 大量使用模板字符串 `` `${BRIDGE}/host/xxx` ``，
     所以不能只匹配「引号紧跟 /host/」，得直接扫 `/host/` 起始的片段。
     模板占位 `${...}` 归一化为 `*`，便于与服务端前缀路由比较。
     """
     found = set()
-    for raw in re.findall(r"/host/[A-Za-z0-9_\-/{}$.]+", src):
+    for raw in re.findall(r"/host/[A-Za-z0-9_\-/{}$.]+", _strip_ts_comments(src)):
         p = re.sub(r"\$\{[^}]*\}", "*", raw)
         # 去掉末尾残留的分隔符/标点
         p = p.rstrip("/.,;:")
@@ -106,6 +124,31 @@ def client_paths(src: str):
             p = p[:-2] + "*"
         found.add(p)
     return found
+
+
+def client_pairs(src: str):
+    """前端调用过的 **(方法, 路径)** 二元组。
+
+    ★ 2026-10-05（刀 A4 第 1 项）新增。**为什么必须有**：只比路径会漏掉
+    「前端 POST、后端只注册 GET」这类错配 —— `/host/model-preload` 正是如此静默 404 的
+    （后端 handler 里 `self.command == "POST"` 那段分支直接成了不可达代码）。
+
+    判定：扫 `fetch(...)` 调用，在调用尾巴 ~260 字符内找 `method: "POST"`，
+    找不到就按 GET（fetch 默认 GET）。路径中的 `${...}` 归一化为 `*`。
+    """
+    pairs = set()
+    for m in re.finditer(r"fetch\(\s*([`\"'])(.*?)\1([\s\S]{0,260})", _strip_ts_comments(src)):
+        url, tail = m.group(2), m.group(3)
+        if "/host/" not in url:
+            continue
+        p = re.sub(r"\$\{[^}]*\}", "*", url)
+        p = re.sub(r"^.*?(/host/)", r"\1", p)     # 去掉 `${BRIDGE}` 之类前缀
+        p = p.split("?")[0].split("#")[0].rstrip("/")
+        if not p.startswith("/host/"):
+            continue
+        mm = re.search(r"method\s*:\s*[\"'](\w+)[\"']", tail, re.I)
+        pairs.add(((mm.group(1) if mm else "GET").upper(), p))
+    return pairs
 
 
 _ROUTE_CMP = re.compile(r"path\s*(?:==|in\b|startswith)")
@@ -227,10 +270,73 @@ def main() -> int:
     unused = sorted(p for p in exact if p not in client_all
                     and not any(p.startswith(c.split("*")[0]) and c.endswith("*") for c in client_all))
 
+    # ── [0] 路由表内部重复注册（★ 2026-10-05 新增；此前只查"表 vs 老 if 链"）──
+    #
+    # 为什么必须查：`_route_get/_route_post` 对同一路径**二次注册会直接 raise**，
+    # 而 raise 发生在**类定义期** ⇒ 整个画布服务起不来（import 就炸）。
+    # 2026-10-05 实际发生过一次：新增 /host/canvas-run 时没发现该端点已存在，
+    # 重复定义把 `import canvas_routes_post` 打成 ValueError。
+    # 旧守卫只看「路由表 vs 老 if 链」，**表内重复完全漏检** —— 这次补上。
+    dup_reg = []
+    seen_reg: dict = {}
+    for rel in SERVER_FILES:
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            continue
+        t = _read(rel)
+        for meth, pat in (("GET", r'@_route_get\(\s*' + _PATH_LIT),
+                          ("POST", r'@_route_post\(\s*' + _PATH_LIT)):
+            for p in re.findall(pat, t):
+                key = (meth, p)
+                if key in seen_reg:
+                    dup_reg.append(f"{meth} {p}（{seen_reg[key]} 与 {rel}）")
+                else:
+                    seen_reg[key] = rel
+    print("\n[0] 路由表内部重复注册（会 raise ⇒ 服务 import 即失败）")
+    if dup_reg:
+        for d in sorted(set(dup_reg)):
+            print(f"  ✗ {d}")
+    else:
+        print(f"  ✓ 无（GET+POST 共 {len(seen_reg)} 条，路径唯一）")
+
     print("\n[1] 前端调用但服务端没实现（会静默 404）")
     if broken:
         for p in broken:
             print(f"  ✗ {p}")
+    else:
+        print("  ✓ 无")
+
+    # ── [1b] 方法错配：路径存在、但**方法**没注册（★ 2026-10-05 新增）──
+    # 只比路径会漏掉这类错配：前端 POST、后端只注册 GET ⇒ 静默 404，
+    # 而且后端 handler 里按 self.command 写的 POST 分支会变成不可达代码。
+    server_pairs = set()
+    for rel in SERVER_FILES:
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            continue
+        t = _read(rel)
+        for p in re.findall(r'@_route_get\(\s*' + _PATH_LIT, t):
+            server_pairs.add(("GET", p))
+        for p in re.findall(r'@_route_post\(\s*' + _PATH_LIT, t):
+            server_pairs.add(("POST", p))
+    _bodies = method_bodies(server_src)
+    for p in legacy_routes(_bodies.get("do_GET", "")):
+        server_pairs.add(("GET", p))
+    for p in legacy_routes(_bodies.get("do_POST", "")):
+        server_pairs.add(("POST", p))
+    server_paths = {pp for _m, pp in server_pairs}
+    method_mismatch = []
+    for rel in CLIENTS:
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            continue
+        for meth, p in client_pairs(_read(rel)):
+            if "*" in p or p not in server_paths:
+                continue                     # 前缀/未实现路由交给 [1] 判
+            if (meth, p) not in server_pairs:
+                have = sorted({m for m, pp in server_pairs if pp == p})
+                method_mismatch.append((rel, meth, p, have))
+    print("\n[1b] 方法错配（路径在、方法没注册 ⇒ 前端拿到 404）")
+    if method_mismatch:
+        for rel, meth, p, have in method_mismatch:
+            print(f"  ✗ {rel} 以 {meth} 调用 {p}，但服务端只注册了 {'/'.join(have)}")
     else:
         print("  ✓ 无")
 
@@ -279,9 +385,17 @@ def main() -> int:
         print(f"✗ 发现 {len(dup)} 个重复注册端点：")
         for p in dup:
             print("   -", p)
-    if broken or dead or dup:
+    if method_mismatch:
+        print(f"✗ 发现 {len(method_mismatch)} 处方法错配（前端会拿到 404）：")
+        for _rel, meth, p, have in method_mismatch:
+            print(f"   - {p}: 前端 {meth} vs 服务端 {'/'.join(have)}")
+    if dup_reg:
+        print(f"✗ 发现 {len(set(dup_reg))} 处路由表内部重复注册（服务会 import 失败）：")
+        for d in sorted(set(dup_reg)):
+            print(f"   - {d}")
+    if broken or dead or dup or method_mismatch or dup_reg:
         return 1
-    print("OK 画布端点契约一致")
+    print("OK 画布端点契约一致（路径 + 方法）")
     return 0
 
 

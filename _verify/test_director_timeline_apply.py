@@ -21,6 +21,20 @@ from app.modules.lego.skill_engine import skill_engine  # noqa: E402
 from app.modules.lego.core import EventBus, EventType  # noqa: E402
 from app.modules.lego.video_editing_skill import register_skills  # noqa: E402
 
+# 临时目录钉到项目内 .workbuddy/tmp（2026-09-28）：沙箱拦截系统 Temp 写入 ⇒
+# tempfile.gettempdir() 回退到 cwd（项目根），直接单跑本脚本会把临时目录漏进仓库根。
+# 规范入口 run_all_checks 已用 TMPDIR 传递；此处覆盖「直接单跑」路径。
+try:
+    _SG_TMP = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if "__file__" in globals() else os.getcwd(),
+        ".workbuddy", "tmp",
+    )
+    os.makedirs(_SG_TMP, exist_ok=True)
+    tempfile.tempdir = _SG_TMP
+except OSError:
+    pass
+
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    "out_director_timeline_apply.json")
 

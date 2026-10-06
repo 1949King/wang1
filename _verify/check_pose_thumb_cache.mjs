@@ -3,12 +3,12 @@
 //
 // ⚠️ 本文件是 poseThumbCache.ts 的**纯函数副本**。改源时务必同步。
 // 关键不变量：
-//   - 源 POSE_PRESETS 共 29 个 PosePresetId；副本必须 29 个且 label/category/hint 齐
+//   - 源 POSE_PRESETS 共 33 个 PosePresetId；副本必须 33 个且 label/category/hint 齐
 //   - PoseThumbnailCache LRU 行为：set 超出容量裁最久未访问
 //   - 命中 +1 hits，重新 set 同 key 不影响其他 key
 //   - 源 schema 对齐断言：源若有变更立刻挂
 
-// @source: POSE_META（29 个姿势，副本源同步）
+// @source: POSE_META（33 个姿势，副本源同步）
 const POSE_META = {
   idle:         { label: "站立",   category: "static",   hint: "默认站姿 · 适用于多数对话场景" },
   wave:         { label: "挥手",   category: "static",   hint: "打招呼 / 致意" },
@@ -39,6 +39,10 @@ const POSE_META = {
   tpose:        { label: "T 字",   category: "static",   hint: "开发期 / 校准用" },
   walk:         { label: "行走",   category: "action",   hint: "动态行走" },
   kneel:        { label: "跪地",   category: "emotion",  hint: "投降 / 哀求" },
+  stand_natural: { label: "自然站姿", category: "static", hint: "对话 / 日常 · 比 T 字更自然的基线" },
+  hands_behind: { label: "背手",   category: "static",   hint: "领导 / 训话 / 等待" },
+  hold_phone:   { label: "看手机", category: "static",   hint: "现代都市 · 低头看屏幕" },
+  handshake:    { label: "握手",   category: "static",   hint: "商务 / 社交 · 右手前伸" },
 };
 
 function getPoseMeta(poseId) { return POSE_META[poseId] || null; }
@@ -92,7 +96,7 @@ console.log("=== 数字人 · 姿势元数据 + 缩略图缓存自检 ===");
 // 1. 元数据
 check("getPoseMeta('idle') 返回站立", getPoseMeta("idle")?.label === "站立", getPoseMeta("idle"));
 check("getPoseMeta('unknown') 返回 null", getPoseMeta("nonexistent") === null);
-check("listAllPoseIds 长度=29", listAllPoseIds().length === 29, listAllPoseIds().length);
+check("listAllPoseIds 长度=33", listAllPoseIds().length === 33, listAllPoseIds().length);
 const cats = {};
 for (const id of listAllPoseIds()) cats[getPoseMeta(id).category] = (cats[getPoseMeta(id).category] || 0) + 1;
 check("分类齐全 static/action/weapon/extreme/emotion", Object.keys(cats).length === 5, cats);
