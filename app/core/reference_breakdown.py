@@ -92,19 +92,36 @@ def merge_short_shots(cuts: List[float], duration: float,
 
     为什么需要：闪帧/叠化会被场景检测切成极小段，直接当"镜头"会让表不可读。
     """
+    # 边界处理（2026-10-09 优化）：
+    #   · 切点 ≤0 或 ≥duration 的**越界值**依旧丢弃（那是脏数据）；
+    #   · **首个镜头太短**时无处可并（没有前一段）—— 旧版会静默丢弃它，
+    #     导致开头 0~0.3s 凭空消失。现在改为**并入后一段**（保住素材完整性）。
     points = [0.0] + [c for c in cuts if 0.0 < c < (duration or c)] + ([duration] if duration else [])
     points = sorted(set(round(p, 3) for p in points))
     if len(points) < 2:
         return []
+    # 归一化段列表（先全部生成，再做短段合并——首段并入后段，其余并入前段）
+    raw = [(points[i], points[i + 1]) for i in range(len(points) - 1)]
+    merged: List[List[float]] = []
+    for start, end in raw:
+        if (end - start) < min_shot:
+            if merged:
+                merged[-1][1] = end          # 有前段 ⇒ 并入前段
+            elif raw.index((start, end)) < len(raw) - 1:
+                continue                      # 是首段且后面还有段 ⇒ 并入后段（先跳过）
+            else:
+                merged.append([start, end])   # 全片只有一个短段 ⇒ 保留（不能空手而归）
+        else:
+            merged.append([start, end])
+    # 处理被跳过的首段：把后段起点前移（真正"并入后段"）
+    if raw and merged and merged[0][0] > raw[0][0]:
+        merged[0][0] = raw[0][0]
     shots: List[Dict[str, float]] = []
-    for i in range(len(points) - 1):
-        start, end = points[i], points[i + 1]
-        if shots and (end - start) < min_shot:
-            shots[-1]["end"] = end            # 太短 ⇒ 并入前一段
-            continue
-        shots.append({"index": len(shots) + 1, "start": start, "end": end})
-    for s in shots:
-        s["duration"] = round(s["end"] - s["start"], 3)
+    for start, end in merged:
+        shots.append({"index": len(shots) + 1, "start": round(start, 3),
+                      "end": round(end, 3)})
+    for s_ in shots:
+        s_["duration"] = round(s_["end"] - s_["start"], 3)
     return shots
 
 

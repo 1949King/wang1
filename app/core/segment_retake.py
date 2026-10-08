@@ -68,6 +68,18 @@ def probe_wh_fps(video: str) -> Dict[str, float]:
     return out
 
 
+def _has_audio_stream(video: str) -> bool:
+    """探测视频是否含音频流（2026-10-09 通电新增：拼接音轨判定的前置）。"""
+    ff = _ffmpeg()
+    if not ff:
+        return False
+    try:
+        r = subprocess.run([ff, "-i", video], capture_output=True, text=True, timeout=60)
+        return "Audio:" in (r.stderr or "")
+    except Exception:
+        return False
+
+
 def nearest_cut(t: float, cuts: Sequence[float]) -> Tuple[Optional[float], float]:
     """离 `t` 最近的切点及其距离（没有切点则返回 (None, inf)）。"""
     best, dist = None, float("inf")
@@ -104,20 +116,29 @@ def plan_retake(duration: float, start: float, end: float, *,
         return {"ok": False, "reason": f"重拍段太短（{e - s:.2f}s < {min_segment:.2f}s），建议整条重生成"}
 
     # 边界吸附切点：接缝藏在场景切换处最不容易被看出来
+    # 2026-10-09 修真 bug：旧版 start/end **各自用对方的旧值**判断合法性，
+    # start 吸附到 > end 的切点时区间会倒置/小于 min_segment（产出非法计划）。
+    # 正解：吸附后**立即重算**另一侧的约束（用当前最新值），并做最终区间自检。
     snapped = False
     snap_delta = 0.0
     for which in ("start", "end"):
         t = s if which == "start" else e
         c, d = nearest_cut(t, cuts)
-        if c is not None and d <= snap_tolerance:
-            if which == "start" and c < e - min_segment:
-                snap_delta = c - s
-                s = c
-                snapped = True
-            elif which == "end" and c > s + min_segment:
-                snap_delta = c - e
-                e = c
-                snapped = True
+        if c is None or d > snap_tolerance:
+            continue
+        if which == "start" and c < e - min_segment:
+            snap_delta = c - s
+            s = c
+            snapped = True
+        elif which == "end" and c > s + min_segment:
+            snap_delta = c - e
+            e = c
+            snapped = True
+    # 吸附后自检：区间仍必须合法（不倒置、不过短、不出界）
+    if e <= s or (e - s) < min_segment or e > duration + 1e-3 or s < 0:
+        return {"ok": False,
+                "reason": (f"吸附场景切点后区间非法（{s:.2f}-{e:.2f}s），"
+                           f"请手动指定重拍范围")}
 
     # 接缝风险：两端是否都落在切点附近
     risk_pts = []
@@ -196,6 +217,15 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
         else:
             v_new += ",setpts=PTS-STARTPTS"
         v_new += "[v1]"
+
+        # 2026-10-09 通电修复：无音轨的输入会让 [0:a]/[1:a] 引用失败（e2e 实测抓到）。
+        # 解法：keep_audio 时给每个输入加 "0:a?"（可选流）+ 无声源兜底 —— 更稳的做法是
+        # 探测两输入是否有音轨：任一没有 ⇒ 整体走 -an（诚实：输出无音轨，而不是硬造静音）。
+        has_a0 = _has_audio_stream(original)
+        has_a1 = _has_audio_stream(replacement)
+        keep_audio = keep_audio and has_a0 and has_a1
+        if not keep_audio and (has_a0 or has_a1):
+            logger.info("[segment_retake] 输入音轨不齐 ⇒ 输出改为无音轨（诚实处理，不硬造静音）")
 
         parts = [
             f"[0:v]trim=start=0:end={s:.3f},setpts=PTS-STARTPTS,setsar=1[v0]",

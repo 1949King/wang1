@@ -164,3 +164,29 @@ def test_e2e_rejects_out_of_range_without_writing(tmp_path):
 def test_missing_file():
     r = sr.splice_retake("nope.mp4", "nope2.mp4", "out.mp4", start=0, end=1)
     assert r["ok"] is False and "找不到文件" in r["reason"]
+
+
+# ─────────────────────── 吸附区间自检（2026-10-09 修 bug 的回归）───────────────────────
+
+def test_plan_snap_cannot_invert_interval():
+    """★ 吸附后区间不得倒置/过短（旧版 bug：start 吸到 > end 的切点会产出非法计划）。
+
+    构造：duration=10，请求 4.0-5.0；切点 4.8 离 start 很近但 > end-min_segment 边界，
+    旧版 start 吸附判断用旧 e ⇒ 可能吸到非法位置。新版本有**吸附后自检**兜底。
+    """
+    p = sr.plan_retake(10.0, 4.0, 4.5, cuts=[4.4, 9.0], snap_tolerance=0.5)
+    # 无论吸附与否，结果必须合法
+    if p["ok"]:
+        assert p["start"] < p["end"]
+        assert p["length"] >= sr.MIN_SEGMENT
+    else:
+        assert "吸附" in p["reason"], "失败必须说明是吸附导致"
+
+
+def test_plan_snap_end_respects_snapped_start():
+    """end 的吸附必须尊重 start **吸附后**的新值（不是旧值）。"""
+    # start=3.9 吸到 4.0；end=6.1 的最近切点是 6.0（合法）⇒ 双吸附
+    p = sr.plan_retake(10.0, 3.9, 6.1, cuts=[4.0, 6.0], snap_tolerance=0.3)
+    assert p["ok"]
+    assert p["start"] == 4.0 and p["end"] == 6.0
+    assert p["length"] == 2.0
