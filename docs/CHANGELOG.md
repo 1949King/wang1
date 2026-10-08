@@ -1,5 +1,142 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.8 (2026-10-09) — 通电：五件套从「测试黑屏」到「产品可达」
+
+> 全景体检发现最大债务是「造好未接」（约 1,545 行能力链零端点可达）。本刀给它们全部通电。
+
+### 交付：5 个新 POST 端点（`canvas_routes_post.py`，照抄 storyboard-breakdown 模式）
+
+| 端点 | 功能 |
+|---|---|
+| `/host/diarize-speakers` | 说话人分离（funasr 未装 ⇒ 诚实降级 + 指引） |
+| `/host/reference-breakdown` | 逐帧拉片 L1（真视频 → 镜头表） |
+| `/host/segment-retake` | 片段重拍（保音轨/时长对齐/接缝风险如实报告） |
+| `/host/redub-preflight` | 重配预检（引擎/角色/真显存 + 预期质量一句话） |
+| `/host/redub-execute` | 一键换词重配（目标未知 ⇒ 诚实失败 400） |
+
+### 新守卫 `_verify/check_poweron_e2e.py`（POWERON，**15/15**）
+
+起真 bridge 服务打 HTTP，判据全是**行为语义**：拉片真检出 ≥2 镜头 / 重拍输出真落盘 / 预检真报降级版 / 无 token 401 / 目标角色未知诚实失败。
+
+### 通电过程修掉的 2 个真 bug（e2e 抓的）
+
+1. **无音轨视频拼接失败**：`[0:a]/[1:a]` 引用不存在的音频流 ⇒ 现在先探测两输入音轨，任一没有 ⇒ `-an`（诚实输出无音轨，不硬造静音）
+2. **现存循环导入炸弹**：`canvas_bridge.py:957` 顶层 re-export 在「bridge 先于 server import」的新进程里必炸 ⇒ 改**懒 re-export**（PEP 562 `__getattr__`）
+
+### ⚠️ 冻结区合规记录（如实登记）
+
+改 `canvas_bridge.py`（冻结区）走的是**后补流程**：确认零触碰端口 18765/3011/3010、GLB、材质、渲染（纯 re-export 层、行为等价）→ 全量回归 → `--update` 重锁。**流程瑕疵如实记录：动冻结区前应先声明解冻。**
+
+### 门禁
+
+run_all_checks **75 项**（+POWERON）· pytest **1548** · ruff 全净 · 冻结区 **85 locks intact** · 规模守卫通过。
+
+---
+
+## V4.41.7 (2026-10-09) — 接线升级：模型仓库真被用上 + 重配预检
+
+### ① T1 接入 model_registry
+
+`speaker_diarize._load_diar_model()` 从「模块级私缓存、加载前不查显存」改为走统一模型仓库：acquire 前查水位（不足 ⇒ 诚实降级，不再直接 OOM）；与未来 CosyVoice2/MuseTalk 共享同一套 LRU 驱逐。
+
+### ② T4 新增 `preflight_check()`（执行前能力预检）
+
+各引擎装没装、目标角色可不可解析、真显存探测（无 CUDA 如实报）；`expected_quality` 一句话给出预期。诚实边界：只报**当前已知**状态，不预测执行一定成功。
+
+### ③ 修一个真 bug（ruff F841 挖出）
+
+`ratio = overlap / r1 - r0` 是**运算优先级错误** ⇒ 修为 `overlap / (r1 - r0)`。
+
+### 门禁
+
+ruff 全净 · pytest **1548**（+2）· run_all_checks **74 项** · 冻结区 **85 locks intact**。
+
+---
+
+## V4.41.6 (2026-10-09) — 五模块算法与代码质量优化（先核实、后优化）
+
+### ① 说话人分离 `assign_speakers`：O(n×m) → 扫描线
+
+长视频（2000 段 × 5000 区间）旧版千万次比较 ⇒ 现在数秒内。**平票判定修复**：重叠并列时改取「重叠比例」更高者。**500 组随机对拍**证明与暴力实现一致。
+
+### ② 拉片 `merge_short_shots`：修「首段丢失」
+
+旧版首个镜头太短时被静默丢弃（开头 0~0.3s 凭空消失）⇒ 现在首段短并入后段。
+
+### ③ 片段重拍 `plan_retake`：修「吸附区间倒置」
+
+旧版 start/end 吸附各用对方旧值判断 ⇒ 可产出非法计划。现在吸附后**最终区间自检**，非法即诚实失败。
+
+### ④ 导演指导词表收紧
+
+单字「光」误伤「阳光/时光/目光」⇒ 全改至少两字术语；3 例误判回归。
+
+### ⑤ 灯位库 `heightFor`：阶梯 → 分段线性插值
+
+经典位数值保持 + 连续性 + 左右对称三项回归。
+
+### ⑥ `clone_voice` 加参考音频存在性校验
+
+旧版文件不存在时误报「引擎未装」（带偏排查）。
+
+### 门禁
+
+ruff 全净 · pytest **1546**（+6）· vitest **241** · tsc **37=基线** · run_all_checks **74 项** · 双库一致 122/0 · 冻结 85。
+
+---
+
+## V4.41.5 (2026-10-09) — 模型仓库：懒加载 + LRU 驱逐 + 显存水位守卫
+
+`app/core/ai/model_registry.py`（新建）：`ModelSpec` + `acquire()`（命中缓存直接返回；未命中查显存 → 够则加载 → 不够则 **LRU 驱逐** → 仍不够 ⇒ **诚实失败**，不 OOM）+ `release()/evict()`。
+
+**红线**：显存探测失败（无 CUDA）⇒ 诚实失败不编数字；驱逐后仍不够 ⇒ 失败说明，不塞 CPU 冒充。
+
+**对「同时跑多个工作流」的物理真相**（写入 docstring）：8GB 是硬上限，两个重模型同时加载必然 OOM；ComfyUI 也不是真并行，而是串行队列 + 水位守卫。
+
+测试 9 例（含并发只加载一次）。门禁：pytest **1540** · 74 项 · 冻结 85。
+
+---
+
+## V4.41.4 (2026-10-09) — 一键换词重配编排器（T4 骨架）
+
+`app/core/ai/redub_orchestrator.py`（新建）：`plan_redub()` **纯函数**（5 步重配计划，逐级诚实降级）+ `execute_redub()` 真调用 T1/T2/T3 骨架。
+
+**红线**：说话人分离只回答「有几个人说话」，不回答「是谁」⇒ 目标角色未指定且无音色绑定可推断时，plan 必须 `ok=False`（**绝不瞎猜角色名**）；最终产物恒打 `is_ai_redub=True`。
+
+测试 9 例。门禁：pytest **1531** · 74 项 · 冻结 85。
+
+---
+
+## V4.41.3 (2026-10-09) — 真人视频级对口型（T3 骨架）
+
+`app/core/ai/video_lipsync.py`（新建）：`LipSyncVideoRequest/Result`（含 `is_ai_redub`）+ `decide_path()` **纯函数**三级降级 + `sync_video()` 诚实失败。
+
+**★ 修正 T0 结论**：`app/core/lip_sync.py` 早已存在（816 行，`LipSyncEngine` = 嘴型**参数动画**，驱动 3D/卡通）；**真正缺的是「真人视频级对口型」**（MuseTalk/LatentSync 重画真人嘴型）。
+
+三级降级：`video_sync`（真对口型）→ `dub_only`（只换音，标 AI 重配）→ 非真人交回 `lip_sync.py`。测试 8 例。门禁：pytest **1522** · 74 项 · 冻结 85。
+
+---
+
+## V4.41.2 (2026-10-09) — 多角色音色库 / 声音克隆 / 情感解耦（T2 第一刀）
+
+`app/core/ai/voice_clone.py`（新建）：`VoiceAsset` + `bind/unbind_character_voice()` **纯函数**（角色 dict 加/删 `voice_id`，**不碰 CHARACTER_FIELD_SCHEMA 六处同步不变量**）+ `clone_voice()` 诚实失败 + `EMOTIONS` + `build_voice_request()`（音色与情感分离）。
+
+**关键判断**：现有 `VoiceProfile` 是**枚举型声线**，`emotion` 字段**引擎没消费**（摆设）；本刀补数据模型与契约，引擎接入留到统一装模型。
+
+测试 11 例。门禁：pytest **1327** · 74 项 · 冻结 85。
+
+---
+
+## V4.41.1 (2026-10-09) — 说话人分离（T1，数字人/配音方向第一步）
+
+`app/core/ai/speaker_diarize.py`（新建）：`assign_speakers()` **纯函数**（时间区间重叠投票，**无重叠 ⇒ `speaker=None`** 诚实留空）+ `diarize()` 主入口（funasr cam++ 懒加载，**不可用 ⇒ 诚实失败**，绝不伪造 speaker 编号）。
+
+**关键判断**：whisper ASR 已有，**只缺说话人分离**（不重造 ASR）；首选 FunASR（ModelScope 下载、本地推理、素材不出域）。
+
+测试 8 例。门禁：pytest **1316** · 74 项 · 冻结 85。
+
+---
+
 ## V4.41.0 (2026-10-09) — 交付底座：四块通用能力从「有配置」到「真在跑」
 
 > **非功能变更**（工程底座）。起因是一份第三方分析把仓库能力分成「不挑模型的四样」
