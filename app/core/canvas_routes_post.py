@@ -1622,3 +1622,124 @@ class CanvasPostRoutesMixin:
                     model_id, sel["engine"], res.get("ok"))
         self._json(200 if res.get("ok") else 400, res)
         return
+
+    # ═══════════════════════════════════════════════════════════
+    # 通电（V4.41.8，2026-10-09）：把「造好未接」的五件套接进产品
+    # 说话人分离 / 拉片 / 片段重拍 / 换词重配（含预检）
+    # 参照 storyboard-breakdown 模式（token 校验 + JSON 解析 + 委托 + 诚实状态码）
+    # ═══════════════════════════════════════════════════════════
+
+    @_route_post("/host/diarize-speakers")
+    def _p_host_diarize_speakers(self, parsed, raw: bytes, ctype: str) -> None:
+        """说话人分离：给 whisper segments 附加 speaker 标签（诚实失败）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.ai import speaker_diarize as sd
+        video = str(data.get("video_path") or "")
+        segments = data.get("segments") or []
+        if not video or not isinstance(segments, list):
+            self._json(400, {"ok": False, "message": "需要 video_path 与 segments 列表"})
+            return
+        res = sd.diarize(video, segments)
+        self._json(200 if res.get("ok") else 200, res)  # 诚实降级也回 200（可用性信息在 body）
+        return
+
+    @_route_post("/host/reference-breakdown")
+    def _p_host_reference_breakdown(self, parsed, raw: bytes, ctype: str) -> None:
+        """逐帧拉片 L1：参考片 → 结构化镜头表（切点/时长/关键帧/可测指标）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized", "shots": []})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json", "shots": []})
+            return
+        from app.core import reference_breakdown as rb
+        video = str(data.get("video_path") or "")
+        out_dir = str(data.get("out_dir") or ".workbuddy/tmp/breakdown")
+        threshold = float(data.get("threshold") or 0.30)
+        if not video:
+            self._json(400, {"ok": False, "message": "需要 video_path", "shots": []})
+            return
+        res = rb.build_shot_table(video, out_dir=out_dir, threshold=threshold)
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
+    @_route_post("/host/segment-retake")
+    def _p_host_segment_retake(self, parsed, raw: bytes, ctype: str) -> None:
+        """片段重拍：只替换视频指定时间段（保音轨/时长对齐/接缝风险如实报告）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core import segment_retake as sr
+        original = str(data.get("original") or "")
+        replacement = str(data.get("replacement") or "")
+        out_path = str(data.get("out_path") or "")
+        start = float(data.get("start") or 0.0)
+        end = float(data.get("end") or 0.0)
+        cuts = data.get("cuts") or []
+        if not (original and replacement and out_path and end > start):
+            self._json(400, {"ok": False, "message": "需要 original/replacement/out_path/start<end"})
+            return
+        res = sr.splice_retake(original, replacement, out_path,
+                               start=start, end=end, cuts=cuts)
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
+    @_route_post("/host/redub-preflight")
+    def _p_host_redub_preflight(self, parsed, raw: bytes, ctype: str) -> None:
+        """换词重配预检：执行前报告各环节可用性与预期质量（诚实降级信息前置）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.ai.redub_orchestrator import RedubRequest, preflight_check
+        req = RedubRequest(
+            video_path=str(data.get("video_path") or ""),
+            new_line=str(data.get("new_line") or ""),
+            target_character=data.get("target_character"),
+        )
+        res = preflight_check(req, character_voice=data.get("character_voice"))
+        self._json(200, res)
+        return
+
+    @_route_post("/host/redub-execute")
+    def _p_host_redub_execute(self, parsed, raw: bytes, ctype: str) -> None:
+        """一键换词重配：编排 T1+T2+T3（引擎未装时诚实降级/失败，不冒充）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.ai.redub_orchestrator import RedubRequest, execute_redub
+        req = RedubRequest(
+            video_path=str(data.get("video_path") or ""),
+            new_line=str(data.get("new_line") or ""),
+            target_character=data.get("target_character"),
+            emotion=str(data.get("emotion") or "neutral"),
+        )
+        res = execute_redub(req, character_voice=data.get("character_voice"))
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return

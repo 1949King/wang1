@@ -176,6 +176,8 @@ CHECKS = [
     # ── pyqtSignal 参数类型（2026-10-09：ai_interpolation / highlight_preview 整模块 import 崩）──
     ("QTSTG", "_verify/check_qt_signal_types.py", "pyqtSignal 参数类型（防泛型别名致整模块 import 崩）"),
     # ── 素材不出域硬约束（2026-10-09）──
+    ("POWERON", "_verify/check_poweron_e2e.py",
+     "通电验证：换词重配五件套 / 拉片 / 重拍端点真可达（起真服务打 HTTP）"),
     ("EGRESS", "_verify/check_provider_egress.py", "素材不出域（SHIGUANG_NO_EGRESS 硬开关）"),
 ]
 
