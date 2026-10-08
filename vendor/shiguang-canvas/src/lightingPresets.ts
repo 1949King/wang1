@@ -68,10 +68,20 @@ const KEY_NAMES: Record<number, { name: string; note: string }> = {
 };
 
 /** 高度角按方位取一个常规值：越接近正侧越常用"略高于眼"。 */
-function heightFor(az: number): number {
-  if (az === 0 || az === 180) return 15;
-  if (az === 90 || az === 270) return 20;
-  return 45; // 伦勃朗/环型等经典位常用 45°
+export function heightFor(az: number): number {
+  // 2026-10-09 优化：旧版是 4 点阶梯（0/90/180/270 特判 + 其余一律 45°），
+  // 相邻档位之间会跳变（15° 方位是 45° 高度、0° 方位是 15° 高度，毫无过渡）。
+  // 改为真实摄影口诀的**分段线性**：
+  //   正前(0°)/正逆(180°) 低角度 15°（平光/剪影感）；正侧(90°/270°) 20°；
+  //   斜侧(45°/135°/315°/225°) 伦勃朗区 45°；之间线性过渡。
+  // 等价于把高度视为「方位离轴线角度」的函数 —— 轴线上低、斜侧高。
+  const offAxis = Math.min(
+    Math.abs(az), Math.abs(az - 180), Math.abs(az - 360),
+  ); // 0..90：离最近轴线（前/后）的角度
+  const side = 90 - offAxis; // 0..90：离正侧轴的角度
+  // offAxis=0（正前/正后）→15°；offAxis=45（斜侧）→45°；offAxis=90（正侧）→20°
+  if (offAxis <= 45) return 15 + (offAxis / 45) * 30;      // 15 → 45 线性
+  return 45 - ((offAxis - 45) / 45) * 25;                   // 45 → 20 线性
 }
 
 function intensityFor(az: number): number {

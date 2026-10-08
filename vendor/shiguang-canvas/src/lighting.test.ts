@@ -7,6 +7,7 @@
  *  ② **受管块**：反复套用只保留**一个**光照块（替换而非叠加）；
  *  ③ **只动我们写的那一块**：`strip` 不得伤到用户自己的文字。
  */
+import { heightFor as heightOf } from "./lightingPresets";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -123,5 +124,29 @@ describe("移除（只动我们那一块）", () => {
     const choice = { keyAzimuth: 315, rimName: "顶轮廓" };
     const p = applyLightingBlock("x", choice);
     expect(readLightingBlock(p)).toBe(buildLightingBlock(choice));
+  });
+});
+
+
+describe("灯位高度插值（2026-10-09 优化回归）", () => {
+  it("经典位数值保持：0°=15 / 45°=45 / 90°=20 / 180°=15", () => {
+    expect(heightOf(0)).toBeCloseTo(15);
+    expect(heightOf(45)).toBeCloseTo(45);
+    expect(heightOf(90)).toBeCloseTo(20);
+    expect(heightOf(180)).toBeCloseTo(15);
+    expect(heightOf(270)).toBeCloseTo(20);
+  });
+
+  it("相邻档位连续过渡（无跳变）", () => {
+    for (let az = 0; az < 360; az += 15) {
+      const a = heightOf(az);
+      const b = heightOf((az + 15) % 360);
+      expect(Math.abs(a - b)).toBeLessThanOrEqual(31); // 相邻差被插值压平
+    }
+  });
+
+  it("左右对称（45° 与 315° 同高）", () => {
+    expect(heightOf(45)).toBeCloseTo(heightOf(315));
+    expect(heightOf(135)).toBeCloseTo(heightOf(225));
   });
 });

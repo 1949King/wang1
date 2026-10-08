@@ -126,3 +126,21 @@ describe("撤销", () => {
     expect(appliedMoves(p).sort()).toEqual(["push", "rim"]);
   });
 });
+
+
+describe("诊断词表收紧（2026-10-09 优化回归）", () => {
+  it("「阳光/时光/目光」不再被误判为已写光线", () => {
+    const d = diagnose({ prompt: "阳光洒落在她肩上，时光仿佛静止，目光望向远方" });
+    expect(d.missing).toContain("光线"); // 全是名词叙事，不是打光设计
+  });
+
+  it("真写了打光 ⇒ 光线维度算已写", () => {
+    const d = diagnose({ prompt: "逆光剪影，轮廓光勾勒发丝" });
+    expect(d.present).toContain("光线");
+  });
+
+  it("「笑容」算情绪已写；一般「笑」字叙事不算", () => {
+    expect(diagnose({ prompt: "她笑了笑转身离开" }).missing).toContain("情绪");
+    expect(diagnose({ prompt: "她露出笑容" }).present).toContain("情绪");
+  });
+});

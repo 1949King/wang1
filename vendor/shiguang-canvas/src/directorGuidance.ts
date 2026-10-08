@@ -74,10 +74,12 @@ export function movesAreConsistent(): boolean {
   return true;
 }
 
+// 词表收紧（2026-10-09 优化）：单字「光」会误伤「阳光/时光/目光」（写了阳光 ≠ 给了打光设计）；
+// 单字「笑/怒/泪」同理误伤一般叙事。全部改为**至少两字的光线/情绪术语**。
 const HAS_SHOT_SIZE = /(特写|近景|中景|全景|远景|大特写|景别)/;
 const HAS_CAMERA_MOVE = /(推近|拉远|摇移|跟随|移动镜头|固定机位|镜头运动|dolly|摇镜|移镜)/;
-const HAS_LIGHT = /(光|明暗|逆光|侧光|伦勃朗|轮廓光|色温)/;
-const HAS_EMOTION = /(情绪|表情|反应|泪|笑|怒|惊恐|沉默)/;
+const HAS_LIGHT = /(光线|打光|光照|明暗|逆光|侧光|顶光|底光|伦勃朗|轮廓光|色温|冷光|暖光)/;
+const HAS_EMOTION = /(情绪|表情|神态|反应|落泪|含泪|笑容|大笑|愤怒|惊恐|沉默|哽咽)/;
 const HAS_DEPTH = /(前景|遮挡|纵深|过肩|层次)/;
 
 export interface Diagnosis {
