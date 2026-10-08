@@ -173,6 +173,10 @@ CHECKS = [
     ("LOCALMODEL", "_verify/check_local_model_wiring.py", "本地模型接线：画布可列出自部署模型"),
     # ── 本地视频生成接线（2026-10-01）──
     ("VIDEOGEN", "_verify/check_video_gen.py", "本地视频生成：镜像/免代理/Xet + 项目原生链路"),
+    # ── pyqtSignal 参数类型（2026-10-09：ai_interpolation / highlight_preview 整模块 import 崩）──
+    ("QTSTG", "_verify/check_qt_signal_types.py", "pyqtSignal 参数类型（防泛型别名致整模块 import 崩）"),
+    # ── 素材不出域硬约束（2026-10-09）──
+    ("EGRESS", "_verify/check_provider_egress.py", "素材不出域（SHIGUANG_NO_EGRESS 硬开关）"),
 ]
 
 _py = _python()

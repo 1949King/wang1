@@ -51,7 +51,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "docs" / "knowledge" / "ruff_gate_baseline.json"
@@ -133,14 +133,38 @@ def _is_controlled(rel: str) -> bool:
     return rel.endswith(".py") and any(rel.startswith(p) for p in WHITELIST_PREFIXES)
 
 
-def _staged_files() -> List[str]:
-    """--default 模式：本次暂存的受控 .py（新增/修改，不含删除）。"""
-    p = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+def _staged_files() -> Optional[List[str]]:
+    """增量模式：本次暂存的受控 .py（新增/修改，不含删除）。
+
+    读取顺序（2026-10-09 调整）：
+      1. **环境变量** ``SHIGUANG_STAGED_FILES``（冒号分隔）—— 首选。由
+         ``scripts/precommit_gates.sh`` 用 **bash** 预先算好传进来。为什么要绕这一下：
+         受限/沙箱环境下 Python 起 git 会被 ``CreateProcess`` 拒绝
+         （``WinError 5 拒绝访问``；git 是 MSYS2 程序，启动要建
+         ``\\BaseNamedObjects\\msys-2.0S5-*`` 共享内存），而 **bash 起 git 是正常的**。
+         若不绕，hook 在沙箱里必然「读暂存区失败 → 回落全量 → 撞上工作区里别人的
+         未跟踪文件 → 门禁假红 → 正当提交被拒」。
+      2. fallback：直接 ``git diff --cached``（真实终端下可用）。
+
+    返回 ``None`` 表示「**读不到**暂存区」，调用方必须**回落全量模式**（见 `_check`）：
+      · 环境问题不该被伪装成「门禁失败」（会让人以为代码有问题）；
+      · 也不该被伪装成「检查通过」（静默跳过更危险）。
+    """
+    env_list = os.environ.get("SHIGUANG_STAGED_FILES")
+    if env_list is not None:
+        # 空串是**有效信息**（= 没有暂存文件），故用 is not None 而非真值判断
+        return [p.strip() for p in env_list.split(":") if p.strip() and _is_controlled(p.strip())]
+    try:
+        p = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    except OSError as exc:
+        print(f"   ⚠️ 无法读取暂存区（{type(exc).__name__}: {exc}）→ 回落全量模式")
+        return None
     if p.returncode != 0:
-        raise SystemExit("✗ 读取暂存区失败（git diff --cached）")
+        print("   ⚠️ git diff --cached 返回非 0 → 回落全量模式")
+        return None
     return [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip() and _is_controlled(ln.strip())]
 
 
@@ -259,7 +283,16 @@ def _report(cmd: List[str]) -> int:
 
 
 def _check(cmd: List[str], staged_mode: bool) -> int:
-    targets = _staged_files() if staged_mode else _all_files()
+    if staged_mode:
+        staged = _staged_files()
+        if staged is None:
+            # 读不到暂存区（受限/沙箱环境）→ 回落全量；判定标准不放松，只是范围变大
+            staged_mode = False
+            targets = _all_files()
+        else:
+            targets = staged
+    else:
+        targets = _all_files()
     if not targets:
         print("OK 无受控 .py 需要检查（ruff 存量棘轮）")
         return 0
