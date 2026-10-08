@@ -1721,6 +1721,61 @@ class CanvasPostRoutesMixin:
         self._json(200, res)
         return
 
+    @_route_post("/host/video-depth")
+    def _p_host_video_depth(self, parsed, raw: bytes, ctype: str) -> None:
+        """深度视频提取（对标 LibTV 深度提取）：参考片 → 灰度**深度**视频。
+
+        「只搬运运动/运镜，不泄露人脸与风格」的那件工具。
+        ⚠️ 深度**必须来自真模型**；不可用时诚实失败（返回 reason + 获取方式），
+        **绝不用灰度/边缘冒充深度**（见 app/core/video_depth.py 的红线）。
+        """
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core import video_depth as vd
+        src = str(data.get("video_path") or "")
+        dst = str(data.get("out_path") or "")
+        if not src:
+            self._json(400, {"ok": False, "message": "需要 video_path"})
+            return
+        if not dst:
+            base = os.path.splitext(os.path.basename(src))[0]
+            dst = os.path.join(".workbuddy", "tmp", f"{base}_depth.mp4")
+        max_side = int(data.get("max_side") or 384)
+        limit = int(data.get("limit_frames") or 0)
+        res = vd.extract_depth_video(src, dst, max_side=max_side, limit_frames=limit)
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
+    @_route_post("/host/reference-breakdown-l2")
+    def _p_host_reference_breakdown_l2(self, parsed, raw: bytes, ctype: str) -> None:
+        """逐帧拉片 **L2 运动级**：在 L1 基础上用深度推断**运镜**（带置信度门槛）。"""
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized", "shots": []})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json", "shots": []})
+            return
+        from app.core import reference_breakdown as rb
+        video = str(data.get("video_path") or "")
+        out_dir = str(data.get("out_dir") or ".workbuddy/tmp/breakdown_l2")
+        threshold = float(data.get("threshold") or 0.30)
+        if not video:
+            self._json(400, {"ok": False, "message": "需要 video_path", "shots": []})
+            return
+        res = rb.build_shot_table(video, out_dir=out_dir, threshold=threshold, with_depth=True)
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
     @_route_post("/host/redub-execute")
     def _p_host_redub_execute(self, parsed, raw: bytes, ctype: str) -> None:
         """一键换词重配：编排 T1+T2+T3（引擎未装时诚实降级/失败，不冒充）。"""

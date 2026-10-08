@@ -170,3 +170,112 @@ def test_e2e_shot_table_and_no_root_pollution(tmp_path):
     # ★ 纪律回归：项目根不得出现临时帧
     stray = glob.glob(os.path.join(ROOT, "_rb_*.jpg"))
     assert stray == [], f"临时帧落到了项目根：{stray}"
+
+
+# ─────────────────── L2 运镜推断（2026-10-09 通电，真机验证固化）───────────────────
+
+def _structured_depth(seed: int = 0):
+    """造一张有结构的深度图（左近右远斜坡 + 一块近物体 + 微噪）。"""
+    import numpy as np
+    h, w = 90, 160
+    yy, xx = np.mgrid[0:h, 0:w].astype("float32")
+    base = (xx / w) * 0.8
+    base[30:60, 20:50] = 0.95
+    base += np.random.RandomState(seed).rand(h, w).astype("float32") * 0.02
+    return base
+
+
+def _shift_img(img, dx, dy):
+    import cv2
+    import numpy as np
+    return cv2.warpAffine(img, np.float32([[1, 0, dx], [0, 1, dy]]),
+                          (img.shape[1], img.shape[0]), borderMode=cv2.BORDER_REPLICATE)
+
+
+def _scale_img(img, s):
+    import cv2
+    h, w = img.shape
+    return cv2.warpAffine(img, cv2.getRotationMatrix2D((w / 2.0, h / 2.0), 0.0, s),
+                          (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+
+def test_l2_static():
+    b = _structured_depth()
+    assert rb.infer_camera_move(b, b)["move"] == "static"
+
+
+def test_l2_pan_direction_semantics():
+    """方向语义：**内容右移 = 镜头左摇**（phaseCorrelate 给的是 b 相对 a 的位移）。
+
+    这条测试是「方向写反」事故的回归 —— 首次实现把推拉方向写反了，
+    且把方向的测试期望也写反了，靠真机验证才纠出来。
+    """
+    b = _structured_depth()
+    assert rb.infer_camera_move(b, _shift_img(b, 12, 0))["move"] == "pan_left"
+    assert rb.infer_camera_move(b, _shift_img(b, -12, 0))["move"] == "pan_right"
+
+
+def test_l2_tilt_direction_semantics():
+    b = _structured_depth()
+    assert rb.infer_camera_move(b, _shift_img(b, 0, 8))["move"] == "tilt_up"
+    assert rb.infer_camera_move(b, _shift_img(b, 0, -8))["move"] == "tilt_down"
+
+
+def test_l2_dolly_direction_semantics():
+    """best_scale 是「b 缩放多少能匹配 a」⇒ <1 表示 b 更大 ⇒ 画面变大 ⇒ **推近**。"""
+    b = _structured_depth()
+    assert rb.infer_camera_move(b, _scale_img(b, 1.11))["move"] == "dolly_in"
+    assert rb.infer_camera_move(b, _scale_img(b, 0.90))["move"] == "dolly_out"
+
+
+def test_l2_pan_beats_zoom_when_both_plausible():
+    """★ 平移 12px 不得被缩放"抢走"（首次实现正是在这里误判）。
+
+    旧实现用不同常数归一化平移与缩放 ⇒ 8% 横移被 11% 缩放压过。
+    新实现改用「残差改善量」比较（谁更能解释差异）。
+    """
+    b = _structured_depth()
+    r = rb.infer_camera_move(b, _shift_img(b, 12, 0))
+    assert r["move"] == "pan_left", f"横移被误判为 {r['move']}（{r['reason']}）"
+
+
+def test_l2_honest_on_flat_and_mismatched():
+    import numpy as np
+    assert rb.infer_camera_move(np.zeros((10, 10)), np.zeros((10, 10)))["move"] == "unknown"
+    assert rb.infer_camera_move(np.zeros((10, 10)), np.zeros((8, 8)))["move"] == "unknown"
+
+
+def test_l2_confidence_range():
+    b = _structured_depth()
+    r = rb.infer_camera_move(b, _shift_img(b, 12, 0))
+    assert 0.0 <= r["confidence"] <= 1.0
+    assert r["confidence"] > 0.5, "明显横移的置信度应较高"
+    assert "reason" in r and r["reason"]
+
+
+# ─────────────────── L2 置信度门槛（2026-10-09 诚实性）───────────────────
+
+def test_camera_move_trusted_gate():
+    """低置信度的运镜结论**不得**写进「运镜」字段（只留详情）。
+
+    实测依据：构造的明确平移/缩放可达 0.94~1.0，而生成图案（非真实场景）只有 0.13
+    ⇒ 用 0.4 分界能干净区分「可据以决策的结论」与「算法猜的」。
+    """
+    assert rb.camera_move_trusted("pan_left", 0.997) is True
+    assert rb.camera_move_trusted("pan_left", 0.40) is True          # 边界含等号
+    assert rb.camera_move_trusted("pan_left", 0.133) is False        # 实测低置信度
+    assert rb.camera_move_trusted("pan_left", 0.399) is False
+
+
+def test_camera_move_trusted_rejects_non_moves():
+    for mv in ("", "unknown", "static"):
+        assert rb.camera_move_trusted(mv, 1.0) is False, f"{mv} 不该被当成运镜结论"
+
+
+def test_camera_move_trusted_handles_bad_confidence():
+    assert rb.camera_move_trusted("pan_left", None) is False
+    assert rb.camera_move_trusted("pan_left", "abc") is False
+
+
+def test_min_confidence_constant_documented():
+    assert 0.0 < rb.CAMERA_MOVE_MIN_CONFIDENCE < 1.0

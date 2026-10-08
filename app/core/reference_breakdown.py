@@ -230,15 +230,253 @@ def read_gray_small(path: str):
     return cv2.resize(img, (160, 90), interpolation=cv2.INTER_AREA)
 
 
+# ── L2 运动级：从深度图推断运镜（2026-10-09 通电，接 video_depth）───────
+#
+# 为什么用深度而不是直接比像素：像素差受「物体自身运动」干扰（人物走动会造成
+# 大面积像素变化，但其实镜头没动）。深度图描述的是**空间结构**，镜头推拉摇移时
+# 整幅深度会整体平移/缩放，而物体自身运动只影响局部 ⇒ 对运镜更鲁棒。
+#
+# 两个估计量（都是标准 CV 方法，不编造）：
+#   · 平移：cv2.phaseCorrelate（相位相关，亚像素级平移估计）
+#   · 推拉：在候选缩放因子里搜最优（重采样后与另一帧 MSE 最小者）
+
+MOVES = ("static", "dolly_in", "dolly_out", "pan_left", "pan_right", "tilt_up", "tilt_down")
+
+# 运镜结论的**最低置信度**：低于它就不写进「运镜」字段（只留详情）
+CAMERA_MOVE_MIN_CONFIDENCE = 0.4
+_ZOOM_CANDIDATES = (0.90, 0.94, 0.97, 1.0, 1.03, 1.06, 1.11)
+
+
+def read_bgr(path: str):
+    """读彩色图（estimate_depth_bgr 要 BGR）。
+
+    ⚠️ 与 read_gray_small 同理：**不能用 cv2.imread**（本项目路径含中文，
+    OpenCV 在 Windows 上会静默返回 None）。用 np.fromfile + cv2.imdecode。
+    """
+    import cv2
+    import numpy as np
+
+    try:
+        buf = np.fromfile(path, dtype=np.uint8)
+    except Exception as e:
+        logger.debug("[reference_breakdown] 读彩色图失败 %s: %s", path, e)
+        return None
+    if buf.size == 0:
+        return None
+    return cv2.imdecode(buf, cv2.IMREAD_COLOR)
+
+
+def infer_camera_move(depth_a, depth_b, *,
+                      pan_thresh: float = 0.8,
+                      zoom_thresh: float = 0.02) -> Dict[str, Any]:
+    """**纯函数**：从「段首深度图 + 段尾深度图」推断运镜（L2）。
+
+    Args:
+        depth_a/depth_b: 两个二维深度图（同尺寸；DPT 输出越大越近）
+        pan_thresh:  平移判定阈值（像素，160x90 尺度下的经验值）
+        zoom_thresh: 缩放判定阈值（比例，如 0.02 = 2%）
+
+    Returns:
+        {"move": MOVES 之一, "confidence": 0~1, "dx"/"dy": 平移像素,
+         "scale": 缩放比（>1 表示画面变大=推近）, "reason": 人类可读依据}
+    全平/尺寸不符等无法判断的情况 ⇒ move="unknown" + reason（**不猜**）。
+    """
+    import cv2
+    import numpy as np
+
+    a = np.asarray(depth_a, dtype="float32")
+    b = np.asarray(depth_b, dtype="float32")
+    if a.ndim != 2 or b.ndim != 2 or a.shape != b.shape or a.size == 0:
+        return {"move": "unknown", "confidence": 0.0, "dx": 0.0, "dy": 0.0,
+                "scale": 1.0, "reason": "深度图尺寸不符或为空"}
+    # 归一化到 [0,1]（不同帧的绝对深度尺度不可比，只比结构）
+    def _norm(x):
+        lo, hi = float(x.min()), float(x.max())
+        return (x - lo) / (hi - lo) if hi - lo > 1e-6 else np.zeros_like(x)
+    na, nb = _norm(a), _norm(b)
+    if float(na.std()) < 1e-6 or float(nb.std()) < 1e-6:
+        return {"move": "unknown", "confidence": 0.0, "dx": 0.0, "dy": 0.0,
+                "scale": 1.0, "reason": "深度图近似全平（无结构可比）"}
+
+    # ① 平移：相位相关
+    try:
+        # response 是相位相关的相关性质量（0~1）：可作后续「平移估计可靠性」的信号
+        # —— 目前未纳入置信度，先留着不丢（故以下划线前缀，避免误报未使用）。
+        (dx, dy), _resp = cv2.phaseCorrelate(na, nb)
+    except Exception:
+        dx = dy = 0.0
+
+    # ② 推拉：候选缩放里搜最优
+    h, w = na.shape
+    best_scale, best_err = 1.0, None
+    base_err = float(np.mean((na - nb) ** 2))
+    for sc in _ZOOM_CANDIDATES:
+        if sc == 1.0:
+            err = base_err
+        else:
+            M = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), 0.0, sc)
+            warped = cv2.warpAffine(nb, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+            err = float(np.mean((na - warped) ** 2))
+        if best_err is None or err < best_err:
+            best_err, best_scale = err, sc
+
+    # ③ 判定（2026-10-09 重写：改用「**谁更能解释差异**」——残差改善量）
+    #
+    # 为什么不用「平移像素 vs 缩放比例」直接比：两者量纲不同，用不同常数归一化
+    # 纯属拍脑袋 —— 实测把「右摇 12px」误判成推拉（8% 的横移被 11% 的缩放"抢走"）。
+    # 正确做法：分别用「平移模型」与「缩放模型」去补偿 nb，看谁把与 na 的差异
+    # 解释得更好（残差下降更多），谁解释力强就是谁。
+    def _mse(x, y):
+        return float(np.mean((x - y) ** 2))
+
+    err_raw = _mse(na, nb)
+    # 平移补偿：b 相对 a 位移 (dx,dy) ⇒ 反向搬回去
+    Ms = np.float32([[1, 0, -dx], [0, 1, -dy]])
+    shifted = cv2.warpAffine(nb, Ms, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    err_shift = _mse(na, shifted)
+    gain_shift = err_raw - err_shift
+
+    # 缩放补偿：best_scale 是「nb 缩放多少能匹配 na」⇒ 直接用它
+    Mz = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), 0.0, best_scale)
+    zoomed = cv2.warpAffine(nb, Mz, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    err_zoom = _mse(na, zoomed)
+    gain_zoom = err_raw - err_zoom
+
+    # 改善量显著性门槛：至少要把原始差异解释掉 5%，否则算「没动」
+    sig = max(err_raw * 0.05, 1e-6)
+    best_gain = max(gain_shift, gain_zoom)
+
+    if best_gain <= sig:
+        return {"move": "static", "confidence": 0.5, "dx": round(float(dx), 3),
+                "dy": round(float(dy), 3), "scale": round(best_scale, 4),
+                "reason": "平移/缩放模型都无法解释差异 ⇒ 固定机位"}
+
+    conf = round(min(1.0, best_gain / max(err_raw, 1e-6)), 3)
+    if gain_shift >= gain_zoom:
+        # 方向语义（写清楚，避免再次写反）：
+        #   phaseCorrelate(a,b) 给的是 **b 相对 a** 的位移
+        #   dx > 0 ⇒ b 的内容相对 a 右移 ⇒ 镜头向左摇（pan_left）
+        #   dy > 0 ⇒ b 的内容下移        ⇒ 镜头向上摇（tilt_up）
+        if abs(dx) >= abs(dy):
+            move = "pan_left" if dx > 0 else "pan_right"
+            why = f"深度水平平移 {dx:+.2f}px（{'内容右移⇒镜头左摇' if dx > 0 else '内容左移⇒镜头右摇'}）"
+        else:
+            move = "tilt_up" if dy > 0 else "tilt_down"
+            why = f"深度垂直平移 {dy:+.2f}px（{'内容下移⇒镜头上摇' if dy > 0 else '内容上移⇒镜头下摇'}）"
+    else:
+        # best_scale < 1 ⇒ nb 需缩小才能匹配 na ⇒ nb 比 na 大 ⇒ 画面变大 ⇒ 推近
+        move = "dolly_in" if best_scale < 1.0 else "dolly_out"
+        why = (f"深度整体缩放 {best_scale:.3f}"
+               f"（{'<1 ⇒ 画面变大 ⇒ 推近' if best_scale < 1.0 else '>1 ⇒ 画面变小 ⇒ 拉远'}）")
+    return {"move": move, "confidence": conf,
+            "dx": round(float(dx), 3), "dy": round(float(dy), 3),
+            "scale": round(best_scale, 4), "reason": why}
+
+
+def extract_frame_with_backoff(video: str, at: float, out_path: str, *,
+                              backoff: float = 0.15, tries: int = 4) -> Optional[float]:
+    """在 ``at`` 秒取一帧；失败则**向前回退重试**（2026-10-09 修）。
+
+    为什么需要回退而不是只 clamp：容器时长（如 2.0s）与**最后一帧时刻**（如 1.9s）
+    不是一回事 —— ``end-0.05`` 可能已越过最后一帧，``-ss`` 直接返回空。
+    L1 与 L2 都踩过这个坑，故统一成「取不到就往前退 0.15s，最多退 4 次」。
+
+    Returns: 实际取到帧的时刻；全失败返回 None（调用方如实留空，不编造）。
+    """
+    for i in range(max(1, tries)):
+        t = max(0.0, at - i * backoff)
+        if extract_frame(video, t, out_path):
+            return t
+    return None
+
+
+def camera_move_trusted(move: str, confidence: float) -> bool:
+    """**纯函数**：这条运镜结论可不可信（决定要不要写进「运镜」字段）。
+
+    判据：① 是有效运动（非 unknown/static）② 置信度 ≥ CAMERA_MOVE_MIN_CONFIDENCE。
+    低置信度的推断只留在 `camera_move` 详情里，**不污染表格结论**。
+    """
+    if not move or move in ("unknown", "static"):
+        return False
+    try:
+        return float(confidence) >= CAMERA_MOVE_MIN_CONFIDENCE
+    except (TypeError, ValueError):
+        return False
+
+
+def _l2_camera_move(video: str, shot: Dict[str, Any], duration: float) -> Dict[str, Any]:
+    """L2：取段首/尾帧 → 深度 → 运镜（**深度不可用就诚实留空**，不编造）。
+
+    返回要 merge 进 shot 的字段；任何一步失败都返回带说明的空结果。
+    """
+    try:
+        from app.core import video_depth as vd
+    except Exception as e:
+        logger.debug("[reference_breakdown] L2 跳过（video_depth 不可用）: %s", e)
+        return {"运镜": "", "camera_move": {"move": "unknown", "reason": "深度模块不可用"}}
+    av = vd.available()
+    if not av.get("available"):
+        return {"运镜": "", "camera_move": {"move": "unknown",
+                                            "reason": av.get("reason") or "深度模型不可用"}}
+    td = _tmp_dir()
+    idx = shot["index"]
+    pa = os.path.join(td, f"_rb_l2a_{idx}.jpg")
+    pb = os.path.join(td, f"_rb_l2b_{idx}.jpg")
+    t_a = shot["start"] + 0.05
+    # 段尾取帧要 clamp：末尾镜头 end-0.05 可能超过最后一帧时刻（L1 已踩过此坑）
+    t_b = min(shot["end"] - 0.05, max(t_a + 0.05, (duration or shot["end"]) - 0.05))
+    if t_b <= t_a:
+        return {"运镜": "", "camera_move": {"move": "unknown", "reason": "段太短，取不到两帧"}}
+    try:
+        # 用带回退的取帧（段尾越界是这个模块的老坑，统一在这里兜住）
+        if extract_frame_with_backoff(video, t_a, pa) is None:
+            return {"运镜": "", "camera_move": {"move": "unknown", "reason": "段首帧取不到"}}
+        if extract_frame_with_backoff(video, t_b, pb) is None:
+            return {"运镜": "", "camera_move": {"move": "unknown", "reason": "段尾帧取不到"}}
+        ia, ib = read_bgr(pa), read_bgr(pb)
+        if ia is None or ib is None:
+            return {"运镜": "", "camera_move": {"move": "unknown", "reason": "帧读取失败"}}
+        da, db = vd.estimate_depth_bgr(ia), vd.estimate_depth_bgr(ib)
+        if da is None or db is None:
+            return {"运镜": "", "camera_move": {"move": "unknown", "reason": "深度推理失败"}}
+        mv = infer_camera_move(da, db)
+        move = mv.get("move") or "unknown"
+        conf = float(mv.get("confidence") or 0.0)
+        # ★ 置信度门槛（2026-10-09）：低置信度的推断**不写进「运镜」字段**，
+        #   只在 camera_move 详情里保留 —— 表格里的运镜应当是"可据以决策"的结论，
+        #   而不是"算法猜了个但不自信"。实测：构造的明确平移/缩放可达 0.94~1.0，
+        #   而生成图案（非真实场景）只有 0.13 ⇒ 用 0.4 分界能干净区分。
+        trustworthy = camera_move_trusted(move, conf)
+        return {"运镜": (move if trustworthy else ""),
+                "camera_move": mv,
+                "camera_move_trusted": trustworthy}
+    finally:
+        for p in (pa, pb):
+            try:
+                os.remove(p)
+            except Exception:  # stability-gate: allow-swallow（临时帧清理；失败只留一个临时文件）
+                pass
+
+
 def build_shot_table(video: str, *, out_dir: str,
                      threshold: float = DEFAULT_SCENE_THRESHOLD,
-                     keyframes: bool = True) -> Dict[str, Any]:
+                     keyframes: bool = True,
+                     with_depth: bool = False) -> Dict[str, Any]:
     """L1 主入口：参考片 → **结构化镜头表**（含关键帧与可测指标）。
 
     产物：
       · `shots[]`：镜号 / 起止 / 时长 / 关键帧路径 / 运动量 / 亮度 / 对比度
       · `table_markdown`：可直接贴进文档或作为分镜参考的表格
-    ⚠️ 景别、运镜、光线基调**不做推断**（表里明确留空，避免编造）。
+    当 ``with_depth=True`` 时额外跑 **L2 运动级**：取每段首/尾帧的深度图，
+    用 ``infer_camera_move``（相位相关 + 缩放搜索）推断**运镜**（推拉摇移/固定）。
+
+    ⚠️ 诚实边界（三条）：
+      1. **景别、光线基调仍不推断**（留空）；
+      2. 运镜只在**置信度 ≥ CAMERA_MOVE_MIN_CONFIDENCE** 时才写进「运镜」字段 ——
+         低置信度的推断只留在 `camera_move` 详情里（`camera_move_trusted=False`）；
+      3. **固有局限**：本方法比较的是「整幅深度结构的变化」，因此**无法区分
+         「镜头在动」与「画面内大物体在动」**。拍摄场景相对静态时结论可靠；
+         画面内有大幅物体运动时可能混淆 —— 置信度会下降，但不保证。
     """
     det = detect_scenes(video, threshold=threshold)
     if not det.get("ok"):
@@ -281,13 +519,18 @@ def build_shot_table(video: str, *, out_dir: str,
                 os.remove(p1)
             except Exception:  # stability-gate: allow-swallow（删临时帧的清理动作；删不掉只留一个临时文件，不掩盖任何崩溃根因）
                 pass
+        # ── L2 运动级（2026-10-09 通电）：深度 → 运镜推断 ──
+        if with_depth:
+            item.update(_l2_camera_move(video, s, det.get("duration") or 0.0))
         shots.append(item)
 
     return {"ok": True, "video": video, "duration": det["duration"],
             "count": len(shots), "threshold": det["threshold"],
             "shots": shots, "table_markdown": shots_to_markdown(shots),
-            "note": "L1 结构级：切点/时长/关键帧/可测指标均为真实计算结果；"
-                    "景别与运镜**未推断**（诚实留空，留给 L2 或人工）"}
+            "note": ("L1 结构级：切点/时长/关键帧/可测指标均为真实计算结果；"
+                     "景别**未推断**（诚实留空）"
+                     + ("；L2 运动级已启用（运镜由深度图推断，带 confidence）"
+                        if with_depth else "；运镜未跑（with_depth=False）"))}
 
 
 def shots_to_markdown(shots: List[Dict[str, Any]]) -> str:
