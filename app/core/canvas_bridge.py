@@ -16,37 +16,14 @@ import json
 import logging
 import os
 import queue
-import re
-import hashlib
 import shutil
 import sys
 import threading
 import time
 import uuid
 from collections import deque
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Callable, Deque, Dict, List, Optional
 # AIGC / 模型配置 / 分镜层已拆到 canvas_aigc.py，此处 re-export 保持向后兼容
-from app.core.canvas_aigc import (
-    VIDEO_KEYWORDS,
-    AUDIO_KEYWORDS,
-    IMAGE_KEYWORDS,
-    guess_capability,
-    build_host_ai_config_patch,
-    _data_url_to_b64,
-    generate_image_openai_compatible,
-    inpaint_via_host,
-    _resolve_aigc_channel,
-    generate_audio_via_host,
-    agent_chat_proxy,
-    generate_video_via_host,
-    generate_music_via_host,
-    _parse_storyboard_json,
-    _heuristic_storyboard,
-    storyboard_breakdown,
-)
 
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
@@ -953,12 +930,19 @@ def list_editor_outbox() -> List[Dict[str, Any]]:
     with _OUTBOX_LOCK:
         return list(_EDITOR_OUTBOX)
 
-# HTTP 服务层（_BridgeHandler / CanvasBridgeServer / inject.js）已拆到 canvas_server.py，此处 re-export 保持向后兼容
-from app.core.canvas_server import (
-    _check_host_token,
-    _BridgeHandler,
-    _build_inject_js,
-    CanvasBridgeServer,
-    get_canvas_bridge,
-)
+# HTTP 服务层（_BridgeHandler / CanvasBridgeServer / inject.js）已拆到 canvas_server.py，
+# 此处 re-export 保持向后兼容。
+# 2026-10-09 改为**懒 re-export**（PEP 562 __getattr__）：顶层 from-import 在
+# 「bridge 先于 server 完成 import」的进程里会撞 partially-initialized（实测：
+# _verify/check_poweron_e2e.py 新进程必炸）。懒导只在**属性首次访问**时发生，
+# 那时两个模块都已初始化完毕 —— 两种导入顺序都能活。
+_BRIDGE_REEXPORTS = ("_check_host_token", "_BridgeHandler", "_build_inject_js",
+                     "CanvasBridgeServer", "get_canvas_bridge")
+
+
+def __getattr__(name: str):
+    if name in _BRIDGE_REEXPORTS:
+        import app.core.canvas_server as _cs
+        return getattr(_cs, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
