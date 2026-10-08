@@ -255,3 +255,15 @@ vendor/shiguang-canvas/src/*.bak
 
 # 验证脚本的报告型 JSON 产出
 /_verify/out_*.json
+
+# ── 2026-10-09 补：CI/测试/浏览器会话临时产物 ──
+# 这些此前一直以「未跟踪」状态挂在 git status 上（实测 597 项里有 500+ 是
+# shiguang-showcase/.tmp/ 下的 node 编译缓存与 puppeteer 会话目录），
+# 是 `git add -A` 事故的高危来源（见 2026-09-21 的 6462 个 node_modules 血泪）。
+/shiguang-showcase/.tmp/
+# pytest-cov 的覆盖率数据库（根级；json 报告已落在 .workbuddy/tmp）
+/.coverage
+/coverage.xml
+/htmlcov/
+# 覆盖率棘轮/CI 的中间产物
+/.pytest_cache/

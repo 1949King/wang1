@@ -55,9 +55,19 @@ jobs:
 
       # 必须在仓库根跑：app/ 下没有 conftest.py，根 conftest.py 负责
       # 把 app/ 加入 sys.path（`cd app` 会让全量测试因导入失败而假红）。
-      - name: 运行全量单元测试
+      # 2026-10-09：加 --cov，产出覆盖率 json 供下一步的棘轮门禁消费。
+      - name: 运行全量单元测试（含覆盖率采样）
         run: |
-          python -m pytest app/tests tests/test_pipeline_optimizations.py --tb=short -q
+          python -m pytest -q --tb=short `
+            --cov=app `
+            --cov-report=term:skip-covered `
+            --cov-report=json:coverage.json
+        shell: pwsh
+
+      # 覆盖率棘轮：只校验「已覆盖的行不许变回未覆盖」，不是「覆盖率必须达 X%」。
+      # 语义与 ruff_gate / stability_gate 一致，见 _verify/check_coverage.py 文件头。
+      - name: 覆盖率棘轮（只增不减）
+        run: python _verify/check_coverage.py --json coverage.json
         shell: pwsh
 
       - name: 上传测试结果
@@ -65,14 +75,55 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
-          path: app/logs/pytest_*.txt
+          path: |
+            app/logs/pytest_*.txt
+            coverage.json
           if-no-files-found: ignore
 
-  # ============== Job 2: 守卫回归（纯 Python，无外部依赖） ==============
+  # ============== Job 2: 守卫回归（= 本地 9 道门禁的全量模式） ==============
+  # 2026-10-09 改造：此前本 job 把 冻结区/稳定性/契约/分层/双库 五道**各抄一遍**，
+  # 而本地 hook 里还有 ruff棘轮/规模守卫/路由校验 三道没抄到 CI —— 两边必然漂移，
+  # 且"CI 绿的本地不一定绿"。现在改为**直接调用仓库内的
+  # scripts/precommit_gates.sh --all**（与本地 hook 同一份代码、同一套判定标准），
+  # 单一真相源。本地 hook 现在也只是这个脚本的一层 3 行 shim。
   guards:
-    name: 守卫回归 (冻结区/棘轮/契约/分层/双库)
+    name: 守卫回归 (9 道门禁全量模式)
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    needs: unit-tests
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 安装依赖 (必需 + ruff)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install ruff
+
+      # SHIGUANG_GATE_ALL=1 ⇒ 全量模式（扫全仓，而非只看暂存文件）
+      # 若本机 .venv312 不存在，脚本自动回落当前 python（见 precommit_gates.sh）
+      - name: 跑 9 道门禁（全量）
+        run: bash scripts/precommit_gates.sh --all
+        shell: bash
+        env:
+          SHIGUANG_GATE_ALL: "1"
+          PYTHONIOENCODING: utf-8
+
+  # ============== Job 3: 验证套件（72 项，含真起 bridge 的 e2e） ==============
+  # 2026-10-09 新增：`_verify/run_all_checks.py` 是项目里最厚的一层回归（含
+  # check_canvas_bridge_e2e 会真起一个 bridge 服务打 HTTP），此前**完全没进 CI**。
+  verify-suite:
+    name: 验证套件 (run_all_checks 72 项)
+    runs-on: windows-latest
+    timeout-minutes: 20
     needs: unit-tests
 
     steps:
@@ -90,29 +141,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r app/requirements.txt
 
-      - name: 冻结区守护（85 锁点哈希）
-        run: python scripts/frozen_zone_guard.py
+      - name: 跑验证套件
+        run: python _verify/run_all_checks.py
         shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
 
-      - name: 稳定性门禁（存量棘轮，只减不增）
-        run: python scripts/stability_gate.py
-        shell: pwsh
-
-      - name: 粘合层契约（跨线字段等价性）
-        run: python _verify/check_glue_contract.py
-        shell: pwsh
-
-      - name: 架构守护（分层纪律）
-        run: python scripts/arch_guard.py --scan app
-        shell: pwsh
-
-      - name: 双库一致性（防复漂）
-        run: python _verify/check_canvas_dual_repo.py
-        shell: pwsh
-
-  # ============== Job 3: 前端校验 (画布真源 vitest) ==============
+  # ============== Job 4: 前端校验 (画布真源 tsc + vitest + 质量棘轮) ==============
   frontend-tests:
-    name: 前端校验 (画布 vitest)
+    name: 前端校验 (tsc + vitest + 质量棘轮)
     runs-on: windows-latest
     timeout-minutes: 15
     needs: unit-tests
@@ -132,10 +169,31 @@ jobs:
         run: npm ci
         working-directory: vendor/shiguang-canvas
 
-      - name: vitest 单元测试
-        run: npm test -- --reporter=dot
+      # 2026-10-09 补：tsc 与质量棘轮此前只在本地 hook 里跑，CI 完全没有。
+      # tsc 基线 37 个错误全在 stage3d-core 冻结区，清零需解冻 ⇒ 先做计数棘轮。
+      - name: tsc 类型检查（棘轮：错误数 ≤ 37）
+        run: |
+          set +e
+          OUT=$(npx tsc --noEmit --pretty false 2>&1)
+          N=$(printf '%s\n' "$OUT" | grep -c "error TS")
+          echo "tsc 错误数：$N（基线 37）"
+          if [ "$N" -gt 37 ]; then
+            printf '%s\n' "$OUT" | grep "error TS" | head -20
+            exit 1
+          fi
         working-directory: vendor/shiguang-canvas
-        shell: pwsh
+        shell: bash
+
+      - name: vitest 单元测试
+        run: npx vitest run --reporter=dot --pool=threads
+        working-directory: vendor/shiguang-canvas
+        shell: bash
+
+      - name: 前端质量棘轮（dupNames/fnOver300/cycloOver60）
+        run: |
+          OUT=$(node _verify/check_canvas_frontend_quality.mjs --json)
+          printf '%s' "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s).summary;const base={dupNames:8,fnOver300:10,cycloOver60:5};const bad=Object.entries(base).filter(([k,v])=>(j[k]||0)>v);if(bad.length){console.log('FAIL '+bad.map(([k,v])=>k+'='+j[k]+'>'+v).join(' '));process.exit(1)}console.log('OK dupNames='+j.dupNames+'/8 fnOver300='+j.fnOver300+'/10 cycloOver60='+j.cycloOver60+'/5')});"
+        shell: bash
 
   # ============== Job 4: 集成测试 (秒级, Qt offscreen) ==============
   integration-tests:
