@@ -1,5 +1,134 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.0 (2026-10-09) — 交付底座：四块通用能力从「有配置」到「真在跑」
+
+> **非功能变更**（工程底座）。起因是一份第三方分析把仓库能力分成「不挑模型的四样」
+> （测试套件 / CI 门禁 / 一任务一分支+自动回滚 / 沙箱权限），并要求先给出两个实测数据：
+> 真实有效行数、有没有能一键跑通的测试套件。实测结果：**四样里只有第一样算有**，
+> 第二样「配了但从没跑过」，后两样等于零。本轮把它们全部落地。
+
+### 〇、体检结论（先给数字）
+
+| 项 | 实测 |
+|---|---|
+| 产品本体规模（`app/` + 画布真源 src，代码行） | 188,535（总行 228,545） |
+| 「22 万行」的口径 | = git 跟踪的 **`.py` 228,014 行**（含 3.2 万行测试/验证），不是产品代码 |
+| pytest | 877 通过 / 4 分 18 秒，**覆盖率仅 21%**，**197 个文件 0% 覆盖**（core 层 113 个） |
+| CI | `ci.yml` / `quality-gate.yml` 配置齐全，但 `origin/main` **只有 32 个无关文件**、本地领先 **96 提交** ⇒ **从未运行过** |
+| 分支模型 | 无。长期在 `main` 上直提，无回滚锚点 |
+| 沙箱权限 | 冻结区/规模/ruff/stability/路由/双库 六类守卫齐全，但**「素材不出域」无开关** |
+
+### 一、测试套件 + 覆盖率棘轮
+
+- **新增 8 个补测文件 / 626 个用例**，pytest 总量 877 → **1527**，全绿 4 分 4 秒。
+  · 第一梯队（5 文件 / 439 用例）：`test_zcov_{core_a,media,timeline,audio,config}.py`
+  · 第二梯队「账本三兄弟」（3 文件 / 187 用例）：`test_zcov_ledger_{budget,global,review}.py`
+    —— 三层价格体系（`budget_pacer` / `global_price`）+ 抽检（`sampling_review`）。
+    这三个此前**只有间接覆盖**，是被本轮的「账本状态隔离」（§六 ⑫）逼出来的：
+    隔离掉「跨测试共享单例 + 污染磁盘状态」之后，间接覆盖消失，真实缺口才暴露。
+- 覆盖率：**21% → 30.2%**（已覆盖 20,254 → **30,253** 行，**+9,999**），
+  零覆盖文件 **197 → 159**；棘轮基线已写回（441 文件）。
+- 目标模块 = 覆盖率体检点名的「0% 且语句多」的 core 层模块：`validation` · `thread_safety`
+  · `async_client` · `generation_postprocess` · `ai_interpolation` · `subtitle_manager`
+  · `subtitle_generator` · `lut_loader` · `waveform_generator` · `keyframe_animation`
+  · `timeline_manager` · `timeline_dsl` · `proxy_media` · `audio_processor`
+  · `music_recommendation` · `voice_generator` · `lip_sync` · `preset_manager`
+  · `shortcut_manager` · `local_asset_manager` · `budget_pacer` · `global_price` · `sampling_review`。
+- **覆盖率棘轮**（`_verify/check_coverage.py` + `docs/knowledge/coverage_baseline.json`）：
+  与 ruff_gate / stability_gate **同一范式**——逐文件「已覆盖行数只增不减」，新文件首次入账
+  不拦但立即受约束，文件消失自动剔除。**不是**「覆盖率必须 ≥ X%」的硬阈值。
+
+> 为什么不做硬阈值：现在只有 21%，拍一个「≥60% 才许提交」等于当场把所有人逼去 `--no-verify`。
+> 棘轮的作用是「不许退」，配合补测清单自然往上走。
+
+### 二、CI 门禁（6 job，单一真相源）
+
+| job | 变化 |
+|---|---|
+| `unit-tests` | 加 `--cov` 采样 + 覆盖率棘轮步骤 |
+| `guards` | **改为调用 `scripts/precommit_gates.sh --all`** —— 此前它把 5 道门禁各抄一份，而本地 hook 还有 4 道没抄进来 |
+| `verify-suite` | **新增**：`_verify/run_all_checks.py`（72 项，含真起 bridge 打 HTTP 的 e2e）此前完全没进 CI |
+| `frontend-tests` | 补 tsc 类型棘轮 + 前端质量棘轮（此前 CI 只跑 vitest） |
+| `integration-tests` / `build-smoke` | 不动 |
+
+**单程等价物**：`bash scripts/check_all.sh` 把 门禁→pytest→覆盖率→vitest→run_all_checks
+串成一条链，**CI 与本机跑的是同一套判定标准**。
+
+### 三、一任务一分支 + 自动回滚
+
+`scripts/task_branch.sh`（+ `.bat` 包装）：
+
+| 子命令 | 行为 |
+|---|---|
+| `start <任务名>` | 工作区干净才允许开 `task/<任务名>`（脏工作区直接拒，防把未提交改动带进任务分支） |
+| `done <任务名>` | **唯一判据 = `check_all.sh` 全绿**；过了才打 `green/<任务名>-<日期>` tag 并 `--no-ff` 合并回 main |
+| `done <任务名> --keep` | 只打绿灯不合并 |
+| `abort <任务名> --yes` | 丢弃前自动打 `backup/aborted-*` tag（丢弃也可回滚） |
+| `rollback [tag]` | 回滚前先打 `backup/pre-rollback-<时间戳>`，并打印撤销命令 |
+
+实测（临时仓库全流程）：脏工作区拦截 ✓ / 绿灯 tag ✓ / `--no-ff` 合并 ✓ / 回滚后文件回到绿灯版本 ✓ / 备份 tag 生成 ✓。
+
+### 四、沙箱权限：素材不出域
+
+- `app/core/ai/provider_caps.py::resolve_order()` 原语义是「真实 provider 按 quality_tier
+  降序 + `local` 兜底」，即**默认优先云端**——对「客户素材不得出域」是反向的，且**没有任何开关**
+  能表达「这一单不许出域」。
+- 新增 `SHIGUANG_NO_EGRESS=1`：**优先于一切参数**（显式 `provider="dashscope"`、`priors`、
+  `lambda_price` 都绕不过），`resolve_order()` 有且仅有返回 `["local"]`；`quote()` 同步报 0 元。
+- 顺带修掉 `provider="local"` 返回 `["local", "local"]` 的重复项瑕疵。
+- 守卫 `_verify/check_provider_egress.py`（29 项断言，含「默认行为未被误伤」的反向用例）。
+
+### 五、门禁 9 道 → 11 道（并入库）
+
+| 新增 | 作用 |
+|---|---|
+| ⑩ `_verify/check_qt_signal_types.py` | AST 扫 `pyqtSignal(...)`，typing 泛型别名一律拦（这类错误让**整模块 import 崩**，ruff/tsc 都看不见） |
+| ⑪ `_verify/check_provider_egress.py` | 素材不出域硬约束 |
+
+**结构性改动**：11 道门禁的全部逻辑此前只存在于 `.git/hooks/pre-commit`，而 `.git/` **不入库**
+⇒ CI 没法复用（所以 ci.yml 只能另写一套，两边必然漂移）、换机即丢、改了什么没人能 review。
+现搬到 `scripts/precommit_gates.sh`（入库），hook 降级为 3 行 shim。同时支持
+`--all` 全量模式 / 增量模式**判定标准完全一致**，以及 node/ruff/venv 缺失时的显式跳过。
+
+### 六、12 个实测缺陷修复
+
+补测时挖出的真实缺陷（都不是风格问题，是「特性完全不可用 / 输出是错的 / 违反铁律」）：
+
+| # | 缺陷 | 后果 | 修法 |
+|---|---|---|---|
+| ① | `ai_interpolation.py:249/302/303`、`highlight_preview.py:97/233/234` 写 `pyqtSignal(float, List[np.ndarray])` | typing 泛型别名（`_GenericAlias`）在**类体执行期**抛 TypeError ⇒ **整个模块 import 失败**。而 `preview_manager` 那句 import 无 try/except（开补帧即崩渲染线程）、`deformity_repair_skill` 被 try/except 吞掉 ⇒ Agent 补帧能力**静默失效**、覆盖率永远 0% | 改用 `object`；新增守卫 ⑩ 静态拦同类 |
+| ② | `timeline_manager.add_marker/add_keyframe` 形参名就叫 `time`，遮蔽模块级 `import time` | `int(time.time())` 在 float 上取 `.time` ⇒ AttributeError ⇒ **标记与关键帧写入 100% 不可用** | 加模块级别名 `_time`，**不动公开签名** |
+| ③ | `keyframe_animation.get_property_value` → `get_all_values` → 对**含自身**的每个属性再调 `get_property_value` | 自引用无限递归 ⇒ 一旦 `link_property` 就 RecursionError，**属性联动特性完全不可用** | 表达式只吃「原始值快照」`_base_values()`，链路断开递归 |
+| ④ | `get_tangent` 用 `t±0.001` 调带缓存的 `get_value`，而缓存键是 `round(t,2)` | 两点落到同一缓存键 ⇒ `v1==v0` ⇒ **切线恒为 0.0**，曲线编辑器的斜率永远是平的 | 拆出无缓存 `_value_at` 供中心差分用；缓存语义不变 |
+| ⑤ | `lut_loader._load_cube` 按 `.cube` 规范（红变化最快）reshape 后直接用 `data[r,g,b]` 取值 | **R/B 轴交换** ⇒ 所有 `.cube` 外观颜色都是错的（红蓝互换）且不报错 | reshape 后 `transpose(2,1,0,3)` |
+| ⑥ | `validation` 用 `abspath.startswith(abspath(base))` 判目录白名单 | **前缀逃逸**：`base=/data/allowed` 时 `/data/allowed_evil/x` 被放行，白名单形同虚设（`SafePathValidator` 与 `sanitize_file_path` 两处都有） | 改用 `os.path.commonpath` 按路径段判定，跨盘符 fail-closed |
+| ⑦ | `voice_generator` 在所有 TTS 引擎失败时合成 220Hz 正弦波并让 `generate_voice` 报 `success=True` | **违反项目铁律**「执行端不可用必须诚实失败，绝不返回假音频」：用户拿到时长对、内容全是嗡声的「配音」却毫无察觉 | 默认诚实失败（返回 None → `success=False` + 可读原因）；正弦波降级为显式 opt-in `SHIGUANG_ALLOW_PLACEHOLDER_TTS=1`，且结果带 `is_placeholder=True` 留痕（同步补进 `to_dict()`） |
+| ⑧ | `audio_processor`：`signal` 只在 pitch 分支内 import 但 speed 分支也引用；`_apply_band_eq` 的 high 频段写死 20000Hz | 前者 ⇒ 变速抛 UnboundLocalError 被吞、**静默丢弃**；后者 ⇒ 22050Hz 音频 `20000/11025>1` 让 `scipy.butter` 抛 ValueError 被吞 ⇒ **5 个内置声线的变声整体静默失效** | import 提到方法开头一次绑定；频点夹进 `(0, nyquist)` 开区间并补 ValueError 兜底 |
+| ⑨ | `subtitle_manager.import_subtitles` 重复 append（`_parse_srt` 内的 `create_subtitle` 已 append） | 每条字幕插入两次 ⇒ 时间线叠两层重合字幕、导出 SRT 重复 | 删掉那次重复 append |
+| ⑩ | `scripts/ruff_gate.py::_staged_files()` 用 `subprocess.run` 取暂存文件，**无异常兜底** | 受限/沙箱环境下 `CreateProcess` 被拒（`WinError 5 拒绝访问` —— git 是 MSYS2 程序，启动要建 `\BaseNamedObjects\msys-2.0S5-*` 共享内存）⇒ 脚本**直接崩** ⇒ 门禁**假红**，让人以为代码有问题 | 捕获 `OSError` → 打印警告并**回落全量模式**（既不伪装成失败，也不静默跳过） |
+| ⑪ | `scripts/check_all.sh` 的 GATES 步骤按环境切「本地增量 / CI 全量」 | ① 体检结果依赖 git 暂存状态 ⇒ **不可复现**（同一份代码 staged 与否结果不同）；② 与脚本头部声明的「判定标准与 CI 完全一致」自相矛盾 | 一律传 `--all`；「提交时只查改动文件」的增量严格性由 git hook 自身保证（那时必有暂存文件） |
+| ⑫ | `budget_pacer` / `global_price` / `sampling_review` 的状态路径在导入期硬编码 `data/*.json`，**无环境变量可覆盖**（同类的 `draw_book` / `quality_prior` 早就有这条纪律，漏的正是这三个） | ① 测试往用户**真实 data/ 目录**写 spent/预算；② 三者的 `get_*()` 是**进程级单例**，首次调用读到磁盘状态则 `_pi_ready=True`（跳过「首拍建基线」分支）⇒ **覆盖率采样不可复现**（`budget_pacer.py` 实测有时覆盖 116 行、有时 109 行）⇒ 覆盖率棘轮随机报假红 | 按既有范式补 `_STORE_ENV` + `_resolve_store_path()`；`conftest.py` 加 autouse fixture 把路径指向 tmp 并清空三个单例 |
+
+> ⑦ 与本项目 YuE 的纪律同源（见知识库冻结区不变量第 35 条）：
+> **执行端不可用必须诚实失败，绝不返回假产物、绝不静默降级。**
+
+### 七、其他
+
+- **`.gitignore`**：补 `/shiguang-showcase/.tmp/`、`/.coverage`、`/coverage.xml`、`/htmlcov/`、
+  `/.pytest_cache/`。此前 `shiguang-showcase/.tmp/`（node 编译缓存 + puppeteer 会话目录，
+  实测 500+ 项）一直挂在未跟踪列表里，是 `git add -A` 事故的高危来源。
+- **`docs/_reports/2026-10-08-仓库可交付性体检与四块通用能力配置.md`**：本轮体检的完整证据链
+  （行数三种口径、覆盖率明细、197 个零覆盖文件分布、52 个零覆盖大模块清单）。
+
+### 八、未做 / 遗留
+
+| 项 | 状态 |
+|---|---|
+| `git push` 点亮 GitHub Actions | **阻塞**：仓库跟踪文件实测 **8.29 GB**，其中 9 个 `.mp4`（各 723MB）+ 一个 743MB zip + 2 个 104MB dll 全都在 HEAD 树里，**已超 GitHub 单文件 100MB 硬上限**，push 必被拒；且 `assets/videos/` 属客户素材，与「素材不出域」硬约束直接冲突。需先决策清理方案（见报告 §4.2） |
+| 补测覆盖到的剩余 0% 模块 | 尚有 ~150 个（多为 UI 层 / 冻结区），已列入棘轮视野，后续按 ROI 继续补 |
+
+---
+
 ## V4.40.56 (2026-10-07) — 门禁加固：ruff 卡点改「逐文件存量棘轮」
 
 > **非功能变更**（构建门禁）。触发场景：把 16 天累积的 257 项未提交改动分语义提交时，

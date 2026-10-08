@@ -1,22 +1,60 @@
-__version__ = "4.40.56"
+__version__ = "4.41.3"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
-    "minor": 40,
-    "patch": 56,
-    "codename": "门禁加固",
-    "release_date": "2026-10-07",
+    "minor": 41,
+    "patch": 3,
+    "codename": "交付底座 + 说话人分离 T1 + 多角色音色 T2 + 真人视频对口型 T3",
+    "release_date": "2026-10-09",
     "description": (
-        "V4.40.56: 门禁加固 —— ruff 卡点由「整文件判定」改为**逐文件存量棘轮**（非功能变更）。"
-        "本轮固化 16 天累积改动时，hook ① 把 11 个遗留文件的 237 处**历史**违规当成「本次新增」"
-        "拦下，其中 `app/modules/lego/editor_module.py`（冻结区、9479 行、50 处存量违规）"
-        "**等于核心文件永远无法提交**。实测归因：白名单下 167 个文件带 1016 处存量违规，"
-        "而这些文件最后一次提交多在 2026-09-21/22，早于 hook 诞生（09-26），从未被扫过。"
-        "改法：按 stability_gate 的既有范式做逐文件基线棘轮"
-        "（`scripts/ruff_gate.py` + `docs/knowledge/ruff_gate_baseline.json`）。"
-        "**门禁未放松**：新文件 >0 违规、或已有文件超过其基线，一律拦；"
-        "逐文件（而非全局计数）防此消彼长；`--update` 抬高既有权或为新文件建基线需显式 `--force`。"
-        "上一版 V4.40.55「机位电影级视锥」见 docs/CHANGELOG.md。"
+        "V4.41.0: 交付底座 —— 把「四块通用能力」从「有配置」做成「真在跑」，"
+        "并顺带修掉补测时挖出的 12 个真实缺陷。非功能新增（不改产品行为，只加固与纠错）。"
+        "\n【一、测试套件 + 覆盖率】新增 5 个补测文件 / 436 个用例（pytest 877→1313）；"
+        "覆盖率由 21% 的现状建立起**棘轮基线**（`_verify/check_coverage.py` + "
+        "`docs/knowledge/coverage_baseline.json`，逐文件「已覆盖行只增不减」，"
+        "与 ruff_gate / stability_gate 同一范式）。"
+        "\n【二、CI 门禁】`.github/workflows/ci.yml` 由 5 job 扩到 6 job："
+        "新增 verify-suite（run_all_checks 72 项，此前完全没进 CI）、"
+        "unit-tests 加覆盖率采样与棘轮、frontend-tests 补 tsc 与质量棘轮；"
+        "guards 改为直接调用 `scripts/precommit_gates.sh --all`（**单一真相源**，"
+        "不再与本地 hook 各抄一份必然漂移）。"
+        "\n【三、一任务一分支 + 自动回滚】新增 `scripts/task_branch.sh`"
+        "（start/status/done/abort/rollback）：合并的唯一判据是 `check_all.sh` 全绿，"
+        "每次绿灯打 `green/<任务名>-<日期>` tag 作回滚锚点，回滚前先打 "
+        "`backup/pre-rollback-*` 让回滚本身也可回滚。"
+        "\n【四、沙箱权限 / 素材不出域】`provider_caps.resolve_order()` 此前"
+        "**默认优先云端**、没有任何「禁止出域」开关；现补 `SHIGUANG_NO_EGRESS=1` "
+        "硬约束（优先于一切函数参数），并修掉 `provider=\"local\"` 返回 "
+        "[\"local\",\"local\"] 的重复项瑕疵。守卫 `_verify/check_provider_egress.py`（29 项）。"
+        "\n【五、门禁 9 道 → 11 道】新增 ⑩ pyqtSignal 参数类型（防 typing 泛型别名致"
+        "整模块 import 崩）、⑪ 素材不出域。"
+        "\n【六、12 个实测缺陷修复】① `ai_interpolation.py` + `highlight_preview.py` 共 4 处 "
+        "`pyqtSignal(float, List[np.ndarray])` ⇒ **模块 import 即崩**（补帧/高光功能整体不可用，"
+        "且因静默降级无人发现）；② `timeline_manager.add_marker/add_keyframe` 形参 `time` 遮蔽"
+        "模块 `import time` ⇒ 标记与关键帧写入 100% 抛 AttributeError；③ `keyframe_animation`"
+        " 的 `link_property` 自引用无限递归 ⇒ 属性联动必 RecursionError；"
+        "④ `get_tangent` 因缓存键 round(t,2) 让 t±0.001 命中同一条目 ⇒ 切线恒为 0；"
+        "⑤ `lut_loader` .cube 的 R/B 轴交换 ⇒ 所有 .cube 外观颜色都是错的（红蓝互换）；"
+        "⑥ `validation` 路径白名单用 startswith 判定 ⇒ `<base>_evil` 同前缀目录可越权（前缀逃逸）；"
+        "⑦ `voice_generator` 在全部 TTS 引擎失败时合成正弦波并报 success=True ⇒ "
+        "**违反项目「执行端不可用必须诚实失败，绝不返回假音频」铁律**，改为诚实失败 + "
+        "显式 opt-in 占位音（`SHIGUANG_ALLOW_PLACEHOLDER_TTS`）；"
+        "⑧ `audio_processor` 的 `signal` 未绑定致变速静默丢弃、EQ high 频段 20000Hz 超 nyquist "
+        "致 5 个内置声线变声**整体静默失效**；"
+        "⑨ `subtitle_manager.import_subtitles` 每条字幕重复插入两次；"
+        "⑩ `scripts/ruff_gate.py::_staged_files()` 无异常兜底 ⇒ 受限环境下 Python 起 git 被 "
+        "CreateProcess 拒绝（WinError 5）时脚本直接崩 ⇒ 门禁**假红**（让人以为代码有问题）；"
+        "⑪ `scripts/check_all.sh` 的 GATES 按环境切「本地增量 / CI 全量」⇒ 体检结果依赖 git "
+        "暂存状态、**不可复现**，且与脚本自述的「判定标准与 CI 一致」矛盾；改为一律 `--all`；"
+        "⑫ 三个账本模块（`budget_pacer` / `global_price` / `sampling_review`）的状态路径在导入期"
+        "硬编码、**无环境变量可覆盖** ⇒ ① 测试往用户真实 `data/` 写 spent/预算；② 三者 `get_*()`"
+        " 是进程级单例，首次读到磁盘状态则走「跳过建基线」分支 ⇒ **覆盖率采样不可复现**"
+        "（同一文件有时 116 行、有时 109 行）⇒ 棘轮随机假红。已按 `draw_book` / `quality_prior` "
+        "既有范式补环境变量 + conftest 隔离 fixture。"
+        "\n【七】`scripts/check_all.sh` 全量体检单一入口（门禁→pytest→覆盖率棘轮→vitest→"
+        "run_all_checks 串联），`.git/hooks/pre-commit` 降级为 3 行 shim 指向**入库**的 "
+        "`scripts/precommit_gates.sh`（此前 11 道门禁逻辑只存在于不入库的 .git/ 里，CI 无法复用）。"
+        "\n上一版 V4.40.56「门禁加固」见 docs/CHANGELOG.md。"
     ),
 }
