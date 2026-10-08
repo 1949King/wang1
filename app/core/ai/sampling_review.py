@@ -58,6 +58,16 @@ _DEFAULT_STORE = os.path.join(
         os.path.dirname(os.path.abspath(__file__))))),
     "data", "sampling_review.json")
 
+# 测试隔离：SAMPLING_REVIEW_STORE_PATH 存在时优先使用（缺省仍是 data/sampling_review.json）。
+# 与 draw_book / quality_prior / budget_pacer 同款纪律：测试不得写入正式账本。
+_STORE_ENV = "SAMPLING_REVIEW_STORE_PATH"
+
+
+def _resolve_store_path() -> str:
+    """解析账本路径：环境变量 > 默认（data/sampling_review.json）。"""
+    env = os.environ.get(_STORE_ENV)
+    return env.strip() if env and env.strip() else _DEFAULT_STORE
+
 
 def _stable_hash(text: str) -> float:
     """unit_id → [0,1) 确定性哈希（抽样可复现的关键）。"""
@@ -70,7 +80,7 @@ class SamplingReview:
 
     def __init__(self, store_path: str = "",
                  prior_writer: Optional[Callable[[str, float], None]] = None):
-        self._path = store_path or _DEFAULT_STORE
+        self._path = store_path or _resolve_store_path()
         self._lock = threading.RLock()
         self._loaded = False
         # prior_writer：人工真值写先验库的唯一通道（注入式，保持纯模块）

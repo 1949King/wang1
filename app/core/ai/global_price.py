@@ -59,6 +59,16 @@ _DEFAULT_STORE = os.path.join(
         os.path.dirname(os.path.abspath(__file__))))),
     "data", "global_price.json")
 
+# 测试隔离：GLOBAL_PRICE_STORE_PATH 存在时优先使用（缺省仍是 data/global_price.json）。
+# 与 draw_book / quality_prior / budget_pacer 同款纪律：测试不得写入正式账本。
+_STORE_ENV = "GLOBAL_PRICE_STORE_PATH"
+
+
+def _resolve_store_path() -> str:
+    """解析账本路径：环境变量 > 默认（data/global_price.json）。"""
+    env = os.environ.get(_STORE_ENV)
+    return env.strip() if env and env.strip() else _DEFAULT_STORE
+
 
 def _month() -> str:
     return time.strftime("%Y-%m", time.localtime())
@@ -86,7 +96,7 @@ class GlobalPriceController:
         self._budget = max(1.0, float(monthly_budget))
         self._kappa = min(_KAPPA_GEARS, key=lambda k: abs(k - float(kappa)))
         self._interval = max(1.0, float(update_interval))
-        self._path = store_path or _DEFAULT_STORE
+        self._path = store_path or _resolve_store_path()
         self._lock = threading.RLock()
         self._loaded = False
         # 持久化状态

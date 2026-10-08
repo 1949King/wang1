@@ -103,6 +103,46 @@ def reset_singletons():
         pass
 
 
+@pytest.fixture(autouse=True)
+def isolate_ledger_state(tmp_path, monkeypatch):
+    """把「三层价格体系 + 抽检」的账本状态隔离到临时目录（2026-10-09）。
+
+    为什么必须隔离（实测事故，不是洁癖）：
+      `budget_pacer.get_pacer()` / `global_price.get_global_price()` /
+      `sampling_review.get_review()` 都是**进程级单例**，首次调用会读磁盘上的
+      `data/*.json`。以 budget_pacer 为例：读到持久化状态则 `_pi_ready=True`
+      （**跳过**「首拍建基线」分支），读不到则走另一条路径 —— 于是同一份代码的
+      **覆盖率采样不可复现**：全量 pytest 实测 `budget_pacer.py` 有时覆盖 116 行、
+      有时 109 行（取决于单例首次建立时磁盘上有没有该文件、以及哪些测试先跑），
+      `_verify/check_coverage.py` 的棘轮因此随机报红。
+
+      次要但同样真实的危害：测试会把 spent / 预算 / 抽检标签写进用户**真实 data/ 目录**。
+
+    做法：① 三个路径环境变量指向本测试的 tmp_path；
+          ② 清空进程级单例，使每个测试从干净状态起步。
+    与 draw_book / quality_prior 的既有纪律一致（它们的路径早已可由环境变量覆盖，
+    本文件补的是漏掉的那三个）。
+    """
+    state = tmp_path / "ledger_state"
+    state.mkdir(parents=True, exist_ok=True)
+    for mod_name, env in (
+        ("budget_pacer", "BUDGET_PACER_STORE_PATH"),
+        ("global_price", "GLOBAL_PRICE_STORE_PATH"),
+        ("sampling_review", "SAMPLING_REVIEW_STORE_PATH"),
+    ):
+        monkeypatch.setenv(env, str(state / f"{mod_name}.json"))
+    try:
+        from app.core.ai import budget_pacer as _bp
+        from app.core.ai import global_price as _gp
+        from app.core.ai import sampling_review as _sr
+        monkeypatch.setattr(_bp, "_PACER", None, raising=False)
+        monkeypatch.setattr(_gp, "_GLOBAL", None, raising=False)
+        monkeypatch.setattr(_sr, "_REVIEW", None, raising=False)
+    except Exception:
+        pass
+    yield
+
+
 # ============== 测试辅助函数 ==============
 
 def pytest_configure(config):

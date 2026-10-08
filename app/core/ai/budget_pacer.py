@@ -65,6 +65,20 @@ _DEFAULT_STORE = os.path.join(
         os.path.dirname(os.path.abspath(__file__))))),
     "data", "budget_pacer.json")
 
+# 测试隔离：BUDGET_PACER_STORE_PATH 存在时优先使用（缺省仍是 data/budget_pacer.json）。
+# 与 draw_book / quality_prior 同款纪律（测试不得写入正式账本）。
+# 2026-10-09 补 —— 此前本文件漏了这条，后果除「测试污染正式账本」外还有更隐蔽的一条：
+# `get_pacer()` 是进程级单例，首次调用读到持久化状态时 `_pi_ready=True`
+# （跳过「首拍建基线」分支），读不到时走另一条路径 ⇒ **覆盖率采样不可复现**
+# （同一份代码实测有时覆盖 116 行、有时 109 行），覆盖率棘轮会随机报红。
+_STORE_ENV = "BUDGET_PACER_STORE_PATH"
+
+
+def _resolve_store_path() -> str:
+    """解析账本路径：环境变量 > 默认（data/budget_pacer.json）。"""
+    env = os.environ.get(_STORE_ENV)
+    return env.strip() if env and env.strip() else _DEFAULT_STORE
+
 
 def _today() -> str:
     return time.strftime("%Y-%m-%d", time.localtime())
@@ -87,7 +101,7 @@ class BudgetPacer:
         self._kp = float(kp)
         self._ki = float(ki)
         self._interval = max(1.0, float(update_interval))
-        self._path = store_path or _DEFAULT_STORE
+        self._path = store_path or _resolve_store_path()
         self._lock = threading.RLock()
         self._loaded = False
         # 持久化状态
