@@ -262,7 +262,19 @@ class LUTLoader:
             return LUT3D(name=os.path.basename(path), size=size, data=None,
                          title=title, domain_min=domain_min, domain_max=domain_max)
 
+        # 2026-10-09 修（R/B 轴交换）：
+        # .cube 规范规定数据行按「**红变化最快**，蓝最慢」排列，即
+        #     扁平下标 = b*size² + g*size + r
+        # 直接 reshape(size,size,size,3) 得到的是 A[b,g,r]；而 LUT3D.apply()
+        # 是按语义正确的 data[r0,g0,b0] 取值的。两者错位 ⇒ **R 与 B 通道被交换**，
+        # 任何 .cube 外观套用出来的颜色都是错的（红蓝互换），且不报任何错。
+        # 实测：纯红 (1,0,0) 过 out=(1-R,G,B) 的 LUT 本应得 (0,0,0)，实际得 (1,0,1)。
+        # 修法：reshape 后 transpose(2,1,0,3)，让 B[r,g,b] == A[b,g,r]。
+        # 注意：`_build_color_matrix_preset` 是程序化构造的，它按 r→g→b 顺序写入
+        # data[r,g,b]，与 apply 自洽，**不需要**转置（别把这里的手法套过去）。
+        # `_load_3dl` 的 3dl 约定是蓝变化最快，同样自洽，也保持不动。
         data = np.array(values, dtype=np.float32).reshape(size, size, size, 3)
+        data = data.transpose(2, 1, 0, 3).copy()
         return LUT3D(
             name=os.path.basename(path),
             size=size,

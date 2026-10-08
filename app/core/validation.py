@@ -40,6 +40,28 @@ class ValidationRule(Enum):
     MIME_TYPE = "mime_type"
 
 
+def is_within_dir(path: str, base_dir: str) -> bool:
+    """``path`` 是否真的落在 ``base_dir`` **目录内**（而非只是字符串同前缀）。
+
+    为什么不能用 ``abspath(path).startswith(abspath(base))``（2026-10-09 修）：
+        这是典型的**前缀逃逸**。base = ``/data/allowed`` 时，
+        ``/data/allowed_evil/x.mp4`` 的字符串前缀完全匹配 ``/data/allowed``
+        ⇒ 白名单形同虚设，攻击者只要建一个同前缀的兄弟目录就能读任意文件。
+        实测该缺陷同时存在于 `SafePathValidator.validate` 与 `sanitize_file_path`。
+
+    正解：用 ``os.path.commonpath`` 比较**路径段**，前缀相同时它会把
+    ``/data/allowed_evil`` 与 ``/data/allowed`` 的公共部分算成 ``/data`` ⇒ 判否。
+    跨盘符时 commonpath 抛 ValueError ⇒ 视为不在范围内（fail-closed）。
+    """
+    try:
+        p = os.path.abspath(os.path.expanduser(str(path)))
+        base = os.path.abspath(os.path.expanduser(str(base_dir)))
+        return os.path.commonpath([p, base]) == base
+    except (ValueError, OSError):
+        # 不同盘符 / 非法路径 ⇒ fail-closed（宁可拒，不可放）
+        return False
+
+
 @dataclass
 class ValidationResult:
     """验证结果"""
@@ -214,15 +236,14 @@ class SafePathValidator(Validator):
         # 检查是否在允许的目录下
         if self.allowed_base_dirs:
             try:
-                abs_path = os.path.abspath(path_str)
                 is_allowed = any(
-                    abs_path.startswith(os.path.abspath(base_dir))
+                    is_within_dir(path_str, base_dir)
                     for base_dir in self.allowed_base_dirs
                 )
-                
+
                 if not is_allowed:
                     result.add_error(f"{field_name} 不在允许的目录范围内")
-                    
+
             except Exception as e:
                 result.add_error(f"{field_name} 路径验证失败: {e}")
         
@@ -491,10 +512,10 @@ def sanitize_file_path(file_path: str, allowed_base_dirs: Optional[List[str]] = 
     # 检查是否在允许的目录下
     if allowed_base_dirs:
         is_allowed = any(
-            abs_path.startswith(os.path.abspath(base_dir))
+            is_within_dir(abs_path, base_dir)
             for base_dir in allowed_base_dirs
         )
-        
+
         if not is_allowed:
             raise SecurityError(
                 ErrorCode.PATH_TRAVERSAL_ERROR,

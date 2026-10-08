@@ -331,13 +331,31 @@ class KeyframeAnimation:
         return mt3 * p0 + 3 * mt2 * t * c0[1] + 3 * mt * t2 * c1[1] + t3 * p1
 
     def get_value(self, time_sec: float) -> float:
-        """获取指定时间点的插值（增强版，支持贝塞尔曲线）"""
+        """获取指定时间点的插值（带缓存）。缓存粒度 = 两位小数（约 10ms）。"""
         if not self._keyframes:
             return 0.0
         self._sort()
         cache_key = round(time_sec, 2)
         if cache_key in self._cache:
             return self._cache[cache_key]
+        result = self._value_at(time_sec)
+        self._cache[cache_key] = result
+        return result
+
+    def _value_at(self, time_sec: float) -> float:
+        """**无缓存**的插值核心（增强版，支持贝塞尔曲线）。
+
+        为什么要从 get_value 里拆出来（2026-10-09）：
+            get_tangent() 用中心差分 (v(t+ε)-v(t-ε))/2ε 求斜率，而它调的是
+            **带缓存**的 get_value —— 缓存键是 `round(t, 2)`，t±0.001 会四舍五入
+            到**同一个键**，于是第二次调用直接命中第一次的缓存，v1 == v0，
+            差商恒为 0 ⇒ **曲线编辑器的切线永远是平的**（该特性实际不可用）。
+            拆出无缓存路径后，get_tangent 走 _value_at，两个采样点各算各的。
+            缓存语义完全不变（外部仍只调 get_value）。
+        """
+        if not self._keyframes:
+            return 0.0
+        self._sort()
         if len(self._keyframes) == 1:
             return float(self._keyframes[0].value)
         if time_sec <= self._keyframes[0].time:
@@ -370,7 +388,6 @@ class KeyframeAnimation:
             result = self._smooth_interpolate(neighbors, t, v0, v1, duration)
         else:
             result = v0 + (v1 - v0) * t
-        self._cache[cache_key] = result
         return result
 
     def _smooth_interpolate(self, neighbors: List[Keyframe], t: float, v0: float, v1: float, duration: float) -> float:
@@ -414,10 +431,15 @@ class KeyframeAnimation:
         return points
 
     def get_tangent(self, time_sec: float) -> float:
-        """计算指定时间点的切线斜率（用于曲线编辑器）"""
+        """计算指定时间点的切线斜率（用于曲线编辑器）。
+
+        2026-10-09 修：原来调 `get_value`（**带缓存，键=round(t,2)**），
+        t±0.001 会落到同一个缓存键 ⇒ v1 直接复用 v0 的结果 ⇒ 切线恒为 0.0。
+        现改走无缓存的 `_value_at`。
+        """
         eps = 0.001
-        v0 = self.get_value(time_sec - eps)
-        v1 = self.get_value(time_sec + eps)
+        v0 = self._value_at(time_sec - eps)
+        v1 = self._value_at(time_sec + eps)
         return (v1 - v0) / (2 * eps)
 
     def get_animation_range(self) -> Tuple[float, float]:
@@ -498,14 +520,8 @@ class AnimatableProperties:
             if prop_name in values:
                 self.add_keyframe(prop_name, time_sec, values[prop_name], easing=easing)
 
-    def get_property_value(self, prop_name: str, time_sec: float) -> float:
-        if prop_name in self._link_expressions:
-            all_values = self.get_all_values(time_sec)
-            try:
-                return self._link_expressions[prop_name](all_values)
-            except Exception as e:
-                logger.debug(f"[KeyframeAnimation] 链接表达式求值失败: {e}")
-
+    def _raw_value(self, prop_name: str, time_sec: float) -> float:
+        """取属性的**原始通道值**（不求值链接表达式）。"""
         channel = self._channels.get(prop_name)
         if channel:
             return channel.get_value(time_sec)
@@ -514,10 +530,37 @@ class AnimatableProperties:
             return 1.0
         return 0.0
 
+    def _base_values(self, time_sec: float) -> Dict[str, float]:
+        """所有有效属性的原始值快照（**不含**链接求值）—— 表达式的输入。"""
+        return {name: self._raw_value(name, time_sec) for name in self.VALID_PROPERTIES}
+
+    def get_property_value(self, prop_name: str, time_sec: float) -> float:
+        """取属性值；有链接表达式则按其求值（表达式输入是**原始值快照**）。
+
+        2026-10-09 修（link_property 特性不可用）：
+            原实现里 get_property_value(linked) → get_all_values() →
+            对**每个**属性（含它自己）再调 get_property_value ⇒ 自引用无限递归，
+            顶层调用直接 RecursionError。只要 link 过任何属性，查询它就必崩。
+            现在表达式只吃 `_base_values()` 这份"未求值快照"，
+            链路彻底断开递归（也顺带避免了 a→b→a 的互相引用死循环）。
+        """
+        if prop_name in self._link_expressions:
+            base = self._base_values(time_sec)
+            try:
+                return float(self._link_expressions[prop_name](base))
+            except Exception as e:
+                logger.debug(f"[KeyframeAnimation] 链接表达式求值失败: {e}")
+        return self._raw_value(prop_name, time_sec)
+
     def get_all_values(self, time_sec: float) -> Dict[str, float]:
-        result = {}
-        for name in self.VALID_PROPERTIES:
-            result[name] = self.get_property_value(name, time_sec)
+        """所有有效属性的取值；链接属性用**同一个原始快照**求值一次。"""
+        base = self._base_values(time_sec)
+        result = dict(base)
+        for name, expr in self._link_expressions.items():
+            try:
+                result[name] = float(expr(base))
+            except Exception as e:
+                logger.debug(f"[KeyframeAnimation] 链接表达式求值失败({name}): {e}")
         return result
 
     def get_active_values(self, time_sec: float) -> Dict[str, float]:

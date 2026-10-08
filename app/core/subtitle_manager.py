@@ -265,7 +265,15 @@ class SubtitleManager:
         return self.create_subtitle(text, start_time, end_time, style)
 
     def import_subtitles(self, file_path, format="srt"):
-        """导入字幕文件 - 支持SRT/VTT格式"""
+        """导入字幕文件 - 支持SRT/VTT格式
+
+        2026-10-09 修（每条字幕被插入两次）：
+            `_parse_srt` / `_parse_vtt` 内部调的就是 `create_subtitle`，而
+            `create_subtitle` **本身就会 append 到 self.subtitles**；
+            原实现返回后又遍历 `imported` 再 append 一遍 ⇒ 导入 N 条实际出现
+            2N 条。现象：导入 1 条字幕，时间线里叠两条完全重合的字幕
+            （导出 SRT 时也会重复）。这里删掉那次重复 append。
+        """
         imported = []
         if not os.path.exists(file_path):
             return imported
@@ -276,8 +284,8 @@ class SubtitleManager:
                 imported = self._parse_srt(content)
             elif format == "vtt":
                 imported = self._parse_vtt(content)
-            for sub in imported:
-                self.subtitles.append(sub)
+            # 注意：_parse_* 内的 create_subtitle 已经把它们写进 self.subtitles，
+            # 此处**不要**再 append（否则就是 2 倍）。
         except Exception as e:
             logger.error(f'导入字幕失败: {e}')
         return imported

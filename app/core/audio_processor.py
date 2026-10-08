@@ -293,26 +293,40 @@ class VoiceChanger:
                 if not profile:
                     logger.info(f'声线配置不存在: {profile_name}')
                     return audio_data
-                
+
+                # 2026-10-09 修（UnboundLocalError 静默吞掉）：
+                # 原来 `from scipy import signal` 只写在 pitch 分支**里面**，而
+                # speed 分支也引用 signal ⇒ pitch_shift==0 但 speed_factor!=1 时
+                # 抛 UnboundLocalError，被外层 except 吞掉后**原样返回入参**
+                # —— 用户以为变速生效了，其实什么都没发生，且没有任何日志级别
+                # 的提示。现把 import 提到方法开头，一次绑定、两处共用。
+                try:
+                    from scipy import signal
+                except ImportError:
+                    signal = None
+
                 result = audio_data.copy().astype(np.float64)
-                
+
                 if progress_callback:
                     progress_callback(20, "调整音高...")
-                
+
                 # 简化的音高调整（实际应使用更专业的算法）
-                if profile.pitch_shift != 0:
+                if profile.pitch_shift != 0 and signal is not None:
                     # 使用重采样实现简单的音高调整
-                    from scipy import signal
                     new_sample_rate = int(sample_rate * (1 + profile.pitch_shift / 12))
                     result = signal.resample(result, int(len(result) * new_sample_rate / sample_rate))
-                
+
                 if progress_callback:
                     progress_callback(40, "调整速度...")
-                
+
                 # 调整速度
                 if profile.speed_factor != 1.0:
-                    new_length = int(len(result) / profile.speed_factor)
-                    result = signal.resample(result, new_length)
+                    if signal is None:
+                        logger.warning("[AudioProcessor] 缺 scipy ⇒ 变速被跳过（profile=%s）",
+                                       profile_name)
+                    else:
+                        new_length = max(1, int(len(result) / profile.speed_factor))
+                        result = signal.resample(result, new_length)
                 
                 if progress_callback:
                     progress_callback(60, "调整音量...")
@@ -350,16 +364,37 @@ class VoiceChanger:
     
     def _apply_band_eq(self, audio_data: np.ndarray, sample_rate: int,
                      low_freq: int, high_freq: int, gain: float) -> np.ndarray:
-        """应用频段EQ"""
+        """应用频段 EQ。
+
+        2026-10-09 修（默认声线整体静默失效）：
+            原来直接把 `high_freq / nyquist` 当归一化截止频率，而调用方给
+            "high" 频段写死了 20000Hz。对 nyquist=11025 的 22050Hz 音频，
+            high = 20000/11025 ≈ 1.81 > 1 ⇒ scipy.butter 抛 ValueError
+            「Digital filter critical frequencies must be 0 < Wn < 1」；
+            而这里只捕获 ImportError，ValueError 冒泡到 apply_voice_change 的
+            except 被吞掉 ⇒ **原样返回入参**。因为 5 个内置声线的 eq_bands 都含
+            "high"，等于**整个变声功能对默认声线全部无效**，且没有任何提示。
+        修法：把频点夹进 (0, nyquist) 的开区间（留 1% 余量），
+            频段非法就不做 EQ 而不是抛；同时补上 ValueError 兜底。
+        """
         try:
             from scipy import signal
-            nyquist = sample_rate / 2
-            low = low_freq / nyquist
-            high = high_freq / nyquist
+            nyquist = sample_rate / 2.0
+            # 归一化到 (0, 1) 开区间：留 1% 余量，避免恰好在 nyquist 上被拒
+            low = max(1e-4, min(low_freq / nyquist, 0.99))
+            high = min(high_freq / nyquist, 0.99)
+            if low >= high:
+                logger.debug("[AudioProcessor] EQ 频段非法（%s-%s @ %sHz），跳过",
+                             low_freq, high_freq, sample_rate)
+                return audio_data
             b, a = signal.butter(2, [low, high], btype='band')
             filtered = signal.filtfilt(b, a, audio_data)
             return audio_data * (1 - gain * 0.5) + filtered * gain * 0.5
         except ImportError:
+            return audio_data
+        except ValueError as e:
+            # 频段/参数异常不该把整条变声链带崩（旧行为正是这样静默失效的）
+            logger.warning("[AudioProcessor] EQ 滤波参数非法，跳过该频段: %s", e)
             return audio_data
     
     def get_profiles(self) -> List[VoiceProfile]:

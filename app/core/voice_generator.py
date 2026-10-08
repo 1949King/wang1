@@ -4,6 +4,7 @@ AI配音生成引擎
 """
 
 import numpy as np
+import os
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,6 +15,26 @@ import json
 
 import logging
 logger = logging.getLogger("AI短剧编辑器.core.voice_generator")
+
+# ── 诚实失败纪律（2026-10-09 修）─────────────────────────────
+# 项目铁律：**执行端不可用必须诚实失败，绝不返回假音频/静默降级**
+# （同 YuE 那条，见 docs/knowledge 冻结区不变量第 35 条）。
+# 本模块原实现违反该铁律：gTTS / edge-tts / Coqui 全失败时，它合成一段
+# 220Hz 正弦波当"配音"返回，而 generate_voice() 无条件标 success=True。
+# 下游据此会写出一个时长正确、内容完全错误的音频文件 —— 且没有任何信号
+# 告诉用户"这是假的"。对配音这种要交付给观众的东西，这是最坏的一类失败。
+#
+# 修法：默认**诚实失败**；把正弦波降级成**显式 opt-in 的演示占位**
+# （环境变量 SHIGUANG_ALLOW_PLACEHOLDER_TTS=1），并在结果里留痕
+# （error_message / is_placeholder），让它永远不可能被误当成真配音。
+ENV_ALLOW_PLACEHOLDER_TTS = "SHIGUANG_ALLOW_PLACEHOLDER_TTS"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def allow_placeholder_tts() -> bool:
+    """是否允许「真 TTS 全挂时返回正弦波占位」（默认否 —— 默认诚实失败）。"""
+    return os.environ.get(ENV_ALLOW_PLACEHOLDER_TTS, "").strip().lower() in _TRUTHY
+
 
 class VoiceStyle(Enum):
     """配音风格"""
@@ -107,7 +128,13 @@ class VoiceGenerationResult:
     error_message: str = ""
     generation_time: float = 0.0
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    
+    # 2026-10-09 新增：本条音频是否为「正弦波占位」而非真实 TTS 合成产物。
+    # 只在 SHIGUANG_ALLOW_PLACEHOLDER_TTS=1 时为 True；有了这个位，
+    # 下游（导出/预览/审核）才能把占位音挑出来，而不是拿它当成品交付。
+    # 注意：按 serialization-field-symmetry 纪律，新增字段必须同步 to_dict()，
+    # 否则写日志/落盘时它会静默丢失。
+    is_placeholder: bool = False
+
     def to_dict(self) -> Dict:
         return {
             "request_id": self.request_id,
@@ -117,8 +144,10 @@ class VoiceGenerationResult:
             "success": self.success,
             "error_message": self.error_message,
             "generation_time": self.generation_time,
-            "created_at": self.created_at
+            "created_at": self.created_at,
+            "is_placeholder": self.is_placeholder,
         }
+
 
 
 class AIVoiceGenerator:
@@ -222,7 +251,26 @@ class AIVoiceGenerator:
                 
                 # TTS 语音生成
                 audio_data = self._generate_tts_audio(request, voice_profile)
-                
+
+                # ── 诚实失败（2026-10-09）：不要拿 None 去算 len()，也不要把
+                # 「没有音频」包装成 success=True。原实现在这里直接
+                # len(audio_data) ⇒ 引擎全挂时抛 TypeError，被外层 except 吞成
+                # 一句模糊的 "object of type 'NoneType' has no len()"。
+                if audio_data is None:
+                    logger.error("[VoiceGenerator] 未生成任何音频（所有 TTS 引擎不可用），"
+                                 "按诚实失败返回：text=%r", request.text[:40])
+                    return VoiceGenerationResult(
+                        request_id=str(time.time()),
+                        audio_data=None,
+                        audio_path=None,
+                        duration=0.0,
+                        sample_rate=0,
+                        success=False,
+                        error_message=("所有 TTS 引擎不可用（Coqui/gTTS/edge-tts），未生成音频；"
+                                       "未使用占位音。如需演示占位音请设置 "
+                                       f"{ENV_ALLOW_PLACEHOLDER_TTS}=1"),
+                    )
+
                 if progress_callback:
                     progress_callback(80, "处理音频...")
                 
@@ -233,6 +281,9 @@ class AIVoiceGenerator:
                     progress_callback(100, "生成完成")
                 
                 generation_time = time.time() - start_time
+
+                is_placeholder = bool(getattr(self, "_last_tts_was_placeholder", False))
+                self._last_tts_was_placeholder = False
                 
                 result = VoiceGenerationResult(
                     request_id=str(time.time()),
@@ -241,8 +292,12 @@ class AIVoiceGenerator:
                     duration=duration,
                     sample_rate=voice_profile.sample_rate,
                     success=True,
-                    generation_time=generation_time
+                    generation_time=generation_time,
+                    is_placeholder=is_placeholder,
+                    error_message=("占位音（正弦波），非真实配音"
+                                   if is_placeholder else ""),
                 )
+
                 
                 self._results[result.request_id] = result
                 
@@ -261,12 +316,19 @@ class AIVoiceGenerator:
                 )
     
     def _generate_tts_audio(self, request: VoiceGenerationRequest,
-                             voice_profile: VoiceProfile) -> np.ndarray:
-        """真实TTS语音生成 - 优先gTTS，回退edge-tts，最终回退正弦波"""
+                             voice_profile: VoiceProfile) -> Optional[np.ndarray]:
+        """真实 TTS 语音生成 - 优先 Coqui，回退 gTTS，再回退 edge-tts。
+
+        Returns:
+            一维 float32 音频；**所有引擎都不可用时返回 None**（诚实失败）。
+            仅当 `SHIGUANG_ALLOW_PLACEHOLDER_TTS=1` 时才返回正弦波占位音。
+        """
         text = request.text
         sample_rate = voice_profile.sample_rate
         text_length = len(text)
         duration_sec = max(1.0, text_length * 0.15)
+        # 每次调用先复位「本次是否用了占位音」，避免上一轮的状态串味
+        self._last_tts_was_placeholder = False
 
         # 尝试 Coqui TTS（质量最高）
         try:
@@ -337,7 +399,24 @@ class AIVoiceGenerator:
         except Exception as e:
             logger.debug(f"[VoiceGenerator] edge-tts生成音频失败: {e}")
 
-        # 最终回退：正弦波合成
+        # ── 最终兜底（2026-10-09 改：默认诚实失败，不再默默返回假音频）──
+        # 原实现无条件合成 220Hz 正弦波返回，调用方（generate_voice）还会把
+        # success 标成 True ⇒ 用户拿到一个"时长对、内容全是嗡声"的配音文件
+        # 却毫无察觉。现在：默认 return None（由 generate_voice 转成诚实的失败
+        # 结果）；只有显式打开 SHIGUANG_ALLOW_PLACEHOLDER_TTS=1 才返回占位音，
+        # 且调用链会把它标成 is_placeholder=True。
+        logger.warning(
+            "[VoiceGenerator] 所有真实 TTS 引擎均不可用（Coqui/gTTS/edge-tts）"
+            "text=%r", text[:40])
+        if not allow_placeholder_tts():
+            logger.error(
+                "[VoiceGenerator] 诚实失败：不返回假音频。"
+                "如需演示占位音，显式设置 %s=1", ENV_ALLOW_PLACEHOLDER_TTS)
+            return None
+
+        logger.warning("[VoiceGenerator] %s=1 ⇒ 返回正弦波占位音（明显不是配音）",
+                       ENV_ALLOW_PLACEHOLDER_TTS)
+        self._last_tts_was_placeholder = True
         sample_count = int(duration_sec * sample_rate)
         t = np.linspace(0, duration_sec, sample_count, endpoint=False)
         audio = np.sin(2 * np.pi * 220 * t) * 0.3

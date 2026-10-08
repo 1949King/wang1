@@ -1,6 +1,13 @@
 import os
 import json
-import time
+# 2026-10-09：`add_marker` / `add_keyframe` / `get_clips_at_time` 的形参名就是
+# `time`，原先模块级的 `import time` 会在这些函数体内被**遮蔽** ⇒
+# `int(time.time())` 变成 `AttributeError: 'float' object has no attribute 'time'`，
+# 这两个 API 100% 不可用（实测：add_marker / add_keyframe 一律抛异常）。
+# 修法：**只**保留别名 `_time` 供「取当前时间戳」用，不再 `import time`
+# （留着会同时触发 F401 未用导入 + 3 处 F811 重定义）。
+# 公开签名不动：形参仍叫 `time`，`add_marker(..., time=1.5)` 关键字调用不受影响。
+import time as _time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from collections import OrderedDict
@@ -40,7 +47,7 @@ class TimelineManager:
         Returns:
             时间线信息字典
         """
-        timeline_id = f"timeline_{int(time.time())}"
+        timeline_id = f"timeline_{int(_time.time())}"
         
         timeline = {
             "id": timeline_id,
@@ -147,7 +154,7 @@ class TimelineManager:
             raise ValueError(f"轨道不存在: {track_id}")
         
         # 生成片段ID
-        clip_id = f"clip_{int(time.time())}"
+        clip_id = f"clip_{int(_time.time())}"
         import os as _os
         clip_name = clip_info.get("name") or _os.path.basename(clip_info.get("path", ""))
         
@@ -356,7 +363,7 @@ class TimelineManager:
         if not timeline:
             raise ValueError(f"时间线不存在: {timeline_id}")
         
-        marker_id = f"marker_{int(time.time())}"
+        marker_id = f"marker_{int(_time.time())}"
         marker = {
             "id": marker_id,
             "time": time,
@@ -388,7 +395,7 @@ class TimelineManager:
         if not timeline:
             raise ValueError(f"时间线不存在: {timeline_id}")
         
-        keyframe_id = f"keyframe_{int(time.time())}"
+        keyframe_id = f"keyframe_{int(_time.time())}"
         keyframe = {
             "id": keyframe_id,
             "clip_id": clip_id,

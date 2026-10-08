@@ -246,7 +246,17 @@ class ContextAwareInterpolator:
 class InterpolationWorker(QThread):
     """补帧工作线程"""
     
-    interpolation_ready = pyqtSignal(float, List[np.ndarray])
+    # 2026-10-09 修：原为 pyqtSignal(float, List[np.ndarray])。
+    # pyqtSignal 只接受**真实 Python 类型 / bytes / ASCII 字符串**，不接受
+    # typing 的泛型别名（typing.List[np.ndarray] 是 _GenericAlias）——它会抛
+    #     TypeError: bytes or ASCII string expected not '_GenericAlias'
+    # 且因为异常发生在**类体执行期**，整个模块 import 即崩。后果：
+    #   * preview_manager._process_frame 里 `from app.core.ai_interpolation import ...`
+    #     会 ImportError（该处无 try/except，一旦用户开启补帧就崩渲染线程）；
+    #   * deformity_repair_skill._try_real_interpolation 被 try/except 吞掉，
+    #     永远返回「ai_interpolation 不可用」，Agent 补帧能力**静默失效**。
+    # 载荷是 list，用 object 声明（PyQt 会按 Python 对象传递，不复制）。
+    interpolation_ready = pyqtSignal(float, object)
     marker_added = pyqtSignal(object)
     progress = pyqtSignal(int, str)
     
@@ -299,8 +309,10 @@ class InterpolationWorker(QThread):
 class AIInterpolationEngine(QObject):
     """线性补帧引擎（历史类名保留 AI 前缀以兼容导入）"""
     
-    interpolation_ready = pyqtSignal(float, List[np.ndarray])
-    markers_updated = pyqtSignal(List)
+    # 同 InterpolationWorker 的修复理由：typing 泛型别名不能进 pyqtSignal。
+    # 原为 pyqtSignal(float, List[np.ndarray]) / pyqtSignal(List)。
+    interpolation_ready = pyqtSignal(float, object)
+    markers_updated = pyqtSignal(object)
     
     def __init__(self):
         super().__init__()

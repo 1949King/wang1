@@ -93,8 +93,11 @@ class InterpolationMarker:
 class HighlightDetectorThread(QThread):
     """高光检测线程"""
     
+    # 2026-10-09 修：原为 pyqtSignal(List[HighlightSegment])。
+    # pyqtSignal 不接受 typing 泛型别名（_GenericAlias），会在类体执行期抛
+    # TypeError 导致**整个模块 import 失败**（详见 _verify/check_qt_signal_types.py）。
     detection_progress = pyqtSignal(int, str)
-    detection_completed = pyqtSignal(List[HighlightSegment])
+    detection_completed = pyqtSignal(object)
     detection_failed = pyqtSignal(str)
 
     def __init__(self, video_path: str, target_duration: float = 60.0):
@@ -230,8 +233,9 @@ class HighlightDetectorThread(QThread):
 class HighlightPreviewManager(QObject):
     """高光预览管理器"""
     
-    highlights_updated = pyqtSignal(List[HighlightSegment])
-    interpolation_markers_updated = pyqtSignal(List[InterpolationMarker])
+    # 同 HighlightDetectorThread 的修复理由：typing 泛型不能进 pyqtSignal。
+    highlights_updated = pyqtSignal(object)
+    interpolation_markers_updated = pyqtSignal(object)
     detection_progress = pyqtSignal(int, str)
 
     def __init__(self):
