@@ -1,0 +1,1777 @@
+{
+ "updated": "2026-10-09",
+ "note": "覆盖率棘轮基线：逐文件「已覆盖行数只增不减」。新文件首次入账不拦，但立即受约束。判定逻辑见 _verify/check_coverage.py 文件头。",
+ "scope": [
+  "app/"
+ ],
+ "totals": {
+  "covered": 30253,
+  "stmts": 100185
+ },
+ "files": {
+  "app/__init__.py": {
+   "covered": 1,
+   "stmts": 1
+  },
+  "app/cleanup_project.py": {
+   "covered": 0,
+   "stmts": 45
+  },
+  "app/config/__init__.py": {
+   "covered": 19,
+   "stmts": 19
+  },
+  "app/config/settings.py": {
+   "covered": 15,
+   "stmts": 18
+  },
+  "app/core/__init__.py": {
+   "covered": 19,
+   "stmts": 40
+  },
+  "app/core/agent_action_registry.py": {
+   "covered": 51,
+   "stmts": 72
+  },
+  "app/core/agent_brain.py": {
+   "covered": 148,
+   "stmts": 257
+  },
+  "app/core/agent_capability_catalog.py": {
+   "covered": 39,
+   "stmts": 44
+  },
+  "app/core/agent_console.py": {
+   "covered": 0,
+   "stmts": 54
+  },
+  "app/core/agent_constants.py": {
+   "covered": 12,
+   "stmts": 12
+  },
+  "app/core/agent_context.py": {
+   "covered": 39,
+   "stmts": 54
+  },
+  "app/core/agent_feedback_bridge.py": {
+   "covered": 0,
+   "stmts": 140
+  },
+  "app/core/agent_loop.py": {
+   "covered": 0,
+   "stmts": 285
+  },
+  "app/core/agent_origin.py": {
+   "covered": 12,
+   "stmts": 12
+  },
+  "app/core/agent_persona.py": {
+   "covered": 0,
+   "stmts": 70
+  },
+  "app/core/agent_pipeline_orchestrator.py": {
+   "covered": 205,
+   "stmts": 371
+  },
+  "app/core/agent_pipeline_router.py": {
+   "covered": 91,
+   "stmts": 107
+  },
+  "app/core/agent_policy.py": {
+   "covered": 108,
+   "stmts": 132
+  },
+  "app/core/agent_proactive.py": {
+   "covered": 0,
+   "stmts": 42
+  },
+  "app/core/agent_runtime.py": {
+   "covered": 43,
+   "stmts": 126
+  },
+  "app/core/agent_session.py": {
+   "covered": 0,
+   "stmts": 129
+  },
+  "app/core/agent_task_store.py": {
+   "covered": 77,
+   "stmts": 122
+  },
+  "app/core/ai/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/core/ai/affect_model.py": {
+   "covered": 124,
+   "stmts": 183
+  },
+  "app/core/ai/audio_emotion_analyzer.py": {
+   "covered": 0,
+   "stmts": 143
+  },
+  "app/core/ai/budget_pacer.py": {
+   "covered": 173,
+   "stmts": 178
+  },
+  "app/core/ai/canvas_aspect.py": {
+   "covered": 15,
+   "stmts": 17
+  },
+  "app/core/ai/character_anchor.py": {
+   "covered": 0,
+   "stmts": 108
+  },
+  "app/core/ai/comfy_client.py": {
+   "covered": 0,
+   "stmts": 243
+  },
+  "app/core/ai/comfy_provider.py": {
+   "covered": 0,
+   "stmts": 264
+  },
+  "app/core/ai/content_classifier.py": {
+   "covered": 83,
+   "stmts": 210
+  },
+  "app/core/ai/dashscope_video.py": {
+   "covered": 0,
+   "stmts": 128
+  },
+  "app/core/ai/degradation.py": {
+   "covered": 49,
+   "stmts": 91
+  },
+  "app/core/ai/divergence_probe.py": {
+   "covered": 75,
+   "stmts": 159
+  },
+  "app/core/ai/draw_book.py": {
+   "covered": 150,
+   "stmts": 163
+  },
+  "app/core/ai/draw_ledger.py": {
+   "covered": 48,
+   "stmts": 55
+  },
+  "app/core/ai/draw_orchestrator.py": {
+   "covered": 56,
+   "stmts": 61
+  },
+  "app/core/ai/engine_api.py": {
+   "covered": 0,
+   "stmts": 125
+  },
+  "app/core/ai/execution_decider.py": {
+   "covered": 67,
+   "stmts": 139
+  },
+  "app/core/ai/execution_modes.py": {
+   "covered": 56,
+   "stmts": 64
+  },
+  "app/core/ai/expression_guard.py": {
+   "covered": 0,
+   "stmts": 148
+  },
+  "app/core/ai/fusion.py": {
+   "covered": 0,
+   "stmts": 92
+  },
+  "app/core/ai/gen_critic.py": {
+   "covered": 156,
+   "stmts": 173
+  },
+  "app/core/ai/global_price.py": {
+   "covered": 206,
+   "stmts": 220
+  },
+  "app/core/ai/guard_base.py": {
+   "covered": 16,
+   "stmts": 71
+  },
+  "app/core/ai/guard_pipeline.py": {
+   "covered": 0,
+   "stmts": 210
+  },
+  "app/core/ai/guards.py": {
+   "covered": 0,
+   "stmts": 53
+  },
+  "app/core/ai/inpaint_retry.py": {
+   "covered": 94,
+   "stmts": 128
+  },
+  "app/core/ai/llm_clipper.py": {
+   "covered": 0,
+   "stmts": 359
+  },
+  "app/core/ai/llm_fallback_stats.py": {
+   "covered": 0,
+   "stmts": 31
+  },
+  "app/core/ai/memory_model.py": {
+   "covered": 62,
+   "stmts": 66
+  },
+  "app/core/ai/module_scheduler.py": {
+   "covered": 0,
+   "stmts": 212
+  },
+  "app/core/ai/pinyin_dict.py": {
+   "covered": 43,
+   "stmts": 269
+  },
+  "app/core/ai/pinyin_unihan_patch.py": {
+   "covered": 0,
+   "stmts": 1
+  },
+  "app/core/ai/pipeline_jobs.py": {
+   "covered": 22,
+   "stmts": 76
+  },
+  "app/core/ai/pose_extract_service.py": {
+   "covered": 0,
+   "stmts": 180
+  },
+  "app/core/ai/pose_video_service.py": {
+   "covered": 0,
+   "stmts": 88
+  },
+  "app/core/ai/pose_worker.py": {
+   "covered": 0,
+   "stmts": 107
+  },
+  "app/core/ai/prompt_templates.py": {
+   "covered": 5,
+   "stmts": 10
+  },
+  "app/core/ai/prop_guard.py": {
+   "covered": 0,
+   "stmts": 122
+  },
+  "app/core/ai/provider_caps.py": {
+   "covered": 50,
+   "stmts": 115
+  },
+  "app/core/ai/provider_pool.py": {
+   "covered": 87,
+   "stmts": 272
+  },
+  "app/core/ai/quality_prior.py": {
+   "covered": 94,
+   "stmts": 129
+  },
+  "app/core/ai/sampling_review.py": {
+   "covered": 251,
+   "stmts": 272
+  },
+  "app/core/ai/score_book.py": {
+   "covered": 0,
+   "stmts": 135
+  },
+  "app/core/ai/simulator.py": {
+   "covered": 0,
+   "stmts": 130
+  },
+  "app/core/ai/speaker_diarize.py": {
+   "covered": 46,
+   "stmts": 74
+  },
+  "app/core/ai/storyboard_memory.py": {
+   "covered": 15,
+   "stmts": 91
+  },
+  "app/core/ai/tts_guard.py": {
+   "covered": 44,
+   "stmts": 285
+  },
+  "app/core/ai/video_generation_client.py": {
+   "covered": 195,
+   "stmts": 544
+  },
+  "app/core/ai/video_lipsync.py": {
+   "covered": 41,
+   "stmts": 49
+  },
+  "app/core/ai/viral_detector.py": {
+   "covered": 0,
+   "stmts": 352
+  },
+  "app/core/ai/voice_clone.py": {
+   "covered": 44,
+   "stmts": 52
+  },
+  "app/core/ai/whisper_asr.py": {
+   "covered": 20,
+   "stmts": 161
+  },
+  "app/core/ai/workflow_importer.py": {
+   "covered": 0,
+   "stmts": 124
+  },
+  "app/core/ai/yue_music.py": {
+   "covered": 97,
+   "stmts": 301
+  },
+  "app/core/ai_editing_assistant.py": {
+   "covered": 0,
+   "stmts": 315
+  },
+  "app/core/ai_engine.py": {
+   "covered": 307,
+   "stmts": 625
+  },
+  "app/core/ai_enhanced.py": {
+   "covered": 59,
+   "stmts": 179
+  },
+  "app/core/ai_interpolation.py": {
+   "covered": 134,
+   "stmts": 214
+  },
+  "app/core/ai_tools.py": {
+   "covered": 0,
+   "stmts": 69
+  },
+  "app/core/ai_video_generation_pipeline.py": {
+   "covered": 0,
+   "stmts": 336
+  },
+  "app/core/alert_system.py": {
+   "covered": 0,
+   "stmts": 308
+  },
+  "app/core/apm_monitoring.py": {
+   "covered": 0,
+   "stmts": 301
+  },
+  "app/core/async_client.py": {
+   "covered": 95,
+   "stmts": 203
+  },
+  "app/core/audio_processor.py": {
+   "covered": 273,
+   "stmts": 337
+  },
+  "app/core/audio_scopes.py": {
+   "covered": 0,
+   "stmts": 123
+  },
+  "app/core/auto_backup.py": {
+   "covered": 0,
+   "stmts": 146
+  },
+  "app/core/automation/__init__.py": {
+   "covered": 0,
+   "stmts": 189
+  },
+  "app/core/beat_split.py": {
+   "covered": 18,
+   "stmts": 23
+  },
+  "app/core/cache_system.py": {
+   "covered": 267,
+   "stmts": 397
+  },
+  "app/core/canvas_agent_runtime.py": {
+   "covered": 0,
+   "stmts": 265
+  },
+  "app/core/canvas_aigc.py": {
+   "covered": 283,
+   "stmts": 1654
+  },
+  "app/core/canvas_bridge.py": {
+   "covered": 76,
+   "stmts": 489
+  },
+  "app/core/canvas_enhance.py": {
+   "covered": 87,
+   "stmts": 154
+  },
+  "app/core/canvas_gen_jobs.py": {
+   "covered": 65,
+   "stmts": 306
+  },
+  "app/core/canvas_node_cache.py": {
+   "covered": 131,
+   "stmts": 144
+  },
+  "app/core/canvas_port_model.py": {
+   "covered": 140,
+   "stmts": 148
+  },
+  "app/core/canvas_route_registry.py": {
+   "covered": 19,
+   "stmts": 37
+  },
+  "app/core/canvas_routes_get.py": {
+   "covered": 63,
+   "stmts": 441
+  },
+  "app/core/canvas_routes_post.py": {
+   "covered": 91,
+   "stmts": 1034
+  },
+  "app/core/canvas_runtime.py": {
+   "covered": 0,
+   "stmts": 375
+  },
+  "app/core/canvas_server.py": {
+   "covered": 115,
+   "stmts": 930
+  },
+  "app/core/canvas_workflow_runner.py": {
+   "covered": 225,
+   "stmts": 258
+  },
+  "app/core/capability_dispatcher.py": {
+   "covered": 136,
+   "stmts": 187
+  },
+  "app/core/capability_handlers.py": {
+   "covered": 220,
+   "stmts": 922
+  },
+  "app/core/chapter_markers.py": {
+   "covered": 81,
+   "stmts": 169
+  },
+  "app/core/config_manager.py": {
+   "covered": 194,
+   "stmts": 280
+  },
+  "app/core/context_budget.py": {
+   "covered": 14,
+   "stmts": 39
+  },
+  "app/core/dialogue_anchor.py": {
+   "covered": 0,
+   "stmts": 162
+  },
+  "app/core/edit_commands.py": {
+   "covered": 251,
+   "stmts": 282
+  },
+  "app/core/editing_capabilities.py": {
+   "covered": 0,
+   "stmts": 47
+  },
+  "app/core/editing_script_generator.py": {
+   "covered": 119,
+   "stmts": 188
+  },
+  "app/core/editor_canvas_link.py": {
+   "covered": 81,
+   "stmts": 93
+  },
+  "app/core/editor_scheduler.py": {
+   "covered": 163,
+   "stmts": 555
+  },
+  "app/core/effect_manager.py": {
+   "covered": 0,
+   "stmts": 115
+  },
+  "app/core/exceptions.py": {
+   "covered": 139,
+   "stmts": 181
+  },
+  "app/core/extension_base.py": {
+   "covered": 0,
+   "stmts": 220
+  },
+  "app/core/extensions_context.py": {
+   "covered": 0,
+   "stmts": 69
+  },
+  "app/core/ffmpeg_service.py": {
+   "covered": 0,
+   "stmts": 242
+  },
+  "app/core/ffmpeg_utils.py": {
+   "covered": 54,
+   "stmts": 149
+  },
+  "app/core/filler_silence_detect.py": {
+   "covered": 175,
+   "stmts": 234
+  },
+  "app/core/first_run_notice.py": {
+   "covered": 46,
+   "stmts": 46
+  },
+  "app/core/five_dimension_scorer.py": {
+   "covered": 109,
+   "stmts": 122
+  },
+  "app/core/frame_cache.py": {
+   "covered": 101,
+   "stmts": 103
+  },
+  "app/core/frame_navigator.py": {
+   "covered": 0,
+   "stmts": 105
+  },
+  "app/core/gateway_stats.py": {
+   "covered": 55,
+   "stmts": 110
+  },
+  "app/core/generation_postprocess.py": {
+   "covered": 49,
+   "stmts": 205
+  },
+  "app/core/gl_filter_widget.py": {
+   "covered": 0,
+   "stmts": 292
+  },
+  "app/core/glue/__init__.py": {
+   "covered": 0,
+   "stmts": 6
+  },
+  "app/core/glue/convert.py": {
+   "covered": 0,
+   "stmts": 117
+  },
+  "app/core/glue/policies.py": {
+   "covered": 0,
+   "stmts": 70
+  },
+  "app/core/glue/schema.py": {
+   "covered": 0,
+   "stmts": 46
+  },
+  "app/core/glue/validate.py": {
+   "covered": 0,
+   "stmts": 106
+  },
+  "app/core/gpu_acceleration.py": {
+   "covered": 120,
+   "stmts": 304
+  },
+  "app/core/highlight_detect.py": {
+   "covered": 81,
+   "stmts": 145
+  },
+  "app/core/highlight_preview.py": {
+   "covered": 78,
+   "stmts": 183
+  },
+  "app/core/history_manager.py": {
+   "covered": 0,
+   "stmts": 90
+  },
+  "app/core/i18n.py": {
+   "covered": 0,
+   "stmts": 73
+  },
+  "app/core/keyframe_animation.py": {
+   "covered": 458,
+   "stmts": 488
+  },
+  "app/core/lip_sync.py": {
+   "covered": 297,
+   "stmts": 317
+  },
+  "app/core/llm_editor.py": {
+   "covered": 0,
+   "stmts": 372
+  },
+  "app/core/local_asset_manager.py": {
+   "covered": 325,
+   "stmts": 362
+  },
+  "app/core/local_video_infer.py": {
+   "covered": 55,
+   "stmts": 437
+  },
+  "app/core/log_manager.py": {
+   "covered": 60,
+   "stmts": 139
+  },
+  "app/core/logging_enhanced.py": {
+   "covered": 74,
+   "stmts": 282
+  },
+  "app/core/lossless_trim.py": {
+   "covered": 32,
+   "stmts": 86
+  },
+  "app/core/lut_loader.py": {
+   "covered": 220,
+   "stmts": 243
+  },
+  "app/core/mask_system.py": {
+   "covered": 0,
+   "stmts": 163
+  },
+  "app/core/mcp_client.py": {
+   "covered": 92,
+   "stmts": 289
+  },
+  "app/core/memory_optimization.py": {
+   "covered": 88,
+   "stmts": 337
+  },
+  "app/core/memory_store.py": {
+   "covered": 104,
+   "stmts": 249
+  },
+  "app/core/music_recommendation.py": {
+   "covered": 241,
+   "stmts": 267
+  },
+  "app/core/neural/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/core/neural/background_replace.py": {
+   "covered": 0,
+   "stmts": 95
+  },
+  "app/core/neural/diffsynth_compat.py": {
+   "covered": 30,
+   "stmts": 46
+  },
+  "app/core/neural/diffsynth_image.py": {
+   "covered": 80,
+   "stmts": 180
+  },
+  "app/core/neural/diffusers_image.py": {
+   "covered": 94,
+   "stmts": 235
+  },
+  "app/core/neural/face_restore.py": {
+   "covered": 0,
+   "stmts": 145
+  },
+  "app/core/neural/inpainting.py": {
+   "covered": 0,
+   "stmts": 75
+  },
+  "app/core/neural/layer_offload.py": {
+   "covered": 7,
+   "stmts": 47
+  },
+  "app/core/neural/memory_policy.py": {
+   "covered": 83,
+   "stmts": 94
+  },
+  "app/core/neural/style_transfer.py": {
+   "covered": 0,
+   "stmts": 121
+  },
+  "app/core/neural/super_resolution.py": {
+   "covered": 61,
+   "stmts": 117
+  },
+  "app/core/neural/video_gen.py": {
+   "covered": 109,
+   "stmts": 273
+  },
+  "app/core/neural_engine.py": {
+   "covered": 121,
+   "stmts": 279
+  },
+  "app/core/permission_management.py": {
+   "covered": 0,
+   "stmts": 298
+  },
+  "app/core/platform_adapter.py": {
+   "covered": 0,
+   "stmts": 111
+  },
+  "app/core/plugin_authentication.py": {
+   "covered": 0,
+   "stmts": 339
+  },
+  "app/core/plugin_hotloader.py": {
+   "covered": 0,
+   "stmts": 398
+  },
+  "app/core/plugin_loader.py": {
+   "covered": 168,
+   "stmts": 698
+  },
+  "app/core/plugin_manager.py": {
+   "covered": 0,
+   "stmts": 234
+  },
+  "app/core/plugin_sandbox.py": {
+   "covered": 0,
+   "stmts": 265
+  },
+  "app/core/preset_manager.py": {
+   "covered": 242,
+   "stmts": 263
+  },
+  "app/core/preview_manager.py": {
+   "covered": 411,
+   "stmts": 1260
+  },
+  "app/core/preview_validation_loop.py": {
+   "covered": 95,
+   "stmts": 196
+  },
+  "app/core/project_agent_host.py": {
+   "covered": 0,
+   "stmts": 436
+  },
+  "app/core/project_manager.py": {
+   "covered": 0,
+   "stmts": 149
+  },
+  "app/core/project_snapshot.py": {
+   "covered": 25,
+   "stmts": 111
+  },
+  "app/core/proxy_media.py": {
+   "covered": 199,
+   "stmts": 219
+  },
+  "app/core/reference_breakdown.py": {
+   "covered": 136,
+   "stmts": 165
+  },
+  "app/core/render_manager.py": {
+   "covered": 166,
+   "stmts": 522
+  },
+  "app/core/secure_store.py": {
+   "covered": 50,
+   "stmts": 139
+  },
+  "app/core/security.py": {
+   "covered": 193,
+   "stmts": 448
+  },
+  "app/core/segment_retake.py": {
+   "covered": 117,
+   "stmts": 129
+  },
+  "app/core/sequence_format.py": {
+   "covered": 116,
+   "stmts": 128
+  },
+  "app/core/shortcut_manager.py": {
+   "covered": 138,
+   "stmts": 263
+  },
+  "app/core/speed_ramping.py": {
+   "covered": 172,
+   "stmts": 278
+  },
+  "app/core/subtitle_generator.py": {
+   "covered": 259,
+   "stmts": 279
+  },
+  "app/core/subtitle_manager.py": {
+   "covered": 338,
+   "stmts": 361
+  },
+  "app/core/test_base.py": {
+   "covered": 0,
+   "stmts": 263
+  },
+  "app/core/text_frame_map.py": {
+   "covered": 186,
+   "stmts": 215
+  },
+  "app/core/thread_safety.py": {
+   "covered": 167,
+   "stmts": 226
+  },
+  "app/core/timeline/__init__.py": {
+   "covered": 0,
+   "stmts": 58
+  },
+  "app/core/timeline_dsl.py": {
+   "covered": 345,
+   "stmts": 352
+  },
+  "app/core/timeline_manager.py": {
+   "covered": 386,
+   "stmts": 392
+  },
+  "app/core/timeline_source.py": {
+   "covered": 0,
+   "stmts": 258
+  },
+  "app/core/title_templates.py": {
+   "covered": 0,
+   "stmts": 51
+  },
+  "app/core/transition_plugin_registry.py": {
+   "covered": 148,
+   "stmts": 221
+  },
+  "app/core/transitions.py": {
+   "covered": 0,
+   "stmts": 48
+  },
+  "app/core/update_manager.py": {
+   "covered": 0,
+   "stmts": 145
+  },
+  "app/core/validation.py": {
+   "covered": 215,
+   "stmts": 267
+  },
+  "app/core/video_depth.py": {
+   "covered": 83,
+   "stmts": 158
+  },
+  "app/core/video_processing/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/core/video_processing/cpp_engine/__init__.py": {
+   "covered": 0,
+   "stmts": 175
+  },
+  "app/core/video_processing/cpp_engine/build.py": {
+   "covered": 0,
+   "stmts": 62
+  },
+  "app/core/video_processing/cpp_engine/install_ffmpeg_dev.py": {
+   "covered": 0,
+   "stmts": 96
+  },
+  "app/core/video_processing/cpp_engine/performance_optimizer.py": {
+   "covered": 0,
+   "stmts": 150
+  },
+  "app/core/video_processing/cpp_engine/test_cpp_engine.py": {
+   "covered": 0,
+   "stmts": 100
+  },
+  "app/core/video_processing/drama_mlt.py": {
+   "covered": 0,
+   "stmts": 126
+  },
+  "app/core/video_processing/mlt_api_detect.py": {
+   "covered": 0,
+   "stmts": 82
+  },
+  "app/core/video_processing/mlt_engine.py": {
+   "covered": 0,
+   "stmts": 282
+  },
+  "app/core/video_processing/mlt_engine_cpp.py": {
+   "covered": 119,
+   "stmts": 971
+  },
+  "app/core/video_processing/pyav_engine.py": {
+   "covered": 64,
+   "stmts": 264
+  },
+  "app/core/voice_generator.py": {
+   "covered": 296,
+   "stmts": 335
+  },
+  "app/core/waveform_generator.py": {
+   "covered": 170,
+   "stmts": 287
+  },
+  "app/core/win_query.py": {
+   "covered": 52,
+   "stmts": 54
+  },
+  "app/dingtalk_bot.py": {
+   "covered": 0,
+   "stmts": 62
+  },
+  "app/local_notifier.py": {
+   "covered": 0,
+   "stmts": 24
+  },
+  "app/main_qt6.py": {
+   "covered": 0,
+   "stmts": 523
+  },
+  "app/modules/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/modules/lego/__init__.py": {
+   "covered": 11,
+   "stmts": 25
+  },
+  "app/modules/lego/agent_workflow.py": {
+   "covered": 175,
+   "stmts": 488
+  },
+  "app/modules/lego/ai_agent_panel.py": {
+   "covered": 26,
+   "stmts": 439
+  },
+  "app/modules/lego/auth.py": {
+   "covered": 197,
+   "stmts": 500
+  },
+  "app/modules/lego/base_block.py": {
+   "covered": 0,
+   "stmts": 173
+  },
+  "app/modules/lego/base_module.py": {
+   "covered": 13,
+   "stmts": 31
+  },
+  "app/modules/lego/batch_task_manager.py": {
+   "covered": 0,
+   "stmts": 330
+  },
+  "app/modules/lego/block_loader.py": {
+   "covered": 0,
+   "stmts": 209
+  },
+  "app/modules/lego/browser_window.py": {
+   "covered": 0,
+   "stmts": 104
+  },
+  "app/modules/lego/builtin_blocks.py": {
+   "covered": 0,
+   "stmts": 263
+  },
+  "app/modules/lego/character_cache.py": {
+   "covered": 0,
+   "stmts": 183
+  },
+  "app/modules/lego/character_management_module.py": {
+   "covered": 115,
+   "stmts": 890
+  },
+  "app/modules/lego/clip_transform.py": {
+   "covered": 10,
+   "stmts": 231
+  },
+  "app/modules/lego/clip_widget.py": {
+   "covered": 0,
+   "stmts": 931
+  },
+  "app/modules/lego/cloud_api.py": {
+   "covered": 65,
+   "stmts": 119
+  },
+  "app/modules/lego/cloud_providers/__init__.py": {
+   "covered": 3,
+   "stmts": 3
+  },
+  "app/modules/lego/cloud_providers/base.py": {
+   "covered": 24,
+   "stmts": 32
+  },
+  "app/modules/lego/cloud_providers/providers.py": {
+   "covered": 197,
+   "stmts": 886
+  },
+  "app/modules/lego/cloud_providers/registry.py": {
+   "covered": 29,
+   "stmts": 52
+  },
+  "app/modules/lego/copywriting_module.py": {
+   "covered": 36,
+   "stmts": 519
+  },
+  "app/modules/lego/core.py": {
+   "covered": 285,
+   "stmts": 382
+  },
+  "app/modules/lego/data_analyzer.py": {
+   "covered": 0,
+   "stmts": 102
+  },
+  "app/modules/lego/deformity_repair_skill.py": {
+   "covered": 0,
+   "stmts": 217
+  },
+  "app/modules/lego/director_skill.py": {
+   "covered": 0,
+   "stmts": 260
+  },
+  "app/modules/lego/drama_understanding_engine.py": {
+   "covered": 0,
+   "stmts": 1080
+  },
+  "app/modules/lego/editor_agent_dock_mixin.py": {
+   "covered": 14,
+   "stmts": 161
+  },
+  "app/modules/lego/editor_agent_panel_mixin.py": {
+   "covered": 133,
+   "stmts": 1293
+  },
+  "app/modules/lego/editor_agent_runtime_mixin.py": {
+   "covered": 50,
+   "stmts": 595
+  },
+  "app/modules/lego/editor_ai_panel.py": {
+   "covered": 0,
+   "stmts": 150
+  },
+  "app/modules/lego/editor_ai_process_mixin.py": {
+   "covered": 14,
+   "stmts": 286
+  },
+  "app/modules/lego/editor_ai_tools_mixin.py": {
+   "covered": 36,
+   "stmts": 268
+  },
+  "app/modules/lego/editor_audio_panel.py": {
+   "covered": 0,
+   "stmts": 123
+  },
+  "app/modules/lego/editor_burn.py": {
+   "covered": 0,
+   "stmts": 227
+  },
+  "app/modules/lego/editor_color_panel.py": {
+   "covered": 0,
+   "stmts": 361
+  },
+  "app/modules/lego/editor_effects_mixin.py": {
+   "covered": 28,
+   "stmts": 591
+  },
+  "app/modules/lego/editor_export.py": {
+   "covered": 0,
+   "stmts": 443
+  },
+  "app/modules/lego/editor_export_panel.py": {
+   "covered": 17,
+   "stmts": 252
+  },
+  "app/modules/lego/editor_module.py": {
+   "covered": 595,
+   "stmts": 6879
+  },
+  "app/modules/lego/editor_preview_ux.py": {
+   "covered": 0,
+   "stmts": 58
+  },
+  "app/modules/lego/editor_props_panel.py": {
+   "covered": 0,
+   "stmts": 147
+  },
+  "app/modules/lego/editor_subtitle_panel.py": {
+   "covered": 0,
+   "stmts": 840
+  },
+  "app/modules/lego/editor_timeline_tools.py": {
+   "covered": 0,
+   "stmts": 413
+  },
+  "app/modules/lego/editor_ui_builder_mixin.py": {
+   "covered": 21,
+   "stmts": 881
+  },
+  "app/modules/lego/editor_ux_commands.py": {
+   "covered": 0,
+   "stmts": 79
+  },
+  "app/modules/lego/email_service.py": {
+   "covered": 0,
+   "stmts": 165
+  },
+  "app/modules/lego/email_verify.py": {
+   "covered": 0,
+   "stmts": 148
+  },
+  "app/modules/lego/extensions_module.py": {
+   "covered": 80,
+   "stmts": 1308
+  },
+  "app/modules/lego/feature_search.py": {
+   "covered": 0,
+   "stmts": 349
+  },
+  "app/modules/lego/flow_orchestrator.py": {
+   "covered": 0,
+   "stmts": 320
+  },
+  "app/modules/lego/gateway_stats_panel.py": {
+   "covered": 0,
+   "stmts": 141
+  },
+  "app/modules/lego/help_module.py": {
+   "covered": 48,
+   "stmts": 540
+  },
+  "app/modules/lego/keyframe_curve_editor.py": {
+   "covered": 0,
+   "stmts": 188
+  },
+  "app/modules/lego/license_manager.py": {
+   "covered": 0,
+   "stmts": 219
+  },
+  "app/modules/lego/login_window.py": {
+   "covered": 0,
+   "stmts": 519
+  },
+  "app/modules/lego/lut_filter.py": {
+   "covered": 29,
+   "stmts": 29
+  },
+  "app/modules/lego/main_window.py": {
+   "covered": 0,
+   "stmts": 827
+  },
+  "app/modules/lego/materials_module.py": {
+   "covered": 25,
+   "stmts": 255
+  },
+  "app/modules/lego/model_card.py": {
+   "covered": 37,
+   "stmts": 633
+  },
+  "app/modules/lego/model_config.py": {
+   "covered": 88,
+   "stmts": 166
+  },
+  "app/modules/lego/model_management.py": {
+   "covered": 28,
+   "stmts": 271
+  },
+  "app/modules/lego/modelscope_client.py": {
+   "covered": 0,
+   "stmts": 124
+  },
+  "app/modules/lego/module_registry.py": {
+   "covered": 51,
+   "stmts": 186
+  },
+  "app/modules/lego/modules.py": {
+   "covered": 135,
+   "stmts": 728
+  },
+  "app/modules/lego/nav_icons.py": {
+   "covered": 0,
+   "stmts": 57
+  },
+  "app/modules/lego/notice_dialog.py": {
+   "covered": 30,
+   "stmts": 34
+  },
+  "app/modules/lego/ollama_client.py": {
+   "covered": 131,
+   "stmts": 416
+  },
+  "app/modules/lego/performance_module.py": {
+   "covered": 19,
+   "stmts": 339
+  },
+  "app/modules/lego/playback_shuttle.py": {
+   "covered": 0,
+   "stmts": 286
+  },
+  "app/modules/lego/plugin_store.py": {
+   "covered": 0,
+   "stmts": 300
+  },
+  "app/modules/lego/plugins_module.py": {
+   "covered": 0,
+   "stmts": 979
+  },
+  "app/modules/lego/professional_video_engine.py": {
+   "covered": 147,
+   "stmts": 448
+  },
+  "app/modules/lego/prompt_library_panel.py": {
+   "covered": 0,
+   "stmts": 292
+  },
+  "app/modules/lego/prompt_library_store.py": {
+   "covered": 0,
+   "stmts": 335
+  },
+  "app/modules/lego/settings_module.py": {
+   "covered": 109,
+   "stmts": 1549
+  },
+  "app/modules/lego/skill_engine.py": {
+   "covered": 175,
+   "stmts": 380
+  },
+  "app/modules/lego/smart_editing_engine.py": {
+   "covered": 0,
+   "stmts": 366
+  },
+  "app/modules/lego/stealth_browser.py": {
+   "covered": 0,
+   "stmts": 100
+  },
+  "app/modules/lego/suggest_checklist.py": {
+   "covered": 33,
+   "stmts": 101
+  },
+  "app/modules/lego/tasks_module.py": {
+   "covered": 34,
+   "stmts": 433
+  },
+  "app/modules/lego/theme_manager.py": {
+   "covered": 0,
+   "stmts": 93
+  },
+  "app/modules/lego/timeline_subwidgets.py": {
+   "covered": 0,
+   "stmts": 699
+  },
+  "app/modules/lego/timeline_ui.py": {
+   "covered": 0,
+   "stmts": 99
+  },
+  "app/modules/lego/timeline_widget.py": {
+   "covered": 0,
+   "stmts": 1038
+  },
+  "app/modules/lego/top0_integration.py": {
+   "covered": 0,
+   "stmts": 130
+  },
+  "app/modules/lego/user_prefs_store.py": {
+   "covered": 0,
+   "stmts": 65
+  },
+  "app/modules/lego/utils/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/modules/lego/utils/hardware_monitor.py": {
+   "covered": 22,
+   "stmts": 38
+  },
+  "app/modules/lego/utils/thread_pool.py": {
+   "covered": 35,
+   "stmts": 61
+  },
+  "app/modules/lego/video_editing_skill.py": {
+   "covered": 0,
+   "stmts": 389
+  },
+  "app/modules/lego/video_processor.py": {
+   "covered": 129,
+   "stmts": 1323
+  },
+  "app/modules/lego/viral_optimization_engine.py": {
+   "covered": 79,
+   "stmts": 196
+  },
+  "app/modules/utils/error_handling.py": {
+   "covered": 23,
+   "stmts": 25
+  },
+  "app/modules/utils/hardware.py": {
+   "covered": 34,
+   "stmts": 46
+  },
+  "app/modules/utils/logger.py": {
+   "covered": 18,
+   "stmts": 18
+  },
+  "app/modules/utils/performance.py": {
+   "covered": 25,
+   "stmts": 27
+  },
+  "app/plugins/__init__.py": {
+   "covered": 1,
+   "stmts": 1
+  },
+  "app/plugins/ai_effects_plugin/__init__.py": {
+   "covered": 0,
+   "stmts": 21
+  },
+  "app/plugins/ai_effects_plugin/effects/__init__.py": {
+   "covered": 0,
+   "stmts": 6
+  },
+  "app/plugins/ai_effects_plugin/effects/background_replace.py": {
+   "covered": 0,
+   "stmts": 151
+  },
+  "app/plugins/ai_effects_plugin/effects/beauty_filter.py": {
+   "covered": 0,
+   "stmts": 177
+  },
+  "app/plugins/ai_effects_plugin/effects/object_removal.py": {
+   "covered": 0,
+   "stmts": 329
+  },
+  "app/plugins/ai_effects_plugin/effects/style_transfer.py": {
+   "covered": 0,
+   "stmts": 151
+  },
+  "app/plugins/ai_effects_plugin/effects/super_resolution.py": {
+   "covered": 0,
+   "stmts": 170
+  },
+  "app/plugins/ai_effects_plugin/main.py": {
+   "covered": 0,
+   "stmts": 225
+  },
+  "app/plugins/ai_effects_plugin/test_plugin.py": {
+   "covered": 0,
+   "stmts": 132
+  },
+  "app/plugins/ai_effects_plugin/ui/__init__.py": {
+   "covered": 0,
+   "stmts": 2
+  },
+  "app/plugins/ai_effects_plugin/ui/ai_effects_widget.py": {
+   "covered": 0,
+   "stmts": 528
+  },
+  "app/plugins/effect_action.py": {
+   "covered": 0,
+   "stmts": 97
+  },
+  "app/plugins/effect_comedy.py": {
+   "covered": 0,
+   "stmts": 83
+  },
+  "app/plugins/effect_dark_tone.py": {
+   "covered": 0,
+   "stmts": 35
+  },
+  "app/plugins/effect_gold_rush.py": {
+   "covered": 0,
+   "stmts": 40
+  },
+  "app/plugins/effect_highlight.py": {
+   "covered": 0,
+   "stmts": 38
+  },
+  "app/plugins/effect_horror.py": {
+   "covered": 0,
+   "stmts": 72
+  },
+  "app/plugins/effect_soft_light.py": {
+   "covered": 0,
+   "stmts": 41
+  },
+  "app/plugins/plugin_config.py": {
+   "covered": 0,
+   "stmts": 71
+  },
+  "app/plugins/transition_circle.py": {
+   "covered": 15,
+   "stmts": 45
+  },
+  "app/plugins/transition_cover.py": {
+   "covered": 15,
+   "stmts": 50
+  },
+  "app/plugins/transition_diag.py": {
+   "covered": 35,
+   "stmts": 46
+  },
+  "app/plugins/transition_dissolve.py": {
+   "covered": 10,
+   "stmts": 19
+  },
+  "app/plugins/transition_fade.py": {
+   "covered": 15,
+   "stmts": 33
+  },
+  "app/plugins/transition_fadeblack.py": {
+   "covered": 32,
+   "stmts": 43
+  },
+  "app/plugins/transition_fadewhite.py": {
+   "covered": 32,
+   "stmts": 43
+  },
+  "app/plugins/transition_flip.py": {
+   "covered": 10,
+   "stmts": 29
+  },
+  "app/plugins/transition_glitch.py": {
+   "covered": 10,
+   "stmts": 33
+  },
+  "app/plugins/transition_horz.py": {
+   "covered": 15,
+   "stmts": 42
+  },
+  "app/plugins/transition_page.py": {
+   "covered": 38,
+   "stmts": 52
+  },
+  "app/plugins/transition_radial.py": {
+   "covered": 27,
+   "stmts": 38
+  },
+  "app/plugins/transition_reveal.py": {
+   "covered": 15,
+   "stmts": 46
+  },
+  "app/plugins/transition_slide.py": {
+   "covered": 15,
+   "stmts": 49
+  },
+  "app/plugins/transition_smooth.py": {
+   "covered": 15,
+   "stmts": 53
+  },
+  "app/plugins/transition_spin.py": {
+   "covered": 10,
+   "stmts": 22
+  },
+  "app/plugins/transition_vert.py": {
+   "covered": 15,
+   "stmts": 42
+  },
+  "app/plugins/transition_wipe.py": {
+   "covered": 10,
+   "stmts": 26
+  },
+  "app/plugins/transition_zoom.py": {
+   "covered": 10,
+   "stmts": 24
+  },
+  "app/simple_test.py": {
+   "covered": 0,
+   "stmts": 21
+  },
+  "app/skills/__init__.py": {
+   "covered": 5,
+   "stmts": 5
+  },
+  "app/skills/external_loader.py": {
+   "covered": 132,
+   "stmts": 175
+  },
+  "app/tests/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/tests/conftest.py": {
+   "covered": 42,
+   "stmts": 59
+  },
+  "app/tests/test_agent_brain_learn.py": {
+   "covered": 135,
+   "stmts": 142
+  },
+  "app/tests/test_agent_pipeline_router.py": {
+   "covered": 23,
+   "stmts": 23
+  },
+  "app/tests/test_agent_policy.py": {
+   "covered": 76,
+   "stmts": 76
+  },
+  "app/tests/test_agent_runtime.py": {
+   "covered": 27,
+   "stmts": 28
+  },
+  "app/tests/test_agent_workflow_review.py": {
+   "covered": 71,
+   "stmts": 71
+  },
+  "app/tests/test_auth.py": {
+   "covered": 62,
+   "stmts": 63
+  },
+  "app/tests/test_buses.py": {
+   "covered": 219,
+   "stmts": 225
+  },
+  "app/tests/test_cache.py": {
+   "covered": 84,
+   "stmts": 84
+  },
+  "app/tests/test_canvas_enhance.py": {
+   "covered": 96,
+   "stmts": 99
+  },
+  "app/tests/test_canvas_node_cache.py": {
+   "covered": 108,
+   "stmts": 109
+  },
+  "app/tests/test_canvas_port_model.py": {
+   "covered": 74,
+   "stmts": 74
+  },
+  "app/tests/test_canvas_workflow_runner.py": {
+   "covered": 184,
+   "stmts": 185
+  },
+  "app/tests/test_config.py": {
+   "covered": 52,
+   "stmts": 52
+  },
+  "app/tests/test_diffsynth_compat.py": {
+   "covered": 43,
+   "stmts": 43
+  },
+  "app/tests/test_diffsynth_image.py": {
+   "covered": 77,
+   "stmts": 78
+  },
+  "app/tests/test_diffusers_image.py": {
+   "covered": 160,
+   "stmts": 161
+  },
+  "app/tests/test_draw_book.py": {
+   "covered": 145,
+   "stmts": 145
+  },
+  "app/tests/test_draw_ledger_wiring.py": {
+   "covered": 112,
+   "stmts": 112
+  },
+  "app/tests/test_draw_loop_defects.py": {
+   "covered": 63,
+   "stmts": 63
+  },
+  "app/tests/test_draw_orchestrator.py": {
+   "covered": 126,
+   "stmts": 128
+  },
+  "app/tests/test_edit_commands.py": {
+   "covered": 161,
+   "stmts": 161
+  },
+  "app/tests/test_editor_canvas_link.py": {
+   "covered": 33,
+   "stmts": 33
+  },
+  "app/tests/test_editor_ripple_capability.py": {
+   "covered": 78,
+   "stmts": 78
+  },
+  "app/tests/test_editor_undo_coverage.py": {
+   "covered": 177,
+   "stmts": 177
+  },
+  "app/tests/test_execution_decider.py": {
+   "covered": 115,
+   "stmts": 115
+  },
+  "app/tests/test_filler_silence_detect.py": {
+   "covered": 129,
+   "stmts": 129
+  },
+  "app/tests/test_first_run_notice.py": {
+   "covered": 74,
+   "stmts": 74
+  },
+  "app/tests/test_frame_cache.py": {
+   "covered": 126,
+   "stmts": 127
+  },
+  "app/tests/test_gen_critic.py": {
+   "covered": 82,
+   "stmts": 82
+  },
+  "app/tests/test_inpaint_retry.py": {
+   "covered": 133,
+   "stmts": 135
+  },
+  "app/tests/test_layer_offload.py": {
+   "covered": 37,
+   "stmts": 37
+  },
+  "app/tests/test_license.py": {
+   "covered": 39,
+   "stmts": 39
+  },
+  "app/tests/test_local_image_dispatch.py": {
+   "covered": 77,
+   "stmts": 78
+  },
+  "app/tests/test_local_model_discovery.py": {
+   "covered": 89,
+   "stmts": 89
+  },
+  "app/tests/test_local_video_infer.py": {
+   "covered": 51,
+   "stmts": 51
+  },
+  "app/tests/test_long_dialogue_smoke.py": {
+   "covered": 77,
+   "stmts": 77
+  },
+  "app/tests/test_lut_export_bake.py": {
+   "covered": 83,
+   "stmts": 83
+  },
+  "app/tests/test_memory_model.py": {
+   "covered": 57,
+   "stmts": 57
+  },
+  "app/tests/test_memory_policy.py": {
+   "covered": 154,
+   "stmts": 155
+  },
+  "app/tests/test_module_registry_imports.py": {
+   "covered": 22,
+   "stmts": 26
+  },
+  "app/tests/test_open_source_wave4.py": {
+   "covered": 75,
+   "stmts": 75
+  },
+  "app/tests/test_p0a_public_interfaces.py": {
+   "covered": 40,
+   "stmts": 40
+  },
+  "app/tests/test_preview_lut.py": {
+   "covered": 223,
+   "stmts": 224
+  },
+  "app/tests/test_preview_preload.py": {
+   "covered": 99,
+   "stmts": 99
+  },
+  "app/tests/test_prompt_image_negative_cache.py": {
+   "covered": 46,
+   "stmts": 46
+  },
+  "app/tests/test_reference_breakdown.py": {
+   "covered": 90,
+   "stmts": 92
+  },
+  "app/tests/test_render_fallback.py": {
+   "covered": 139,
+   "stmts": 167
+  },
+  "app/tests/test_render_manager.py": {
+   "covered": 63,
+   "stmts": 63
+  },
+  "app/tests/test_safe_import.py": {
+   "covered": 91,
+   "stmts": 96
+  },
+  "app/tests/test_secure_store.py": {
+   "covered": 39,
+   "stmts": 39
+  },
+  "app/tests/test_security.py": {
+   "covered": 108,
+   "stmts": 108
+  },
+  "app/tests/test_seed_passthrough.py": {
+   "covered": 70,
+   "stmts": 70
+  },
+  "app/tests/test_segment_retake.py": {
+   "covered": 106,
+   "stmts": 106
+  },
+  "app/tests/test_sequence_format.py": {
+   "covered": 85,
+   "stmts": 85
+  },
+  "app/tests/test_skill_registration.py": {
+   "covered": 214,
+   "stmts": 215
+  },
+  "app/tests/test_speaker_diarize.py": {
+   "covered": 58,
+   "stmts": 58
+  },
+  "app/tests/test_speed_ramping.py": {
+   "covered": 91,
+   "stmts": 91
+  },
+  "app/tests/test_super_resolution_honesty.py": {
+   "covered": 62,
+   "stmts": 64
+  },
+  "app/tests/test_text_frame_map.py": {
+   "covered": 66,
+   "stmts": 66
+  },
+  "app/tests/test_transition_new_plugins.py": {
+   "covered": 137,
+   "stmts": 137
+  },
+  "app/tests/test_video_depth.py": {
+   "covered": 61,
+   "stmts": 63
+  },
+  "app/tests/test_video_gen.py": {
+   "covered": 147,
+   "stmts": 148
+  },
+  "app/tests/test_video_lipsync.py": {
+   "covered": 36,
+   "stmts": 36
+  },
+  "app/tests/test_voice_clone.py": {
+   "covered": 52,
+   "stmts": 52
+  },
+  "app/tests/test_win_query.py": {
+   "covered": 68,
+   "stmts": 78
+  },
+  "app/tests/test_yue_music.py": {
+   "covered": 75,
+   "stmts": 75
+  },
+  "app/tests/test_zcov_audio.py": {
+   "covered": 676,
+   "stmts": 676
+  },
+  "app/tests/test_zcov_config.py": {
+   "covered": 580,
+   "stmts": 581
+  },
+  "app/tests/test_zcov_core_a.py": {
+   "covered": 425,
+   "stmts": 425
+  },
+  "app/tests/test_zcov_ledger_budget.py": {
+   "covered": 364,
+   "stmts": 364
+  },
+  "app/tests/test_zcov_ledger_global.py": {
+   "covered": 330,
+   "stmts": 330
+  },
+  "app/tests/test_zcov_ledger_review.py": {
+   "covered": 391,
+   "stmts": 391
+  },
+  "app/tests/test_zcov_media.py": {
+   "covered": 587,
+   "stmts": 588
+  },
+  "app/tests/test_zcov_timeline.py": {
+   "covered": 872,
+   "stmts": 874
+  },
+  "app/ui/__init__.py": {
+   "covered": 0,
+   "stmts": 0
+  },
+  "app/utils/__init__.py": {
+   "covered": 2,
+   "stmts": 2
+  },
+  "app/utils/error_handling.py": {
+   "covered": 2,
+   "stmts": 2
+  },
+  "app/utils/hardware.py": {
+   "covered": 2,
+   "stmts": 2
+  },
+  "app/utils/performance.py": {
+   "covered": 2,
+   "stmts": 2
+  },
+  "app/verify_c8_qt6.py": {
+   "covered": 0,
+   "stmts": 34
+  },
+  "app/version.py": {
+   "covered": 2,
+   "stmts": 2
+  }
+ }
+}
