@@ -14,14 +14,31 @@
   - **新增 provider 只加声明**（表里加一行或 `register_caps()`），路由代码零改动；
   - `local` 是**终端兜底**，永远排在最后、不受能力筛选拦截（保住「无网络也能演示」
     的既有承诺——占位生成本来就不区分输入形态）；
-  - 筛选掉的 provider 会给出**人话理由**（供审计日志 / UI 提示），不是静默消失。
+  - 筛选掉的 provider 会给出**人话理由**（供审计日志 / UI 提示），不是静默消失；
+  - **`SHIGUANG_NO_EGRESS=1` ⇒ 强制 local-only（素材不出域）**，见 `no_egress()`。
+
+⚠️ 关于「素材不能出域」（2026-10-09 补）：
+    本模块默认排序是 `[真实 provider 按 quality_tier 降序] + ["local"]` —— 即
+    **优先走云端**，`local` 只是兜底。这对「客户素材不得离开本机/内网」的硬约束
+    是反向的：默认行为就会把素材发给 dashscope/seedance/cogvideo。此前没有任何
+    开关能表达「这一单不许出域」，只能靠调用方手工传 `provider="local"`（而那条
+    分支还会返回 `["local", "local"]` 的重复项）。现已补 `SHIGUANG_NO_EGRESS`。
 """
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("AI短剧编辑器.core.ai.provider_caps")
+
+# 终端兜底 provider 的 id（唯一一个保证「不出域」的实现）
+LOCAL_PROVIDER_ID = "local"
+
+# 环境开关名（显式常量，禁裸字符串 —— 见项目不变量 #5 的精神）
+ENV_NO_EGRESS = "SHIGUANG_NO_EGRESS"
+
+_TRUTHY = {"1", "true", "yes", "on"} 
 
 # ═══════════════════════════════════════════════════════════
 # 能力声明表（新增 provider = 这里加一行，路由零改动）
@@ -226,6 +243,17 @@ def filter_by_caps(order: List[str], spec: Optional[Dict[str, Any]] = None
     return {"kept": kept, "dropped": dropped}
 
 
+def no_egress() -> bool:
+    """是否开启了「素材不出域」硬约束（``SHIGUANG_NO_EGRESS=1``）。
+
+    为什么每次调用都重读环境变量、不在 import 时算一次（2026-10-09）：
+    进程级缓存会让测试无法用 monkeypatch 验证、也让长驻进程无法中途切换
+    （用户在处理客户素材那一单临时打开开关）。读 env 是纳秒级操作，
+    相对一次视频生成调用（秒~分钟级）完全可忽略。
+    """
+    return os.environ.get(ENV_NO_EGRESS, "").strip().lower() in _TRUTHY
+
+
 def resolve_order(provider: str = "auto",
                   spec: Optional[Dict[str, Any]] = None,
                   priors: Optional[Dict[str, float]] = None,
@@ -239,15 +267,29 @@ def resolve_order(provider: str = "auto",
     * ``lambda_price``：动态影子价格（V4.37.6 切片④，由 budget_pacer 按预算
       消耗连续调节）；不传用静态 ``_LAMBDA_PRICE`` 兜底；
     * 显式 provider：能力满足才进候选（不满足 → 只剩 local，理由进日志）；
-    * ``local`` 永远在最后（保证无网络/无 Key 仍可演示）。
+    * ``local`` 永远在最后（保证无网络/无 Key 仍可演示）；
+    * **``SHIGUANG_NO_EGRESS=1`` ⇒ 无条件返回 ``["local"]``**（素材不出域，
+      见 `no_egress()`）。此开关**优先于一切其它参数**，包括显式 provider ——
+      硬约束不该被一个函数参数绕过。
     """
+    # ── 硬约束优先：出域开关在能力筛选之前拦截 ──
+    if no_egress():
+        logger.warning(
+            "[provider_caps] %s=1 ⇒ 强制 local-only，本次请求不做任何出域调用"
+            "（请求的 provider=%r 被忽略）", ENV_NO_EGRESS, provider)
+        return [LOCAL_PROVIDER_ID]
+
     s = normalize_spec(spec)
     if provider and provider != "auto":
+        # 显式指定 local：直接出域检查已过，返回单元素即可
+        # （原实现走下面的 [provider, "local"] 分支会返回 ["local","local"] 重复项）
+        if provider == LOCAL_PROVIDER_ID:
+            return [LOCAL_PROVIDER_ID]
         ok, reason = supports(provider, s)
         if not ok:
             logger.warning("[provider_caps] 指定 provider %s 不满足本次请求：%s", provider, reason)
-            return ["local"]
-        return [provider, "local"]
+            return [LOCAL_PROVIDER_ID]
+        return [provider, LOCAL_PROVIDER_ID]
 
     order = [p for p in DEFAULT_REAL_ORDER if p != "local"]
     filtered = filter_by_caps(order, s)
@@ -266,7 +308,7 @@ def resolve_order(provider: str = "auto",
     else:
         # quality_tier 降序（同档保持声明表顺序，结果稳定可复现）
         kept.sort(key=lambda p: -int((PROVIDER_CAPS.get(p) or {}).get("quality_tier") or 0))
-    return kept + ["local"]
+    return kept + [LOCAL_PROVIDER_ID]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -288,7 +330,7 @@ def quote(provider: str = "auto", *, count: int = 1,
     """
     s = normalize_spec(spec)
     chain = resolve_order(provider, spec=s)
-    best = chain[0] if chain else "local"
+    best = chain[0] if chain else LOCAL_PROVIDER_ID
     caps = PROVIDER_CAPS.get(best) or {}
     n = max(1, int(count or 1))
     price = float(caps.get("price_per_clip") or 0.0)
