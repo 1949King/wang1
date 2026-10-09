@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import "./LibTvChrome.css";
+import { getGraphFuture, getGraphPast } from "./stores/history-store";
 import { useToolboxStore } from "./toolboxStore";
 import { useCanvasStore } from "./store";
 import type { NodeData } from "./store";
@@ -114,6 +115,8 @@ export function LibTvBottomDock({
   const directorOpen = useToolboxStore((s) => s.directorOpen);
   const galleryOpen = useToolboxStore((s) => s.galleryOpen);
   const previewPlaying = useToolboxStore((s) => s.previewPlaying);
+  const previewStep = useToolboxStore((s) => s.previewStep);
+  const previewTotal = useToolboxStore((s) => s.previewTotal);
   const upstreamRefs = useToolboxStore((s) => s.upstreamRefs);
   const toggleHistory = useToolboxStore((s) => s.toggleHistory);
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
@@ -124,6 +127,10 @@ export function LibTvBottomDock({
   // 撤销/重做直连画布 store（V4.41.16：「历史栈」占位 → 真按钮）
   const undoGraph = useCanvasStore((s) => s.undoGraph);
   const redoGraph = useCanvasStore((s) => s.redoGraph);
+  // V4.41.17：开板时读一次历史栈步数进 title（history-store 是模块级数组，非响应式；
+  // toolsOpen 变化触发重渲染时刷新，关板不读）
+  const pastCount = toolsOpen ? getGraphPast().length : 0;
+  const futureCount = toolsOpen ? getGraphFuture().length : 0;
   // 保留引用避免「未使用参数」告警：签名不能动（冻结区调用点），旧实现已被真功能取代
   void onPreview;
   void onHistory;
@@ -174,7 +181,15 @@ export function LibTvBottomDock({
           title="画布工具：视图 / 节点 / 数据 / 帮助"
           aria-expanded={toolsOpen}
         >
-          <span className="ltd-ico">⚡</span>工具{toolsOpen ? " ▴" : " ▾"}
+          {previewPlaying && previewTotal > 0 ? (
+            <>
+              <span className="ltd-ico">⌕</span>预览 {previewStep + 1}/{previewTotal}
+            </>
+          ) : (
+            <>
+              <span className="ltd-ico">⚡</span>工具{toolsOpen ? " ▴" : " ▾"}
+            </>
+          )}
         </button>
       </div>
 
@@ -272,7 +287,7 @@ export function LibTvBottomDock({
                 type="button"
                 className="ltd-item"
                 onClick={fire(undoGraph)}
-                title="撤销上一步画布操作（Ctrl+Z）"
+                title={`撤销上一步画布操作（Ctrl+Z）${pastCount ? ` · 可撤销 ${pastCount} 步` : " · 已是最早状态"}`}
               >
                 <span className="ltd-ico">↶</span>撤销
               </button>
@@ -280,7 +295,7 @@ export function LibTvBottomDock({
                 type="button"
                 className="ltd-item"
                 onClick={fire(redoGraph)}
-                title="重做被撤销的操作（Ctrl+Y）"
+                title={`重做被撤销的操作（Ctrl+Y）${futureCount ? ` · 可重做 ${futureCount} 步` : " · 没有可重做的操作"}`}
               >
                 <span className="ltd-ico">↷</span>重做
               </button>

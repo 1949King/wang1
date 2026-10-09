@@ -105,6 +105,9 @@ export default function CanvasOverlays() {
     const tick = () => {
       setSelected(order[step]);
       setStatus(`时序预览 ${step + 1}/${order.length}`);
+      // 相机跟随（V4.41.17）：CanvasShell 监听此事件 fitView 到当前节点，
+      // 否则节点跑到视窗外就成了「白高亮」。冻结区只加了一个监听器（已授权）。
+      window.dispatchEvent(new CustomEvent("sg-preview-focus", { detail: order[step] }));
       step += 1;
       advancePreview(order.length);
     };

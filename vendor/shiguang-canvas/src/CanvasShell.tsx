@@ -414,6 +414,18 @@ export default function CanvasShell(props: CanvasShellProps) {
   // 持久化折叠偏好：用户手动折叠/展开后记住
   useEffect(() => { localStorage.setItem("shiguang-canvas:left-collapsed", leftCollapsed ? "1" : "0"); }, [leftCollapsed]);
   useEffect(() => { localStorage.setItem("shiguang-canvas:right-collapsed", rightCollapsed ? "1" : "0"); }, [rightCollapsed]);
+  // V4.41.17 时序预览相机跟随：CanvasOverlays 每步派发 sg-preview-focus（detail=节点 id），
+  // 这里把视窗平滑移到当前节点（maxZoom 防止单节点被放得过大）。冻结区已授权的唯一新增。
+  useEffect(() => {
+    const onFocusNode = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === "string" && id) {
+        rfRef.current?.fitView({ nodes: [{ id }], duration: 420, maxZoom: 1.15 });
+      }
+    };
+    window.addEventListener("sg-preview-focus", onFocusNode as EventListener);
+    return () => window.removeEventListener("sg-preview-focus", onFocusNode as EventListener);
+  }, []);
   const [autoSavedAt, setAutoSavedAt] = useState<string>("");
   const [agentListening, setAgentListening] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
