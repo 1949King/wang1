@@ -1,7 +1,6 @@
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   BackgroundVariant,
   type Node,
@@ -1585,7 +1584,8 @@ export default function CanvasShell(props: CanvasShellProps) {
               <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#1a2433" />
             ) : null}
               {showMiniMap ? <MiniMap pannable zoomable /> : null}
-              <Controls />
+              {/* V4.41.15：删 ReactFlow <Controls /> —— 与底部 dock 缩放三处重复；
+                  滚轮缩放（ReactFlow 默认）+ dock「⊙ zoomPct% 聚焦」覆盖全部能力 */}
               <CanvasToolbar />
               {/* 咬合缝：吸附成功的持久提示（已吸附 / 拉伸中 / 即将断开 + 落座闪光） */}
               {magneticActive ? (

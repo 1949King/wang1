@@ -43,11 +43,20 @@ def check_wiring() -> None:
     if "<OutputHistoryPanel" in app or "<AgentPet" in app or "<DirectorPanel" in app or "<LightingPanel" in app:
         _fail("① App.tsx 直接挂了浮层子组件 —— App 顶到规模上限（2000），应只挂浮层簇入口")
     ov = _read(OVERLAYS)
-    for probe in ("<OutputHistoryPanel", "oh-open-chip", "Ctrl+H",
+    for probe in ("<OutputHistoryPanel", "Ctrl+H",
                   "useUpstreamRefsSync", "<LightingPanel", "灯位",
-                  "<DirectorPanel", "导演指导",):
+                  "<DirectorPanel", "导演指导", "useToolboxStore"):
         if probe not in ov:
             _fail(f"① CanvasOverlays 缺 {probe}")
+    # V4.41.15 起浮层入口收进底部「⚡工具」横向工具板（旧 ov-bar 四胶囊退役）
+    dock = _read(os.path.join("vendor", "shiguang-canvas", "src", "LibTvChrome.tsx"))
+    for probe in ("输出历史", "灯位", "导演指导", "上游引用", "useToolboxStore"):
+        if probe not in dock:
+            _fail(f"① LibTvChrome 工具板缺入口：{probe}")
+    store = _read(os.path.join("vendor", "shiguang-canvas", "src", "toolboxStore.ts"))
+    for probe in ("historyOpen", "lightingOpen", "directorOpen", "upstreamRefs", "zustand"):
+        if probe not in store:
+            _fail(f"① toolboxStore 缺 {probe}")
 
 
 def check_upstream_refs_module() -> None:
