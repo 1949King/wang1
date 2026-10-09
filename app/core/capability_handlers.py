@@ -211,15 +211,22 @@ class CanvasCapabilityHandlers:
                 output={"reasons": sel.get("reasons")},
                 error=sel.get("message") or "本地图像引擎不可用",
             )
+        # P0b（2026-10-10）：seed 归一化 —— 与云路径同语义（draw_ledger.normalize_seed）。
+        # 本地引擎必然收到 seed（不存在"渠道没收"问题）⇒ seed_sent 恒 True；
+        # 缺省/非法给密码学随机，保证每次抽卡可复现可入账。
+        from app.core.ai.draw_ledger import normalize_seed
+
+        seed_used, _seed_explicit = normalize_seed(p.get("seed"))
+        model_id = str(p.get("model_id") or "sd15-t2i")
         try:
             res = sel["backend"].generate(
-                str(p.get("model_id") or "sd15-t2i"),
+                model_id,
                 prompt=str(p.get("prompt") or ""),
                 negative_prompt=str(p.get("negative_prompt") or ""),
                 image_path=str(p.get("image_path") or ""),
                 width=int(p.get("width") or 0),
                 height=int(p.get("height") or 0),
-                seed=int(p.get("seed") or 0),
+                seed=seed_used,
                 steps=int(p.get("steps") or 0),
                 cfg=float(p.get("cfg") or 0.0),
             )
@@ -228,6 +235,17 @@ class CanvasCapabilityHandlers:
         res["engine"] = sel["engine"]
         res["engine_is_fallback"] = sel.get("is_fallback", False)
         ok = bool(res.get("ok"))
+        if ok:
+            # P0b：本地生图收尾入闭环（代理分 + draw_book 账本 + 推荐回传）。
+            # 接线层内部吞异常，入账失败绝不影响生成结果。
+            from app.core.ai.draw_ledger import feed_draw_ledger_local
+
+            feed_draw_ledger_local(
+                res, prompt=str(p.get("prompt") or ""), model_id=model_id,
+                engine=sel["engine"], seed=seed_used,
+                elapsed_ms=float(res.get("seconds_elapsed") or 0) * 1000.0)
+            res["seed"] = seed_used        # P0a 同款回显：本地生成必可复现
+            res["seed_sent"] = True
         return CapabilityResult(
             req.request_id, ok, output=res,
             error=None if ok else (res.get("message") or "本地生图失败"),

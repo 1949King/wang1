@@ -138,3 +138,51 @@ def lookup_recommendation(prompt: str, model: str, *, size: str = "",
 def now_ms() -> float:
     """单调时钟毫秒（供生成耗时统计，测试可 monkeypatch）。"""
     return time.monotonic() * 1000.0
+
+
+def feed_draw_ledger_local(result: Dict[str, Any], *, prompt: str, model_id: str,
+                           engine: str = "", seed: Optional[int] = None,
+                           elapsed_ms: Optional[float] = None) -> None:
+    """本地生图收尾入账（P0b，2026-10-10）：本地引擎产物 → 闭环。
+
+    为什么单独一个适配函数而不是让调用方各自拼：
+      本地双栈引擎返回 ``image_path``/``image_url``（本地文件），而闭环接线层
+      :func:`feed_draw_ledger` 只认 ``image_data_url``（gen_critic 要读像素）——
+      这正是「本地生图在闭环外」的结构性原因（深潜复核发现，账本只记花钱的半边）。
+      此处做一次 文件 → base64 data URL 的适配，两个调用方
+      （``capability_handlers.local_generate_image`` 与 ``/host/local-image-generate`` 路由）
+      共用，避免各写一遍。
+
+    行为：
+      - 就地写 ``result["image_data_url"]`` → 调 :func:`feed_draw_ledger`
+        （推荐回传 / proxy_score / repair_plan / 账本落笔全走既有链路）→
+        **移除临时 data URL**（本地产物按路径返回，响应不带巨型 base64）；
+      - 记账模型名用 ``local/{engine}/{model_id}``（与云渠道 id 命名空间隔离；
+        ``local/`` 前缀与 execution_decider 的本地约定一致）。
+
+    纪律：与 feed_draw_ledger 相同——**异常绝不抛出**，入账失败不影响生成主链路。
+    """
+    try:
+        import os as _os
+
+        p = str(result.get("image_path") or "")
+        if not p or not _os.path.isfile(p):
+            return
+        import base64
+
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        result["image_data_url"] = f"data:image/png;base64,{b64}"
+        try:
+            feed_draw_ledger(
+                result, prompt=prompt,
+                model=f"local/{engine or 'local'}/{model_id}",
+                size=f"{result.get('width') or 0}x{result.get('height') or 0}",
+                channel_id="", seed=seed, seed_sent=True,
+                elapsed_ms=elapsed_ms, kind="image",
+            )
+        finally:
+            # 本地产物按路径返回；data URL 只是入账的临时载体，别留在响应里
+            result.pop("image_data_url", None)
+    except Exception:
+        logger.debug("[draw_ledger] 本地生图入账失败（不影响生成）", exc_info=True)

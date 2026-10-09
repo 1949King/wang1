@@ -141,3 +141,141 @@ def test_bench_scripts_in_repo():
     for name in ("bench_sdxl_modes.py", "compare_dual_stack_sd15.py"):
         text = (bench / name).read_text(encoding="utf-8")
         assert "已入库" in text
+
+
+# ─────────────────────── ⑥ P0b（2026-10-10）：本地生图入闭环 ───────────────────────
+# 深潜复核发现：本地生图 seed 缺省 0、不归一化、不回显、不调 feed_draw_ledger
+# —— 零成本抽卡主力是账本盲区。本组锁定修复后的行为。
+
+def _fake_backend_ok(tmp_path, png_bytes=b"\x89PNG\r\n\x1a\nfake"):
+    """构造一个假引擎：生成成功、产物落盘、返回与真引擎同构的 dict。"""
+
+    class _B:
+        def generate(self, model_id, *, prompt="", negative_prompt="", image_path="",
+                     width=0, height=0, seed=0, steps=0, cfg=0.0, out_path=""):
+            p = tmp_path / "img.png"
+            p.write_bytes(png_bytes)
+            return {"ok": True, "path": str(p), "image_path": str(p),
+                    "image_url": "inbox://img.png", "width": width or 512,
+                    "height": height or 512, "seconds_elapsed": 0.1,
+                    "message": "生成完成"}
+
+    return _B()
+
+
+def test_local_generate_seed_normalized_and_echoed(monkeypatch, tmp_path):
+    """seed 缺省 → 密码学随机且 >0；显式 42 → 透传；两者都回显且 seed_sent=True。"""
+    calls = {}
+
+    def _fake_backend():
+        b = _fake_backend_ok(tmp_path)
+        orig_gen = b.generate
+
+        def gen(model_id, **kw):
+            calls.update(kw)
+            return orig_gen(model_id, **kw)
+
+        b.generate = gen
+        return b
+
+    monkeypatch.setattr(ED, "resolve_local_image_engine",
+                        lambda prefer="": {"ok": True, "engine": "builtin",
+                                           "is_fallback": True, "reasons": ["测试"],
+                                           "backend": _fake_backend()})
+    from app.core.capability_handlers import CanvasCapabilityHandlers
+    from app.core.capability_dispatcher import CapabilityRequest
+
+    # 缺省 seed
+    res = CanvasCapabilityHandlers().local_generate_image(
+        CapabilityRequest(request_id="t1", capability_id="canvas.local_generate_image",
+                          params={"prompt": "x"}))
+    assert res.success
+    out = res.output
+    assert out["seed"] > 0 and out["seed_sent"] is True
+    assert calls["seed"] == out["seed"], "引擎收到的 seed 必须与回显一致（可复现）"
+
+    # 显式 seed=42
+    res2 = CanvasCapabilityHandlers().local_generate_image(
+        CapabilityRequest(request_id="t2", capability_id="canvas.local_generate_image",
+                          params={"prompt": "x", "seed": 42}))
+    assert res2.output["seed"] == 42
+    assert calls["seed"] == 42
+
+
+def test_local_generate_feeds_ledger_on_success(monkeypatch, tmp_path):
+    """生成成功必须进闭环接线（feed_draw_ledger_local），失败/未生成则不进。"""
+    fed = []
+
+    import app.core.ai.draw_ledger as DL
+
+    def _fake_feed_local(result, *, prompt, model_id, engine, seed, elapsed_ms=None):
+        fed.append({"prompt": prompt, "model_id": model_id, "engine": engine,
+                    "seed": seed, "path": result.get("image_path")})
+
+    monkeypatch.setattr(DL, "feed_draw_ledger_local", _fake_feed_local)
+    # capability_handlers 在函数内 import，patch 的是 draw_ledger 模块属性 ⇒ 生效
+    monkeypatch.setattr(ED, "resolve_local_image_engine",
+                        lambda prefer="": {"ok": True, "engine": "builtin",
+                                           "is_fallback": True, "reasons": ["测试"],
+                                           "backend": _fake_backend_ok(tmp_path)})
+    from app.core.capability_handlers import CanvasCapabilityHandlers
+    from app.core.capability_dispatcher import CapabilityRequest
+
+    res = CanvasCapabilityHandlers().local_generate_image(
+        CapabilityRequest(request_id="t3", capability_id="canvas.local_generate_image",
+                          params={"prompt": "入账测试", "model_id": "sd15-t2i"}))
+    assert res.success
+    assert len(fed) == 1
+    assert fed[0]["model_id"] == "sd15-t2i"
+    assert fed[0]["engine"] == "builtin"
+    assert fed[0]["prompt"] == "入账测试"
+
+
+def test_feed_draw_ledger_local_adapts_file_to_data_url(monkeypatch, tmp_path):
+    """适配层：文件 → data URL 喂 feed_draw_ledger，事后移除临时字段。"""
+    seen = {}
+
+    import app.core.ai.draw_ledger as DL
+
+    def _fake_feed(result, *, prompt, model, size, channel_id, seed,
+                   seed_sent, elapsed_ms, retried=False, kind="image"):
+        seen["data_url"] = result.get("image_data_url", "")
+        seen["model"] = model
+        seen["seed_sent"] = seed_sent
+        result["proxy_score"] = 0.9   # 模拟接线层就地写回
+        result["is_proxy"] = True
+
+    monkeypatch.setattr(DL, "feed_draw_ledger", _fake_feed)
+    p = tmp_path / "img.png"
+    p.write_bytes(b"\x89PNGfake")
+    result = {"ok": True, "image_path": str(p), "width": 512, "height": 512}
+
+    DL.feed_draw_ledger_local(result, prompt="p", model_id="sd15-t2i",
+                              engine="diffsynth", seed=7)
+
+    assert seen["data_url"].startswith("data:image/png;base64,")
+    assert seen["model"] == "local/diffsynth/sd15-t2i"
+    assert seen["seed_sent"] is True
+    # 临时 data URL 必须被移除；接线层写回的字段保留
+    assert "image_data_url" not in result
+    assert result["proxy_score"] == 0.9
+
+
+def test_feed_draw_ledger_local_never_raises(tmp_path):
+    """红线：入账链路任何异常绝不抛出（不影响生成主链路）。"""
+    from app.core.ai.draw_ledger import feed_draw_ledger_local
+
+    # 产物不存在 → 静默跳过
+    feed_draw_ledger_local({"ok": True, "image_path": str(tmp_path / "nope.png")},
+                           prompt="p", model_id="m", seed=1)
+    # 产物字段缺失 → 静默跳过
+    feed_draw_ledger_local({"ok": True}, prompt="p", model_id="m", seed=1)
+
+
+def test_route_generate_uses_normalized_seed():
+    """源码级锁：路由 generate 分支必须 seed 归一化 + 收尾入账 + 回显。"""
+    src = (ROOT / "app" / "core" / "canvas_routes_post.py").read_text(encoding="utf-8")
+    seg = src[src.index("local-image-generate"):]
+    assert "normalize_seed" in seg, "路由必须用 normalize_seed 归一化 seed"
+    assert "feed_draw_ledger_local" in seg, "路由生成成功后必须入闭环"
+    assert 'res["seed_sent"] = True' in seg, "本地生成必可复现，必须回显 seed_sent"

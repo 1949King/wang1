@@ -1597,6 +1597,11 @@ class CanvasPostRoutesMixin:
             if not image_path:
                 self._json(400, {"ok": False, "message": "image（data URL）解析失败"})
                 return
+        # P0b（2026-10-10）：seed 归一化 —— 与云路径 / Agent 能力同语义
+        # （draw_ledger.normalize_seed：显式正整数透传，缺省/非法给密码学随机）。
+        from app.core.ai.draw_ledger import normalize_seed
+
+        seed_used, _seed_explicit = normalize_seed(body.get("seed"))
         try:
             res = eng.generate(
                 model_id,
@@ -1605,7 +1610,7 @@ class CanvasPostRoutesMixin:
                 image_path=image_path,
                 width=int(body.get("width") or 0),
                 height=int(body.get("height") or 0),
-                seed=int(body.get("seed") or 0),
+                seed=seed_used,
                 steps=int(body.get("steps") or 0),
                 cfg=float(body.get("cfg") or 0.0),
                 out_path=str(body.get("out_path") or ""),
@@ -1618,8 +1623,19 @@ class CanvasPostRoutesMixin:
         res["engine"] = sel["engine"]
         res["engine_is_fallback"] = sel.get("is_fallback", False)
         res["engine_reasons"] = sel.get("reasons", [])
-        logger.info("[/host/local-image-generate] generate %s engine=%s ok=%s",
-                    model_id, sel["engine"], res.get("ok"))
+        if res.get("ok"):
+            # P0b：本地生图收尾入闭环（代理分 + draw_book 账本 + 推荐回传）。
+            # 接线层内部吞异常，入账失败绝不影响生成结果。
+            from app.core.ai.draw_ledger import feed_draw_ledger_local
+
+            feed_draw_ledger_local(
+                res, prompt=str(body.get("prompt") or ""), model_id=model_id,
+                engine=sel["engine"], seed=seed_used,
+                elapsed_ms=float(res.get("seconds_elapsed") or 0) * 1000.0)
+            res["seed"] = seed_used        # P0a 同款回显：本地生成必可复现
+            res["seed_sent"] = True
+        logger.info("[/host/local-image-generate] generate %s engine=%s ok=%s seed=%s",
+                    model_id, sel["engine"], res.get("ok"), seed_used)
         self._json(200 if res.get("ok") else 400, res)
         return
 
