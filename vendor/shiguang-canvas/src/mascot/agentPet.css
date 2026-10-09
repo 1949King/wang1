@@ -1,0 +1,193 @@
+/**
+ * 桌宠样式 —— 独立文件，**刻意不写进 `styles.css`**。
+ *
+ * `vendor/shiguang-canvas/src/styles.css` 属于冻结区 `canvas-magnetic-intent`（33 个锁定文件之一）。
+ * 把桌宠样式塞进去就得走「解冻 → 备份 → 改 → 回归 → 重锁」全流程，收益为零。
+ * 而 `styles.css` 已在 `App.tsx` 里全局引入，本文件被 `AgentPet.tsx` 引入即可等效生效。
+ *
+ * 层级：z-index 1500 —— 高于输出历史面板(1000)/遮罩(1400)，低于确认弹窗 `.sg-modal-root`(10000)。
+ * 桌宠不能盖在「等你确认」的弹窗上，那正好是它要提醒你的东西。
+ *
+ * 动效纪律：本文件只做**合成器友好**的动画（transform / opacity）。
+ * 桌宠主体的动作全在 WebGL 渲染循环里算（见 `AgentPet.tsx`），CSS 只负责光晕呼吸与形态切换。
+ */
+
+.sg-pet {
+  position: fixed;
+  /* left/top 由 usePetDrag 直接写入（归一化位置 → 像素），此处只给兜底值 */
+  left: 0;
+  top: 0;
+  z-index: 1500;
+  width: 132px;
+  height: 132px;
+  /* 只过渡尺寸（收起/展开），**不过渡 left/top**：拖拽必须 1:1 跟手，
+     且首帧落位若带过渡会看到桌宠从左上角飞进来。 */
+  transition: width 0.22s cubic-bezier(0.2, 0.9, 0.2, 1), height 0.22s cubic-bezier(0.2, 0.9, 0.2, 1);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sg-pet--mini {
+  width: 56px;
+  height: 56px;
+}
+
+.sg-pet-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: grab;
+  /* 触摸设备上阻止页面滚动抢走拖拽 */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sg-pet--dragging .sg-pet-btn {
+  cursor: grabbing;
+}
+
+.sg-pet-stage {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.sg-pet-stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 状态光晕：颜色由 --sg-pet-rim 提供（AgentPet 按状态写入内联变量） */
+.sg-pet-halo {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  width: 88%;
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 60%,
+    color-mix(in srgb, var(--sg-pet-rim, #f7a061) 34%, transparent) 0%,
+    transparent 68%
+  );
+  opacity: 0.5;
+  animation: sg-pet-halo-idle 4.6s ease-in-out infinite;
+}
+
+/* 在忙 / 等你确认时，光晕跟着「有事发生」的节奏加快 —— 这是桌宠唯一的纯 CSS 提示，
+   让它在屏幕边缘也能被余光扫到。 */
+.sg-pet[data-state="thinking"] .sg-pet-halo,
+.sg-pet[data-state="awaiting"] .sg-pet-halo {
+  animation-duration: 1.6s;
+  opacity: 0.78;
+}
+
+.sg-pet[data-state="success"] .sg-pet-halo {
+  animation: none;
+  opacity: 0.85;
+}
+
+@keyframes sg-pet-halo-idle {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(0.94);
+    opacity: 0.42;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.06);
+    opacity: 0.62;
+  }
+}
+
+.sg-pet-name {
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  transform: translateX(-50%);
+  padding: 1px 7px;
+  border: 1px solid var(--line2, #2a3a4d);
+  border-radius: 999px;
+  background: var(--panel-solid, #101820);
+  color: var(--muted, #8b9bb0);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 气泡：贴在桌宠上方，靠状态文案承载「懂你」的那一句话 */
+.sg-pet-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 6px);
+  transform: translateX(-50%);
+  max-width: 168px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--sg-pet-rim, #f7a061) 45%, var(--line2, #2a3a4d));
+  border-radius: 10px;
+  background: var(--panel, rgba(14, 20, 28, 0.92));
+  color: var(--text, #e8eef6);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+  animation: sg-pet-bubble-in 0.18s ease-out;
+}
+
+.sg-pet-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -5px) rotate(45deg);
+  border-right: 1px solid color-mix(in srgb, var(--sg-pet-rim, #f7a061) 45%, var(--line2, #2a3a4d));
+  border-bottom: 1px solid color-mix(in srgb, var(--sg-pet-rim, #f7a061) 45%, var(--line2, #2a3a4d));
+  background: var(--panel, rgba(14, 20, 28, 0.92));
+}
+
+@keyframes sg-pet-bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* 「等你确认」时气泡轻微跳动，配合狐狸举手 —— 这是整套桌宠里最强的一次注意力唤起 */
+.sg-pet[data-state="awaiting"] .sg-pet-bubble {
+  animation: sg-pet-nudge 1.1s ease-in-out infinite;
+}
+
+@keyframes sg-pet-nudge {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, -4px);
+  }
+}
+
+/* 系统「减弱动态」偏好：去掉所有 CSS 动画 */
+@media (prefers-reduced-motion: reduce) {
+  .sg-pet,
+  .sg-pet-halo,
+  .sg-pet-bubble {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -19,16 +19,30 @@
  * 全量重算才会变成 338px（探针见 `.workbuddy/tmp/probe_has3.py`，三步对照实测）。
  * ⇒ 改为：盯 `.workspace` 的 class 变化（MutationObserver）→ 直接写 **内联样式** 定位，
  *    同时把 4 个入口收成一枚「🧰 工具」胶囊，避免让位后又压住画布底部工具条（`.libtv-dock`）。
+ *
+ * V4.41.9：挂载 Agent 桌宠（Q 版狐狸「拾岚」）
+ * ==========================================
+ * 桌宠挂在本文件，理由是**这里已经知道 Agent 侧栏开没开**（上面的 MutationObserver 就在盯
+ * `.workspace.agent-open`），正好就是桌宠需要的 `mini` 信号。另外本文件不在冻结区
+ * （`canvas-magnetic-intent` 只锁 `CanvasShell.tsx`），挂在这里零解冻。
+ *
+ * ⚠️ 桌宠必须 **懒载**（`React.lazy`）。它是装饰件，但依赖整个 Three.js；直接 import 会把 Three
+ * 拖进首屏主包，让每次进画布都多付一份解析/执行成本 —— 这个项目刚从 8.24s 冷启动优化到 0.191s，
+ * 不能为一只狐狸把账还回去。懒载后桌宠（连同 Three）落进独立 chunk，只在真正需要时才下来，
+ * 且 `fallback={null}`：加载期间画布完全不受影响，一两百毫秒后狐狸自己出现。
  */
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import DirectorPanel from "./DirectorPanel";
 import LightingPanel from "./LightingPanel";
 import OutputHistoryPanel from "./OutputHistoryPanel";
+import { usePetStatus } from "./mascot/usePetStatus";
 import { isTypingTarget } from "./CommandPalette";
 import { useUpstreamRefsSync } from "./upstreamRefs";
 import "./overlayBar.css";
+
+const AgentPet = lazy(() => import("./mascot/AgentPet"));
 
 const PIN_KEY = "shiguang-canvas:output-history:pinned";
 
@@ -58,6 +72,26 @@ export default function CanvasOverlays() {
   const [toolsOpen, setToolsOpen] = useState(false);
 
   const toggleHistory = useCallback(() => setShowHistory((v) => !v), []);
+
+  // 桌宠状态：由画布真实状态派生（节点在跑生成 / 弹了确认框在等你 / 刚失败）。
+  // 详见 mascot/petActivity.ts（纯函数状态机）与 mascot/usePetStatus.ts（订阅源）。
+  const petStatus = usePetStatus();
+
+  /**
+   * 点桌宠 = 进入 Agent 对话画面。
+   * 不碰冻结的 `CanvasShell.tsx`：直接驱动它自己那个 `.libtv-agent-btn`（它内部 toggle 状态）。
+   * 只在「还没开」时点，避免点一下反而把面板关掉。
+   */
+  const openAgent = useCallback(() => {
+    const workspace = document.querySelector(".workspace");
+    const isOpen = Boolean(workspace?.classList.contains("agent-open"));
+    if (!isOpen) {
+      document.querySelector<HTMLButtonElement>(".libtv-agent-btn")?.click();
+      return;
+    }
+    // 已开：直接把焦点交给输入框，「进入对话画面」才算真的到位
+    document.querySelector<HTMLTextAreaElement>(".sg-agent-input textarea")?.focus();
+  }, []);
 
   // 「连线上游素材引用」：默认关；开启后连线的上游产物会写进下游节点的真实引用字段
   // （firstFrameUrl —— 生成侧真的会用它，不是往提示词里塞 @ 装饰）。
@@ -178,6 +212,11 @@ export default function CanvasOverlays() {
       {showHistory ? <OutputHistoryPanel onClose={() => setShowHistory(false)} /> : null}
       {showLighting ? <LightingPanel onClose={() => setShowLighting(false)} /> : null}
       {showDirector ? <DirectorPanel onClose={() => setShowDirector(false)} /> : null}
+      {/* Agent 桌宠（Q 版狐狸「拾岚」）：Agent 面板打开时自动收起为专属小形象。
+          懒载 + fallback=null —— 加载期间画布零影响。 */}
+      <Suspense fallback={null}>
+        <AgentPet status={petStatus} mini={agentOpen} onActivate={openAgent} />
+      </Suspense>
     </>
   );
 }

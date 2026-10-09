@@ -1,5 +1,110 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.9 (2026-10-10) — 桌宠「拾岚」：画布上的 Agent 桌面形象（动态 · 对标开源画布）
+
+> 用户原话：「给我做一个 Q 版的狐狸头，拟人，一个做出形象。并且它也是 Agent 的一个桌面形象。
+> 点击它的时候，直接进入 Agent 的对话画面。收起它的时候，就是一个专属形象。」
+> 追加口径：「要动态的，对标借鉴的那个开源 ai 画布里面的。」
+> ⚠️ 定位：**陪伴是差异化，不是核心**。核心仍是「剪辑 ↔ AI 画布生成」的每一条往返路径。
+
+### 对标对象（真读源码，不是凭印象）
+
+参考实现就在副库里：`vendor/AI-Canvas-tauri/src/components/shared/mascot/`
+（`Mascot.tsx` 37.9KB + `hooks/useMascotDrag.ts` + `hooks/useMascotStatus.ts` + `mascotMotion.ts` + 7 例测试）。
+
+**它的骨架**（我们逐条移植）：常驻 rAF 渲染循环 + **所有随帧输入走 ref 不进 effect 依赖**（否则每帧重建 WebGL 场景）
++ 帧率分档（IDLE 30fps / ACTIVE 60fps）+ `document.hidden` 不画 + 参数化动作。
+
+### 新建：`vendor/shiguang-canvas/src/mascot/`（9 文件）
+
+| 文件 | 内容 |
+|---|---|
+| `mascotMotion.ts` | **同名同语义移植**参考的纯函数层：`getReactionPose` / `getSquashWidth`（等体积 `1/√squashY`）/ `pickNextGazeIndex`（不重复选同一落点）/ `REACTION_DURATIONS` |
+| `petActivity.ts` | 状态机纯函数：`selectPetActivity` / `stepPetStatus`。优先级 **等确认 > 失败 > 成功 > 在忙 > 待命** |
+| `usePetStatus.ts` | 两路订阅：`useCanvasStore(s=>s.nodes)` + `MutationObserver` 盯 `.sg-modal-root`（合并同帧回调） |
+| `usePetDrag.ts` | 原生 pointer 拖拽（**不引 framer-motion**）。位置存**归一化 (x,y)∈[0,1]²**，窗口 resize 按比例跟随 |
+| `foxScene.ts` | 程序化 Q 版狐狸几何（Three.js，零外部资源） |
+| `AgentPet.tsx` | 桌宠主体：11 段渲染循环 + DOM 外壳 |
+| `agentPet.css` | 桌宠样式（**刻意不写进冻结的 `styles.css`**） |
+| `mascotMotion.test.ts`(15) · `petActivity.test.ts`(11) | 回归锁 |
+
+### 形象演进：**七轮截图迭代**（每轮都渲染成 PNG 亲眼看，不靠读代码猜）
+
+用 headless Edge + CDP 连拍 + PIL 5× 放大诊断，逐轮修掉的**真问题**：
+
+| 轮次 | 截图暴露的问题 | 修法 |
+|---|---|---|
+| 1 | 读成**柴犬**：矮胖三角耳 / 圆眼 / 狗面罩 / 尾巴完全看不见 | 记录问题清单 |
+| 2 | 耳朵仍偏矮，吻是「倒插的尖角」（`ConeGeometry` 旋转后尖端朝向不可控） | 耳 `0.24×0.5→0.19×0.72` 拉高收窄 + 压薄；吻改**扁球**做楔形 |
+| 3 | 尾巴**穿到身前**（在围巾上打了个勾）—— `+z` 是观众方向 | 尾根挂右后方、整条 `rotation.x` 后仰，各节只走很小负 z |
+| 4 | 给眼组加 `rotation.z=0.13` 上挑 ⇒ **立刻变成「眯眼凶相」** | 回退；杏眼靠**眼白上窄下宽**的比例做，不靠整体旋转 |
+| 5 | 独立颊斑无论怎么调都像**贴在脸上的棉花球** | 换思路：**去掉独立颊斑** |
+| 6 | — | 改**一整块白楔形**吻体承担全部白色，中间是吻、两侧自然收进脸颊 ⇒ 立刻像狐 |
+| 7 | 鼻子偏上像长在鼻梁上 | 鼻头移到吻部**下缘**；腮红上移外移 |
+
+**定稿特征**：高窄尖耳（外橙内粉）/ 白楔形脸 / 尖吻小鼻 / 上宽下窄头骨 / 右后上方翘起的橙白蓬尾 /
+额顶青绿挑染 / **品牌蓝围巾**。后两笔是把桌宠接在企划形象「拾岚」上的锚
+（见 `vendor/AI-Canvas-tauri/public/prompts/shiguang-mascot.json`），不是另造一只无关的狐狸。
+
+### 挂载点选 `CanvasOverlays.tsx` ⇒ **零解冻**
+
+`CanvasOverlays.tsx` **不在** `canvas-magnetic-intent` 的 33 个锁文件里（该区只锁 `CanvasShell.tsx` / `styles.css` / `store.ts` 等），
+且它**已经知道** `.workspace.agent-open`（上面就有 MutationObserver 在盯），正好是桌宠的 `mini` 信号。
+
+### 交互
+
+- **单击桌宠 → 进入 Agent 对话画面**：不碰冻结的 `CanvasShell.tsx`，直接驱动它自己的 `.libtv-agent-btn`；
+  **只在还没开时点**（否则点一下反而把面板关掉）；已开时把焦点交给 `.sg-agent-input textarea`。
+- **Agent 打开 → 桌宠自动收起为迷你形象**（132px → 56px），并**自动左移 262px 躲开侧栏**（`reserveRight=338`）。
+- **拖拽**：原生 pointer 事件（不引依赖），位置归一化持久化；用户手动摆过就不再自动挪；**右键复位**。
+
+### 四条动态证据（CDP 无依赖探针，真浏览器真鼠标）
+
+`.workbuddy/tmp/petshot/pet_probe.mjs`（Node 内置 `fetch` + 全局 `WebSocket` 自实现 CDP 客户端，**不装 playwright**）：
+
+| 证据 | 结果 |
+|---|---|
+| 桌宠渲染 | `present:true, state:"idle", name:"拾岚"`，WebGL canvas 132×132 ✓ |
+| **动画真在跑** | 连拍 4 帧，像素差异 **207 → 549 → 895 单调累加**（呼吸+尾摆），非静态图 ✓ |
+| **单击进 Agent + 自动迷你** | 点击 → `agentOpen:true, mini:true`，132→56px，x 由 1416 移至 1154 ✓ |
+| **awaiting 状态** | 向 Agent 输入框打 `/generate` + 回车 → 真弹确认框 → `state:"awaiting", modalOpen:true`；放大图可见**双手举起** ✓ |
+| **弹窗关闭回落** | Esc → `state:"idle", modalOpen:false`（曾永久卡在 awaiting，已修） |
+
+### 修掉的 3 个真缺陷（都有回归锁）
+
+1. **awaiting 永久卡住**：`stepPetStatus` 的「快照无变化」分支直接 `return previous`，而 awaiting **不来自节点快照** ⇒ 弹窗关掉后永远等不到下一次推进。
+2. **「成功」保留期永不消失**：`apply()` 每次 store 变更都重置 `holdTimer` ⇒ 改为**只在状态真的变了**才动定时器。
+3. **`getDragForce` 引用不稳定会让 WebGL 场景反复重建**（桌宠闪一下 + 泄漏上下文）⇒ `useCallback` 稳定引用；场景 effect 依赖 `[getDragForce]`。
+
+### 性能：桌宠必须懒载
+
+首版直接 import Three.js ⇒ 主包 **1,407.94 kB**。改 `React.lazy` + `Suspense fallback={null}` 后：
+
+| 产物 | 大小 |
+|---|---|
+| 首屏主包 | **808.39 kB**（回落 599 kB） |
+| `three.module-*.js` | 581.36 kB（独立 chunk） |
+| `AgentPet-*.js` | **15.96 kB** |
+
+理由：这个项目刚从 8.24s 冷启动优化到 0.191s，**不能为一只狐狸把账还回去**。
+
+### 冻结区合规
+
+仅 `canvasVersion.ts` 在锁内（升版本号必须动）⇒ 已按纪律：备份 → 改 → 校验 → **漂移清单精确只列该 1 项** → 登记 reason → `--update` 重锁 → 复跑 **85 locks intact**。
+**桌宠功能本身零解冻**（挂载点 + 新增目录都在锁外）。
+
+### 门禁
+
+主库 tsc **37 = 基线**（mascot 目录 0 命中）· vitest **20 文件 267 例全绿** · vite build ✓
+· 双库一致 **130 / 分叉 0 / 缺失 10（均在基线内）** · 冻结区 **85 locks intact** · dist 重建 ✓
+
+### 已知未做
+
+- 桌宠「专属页」（形象管理 / 人格 / 记忆）—— 用户提出的「把没有组成陪伴感的情节连在一起」仍是可选项。
+- 迷你态不显示气泡（`bubble: null`）—— 有意为之，56px 下气泡会盖住本体。
+
+---
+
 ## V4.41.8 (2026-10-09) — 通电：五件套从「测试黑屏」到「产品可达」
 
 > 全景体检发现最大债务是「造好未接」（约 1,545 行能力链零端点可达）。本刀给它们全部通电。

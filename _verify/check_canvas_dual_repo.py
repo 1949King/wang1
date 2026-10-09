@@ -56,6 +56,11 @@ BASELINE_MISSING = {
     # 2026-10-07 新增：机位视锥回归测试（锁「视锥必须由 fov 决定」）。
     # 同上——源码 stage3dCamGizmo.ts 已双向同步，只有测试主库独有。
     "stage3dCamGizmo.test.ts",
+    # 2026-10-10 新增：Agent 桌宠回归测试（动作纯函数 15 例 + 状态机 11 例）。
+    # 同上——源码 mascot/*.ts 已双向同步（mascot/ 整个目录都拷到副库），
+    # 只有测试主库独有：副库自有 vitest 会扫到，引入主库测试会带来规则冲突。
+    "mascot/mascotMotion.test.ts",
+    "mascot/petActivity.test.ts",
 }
 
 
