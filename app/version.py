@@ -1,11 +1,11 @@
-__version__ = "4.41.11"
+__version__ = "4.41.12"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 41,
-    "patch": 11,
-    "codename": "硬件三档（H1：显存分档进选路留痕）",
+    "patch": 12,
+    "codename": "产品树净化（T1：app/temp 调试垃圾迁出）",
     "release_date": "2026-10-10",
     "description": (
         "V4.41.0: 交付底座 —— 把「四块通用能力」从「有配置」做成「真在跑」，"

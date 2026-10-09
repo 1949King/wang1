@@ -28,11 +28,14 @@ print(f'[3] 代理 backend: {eng.backend}')
 print(f'[4] 代理 available: {eng.available}')
 
 # ===== STEP 2: 端到端多片段工作流 =====
-os.makedirs('app/temp', exist_ok=True)
+# 2026-10-10 T1：app/temp 已迁出产品树（归档至 docs/_archive/2026-10-10-app-temp-cleanup/），
+# 验证脚本工作目录改钉 .workbuddy/tmp（项目临时目录统一入口）。
+_TEMP_DIR = os.path.join('.workbuddy', 'tmp')
+os.makedirs(_TEMP_DIR, exist_ok=True)
 
 # 生成两个测试源
-src1 = 'app/temp/e2e_src1.mp4'
-src2 = 'app/temp/e2e_src2.mp4'
+src1 = os.path.join(_TEMP_DIR, 'e2e_src1.mp4')
+src2 = os.path.join(_TEMP_DIR, 'e2e_src2.mp4')
 for f, color in [(src1, 'red'), (src2, 'blue')]:
     if not os.path.exists(f):
         subprocess.run(
@@ -55,7 +58,7 @@ else:
     print('[2.1] src1 分析: FAIL')
 
 # 2.2 剪辑
-clipped = 'app/temp/e2e_clipped.mp4'
+clipped = os.path.join(_TEMP_DIR, 'e2e_clipped.mp4')
 if os.path.exists(clipped):
     os.remove(clipped)
 eng.clip_video(src1, clipped, start_time=0.3, duration=1.2)
@@ -63,7 +66,7 @@ clip_ok = os.path.exists(clipped) and os.path.getsize(clipped) > 0
 print(f'[2.2] 剪辑: {"OK" if clip_ok else "FAIL"} ({os.path.getsize(clipped) if clip_ok else 0} bytes)')
 
 # 2.3 水印
-wmarked = 'app/temp/e2e_wmarked.mp4'
+wmarked = os.path.join(_TEMP_DIR, 'e2e_wmarked.mp4')
 if os.path.exists(wmarked):
     os.remove(wmarked)
 ok = eng.add_watermark(clipped, wmarked, 'AI Drama Editor', font_size=20, color='white')
@@ -80,7 +83,7 @@ if stats:
     print(f'[2.5] 性能: {stats.frames_processed} 帧, {stats.fps_processed:.1f} fps, 耗时 {stats.processing_time:.2f}s')
 
 # 2.6 缩略图
-thumbs = eng.extract_thumbnails(src1, 4, 'app/temp/e2e_thumbs', width=160, height=90)
+thumbs = eng.extract_thumbnails(src1, 4, os.path.join(_TEMP_DIR, 'e2e_thumbs'), width=160, height=90)
 print(f'[2.6] 缩略图: {len(thumbs)} 张')
 
 # 2.7 多片段合并
@@ -104,7 +107,7 @@ clips = [
     make_clip(os.path.abspath(src2), 0.2, 1.8, 1.5),
     make_clip(os.path.abspath(clipped), 0, 1.0, 3.0),
 ]
-merged = os.path.abspath('app/temp/e2e_merged.mp4')
+merged = os.path.abspath(os.path.join(_TEMP_DIR, 'e2e_merged.mp4'))
 if os.path.exists(merged):
     os.remove(merged)
 

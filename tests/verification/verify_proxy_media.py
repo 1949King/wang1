@@ -25,7 +25,10 @@ print("P0#1 代理媒体端到端验证")
 print("=" * 60)
 
 # ===== STEP 1: 准备源（高分辨率以触发代理策略）=====
-src = os.path.abspath('app/temp/proxy_src.mp4')
+# 2026-10-10 T1：app/temp 已迁出产品树，临时产物改钉 .workbuddy/tmp
+_TEMP_DIR = os.path.join('.workbuddy', 'tmp')
+os.makedirs(_TEMP_DIR, exist_ok=True)
+src = os.path.abspath(os.path.join(_TEMP_DIR, 'proxy_src.mp4'))
 if not os.path.exists(src):
     print(f"[生成] 高分辨率源: {src}")
     subprocess.run([
@@ -93,7 +96,7 @@ print()
 print("=" * 60)
 print("STEP 6: 异步生成 (后台线程)")
 print("=" * 60)
-src2 = os.path.abspath('app/temp/proxy_src2.mp4')
+src2 = os.path.abspath(os.path.join(_TEMP_DIR, 'proxy_src2.mp4'))
 if not os.path.exists(src2):
     subprocess.run([
         'ffmpeg', '-y',
