@@ -44,10 +44,12 @@ const PET_BLINK = `${import.meta.env.BASE_URL}mascot/pet_blink.png`;
 const PET_CHEER = `${import.meta.env.BASE_URL}mascot/pet_cheer.png`;
 
 /**
- * 形态尺寸（px）。expanded 立绘显示高约 200px；mini = Agent 面板打开时的
- * 脸部特写（裁窗口见 CSS `.sg-pet--mini`）。传给 usePetDrag 的是**高度**（拖拽边界用）。
+ * 形态尺寸（px）。立绘显示高约 200px。
+ * `mini` = Agent 面板打开 —— 桌宠**完全隐藏**（对齐参考开源项目：
+ * 点开桌宠 → 桌宠变成对话窗口并消失；关闭对话 → 桌宠回来），
+ * 不再有「缩成角落小头像」形态，故只此一档尺寸。
  */
-export const PET_SIZE = { expanded: 224, mini: 64 } as const;
+export const PET_SIZE = { expanded: 224 } as const;
 
 /** 眨眼帧显示时长（ms）。 */
 const BLINK_MS = 180;
@@ -72,7 +74,7 @@ function useReducedMotion(): boolean {
 
 export interface AgentPetProps {
   status: PetStatus;
-  /** 收起态：只留专属小形象（Agent 面板打开时自动收起，避免挡住画布） */
+  /** Agent 面板已打开 —— 桌宠完全隐藏（面板关闭即回归，位置记忆保留） */
   mini: boolean;
   /** 单击：进入 Agent 对话画面 */
   onActivate: () => void;
@@ -83,10 +85,7 @@ export interface AgentPetProps {
 export default function AgentPet({ status, mini, onActivate, reduceMotion }: AgentPetProps) {
   const prefersReduce = useReducedMotion();
   const reduceMotionResolved = reduceMotion ?? prefersReduce;
-  const size = mini ? PET_SIZE.mini : PET_SIZE.expanded;
-  // 迷你形态 == Agent 侧栏已打开。默认落位要让开面板那一列（320 上限 + 18 间距），
-  // 否则「一点桌宠，Agent 面板盖住桌宠」。用户手动拖过位置后不再自动挪动。
-  const drag = usePetDrag(size, mini ? 338 : 0);
+  const drag = usePetDrag(PET_SIZE.expanded, 0);
   const { rootRef, onPointerDown, consumeClick, resetPosition } = drag;
 
   const hopRef = useRef<HTMLSpanElement | null>(null);
@@ -166,9 +165,10 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
   return (
     <div
       ref={rootRef}
-      className={`sg-pet${mini ? " sg-pet--mini" : ""}${drag.dragging ? " sg-pet--dragging" : ""}`}
+      className={`sg-pet${mini ? " sg-pet--hidden" : ""}${drag.dragging ? " sg-pet--dragging" : ""}`}
       data-state={status}
       data-sg-no-autoclick="1"
+      aria-hidden={mini || undefined}
       style={
         {
           "--sg-pet-rim": rimCss(STATUS_RIM_COLORS[status]),
@@ -184,6 +184,7 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
         type="button"
         className="sg-pet-btn"
         data-sg-no-autoclick="1"
+        tabIndex={mini ? -1 : 0}
         title={`${STATUS_LABELS[status]}（单击打开 / 拖动移位 / 右键复位）`}
         aria-label={STATUS_LABELS[status]}
         onPointerDown={onPointerDown}
