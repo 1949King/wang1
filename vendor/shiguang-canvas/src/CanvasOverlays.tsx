@@ -27,10 +27,13 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 
 import DirectorPanel from "./DirectorPanel";
+import GalleryPanel from "./GalleryPanel";
 import LightingPanel from "./LightingPanel";
 import OutputHistoryPanel from "./OutputHistoryPanel";
 import { usePetStatus } from "./mascot/usePetStatus";
 import { isTypingTarget } from "./CommandPalette";
+import { PREVIEW_STEP_MS, previewOrder } from "./previewPlayer";
+import { useCanvasStore } from "./store";
 import { useUpstreamRefsSync } from "./upstreamRefs";
 import { useToolboxStore } from "./toolboxStore";
 
@@ -40,9 +43,11 @@ export default function CanvasOverlays() {
   const showHistory = useToolboxStore((s) => s.historyOpen);
   const showLighting = useToolboxStore((s) => s.lightingOpen);
   const showDirector = useToolboxStore((s) => s.directorOpen);
+  const showGallery = useToolboxStore((s) => s.galleryOpen);
   const toggleHistory = useToolboxStore((s) => s.toggleHistory);
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
   const toggleDirector = useToolboxStore((s) => s.toggleDirector);
+  const toggleGallery = useToolboxStore((s) => s.toggleGallery);
 
   /** Agent 侧栏是否打开（决定桌宠隐藏态） */
   const [agentOpen, setAgentOpen] = useState(false);
@@ -69,6 +74,44 @@ export default function CanvasOverlays() {
 
   // 「连线上游素材引用」订阅同步仍在（开关状态已进 toolboxStore，这里只保留 apply 副作用）
   useUpstreamRefsSync();
+
+  /* 连线时序预览（V4.41.16 真功能）：按拓扑层级从上游到下游逐节点高亮。
+     推进用 interval + store.advancePreview（播完自动停）；每步把画布状态栏
+     写成进度（store.setStatus 已有机制），用户随时能读「播到哪了」。 */
+  const previewPlaying = useToolboxStore((s) => s.previewPlaying);
+  useEffect(() => {
+    if (!previewPlaying) return;
+    const nodes = useCanvasStore.getState().nodes;
+    const edges = useCanvasStore.getState().edges;
+    const order = previewOrder(
+      (nodes || []).map((n: { id: string; position: { x: number; y: number } }) => ({
+        id: n.id,
+        x: n.position?.x ?? 0,
+        y: n.position?.y ?? 0,
+      })),
+      (edges || []).map((e2: { source: string; target: string }) => ({ source: e2.source, target: e2.target })),
+    );
+    if (!order.length) {
+      useCanvasStore.getState().setStatus("画布上没有节点可预览");
+      useToolboxStore.getState().stopPreview();
+      return;
+    }
+    const { setSelected, setStatus, advancePreview } = {
+      setSelected: useCanvasStore.getState().setSelected,
+      setStatus: useCanvasStore.getState().setStatus,
+      advancePreview: useToolboxStore.getState().advancePreview,
+    };
+    let step = 0;
+    const tick = () => {
+      setSelected(order[step]);
+      setStatus(`时序预览 ${step + 1}/${order.length}`);
+      step += 1;
+      advancePreview(order.length);
+    };
+    tick(); // 立即高亮第一个
+    const timer = window.setInterval(tick, PREVIEW_STEP_MS);
+    return () => window.clearInterval(timer);
+  }, [previewPlaying]);
 
   // Agent 侧栏开合 ⇒ 桌宠隐藏/回归（盯 class，不用 :has() —— Chromium 134 样式失效坑）
   useEffect(() => {
@@ -120,6 +163,7 @@ export default function CanvasOverlays() {
       {showHistory ? <OutputHistoryPanel onClose={toggleHistory} /> : null}
       {showLighting ? <LightingPanel onClose={toggleLighting} /> : null}
       {showDirector ? <DirectorPanel onClose={toggleDirector} /> : null}
+      {showGallery ? <GalleryPanel onClose={toggleGallery} /> : null}
       {/* Agent 桌宠（Q 版狐狸「拾岚」）：Agent 面板打开时隐藏（V4.41.14）。
           懒载 + fallback=null —— 加载期间画布零影响。 */}
       <Suspense fallback={null}>

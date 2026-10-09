@@ -1,28 +1,26 @@
-__version__ = "4.41.15"
+__version__ = "4.41.16"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 41,
-    "patch": 15,
-    "codename": "横向工具板（画布底部 C 方案重做）",
+    "patch": 16,
+    "codename": "工具补全（图库/时序预览/撤销重做 · 画布 0.3.15）",
     "release_date": "2026-10-10",
     "description": (
-        "V4.41.15: 画布底部工具栏 C 方案重做（画布 0.3.13 → 0.3.14「横向工具板」）。"
-        "\n【问题】用户实测截图定性：底部三套控件叠加（dock 一行 13 个无文字图标"
-        " + 右下 ov-bar 4 胶囊 + ReactFlow 自带 Controls），缩放 3 处重复、"
-        "历史 2 处重复，「排列混乱重叠、根本不知道是哪些」。"
-        "\n【改】① LibTvBottomDock 重写：dock 收敛为 4 按钮"
-        "（资产 / +添加 / ⊙缩放聚焦 / ⚡工具），其余全部收进「⚡工具」向上的"
-        "横向工具板（视图/节点/数据/帮助 4 组并排、组内横排、图标+文字常显）；"
-        "props 签名一字不动（冻结区 CanvasShell 零接口变更）。"
-        "② 新建 toolboxStore.ts（zustand）：历史/灯位/导演指导/上游引用开关跨组件共享，"
-        "工具板按钮与 CanvasOverlays 面板渲染同源；快捷键 Ctrl+H/L/D 改写 store 行为不变。"
-        "③ 退役 ov-bar 浮层（CanvasOverlays -92 行、删 overlayBar.css），"
-        "Agent 打开的让位/折叠逻辑随之消亡（dock 由 CanvasShell 布局管）。"
-        "④ 删 ReactFlow <Controls />（CanvasShell 冻结区已授权改动，缩放走滚轮 + dock 聚焦）。"
-        "⑤ 新样式全在独立 LibTvChrome.css（ltd-* 类名，styles.css 冻结区零触碰）。"
-        "\n【门禁】tsc 37=基线、vitest 267/267、run_all_checks、双库校验全绿。"
-        "\n上一版 V4.41.14「桌宠隐藏态」见 docs/CHANGELOG.md。"
+        "V4.41.16: 工具板三个占位功能补全为真功能（画布 0.3.14 → 0.3.15「工具补全」）。"
+        "\n【① 图库】此前只弹统计文字 → 新建 GalleryPanel：画布全部有产物的"
+        "图片/视频节点缩略图网格（视频用首帧），点击缩略图选中对应节点（画布高亮"
+        "+检查器联动），最新产物排前；空态有引导文案。"
+        "\n【② 时序预览】此前只 fitView+提示 → 新建 previewPlayer.ts（Kahn 分层"
+        "拓扑排序纯函数，同层按画布位置 y 主 x 辅，环不丢弃按位置序附尾），"
+        "CanvasOverlays 按拓扑序每 900ms 高亮一个节点并写状态栏进度"
+        "「时序预览 n/总」，播完自动停、再点即停；7 例 vitest 锁排序行为。"
+        "\n【③ 撤销/重做】「历史栈」占位（只报步数）→ 拆成 ↶撤销/↷重做真按钮，"
+        "直连 store.undoGraph/redoGraph（与 Ctrl+Z/Y 同源）。"
+        "\n【纪律】全部零冻结区：onPreview/onGallery/onHistory props 保留签名"
+        "不再调用（CanvasShell 零改动）；面板外壳复用 .oh-panel 视觉家族。"
+        "\n【门禁】tsc 37=基线 · vitest 274/274（+7）· run_all_checks 75 全绿 · 双库无漂移。"
+        "\n上一版 V4.41.15「横向工具板」见 docs/CHANGELOG.md。"
     ),
 }

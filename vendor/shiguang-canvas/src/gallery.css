@@ -1,0 +1,115 @@
+/**
+ * gallery.css — 图库面板网格区样式（V4.41.16）。
+ * 外壳复用 .oh-panel（outputHistory.css），这里只写网格专属样式。
+ */
+
+.sg-gallery {
+  width: min(680px, calc(100vw - 48px));
+}
+
+.sg-gallery-body {
+  padding: 10px 12px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.sg-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.sg-gallery-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.14s;
+}
+
+.sg-gallery-cell:hover {
+  border-color: #3b82f6;
+}
+
+.sg-gallery-cell.on {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb, 0 4px 16px rgba(37, 99, 235, 0.25);
+}
+
+.sg-gallery-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #101623;
+}
+
+.sg-gallery-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sg-gallery-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(10, 14, 20, 0.78);
+  color: #cfe0ff;
+  font-size: 9px;
+}
+
+.sg-gallery-label {
+  padding: 0 2px;
+  font-size: 11px;
+  color: #9aa7bf;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.sg-gallery-cell.on .sg-gallery-label {
+  color: #eaf2ff;
+}
+
+.sg-gallery-empty {
+  padding: 42px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #8b95ad;
+  line-height: 2;
+}
+
+.sg-gallery-hint {
+  font-size: 11px;
+  color: #5c6478;
+}
+
+/* 浅色主题 */
+.theme-light .sg-gallery-cell.on,
+body[data-theme="light"] .sg-gallery-cell.on {
+  box-shadow: 0 0 0 1px #2563eb, 0 4px 16px rgba(37, 99, 235, 0.15);
+}
+
+.theme-light .sg-gallery-thumb,
+body[data-theme="light"] .sg-gallery-thumb {
+  background: #e8edf5;
+}
+
+.theme-light .sg-gallery-label,
+body[data-theme="light"] .sg-gallery-label {
+  color: #4a5a75;
+}

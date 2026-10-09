@@ -23,10 +23,21 @@ export interface ToolboxState {
   lightingOpen: boolean;
   directorOpen: boolean;
   upstreamRefs: boolean;
+  /** 图库面板（V4.41.16 起为真·缩略图网格，不再是统计提示） */
+  galleryOpen: boolean;
+  /** 连线时序预览是否播放中（推进逻辑在 CanvasOverlays，这里只持有开关与进度） */
+  previewPlaying: boolean;
+  previewStep: number;
+  previewTotal: number;
   toggleHistory: () => void;
   toggleLighting: () => void;
   toggleDirector: () => void;
   toggleUpstreamRefs: () => void;
+  toggleGallery: () => void;
+  togglePreview: () => void;
+  /** 预览推进一帧；播完自动停（CanvasOverlays 的 interval 调用） */
+  advancePreview: (total: number) => void;
+  stopPreview: () => void;
 }
 
 export const useToolboxStore = create<ToolboxState>((set) => ({
@@ -40,6 +51,10 @@ export const useToolboxStore = create<ToolboxState>((set) => ({
   lightingOpen: false,
   directorOpen: false,
   upstreamRefs: isUpstreamRefsEnabled(),
+  galleryOpen: false,
+  previewPlaying: false,
+  previewStep: 0,
+  previewTotal: 0,
   toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
   toggleLighting: () => set((s) => ({ lightingOpen: !s.lightingOpen })),
   toggleDirector: () => set((s) => ({ directorOpen: !s.directorOpen })),
@@ -48,4 +63,17 @@ export const useToolboxStore = create<ToolboxState>((set) => ({
     setUpstreamRefsEnabled(next);
     set({ upstreamRefs: next });
   },
+  toggleGallery: () => set((s) => ({ galleryOpen: !s.galleryOpen })),
+  togglePreview: () =>
+    set((s) => (s.previewPlaying
+      ? { previewPlaying: false, previewStep: 0, previewTotal: 0 }
+      : { previewPlaying: true, previewStep: 0 })),
+  advancePreview: (total) =>
+    set((s) => {
+      const next = s.previewStep + 1;
+      return next >= total
+        ? { previewPlaying: false, previewStep: 0, previewTotal: 0 }
+        : { previewStep: next, previewTotal: total };
+    }),
+  stopPreview: () => set({ previewPlaying: false, previewStep: 0, previewTotal: 0 }),
 }));

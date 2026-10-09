@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import "./LibTvChrome.css";
 import { useToolboxStore } from "./toolboxStore";
+import { useCanvasStore } from "./store";
 import type { NodeData } from "./store";
 
 export type EmptyCardId = "script" | "threeview" | "refvideo" | "audiovideo";
@@ -68,6 +69,13 @@ export function LibTvEmptyState({
  *    子元素全部换 `ltd-*` 新类名，旧 `.libtv-dock-*` 样式自然失效；
  *  - 「数据」组（历史/灯位/导演/上游引用）的面板本体在 CanvasOverlays 渲染，
  *    开关经 toolboxStore（zustand）联动，不新增 props。
+ *
+ * V4.41.16 功能补全（占位 → 真功能）：
+ *  - 「打开图库」→ 真·缩略图网格面板（GalleryPanel，toggleGallery 开关）；
+ *  - 「预览」→ 连线时序预览（previewPlayer 拓扑序逐节点高亮，togglePreview 开关），
+ *    挪进视图组；onPreview/onGallery props 保留在签名里但不再被调用
+ *    （CanvasShell 的旧实现是统计提示，被真功能取代）；
+ *  - 「历史栈」→ 拆成「↶ 撤销 / ↷ 重做」直连 store.undoGraph/redoGraph。
  */
 export function LibTvBottomDock({
   zoomPct,
@@ -104,11 +112,22 @@ export function LibTvBottomDock({
   const historyOpen = useToolboxStore((s) => s.historyOpen);
   const lightingOpen = useToolboxStore((s) => s.lightingOpen);
   const directorOpen = useToolboxStore((s) => s.directorOpen);
+  const galleryOpen = useToolboxStore((s) => s.galleryOpen);
+  const previewPlaying = useToolboxStore((s) => s.previewPlaying);
   const upstreamRefs = useToolboxStore((s) => s.upstreamRefs);
   const toggleHistory = useToolboxStore((s) => s.toggleHistory);
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
   const toggleDirector = useToolboxStore((s) => s.toggleDirector);
+  const toggleGallery = useToolboxStore((s) => s.toggleGallery);
+  const togglePreview = useToolboxStore((s) => s.togglePreview);
   const toggleUpstreamRefs = useToolboxStore((s) => s.toggleUpstreamRefs);
+  // 撤销/重做直连画布 store（V4.41.16：「历史栈」占位 → 真按钮）
+  const undoGraph = useCanvasStore((s) => s.undoGraph);
+  const redoGraph = useCanvasStore((s) => s.redoGraph);
+  // 保留引用避免「未使用参数」告警：签名不能动（冻结区调用点），旧实现已被真功能取代
+  void onPreview;
+  void onHistory;
+  void onGallery;
 
   /* 点击外部 / Esc 关闭工具板（面板类开关不关板：开了就让它开着） */
   useEffect(() => {
@@ -173,6 +192,14 @@ export function LibTvBottomDock({
               <button type="button" className="ltd-item" onClick={fire(onConnect)}>
                 <span className="ltd-ico">⚭</span>自动连线
               </button>
+              <button
+                type="button"
+                className={`ltd-item${previewPlaying ? " on" : ""}`}
+                onClick={togglePreview}
+                title="时序预览：按连线拓扑从上游到下游逐节点高亮（再点一次停止）"
+              >
+                <span className="ltd-ico">⌕</span>{previewPlaying ? "停止预览" : "时序预览"}
+              </button>
             </div>
           </div>
 
@@ -188,7 +215,12 @@ export function LibTvBottomDock({
               <button type="button" className="ltd-item" onClick={fire(onBranch)} title="复制选中节点为新分支">
                 <span className="ltd-ico">⎇</span>从选中分支
               </button>
-              <button type="button" className="ltd-item" onClick={fire(onGallery)}>
+              <button
+                type="button"
+                className={`ltd-item${galleryOpen ? " on" : ""}`}
+                onClick={toggleGallery}
+                title="图库：画布全部图片/视频产物的缩略图网格，点击定位节点"
+              >
                 <span className="ltd-ico">▤</span>打开图库
               </button>
             </div>
@@ -236,16 +268,21 @@ export function LibTvBottomDock({
           <div className="ltd-group">
             <div className="ltd-group-title">帮助</div>
             <div className="ltd-group-items">
-              <button type="button" className="ltd-item" onClick={fire(onPreview)} title="聚焦全图预览节点关系">
-                <span className="ltd-ico">⌕</span>预览
+              <button
+                type="button"
+                className="ltd-item"
+                onClick={fire(undoGraph)}
+                title="撤销上一步画布操作（Ctrl+Z）"
+              >
+                <span className="ltd-ico">↶</span>撤销
               </button>
               <button
                 type="button"
                 className="ltd-item"
-                onClick={fire(onHistory)}
-                title="历史栈：撤销 / 重做步数（Ctrl+Z / Ctrl+Y）"
+                onClick={fire(redoGraph)}
+                title="重做被撤销的操作（Ctrl+Y）"
               >
-                <span className="ltd-ico">⏳</span>历史栈
+                <span className="ltd-ico">↷</span>重做
               </button>
               <button type="button" className="ltd-item" onClick={fire(onHelp)} title="快捷键与命令面板">
                 <span className="ltd-ico">?</span>快捷键
