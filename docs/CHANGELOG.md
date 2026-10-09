@@ -1,5 +1,28 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.13 (2026-10-10) — 桌宠立绘化（AgentPet 2D 重写 · 删 3D 渲染层）
+
+> 用户实测看到 b237626 的 3D 几何狐狸后直接否定（「正常人审美做不出来的东西」+ 双图标共存混乱）。
+> 返工为 **2D 立绘 + 表情帧**方案：形象本体 = 用户认可的 chibi 立绘
+> （`assets/mascot/` 2026-10-08 素材，image-to-image 生成表情差分）。
+> 教训入档：可爱感来自设计（比例/线条/配色），不来自几何参数；先翻项目里有没有现成素材。
+
+### 改动（画布 0.3.11 → 0.3.12「拾岚立绘」）
+
+| 项 | 说明 |
+|---|---|
+| 删 `src/mascot/foxScene.ts` | Three.js 程序化几何（406 行）整个移除；`three` 依赖保留（Stage3D 等仍在用），桌宠不再建 GL 上下文 |
+| 重写 `AgentPet.tsx` | 493 → 264 行：三帧叠层（neutral 自然表情默认 / blink 眨眼 2.2~5.5s 随机 / cheer 大笑仅 success），opacity 切换零位移（对齐 IoU≥0.985）；props 接口不变，`CanvasOverlays` 零改动 |
+| 重写 `agentPet.css` | 分层动画 hop > lift > bob > frames（transform/opacity 合成器友好）；mini 形态 = 立绘放大裁头部（脸部特写）；沿用 z-index 1500 与气泡/名牌骨架 |
+| 素材入包 | `public/mascot/pet_{neutral,blink,cheer}.png`（316×480，各 ~200KB） |
+| 双图标修复 | 桌宠挂载即 MutationObserver 隐藏右下角旧 `.sg-agent-fab`（冻结区 CanvasShell 零改动，卸载恢复） |
+| 保留 | `mascotMotion.ts` 纯函数全保留（26 例测试全绿），3D 专属曲线（耳/尾/眼球）留作回归基线 |
+
+### 表情体系（用户点名「不要一直挂笑」）
+
+默认自然平和表情；眨眼让她"活"；**只有 success 才切大笑帧**（原 v2 挥手姿势），
+awaiting = 自然表情 + 周期小跳，error = 自然表情 + 摇头。
+
 ## V4.41.12 (2026-10-10) — 产品树净化（T1：app/temp 调试垃圾迁出）
 
 > `app/` 是发布产品树，却长期躺着 145 个文件 / 2.2MB 的调试垃圾
