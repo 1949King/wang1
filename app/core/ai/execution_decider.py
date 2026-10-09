@@ -79,30 +79,41 @@ def decide_execution(
     reasons.append(f"执行引擎：{eng['engine']}" + ("（**备选/自研**）" if eng["is_fallback"] else "（主选）")
                    + f" —— {eng['reason']}")
 
+    # ── 0b) 硬件三档自适应（H1，2026-10-10）────────────────────────────
+    # 按显存把本机分为三档，**只留痕不改路**：既有显式选路语义（local/ 前缀强制
+    # 本地、显式 channel_id 优先）一概不变；档位供 reasons 可解释 + 后续路由偏好消费。
+    hw = detect_hardware_tier()
+    reasons.append(hw["reason"])
+
     # ── 1) 本地优先（显式前缀，语义与既有 `local/` 约定一致）──
     if cid.startswith("local/"):
         if not allow_local:
             return {"ok": False, "channel_id": "", "model": model, "params": {},
                     "reasons": reasons + ["调用方显式禁止本地执行，但 channel_id 指向本地"],
                     "engine": eng["engine"], "degrade_level": 0,
+                    "hw_tier": hw["tier"],
                     "message": "本地执行被禁用（allow_local=False）"}
         backends = local_generation_registry.resolve(capability)
         if not backends:
             return {"ok": False, "channel_id": cid, "model": model, "params": {},
                     "reasons": reasons + [f"本地无可用后端（capability={capability}）"],
                     "engine": eng["engine"], "degrade_level": 0,
+                    "hw_tier": hw["tier"],
                     "message": "本地推理模块不可用（请检查 local_video_infer.py / voice_generator.py）"}
         reasons.append(f"channel_id 以 local/ 开头 ⇒ 强制本地（后端 {backends[0].backend_id}）")
         if frames:
             reasons.append(f"帧数 {frames}（供本地显存分级使用）")
         return {"ok": True, "channel_id": cid, "model": model, "params": {},
-                "reasons": reasons, "engine": eng["engine"], "degrade_level": 0, "message": ""}
+                "reasons": reasons, "engine": eng["engine"], "degrade_level": 0,
+                "hw_tier": hw["tier"], "message": ""}
 
     # ── 2) 云端渠道 ──
     if not allow_cloud:
         return {"ok": False, "channel_id": cid, "model": model, "params": {},
                 "reasons": reasons + ["调用方禁止云端，且未指定本地渠道"],
-                "engine": eng["engine"], "degrade_level": 0, "message": "云端执行被禁用（allow_cloud=False）"}
+                "engine": eng["engine"], "degrade_level": 0,
+                "hw_tier": hw["tier"],
+                "message": "云端执行被禁用（allow_cloud=False）"}
 
     ch, chan_model, _patch = _resolve_aigc_channel(
         channel_id=cid, capability=capability, default_model_key=default_model_key)
@@ -112,6 +123,7 @@ def decide_execution(
                     f"未解析到可用云端渠道（capability={capability}，"
                     f"请求的 channel_id={cid or '（空）'}）"],
                 "engine": eng["engine"], "degrade_level": 0,
+                "hw_tier": hw["tier"],
                 "message": "未找到可用 AIGC 渠道，请在「模型管理」配置渠道 Key"}
 
     resolved_model = model or chan_model
@@ -201,6 +213,7 @@ def decide_execution(
         return {"ok": False, "channel_id": str(ch.get("id") or ""), "model": "", "params": {},
                 "reasons": reasons + [f"渠道 {ch.get('id')} 内没有 {capability} 能力的模型"],
                 "engine": eng["engine"], "degrade_level": 0,
+                "hw_tier": hw["tier"],
                 "message": f"渠道内没有 {capability} 模型，请点「同步模型池」"}
 
     if frames:
@@ -225,11 +238,92 @@ def decide_execution(
             logger.debug("translate_motion 失败，按原值透传", exc_info=True)
 
     return {"ok": True, "channel_id": str(ch.get("id") or ""), "model": resolved_model,
-            "params": params, "reasons": reasons, "engine": eng["engine"], "degrade_level": 0, "message": ""}
+            "params": params, "reasons": reasons, "engine": eng["engine"], "degrade_level": 0,
+            "hw_tier": hw["tier"], "message": ""}
 
 
 __all__ = ["decide_execution", "resolve_execution_engine", "resolve_local_image_engine",
-           "PRIMARY_ENGINE", "FALLBACK_ENGINE"]
+           "detect_hardware_tier", "PRIMARY_ENGINE", "FALLBACK_ENGINE"]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  硬件三档自适应（H1，2026-10-10）—— 全云 / 主流 / 满血
+# ══════════════════════════════════════════════════════════════════════════
+#
+# 设计（详见 docs/_reports/2026-10-10-算力路线深度探讨-三档自适应与生态兼容.md）：
+#   · **满血档（full）**      显存 ≥ 16G：本地大模型主力（视频/长音频全谱），云仅加速兜底
+#   · **主流档（mainstream）** 显存 5G~15G（覆盖本机 RTX 4060 8G）：本地图像主选，
+#     视频/全曲音乐走云端或量化档
+#   · **全云档（cloud）**      无独显 / ≤4G / 探测失败：本地生成基本不可行，云端为主
+#
+# 铁律：
+#   · **探测失败 = 诚实降级**：按全云档处理，但 reason 里明说「探测不到」，
+#     绝不编造显存数字（R3 诚实失败）。
+#   · **只留痕不改路**（本刀）：档位写进 reasons + 返回 `hw_tier` 字段，
+#     不改变既有显式选路语义（`local/` 强制本地、显式 channel_id 优先）。
+#     路由偏好的消费（如全云档时跳过本地候选）留待下一刀，避免一次改两层。
+#
+# 沙箱注意（不变量 #10）：`gpu_acceleration` 顶层 import 链较重（numpy 等），
+# 故在此**惰性导入**且包 try —— 探测异常 = 全云档 + 诚实标注，绝不阻断选路。
+
+_TIER_FULL = "full"
+_TIER_MAINSTREAM = "mainstream"
+_TIER_CLOUD = "cloud"
+
+# 阈值（MB）：≤4096 全云；4097~15360 主流；≥16384 满血。
+# 4096 与 16384 都是刻意保守的分界：4G 卡连 SD1.5 fp16 都紧巴巴；
+# 16G 是 Wan 级视频 + YuE 级全曲本地化的实际门槛。
+_TIER_CLOUD_MAX_MB = 4096
+_TIER_FULL_MIN_MB = 16384
+
+_gpu_detector = None
+
+
+def _get_gpu_detector():
+    global _gpu_detector
+    if _gpu_detector is None:
+        from app.core.gpu_acceleration import GPUDetector
+        _gpu_detector = GPUDetector()
+    return _gpu_detector
+
+
+def detect_hardware_tier(*, force_redetect: bool = False) -> Dict[str, Any]:
+    """按显存把本机分为三档（full / mainstream / cloud）。
+
+    Returns:
+        ``{tier, memory_mb, gpu_name, reason}`` —— `memory_mb` 探测失败时为 0，
+        `reason` 供 R9 留痕（必含档位判定依据；探测失败时明说探测不到）。
+    """
+    try:
+        info = _get_gpu_detector().detect_gpu(force_redetect=force_redetect)
+    except Exception as e:
+        logger.debug("[execution_decider] GPU 探测异常，按全云档处理", exc_info=True)
+        return {"tier": _TIER_CLOUD, "memory_mb": 0, "gpu_name": "",
+                "reason": f"硬件档位：全云档（GPU 探测异常 {type(e).__name__} ⇒ 诚实降级，"
+                          f"不改变显式选路语义）"}
+
+    mem = int(getattr(info, "memory_mb", 0) or 0)
+    name = str(getattr(info, "name", "") or "")
+    gpu_type = getattr(getattr(info, "gpu_type", None), "value", "none")
+
+    if mem <= 0:
+        # 无独显（Intel 核显 memory_mb=0）或解析失败 —— 同样诚实标注
+        return {"tier": _TIER_CLOUD, "memory_mb": 0, "gpu_name": name,
+                "reason": f"硬件档位：全云档（未探测到独显显存：{name or gpu_type}）"
+                          f"—— 本地生成基本不可行，建议云端为主"}
+
+    if mem < _TIER_FULL_MIN_MB:
+        tier = _TIER_MAINSTREAM if mem > _TIER_CLOUD_MAX_MB else _TIER_CLOUD
+    else:
+        tier = _TIER_FULL
+
+    tier_desc = {
+        _TIER_FULL: "满血档（≥16G）：本地大模型主力，云仅加速兜底",
+        _TIER_MAINSTREAM: "主流档（5G~15G）：本地图像主选，视频/全曲音乐走云端或量化档",
+        _TIER_CLOUD: "全云档（≤4G）：本地生成基本不可行，云端为主",
+    }[tier]
+    return {"tier": tier, "memory_mb": mem, "gpu_name": name,
+            "reason": f"硬件档位：{tier_desc} —— {name} {mem}MB（R9 留痕，不改显式选路）"}
 
 
 # ══════════════════════════════════════════════════════════════════════════

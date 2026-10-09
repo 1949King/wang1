@@ -1,5 +1,63 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.11 (2026-10-10) — 硬件三档（H1：显存分档进选路留痕）
+
+> 承接《2026-10-10 算力路线深度探讨》三档自适应定稿。本刀是 H1 第一刀：
+> **只留痕不改路** —— 档位判定 + reasons 可解释 + `hw_tier` 字段落地，
+> 不改变任何既有显式选路语义（`local/` 强制本地、显式 channel_id 优先）。
+> 路由偏好的实际消费（如全云档跳过本地候选）留待下一刀，一次只改一层。
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `app/core/ai/execution_decider.py` | 新增 `detect_hardware_tier()`：包装 `GPUDetector`（模块级单例 + 惰性导入，复用其显存缓存），按显存分三档 —— **满血 full**（≥16G：本地大模型主力）/ **主流 mainstream**（5G~15G：本地图像主选）/ **全云 cloud**（≤4G 或无独显或探测失败）。`decide_execution()` 步骤 0b 档位写入 reasons（R9）+ 全部 7 个返回路径附 `hw_tier` 字段 |
+| `app/tests/test_execution_decider.py` | 新增 H1 组 8 例：16G/8G/4G 边界三档判定（4096 含全云、4097 起主流）/ 核显 memory_mb=0 诚实全云 / 探测异常绝不抛且诚实标注（R3）/ reasons 含「硬件档位」/ 全云档下 `local/` 仍强制本地（不改显式语义）/ 探测不新建检测器（走缓存不起子进程） |
+
+### 设计纪律
+
+- **探测失败 = 诚实降级**：按全云档处理，reason 明说「探测不到」，绝不编造显存数字（R3）。
+- **阈值刻意保守**：4G 是 SD1.5 fp16 的实际下限；16G 是 Wan 级视频 + YuE 级全曲本地化的门槛。
+- 真机验证：RTX 4060 Laptop 8188MB → `mainstream` ✓（pytest 28/28 全绿）。
+
+## V4.41.10 (2026-10-10) — 抽卡首流量（P0a/P0b：本地生图入闭环 · 账本首笔落笔）
+
+> 承接《2026-10-10 项目策划案》§12 三路深潜复核的核心发现：抽卡闭环九层系统
+> **代码已通电但账本零流量**（`data/draw_book.json` 长期 `{}` 2 字节）；
+> 本地生图（零成本抽卡主力）完全在闭环外（seed 缺省 0、不归一化、不回显、不入账）。
+> 本刀按用户「先修复历史性遗留问题」指令执行任务清单 P0a/P0b，**闭环从「存在」变「工作」**。
+
+### P0b：本地生图入闭环（代码改动）
+
+| 文件 | 改动 |
+|---|---|
+| `app/core/ai/draw_ledger.py` | 新增 `feed_draw_ledger_local()` 适配层：本地引擎产物（image_path 文件）→ base64 data URL → 既有 `feed_draw_ledger`（推荐回传/代理分/repair_plan/账本全走既有链路），事后移除临时 data URL；记账模型名 `local/{engine}/{model_id}`（与云渠道命名空间隔离）；异常绝不抛出 |
+| `app/core/capability_handlers.py` | `local_generate_image`：seed 走 `normalize_seed` 归一化（缺省/非法 → 密码学随机；本地引擎必收到 seed ⇒ seed_sent 恒 True）+ 回显 `seed`/`seed_sent`（P0a 同款）+ 成功后入闭环 |
+| `app/core/canvas_routes_post.py` | `/host/local-image-generate` generate 分支同款三连（归一化+入账+回显）；日志带 seed |
+| `app/tests/test_local_image_dispatch.py` | 新增第 ⑥ 组 5 例：seed 归一化与回显（缺省→随机>0、显式 42 透传且引擎收到=回显）/ 成功必入账 / 适配层文件→dataURL 转换与临时字段移除 / 异常绝不抛出 / 路由源码级锁 |
+| `_verify/check_draw_first_flow.py` | 新增：P0a 验收工具（接线证据 7 项源码检查 + 账本/代理桶状态 + `--verify` 通过判定） |
+
+**顺手修掉一个真实历史 bug**：`test_local_image_dispatch.py` 原有
+`test_bench_scripts_in_repo` 里 `.isfile()`（Path 无此方法，应为 `.is_file()`）——
+该断言此前会 AttributeError，说明这条测试没真正绿过。
+
+### P0a：首流量验收（真实运行，历史性一刻）
+
+本地 SD1.5（零成本）真跑两抽，**账本从 `{}` 到落笔**：
+
+| 验证点 | 结果 |
+|---|---|
+| 首抽（seed=20261010） | success ✓ · engine=diffsynth 主选 · 20 步 2.8s · proxy_score=1.0 · is_proxy=True ✓ |
+| 账本落笔 | 桶 `37f3e26a` n=1 mean=1.0 **best_seed=20261010** best_score=1.0 ✓ |
+| 第二抽（seed=20261011） | 响应自动携带 `recommendation`：best_seed=20261010 + 诚实 advice「样本尚少（1 次），参考性有限」✓ |
+| quality_prior 代理桶 | 出现 `local/diffsynth/sd15-t2i::proxy`（观察期纯积累，route_mean 不读 —— 红线维持）✓ |
+| `check_draw_first_flow.py --verify` | **PASS（EXIT=0）**：接线 7/7 + 1 桶 / 2 次抽卡 ✓ |
+
+### 红线维持
+
+`is_proxy` 语义不丢（代理分永不冒充真值）；观察期纯记录零路由影响；
+入账失败绝不拖垮生成主链路（接线层内部吞异常，测试锁定）。
+
 ## V4.41.9 (2026-10-10) — 桌宠「拾岚」：画布上的 Agent 桌面形象（动态 · 对标开源画布）
 
 > 用户原话：「给我做一个 Q 版的狐狸头，拟人，一个做出形象。并且它也是 Agent 的一个桌面形象。

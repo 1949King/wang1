@@ -248,3 +248,117 @@ def test_probe_does_not_trigger_heavy_import():
     src = inspect.getsource(ed._probe_importable)
     assert "find_spec" in src, "探测必须用 find_spec"
     assert "import torch" not in src and "import diffusers" not in src
+
+
+# ═══════════ H1 硬件三档自适应（2026-10-10）：全云 / 主流 / 满血 ═══════════
+
+def _fake_tier(mem_mb, name="FakeGPU"):
+    """构造一个假的 GPUInfo 返回值，供 monkeypatch 桩替换 detect_gpu。"""
+    from types import SimpleNamespace
+    from app.core.gpu_acceleration import GPUType
+
+    return SimpleNamespace(gpu_type=GPUType.NVIDIA, name=name, memory_mb=mem_mb)
+
+
+class _FakeDetector:
+    def __init__(self, info):
+        self._info = info
+
+    def detect_gpu(self, force_redetect=False):
+        return self._info
+
+
+def _patch_tier(monkeypatch, mem_mb, name="FakeGPU"):
+    from app.core.ai import execution_decider as ed
+
+    monkeypatch.setattr(ed, "_gpu_detector", _FakeDetector(_fake_tier(mem_mb, name)))
+
+
+def test_tier_full_at_16g(monkeypatch):
+    """≥16G ⇒ 满血档。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 16384, "RTX 4080")
+    hw = ed.detect_hardware_tier()
+    assert hw["tier"] == "full"
+    assert hw["memory_mb"] == 16384
+    assert "满血档" in hw["reason"]
+
+
+def test_tier_mainstream_at_8g(monkeypatch):
+    """5G~15G ⇒ 主流档（本机 RTX 4060 8G 落在这档）。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 8188, "RTX 4060 Laptop")
+    hw = ed.detect_hardware_tier()
+    assert hw["tier"] == "mainstream"
+    assert "主流档" in hw["reason"]
+
+
+def test_tier_cloud_at_4g_and_below(monkeypatch):
+    """≤4G ⇒ 全云档；边界 4096 含、4097 起进主流。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 4096)
+    assert ed.detect_hardware_tier()["tier"] == "cloud"
+    _patch_tier(monkeypatch, 2048)
+    assert ed.detect_hardware_tier()["tier"] == "cloud"
+    _patch_tier(monkeypatch, 4097)
+    assert ed.detect_hardware_tier()["tier"] == "mainstream"
+
+
+def test_tier_zero_memory_is_cloud_honestly(monkeypatch):
+    """无独显（核显 memory_mb=0）⇒ 全云档 + 诚实标注（不编数字）。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 0, "Intel Iris Xe")
+    hw = ed.detect_hardware_tier()
+    assert hw["tier"] == "cloud"
+    assert hw["memory_mb"] == 0
+    assert "未探测到独显显存" in hw["reason"]
+
+
+def test_tier_probe_exception_degrades_honestly(monkeypatch):
+    """★ 探测异常 ⇒ 全云档 + 诚实标注 + **绝不抛出**（R3）。"""
+    from app.core.ai import execution_decider as ed
+
+    class _Boom:
+        def detect_gpu(self, force_redetect=False):
+            raise RuntimeError("no nvidia-smi")
+
+    monkeypatch.setattr(ed, "_gpu_detector", _Boom())
+    hw = ed.detect_hardware_tier()  # 不得抛
+    assert hw["tier"] == "cloud"
+    assert "探测异常" in hw["reason"]
+
+
+def test_decide_execution_records_tier_in_reasons(monkeypatch):
+    """★ R9：档位必须写进 reasons —— 线上能回答「为什么这条链走这档」。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 8188)
+    r = ed.decide_execution(capability="video", channel_id="local/svd")
+    assert r["hw_tier"] == "mainstream"
+    assert any("硬件档位" in x for x in r["reasons"]), "reasons 未记录硬件档位"
+
+
+def test_tier_does_not_change_explicit_routing(monkeypatch):
+    """★ 档位**只留痕不改路**：全云档下 `local/` 前缀仍强制本地（显式语义优先）。"""
+    from app.core.ai import execution_decider as ed
+
+    _patch_tier(monkeypatch, 2048)  # 全云档
+    r = ed.decide_execution(capability="video", channel_id="local/svd")
+    assert r["ok"] is True and r["channel_id"] == "local/svd"
+    assert r["hw_tier"] == "cloud"
+
+
+def test_tier_probe_is_cached_not_per_call(monkeypatch):
+    """档位探测走 GPUDetector 缓存（多次调用不得每次都起 nvidia-smi 子进程）。"""
+    import inspect
+
+    from app.core.ai import execution_decider as ed
+
+    # detect_hardware_tier 自己不 new 检测器（用模块级单例），且委托 detect_gpu 的缓存
+    src = inspect.getsource(ed.detect_hardware_tier)
+    assert "GPUDetector()" not in src, "不得每次调用新建检测器（丢缓存、反复起子进程）"
+    assert "_get_gpu_detector()" in src

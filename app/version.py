@@ -1,11 +1,11 @@
-__version__ = "4.41.9"
+__version__ = "4.41.11"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 41,
-    "patch": 9,
-    "codename": "Agent 桌宠「拾岚」（Q 版狐狸 · 动态 · 对标开源画布）",
+    "patch": 11,
+    "codename": "硬件三档（H1：显存分档进选路留痕）",
     "release_date": "2026-10-10",
     "description": (
         "V4.41.0: 交付底座 —— 把「四块通用能力」从「有配置」做成「真在跑」，"
