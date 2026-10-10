@@ -219,13 +219,69 @@ body[data-theme="light"] .ltd-item {
   color: #3a4a63;
 }
 
+/* ── AgentOS S1：dock 最小化面板恢复图标区（space-between 自动靠右） ── */
+
+.ltd-minis {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.ltd-mini {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #232b3d;
+  border-radius: 50%;
+  background: rgba(16, 22, 34, 0.92);
+  color: #c8d3ec;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  animation: ltd-mini-in 0.16s ease-out;
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+@keyframes ltd-mini-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ltd-mini:hover {
+  border-color: #3b82f6;
+  color: #fff;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.theme-light .ltd-mini,
+body[data-theme="light"] .ltd-mini {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #d5dbe7;
+  color: #3a4a63;
+}
+
+.theme-light .ltd-mini:hover,
+body[data-theme="light"] .ltd-mini:hover {
+  border-color: #2563eb;
+  color: #172033;
+}
+
 /* 系统「减弱动态」偏好 */
 @media (prefers-reduced-motion: reduce) {
   .ltd-board,
   .ltd-btn,
   .ltd-item,
   .ltd-switch,
-  .ltd-switch::after {
+  .ltd-switch::after,
+  .ltd-mini {
     animation: none !important;
     transition: none !important;
   }

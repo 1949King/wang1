@@ -23,11 +23,13 @@ import {
   type MoveCategory,
 } from "./directorGuidance";
 import { useCanvasStore } from "./store";
+import { useWindowPanel } from "./hooks/useWindowPanel";
 import "./directorPanel.css";
 
 const CATEGORIES: MoveCategory[] = ["景别", "运镜", "构图", "光线", "情绪", "节奏"];
 
 export default function DirectorPanel({ onClose }: { onClose: () => void }) {
+  const win = useWindowPanel("director");
   const selectedId = useCanvasStore((s) => s.selectedId);
   const sel = useCanvasStore((s) => s.nodes.find((n) => n.id === s.selectedId));
   const allNodes = useCanvasStore((s) => s.nodes);
@@ -99,11 +101,14 @@ export default function DirectorPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="dp-panel">
-      <header className="dp-head">
+    <div className="dp-panel" ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
+      <header className="dp-head" onPointerDown={win.startDrag}>
         <span className="dp-title">导演指导</span>
         <span className="dp-sub">规则驱动的分镜改进（非大模型）</span>
         <span className="dp-spacer" />
+        <button type="button" className="dp-min" onClick={win.minimize} title="最小化到任务栏">
+          —
+        </button>
         <button type="button" className="dp-x" onClick={onClose} title="关闭">
           ×
         </button>

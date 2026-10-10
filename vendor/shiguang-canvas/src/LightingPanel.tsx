@@ -20,6 +20,7 @@ import {
   type LightingChoice,
 } from "./lightingPresets";
 import { useCanvasStore } from "./store";
+import { useWindowPanel } from "./hooks/useWindowPanel";
 import "./lighting.css";
 
 const DEFAULT_CHOICE: LightingChoice = { keyAzimuth: 45, rimName: "后上 45° 轮廓" };
@@ -31,6 +32,7 @@ function polar(cx: number, cy: number, r: number, az: number) {
 }
 
 export default function LightingPanel({ onClose }: { onClose: () => void }) {
+  const win = useWindowPanel("lighting");
   const selectedId = useCanvasStore((s) => s.selectedId);
   const sel = useCanvasStore((s) => s.nodes.find((n) => n.id === s.selectedId));
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
@@ -70,11 +72,14 @@ export default function LightingPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="lp-panel">
-      <header className="lp-head">
+    <div className="lp-panel" ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
+      <header className="lp-head" onPointerDown={win.startDrag}>
         <span className="lp-title">电影级灯位</span>
         <span className="lp-sub">24 主光位 · 9 轮廓光</span>
         <span className="lp-spacer" />
+        <button type="button" className="lp-min" onClick={win.minimize} title="最小化到任务栏">
+          —
+        </button>
         <button type="button" className="lp-x" onClick={onClose} title="关闭">
           ×
         </button>

@@ -36,6 +36,7 @@ import { PREVIEW_STEP_MS, previewOrder } from "./previewPlayer";
 import { useCanvasStore } from "./store";
 import { useUpstreamRefsSync } from "./upstreamRefs";
 import { useToolboxStore } from "./toolboxStore";
+import { useWindowManager } from "./windowManager";
 
 const AgentPet = lazy(() => import("./mascot/AgentPet"));
 
@@ -44,6 +45,8 @@ export default function CanvasOverlays() {
   const showLighting = useToolboxStore((s) => s.lightingOpen);
   const showDirector = useToolboxStore((s) => s.directorOpen);
   const showGallery = useToolboxStore((s) => s.galleryOpen);
+  // 窗口管理（AgentOS S1）：最小化的面板不渲染本体（dock 上有恢复入口）
+  const minimized = useWindowManager((s) => s.minimized);
   const toggleHistory = useToolboxStore((s) => s.toggleHistory);
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
   const toggleDirector = useToolboxStore((s) => s.toggleDirector);
@@ -163,10 +166,10 @@ export default function CanvasOverlays() {
 
   return (
     <>
-      {showHistory ? <OutputHistoryPanel onClose={toggleHistory} /> : null}
-      {showLighting ? <LightingPanel onClose={toggleLighting} /> : null}
-      {showDirector ? <DirectorPanel onClose={toggleDirector} /> : null}
-      {showGallery ? <GalleryPanel onClose={toggleGallery} /> : null}
+      {showHistory && !minimized.history ? <OutputHistoryPanel onClose={toggleHistory} /> : null}
+      {showLighting && !minimized.lighting ? <LightingPanel onClose={toggleLighting} /> : null}
+      {showDirector && !minimized.director ? <DirectorPanel onClose={toggleDirector} /> : null}
+      {showGallery && !minimized.gallery ? <GalleryPanel onClose={toggleGallery} /> : null}
       {/* Agent 桌宠（Q 版狐狸「拾岚」）：Agent 面板打开时隐藏（V4.41.14）。
           懒载 + fallback=null —— 加载期间画布零影响。 */}
       <Suspense fallback={null}>

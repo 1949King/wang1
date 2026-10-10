@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useCanvasStore } from "./store";
+import { useWindowPanel } from "./hooks/useWindowPanel";
 
 import "./gallery.css";
 
@@ -34,6 +35,7 @@ function str(v: unknown): string {
 }
 
 export default function GalleryPanel({ onClose }: { onClose: () => void }) {
+  const win = useWindowPanel("gallery");
   const nodes = useCanvasStore((s) => s.nodes);
   const selectedId = useCanvasStore((s) => s.selectedId);
   const setSelected = useCanvasStore((s) => s.setSelected);
@@ -93,13 +95,17 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
   const zoomItem = zoomIdx !== null ? filtered[zoomIdx] : null;
 
   return (
-    <div className="oh-panel sg-gallery" data-pinned="0">
-      <header className="oh-head">
+    <div className="oh-panel sg-gallery" data-pinned="0"
+         ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
+      <header className="oh-head" onPointerDown={win.startDrag}>
         <span className="oh-title">图库</span>
         <span className="oh-count">
           共 {items.length} 个产物{filter !== "all" ? ` · 当前 ${filtered.length}` : ""}
         </span>
         <span className="oh-spacer" />
+        <button type="button" className="oh-min" onClick={win.minimize} title="最小化到任务栏">
+          —
+        </button>
         <button type="button" className="oh-close" onClick={onClose} title="关闭">
           ✕
         </button>

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import "./LibTvChrome.css";
 import { getGraphFuture, getGraphPast } from "./stores/history-store";
+import { PANEL_META, PANEL_NAMES, useWindowManager, type PanelName } from "./windowManager";
 import { useToolboxStore } from "./toolboxStore";
 import { useCanvasStore } from "./store";
 import type { NodeData } from "./store";
@@ -127,6 +128,16 @@ export function LibTvBottomDock({
   // 撤销/重做直连画布 store（V4.41.16：「历史栈」占位 → 真按钮）
   const undoGraph = useCanvasStore((s) => s.undoGraph);
   const redoGraph = useCanvasStore((s) => s.redoGraph);
+  // 窗口管理（AgentOS S1）：最小化面板在 dock 右侧出现恢复图标
+  const minPanels = useWindowManager((s) => s.minimized);
+  const restorePanel = useWindowManager((s) => s.restore);
+  const minis: PanelName[] = PANEL_NAMES.filter(
+    (n) =>
+      (n === "history" && historyOpen) ||
+      (n === "gallery" && galleryOpen) ||
+      (n === "lighting" && lightingOpen) ||
+      (n === "director" && directorOpen),
+  ).filter((n) => minPanels[n]);
   // V4.41.17：开板时读一次历史栈步数进 title（history-store 是模块级数组，非响应式；
   // toolsOpen 变化触发重渲染时刷新，关板不读）
   const pastCount = toolsOpen ? getGraphPast().length : 0;
@@ -192,6 +203,23 @@ export function LibTvBottomDock({
           )}
         </button>
       </div>
+
+      {/* AgentOS S1：最小化面板的恢复图标区（.libtv-dock 是 space-between，此节点自动靠右） */}
+      {minis.length > 0 ? (
+        <div className="ltd-minis">
+          {minis.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="ltd-mini"
+              onClick={() => restorePanel(n)}
+              title={`恢复「${PANEL_META[n].title}」`}
+            >
+              <span className="ltd-ico">{PANEL_META[n].icon}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {toolsOpen ? (
         <div className="ltd-board" role="menu">

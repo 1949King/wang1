@@ -23,11 +23,13 @@ import {
   type HistoryCategory,
 } from "./outputHistory";
 import { useCanvasStore } from "./store";
+import { useWindowPanel } from "./hooks/useWindowPanel";
 import "./outputHistory.css";
 
 const PIN_KEY = "shiguang-canvas:output-history:pinned";
 
 export default function OutputHistoryPanel({ onClose }: { onClose: () => void }) {
+  const win = useWindowPanel("history");
   const nodes = useCanvasStore((s) => s.nodes);
   const setSelected = useCanvasStore((s) => s.setSelected);
   const [category, setCategory] = useState<HistoryCategory | "all">("all");
@@ -75,8 +77,9 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
   ];
 
   return (
-    <div className="oh-panel" data-pinned={pinned ? "1" : "0"}>
-      <header className="oh-head">
+    <div className="oh-panel" data-pinned={pinned ? "1" : "0"}
+         ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
+      <header className="oh-head" onPointerDown={win.startDrag}>
         <span className="oh-title">输出历史</span>
         <span className="oh-count">共 {counts.all} 条</span>
         <span className="oh-spacer" />
@@ -88,6 +91,9 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
           />
           固定面板
         </label>
+        <button type="button" className="oh-min" onClick={win.minimize} title="最小化到任务栏">
+          —
+        </button>
         <button type="button" className="oh-close" onClick={onClose} title="关闭">
           ×
         </button>

@@ -1,5 +1,21 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.18 (2026-10-10) — AgentOS S1 窗口管理（画布 0.3.17）
+
+> AgentOS 演进第一刀（S1 窗口管理 → S2 进程模型 → S3 通知中心 → S4 技能仓库 → S5 命令中枢）。
+> 解决真实痛点：4 面板此前全部固定叠在底部同一坐标（bottom:58px 居中），同开必互相覆盖。
+
+### 改动
+
+| 项 | 说明 |
+|---|---|
+| 面板可拖动 | 拖 header 移动（抓起即置顶）；双模式定位（未拖过=CSS 居中，拖过 5px 阈值一刻用 getBoundingClientRect 换算切 JS 内联定位，零跳动）；位置归一化持久化（`shiguang-canvas:panel-pos:<name>:v1`）；拖拽逐帧直写 el.style 零重渲染 |
+| 点击置顶 | z = 47 + 层叠序（**顺序数组派生**，非计数器）：4 面板恒在 47..50，轮转置顶永不撞车；fab(60)/agent-panel(70)/lightbox(9000) 全在安全距离 |
+| 最小化到 dock | 面板「—」收起 → dock 右侧恢复图标（⏱▤💡🎬 与工具板同源）→ 点击恢复到存储位置；最小化不持久化（刷新还原）；open=false 时 subscribe 联动自动清最小化态+层叠序（无死状态）；最小化时快捷键=关闭（开关灯语义） |
+| 边界纪律 | DOCK_RESERVE=64 底部 clamp（拖不进 dock 带）+ maxHeight 动态钳制（内容长高不越界）；上沿 INSET=8 |
+
+新建 `windowManager.ts`（zustand + 纯函数层）· `hooks/useWindowPanel.ts` · `windowManager.test.ts`（17 例）；改 4 面板接入（各 ~6 行）+ 3 css（header 把手/最小化按钮）+ CanvasOverlays 渲染条件 + LibTvChrome dock 最小化区；冻结区零触碰（styles.css/CanvasShell 一行未动）。
+
 ## V4.41.17 (2026-10-10) — 图库灯箱与相机跟随（画布 0.3.16）
 
 > 工具板二轮优化（用户拍板 A1+A2+B5，A3/A4 顺带）：图库能看大图、预览能跟相机。
