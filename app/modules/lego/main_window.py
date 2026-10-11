@@ -1396,19 +1396,14 @@ class MainWindow(QMainWindow):
     def _show_settings(self):
         """显示设置界面
 
-        V4.43.1：⚙ 顶栏按钮改为弹出模态设置弹窗（对齐 AI Canvas 设置截图形态）。
-        左侧导航栏「设置」入口仍切到页内 SettingsModule（两处均可达，内容同源）。
+        V4.43.9（用户裁定「方案 A」）：设置改为**主界面内的页面**，不再弹独立窗口。
+        用户原话：「为什么顶部里面设登录的设置功能打开的是单独的一个窗口，而不是和
+        项目整体挂钩的？」→ 选定 A「变回页内模块」。
+
+        ⚙ 顶栏按钮 / 用户中心「设置」行 → 统一 `switch_to_module("settings")`。
+        ⚠️ 不再走 `SettingsDialog`（QDialog 独立窗口）—— 它已退化为历史实现，
+        如需回滚请只改回本方法（设置内容与页内模块同源，无数据差异）。
         """
-        try:
-            from .settings_panel import SettingsDialog
-            dlg = SettingsDialog.instance(self)
-            dlg.show()
-            dlg.raise_()
-            dlg.activateWindow()
-            return
-        except Exception as e:
-            logger.warning("打开设置弹窗失败，回落页内设置模块: %s", e)
-        # 回落：切到页内设置模块
         from .settings_module import SettingsModule
         if "settings" in self._modules and not self._modules["settings"].instance:
             self.set_module_widget("settings", SettingsModule())

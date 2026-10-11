@@ -1,5 +1,29 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.9 (2026-10-11) — 设置改回页内模块（方案 A：不再弹独立窗口）
+
+> 用户原话：「为什么顶部里面设登录的设置功能打开的是单独的一个窗口，而不是和项目整体
+> 挂钩的？」→ 用户选定 **方案 A（变回页内模块）**。
+
+### 【改动】
+- `main_window._show_settings()` **反转优先级**：此前**先弹** `SettingsDialog`（QDialog
+  独立窗口）、失败才回落页内；现改为**直接** `switch_to_module("settings")`。
+  点顶栏 ⚙ / 用户中心「设置」行 → 内容区切到页内设置页，**不再产生任何独立窗口**。
+- `SettingsDialog` 退化为历史实现（保留代码以便一行回滚）；设置**内容与页内模块同源**
+  （`build_appearance_top_block` 等共用），无数据差异。
+
+### 【为什么当初是弹窗】
+- V4.43.1 为对齐 AI Canvas 设置截图的形态，把 ⚙ 做成模态弹窗；V4.43.2 又把设置从左侧
+  导航撤出 ⇒ 只剩弹窗一条路，于是「设置 = 独立窗口」。本轮按用户裁定改回页内。
+
+### 【验证】
+- `SettingsModule()` 离屏创建 OK（`sizeHint 632×477`），确认 `settings_module` 不 import
+  `SettingsDialog`（页内模块自洽）。
+- ruff 棘轮 166 文件零新增 / frozen_zone 85 locks intact / 规模守卫无新增债务 /
+  stability 250 / SCOPE 0 命中 / run_all_checks 75/75 / pre-commit 11 道全过。
+
+---
+
 ## V4.43.8 (2026-10-11) — 解冻 stage3d-core：角色工具栏去内联硬编码色
 
 > 用户裁定：「解冻 character_management_module.py」（明确授权）
