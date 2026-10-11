@@ -1,32 +1,48 @@
-__version__ = "4.43.9"
+__version__ = "4.43.10"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 43,
-    "patch": 9,
-    "codename": "设置改回页内模块（方案 A：不再弹独立窗口）",
+    "patch": 10,
+    "codename": "画布太阳系背景求真：8 张真实行星素材 + 80s 轮播 + 星场漂移",
     "release_date": "2026-10-11",
     "description": (
-        "V4.43.9：设置从「独立弹窗」改回「主界面内的页面」\n"
-        "\n【用户反馈原话】「为什么顶部里面设登录的设置功能打开的是单独的一个窗口，而不是\n"
-        "和项目整体挂钩的？」→ 用户选定方案 **A（变回页内模块）**\n"
-        "\n【改动】\n"
-        "· `main_window._show_settings()` 反转优先级：此前**先弹** `SettingsDialog`\n"
-        "  （QDialog 独立窗口），失败才回落页内；现改为**直接**\n"
-        "  `switch_to_module(\"settings\")` —— 点顶栏 ⚙ / 用户中心「设置」行，内容区切到\n"
-        "  页内设置页，不再产生任何独立窗口。\n"
-        "· `SettingsDialog` 退化为历史实现（保留代码以便一行回滚），设置**内容与页内模块\n"
-        "  同源**（`build_appearance_top_block` 等共用），无数据差异。\n"
-        "\n【为什么当初是弹窗】\n"
-        "· V4.43.1 为对齐 AI Canvas 设置截图的形态，把 ⚙ 做成模态弹窗；V4.43.2 又把设置\n"
-        "  从左侧导航撤出 ⇒ 只剩弹窗一条路，于是「设置 = 独立窗口」。本轮按用户裁定\n"
-        "  改回页内（用户中心「设置」行同步生效，两处同源）。\n"
+        "V4.43.10：照搬 AI Canvas 的行星素材 + 动效（用户裁定「要」）\n"
+        "\n【用户反馈原话】「我记得我们参考的那个 AI 画布的开源项目里面的主题是动态效果的，\n"
+        "是一个比较好的一个效果的，你给我做出来的为什么是这样？…同样的地方同样的功能，\n"
+        "为什么别人能做成这样，你给我做出来却是一个屎山一样的东西？」→ 用户裁定「要」\n"
+        "（照搬行星素材 + 动效）。\n"
+        "\n【此前为什么差】\n"
+        "· 开源 `SolarSystemBackground.tsx`：**8 张真实行星照片**（水/金/地/火/木/土/天/海\n"
+        "  PNG）+ `setInterval` **每 80 秒轮播** + 行星淡入/缩放 1.2s；`backgrounds.css`\n"
+        "  的星场 `animation: stars-shift 60s linear infinite` 缓慢漂移。\n"
+        "· 我们 `canvasBackgrounds.ts`（V4.43.2）只有**几层 CSS radial-gradient**、静态。\n"
+        "  ⇒ 差距是「没搬素材、没做动效」，不是能力不可及。\n"
+        "\n【本轮改动（零解冻）】\n"
+        "· 复制 8 张行星 PNG → `vendor/shiguang-canvas/src/assets/images/bg/`（**新建文件**，\n"
+        "  不在冻结清单）。\n"
+        "· `canvasBackgrounds.ts` 重写：① 静态 import 8 张图（Vite 构建时解析）；\n"
+        "  ② 惰性建背景层 `#sg-solar-layer`（星场 + 8 个 `<figure>`）；③ CSS 复刻开源的\n"
+        "  星场 14 点 + `sg-stars-shift` 60s 漂移、行星 `is-active` 淡入/缩放 1.2s、\n"
+        "  容器 `opacity .13 / bottom -70%`；④ `applyCanvasBackground` 按背景 id 挂/卸该层，\n"
+        "  太阳系时起 80s 轮播（幂等，beforeunload 清理）。\n"
+        "· **未动** `styles.css` / `store.ts` / `CanvasShell.tsx`（冻结区）—— 仍走\n"
+        "  「运行时注入 + 自建 DOM 层」的零解冻路线。\n"
+        "\n【双库同步（frozen-zone-release 5b/5c）】\n"
+        "· 同步 `canvasBackgrounds.ts` + **整条依赖链**（8 张素材）到副库\n"
+        "  `vendor/AI-Canvas-tauri/src/libtv/`（副库原本无 assets 目录）。\n"
+        "· 副库 tsc 实测 **0 错误**；`check_canvas_dual_repo` 复跑 **OK 无新增漂移**。\n"
         "\n【验证】\n"
-        "· `SettingsModule()` 离屏创建 OK（sizeHint 632×477），确认不从 `settings_module`\n"
-        "  import `SettingsDialog`（页内模块自洽）。\n"
-        "· ruff 存量棘轮 166 文件零新增 / frozen_zone 85 locks intact / 规模守卫无新增 /\n"
-        "  stability 250 / SCOPE 0 命中 / run_all_checks 全绿 / pre-commit 11 道全过。\n"
-        "\n【上一版 V4.43.8『解冻 stage3d-core 修工具栏可读性』见 docs/CHANGELOG.md。】"
+        "· tsc 主库 **37 处 = 基线**（Stage3D 16 + riggedHumanoid 21，零新增）\n"
+        "· vitest **296/296** · vite build **rc=0** · 8 张行星素材**全部进 dist**\n"
+        "  （`1_mercury-*.png` … `8_neptune-*.png`）\n"
+        "· frozen_zone_guard **85 locks intact**（未动任何冻结文件）\n"
+        "\n【已知未做（待用户授权）】\n"
+        "· 画布版本号 `canvasVersion.ts` 0.3.24 → 0.3.25 **未升** —— 该文件在冻结区\n"
+        "  `canvas-magnetic-intent`，本轮授权范围仅 `character_management_module.py`，\n"
+        "  故**未擅自改动**。待用户授权解冻后补升（三件套：canvasVersion.ts →\n"
+        "  package.json → CHANGELOG）。\n"
+        "\n【上一版 V4.43.9『设置改回页内模块』见 docs/CHANGELOG.md。】"
     ),
 }

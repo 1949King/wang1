@@ -1,5 +1,60 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.10 (2026-10-11) — 画布太阳系背景求真：8 张真实行星素材 + 80s 轮播 + 星场漂移
+
+> 用户裁定：「**要**」（照搬 AI Canvas 的行星素材 + 动效）。
+> 前情：用户问「参考的那个 AI 画布开源项目里面的主题是动态效果的…你给我做出来的为什么
+> 是这样？同样的地方同样的功能，为什么别人能做成这样，你给我做出来却是一个屎山一样的东西？」
+
+### 【差距的真相（对照源码）】
+
+| | AI-Canvas-tauri | 拾光剪影（V4.43.2~4.43.9） |
+|---|---|---|
+| 太阳系 | **8 张真实行星照片**（水/金/地/火/木/土/天/海 PNG）+ `setInterval` **每 80 秒轮播** + 行星淡入/缩放 `1.2s` | `canvasBackgrounds.ts` **几层 CSS radial-gradient**、静态 |
+| 星场 | `animation: stars-shift 60s linear infinite` 缓慢漂移（14 个白点） | 无 |
+| 磨砂暖光 / 星云 | **Three.js** 真实渲染 | CSS 渐变 |
+
+⇒ 差距是「**没搬素材、没做动效**」，不是能力不可及。
+
+### 【本轮改动（零解冻）】
+
+1. 复制 8 张行星 PNG → `vendor/shiguang-canvas/src/assets/images/bg/`
+   （**新建文件**，不在冻结清单）。
+2. `canvasBackgrounds.ts` 重写：
+   - 静态 import 8 张图（Vite 构建时解析为 URL）
+   - 惰性建背景层 `#sg-solar-layer`（星场 + 8 个 `<figure>`）
+   - CSS 复刻开源规则：星场 14 点 + `sg-stars-shift` 60s 漂移、行星 `.is-active`
+     淡入/缩放 `1.2s`、容器 `opacity .13 / bottom -70%`、`img { brightness(.75); border-radius:50% }`
+   - `applyCanvasBackground` 按背景 id 挂/卸该层；太阳系时起 80s 轮播（**幂等**，
+     `beforeunload` 清理定时器）
+3. **未动** `styles.css` / `store.ts` / `CanvasShell.tsx`（冻结区）—— 仍走
+   「运行时注入 + 自建 DOM 层」的**零解冻**路线。
+
+### 【双库同步（frozen-zone-release 5b/5c）】
+- 同步 `canvasBackgrounds.ts` + **整条依赖链**（8 张素材）到副库
+  `vendor/AI-Canvas-tauri/src/libtv/`（副库原无 `assets` 目录，本次新建）。
+- 副库 tsc 实测 **0 错误**；`check_canvas_dual_repo` 复跑 **OK 无新增漂移**。
+- 副库原文件已备份为 `canvasBackgrounds.ts.bak`（副库未被 git 跟踪，按纪律保留备份）。
+
+### 【验证】
+
+| 项 | 结果 |
+|---|---|
+| 主库 tsc | **37 处 = 基线**（Stage3D 16 + riggedHumanoid 21，零新增） |
+| vitest | **296 / 296** |
+| vite build | **rc=0** |
+| 素材进包 | **8 张全部进 dist**（`1_mercury-*.png` … `8_neptune-*.png`） |
+| 副库 tsc | **0 错误** |
+| 双库漂移 | **OK 无新增** |
+| frozen_zone | **85 locks intact**（未动任何冻结文件） |
+
+### 【已知未做（待用户授权）】
+- 画布版本号 `canvasVersion.ts` **0.3.24 → 0.3.25 未升** —— 该文件在冻结区
+  `canvas-magnetic-intent`；本轮授权范围仅 `character_management_module.py`，故**未擅自改动**。
+  待授权后补升（三件套：`canvasVersion.ts` → `package.json` → CHANGELOG）。
+
+---
+
 ## V4.43.9 (2026-10-11) — 设置改回页内模块（方案 A：不再弹独立窗口）
 
 > 用户原话：「为什么顶部里面设登录的设置功能打开的是单独的一个窗口，而不是和项目整体
