@@ -85,7 +85,9 @@ class ComfyUISummaryCard(QFrame):
         btn_row.addWidget(self._start_btn)
 
         settings_btn = QPushButton("⚙ 设置")
-        settings_btn.setObjectName("toolBtn")
+        # V4.43.6：改用 ghostBtn —— toolBtn 是 36×36 的「圆形图标按钮」，
+        # 套在带文字的「⚙ 设置」上会把文字压成只剩一个「设」。
+        settings_btn.setObjectName("ghostBtn")
         settings_btn.clicked.connect(self.open_settings_requested.emit)
         btn_row.addWidget(settings_btn)
 
@@ -176,7 +178,9 @@ class McpSummaryCard(QFrame):
         btn_row.addWidget(copy_btn)
 
         settings_btn = QPushButton("⚙ 设置")
-        settings_btn.setObjectName("toolBtn")
+        # V4.43.6：改用 ghostBtn —— toolBtn 是 36×36 的「圆形图标按钮」，
+        # 套在带文字的「⚙ 设置」上会把文字压成只剩一个「设」。
+        settings_btn.setObjectName("ghostBtn")
         settings_btn.clicked.connect(self.open_settings_requested.emit)
         btn_row.addWidget(settings_btn)
 

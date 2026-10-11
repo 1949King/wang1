@@ -1,5 +1,63 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.6 (2026-10-11) — 画布白屏根治（Chromium --no-sandbox）+ 首页三处可读性
+
+> 用户原话：「图一中三个地方我圈了，用红线圈的地方你自己看一下，根本就看不清里面的内容，
+> 然后图二画布启动不了，你给我说解释一下什么情况。」（附两张截图）
+
+### 【① 画布白屏 → 根治（本次最重要）】
+
+**证据链**
+- 全库 grep：`QTWEBENGINE_CHROMIUM_FLAGS` 在**主程序侧零设置**（只有 automation /
+  stealth_browser 里用于别的用途）。
+- 前端状态行用户原话：「画布页面加载完成（**遭遇 断网**）」+ 主体全黑。
+- 启动日志：`canvas page loadFinished FAIL, retrying once` → `loadFinished FAIL`。
+
+**决定性对照实验**（不依赖画布服务，直接加载 `data:` URL —— 这是「是不是服务问题」的判据）
+
+| 条件 | `loadFinished` |
+|---|---|
+| 不加 flags | **ok=False** |
+| 加 `--no-sandbox` | **ok=True** |
+
+⇒ 与 3011 / 18765 服务无关，是 **QtWebEngine 内置 Chromium 沙箱起不来**
+（与 2026-10-06 定案一致；当时已证伪：非代理 / 非 GPU / 非 `_SPAHandler` / 非 dist 内容）。
+
+**修复**：`app/main_qt6.py` **模块顶层**（早于任何 `PyQt6.QtWebEngine*` 导入）把
+`--no-sandbox` **追加**到 `QTWEBENGINE_CHROMIUM_FLAGS`（追加而非覆盖，保留用户其它 flags；
+已含则不重复）。
+
+```python
+_webengine_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+if "--no-sandbox" not in _webengine_flags:
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{_webengine_flags} --no-sandbox".strip()
+```
+
+### 【② 顶栏 4 按钮（🔔 通知 / 🎨 主题 / ⚙ 设置）看不清】
+
+- **根因**：`#headerBarIconBtn` 的 QSS **根本不存在** —— `theme_manager.py` 里只有
+  `#headerBar`（容器），没有按钮自身的样式。三个图标按钮因此走 Qt 默认样式，在深色底上发暗。
+- **修复**：`theme_manager.py` 补 `#headerBarIconBtn`（+ `:hover` / `:pressed`）：
+  透明底、`text_primary` 前景色、hover 时 `accent` 高亮 + 边框。
+
+### 【③ 底部 ComfyUI / MCP 卡的「设置」被压成「设」】
+
+- **根因**：`home_sub_widgets.py` 里「⚙ 设置」按钮用了 `#toolBtn` —— 那是**圆形图标按钮**
+  （QSS 死锁 `min/max-width: 36px`、`min/max-height: 36px`），套在带文字的按钮上必然截断。
+- **修复**：两处改用 `#ghostBtn`（自适应宽度、`padding: 6px 14px`，与本卡「启动」按钮协调）。
+
+### 【验证】
+- 对照实验：`data:` URL 无 flags=Fail / 有 `--no-sandbox`=Ok。
+- 真机启动：banner 正常、主题切换正常、0 崩溃。
+- 门禁：ruff 棘轮 166 文件零新增 / frozen_zone 85 locks intact / 规模守卫无新增债务 /
+  stability 250 无新增 / SCOPE 0 命中 / run_all_checks 全绿 / pre-commit 11 道全过。
+
+### 【纪律延续】
+- V4.43.5 的教训继续适用：**静态门禁全绿 ≠ 运行时没崩**；UI / 绘制类改动一律
+  **真机启动 + 打开该界面**才算验证过。本版三处修复均按此标准执行。
+
+---
+
 ## V4.43.5 (2026-10-11) — 热修：外观卡动画节点 QColor 非法重载崩溃（真机才暴露）
 
 > 用户连续多次要求「启动 qt6 版本」→ 改用真机启动（不带 offscreen）后 10 秒即疯狂

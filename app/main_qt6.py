@@ -26,6 +26,21 @@ AI短剧编辑器 - Qt6 主程序入口
 """
 
 import os
+
+# V4.43.6 — QtWebEngine（内置 Chromium）在本机起不来会导致「画布白屏」：
+# 症状 = 进画布只有壳 + 日志 `canvas page loadFinished FAIL`
+#        （前端提示「画布页面加载完成（遭遇 断网）」）。
+# 定案 2026-10-06（已证伪：非代理 / 非 GPU / 非 _SPAHandler / 非 dist 内容），
+# 2026-10-11 真机再次复现；对照实验（加载 data: URL）：
+#     不加 flags → loadFinished ok=False；加 --no-sandbox → ok=True。
+# 注意：必须在**任何** PyQt6.QtWebEngine* 导入之前设置，故置于模块顶层。
+_webengine_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+if "--no-sandbox" not in _webengine_flags:
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        f"{_webengine_flags} --no-sandbox".strip()
+    )
+del _webengine_flags
+
 import sys
 import json
 import importlib.util

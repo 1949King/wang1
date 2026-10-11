@@ -318,6 +318,26 @@ class ThemeManager:
             background-color: {c['bg_secondary']};
             border-bottom: 1px solid {c['border_light']};
         }}
+        /* ── 顶栏图标按钮（🔔 通知 / 🎨 主题 / ⚙ 设置）──
+           V4.43.6 补：此前只有 #headerBar 而缺 #headerBarIconBtn 样式，
+           这三个按钮因此走 Qt 默认样式 —— 在深色底上图标发暗「看不清」。
+           统一为透明底 + 亮色前景 + hover 高亮（对齐 .sidebar-btn-v3 手感）。 */
+        QPushButton[theme="{theme_name}"]#headerBarIconBtn {{
+            background-color: transparent;
+            color: {c['text_primary']};
+            border: 1px solid transparent;
+            border-radius: 6px;
+            font-size: 15px;
+            padding: 0;
+        }}
+        QPushButton[theme="{theme_name}"]#headerBarIconBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['accent']};
+            border-color: {c['border_light']};
+        }}
+        QPushButton[theme="{theme_name}"]#headerBarIconBtn:pressed {{
+            background-color: {c['bg_tertiary']};
+        }}
         QFrame[theme="{theme_name}"]#bottomBar {{
             background-color: {c['bg_secondary']};
             border-top: 1px solid {c['border_light']};
