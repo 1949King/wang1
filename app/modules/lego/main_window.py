@@ -1394,20 +1394,33 @@ class MainWindow(QMainWindow):
         self.switch_to_module("help")
     
     def _show_settings(self):
-        """显示设置界面
+        """显示设置界面（主界面内的页面）
 
-        V4.43.9（用户裁定「方案 A」）：设置改为**主界面内的页面**，不再弹独立窗口。
-        用户原话：「为什么顶部里面设登录的设置功能打开的是单独的一个窗口，而不是和
-        项目整体挂钩的？」→ 选定 A「变回页内模块」。
+        ⚠️ V4.43.11 修复 V4.43.9 引入的回归 —— 「设置打不开」：
+        V4.43.9 把这里写成 `switch_to_module("settings")`，而 `switch_to_module`
+        内部只是 `_nav_bar.select_module()`，后者实现为：
 
-        ⚙ 顶栏按钮 / 用户中心「设置」行 → 统一 `switch_to_module("settings")`。
-        ⚠️ 不再走 `SettingsDialog`（QDialog 独立窗口）—— 它已退化为历史实现，
-        如需回滚请只改回本方法（设置内容与页内模块同源，无数据差异）。
+            def select_module(self, module_id):
+                if module_id in self._buttons:      # ← 只认导航栏里的模块
+                    self._on_button_clicked(module_id)
+                # 否则什么都不做 —— 静默失败
+
+        而 settings 自 V4.43.2 起 `nav_hidden=True`、**不在导航栏** ⇒ 不在 `_buttons`
+        ⇒ 点击 ⚙ / 用户中心「设置」**毫无反应**。（help / 意见反馈能打开，正因它们在
+        导航栏里。）日志也不报错 —— 典型的静默失败。
+
+        正解：走官方模块加载路径 `_perform_module_load`（建 widget → 连接 settings_changed
+        → `set_module_widget` 建 tab → `_activate_module` 切到该 tab），**完全不依赖导航栏**。
+        设置内容与弹窗同源（`SettingsModule`），仍是页内呈现、不产生独立窗口。
         """
-        from .settings_module import SettingsModule
-        if "settings" in self._modules and not self._modules["settings"].instance:
-            self.set_module_widget("settings", SettingsModule())
-        self.switch_to_module("settings")
+        info = self._modules.get("settings")
+        if info is None:
+            logger.warning("设置模块未注册，无法打开设置")
+            return
+        if not info.instance:
+            self._perform_module_load("settings")
+            return
+        self._activate_module("settings", info)
     
     def _on_login_clicked(self):
         """登录按钮点击事件 - 异步非阻塞方式"""

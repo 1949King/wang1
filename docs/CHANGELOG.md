@@ -1,5 +1,67 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.11 (2026-10-11) — 热修：设置打不开（V4.43.9 回归）
+
+> 用户原话：「就是设置呃首页中的最顶上的设置图标的功能打不开，以及登录里面的设置也打不开，
+> 为什么？切换主题正常，帮助文档正常，意见反馈也正常，就是登录里面打不开。」
+
+### 【根因（V4.43.9 引入）】
+
+V4.43.9 把 `_show_settings()` 改成 `switch_to_module("settings")`，而：
+
+```python
+def switch_to_module(self, module_id):
+    self._nav_bar.select_module(module_id)      # ← 只做这一件事
+
+def select_module(self, module_id):
+    if module_id in self._buttons:              # ← 只认导航栏里的模块
+        self._on_button_clicked(module_id)
+    # 否则什么都不做 —— 静默失败
+```
+
+settings 自 V4.43.2 起 `nav_hidden=True`、**不在导航栏** ⇒ 不在 `_buttons` ⇒ **点击 ⚙ /
+用户中心「设置」毫无反应，且日志不报错**。
+
+**这也解释了用户观察到的「help / 意见反馈正常、唯独设置打不开」** —— 前者都在导航栏里。
+
+### 【修复】
+
+`_show_settings` 改走官方模块加载路径（**完全不依赖导航栏**）：
+
+```python
+info = self._modules.get("settings")
+if not info.instance:
+    self._perform_module_load("settings")   # 建 widget + 连 settings_changed + 建 tab + 切 tab
+else:
+    self._activate_module("settings", info)
+```
+
+仍保持 V4.43.9 的意图：**页内呈现、不产生独立窗口**。
+
+### 【验证（实测，非推断）】
+
+新建真 `MainWindow()` 实测：
+
+| 检查 | 结果 |
+|---|---|
+| settings 在 `_modules` | `True` |
+| settings 在导航栏 `_buttons` | `False`（`nav_hidden`，正是失败原因） |
+| 调用 `_show_settings()` 前 tab | `[0] 🏠 首页` |
+| 调用后 tab | **`[1] ⚙️ 设置`**（成功打开） |
+| settings 实例已创建 | `True` |
+
+脚本 `.workbuddy/tmp/verify_settings_open.py` → `SUMMARY: PASS`。
+门禁：ruff 棘轮零新增 / frozen_zone 85 locks intact / 规模守卫无新增 / stability 250 / SCOPE 0。
+
+### 【教训（写进纪律）】
+- **`switch_to_module()` 不能用于任何 `nav_hidden` 模块** —— 它经 `select_module` 只匹配
+  导航栏按钮，对隐藏模块静默无效。打开隐藏模块必须走 `_perform_module_load` /
+  `_activate_module`。
+- 「**没反应且日志无异常**」是静默失败的典型特征 —— 查 `if ... in self._buttons` 这类
+  前置守卫比翻日志更快。
+
+---
+
 ## V4.43.10 (2026-10-11) — 画布太阳系背景求真：8 张真实行星素材 + 80s 轮播 + 星场漂移
 
 > 用户裁定：「**要**」（照搬 AI Canvas 的行星素材 + 动效）。
