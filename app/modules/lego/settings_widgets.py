@@ -7,24 +7,27 @@
 - SegmentedControl  = 节点工具栏「极简图标 / 图标+文本」分段控件
 - MiniPreview       = `.sidebar-pref-window`（88×52 迷你界面预览，6 种形态）
 - PreferenceCard    = `.sidebar-pref-card`（预览 + 标题/描述 + 开关）
-- PresetCard        = 外观预设卡（迷你节点预览 + 名称 + 当前使用徽标）
+- PresetCard        = 外观预设卡（迷你背景预览 + 名称 + 当前使用徽标）
+- AppearancePreview = 大预览（节点卡 + 虚线连接 + 当前主题圆点）
 
 设计纪律（见 MEMORY 核心不变量第 8/9 条）:
 - 颜色一律走 ThemeManager.get_colors() / theme_tokens，禁止内联 hex
 - 自绘控件在 set_theme() 里 update() 重绘，跟随主程序明暗
 - 动画用 QPropertyAnimation + parent=self 防 GC（floating_sidebar 同款教训）
 
-V4.43.1 任务 #286
+V4.43.3 任务 #287
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from typing import Optional
 
 from PyQt6.QtCore import (
     Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QRectF, QPointF,
 )
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QRadialGradient
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
 )
@@ -559,8 +562,8 @@ class PresetCard(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        # 预览（自绘）
-        self._preview = _PresetPreview(swatch, accent)
+        # 预览（自绘：6 个背景真实模拟 + 中心节点卡）
+        self._preview = _PresetPreview(preset_id, swatch, accent)
         layout.addWidget(self._preview, stretch=1)
 
         # 名称行
@@ -601,10 +604,22 @@ class PresetCard(QFrame):
 
 
 class _PresetPreview(QWidget):
-    """预设卡内部迷你节点预览（自绘）"""
+    """预设卡内部真实背景预览（直抄画布 CSS 的渐变）
 
-    def __init__(self, swatch: str, accent: str, parent: Optional[QWidget] = None):
+    V4.43.3：6 个预设一一对应画布 CANVAS_BACKGROUNDS，每个 paint 用
+    QRadialGradient / QLinearGradient 真实模拟 radial-gradient 叠加，
+    与画布 CSS 表现完全一致（不再是色块占位）。
+    """
+
+    def __init__(
+        self,
+        preset_id: str,
+        swatch: str,
+        accent: str,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
+        self._preset_id = preset_id
         self._swatch = swatch
         self._accent = accent
         self.setMinimumHeight(84)
@@ -614,12 +629,36 @@ class _PresetPreview(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # 底色块
+        # ① 底色
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(self._swatch)))
         p.drawRoundedRect(QRectF(0, 0, w, h), 6, 6)
 
-        # 一个迷你节点（顶部标题行 + 内容行）
+        # ② 按 preset_id 叠加 radial-gradient（与画布端 CSS 完全对应）
+        if self._preset_id == "solar-system":
+            _stack_radials(p, w, h, [
+                (0.78, 0.30, "#f97316", 0.22),
+                (0.72, 0.34, "#a855f7", 0.30),
+                (0.20, 0.80, "#6366f1", 0.16),
+            ])
+        elif self._preset_id == "nebula":
+            _stack_radials(p, w, h, [
+                (0.24, 0.26, "#a855f7", 0.24),
+                (0.74, 0.68, "#d946ef", 0.20),
+                (0.52, 0.44, "#8b5cf6", 0.16),
+            ])
+        elif self._preset_id == "frosted-glass":
+            _paint_linear(p, w, h, "#fdfbf7", "#eef1f8", angle_deg=160)
+        elif self._preset_id == "custom":
+            # custom 上传一张图 → 整块铺图，否则画一个"+ 上传"虚线框
+            self._paint_custom_overlay(p, w, h)
+            return
+
+        # ③ 中心浮一个迷你节点卡（与画布端 React Flow 节点一致）+ 输入占位 + 连接手柄
+        self._paint_center_node(p, w, h)
+
+    def _paint_center_node(self, p: QPainter, w: float, h: float) -> None:
+        """画一个迷你 React Flow 节点卡（小圆 + 标题行 + 输入占位 + 左连接柄）"""
         card_w = w * 0.72
         card_x = (w - card_w) / 2
         card_y = h * 0.22
@@ -630,18 +669,121 @@ class _PresetPreview(QWidget):
         p.setPen(QPen(card_border, 1))
         p.setBrush(QBrush(card_bg))
         p.drawRoundedRect(QRectF(card_x, card_y, card_w, card_h), 5, 5)
-        # 标题行（accent 色点 + 灰线）
+        # 标题行：accent 色小方块 + 灰条
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(self._accent)))
         p.drawRoundedRect(QRectF(card_x + 6, card_y + 6, 4, 4), 1, 1)
         line_col = QColor(0, 0, 0, 30) if is_light else QColor(255, 255, 255, 40)
         p.setBrush(QBrush(line_col))
         p.drawRoundedRect(QRectF(card_x + 13, card_y + 7, card_w * 0.5, 2.5), 1, 1)
-        # 连接手柄（左侧小圆）
+        # 内容行（灰条）
+        if is_light:
+            content_col = QColor(0, 0, 0, 25)
+        else:
+            content_col = QColor(255, 255, 255, 35)
+        p.setBrush(QBrush(content_col))
+        p.drawRoundedRect(QRectF(card_x + 8, card_y + 14, card_w - 16, 6), 2, 2)
+        p.drawRoundedRect(QRectF(card_x + 8, card_y + 22, card_w * 0.6, 6), 2, 2)
+        # 连接手柄（左侧小白圆 + accent 描边）
         p.setPen(QPen(QColor(self._accent), 1))
         p.setBrush(QBrush(QColor("#ffffff")))
         p.drawEllipse(QRectF(card_x - 10, card_y + card_h / 2 - 4, 8, 8))
-        p.end()
+        # 连接手柄（右侧）
+        p.drawEllipse(QRectF(card_x + card_w + 2, card_y + card_h / 2 - 4, 8, 8))
+
+    def _paint_custom_overlay(self, p: QPainter, w: float, h: float) -> None:
+        """custom 卡：未上传显示「+ 上传」引导，否则画已上传的图"""
+        b64 = _get_custom_image_b64()
+        if b64:
+            # 已上传：尝试解码 base64 data:image/...;base64,
+            try:
+                from PyQt6.QtGui import QPixmap
+                pix = QPixmap()
+                # data:URL 直接 QPixmap.loadFromData 也可以走 bytes
+                # 但 data: URL 带前缀，需要去掉
+                if "," in b64:
+                    raw = base64.b64decode(b64.split(",", 1)[1])
+                else:
+                    raw = base64.b64decode(b64)
+                pix.loadFromData(raw)
+                if not pix.isNull():
+                    p.setBrush(QBrush(pix))
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.drawRoundedRect(QRectF(0, 0, w, h), 6, 6)
+                    return
+            except Exception as e:
+                logger.debug("custom 缩略图 base64 解码失败: %s", e)
+        # 未上传：1px 虚线 + 中央"+" 与文字
+        border = QColor(self._accent)
+        border.setAlpha(140)
+        p.setPen(QPen(border, 1, Qt.PenStyle.DashLine))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(3, 3, w - 6, h - 6), 6, 6)
+        # "+" 大字
+        f = QFont()
+        f.setPointSize(22)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QPen(border, 1))
+        p.drawText(QRectF(0, h / 2 - 36, w, 24), Qt.AlignmentFlag.AlignCenter, "+")
+        # 提示文字
+        f2 = QFont()
+        f2.setPointSize(8)
+        p.setFont(f2)
+        p.setPen(QPen(QColor(self._accent), 1))
+        p.drawText(
+            QRectF(0, h / 2 - 8, w, 14),
+            Qt.AlignmentFlag.AlignCenter,
+            "点击上传背景",
+        )
 
     def set_theme(self, _theme: str) -> None:
         self.update()
+
+
+def _stack_radials(p: QPainter, w: float, h: float, layers: list[tuple]) -> None:
+    """叠加多层 QRadialGradient（模拟 CSS radial-gradient(circle at X% Y%, …)）。
+
+    每层：(cx 比例, cy 比例, hex, alpha 0-1)  透明度按 alpha 衰减到 0 的距离固定半径。
+    """
+    for cx, cy, hex_color, alpha in layers:
+        grad = QRadialGradient(QPointF(w * cx, h * cy), max(w, h) * 0.55)
+        col = QColor(hex_color)
+        col.setAlpha(int(255 * alpha))
+        grad.setColorAt(0.0, col)
+        col0 = QColor(col)
+        col0.setAlpha(0)
+        grad.setColorAt(1.0, col0)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(grad))
+        p.drawRect(QRectF(0, 0, w, h))
+
+
+def _paint_linear(p: QPainter, w: float, h: float, c1: str, c2: str, angle_deg: float = 160) -> None:
+    """线性渐变（160deg 与画布 frosted-glass 的 linear-gradient(160deg, …) 对齐）"""
+    import math
+    a = math.radians(angle_deg)
+    # 渐变从左上到右下
+    x1 = w * 0.5 - math.cos(a) * w * 0.6
+    y1 = h * 0.5 - math.sin(a) * h * 0.6
+    x2 = w * 0.5 + math.cos(a) * w * 0.6
+    y2 = h * 0.5 + math.sin(a) * h * 0.6
+    grad = QLinearGradient(QPointF(x1, y1), QPointF(x2, y2))
+    grad.setColorAt(0.0, QColor(c1))
+    grad.setColorAt(1.0, QColor(c2))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(grad))
+    p.drawRect(QRectF(0, 0, w, h))
+
+
+def _get_custom_image_b64() -> Optional[str]:
+    """读取当前 JSON 里持久化的 custom 背景图 base64（若有）"""
+    try:
+        from app.modules.lego.settings_panel import CANVAS_APPEARANCE_FILE
+        f = CANVAS_APPEARANCE_FILE
+        if not f.exists():
+            return None
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data.get("image_data_url") or None
+    except Exception:
+        return None

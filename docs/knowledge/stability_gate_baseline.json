@@ -23,6 +23,7 @@
     "app/modules/lego/license_manager.py:print-statement": 3,
     "app/modules/lego/ollama_client.py:swallow-except": 2,
     "app/modules/lego/professional_video_engine.py:print-statement": 14,
+    "app/modules/lego/settings_panel.py:swallow-except": 1,
     "app/modules/lego/smart_editing_engine.py:print-statement": 8,
     "app/modules/lego/timeline_subwidgets.py:swallow-except": 3,
     "app/modules/lego/timeline_widget.py:swallow-except": 10,

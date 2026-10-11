@@ -732,6 +732,8 @@ class CanvasGetRoutesMixin:
     # 用 JSON 文件而非 QSettings：沙箱 / 无注册表写权限环境也能落盘，画布通道可直接读。
     # revision 机制的意义：只在**设置真的被改过**时画布才覆盖本地值，
     # 否则会每 2.5s 把用户在画布里的主题切换按钮按回去。
+    #
+    # V4.43.3 新增 image_data_url 字段（custom 背景走 base64 即可，无需上传接口）
     @_route_get("/host/canvas-settings")
     def _route_host_canvas_settings(self, parsed=None):
         cs = _cs()
@@ -748,11 +750,13 @@ class CanvasGetRoutesMixin:
                 try:
                     data = _json.loads(f.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
-                        payload.update({
-                            "revision": int(data.get("revision", 0) or 0),
-                            "canvas_background": str(data.get("canvas_background", "default")),
-                            "theme": str(data.get("theme", "dark")),
-                        })
+                        payload["revision"] = int(data.get("revision", 0) or 0)
+                        payload["canvas_background"] = str(data.get("canvas_background", "default"))
+                        payload["theme"] = str(data.get("theme", "dark"))
+                        # 把 base64 data URL 透传给画布（custom 背景专用）
+                        img = data.get("image_data_url")
+                        if isinstance(img, str) and img.startswith("data:image/"):
+                            payload["image_data_url"] = img
                 except Exception as e:
                     logger.debug("[/host/canvas-settings] 读文件失败: %s", e)
             self._json(200, {"ok": True, **payload})

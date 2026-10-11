@@ -14,7 +14,7 @@
 - PresetCard / AppearancePreview / SegmentedControl / PreferenceCard（settings_widgets.py）
 - 开关卡 = .sidebar-pref-card（88×52 迷你预览 + iOS 开关）
 
-V4.43.1 任务 #286
+V4.43.3 任务 #287
 """
 from __future__ import annotations
 
@@ -81,11 +81,19 @@ def apply_theme_mode_combo(mod, mode: str) -> None:
 
 
 def on_preset_activated(mod, preset_id: str) -> None:
-    """外观预设点击 → 主程序主题 + 画布背景（V4.43.2：4 个预设全部落地）"""
+    """外观预设点击 → 主程序主题 + 画布背景（V4.43.3：6 个预设全部落地 + custom 走上传）"""
     entry = next((p for p in PRESETS if p[0] == preset_id), None)
     if entry is None:
         return
     _pid, label, _swatch, _accent, canvas_bg, canvas_theme = entry
+
+    # V4.43.3：custom 卡未上传时弹文件框（settings_panel.SettingsDialog 有完整实现，
+    # settings_module 走的也是同一函数；此处仅做主程序主题 + 画布背景对齐）
+    image_b64 = None
+    if preset_id == "custom":
+        from app.modules.lego.settings_panel import _load_current_image_b64
+        image_b64 = _load_current_image_b64()
+
     _write_str_setting(SETTING_KEY_APPEARANCE_PRESET, preset_id)
     for card in getattr(mod, "_preset_cards", []):
         card.set_active(card._preset_id == preset_id)
@@ -99,8 +107,8 @@ def on_preset_activated(mod, preset_id: str) -> None:
     if seg is not None:
         seg.set_current(canvas_theme)
     apply_theme_mode_combo(mod, canvas_theme)
-    # 2) 下发到画布（画布 canvasBackgrounds.ts 轮询应用）
-    push_canvas_appearance(canvas_bg, canvas_theme)
+    # 2) 下发到画布（画布 canvasBackgrounds.ts 轮询应用；custom 带 image_b64）
+    push_canvas_appearance(canvas_bg, canvas_theme, image_b64=image_b64)
     logger.info("外观预设 %s → 画布背景 %s / 主题 %s", preset_id, canvas_bg, canvas_theme)
 
 
@@ -170,9 +178,9 @@ def build_appearance_top_block(mod) -> QWidget:
     mod._appearance_preview.set_theme_label(theme_label)
     layout.addWidget(mod._appearance_preview)
 
-    # 外观预设 2×2
+    # 外观预设 3×2（6 个）
     layout.addWidget(_section("外观预设"))
-    layout.addWidget(_hint("选择、保存或管理完整外观配置"))
+    layout.addWidget(_hint("选择、保存或管理完整外观配置（含 6 套背景 + custom 上传）"))
     mod._preset_cards = []
     grid = QGridLayout()
     grid.setSpacing(12)
@@ -181,7 +189,7 @@ def build_appearance_top_block(mod) -> QWidget:
         card.set_active(pid == current_preset)
         card.activated.connect(lambda p, m=mod: on_preset_activated(m, p))
         mod._preset_cards.append(card)
-        grid.addWidget(card, i // 2, i % 2)
+        grid.addWidget(card, i // 3, i % 3)
     layout.addLayout(grid)
 
     # 主题模式 3 段

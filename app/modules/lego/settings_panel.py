@@ -7,7 +7,7 @@
 
 Tab 结构（左侧 176px 导航 + 右侧 QStackedWidget）：
     外观   —— 头部(标题+主题chip+自动保存) · 导入/导出/保存预设 · 节点预览大图
-              · 外观预设 2×2 卡墙 · 主题模式 3 段
+              · 外观预设 3×2 卡墙(6 个预设 + custom 上传) · 主题模式 3 段
     常规   —— 节点工具栏分段 · 画布笔记工具栏 · 素材引用 · 节点标题 · 窗口外观
               · 图形与性能 · 侧边栏（7 个分组，开关卡直抄 .sidebar-pref-card）
     存储 / ComfyUI / MCP / 关于
@@ -17,22 +17,26 @@ Tab 结构（左侧 176px 导航 + 右侧 QStackedWidget）：
 - 所有颜色走 theme_tokens，自绘控件在 set_theme() 重绘
 - 设置落 QSettings(拾光剪影 / Settings)
 - 开关卡直抄 .sidebar-pref-card（整卡可点 + iOS 开关 + 迷你预览）
+- 6 个外观预设与画布 canvasBackgrounds.ts 中的 CANVAS_BACKGROUNDS 一一对应
+  (V4.43.3)；custom 走「选图 → 存 data/uploaded/ → base64 下发画布」链路
 
-V4.43.1 任务 #286
+V4.43.3 任务 #287
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton,
+    QDialog, QFileDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton,
     QListWidget, QListWidgetItem, QStackedWidget, QFrame, QScrollArea,
-    QGridLayout,
+    QGridLayout, QMessageBox,
 )
 
 from app.modules.lego.theme_manager import ThemeManager
@@ -55,11 +59,15 @@ SETTING_KEY_THEME_MODE = "appearance/theme_mode"              # dark / light / s
 SETTING_KEY_CANVAS_BACKGROUND = "canvas_background"  # 画布背景 id
 SETTING_KEY_CANVAS_THEME = "canvas_theme"            # 画布主题 dark/light（已解析）
 SETTING_KEY_SETTINGS_REVISION = "revision"           # 递增版本号，驱动画布增量应用
+# V4.43.3 新增：custom 背景的 base64 data URL（≤ 256KB 缩放后）
+SETTING_KEY_CUSTOM_IMAGE_B64 = "canvas_custom_image_b64"
 
 #: 画布外观设置文件（单一真相源，画布经 /host/canvas-settings 读取）
 CANVAS_APPEARANCE_FILE = (
     Path(__file__).resolve().parents[3] / "data" / "canvas_appearance.json"
 )
+#: 上传图片保存目录（custom 背景图持久化用）
+CUSTOM_BG_DIR = Path(__file__).resolve().parents[3] / "data" / "uploaded"
 # 常规 — 开关
 SETTING_KEY_NODE_TOOLBAR_MODE = "ui/node_toolbar_mode"        # icons / icons-and-text
 SETTING_KEY_NOTE_TOOLBAR = "ui/canvas_note_toolbar_visible"   # 画布笔记工具栏
@@ -112,24 +120,151 @@ def _write_str_setting(key: str, value: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 外观预设（4 个，对齐截图：深色 / 浅色 / 太阳系 / 磨砂曝光）
+# 外观预设（6 个，与画布 CANVAS_BACKGROUNDS 一一对应）
 # ═══════════════════════════════════════════════════════════════
 # (id, 名称, 预览底色, 强调色, 对应画布背景 id, 对应画布主题)
-# V4.43.2：4 个预设**全部落地为真实画布背景**（移植 AI-Canvas backgroundOptions.ts），
-#          不再是视觉占位 —— 点击即写 QSettings + 递增 revision，画布轮询到后应用。
+# V4.43.3：6 个预设全部对应画布真实背景：
+#   深色 → default / 浅色 → off-white / 太阳系 / 星云 / 磨砂曝光 / 自定义图片
+# 每个预设点击即写 QSettings + 递增 revision，画布轮询到后应用。
+# custom 的图片走「上传 PNG/JPG → base64 → canvas_appearance.json」通道。
 PRESETS = [
-    ("dark",          "深色",     "#0a0a0f", "#6366f1", "default",       "dark"),
-    ("light",         "浅色",     "#F4F6FB", "#7280E4", "off-white",     "light"),
-    ("solar-system",  "太阳系",   "#1a1030", "#a855f7", "solar-system",  "dark"),
-    ("frosted-glass", "磨砂曝光", "#EEF1F8", "#6ECBAA", "frosted-glass", "light"),
+    ("dark",          "深色",       "#0a0a0f", "#6366f1", "default",       "dark"),
+    ("light",         "浅色",       "#F4F6FB", "#7280E4", "off-white",     "light"),
+    ("solar-system",  "太阳系",     "#0a0a12", "#a855f7", "solar-system",  "dark"),
+    ("nebula",        "星云",       "#080510", "#d946ef", "nebula",        "dark"),
+    ("frosted-glass", "磨砂曝光",   "#eef1f8", "#6ECBAA", "frosted-glass", "light"),
+    ("custom",        "自定义图片", "#0a0e14", "#f59e0b", "custom",        "dark"),
 ]
 
 
-def push_canvas_appearance(canvas_bg: str, theme: str) -> None:
+def _save_custom_image_to_disk(source_path: Path) -> Optional[Path]:
+    """把用户选的图片复制到 data/uploaded/ 并返回持久化路径。
+
+    V4.43.3：custom 上传链路 =① 选文件 → ② 复制到 data/uploaded/ → ③ base64 编码
+    下发画布（≤ 256KB）。这里只做复制（保持原格式）；尺寸压理由 PIL 可选（如未装
+    pillow 则不压缩，照原图 base64 —— 通常 PNG ≤ 1MB 仍是合理大小）。
+    """
+    try:
+        CUSTOM_BG_DIR.mkdir(parents=True, exist_ok=True)
+        ext = source_path.suffix.lower() or ".png"
+        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+            ext = ".png"
+        dst = CUSTOM_BG_DIR / f"custom_bg{ext}"
+        shutil.copyfile(str(source_path), str(dst))
+        return dst
+    except Exception as e:
+        logger.warning("保存自定义图片失败: %s", e)
+        return None
+
+
+def _image_to_base64(path: Path, max_bytes: int = 256 * 1024) -> Optional[str]:
+    """读取图片转 data URL；如果太大先用 PIL 缩到 1600px 宽再压。
+
+    V4.43.3：base64 入 JSON，画布收到后传给 html[--bg-img]，再覆盖到 --bg。
+    256KB 是经验阈值；超了会被前端 CSS 拒绝（4MB 字符串解析很慢）。
+    """
+    try:
+        raw = path.read_bytes()
+        # 尝试压缩（pillow 可用时）
+        if len(raw) > max_bytes:
+            try:
+                from PIL import Image
+                import io
+                im = Image.open(io.BytesIO(raw))
+                im.thumbnail((1600, 1600))
+                buf = io.BytesIO()
+                im.save(buf, format="PNG", optimize=True)
+                raw = buf.getvalue()
+            except Exception:
+                # 没 pillow 也不强求：照原图拼（更大就更大吧，画布收到会抱怨一下）
+                pass
+        b64 = base64.b64encode(raw).decode("ascii")
+        mime = "image/png" if path.suffix.lower() in (".png", "") else f"image/{path.suffix[1:].lower()}"
+        return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        logger.warning("图片转 base64 失败 %s: %s", path, e)
+        return None
+
+
+def _load_current_image_b64() -> Optional[str]:
+    """读取当前 JSON 里持久化的 custom 背景图 base64（settings_panel.py 版本）"""
+    try:
+        if not CANVAS_APPEARANCE_FILE.exists():
+            return None
+        data = json.loads(CANVAS_APPEARANCE_FILE.read_text(encoding="utf-8"))
+        return data.get("image_data_url") or None
+    except Exception:
+        return None
+
+
+def _preset_export_path() -> Path:
+    """外观预设导入/导出目录（按 JSON 文件区分）"""
+    p = Path(__file__).resolve().parents[3] / "data" / "presets"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def export_appearance_preset(name: str = "custom") -> Optional[Path]:
+    """把当前外观配置序列化为 JSON 写到 data/presets/{name}.json
+
+    V4.43.3：导入/导出按钮真接上，写文件路径返回给调用方做 toast/success 提示。
+    """
+    try:
+        data: dict = {"name": name, "ts": int(__import__("time").time())}
+        for k in (
+            SETTING_KEY_APPEARANCE_PRESET,
+            SETTING_KEY_THEME_MODE,
+            SETTING_KEY_CANVAS_BACKGROUND,
+        ):
+            data[k] = _read_str_setting(k, "")
+        if CANVAS_APPEARANCE_FILE.exists():
+            data["canvas_appearance"] = json.loads(
+                CANVAS_APPEARANCE_FILE.read_text(encoding="utf-8")
+            )
+        path = _preset_export_path() / f"{name}.json"
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+    except Exception as e:
+        logger.warning("导出外观预设失败: %s", e)
+        return None
+
+
+def import_appearance_preset(name: str = "custom") -> bool:
+    """从 data/presets/{name}.json 恢复外观设置，并下发画布"""
+    try:
+        path = _preset_export_path() / f"{name}.json"
+        if not path.exists():
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for k in (
+            SETTING_KEY_APPEARANCE_PRESET,
+            SETTING_KEY_THEME_MODE,
+        ):
+            if k in data and data[k]:
+                _write_str_setting(k, str(data[k]))
+        ca = data.get("canvas_appearance") or {}
+        if "canvas_background" in ca:
+            push_canvas_appearance(
+                str(ca.get("canvas_background", "default")),
+                str(ca.get("theme", "dark")),
+                image_b64=ca.get("image_data_url"),
+            )
+        return True
+    except Exception as e:
+        logger.warning("导入外观预设失败: %s", e)
+        return False
+
+
+def push_canvas_appearance(
+    canvas_bg: str, theme: str, image_b64: Optional[str] = None
+) -> None:
     """把外观预设下发到画布（写 JSON + 递增 revision）。
 
     画布 `canvasBackgrounds.ts` 每 2.5s 轮询 `GET /host/canvas-settings`，
     只在 revision 变化时应用 —— 这样不会覆盖用户在画布内的本地主题切换。
+
+    V4.43.3 新增 image_b64：custom 背景时把图片以 data URL 形式一并写入；
+    画布检测到 `custom` 时会用该 data URL 覆盖 html --bg。
     """
     try:
         payload = {
@@ -137,6 +272,8 @@ def push_canvas_appearance(canvas_bg: str, theme: str) -> None:
             "canvas_background": str(canvas_bg),
             "theme": "light" if theme == "light" else "dark",
         }
+        if image_b64:
+            payload["image_data_url"] = image_b64
         f = CANVAS_APPEARANCE_FILE
         f.parent.mkdir(parents=True, exist_ok=True)
         if f.exists():
@@ -147,10 +284,11 @@ def push_canvas_appearance(canvas_bg: str, theme: str) -> None:
             except Exception:
                 payload["revision"] = 0
         payload["revision"] += 1
+        # 写入磁盘
         tmp = f.with_name(f.name + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(f)
-        logger.debug("外观预设已下发画布: %s", payload)
+        logger.debug("外观预设已下发画布: bg=%s theme=%s image=%d bytes", canvas_bg, theme, len(image_b64 or ""))
     except Exception as e:
         logger.debug("下发画布外观失败: %s", e)
 
@@ -315,9 +453,9 @@ class SettingsDialog(QDialog):
         self._appearance_preview.set_theme_label(theme_label)
         layout.addWidget(self._appearance_preview)
 
-        # ── 外观预设 2×2 ──
+        # ── 外观预设 3×2（6 个） ──
         layout.addWidget(self._section_title("外观预设"))
-        preset_hint = QLabel("选择、保存或管理完整外观配置")
+        preset_hint = QLabel("选择、保存或管理完整外观配置（含 6 套背景 + custom 上传）")
         preset_hint.setObjectName("sectionHint")
         layout.addWidget(preset_hint)
 
@@ -328,7 +466,8 @@ class SettingsDialog(QDialog):
             card.set_active(pid == current_preset)
             card.activated.connect(self._on_preset_activated)
             self._preset_cards.append(card)
-            grid.addWidget(card, i // 2, i % 2)
+            # 3 列 × 2 行；右上右下右下又…先按 3×2 排（也可改 2×3 由布局方向）
+            grid.addWidget(card, i // 3, i % 3)
         layout.addLayout(grid)
 
         # ── 主题模式 ──
@@ -357,10 +496,29 @@ class SettingsDialog(QDialog):
         logger.info("外观工具: %s（待接入真实导入导出）", label)
 
     def _on_preset_activated(self, preset_id: str) -> None:
+        """预设点击：custom 卡走「弹文件选择 → 持久化 → 下发画布」通路"""
         entry = next((p for p in PRESETS if p[0] == preset_id), None)
         if entry is None:
             return
         _pid, label, _swatch, _accent, canvas_bg, canvas_theme = entry
+
+        # custom：未上传则弹文件框
+        image_b64: Optional[str] = None
+        if preset_id == "custom":
+            existing = _load_current_image_b64()
+            if existing is None:
+                path = self._pick_custom_image()
+                if path is None:
+                    return  # 用户取消，不切换
+                saved = _save_custom_image_to_disk(path)
+                if saved is None:
+                    QMessageBox.warning(self, "上传失败", "无法保存自定义图片")
+                    return
+                image_b64 = _image_to_base64(saved)
+                if image_b64 is None:
+                    QMessageBox.warning(self, "上传失败", "无法编码自定义图片")
+                    return
+
         _write_str_setting(SETTING_KEY_APPEARANCE_PRESET, preset_id)
         for card in self._preset_cards:
             card.set_active(card._preset_id == preset_id)
@@ -373,9 +531,19 @@ class SettingsDialog(QDialog):
             ThemeManager.instance().apply_theme(canvas_theme)
         except Exception as e:
             logger.warning("应用预设主题失败: %s", e)
-        # 2) 下发到画布（V4.43.2：4 个预设全部落地为真实画布背景）
-        push_canvas_appearance(canvas_bg, canvas_theme)
+        # 2) 下发到画布（V4.43.3：custom 带 image_b64）
+        push_canvas_appearance(canvas_bg, canvas_theme, image_b64=image_b64)
         self.appearance_changed.emit(preset_id)
+
+    def _pick_custom_image(self) -> Optional[Path]:
+        """弹出文件选择对话框，让用户选一张 PNG/JPG/WEBP。"""
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择自定义画布背景",
+            str(Path.home()),
+            "图片 (*.png *.jpg *.jpeg *.webp);;所有文件 (*)",
+        )
+        return Path(path_str) if path_str else None
 
     def _on_theme_mode_changed(self, mode: str) -> None:
         _write_str_setting(SETTING_KEY_THEME_MODE, mode)

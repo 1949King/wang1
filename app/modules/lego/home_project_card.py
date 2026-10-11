@@ -1,18 +1,19 @@
 """
-项目卡片 (ProjectCard)
-========================
+项目卡片 (ProjectCard / EmptyProjectCard)
+========================================
 
 对标 AI-Canvas-tauri ProjectLibraryModal.tsx 行 1-150（项目卡片墙）
 - 缩略图占位（emoji/首字圆形 fallback）
 - 标题 + 修改时间
 - hover 显示操作按钮（重命名 / 复制 / 删除）
+- 空状态:EmptyProjectCard 「+ 新建项目」 CTA 卡（含新建/导入按钮）—— V4.43.3 新增
 
 PyQt6 实现，与 React/Tailwind 不同：
 - 用 QFrame + QVBoxLayout 模拟卡片结构
 - 操作按钮默认隐藏，hover 显示（mouseMoveEvent）
 - 主题跟随主程序（属性选择器）
 
-V4.43.0 任务 #275
+V4.43.0 任务 #275 / V4.43.3 任务 #288
 """
 from __future__ import annotations
 
@@ -49,6 +50,88 @@ def _format_mtime(ts: float) -> str:
     if diff < 86400 * 365:
         return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+# ─────────── V4.43.3:空项目 CTA 卡 ───────────
+class EmptyProjectCard(QFrame):
+    """首页空项目状态卡（占位 1 格,220×180）
+
+    信号:
+        create_requested()  — 点「新建」
+        import_requested()  — 点「导入」
+    """
+
+    create_requested = pyqtSignal()
+    import_requested = pyqtSignal()
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("emptyProjectCard")
+        self.setFixedSize(220, 180)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 与 ProjectCard 对齐的阴影
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(12)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        self.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 10)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # "+" 大圆图标
+        self._plus = QLabel("+")
+        self._plus.setObjectName("emptyProjectPlus")
+        self._plus.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plus.setFixedHeight(54)
+        f = QFont()
+        f.setPointSize(34)
+        f.setBold(True)
+        self._plus.setFont(f)
+        layout.addWidget(self._plus)
+
+        title = QLabel("新建项目")
+        title.setObjectName("emptyProjectTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        hint = QLabel("空白工程 · 支持 .timeline / .proj")
+        hint.setObjectName("emptyProjectHint")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint)
+
+        # 两按钮（新建 + 导入）
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        new_btn = QPushButton("新建")
+        new_btn.setObjectName("brandBtn")
+        new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_btn.clicked.connect(self.create_requested.emit)
+        btn_row.addWidget(new_btn)
+
+        import_btn = QPushButton("导入…")
+        import_btn.setObjectName("ghostBtn")
+        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        import_btn.clicked.connect(self.import_requested.emit)
+        btn_row.addWidget(import_btn)
+        layout.addLayout(btn_row)
+
+        # 整体可点 → 触发新建
+        self.setProperty("theme", ThemeManager.instance().current_theme)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.create_requested.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def set_theme(self, theme: str) -> None:
+        self.setProperty("theme", theme)
+        for child in self.findChildren(QWidget):
+            child.setProperty("theme", theme)
 
 
 class ProjectCard(QFrame):

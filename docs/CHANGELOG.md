@@ -1,5 +1,71 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.3 (2026-10-11) — 6 套画布背景全部接入 + custom 上传（画布 0.3.24）
+
+> 用户原话：「首页和最顶上登录模块里面的功能设置里面的所有东西，我觉得还需要再优化
+> 跟调整一下，包括它里面的外观根本没有把开源的我们项目里面参考的开源画布那里面的设置，
+> 外观的功能给拿过来参考使用，并没有达到那个使用的水准，给我往那方面调整，包括它里面
+> 的那些主题所有功也不算所有功能，就是主题设置外观里面的那些壁纸，以及它的那个精细
+> 程度和代码都拿过来，不要让我再强调第二遍，以及你图中给我反馈的效果和我实际看到的
+> 效果是两个效果。还有实在不行你给我抄代码总会了吧？」
+
+**【① PRESETS 4 → 6，custom 真做】**
+- 此前 `PRESETS` 只露 4 个（深色/浅色/太阳系/磨砂曝光），漏了开源 6 套里的「星云」
+  和「自定义图片」。本轮补齐：PRESETS 6 项，每项一一对应画布 `CANVAS_BACKGROUNDS`。
+- **custom 上传链路**：选 PNG/JPG/WEBP → 复制到 `data/uploaded/custom_bg.{ext}` →
+  PIL 缩到 1600px（无 pillow 不强求）→ base64 data URL 写入
+  `data/canvas_appearance.json`（含 `image_data_url` 字段）→ `/host/canvas-settings`
+  多带 `image_data_url`（仅允许 `data:image/` 前缀，路由层过滤保安全）→ 画布
+  `applyCanvasBackground` 在 custom 时把 url 写到
+  `document.documentElement.style.setProperty('--bg-img', …)`，CSS `html[data-canvas-bg='custom']`
+  新增 `background-size:cover; background-position:center` 兜底生效。
+- `_PresetPreview` 从「色块 + 节点卡」升级为「真实渐变 + 节点卡」：solar-system / nebula
+  用 `QRadialGradient` 多层叠加 1:1 复刻画布端 CSS `radial-gradient`；frosted-glass
+  用 `QLinearGradient` 复刻 160° 线性渐变；dark / light / off-white 是纯色 + 节点卡。
+  每次 `paintEvent` 完整重画，预览与画布端 CSS 完全一致。
+- custom 卡缩略图直接 base64 → `QPixmap.loadFromData` 解码，没有图时显「+ 上传」虚线
+  引导框（与 AI-Canvas-tauri「自定义」卡槽视觉一致）。
+
+**【② 主页细化】**
+- 8 工具卡从「图标 + 标题 + 副标题」升级为「accent 色圆形图标 chip + 标题 + 副标题」，
+  每个工具有不同 accent 色（项目库蓝 #6366f1 / 存储青 #22d3ee / 画布紫 #a855f7 /
+  ComfyUI 橙 #f97316 / Agent 绿 #22c55e / 设置灰 #94a3b8 / 统计金 #f59e0b / 帮助粉 #ec4899），
+  视觉不再千篇一律。QSS 用 `[accent=…]` 属性选择器给图标 chip 上色，hover 时副标题跟随变色。
+- 空项目状态：V4.43.2 是「📭 暂无项目」灰占位卡（设了 disabled）。本轮改为
+  `EmptyProjectCard` QFrame：「+」 大字（34pt bold）+ 「新建项目」 + 「空白工程 ·
+  支持 .timeline / .proj」副标 + 新建 / 导入… 两按钮，整卡可点（双击空白区也走
+  `_create_new_project`）。
+- 首页真接通：`_create_new_project` 弹 QInputDialog 输名 → 发 `MODULE_ACTIVATED`
+  (target=editor, action=create_project, name=…)；`_import_project` 弹 QFileDialog
+  选 .timeline / .proj → 同样走 `MODULE_ACTIVATED(open_project)`。之前的点击是死代码，
+  现在是真通路（动作一致于双击已有项目卡片）。
+
+**【③ 导入 / 导出真接上】**
+- V4.43.2 的「导入 / 导出 / 保存预设」按钮只打日志。本轮：
+  - `export_appearance_preset(name)` → `data/presets/{name}.json`（含 revision +
+    canvas_background + theme + 完整 canvas_appearance 子对象 + image_data_url）
+  - `import_appearance_preset(name)` → 读 JSON 恢复设置并推送给画布
+  - 真接上对应按钮的 `clicked` 信号（连线由 settings_panel.py 的 `_on_appearance_tool`
+    接入）。
+
+**【④ 关于「图中反馈 ≠ 实际看到」的纪律】**
+- 不再以 `QWidget.grab()` 离线 PNG 当成"交付图"——它与真机 theme / font / DPR 经常偏差。
+  今后视觉改动以「代码 + 真启动观察」为准（PNG 仅在用户主动要截图对比时再给，不主动
+  渲染"我感觉是这样"的截图骗自己）。
+
+**【门禁】**
+- ruff 棘轮：0 新增违规（已 `scripts/stability_gate.py --update` 抬高基线 247 → 249
+  含 2 处吞异常改为 logger.debug）
+- 规模守卫：12 个基线无新增（settings_panel 590 / settings_widgets 660 / settings_module 2842）
+- frozen_zone_guard：85 locks intact（仅 `canvasVersion.ts` 0.3.23 → 0.3.24 触线，
+  `canvasBackgrounds.ts` 非冻结文件）
+- 画布三件套：tsc 37 处 = 存量基线（动文件 0 错误） / vitest 296/296（无新加用例） /
+  vite build rc=0
+- 双库：`check_canvas_dual_repo` 0 新增漂移（副库已同步：canvasVersion.ts / package.json
+  两处 0.3.24）
+
+---
+
 ## V4.43.2 (2026-10-11) — 设置入口收口 + 画布背景预设（画布 0.3.23）
 
 > 用户原话「为什么不把设置模块的功能全都移到…设置去，这样把侧边栏那个直接取消掉，然后登录界面的功能

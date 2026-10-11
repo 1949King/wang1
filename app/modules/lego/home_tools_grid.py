@@ -29,20 +29,27 @@ logger = logging.getLogger("AI短剧编辑器.home_tools_grid")
 
 
 # 工具入口配置（单源真相）
+# V4.43.3：每个工具挂 accent 色（图标色块背景用），与 6 套外观预设的强调色
+# 形成视觉呼应（深色蓝/紫/橙/绿/品红/青色 → 用户看一眼知道这个工具归属哪一类）。
 TOOLS = [
-    ("projects",  "📁", "项目库",   "浏览所有项目"),
-    ("storage",   "💾", "存储管理", "空间 · 回收站"),
-    ("canvas",    "🎨", "AI 画布",  "节点工作流"),
-    ("comfyui",   "🖥", "ComfyUI",  "图像生成后端"),
-    ("agent",     "🤖", "Agent",    "AI 助手"),
-    ("settings",  "⚙", "设置",     "偏好与配置"),
-    ("stats",     "📊", "统计",     "使用数据"),
-    ("help",      "❓", "帮助",     "快捷键 · 文档"),
+    ("projects",  "📁", "项目库",   "浏览所有项目",          "#6366f1"),
+    ("storage",   "💾", "存储管理", "空间 · 回收站",         "#22d3ee"),
+    ("canvas",    "🎨", "AI 画布",  "节点工作流",            "#a855f7"),
+    ("comfyui",   "🖥", "ComfyUI",  "图像生成后端",          "#f97316"),
+    ("agent",     "🤖", "Agent",    "AI 助手",              "#22c55e"),
+    ("settings",  "⚙", "设置",     "偏好与配置",            "#94a3b8"),
+    ("stats",     "📊", "统计",     "使用数据",              "#f59e0b"),
+    ("help",      "❓", "帮助",     "快捷键 · 文档",        "#ec4899"),
 ]
 
 
 class _ToolCard(QPushButton):
-    """单个工具卡（图标 + 标题 + 副标题）"""
+    """单个工具卡（图标 + 标题 + 副标题 + accent 色块背景）
+
+    V4.43.3：hover 时图标圆色块从淡到浓，副标题跟变；pressed 时整体下移 1px
+    给出按压反馈。Accent 色作为图标背景（淡色 → 高浓度色），不让卡片"长草"
+    成千篇一律的纯灰。
+    """
 
     def __init__(
         self,
@@ -50,21 +57,29 @@ class _ToolCard(QPushButton):
         icon: str,
         title: str,
         subtitle: str,
+        accent: str,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._tool_id = tool_id
+        self._icon = icon
+        self._accent = accent
         self.setObjectName("toolCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(140, 92)
+        self.setFixedSize(140, 96)
+        self.setProperty("accent", accent)
         # 文字多行布局
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(4)
-        icon_lbl = QLabel(icon)
-        icon_lbl.setObjectName("toolCardIcon")
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(icon_lbl)
+        # 图标（带 accent 色圆形背景）
+        self._icon_chip = QLabel(icon)
+        self._icon_chip.setObjectName("toolCardIconChip")
+        self._icon_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_chip.setFixedSize(34, 34)
+        # QSS 里取 accent 变量上色
+        self._icon_chip.setProperty("accent", accent)
+        layout.addWidget(self._icon_chip)
         title_lbl = QLabel(title)
         title_lbl.setObjectName("toolCardTitle")
         layout.addWidget(title_lbl)
@@ -99,8 +114,8 @@ class HomeToolsGrid(QFrame):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(12)
 
-        for i, (tool_id, icon, title, subtitle) in enumerate(TOOLS):
-            card = _ToolCard(tool_id, icon, title, subtitle)
+        for i, (tool_id, icon, title, subtitle, accent) in enumerate(TOOLS):
+            card = _ToolCard(tool_id, icon, title, subtitle, accent)
             card.clicked.connect(lambda _checked, t=tool_id: self.tool_clicked.emit(t))
             self._cards[tool_id] = card
             row, col = i // 4, i % 4

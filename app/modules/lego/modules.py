@@ -1483,11 +1483,11 @@ class HomeModule(BaseModule):
     def _refresh_recent_projects(self):
         """V4.43.0:从 data/projects/ 扫描最近 8 个项目,渲染为 ProjectCard 墙
 
-        旧实现用 QListWidget 平铺,信息密度低;现在改成卡片网格,
-        借鉴 AI-Canvas-tauri ProjectLibraryModal 的视觉。
+        V4.43.3:空状态从「📭 暂无项目」（弱提示）升级为「+ 新建项目」CTA 卡（含
+        新建/导入两个动作按钮），双击卡也走"_create_new_project"。
         """
         from pathlib import Path
-        from .home_project_card import ProjectCard
+        from .home_project_card import ProjectCard, EmptyProjectCard
 
         # 清空旧卡片
         for old in self._project_cards:
@@ -1506,16 +1506,12 @@ class HomeModule(BaseModule):
                 files.sort(key=lambda x: x[1], reverse=True)
 
             if not files:
-                # 空状态:占一张空卡提示
-                placeholder = ProjectCard(
-                    project_id="__empty__",
-                    title="暂无项目",
-                    emoji="📭",
-                    mtime=0.0,
-                )
-                placeholder.setEnabled(False)
-                self._projects_grid.addWidget(placeholder, 0, 0)
-                self._project_cards.append(placeholder)
+                # V4.43.3：空项目 CTA 卡（含新建/导入两按钮）
+                empty = EmptyProjectCard(self)
+                empty.create_requested.connect(self._create_new_project)
+                empty.import_requested.connect(self._import_project)
+                self._projects_grid.addWidget(empty, 0, 0)
+                self._project_cards.append(empty)
                 return
 
             # 4 列网格
@@ -1566,6 +1562,48 @@ class HomeModule(BaseModule):
             )
         except Exception as e:
             logger.debug("刷新子卡片失败: %s", e)
+
+    def _create_new_project(self) -> None:
+        """V4.43.3:首页空项目 CTA → 新建空白工程并跳到剪辑模块
+
+        V4.43.0 ~ 4.43.2 这一步是死代码（首页不响应）,改为激活编辑器并创建时间线文件,
+        复用 MainWindow 已有的 MODULE_ACTIVATED(action=create_project)通路。
+        """
+        try:
+            from PyQt6.QtWidgets import QInputDialog
+            text, ok = QInputDialog.getText(
+                self, "新建项目", "项目名称", text="未命名项目"
+            )
+            if not ok or not text.strip():
+                return
+            self._event_bus.emit(EventType.MODULE_ACTIVATED, {
+                "target": "editor",
+                "action": "create_project",
+                "name": text.strip(),
+            })
+            logger.info("首页 CTA:请求新建项目 %s", text)
+        except Exception as e:
+            logger.warning("新建项目失败: %s", e)
+
+    def _import_project(self) -> None:
+        """V4.43.3:首页空项目 CTA → 选 .timeline / .proj 文件导入
+
+        通过 QFileDialog 选文件,然后走 MODULE_ACTIVATED(open_project) 通路,
+        与 _open_recent_project 行为一致。
+        """
+        try:
+            from PyQt6.QtWidgets import QFileDialog
+            path_str, _ = QFileDialog.getOpenFileName(
+                self,
+                "导入项目文件",
+                str(Path(__file__).parent.parent.parent.parent / "data" / "projects"),
+                "拾光剪影工程 (*.timeline *.proj);;JSON (*.json);;所有文件 (*)",
+            )
+            if not path_str:
+                return
+            self._open_recent_project(path_str)
+        except Exception as e:
+            logger.warning("导入项目失败: %s", e)
 
     def _open_recent_project(self, project_path: str):
         """项目卡片打开/双击 — 真正加载工程文件
