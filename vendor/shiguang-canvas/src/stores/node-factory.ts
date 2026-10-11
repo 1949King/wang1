@@ -52,6 +52,9 @@ export type CharacterEntry = {
   representative_line?: string;
   background?: string;
   notes?: string;
+  /** 3D 导演台体型预设（缺口①）。取值 = riggedHumanoid.HUMAN_PRESETS 的 key：
+   *  male_std / female_std / male_thin / male_heavy / child；空 = 按性别·年龄段推断。 */
+  human_variant?: string;
   /** 由 Python build_character_prompt 拼好的生图提示片段（服务端下发）。
    *  前端直接消费，不要自己再拼字段 —— 两份拼装逻辑必然漂移。 */
   prompt?: string;

@@ -154,6 +154,8 @@ export type EncodeResult = {
   ok: boolean;
   message?: string;
   url?: string;
+  /** 后端落盘后的本机绝对路径 —— 送剪辑时间线时回传它（画布是 WebView，读不了本地文件） */
+  path?: string;
   frames?: number;
   fps?: number;
   duration?: number;

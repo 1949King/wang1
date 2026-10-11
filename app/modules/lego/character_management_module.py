@@ -77,6 +77,9 @@ CHARACTER_FIELD_SCHEMA = [
     ("representative_line", "代表台词", "text",  False, "other"),
     ("background",   "人物背景",     "text",    False, "other"),
     ("notes",        "备注",         "text",    False, "other"),
+    # 缺口①：交给 3D 导演台的身体预设。放 other 组（**不进生图提示词** ⇒ 不必改
+    # canvas_bridge.build_character_prompt，冻结区的桥接行为零变化）。
+    ("human_variant", "体型预设（3D 导演台）", "enum", False, "other"),
 ]
 
 # 分组渲染顺序 + 显示名（UI 渲染与提示词筛选共用同一份定义）
@@ -98,6 +101,30 @@ def characters_schema_by_group(group: str) -> List[tuple]:
 
 GENDER_OPTIONS = ["男", "女", "其他"]
 ROLE_OPTIONS = ["主角", "配角", "反派", "路人"]
+
+# 3D 导演台体型预设（缺口①）：值必须与画布 `riggedHumanoid.ts::HUMAN_PRESETS` 的 key
+# **逐字相同**，否则导演台查不到预设、只能退回「按性别/年龄段推断」的兜底。
+# 唯一真相源在画布侧，这里只是「可选项镜像」；改动需同步 _verify/check_character_schema.py 与本表。
+HUMAN_VARIANT_OPTIONS = [
+    ("", "未指定（按性别/年龄段推断）"),
+    ("male_std", "男·标准"),
+    ("female_std", "女·标准"),
+    ("male_thin", "男·瘦"),
+    ("male_heavy", "男·胖"),
+    ("child", "儿童"),
+]
+
+# enum 字段 → 可选值来源。(value, 显示文本) 成对；值为 "" 表示「未指定」。
+# 注意：gender / role_type 虽也是 enum，但由头部单行控件承载（见 _HEADER_FIELD_KEYS），
+# 不会走到滚动表单的 enum 分支，故无需登记在这里。
+_ENUM_SOURCES: Dict[str, List[tuple]] = {
+    "human_variant": HUMAN_VARIANT_OPTIONS,
+}
+
+
+def enum_options(key: str) -> List[tuple]:
+    """取 enum 字段的可选值；无来源返回空列表（调用方退化为纯文本框，绝不静默丢字段）。"""
+    return list(_ENUM_SOURCES.get(key, []))
 
 
 # ---------------------------------------------------------------------------
@@ -318,10 +345,13 @@ class CharacterEditorPanel(QWidget):
         form_layout.setSpacing(10)
 
         self._text_edits: Dict[str, QTextEdit] = {}
+        # enum 字段的下拉框。此前动态生成器只认 text/string ⇒ enum 字段**根本没有控件**，
+        # 新加一个 enum 字段会表现为「标题看得见、值填不了、保存后永远是空」的静默失效。
+        self._enum_combos: Dict[str, QComboBox] = {}
         for group_key, group_label in CHARACTER_FIELD_GROUPS:
             fields = [
                 f for f in characters_schema_by_group(group_key)
-                if f[0] not in _HEADER_FIELD_KEYS and f[2] in ("text", "string")
+                if f[0] not in _HEADER_FIELD_KEYS and f[2] in ("text", "string", "enum")
             ]
             if not fields:
                 continue  # base 组已由头部单行控件承载
@@ -333,10 +363,21 @@ class CharacterEditorPanel(QWidget):
             form_layout.addWidget(group_lbl)
             # inner 组字段普遍短，压缩高度以免面板过长
             box_h = 76 if group_key == "inner" else 104
-            for key, label, _ftype, _required, _group in fields:
+            for key, label, ftype, _required, _group in fields:
                 lbl = QLabel(label)
                 lbl.setStyleSheet("color:#bbb;font-size:12px;font-weight:bold;")
                 form_layout.addWidget(lbl)
+                opts = enum_options(key) if ftype == "enum" else []
+                if opts:
+                    # 有枚举来源 ⇒ 下拉框（值存在 itemData 里，与显示文本解耦）
+                    combo = QComboBox()
+                    for value, text in opts:
+                        combo.addItem(text, value)
+                    combo.setStyleSheet(self._combo_style())
+                    self._enum_combos[key] = combo
+                    form_layout.addWidget(combo)
+                    continue
+                # 无枚举来源的 enum / 常规文本 ⇒ 文本框兜底，绝不静默丢字段
                 edit = self._mk_text_edit("", max_height=box_h)
                 self._text_edits[key] = edit
                 form_layout.addWidget(edit)
@@ -444,6 +485,9 @@ class CharacterEditorPanel(QWidget):
         self._tags_edit.setText(tags or "")
         for key, edit in self._text_edits.items():
             edit.setPlainText(c.get(key) or "")
+        for key, combo in self._enum_combos.items():
+            idx = combo.findData(c.get(key) or "")
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.set_enabled(True)
 
     def clear(self):
@@ -453,6 +497,8 @@ class CharacterEditorPanel(QWidget):
         self._tags_edit.clear()
         for edit in self._text_edits.values():
             edit.clear()
+        for combo in self._enum_combos.values():
+            combo.setCurrentIndex(0)
         self.set_enabled(False)
 
     def set_enabled(self, enabled: bool):
@@ -460,6 +506,7 @@ class CharacterEditorPanel(QWidget):
             self._name_edit, self._gender_combo, self._role_combo,
             self._age_edit, self._tags_edit,
             *self._text_edits.values(),
+            *self._enum_combos.values(),
             self._save_btn, self._delete_btn,
         ]
         for w in widgets:
@@ -482,6 +529,8 @@ class CharacterEditorPanel(QWidget):
         }
         for key, edit in self._text_edits.items():
             data[key] = edit.toPlainText().strip()
+        for key, combo in self._enum_combos.items():
+            data[key] = str(combo.currentData() or "")
         return data
 
     def _on_save(self):

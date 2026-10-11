@@ -444,6 +444,14 @@ type Store = {
   applyStage3dCameraPlan: (cameras: StageCameraPlanShot[]) => void;
   consumeStage3dCameraPlan: () => void;
 
+  // ===== 缺口① 角色库 → 3D 导演台：把一个角色投成导演台人偶 =====
+  /** 递增序号：触发 Stage3D 消费 pendingStage3dCast（仅序号变化才应用，避免重复投递） */
+  stage3dCastSeq: number;
+  /** 待投递的角色（消费后置空，防止切回导演台时重复添加同一个角色） */
+  pendingStage3dCast: CharacterEntry | null;
+  requestStage3dCast: (character: CharacterEntry) => void;
+  consumeStage3dCast: () => void;
+
   // ===== Canvas View Preferences =====
   showGrid: boolean;
   smoothLine: boolean;
@@ -634,6 +642,8 @@ export const useCanvasStore = create<Store>((set, get) => ({
   directorTargetNodeId: null,
   stage3dApplySeq: 0,
   pendingStage3dCameras: null,
+  stage3dCastSeq: 0,
+  pendingStage3dCast: null,
   activeProjectId: null,
   activeProjectName: "未命名工作区",
   activeCanvasId: null,
@@ -2318,6 +2328,15 @@ export const useCanvasStore = create<Store>((set, get) => ({
     }));
   },
   consumeStage3dCameraPlan: () => set({ pendingStage3dCameras: null }),
+  requestStage3dCast: (character) => {
+    set((state) => ({
+      pendingStage3dCast: character,
+      stage3dCastSeq: state.stage3dCastSeq + 1,
+      viewMode: "stage3d",
+      status: `已把「${character.name || "角色"}」投递到 3D 导演台`,
+    }));
+  },
+  consumeStage3dCast: () => set({ pendingStage3dCast: null }),
 
   // ===== Character Library（对接 Python CharacterStore）=====
   characters: [] as CharacterEntry[],

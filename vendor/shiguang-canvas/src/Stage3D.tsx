@@ -79,7 +79,10 @@ import {
 } from "./stage3dPoseVideo";
 import { useCanvasStore } from "./store";
 import { uploadAssetToHost, poseExtractViaHost } from "./bridge";
+import { publishStage3dArtifact, registerControlNetArtifacts, sendLatestArtifactToTimeline, useLatestStage3dArtifact } from "./stage3dArtifacts";
 import { CameraRecorder } from "./cameraRecorder";
+import { disposeObject3D, isWorldVisible, readRenderTargetToDataURL } from "./stage3dGlUtils";
+import { Stage3dCastPanel, useStage3dCast } from "./stage3dCast";
 import CommandPalette, { isTypingTarget, type CommandItem } from "./CommandPalette";
 
 export type StageActor = {
@@ -168,15 +171,6 @@ function isFrontMarkerHit(obj: THREE.Object3D): boolean {
     p = p.parent;
   }
   return false;
-}
-
-function isWorldVisible(obj: THREE.Object3D): boolean {
-  let p: THREE.Object3D | null = obj;
-  while (p) {
-    if (!p.visible) return false;
-    p = p.parent;
-  }
-  return true;
 }
 
 type Props = {
@@ -415,19 +409,6 @@ function loadScene(): ScenePersist | null {
   } catch {
     return null;
   }
-}
-
-function disposeObject3D(obj: THREE.Object3D) {
-  obj.userData._disposed = true;
-  obj.traverse((ch) => {
-    if (!(ch instanceof THREE.Mesh)) return;
-    // GLB 模板几何/材质是共享的，dispose 会把缓存里的人偶一起毁掉，下次只能看到胶囊骨架
-    if (ch.userData.sharedTemplate) return;
-    ch.geometry?.dispose();
-    const mat = ch.material;
-    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-    else mat?.dispose();
-  });
 }
 
 function actorPose(a: StageActor): JointPose {
@@ -897,6 +878,8 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
   // 消费 AI 分镜相机计划：applyStage3dCameraPlan 递增 stage3dApplySeq 后，把 pendingStage3dCameras 应用进实时视口
   const stage3dApplySeq = useCanvasStore((state) => state.stage3dApplySeq);
+  /** 最近一条已导出的 3D 产物（「→ 时间线」按钮的可用性与提示用，通道见 stage3dArtifacts.ts） */
+  const last3dArtifact = useLatestStage3dArtifact();
   useEffect(() => {
     const pending = useCanvasStore.getState().pendingStage3dCameras;
     if (!pending || !pending.length) return;
@@ -2134,6 +2117,9 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     undoRef.current = actors;
   };
 
+  // 缺口①「角色库 → 3D 导演台」消费端。必须放在 pushUndo 之后（它是 const，放前面会 TDZ）。
+  useStage3dCast({ actors, setActors, setSelectedId, setSceneMode, onStatus, pushUndo });
+
   const addActor = (kind: StageActor["kind"]) => {
     pushUndo();
     const colors = [
@@ -2444,6 +2430,11 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       document.body.removeChild(a);
     });
     onStatus(`已导出 ${packs.length} 个 ControlNet 通道（${actorActors.length} 个演员骨架）`);
+    // 除了浏览器下载，同时入库并登记 —— 这类产物在画布侧只有 data URL，没有本机路径，
+    // 必须经 /host/upload-asset 落 inbox 才能送剪辑（唯一通道见 stage3dArtifacts.ts）
+    void registerControlNetArtifacts(packs).then((n) =>
+      onStatus(`已入库 ${n}/${packs.length} 个 ControlNet 通道，可点「最近产物 → 时间线」`),
+    );
   };
 
   /** 导出选中角色（或第一个有 Motion 的角色）的 BVH 动画文件 */
@@ -2703,32 +2694,6 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     }
     onExportBatch(segments);
     onStatus(`✅ 批量导出完成 ${segments.length}/${eligible.length} 个分镜`);
-  };
-
-  /** 从 WebGLRenderTarget 读像素 → Canvas → PNG data URL */
-  const readRenderTargetToDataURL = (
-    renderer: THREE.WebGLRenderer,
-    rt: THREE.WebGLRenderTarget,
-    w: number,
-    h: number,
-  ): string => {
-    const buf = new Uint8Array(w * h * 4);
-    renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d")!;
-    const imgData = ctx.createImageData(w, h);
-    // WebGL 左下角起点 → Canvas 左上角起点，需要垂直翻转
-    for (let row = 0; row < h; row++) {
-      const srcStart = row * w * 4;
-      const dstStart = (h - 1 - row) * w * 4;
-      for (let col = 0; col < w * 4; col++) {
-        imgData.data[dstStart + col] = buf[srcStart + col];
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-    return canvas.toDataURL("image/png");
   };
 
   const captureActorViews = (actorId: string) => {
@@ -3389,7 +3354,12 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
         url: enc.url,
         name: `白模动作_${enc.frames}帧_${enc.duration}s.mp4`,
       });
-      onStatus(`✅ 白模动作视频已生成（${enc.frames} 帧 / ${enc.duration}s），已挂为动作参考`);
+      // 登记为可送剪辑的产物（是否入轨由用户点「→ 时间线」决定，录制本身不自动入轨）
+      if (enc.path) {
+        publishStage3dArtifact({ path: enc.path, kind: "video", source: "stage3d_pose_video",
+          title: `白模动作_${enc.frames}帧_${enc.duration}s`, durationSec: enc.duration });
+      }
+      onStatus(`✅ 白模动作视频已生成（${enc.frames} 帧 / ${enc.duration}s）— 可点「最近产物 → 时间线」`);
     } finally {
       api.renderer.setRenderTarget(null);
       api.renderer.setSize(prevW, prevH, false);
@@ -3405,6 +3375,13 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       setPoseVideoBusy(false);
       setPoseVideoProgress(0);
     }
+  };
+
+  /** 把最近一次导出的 3D 产物送进剪辑时间线 —— 唯一通道见 stage3dArtifacts.ts */
+  const sendLastArtifactToTimeline = async () => {
+    onStatus(`⏳ 正在送入剪辑时间线：${last3dArtifact?.title || ""}…`);
+    const r = await sendLatestArtifactToTimeline();
+    onStatus(`${r.ok ? "✅" : "❌"} ${r.message}`);
   };
 
   /** 停止正在播放的路径 */
@@ -3964,6 +3941,10 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
                 群像
               </button>
             </div>
+
+            {/* 缺口①：直接从角色库投人偶进来（体型/发型/配色由角色字段决定，不随机） */}
+            <Stage3dCastPanel visible={railTab === "actor"} />
+
             {sceneMode === "group" ? (
               <>
                 <div className="section-title">群像模板（生成多人）</div>
@@ -4487,6 +4468,14 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
               title="选中角色时可用"
             >
               🎭 导出三视图（前·侧·背）
+            </button>
+            <button
+              className="btn teal"
+              onClick={() => void sendLastArtifactToTimeline()}
+              disabled={!last3dArtifact}
+              title="把最近一次导出的产物（白模动作视频/首尾帧/分镜/三视图/ControlNet）送入剪辑时间线"
+            >
+              ➡ 最近产物 → 时间线
             </button>
             <div className="section-title">镜头路径</div>
             <p className="muted tiny">选两个机位（先选起点再点"→"），生成插值路径后可循环预览</p>

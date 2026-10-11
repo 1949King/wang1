@@ -10,6 +10,11 @@
     ④ vendor/shiguang-canvas/src/stores/node-factory.ts
     ⑤ vendor/AI-Canvas-tauri/src/libtv/stores/node-factory.ts
     ⑥ 两个 store.ts 的「角色设定块 → prompt」拼装（必须消费 ③ 下发的 prompt）
+    ⑦ character_management_module.py 的 HUMAN_VARIANT_OPTIONS ↔ 画布 riggedHumanoid.ts 的
+       HUMAN_PRESETS：体型预设值必须**逐字相同**，否则「角色库 → 3D 导演台」查不到预设、
+       静默退回兜底推断（角色库选了「儿童」，导演台给成年男体，不报错）。2026-10-12 加入。
+    ⑧ character_management_module.py 的 enum 字段必须有控件且**五处读写都接线**
+       （生成器只认 text/string 时，enum 字段会「标题看得见、值填不了」）。2026-10-12 加入。
 
 任何一处漏改都**不会报错**，只会表现为「填了不生效」或「前端看不到」。
 本脚本把这条链路变成可自动验证的。
@@ -149,6 +154,63 @@ def main() -> int:
         if "function applyCharBlock" not in s:
             problems.append(f"{rel} 缺少 applyCharBlock，角色设定块增删不幂等")
 
+    # ---- ⑦ 3D 导演台体型预设：Python 选项表必须与画布 HUMAN_PRESETS 的 key 逐字一致 ----
+    # 由来（2026-10-12，缺口①「角色库 → 3D 导演台」）：human_variant 是角色库交给导演台的
+    # 体型字段，值要拿去查画布侧的 HUMAN_PRESETS[variant]。两边一旦不逐字相同，导演台
+    # 查不到预设、**静默退回兜底推断**（角色库明明选了「儿童」，导演台给个成年男体，不报错）。
+    variants = _literal("HUMAN_VARIANT_OPTIONS")
+    py_values = [v for v, _label in variants]
+    rigged = os.path.join(ROOT, "vendor", "shiguang-canvas", "src", "riggedHumanoid.ts")
+    if not os.path.isfile(rigged):
+        problems.append("vendor/shiguang-canvas/src/riggedHumanoid.ts 缺失，无法校验体型预设镜像")
+    else:
+        m = re.search(r"export const HUMAN_PRESETS[^\n]*\{(.*?)\n\};", read(rigged), re.S)
+        if not m:
+            problems.append("riggedHumanoid.ts 未找到 HUMAN_PRESETS")
+        else:
+            ts_keys = re.findall(r'^\s*id:\s*"([^"]+)"', m.group(1), re.M)
+            if py_values[:1] != [""]:
+                problems.append(
+                    f"HUMAN_VARIANT_OPTIONS 首项应为「未指定」空值，实际 {py_values[:1]!r}"
+                )
+            if py_values[1:] != ts_keys:
+                problems.append(
+                    "HUMAN_VARIANT_OPTIONS 与画布 HUMAN_PRESETS 的 key 不一致"
+                    f"（py={py_values[1:]!r} vs ts={ts_keys!r}）⇒ 导演台会静默退回兜底推断"
+                )
+            if not ts_keys:
+                problems.append("HUMAN_PRESETS 里没抽到任何 id，检查本脚本的正则是否过期")
+
+    # ---- ⑧ enum 字段必须真有控件、真能被保存（否则「填了不可用」静默失效） ----
+    # 由来（2026-10-12）：动态表单生成器原本只认 text/string，新增 enum 字段会
+    # 「标题看得见、值填不了」，保存后永远是空 —— 与本文件开头说的「填了不生效」同一类缺陷。
+    header_keys = _literal("_HEADER_FIELD_KEYS")
+    enum_fields = [f[0] for f in schema if len(f) == 5 and f[2] == "enum" and f[0] not in header_keys]
+    module_src = read(MODULE)
+    # _ENUM_SOURCES 的值引用了另一个常量（HUMAN_VARIANT_OPTIONS），literal_eval 解不了
+    # ⇒ 这里只取它的键名（键名本身就是字面量，够用）。
+    m_src = re.search(r"^_ENUM_SOURCES\s*(?::[^=]+)?=\s*\{(.*?)^\}", module_src, re.S | re.M)
+    src_keys = re.findall(r'"(\w+)"\s*:', m_src.group(1)) if m_src else []
+    if not m_src:
+        problems.append("未找到 _ENUM_SOURCES 定义（enum 字段的可选值来源表）")
+    for key in enum_fields:
+        if key not in src_keys:
+            problems.append(
+                f"enum 字段 {key} 不在 _ENUM_SOURCES 里 ⇒ 滚动表单里拿不到控件（会「填了不可用」）"
+            )
+    if 'f[2] in ("text", "string", "enum")' not in module_src:
+        problems.append("动态表单生成器没有把 enum 纳入控件分支 ⇒ enum 字段会没有控件")
+    wiring = {
+        "建下拉框": r"self\._enum_combos\[key\] = combo",
+        "提交时取值": r"for key, combo in self\._enum_combos\.items\(\):\s*\n\s*data\[key\]",
+        "载入时回填": r"for key, combo in self\._enum_combos\.items\(\):\s*\n\s*idx = combo\.findData",
+        "清空时复位": r"for combo in self\._enum_combos\.values\(\):\s*\n\s*combo\.setCurrentIndex\(0\)",
+        "启用态联动": r"\*self\._enum_combos\.values\(\),",
+    }
+    for label, pat in wiring.items():
+        if not re.search(pat, module_src):
+            problems.append(f"enum 下拉框的「{label}」未接线（只加控件不读写 ⇒ 填了不生效）")
+
     if problems:
         print("FAIL 角色库字段存在漂移：")
         for p in problems:
@@ -157,7 +219,8 @@ def main() -> int:
 
     print(
         f"OK 角色库字段六处同步 "
-        f"(fields={len(schema)}, visual={len(visual)}, groups={len(groups)})"
+        f"(fields={len(schema)}, visual={len(visual)}, groups={len(groups)}, "
+        f"enum={len(enum_fields)}, variants={len(py_values) - 1})"
     )
     return 0
 

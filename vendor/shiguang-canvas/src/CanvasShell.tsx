@@ -462,6 +462,8 @@ export default function CanvasShell(props: CanvasShellProps) {
   // 角色库（Step A）— 从 store 读取
   const characters = useCanvasStore((s) => s.characters);
   const refreshCharacters = useCanvasStore((s) => s.refreshCharacters);
+  // 缺口①：把角色库里的人直接投到 3D 导演台（store 通道，见 stage3dCast.tsx）
+  const requestStage3dCast = useCanvasStore((s) => s.requestStage3dCast);
   const bindCharacterToShot = useCanvasStore((s) => s.bindCharacterToShot);
   const unbindCharacterFromShot = useCanvasStore((s) => s.unbindCharacterFromShot);
   const syncCharacterToShot = useCanvasStore((s) => s.syncCharacterToShot);
@@ -1920,6 +1922,19 @@ export default function CanvasShell(props: CanvasShellProps) {
                           title="从角色库刷新"
                         >
                           ↻
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "4px 8px" }}
+                          disabled={!selectedData.characterId}
+                          onClick={() => {
+                            const c = characters.find((x) => x.id === selectedData.characterId);
+                            if (c) requestStage3dCast(c);
+                          }}
+                          title="把该角色投到 3D 导演台（体型/发型/配色取自角色字段，不随机）"
+                        >
+                          🎭
                         </button>
                       </div>
                       {selectedData.characterId && (
