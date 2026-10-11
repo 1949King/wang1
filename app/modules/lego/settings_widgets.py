@@ -947,7 +947,10 @@ class _PresetPreview(QWidget):
         for i in range(2):
             w_factor = 1.0 if i == 0 else 0.7
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(QColor("#ffffff" if not is_light else "#1a1a26", 80)))
+            # 注意：PyQt6 的 QColor 没有 (str, alpha) 重载 —— 必须用 _rgb() 走
+            # QColor(name) + setAlpha()。V4.43.4 曾误写成 QColor("#fff", 80)，
+            # 真机一渲染 paintEvent 就抛 TypeError（静态门禁查不出来）。
+            p.setBrush(QBrush(_rgb("#ffffff" if not is_light else "#1a1a26", 80)))
             p.drawRoundedRect(
                 QRectF(in_x + 2, prev_y + i * 6, prev_w * w_factor - 4, 3), 1, 1
             )

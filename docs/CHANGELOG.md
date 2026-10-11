@@ -1,5 +1,55 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.5 (2026-10-11) — 热修：外观卡动画节点 QColor 非法重载崩溃（真机才暴露）
+
+> 用户连续多次要求「启动 qt6 版本」→ 改用真机启动（不带 offscreen）后 10 秒即疯狂
+> 刷屏 CRITICAL。**这是 V4.43.4 引入的运行时崩溃，11 道静态门禁 + offscreen 启动
+> 全部漏过。**
+
+### 【症状 / 证据】
+```
+File "app/modules/lego/settings_widgets.py", line 950, in _paint_animation_node
+    p.setBrush(QBrush(QColor("#ffffff" if not is_light else "#1a1a26", 80)))
+TypeError: arguments did not match any overloaded call:
+  QColor(name: str): too many arguments
+  ...
+```
+
+### 【根因】
+- **PyQt6 的 `QColor` 没有 `(name: str, alpha: int)` 重载**。合法写法只有
+  `QColor(name)`（单参，alpha 默认 255）或 `QColor(r, g, b, alpha)`（四整数）。
+- V4.43.4 在 `_paint_animation_node` 里误写成 `QColor("#fff", 80)`。
+
+### 【为什么 11 道门禁 + 4 次 offscreen 启动全没抓到】
+| 检查 | 为什么漏 |
+|---|---|
+| ruff 棘轮 | 不做类型检查 |
+| AST scope（SCOPE） | 扫的是「未定义名字」，`QColor` 是已导入的合法名字 |
+| 单测 | 没有任何用例覆盖 `paintEvent` 的运行时绘制 |
+| tsc / vitest | 是 TypeScript 侧，与 PyQt 无关 |
+| **offscreen 启动 ×4** | **设置对话框没被打开 ⇒ `_PresetPreview.paintEvent` 根本不触发** |
+
+⇒ **只有「真机（有 display）+ 打开该界面」才能暴露这类崩溃。**
+
+### 【修复】
+- 改用本文件已有的 `_rgb(hexv, alpha)` helper（内部走 `QColor(name)` + `setAlpha()`）：
+  ```python
+  p.setBrush(QBrush(_rgb("#ffffff" if not is_light else "#1a1a26", 80)))
+  ```
+- 全项目 AST 扫描 `QColor(<str>, ...)` 反模式 → **0 命中**（修复后已无同类）。
+
+### 【验证】
+- 修复后**真机重启 30 秒：0 个 TypeError / 0 个 paintEvent 崩溃**（对比修复前 10 秒即刷屏）。
+- 并看到后续正常日志：`canvas bridge listening on 18765` / `canvas static server on 3011` /
+  `WebEngineView created in 381ms`。
+
+### 【永久纪律】
+- **静态门禁全绿 ≠ 运行时没崩。** 凡自绘控件（QPainter / QColor / QPen）的改动，
+  交付前**必须真机启动**（不能只 offscreen），且**打开那个界面**让 `paintEvent` 真跑一遍。
+  offscreen 会掩盖一切绘制类崩溃。
+
+---
+
 ## V4.43.4 (2026-10-11) — 外观页 1:1 复刻开源 2×2 大卡墙（用户裁定「完全复刻」）
 
 > 用户原话：「我要的是完全复刻这个样子的效果。你把那个开源代码库 AI 画布那个给我拷下来，
