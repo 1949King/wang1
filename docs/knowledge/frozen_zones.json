@@ -94,7 +94,7 @@
     {
       "id": "exit-media",
       "title": "关程序停声 · 防幽灵音频",
-      "reason": "关窗后 Windows WMF 偶发残留出声；已强制 stop/静音/清 source",
+      "reason": "关窗后 Windows WMF 偶发残留出声；已强制 stop/静音/清 source。｜【2026-10-11 用户授权解冻 · 仅 closeEvent 一个符号，其余 84 锁点一字未动】V4.43.14「会话恢复」需在退出时落盘「本次在哪」（当前模块 + 当前工程），唯一可用的挂点就是 closeEvent。初版实现把会话保存插在 _stop_all_media_on_exit() 之前（注释写明「放在最前」），**字面违反不变量 1**；经用户裁定「保不变量，保存挪后」，改为紧跟媒体停止、早于其余清理步骤（后续清理出错也不丢会话）。三条不变量文本一字未改。新增 _verify/check_exit_media_invariant.py：把三条不变量变成 AST 可执行断言（已用「改动前版本」做反例验证，确认必报红），并挂到 pre-commit ③b 与 run_all_checks（EXITMEDIA）—— 起因是 frozen_zone_guard 只比哈希，只能报「代码被改」、报不出「不变量被破」，本次正是靠人眼才发现冲突。",
       "invariants": [
         "closeEvent 必须先 _stop_all_media_on_exit",
         "EditorModule.cleanup 调 _shutdown_media(release_source=True)",

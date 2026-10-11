@@ -1284,6 +1284,20 @@ class MainWindow(QMainWindow):
                     self.show_status(f"打开工程失败: {e}", "#f97316")
             return
 
+        # V4.43.14 补：首页「+ 新建项目」此前**没有分支**（只切了模块、项目没建也没落盘，
+        # 导致回首页时扫描 data/projects/ 看不到刚建的项目）。
+        if module_id == "editor" and action == "create_project":
+            name = str(pending.get("name") or "未命名项目").strip()
+            if widget is not None and hasattr(widget, "create_blank_project"):
+                try:
+                    path = widget.create_blank_project(name)
+                    self.show_status(f"已新建工程：{name}", "#22c55e")
+                    logger.info("已新建工程并落盘: %s", path)
+                except Exception as e:
+                    logger.warning("新建工程失败: %s", e)
+                    self.show_status(f"新建工程失败: {e}", "#f97316")
+            return
+
         if module_id == "editor" and workflow_hint and widget:
             if hasattr(widget, "_on_workflow_hint_received"):
                 widget._on_workflow_hint_received(workflow_hint)
@@ -1393,6 +1407,39 @@ class MainWindow(QMainWindow):
             self.set_module_widget("help", HelpModule())
         self.switch_to_module("help")
     
+    def _restore_last_session(self) -> None:
+        """启动后按设置开关恢复上次会话：跳回上次的模块 / 项目（V4.43.14）。
+
+        用户需求原话：「上次关闭的内容，等到下一次开启的时候，如果用户开启了此开关，
+        系统会直接从上一次用户开启的那个模块功能去直接跳转到对应的那个模块功能，并跳转到
+        对应的项目里面去；如果未开启，系统会自动保存存档，然后用户手动点击到该功能模块
+        的时候，它会有这个记录。」
+
+        ⚠️ **不能用 `switch_to_module()`** —— 它经 `_nav_bar.select_module()` 只认导航栏
+        按钮，对 `nav_hidden` 模块（如 settings）静默无效（V4.43.11 踩过）。这里走
+        `_perform_module_load` / `_activate_module`。
+        """
+        try:
+            from . import session_state as ss
+            if not self._settings.value(ss.SETTING_KEY_RESUME_SESSION, True, type=bool):
+                return  # 开关关闭：只留存档，用户自己点进去时能看到
+            data = ss.load_last_session()
+            mod = str(data.get("module") or "")
+            if not mod or mod not in self._modules:
+                return
+            info = self._modules[mod]
+            if not info.instance:
+                self._perform_module_load(mod)
+            else:
+                self._activate_module(mod, info)
+            proj = str(data.get("project") or "")
+            widget = self.get_module_widget(mod)
+            if ss.project_exists(proj) and widget is not None and hasattr(widget, "import_project"):
+                widget.import_project(proj)
+            self.show_status(f"已恢复上次进度 · {ss.describe(data)}", "#22c55e")
+        except Exception as e:
+            logger.debug("恢复上次会话失败（忽略，不影响启动）: %s", e)
+
     def _show_settings(self):
         """显示设置界面（主界面内的页面）
 
@@ -1673,8 +1720,19 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """关闭事件"""
         logger.info("用户关闭主窗口")
-        # 先停一切媒体，再存盘/拆控件，避免 Windows WMF 关窗后仍出声
+        # 先停一切媒体，再存盘/拆控件，避免 Windows WMF 关窗后仍出声。
+        # ⚠️ 不变量（exit-media zone）：本句必须是 closeEvent 的第一件事。
+        #    2026-10-11 解冻时按用户裁定「保不变量，保存挪后」保留此顺序。
         self._stop_all_media_on_exit()
+        # V4.43.14：随即记住「本次退出时在哪」（模块 + 当前工程），供下次启动按开关恢复。
+        # 紧跟媒体停止、早于其余清理步骤 —— 后续清理即使出错也不会丢会话。
+        try:
+            from . import session_state as ss
+            _ed = self._modules.get("editor")
+            _proj = getattr(getattr(_ed, "instance", None), "_project_path", "") or ""
+            ss.save_last_session(self._current_module or "", _proj)
+        except Exception as e:
+            logger.debug("保存会话状态失败: %s", e)
         logger.info("保存项目状态...")
         self._event_bus.emit(EventType.PROJECT_SAVED, {})
         logger.info("清理资源...")

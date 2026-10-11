@@ -67,7 +67,7 @@ SUMMARY: PASS ✅
 
 ### 【② 会话恢复（新增 `session_state` 模块）】
 - 记录「上次退出时在哪个模块 / 哪个工程 / 何时」→ `data/session_state.json`；
-  主窗口 `closeEvent` **最前**写入（避免后续清理出错导致丢失）。
+  写入位置 = `closeEvent` 里**紧跟 `_stop_all_media_on_exit()` 之后**、早于其余清理步骤（⚠️ 初版写在**最前**，字面违反 `exit-media` 不变量「closeEvent 必须先 `_stop_all_media_on_exit`」；2026-10-11 用户授权解冻后裁定「保不变量，保存挪后」——见本版 ④）。
 - 启动后 1.6s 按开关恢复：`_restore_last_session()` 跳回上次模块并重新打开工程。
   ⚠️ **不用 `switch_to_module()`** —— 它经 `select_module()` 只认导航栏按钮，对 `nav_hidden`
   模块静默无效（V4.43.11 踩过）；这里走 `_perform_module_load` / `_activate_module`。
@@ -77,11 +77,69 @@ SUMMARY: PASS ✅
 - ⚠️ 核实发现：常规页那 6 张 `PreferenceCard` 的 `toggled` **从未被统一连接**
   （看起来有开关、其实没接线）；本版开关**显式自行连接**，不重复这个坑。
 
+### 【③ 修 GPrice 日期炸弹（L1 层漏改的那一半）】
+- 现象：`_verify/check_global_price.py` 的 **D6「L1 恢复第二拍调节」**失败（本日 22:22 复现）。
+- 真因（读 `budget_pacer.py:272` 确认）：**L1 是「日」预算**，超支判据基于
+  `budget_pacer._day_progress()`（今日已过时间比例），而用例硬编码 `p.record_spend(90.0)`
+  （预算 100）—— 只有当「当日已过比例 < 0.90」时才判超支 ⇒ **每晚约 21:36 后必然变红**。
+  这与 `over_paced_spend` 是**同源的日期炸弹**，此前只修了 L0 层、**L1 层漏改**。
+- 修复：新增 `over_paced_day_spend(bp_mod, budget)`，按当日进度反推「当日应花 + margin」；
+  D5/D6 改用它。**实测**：`24/24 通过`；并逐时刻验证 —— 00:00/06:00/12:00/18:00/21:00/
+  22:00/23:00 **全天任意时刻都稳定判超支** ✅
+
+### 【④ 解冻 `exit-media`：会话保存挪到媒体停止之后】
+
+- **授权**：2026-10-11 用户明确授权「解冻 `exit-media`」，并在两个方案里裁定
+  「**保不变量，保存挪后**」。另一方案（保留原位 + 改写不变量）被否 —— 那等于放宽 guard 判据。
+- **只动一个符号**：`app/modules/lego/main_window.py:closeEvent`。其余 **84 个锁点一字未动**；
+  重锁后仍是 `85 locks` —— 锁点数不变就是「没外溢」的最直接证据。
+- **为什么绕不开**：会话恢复要在退出时落盘「在哪」，唯一挂点就是 `closeEvent`。
+  （试过「换协作对象」这招但行不通：`aboutToQuit` 触发时 `closeEvent` 已拆过控件，读不到工程路径。）
+- **改动内容**：把 9 行会话保存从「最前」挪到 `_stop_all_media_on_exit()` **之后**、
+  `logger.info("保存项目状态...")` 之前（净 +2 行）。于是媒体仍最先停（不变量 1 成立），
+  保存仍早于**全部**风险步骤（后续清理出错也不丢会话）—— 两个目标同时保住。
+- **三条不变量文本一字未改**；另新增可执行断言（见【门禁】）。
+
+### 【⑤ 同版补记：commit `c07d847` 的 A/B/D 三层落地】
+
+V4.43.14 定版前的一次独立提交（`c07d847`，17 文件 +3220/−264）。当时**刻意未写版本号与 CHANGELOG**：
+`version.py` / `CHANGELOG.md` 正被另一路会话暂存着本版内容，写进去会把两边搅成一个提交。现并入本版记录：
+
+| 层 | 内容 | 关键文件 |
+|---|---|---|
+| A1 | OTIO 时间线互操作（.otio / .edl / .fcpxml 导出与回读） | 新 `app/core/interchange/*` |
+| A2 | 转场伪别名修正 | `app/core/transitions.py` |
+| A3 | 时间线格式导出跳过整条 ffmpeg 渲染 | `editor_export_panel.py` |
+| B1 | Piper TTS 接线 | `voice_generator.py` |
+| B2 | Agent 会话检查点（崩溃重启**强制 paused**，绝不自动续跑） | `agent_session.py` + `canvas_server.py` |
+| B3 | 官方 MCP SDK 后端（`auto/sdk/native`；显式 `sdk` 而缺席即**诚实失败**） | 新 `mcp_sdk_backend.py` + `mcp_client.py` |
+| B4 | 三套扩展系统合一（注册表 / 技能 / 插件） | 新 `extension_facade.py` + `capability_handlers.py` |
+| D1 | 补帧改光流成对插值 | `ai_interpolation.py` |
+| D2 | 真像素审美测量替代常量 70 基线 | 新 `aesthetic_analyzer.py` + `five_dimension_scorer.py` |
+
+三条值得留档的实测结论：
+
+1. **`import PyQt6.QtCore` 之后再 `import opentimelineio` → 段错误**（反序正常）⇒ OTIO 永不在 GUI 进程加载，
+   全部走无 Qt 子进程 `_otio_worker.py`（与 `wmic` / `ffmpeg` 同一隔离范式）。
+2. **噪声会伪装成「清晰」**：未处理时噪声图 composite **85.8 反而压过**真清晰图 61.6。修法 = 先中值滤波压噪、
+   再减去噪声贡献；该系数经 σ=5..40 标定为 **2.29**（实测 2.276~2.397，±2.6%）。
+3. **官方 `ruff_gate.py` 对「未跟踪新文件」不强制 0 违规（存在盲区）** —— 它漏报了一个 `B905`。
+   已自建逐文件 HEAD↔工作区比对核对，17 个文件全部满足「新文件 0 / 已跟踪只减不增」。
+
 ### 【门禁】
-- ruff 存量棘轮零新增（163 文件）/ 规模守卫通过 / frozen_zone 85 locks intact。
-- ⚠️ `stability_gate` 报 1 项 —— **`app/core/voice_generator.py:401`** 的 `except: pass`。
-  该文件**非本轮改动**（与 `ai_interpolation.py` / `transitions.py` / `settings_module.py` /
-  `core/interchange/*` 同属**并行会话**的产物），**未擅改**，仅上报。
+- ruff 存量棘轮零新增 / 规模守卫通过 / **稳定性门禁 250 项零新增** / GPrice 24/24 通过 /
+  `frozen_zone` 85 locks intact（解冻 `exit-media` 后已重锁）。
+- ✅ 曾阻塞本轮的 **8 项 `stability_gate` 违规已清零**：它们是上一个提交 `c07d847` 的新模块引入的
+  （`otio_adapter.py`×4 swallow-except、`_otio_worker.py`×3 print、`voice_generator.py`×1），
+  **同批已修**（4 处临时清理抽成 `_safe_unlink()`；其余逐处补 `logger.debug(exc_info=True)`；
+  `_otio_worker.py` 的 print 属**子进程协议**，用门禁自带的行内豁免
+  `# stability-gate: allow-print（理由）` —— 未放宽基线）。
+  ⇒ 本轮**不需要** `--no-verify`，走正常门禁提交。
+- 🆕 新增 `_verify/check_exit_media_invariant.py`，挂 pre-commit **③b** 与 `run_all_checks`（**EXITMEDIA**）：
+  把 `exit-media` 的三条不变量变成 AST 断言。起因 = 本版 ② 的初版改动**字面违反**了不变量
+  「closeEvent 必须先 `_stop_all_media_on_exit`」，而 `frozen_zone_guard` 只比哈希，
+  **报得出「代码被改」却报不出「不变量被破」**（人若只看到「有漂移」就去重锁就完了）。
+  已用「改动前版本」做**反例验证**，确认它必然报红 —— 不是摆设。
 
 ---
 

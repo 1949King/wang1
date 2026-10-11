@@ -22,7 +22,7 @@
     "symbol:app/modules/lego/editor_module.py:cleanup": "e106af6665066738",
     "symbol:app/modules/lego/editor_module.py:_shutdown_media": "a493057dfc78d4e5",
     "symbol:app/modules/lego/main_window.py:_stop_all_media_on_exit": "9c155431a7ce0688",
-    "symbol:app/modules/lego/main_window.py:closeEvent": "0ce7f489d9b14837",
+    "symbol:app/modules/lego/main_window.py:closeEvent": "6c75f25fd1d79188",
     "marker:app/modules/lego/editor_module.py:exit-media:shutdown": "16ad1994e3a3265c",
     "marker:app/modules/lego/main_window.py:exit-media:main-window": "9c155431a7ce0688",
     "file:app/modules/lego/clip_transform.py": "49e63d47b1237cac",

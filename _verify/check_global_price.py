@@ -59,6 +59,20 @@ def over_paced_spend(budget: float, month_progress: float, margin: float = 5.0) 
     return min(budget, budget * month_progress + margin)
 
 
+def over_paced_day_spend(bp_mod, budget: float, margin: float = 5.0) -> float:
+    """返回一个「任何时刻都判超支」的花费额 —— 供 **L1(BudgetPacer)** 使用。
+
+    L1 是**日**预算，超支判据基于 `budget_pacer._day_progress()`（今日已过时间比例），
+    而用例此前硬编码 `p.record_spend(90.0)`（预算 100）—— 只有当「当日已过比例 < 0.90」
+    时才判超支 ⇒ **每晚约 21:36 之后必然变红**（2026-10-11 22:22 实测 D6 失败）。
+    这与 `over_paced_spend` 是**同源的日期炸弹**，此前只修了 L0 层、L1 层漏改。
+
+    改为按当日进度反推：花掉「当日应花额度 + margin」，任何时刻都稳定超支。
+    封顶到 budget 仍成立：此时剩余为 0，判据下界 max(0.02,·) ≥ 0.02 ⇒ 误差为负。
+    """
+    return min(budget, budget * bp_mod._day_progress() + margin)
+
+
 def _load(fname: str):
     ai_dir = os.path.join(ROOT, "app", "core", "ai")
     pkg = "_sg_ai_pkg"
@@ -152,7 +166,9 @@ def main() -> int:
     # L1 同语义
     p = bp.BudgetPacer(budget=100.0, store_path=os.path.join(tmpdir, "d2.json"),
                        update_interval=1)
-    p.record_spend(90.0)
+    # 2026-10-11 修日期炸弹：L1 是「日」预算，原先硬编码 90.0 —— 当日已过比例 > 0.90
+    # （约 21:36 之后）就判不出超支、D6 必红。改按当日进度反推。
+    p.record_spend(over_paced_day_spend(bp, 100.0))
     p.set_observation(False, "暂停")
     time.sleep(1.1)
     check("D4 L1 冻结期 λ 不动", abs(p.get_lambda() - 0.2) < 1e-12)

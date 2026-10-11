@@ -96,6 +96,13 @@ fi
 echo "── ③ 冻结区守护（85 锁点哈希）"
 "$PY" scripts/frozen_zone_guard.py || fail=1
 
+echo "── ③b 冻结区语义不变量（哈希说不出「改得对不对」）"
+# 2026-10-11 补：③ 只比哈希 —— 它能报「这段冻结代码被改过」，却报不出
+# 「不变量被破」。实测过一次真实漏网：会话保存被插到 _stop_all_media_on_exit()
+# 之前，③ 报了漂移、不变量却静默失效（人若只看到「有漂移」就去重锁就完了）。
+# 故把 exit-media 的三条不变量变成 AST 断言，挂在这里。
+"$PY" _verify/check_exit_media_invariant.py || fail=1
+
 echo "── ④ 稳定性门禁（存量棘轮，只减不增）"
 "$PY" scripts/stability_gate.py || fail=1
 
@@ -214,5 +221,5 @@ if [ "$fail" -ne 0 ]; then
     echo "✗ 提交前卡点未通过，请修复后重试（紧急跳过：git commit --no-verify）"
     exit 1
 fi
-echo "✓ 提交前卡点全部通过（11 道）"
+echo "✓ 提交前卡点全部通过（12 道）"
 exit 0

@@ -139,6 +139,12 @@ CHECKS = [
     ("PINYIN", "_verify/check_pinyin_dict.py", "汉字注音字典（离线确定性）+ 四处接线"),
     # ── 单文件规模守卫（V4.39.4）──
     ("SIZE", "_verify/check_file_size.py", "单文件规模守卫（存量冻结，只许减不许增）"),
+    # ── 退出链路不变量（exit-media 冻结区的**语义**守卫，2026-10-11）──
+    #    为什么需要：frozen_zone_guard 只比对哈希，能报「代码被改」却报不出
+    #    「不变量被破」；实测有一次会话保存被插到 _stop_all_media_on_exit 之前，
+    #    哈希报了漂移、不变量却静默失效。本项把三条不变量变成可执行断言。
+    ("EXITMEDIA", "_verify/check_exit_media_invariant.py",
+     "退出链路不变量（closeEvent 先停媒体 / cleanup release_source / mute+stop+清源）"),
     # ── 长对白 scrub 压测（报告 §6.1 补项，2026-09-27）──
     ("SCRUBPERF", "_verify/check_scrub_perf.py", "长对白 scrub 压测（命中查找层）"),
     # ── 路由 mixin 属性可解析性（A4 迁移踩坑后置守卫，2026-09-27）──

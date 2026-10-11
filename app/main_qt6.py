@@ -795,6 +795,15 @@ class Application:
         except Exception as _e:  # pragma: no cover - 兜底，绝不影响启动
             logger.warning("首启提示未能显示（不影响使用）: %s", _e)
 
+        # V4.43.14：按设置开关恢复上次会话（模块 / 项目）—— 用户裁定「默认开启」。
+        # 延迟 1.6s：等主窗口完成首帧布局再切模块，避免抢在渲染之前。
+        try:
+            from PyQt6.QtCore import QTimer as _QTimer
+
+            _QTimer.singleShot(1600, mw._restore_last_session)
+        except Exception as _e:  # pragma: no cover - 兜底，绝不影响启动
+            logger.debug("会话恢复挂载失败（忽略）: %s", _e)
+
         # MainWindow.__init__() 已调用 _setup_default_modules()
         # 该方法从注册表读取启用状态，只注册已启用的模块导航按钮
         # 模块 widget 采用懒加载：首次点击时才实例化（大幅降低启动内存）

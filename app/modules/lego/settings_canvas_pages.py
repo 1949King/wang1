@@ -295,5 +295,25 @@ def build_general_top_block(mod) -> QWidget:
     footnote.setWordWrap(True)
     layout.addWidget(footnote)
 
+    # ── V4.43.14：启动恢复（用户要求「写进设置 + 加开关」）──
+    # 注意：上面 6 张 PreferenceCard 只 emit toggled、**从未被统一连接**（本次核实），
+    # 所以这里**显式自行连接**，不再制造"看起来有开关、其实没接线"的坑。
+    from . import session_state as _ss
+
+    layout.addWidget(_section("启动恢复"))
+    _resume_card = PreferenceCard(
+        _ss.SETTING_KEY_RESUME_SESSION,
+        "启动时恢复上次进度",
+        "打开软件后直接跳回上次使用的模块与工程",
+        preview_kind="perf_mode",
+        on_desc="启动直接跳回上次的模块与工程，接着上次继续",
+        off_desc="仅保留存档；手动进入该模块时仍可看到上次记录",
+        default_value=_read_bool_setting(_ss.SETTING_KEY_RESUME_SESSION, True),
+    )
+    _resume_card.toggled.connect(
+        lambda key, val: _write_str_setting(key, "1" if val else "0")
+    )
+    layout.addWidget(_resume_card)
+
     layout.addWidget(_hr())
     return container

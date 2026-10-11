@@ -4803,15 +4803,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         except Exception as e:
             logger.error(f'自动保存失败: {e}')
 
+    def create_blank_project(self, name: str) -> str:
+        """新建空白工程并立刻落盘（V4.43.14，供首页 CTA；缘由见 session_state 模块头）"""
+        from . import session_state as ss
+        path = ss.new_project_path(name)
+        with self._clips_lock:
+            self._clips.clear()
+        self._project_path, self._project_dirty = path, False
+        self.export_project(path, show_message=False)
+        return path
+
     def _maybe_restore_autosave(self):
         """**仅在上次「异常退出」时**询问是否恢复自动保存（V4.43.13）。
 
-        策略（该不该弹 / 弹几次 / 过期怎么办）全部收敛到 `autosave_recovery` 模块，
-        见其模块头注释 —— 对标 Premiere（仅崩溃弹、且只弹一次）/ Office（正常关闭即删
-        恢复文件）/ NightOS（`awake` 标记残留即判崩溃）。
-
-        历史缺陷（用户「每次一开程序就弹，弹的还是两个月前的文件」）：
-        关闭时无清理 + 提示标记只在内存 + 无崩溃判定 ⇒ 每次都弹。
+        策略全在 `autosave_recovery` 模块头注释 —— 对标 Premiere（仅崩溃弹、只弹一次）/
+        Office（正常关闭即删恢复文件）/ NightOS（`awake` 标记残留即判崩溃）。
         """
         if getattr(self, "_autosave_prompted", False):
             return
