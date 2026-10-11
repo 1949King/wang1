@@ -39,6 +39,7 @@ import HomeLanding from "./HomeLanding";
 import NodePalette, { buildAddNodeItems, buildNoviceAddNodeGroups, groupPaletteByCategory, isBuiltinNodeKind } from "./NodePalette";
 import CommandPalette, { type CommandItem } from "./CommandPalette";
 import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
+import ShortcutSettings from "./components/settings/ShortcutSettings";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
 import { LibTvBottomDock } from "./LibTvChrome";
 import { type NodeData, type ViewMode, type CanvasLayoutMode, type CanvasTheme, type ShotData, useCanvasStore } from "./store";
@@ -406,6 +407,7 @@ export default function CanvasShell(props: CanvasShellProps) {
     flow: { x: 160, y: 120 },
   });
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [shortcutOpen, setShortcutOpen] = useState(false);
   const lastPointerRef = useRef({ clientX: 200, clientY: 200 });
   const [spacePan, setSpacePan] = useState(false);
   const [snapGrid, setSnapGrid] = useState(true);
@@ -657,6 +659,7 @@ export default function CanvasShell(props: CanvasShellProps) {
     onGenerate,
     onSendToEditor,
     onBreakdown,
+    onOpenShortcuts: () => setShortcutOpen(true),
   });
 
   // 小地图切换监听
@@ -858,6 +861,7 @@ export default function CanvasShell(props: CanvasShellProps) {
         onTierChange={(t: CanvasTier) => setEditorTier(t)}
         theme={theme}
         onThemeChange={(t: CanvasTheme) => setTheme(t)}
+        onOpenShortcuts={() => setShortcutOpen(true)}
       />
 
       {viewMode === "home" ? (
@@ -3085,6 +3089,10 @@ export default function CanvasShell(props: CanvasShellProps) {
           }}
         />
       </Suspense>
+
+      {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：
+          顶栏 [?] 按钮 + Ctrl+Shift+K 触发；Esc/点遮罩关闭；自包含 Modal 不影响画布。 */}
+      <ShortcutSettings open={shortcutOpen} onClose={() => setShortcutOpen(false)} />
     </div>
   );
 }

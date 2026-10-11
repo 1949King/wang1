@@ -1,5 +1,59 @@
 # 拾光剪影 — 变更日志
 
+## 画布 0.3.22 (2026-10-11) — 快捷键可视化（V4.42.2 解冻延续）
+
+> 用户原话「图片里面反馈的就是可视化不足」+「关于主题切换这个还是需要去深度的改造一下」。
+> AI-Canvas-tauri 24 行原版 `<div>+<kbd>` 平铺（vendor/AI-Canvas-tauri/src/components/settings/ShortcutSettings.tsx）。
+> 改进 4 处：分组卡片 / 拟物键盘 / 触发预览 / 顶部搜索；沿用 styles.css [data-theme] 变量实时跟主题切换。
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `vendor/shiguang-canvas/src/components/settings/ShortcutSettings.tsx` | **新建 388 行** · 4 分组（编辑 / 节点创建 / 视图与导航 / 系统与资源）+ 拟物 Kbd 组件 + 16 个触发预览 SVG（自包含 Inline）+ 自包含 Modal |
+| `vendor/shiguang-canvas/src/components/settings/shortcut-settings.css` | **新建 174 行** · 沿用 styles.css [data-theme] 变量，深浅主题实时生效 |
+| `vendor/shiguang-canvas/src/AppNav.tsx` | 加 `onOpenShortcuts` prop + 顶栏 [?] 按钮（与 ☀/☾ 视觉对齐，title="Ctrl+Shift+K"） |
+| `vendor/shiguang-canvas/src/hooks/useKeyboardShortcuts.ts` | ShortcutDeps 加 `onOpenShortcuts?` + Ctrl/Cmd+Shift+K 触发；用 useCallback deps 同步 |
+| `vendor/shiguang-canvas/src/CanvasShell.tsx` | + shortcutOpen state + 渲染 `<ShortcutSettings>` + import |
+| `vendor/shiguang-canvas/src/styles.css` | + `.ic-shortcut-btn` 样式块（沿用 [data-theme] 分层） |
+| `vendor/shiguang-canvas/src/canvasVersion.ts` | 0.3.21 → 0.3.22，codename → "快捷键可视化（V4.42.2）" |
+| `vendor/shiguang-canvas/package.json` | 0.3.21 → 0.3.22 |
+
+### 触发入口（语义序列设计）
+
+| 键 | 动作 |
+|---|---|
+| `Ctrl/Cmd + K` | 命令面板（既有） |
+| **`Ctrl/Cmd + Shift + K`** | **快捷键参考**（本轮新增） |
+| `Ctrl/Cmd + Shift + T` | 切换主题（V4.41.22 引入） |
+| `?` / `H` | 命令面板（既有，与 Help 共键） |
+| 顶栏 `[?]` 按钮 | 打开/关闭快捷键参考弹窗 |
+
+K = 命令 / Shift+K = 参考 = 同源 K 形成语义序列，避开 `?` 与 Help 的冲突。
+
+### 弹窗交互
+
+- 顶部搜索框实时过滤（支持模糊匹配「撤销」「Ctrl+Z」「创建」「theme」「minimap」）
+- 右侧显示 `N / 17 匹配` 计数
+- Esc / 点遮罩 / 点 ✕ 关闭
+- 沿用 styles.css `[data-theme]` 变量，主题切换实时生效
+
+### HTML 原型（拍板用）
+
+`docs/_reports/2026-10-11-快捷键可视化方案.html`（35 KB · 单文件零依赖）= 用户拍板前看的可视化方案。
+含对比视图（左栏 AI-Canvas-tauri 24 行原版 vs 改进后），用户确认后再落代码。
+
+### 纪律
+
+- **冻结区 canvas-magnetic-intent 解冻 → 备份 → 改 → 回归 → 重锁** ✓
+  - 备份：`docs/_archive/2026-10-11-shortcut-v1-unfreeze/`（4 个 .bak）
+  - 重锁：`python scripts/frozen_zone_guard.py --update` → 85 locks intact
+- **CANVASDUAL 双库同步** ✓ cp 6 文件（4 改 + 2 新建）到 vendor/AI-Canvas-tauri/src/libtv/ → check_canvas_dual_repo.py 0 新增漂移
+- **tsc 干净** ✓ 67 行错误全在 Stage3D.tsx/riggedHumanoid.ts（stage3d-core 存量），新文件 0 错误
+- **vite build rc=0** ✓ main bundle 832.10 → 846.59 kB（+14.49 kB 是 ShortcutSettings 全量打入，后续可拆 lazy）
+- **useKeyboardShortcuts.ts 不在冻结区清单** ✓ grep 验证，自由修改无需解冻
+- **版本号三件套同步** ✓ canvasVersion.ts → package.json → CHANGELOG
+
 ## 画布 0.3.21 (2026-10-11) — 主题系统 P1（V4.41.22 解冻延续）
 
 > 用户授权解冻 `canvas-magnetic-intent`，延续 V4.41.22 主题系统工作。

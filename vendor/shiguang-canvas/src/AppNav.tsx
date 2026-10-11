@@ -42,6 +42,8 @@ type Props = {
   theme: CanvasTheme;
   /** 切换主题回调（Ctrl+Shift+T 也走它） */
   onThemeChange: (t: CanvasTheme) => void;
+  /** V4.41.23 引入：打开快捷键参考面板 */
+  onOpenShortcuts?: () => void;
 };
 
 export default function AppNav({
@@ -53,6 +55,7 @@ export default function AppNav({
   onTierChange,
   theme,
   onThemeChange,
+  onOpenShortcuts,
 }: Props) {
   return (
     <nav className="ic-nav" aria-label="主导航">
@@ -78,6 +81,18 @@ export default function AppNav({
         ))}
       </div>
       <div className="ic-nav-right">
+        {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：顶栏按钮 + Ctrl+Shift+K */}
+        {onOpenShortcuts && (
+          <button
+            type="button"
+            className="ic-shortcut-btn"
+            aria-label="打开快捷键参考"
+            title="快捷键参考（Ctrl+Shift+K）"
+            onClick={onOpenShortcuts}
+          >
+            <span aria-hidden>?</span>
+          </button>
+        )}
         {/* V4.41.22 主题切换（用户授权解冻 canvas-magnetic-intent）：暗色默认 / 浅色 */}
         <button
           type="button"

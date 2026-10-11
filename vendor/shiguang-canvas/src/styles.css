@@ -995,6 +995,38 @@ html[data-theme='light'] .ic-theme-btn:hover {
   border-color: #cdd5e3;
 }
 
+/* V4.41.23 快捷键参考按钮（用户授权解冻 canvas-magnetic-intent） */
+.ic-shortcut-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #262626;
+  border-radius: 8px;
+  background: #161616;
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ic-shortcut-btn:hover {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.18));
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+}
+html[data-theme='light'] .ic-shortcut-btn {
+  border-color: var(--line2, #cdd5e3);
+  background: #f6f8fc;
+  color: #4b5563;
+}
+html[data-theme='light'] .ic-shortcut-btn:hover {
+  background: var(--accent-soft, rgba(37, 99, 235, 0.12));
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
 .ic-home {
   flex: 1;
   min-height: 0;

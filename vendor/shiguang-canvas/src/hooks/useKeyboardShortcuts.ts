@@ -47,6 +47,8 @@ interface ShortcutDeps {
   onGenerate: () => void;
   onSendToEditor: () => void;
   onBreakdown: () => void;
+  /** V4.41.23 引入：打开快捷键参考面板（Ctrl+Shift+K） */
+  onOpenShortcuts?: () => void;
 }
 
 export function useKeyboardShortcuts(deps: ShortcutDeps) {
@@ -65,6 +67,7 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
     onGenerate,
     onSendToEditor,
     onBreakdown,
+    onOpenShortcuts,
   } = deps;
 
   // 从 store 获取操作
@@ -253,6 +256,11 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
           setTheme(theme === "dark" ? "light" : "dark");
           setStatus(`已切换到${theme === "dark" ? "浅色" : "暗色"}主题`);
           break;
+        case "k":
+          // Ctrl+Shift+K 打开快捷键参考（V4.41.23 引入；与 Ctrl+K 命令面板形成序列 K=命令 / Shift+K=参考）
+          ev.preventDefault();
+          onOpenShortcuts?.();
+          break;
       }
     },
     [
@@ -270,6 +278,7 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
       onGenerate,
       onSendToEditor,
       onBreakdown,
+      onOpenShortcuts,
       removeSelected,
       duplicateSelected,
       copySelected,
