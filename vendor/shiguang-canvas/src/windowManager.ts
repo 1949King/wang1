@@ -28,8 +28,8 @@ import { create } from "zustand";
 
 import { useToolboxStore } from "./toolboxStore";
 
-export type PanelName = "history" | "gallery" | "lighting" | "director";
-export const PANEL_NAMES: readonly PanelName[] = ["history", "gallery", "lighting", "director"];
+export type PanelName = "history" | "gallery" | "lighting" | "director" | "generate";
+export const PANEL_NAMES: readonly PanelName[] = ["history", "gallery", "lighting", "director", "generate"];
 
 /** dock 最小化图标与恢复 title 的元数据（图标与工具板 ltd-item 同源，零新资产）。 */
 export const PANEL_META: Record<PanelName, { title: string; icon: string }> = {
@@ -37,6 +37,7 @@ export const PANEL_META: Record<PanelName, { title: string; icon: string }> = {
   gallery: { title: "图库", icon: "▤" },
   lighting: { title: "电影级灯位", icon: "💡" },
   director: { title: "导演指导", icon: "🎬" },
+  generate: { title: "生成/入轨", icon: "🚀" },
 };
 
 export const Z_BASE = 47;
@@ -142,6 +143,7 @@ const minimizedInit = (): Record<PanelName, boolean> => ({
   gallery: false,
   lighting: false,
   director: false,
+  generate: false,
 });
 
 export const useWindowManager = create<WindowManagerState>((set, get) => ({

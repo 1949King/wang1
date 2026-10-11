@@ -3,6 +3,8 @@ import { type Node } from "@xyflow/react";
 import { useCanvasStore, type NodeData } from "./store";
 import { useEditorCanvasLink } from "./hooks/useEditorCanvasLink";
 import CanvasShell from "./CanvasShell";
+// V4.41.20：把 9 个生成/入轨回调注入 generateActions store，给浮窗 GeneratePanel 用
+import { useInjectGenerateActions } from "./generateActionsInjector";
 import { NodeActionsContext } from "./nodes";
 import { registerBuiltinNodes } from "./registerBuiltinNodes";
 import { registerNodeDefinitions } from "./plugins/node-registry";
@@ -1608,6 +1610,12 @@ export default function App() {
     setStatus("正在中断批量…");
   };
 
+  // V4.41.20：9 个生成/入轨回调注入 generateActions（hook 拆出到 generateActionsInjector.ts）
+  useInjectGenerateActions(
+    onGenerate, onCompareGenerate, onMultiAngleGenerate, onBatchGenerate,
+    runToHere, onAbortBatch, onSendToEditor, onSendAllToEditor, onSyncModels,
+  );
+
   /** 节点一键重试 — 由 NodeActionsContext 注入给各节点组件的 Shell */
   const retryNode = useCallback(async (nodeId: string) => {
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
@@ -1663,20 +1671,7 @@ export default function App() {
       generating={generating}
       editorClipCount={editorClipCount}
       breaking={breaking}
-      imageModels={imageModels}
-      selectedModelKey={selectedModelKey}
-      setSelectedModelKey={setSelectedModelKey}
-      compareModelKey={compareModelKey}
-      setCompareModelKey={setCompareModelKey}
-      videoModels={videoModels}
-      selectedVideoModelKey={selectedVideoModelKey}
-      setSelectedVideoModelKey={setSelectedVideoModelKey}
-      compareVideoModelKey={compareVideoModelKey}
-      setCompareVideoModelKey={setCompareVideoModelKey}
-      audioModels={audioModels}
-      selectedAudioModelKey={selectedAudioModelKey}
-      setSelectedAudioModelKey={setSelectedAudioModelKey}
-      musicModels={musicModels}
+            musicModels={musicModels}
       selectedMusicModelKey={selectedMusicModelKey}
       setSelectedMusicModelKey={setSelectedMusicModelKey}
       breakdownDraft={breakdownDraft}

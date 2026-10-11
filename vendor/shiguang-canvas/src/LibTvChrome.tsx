@@ -115,6 +115,7 @@ export function LibTvBottomDock({
   const lightingOpen = useToolboxStore((s) => s.lightingOpen);
   const directorOpen = useToolboxStore((s) => s.directorOpen);
   const galleryOpen = useToolboxStore((s) => s.galleryOpen);
+  const generateOpen = useToolboxStore((s) => s.generateOpen);
   const previewPlaying = useToolboxStore((s) => s.previewPlaying);
   const previewStep = useToolboxStore((s) => s.previewStep);
   const previewTotal = useToolboxStore((s) => s.previewTotal);
@@ -123,6 +124,7 @@ export function LibTvBottomDock({
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
   const toggleDirector = useToolboxStore((s) => s.toggleDirector);
   const toggleGallery = useToolboxStore((s) => s.toggleGallery);
+  const toggleGenerate = useToolboxStore((s) => s.toggleGenerate);
   const togglePreview = useToolboxStore((s) => s.togglePreview);
   const toggleUpstreamRefs = useToolboxStore((s) => s.toggleUpstreamRefs);
   // 撤销/重做直连画布 store（V4.41.16：「历史栈」占位 → 真按钮）
@@ -136,7 +138,8 @@ export function LibTvBottomDock({
       (n === "history" && historyOpen) ||
       (n === "gallery" && galleryOpen) ||
       (n === "lighting" && lightingOpen) ||
-      (n === "director" && directorOpen),
+      (n === "director" && directorOpen) ||
+      (n === "generate" && generateOpen),
   ).filter((n) => minPanels[n]);
   // V4.41.17：开板时读一次历史栈步数进 title（history-store 是模块级数组，非响应式；
   // toolsOpen 变化触发重渲染时刷新，关板不读）
@@ -295,6 +298,14 @@ export function LibTvBottomDock({
                 title="导演指导：诊断分镜缺什么并一键写回（Ctrl+D）"
               >
                 <span className="ltd-ico">🎬</span>导演指导
+              </button>
+              <button
+                type="button"
+                className={`ltd-item${generateOpen ? " on" : ""}`}
+                onClick={toggleGenerate}
+                title="生成/入轨浮动面板：模型选择 + 生成/对比/批量/运行到此处/入轨全在一处（V4.41.20 起推荐用顶栏 🚀 生成）"
+              >
+                <span className="ltd-ico">🚀</span>生成/入轨
               </button>
               <button
                 type="button"

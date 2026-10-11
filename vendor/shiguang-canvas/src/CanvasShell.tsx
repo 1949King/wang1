@@ -68,6 +68,8 @@ import MultiSelectToolbar from "./components/canvas/MultiSelectToolbar";
 import ModelSelector from "./components/canvas/ModelSelector";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { getGraphPast, getGraphFuture } from "./stores/history-store";
+// V4.41.20：顶栏 🚀 生成按钮 → toggle generateOpen
+import { useToolboxStore } from "./toolboxStore";
 import { buildNoviceNodeTypes, NoviceInspector } from "./novice";
 import type { CanvasTier } from "./store";
 
@@ -208,20 +210,7 @@ export type CanvasShellProps = {
   prefs: BridgePrefs;
   generating: boolean;
   breaking: boolean;
-  imageModels: ImageModelOption[];
-  selectedModelKey: string;
-  setSelectedModelKey: (k: string) => void;
-  compareModelKey: string;
-  setCompareModelKey: (k: string) => void;
-  videoModels: VideoModelOption[];
-  selectedVideoModelKey: string;
-  setSelectedVideoModelKey: (k: string) => void;
-  compareVideoModelKey: string;
-  setCompareVideoModelKey: (k: string) => void;
-  audioModels: AudioModelOption[];
-  selectedAudioModelKey: string;
-  setSelectedAudioModelKey: (k: string) => void;
-  musicModels: MusicModelOption[];
+    musicModels: MusicModelOption[];
   selectedMusicModelKey: string;
   setSelectedMusicModelKey: (k: string) => void;
   breakdownDraft: string;
@@ -300,20 +289,7 @@ export default function CanvasShell(props: CanvasShellProps) {
     prefs,
     generating,
     breaking,
-    imageModels,
-    selectedModelKey,
-    setSelectedModelKey,
-    compareModelKey,
-    setCompareModelKey,
-    videoModels,
-    selectedVideoModelKey,
-    setSelectedVideoModelKey,
-    compareVideoModelKey,
-    setCompareVideoModelKey,
-    audioModels,
-    selectedAudioModelKey,
-    setSelectedAudioModelKey,
-    musicModels,
+        musicModels,
     selectedMusicModelKey,
     setSelectedMusicModelKey,
     breakdownDraft,
@@ -444,6 +420,8 @@ export default function CanvasShell(props: CanvasShellProps) {
   const [comfyEngineStatus, setComfyEngineStatus] = useState<ComfyEngineStatus | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const skillImportRef = useRef<HTMLInputElement>(null);
+  const generateOpen = useToolboxStore((s) => s.generateOpen);
+  const toggleGenerate = useToolboxStore((s) => s.toggleGenerate);
   const [agentPanelOpen, setAgentPanelOpen] = useState(() => {
     try {
       const v = localStorage.getItem("shiguang-canvas:agent-dock:open");
@@ -1014,6 +992,15 @@ export default function CanvasShell(props: CanvasShellProps) {
           <div className="chip" title="来自剪辑时间线快照">
             剪辑 {editorClipCount} 片 · {prefs.active_provider_label || prefs.active_provider || "未同步"}
           </div>
+          {/* V4.41.20：「生成/入轨」高频面板浮动化，顶栏一键直达（侧栏深处不再卡人） */}
+          <button
+            type="button"
+            className={`libtv-agent-btn${generateOpen ? " on" : ""}`}
+            onClick={() => toggleGenerate()}
+            title="生成/入轨浮动面板：模型选择 + 生成/对比/批量/运行到此处/入轨全在一处（agent 面板开着也能用）"
+          >
+            🚀 生成
+          </button>
           <button
             type="button"
             className={`libtv-agent-btn${agentPanelOpen ? " on" : ""}`}
@@ -1254,143 +1241,6 @@ export default function CanvasShell(props: CanvasShellProps) {
                 </button>
               </div>
             </details>
-
-            <details className="panel" open>
-              <summary>生成 / 入轨</summary>
-              <div className="panel-body">
-                <div className="field">
-                  <label>生图模型</label>
-                  <ModelSelector
-                    models={imageModels}
-                    value={selectedModelKey}
-                    onChange={setSelectedModelKey}
-                    placeholder={imageModels.length === 0 ? "请先同步模型池" : "选择生图模型"}
-                    disabled={imageModels.length === 0}
-                    persistKey="shiguang-canvas:model:image"
-                  />
-                </div>
-                <div className="field">
-                  <label>生视频模型</label>
-                  <ModelSelector
-                    models={videoModels}
-                    value={selectedVideoModelKey}
-                    onChange={setSelectedVideoModelKey}
-                    placeholder={videoModels.length === 0 ? "无视频模型" : "选择视频模型"}
-                    disabled={videoModels.length === 0}
-                    persistKey="shiguang-canvas:model:video"
-                  />
-                </div>
-                <div className="field">
-                  <label>TTS 模型</label>
-                  <ModelSelector
-                    models={audioModels}
-                    value={selectedAudioModelKey}
-                    onChange={setSelectedAudioModelKey}
-                    placeholder={audioModels.length === 0 ? "无 TTS 模型（走本地 edge-tts 降级）" : "选择 TTS 模型"}
-                    disabled={audioModels.length === 0}
-                    persistKey="shiguang-canvas:model:audio"
-                  />
-                </div>
-                <div className="field">
-                  <label>对比模型（TapNow 式 A/B）</label>
-                  <select
-                    value={compareModelKey}
-                    onChange={(e) => setCompareModelKey(e.target.value)}
-                  >
-                    {imageModels.length < 2 ? (
-                      <option value="">需至少 2 个生图模型</option>
-                    ) : (
-                      imageModels.map((m) => (
-                        <option
-                          key={`cmp_${m.channel_id}::${m.model}`}
-                          value={`${m.channel_id}::${m.model}`}
-                        >
-                          {m.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>对比视频模型</label>
-                  <select
-                    value={compareVideoModelKey}
-                    onChange={(e) => setCompareVideoModelKey(e.target.value)}
-                  >
-                    {videoModels.length < 2 ? (
-                      <option value="">需至少 2 个视频模型</option>
-                    ) : (
-                      videoModels.map((m) => (
-                        <option
-                          key={`vcmp_${m.channel_id}::${m.model}`}
-                          value={`${m.channel_id}::${m.model}`}
-                        >
-                          {m.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                <button className="btn primary" onClick={onGenerate} disabled={generating}>
-                  {generating
-                    ? "生成中…"
-                    : selectedData?.kind === "video"
-                      ? "生成选中视频"
-                      : selectedData?.kind === "digitalHuman"
-                        ? "生成配音"
-                        : "生成选中"}
-                </button>
-                <button
-                  className="btn"
-                  onClick={onCompareGenerate}
-                  disabled={
-                    generating ||
-                    (selectedData?.kind === "video"
-                      ? videoModels.length < 2 || !compareVideoModelKey
-                      : selectedData?.kind === "shot" || selectedData?.kind === "image"
-                        ? imageModels.length < 2 || !compareModelKey
-                        : true)
-                  }
-                >
-                  双模型对比
-                </button>
-                <button
-                  className="btn"
-                  onClick={onMultiAngleGenerate}
-                  disabled={generating || selectedData?.kind !== "shot"}
-                >
-                  多角度预览
-                </button>
-                <button className="btn" onClick={onBatchGenerate} disabled={generating}>
-                  批量生成
-                </button>
-                <button
-                  className="btn"
-                  onClick={onRunToHere}
-                  disabled={generating}
-                  title="先出执行计划（不消耗额度），确认后按依赖顺序整图执行；Ctrl+Shift+Enter"
-                >
-                  运行到此处
-                </button>
-                {generating ? (
-                  <button className="btn" onClick={onAbortBatch}>
-                    中断
-                  </button>
-                ) : null}
-                <div className="btn-row">
-                  <button className="btn" onClick={onSendToEditor}>
-                    入轨
-                  </button>
-                  <button className="btn" onClick={onSendAllToEditor} disabled={generating}>
-                    全部入轨
-                  </button>
-                </div>
-                <button className="btn teal" onClick={onSyncModels}>
-                  同步模型池
-                </button>
-              </div>
-            </details>
-
             <details className="panel">
               <summary>工程</summary>
               <div className="panel-body">

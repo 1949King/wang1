@@ -1,5 +1,49 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.20 (2026-10-11) — 生成/入轨 浮层化（画布 0.3.19「生成/入轨 浮层化」）
+
+> 治「左侧栏最底下的「生成 / 入轨」高频入口放最深处、要滚半天找不到」（用户截图反馈）。
+> 用户拍板 **C 方案**：顶 navbar 加 🚀 生成按钮 + 5 号面板浮层化；侧栏块整段删除；剪 CanvasShell 12 个未用 props。
+> 报告：同 V4.41.19 调研结论 + 本轮落地点。
+
+### 改动
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| ① 顶 navbar 🚀 生成按钮 | 侧栏最底「生成 / 入轨」一块（要滚到底才能看到） | 顶 navbar 在 💬 Agent **之前**加 🚀 生成/入轨 主入口（与 history/lighting/director/generate 5 面板并列） |
+| ② 5 号浮层 GeneratePanel | 无 | 独立浮层 `useWindowPanel("generate")`：可拖动 / 双模式定位 / z 顺序数组派生 / 最小化到 dock / 头舵图标 ✕ 三件套（与 S1 窗管同源） |
+| ③ 自给自足状态 | 侧栏依赖 12 个 CanvasShell props（imageModels/selectedModelKey/.../audioModels/... 全部从 App.tsx 穿透 4 层） | 浮层自己 `Promise.all([listImageModels, listVideoModels, listAudioModels])` 拉模型，4 个 localStorage 键 `shiguang-canvas:model:image\|video\|compare\|compare-video` 与原侧栏共享 — 两边读同一个值，切回旧 UI 不丢选择 |
+| ④ 9 个回调注入 | 原侧栏直接拿 props 调 App.tsx 的 onGenerate/onCompareGenerate/.../onSyncModels | App.tsx 一次 `useInjectGenerateActions(9 个回调)` 写入 zustand `generateActionsStore`，浮层 mount 时 `useGenerateActionsStore(s => s.onGenerate)()` 取 — App→CanvasShell→Overlays→Panel 4 层 prop 污染归零 |
+| ⑤ CanvasShell 瘦身 | Props 接口 16 行 + 解构 16 行 + 22 行 prop 传递 = **54 行 prop/解构代码** | -38 行：**12 个 props + 12 个解构 + 12 行 App.tsx prop 传递** 全删（确认画布函数体无引用）；音乐模型选择器保留（节点选中面板用到） |
+| ⑥ windowManager 5 面板 | 4 面板轮转 z 47..50 | + generate → 5 面板 47..51；minimizedInit/rot/PANEL_NAMES/PANEL_META/title/icon "🚀"/"生成/入轨" 全有；windowManager.test 由「4 面板」改「5 面板」（50 次轮转不撞 z=51） |
+
+### 文件
+
+- 新建：`GeneratePanel.tsx`（233 行）/ `generateActions.ts`（60 行）/ `generateActionsInjector.ts`（37 行）/ `generatePanel.css`（110 行）
+- 改 `windowManager.ts`（+5 行）/ `toolboxStore.ts`（+3 行）/ `windowManager.test.ts`（3 行）
+- 解冻 `CanvasShell.tsx`：删 137 行侧栏块 + 加 6 行 navbar 按钮 + 删 26 行 props/解构（=净减 157 行 3089→3063）
+- 解冻 `CanvasOverlays.tsx`：+5 行 import/hooks 注册
+- 解冻 `LibTvChrome.tsx`：+1 行 generate 进 `minis` 数组、+2 行 navbar data group 按钮
+- 解冻 `App.tsx`：把 21 行 useEffect 替换为 4 行 `useInjectGenerateActions(...)` + 删 12 行 prop 传递（=净减 16 行 2006→1993）
+
+### 纪律
+
+- **self-contained**：GeneratePanel 不需要任何人喂数据，自取自存，避免 prop drilling
+- **localStorage 共享键**：浮层/侧栏同一组 key — 老 UI 入口删了键不丢，想回滚用同一个 key
+- **生成/入轨 的 9 个动作函数定义在 App.tsx**：`onGenerate / onCompareGenerate / onMultiAngleGenerate / onBatchGenerate / runToHere / onAbortBatch / onSendToEditor / onSendAllToEditor / onSyncModels`（App.tsx 的 useCallback 栈，跨 V4.41.19/20 没换实现，只挪位置）
+- **音乐模型选择器** 留在节点选中面板（行 2669），未受 ②⑥ 删 props 影响
+
+### 门禁
+
+- tsc 37=基线（0 新增 · Stage3D.tsx 历史债未碰）
+- vitest 22 文件 291/291 PASS · windowManager.test.ts 改 5 面板用例全绿
+- vite build 7.7s
+- frozen_zone_guard `canvas-magnetic-intent` 已解冻改 → `--update` 重锁 85 锁点
+- SIZE 守卫：App.tsx 2006 → **1993** ✓（净 -13 行，**重过 2000 硬限**）
+- CANVASDUAL 双库 0 新分叉 / 0 新缺失（11 文件同步：7 修改覆盖 + 4 新建复制，含 canvasVersion.ts/package.json/GeneratePanel.tsx/generateActions.ts/generateActionsInjector.ts/generatePanel.css/windowManager.test.ts 等）
+
+上一版 V4.41.19 见下。
+
 ## V4.41.19 (2026-10-11) — AI 画布重组（画布 0.3.18「AI 画布重组」）
 
 > 治「AI 画布 5 面板同屏 40+ 控件堆叠看着乱」（用户截图反馈）。

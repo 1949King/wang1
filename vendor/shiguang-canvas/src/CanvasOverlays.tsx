@@ -30,6 +30,8 @@ import DirectorPanel from "./DirectorPanel";
 import GalleryPanel from "./GalleryPanel";
 import LightingPanel from "./LightingPanel";
 import OutputHistoryPanel from "./OutputHistoryPanel";
+// V4.41.20：生成/入轨浮动面板（顶栏 🚀 生成；agent 面板开着也能用）
+import GeneratePanel from "./GeneratePanel";
 import { usePetStatus } from "./mascot/usePetStatus";
 import { isTypingTarget } from "./CommandPalette";
 import { PREVIEW_STEP_MS, previewOrder } from "./previewPlayer";
@@ -45,12 +47,14 @@ export default function CanvasOverlays() {
   const showLighting = useToolboxStore((s) => s.lightingOpen);
   const showDirector = useToolboxStore((s) => s.directorOpen);
   const showGallery = useToolboxStore((s) => s.galleryOpen);
+  const showGenerate = useToolboxStore((s) => s.generateOpen);
   // 窗口管理（AgentOS S1）：最小化的面板不渲染本体（dock 上有恢复入口）
   const minimized = useWindowManager((s) => s.minimized);
   const toggleHistory = useToolboxStore((s) => s.toggleHistory);
   const toggleLighting = useToolboxStore((s) => s.toggleLighting);
   const toggleDirector = useToolboxStore((s) => s.toggleDirector);
   const toggleGallery = useToolboxStore((s) => s.toggleGallery);
+  const toggleGenerate = useToolboxStore((s) => s.toggleGenerate);
 
   /** Agent 侧栏是否打开（决定桌宠隐藏态） */
   const [agentOpen, setAgentOpen] = useState(false);
@@ -170,6 +174,7 @@ export default function CanvasOverlays() {
       {showLighting && !minimized.lighting ? <LightingPanel onClose={toggleLighting} /> : null}
       {showDirector && !minimized.director ? <DirectorPanel onClose={toggleDirector} /> : null}
       {showGallery && !minimized.gallery ? <GalleryPanel onClose={toggleGallery} /> : null}
+      {showGenerate && !minimized.generate ? <GeneratePanel onClose={toggleGenerate} /> : null}
       {/* Agent 桌宠（Q 版狐狸「拾岚」）：Agent 面板打开时隐藏（V4.41.14）。
           懒载 + fallback=null —— 加载期间画布零影响。 */}
       <Suspense fallback={null}>

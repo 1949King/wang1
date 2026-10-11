@@ -33,19 +33,19 @@ describe("z 派生（顺序数组）", () => {
     expect(focusInOrder(top, "history")).toBe(top);
   });
 
-  it("4 面板轮转置顶 50 次：z 集合恒唯一且 ≤ 50", () => {
-    const names = ["history", "gallery", "lighting", "director"] as const;
+  it("5 面板轮转置顶 50 次：z 集合恒唯一且 ≤ 51", () => {
+    const names = ["history", "gallery", "lighting", "director", "generate"] as const;
     type P = (typeof names)[number];
     let order: P[] = [];
     for (let i = 0; i < 50; i++) {
       const n = names[i % names.length];
       order = focusInOrder(order, n);
     }
-    expect(order).toHaveLength(4);
+    expect(order).toHaveLength(5);
     const zs = order.map((n, i) => Z_BASE + i);
     const set = new Set(zs);
-    expect(set.size).toBe(4);
-    expect(Math.max(...zs)).toBeLessThanOrEqual(50);
+    expect(set.size).toBe(5);
+    expect(Math.max(...zs)).toBeLessThanOrEqual(51);
   });
 });
 
@@ -100,7 +100,7 @@ describe("normalize / denorm roundtrip", () => {
 describe("store 状态机", () => {
   beforeEach(() => {
     // 状态复位：直接 set 回初始
-    useWindowManager.setState({ order: [], minimized: { history: false, gallery: false, lighting: false, director: false } });
+    useWindowManager.setState({ order: [], minimized: { history: false, gallery: false, lighting: false, director: false, generate: false } });
   });
 
   it("minimize → restore：min 翻转 + restore 置顶", () => {

@@ -25,6 +25,8 @@ export interface ToolboxState {
   upstreamRefs: boolean;
   /** 图库面板（V4.41.16 起为真·缩略图网格，不再是统计提示） */
   galleryOpen: boolean;
+  /** V4.41.20 生成/入轨浮动面板（顶栏 🚀 生成；从 sidebar 深处挪出） */
+  generateOpen: boolean;
   /** 连线时序预览是否播放中（推进逻辑在 CanvasOverlays，这里只持有开关与进度） */
   previewPlaying: boolean;
   previewStep: number;
@@ -34,6 +36,7 @@ export interface ToolboxState {
   toggleDirector: () => void;
   toggleUpstreamRefs: () => void;
   toggleGallery: () => void;
+  toggleGenerate: () => void;
   togglePreview: () => void;
   /** 预览推进一帧；播完自动停（CanvasOverlays 的 interval 调用） */
   advancePreview: (total: number) => void;
@@ -52,6 +55,7 @@ export const useToolboxStore = create<ToolboxState>((set) => ({
   directorOpen: false,
   upstreamRefs: isUpstreamRefsEnabled(),
   galleryOpen: false,
+  generateOpen: false,
   previewPlaying: false,
   previewStep: 0,
   previewTotal: 0,
@@ -64,6 +68,7 @@ export const useToolboxStore = create<ToolboxState>((set) => ({
     set({ upstreamRefs: next });
   },
   toggleGallery: () => set((s) => ({ galleryOpen: !s.galleryOpen })),
+  toggleGenerate: () => set((s) => ({ generateOpen: !s.generateOpen })),
   togglePreview: () =>
     set((s) => (s.previewPlaying
       ? { previewPlaying: false, previewStep: 0, previewTotal: 0 }
