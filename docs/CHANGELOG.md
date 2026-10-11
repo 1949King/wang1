@@ -1,5 +1,43 @@
 # 拾光剪影 — 变更日志
 
+## V4.42.0 (2026-10-11) — 用户中心面板（顶 navbar 4 按钮）
+
+> 用户二轮反馈：「我要的是在整个项目的最顶上那儿增加，而不是在画布模块里面去增加，这样没有意义。画木块也是在这个项目里面的一个一个模块功能而已。」
+> 把「消息 / 主题 / 设置 / 帮助 / 反馈 / 检查更新 / 退出登录」统一上移到 PyQt6 主程序顶 navbar，替代原「登录 / 激活」两个冷按钮。
+> 画布版本不动（独立版本号），本次仅主程序改动。
+
+### 改动
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| ① headerBar 右侧 | 2 按钮：登录 + 激活（矮小、藏在最右） | 4 按钮：🔔 通知 + 🎨 主题 + ⚙ 设置 + 👤 用户中心（与 Trae IDE 排序一致） |
+| ② 用户中心面板 | 无 | `app/modules/lego/user_center_panel.py`（402 行 QFrame + QPoint Popup）：6 段布局（头部·身份 / 通知中心 / 设置 / 主题·帮助·反馈 / 退出登录） |
+| ③ 业务信号 | 2 个按钮直调 `_on_login_clicked` / `_on_activate_clicked` | UserCenterPanel 11 个 pyqtSignal：`login_requested / activate_requested / register_requested / upgrade_requested / notifications_requested / check_update_requested / settings_requested / theme_requested / help_requested / feedback_requested / logout_requested` |
+| ④ 主题按钮 | 无 | headerBar 🎨 直接 toggle dark/light（不弹面板），调 `ThemeManager.instance().apply_theme()` 并写 QSettings |
+| ⑤ 设置入口 | 在侧栏最底部 | headerBar ⚙ 直跳 `_show_settings()`，置顶 |
+| ⑥ 检查更新 | 无 | headerBar 通过 UserCenterPanel 「🔔 通知中心」段内嵌"检查更新"按钮 → `update_manager.check_async()` |
+| ⑦ 退出登录 | 仅依赖下拉菜单 | UserCenterPanel 末段「🚪 退出登录」（仅登录态可见），调 `AuthService.logout()` + 刷新状态栏 |
+| ⑧ 主题同步 | 设置模块改主题 | UserCenterPanel `setProperty('theme', ...)` + 属性选择器；`_on_theme_changed` 事件转发 `panel.on_theme_changed()` |
+| ⑨ 自动关闭 | n/a | `eventFilter` 监听 `MouseButtonPress` 点击外部关闭 + `focusOutEvent` 关闭 + `ESC` 关闭，3 道保险 |
+
+### 纪律
+
+- **零冻结区触碰**：`main_window.py` 与 `user_center_panel.py` 均不在 `frozen_zones.json`；未解冻任何符号。
+- **零 CANVASDUAL 影响**：本次纯 Python 改动，副库 `vendor/AI-Canvas-tauri/` 无需同步。
+- **零新增 ruff 违规**：user_center_panel.py `All checks passed!`；main_window.py 12 项 = 基线 12（存量棘轮只减不增）。
+- **画布版本不动**：`vendor/shiguang-canvas/src/canvasVersion.ts` 仍为 0.3.20；本次仅主程序改动。
+- **UserCenterPanel 零业务耦合**：不直接 import login_window / settings_module / update_manager；仅持有引用 + 发信号；main_window 在 `_wire_user_center_signals` 里接线 → 可独立单测。
+
+### 文件
+
+- 新建：`app/modules/lego/user_center_panel.py`（402 行）
+- 改：`app/modules/lego/main_window.py`（1100 → 1653 行，+553 行；headerBar 4 按钮替换 + 11 信号接线 + `_toggle_theme` + `_on_user_btn_clicked` + `_popup_user_center` 等 9 个新方法）
+- 改：`app/version.py` 4.41.21 → 4.42.0
+
+### 验证
+
+ruff 166 文件零新增违规 · sizeratchet 通过 · run_all_checks **75/75** 全过 · size `main_window.py` 1653 行 ≤ 2000 阈值 · `user_center_panel.py` 402 行 ≤ 2000 阈值 · 新文件 `ruff check` All checks passed · 导入烟雾测试通过。
+
 ## V4.41.21 (2026-10-11) — 小白意图入口（P0：左栏 7 组创作阶段 + 建卡小白命名）
 
 > 用户拍板「按这个方案进行」（2026-10-11 网页原型 v3 + 《意图编译范式 2.0》）。

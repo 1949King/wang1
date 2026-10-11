@@ -794,34 +794,62 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(0)
         
         # 顶部状态栏 - 显示授权状态
+        # V4.42.0 起改为 Trae IDE 风格 4 按钮：🔔 通知 / 🎨 主题 / ⚙ 设置 / 👤 用户中心
+        # 设计目标：把"消息/主题/设置/帮助/反馈/检查更新/退出登录"统一到最顶上，
+        #          主程序登顶之前那种"登录+激活"两个冷按钮让位给完整用户中心面板。
         self._top_status_bar = QFrame()
         self._top_status_bar.setObjectName("headerBar")
         self._top_status_bar.setFixedHeight(40)
         top_layout = QHBoxLayout(self._top_status_bar)
         top_layout.setContentsMargins(16, 0, 16, 0)
-        top_layout.setSpacing(12)
-        
+        top_layout.setSpacing(8)
+
         # 左侧状态信息
         self._status_label = QLabel("未登录 / 未授权")
         self._status_label.setStyleSheet("color: #fbbf24; font-size: 13px; font-weight: 600;")
         top_layout.addWidget(self._status_label)
-        
+
         top_layout.addStretch()
-        
-        # 右侧操作按钮
 
-        self._login_btn = QPushButton("登录")
-        self._login_btn.setObjectName("primaryBtn")
-        self._login_btn.setFixedHeight(28)
-        self._login_btn.setFixedWidth(80)
-        self._login_btn.clicked.connect(self._on_login_clicked)
-        top_layout.addWidget(self._login_btn)
+        # 右侧 4 按钮（按 Trae IDE 排序：通知 → 主题 → 设置 → 用户中心）
+        # 通知按钮 — 暂作为统一入口占位，点击触发用户中心面板的通知段
+        self._notif_btn = QPushButton("🔔")
+        self._notif_btn.setObjectName("headerBarIconBtn")
+        self._notif_btn.setFixedHeight(28)
+        self._notif_btn.setFixedWidth(36)
+        self._notif_btn.setToolTip("通知中心")
+        self._notif_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._notif_btn.clicked.connect(self._on_notif_btn_clicked)
+        top_layout.addWidget(self._notif_btn)
 
-        self._activate_btn = QPushButton("激活")
-        self._activate_btn.setFixedHeight(28)
-        self._activate_btn.setFixedWidth(80)
-        self._activate_btn.clicked.connect(self._on_activate_clicked)
-        top_layout.addWidget(self._activate_btn)
+        # 主题按钮 — 直接 light/dark 切换（避免再开面板）
+        self._theme_btn = QPushButton("🎨")
+        self._theme_btn.setObjectName("headerBarIconBtn")
+        self._theme_btn.setFixedHeight(28)
+        self._theme_btn.setFixedWidth(36)
+        self._theme_btn.setToolTip("切换主题")
+        self._theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._theme_btn.clicked.connect(self._toggle_theme)
+        top_layout.addWidget(self._theme_btn)
+
+        # 设置按钮 — 直跳设置模块（按用户要求"置顶"）
+        self._header_settings_btn = QPushButton("⚙")
+        self._header_settings_btn.setObjectName("headerBarIconBtn")
+        self._header_settings_btn.setFixedHeight(28)
+        self._header_settings_btn.setFixedWidth(36)
+        self._header_settings_btn.setToolTip("设置")
+        self._header_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header_settings_btn.clicked.connect(self._show_settings)
+        top_layout.addWidget(self._header_settings_btn)
+
+        # 用户中心按钮 — 已登录显示头像文字 / 未登录显示"登录"
+        self._user_btn = QPushButton("登录")
+        self._user_btn.setObjectName("primaryBtn")
+        self._user_btn.setFixedHeight(28)
+        self._user_btn.setFixedWidth(80)
+        self._user_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._user_btn.clicked.connect(self._on_user_btn_clicked)
+        top_layout.addWidget(self._user_btn)
         
         content_layout.addWidget(self._top_status_bar)
         
@@ -1149,6 +1177,13 @@ class MainWindow(QMainWindow):
         """响应设置模块的主题切换事件，同步全局UI（通过 ThemeManager 统一处理）"""
         theme = event.data.get("theme", "dark")
         self._apply_theme(theme)
+        # 同步刷新已实例化的用户中心面板
+        panel = getattr(self, "_user_center_panel", None)
+        if panel is not None:
+            try:
+                panel.on_theme_changed(theme)
+            except Exception as e:
+                logger.debug("同步用户中心面板主题失败: %s", e)
 
     def _apply_theme(self, theme):
         """
@@ -1373,6 +1408,13 @@ class MainWindow(QMainWindow):
         """登录成功回调"""
         self._update_auth_status()
         self.show_status("登录成功", "#4caf50")
+        # 同步刷新用户中心面板（如已实例化）
+        panel = getattr(self, "_user_center_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_state()
+            except Exception as e:
+                logger.debug("刷新用户中心面板失败: %s", e)
     
     def _on_activate_clicked(self):
         """激活按钮点击事件 - 异步非阻塞方式"""
@@ -1385,6 +1427,12 @@ class MainWindow(QMainWindow):
         """激活成功回调"""
         self._update_auth_status()
         self.show_status("激活成功", "#4caf50")
+        panel = getattr(self, "_user_center_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_state()
+            except Exception as e:
+                logger.debug("刷新用户中心面板失败: %s", e)
     
     def _update_auth_status(self):
         """更新授权状态"""
@@ -1403,9 +1451,102 @@ class MainWindow(QMainWindow):
             else:
                 self._status_label.setText(f"已登录 - {user.nickname}")
                 self._status_label.setStyleSheet("color: #4caf50; font-size: 13px; font-weight: 500;")
+            # V4.42.0: headerBar 用户中心按钮跟着改文案
+            if hasattr(self, "_user_btn") and self._user_btn is not None:
+                nickname = (user.nickname or user.email or "已登录") if user else "已登录"
+                first_ch = nickname[0].upper() if nickname else "U"
+                prefix = "👑" if (user and getattr(user, "is_vip", False)) else "👤"
+                self._user_btn.setText(f"{prefix} {first_ch}")
         else:
             self._status_label.setText("未登录 / 未授权")
             self._status_label.setStyleSheet("color: #f59e0b; font-size: 13px; font-weight: 500;")
+            if hasattr(self, "_user_btn") and self._user_btn is not None:
+                self._user_btn.setText("登录")
+
+    # ────── V4.42.0 顶部 headerBar 4 按钮（通知/主题/设置/用户中心）──────
+    def _toggle_theme(self):
+        """快速切换 dark / light 主题（headerBar 主题按钮）"""
+        tm = ThemeManager.instance()
+        try:
+            current = getattr(tm, "current_theme", None) or "dark"
+        except Exception:
+            current = "dark"
+        new_theme = "light" if current == "dark" else "dark"
+        self._apply_theme(new_theme)
+        self._settings.setValue("theme", new_theme)
+        self.show_status(f"已切换到{('浅色' if new_theme == 'light' else '深色')}主题", "#4caf50")
+
+    def _on_notif_btn_clicked(self):
+        """通知按钮 — 暂作为统一入口占位，复用用户中心面板"""
+        self._popup_user_center()
+
+    def _on_user_btn_clicked(self):
+        """用户中心按钮 — 弹面板"""
+        self._popup_user_center()
+
+    def _get_user_center_panel(self):
+        """懒加载用户中心面板单例"""
+        if getattr(self, "_user_center_panel", None) is None:
+            from .user_center_panel import UserCenterPanel
+            from app.core.update_manager import update_manager
+            self._user_center_panel = UserCenterPanel(
+                auth_service=self._auth_service,
+                theme_manager=ThemeManager.instance(),
+                update_manager=update_manager,
+                parent=self,
+            )
+            self._wire_user_center_signals(self._user_center_panel)
+        return self._user_center_panel
+
+    def _wire_user_center_signals(self, panel):
+        """把用户中心面板的 11 个业务信号接到 main_window 现有方法上"""
+        panel.login_requested.connect(self._on_login_clicked)
+        panel.activate_requested.connect(self._on_activate_clicked)
+        panel.settings_requested.connect(self._show_settings)
+        panel.theme_requested.connect(self._toggle_theme)
+        panel.help_requested.connect(self._show_help)
+        panel.feedback_requested.connect(self._on_feedback_clicked)
+        panel.check_update_requested.connect(self._on_check_update_clicked)
+        panel.logout_requested.connect(self._on_logout_completed)
+        panel.notifications_requested.connect(self._on_notifications_clicked)
+        panel.upgrade_requested.connect(self._on_activate_clicked)
+        panel.register_requested.connect(self._on_register_clicked)
+
+    def _popup_user_center(self):
+        """在 _user_btn 正下方弹出用户中心面板"""
+        panel = self._get_user_center_panel()
+        try:
+            panel.refresh_state()
+        except Exception as e:
+            logger.debug("刷新用户中心面板失败: %s", e)
+        panel.popup_below(self._user_btn)
+
+    def _on_logout_completed(self):
+        """退出登录后的 UI 同步"""
+        self._update_auth_status()
+        self.show_status("已退出登录", "#fbbf24")
+
+    def _on_feedback_clicked(self):
+        """意见反馈 — 暂用 status bar 提示（P1 接入真实反馈入口）"""
+        self.show_status("反馈通道建设中，请先到帮助文档查看临时联系方式", "#3b82f6")
+
+    def _on_notifications_clicked(self):
+        """通知中心 — 暂用 status bar 提示（P1 接入 NotificationCenterPanel）"""
+        self.show_status("通知中心建设中，详见用户中心面板", "#3b82f6")
+
+    def _on_register_clicked(self):
+        """注册入口 — 直接复用登录窗口并切到注册 Tab"""
+        self._on_login_clicked()
+
+    def _on_check_update_clicked(self):
+        """检查更新 — 调 update_manager.check_async()"""
+        try:
+            from app.core.update_manager import update_manager
+            update_manager.check_async()
+            self.show_status("正在检查更新…", "#3b82f6")
+        except Exception as e:
+            logger.error("触发更新检查失败: %s", e)
+            self.show_status("检查更新失败，请稍后重试", "#ef4444")
     
     def _restore_window_geometry(self):
         """按「记住窗口大小和位置」设置恢复上次退出时的窗口几何信息。
