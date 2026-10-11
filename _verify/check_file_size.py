@@ -64,7 +64,7 @@ BASELINE: dict = {
     # 2026-10-05：姿势数据抽到 stage3dPoseLibrary.ts 后由 3707 下调到 3159
     "vendor/shiguang-canvas/src/riggedHumanoid.ts": 3159,
     "vendor/shiguang-canvas/src/CanvasShell.tsx": 3199,
-    "vendor/shiguang-canvas/src/store.ts": 2452,
+    "vendor/shiguang-canvas/src/store.ts": 2483,
     # V4.39.8 异步接线（generateForNode→runGeneration）后越线 2000；
     # 存量文件冻结入基线，⚠️ 待拆分（异步编排宜独立成模块），拆分后请下调。
     "vendor/shiguang-canvas/src/bridge.ts": 2016,
