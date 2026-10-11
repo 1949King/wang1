@@ -311,7 +311,7 @@ class SettingsModule(BaseModule):
         sidebar_layout.setContentsMargins(8, 10, 8, 10)
         sidebar_layout.setSpacing(2)
         
-        self._sidebar_title = QLabel("  璁剧疆鍒嗙被")
+        self._sidebar_title = QLabel("  设置分类")
         self._sidebar_title.setObjectName("hintLabel")
         self._sidebar_title.setStyleSheet("color: #666666; font-size: 11px; font-weight: bold; padding: 6px 4px;")
         sidebar_layout.addWidget(self._sidebar_title)
