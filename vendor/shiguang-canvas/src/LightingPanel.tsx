@@ -20,6 +20,7 @@ import {
   type LightingChoice,
 } from "./lightingPresets";
 import { useCanvasStore } from "./store";
+import { lightStateFor } from "./stage3dLighting";
 import { useWindowPanel } from "./hooks/useWindowPanel";
 import "./lighting.css";
 
@@ -36,6 +37,7 @@ export default function LightingPanel({ onClose }: { onClose: () => void }) {
   const selectedId = useCanvasStore((s) => s.selectedId);
   const sel = useCanvasStore((s) => s.nodes.find((n) => n.id === s.selectedId));
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const requestStage3dLighting = useCanvasStore((s) => s.requestStage3dLighting);
   const [choice, setChoice] = useState<LightingChoice>(DEFAULT_CHOICE);
   const [msg, setMsg] = useState("");
 
@@ -55,7 +57,9 @@ export default function LightingPanel({ onClose }: { onClose: () => void }) {
     }
     const next = applyLightingBlock(currentPrompt, choice);
     updateNodeData(selectedId, { prompt: next } as never);
-    setMsg("已写入该节点提示词");
+    // 同一动作的另一半：把灯位投给 3D 导演台（写提示词 + 转 3D 同时发生）
+    requestStage3dLighting(lightStateFor(choice));
+    setMsg("已写入提示词，并应用到 3D 导演台");
   };
 
   const remove = () => {
@@ -68,7 +72,9 @@ export default function LightingPanel({ onClose }: { onClose: () => void }) {
       return;
     }
     updateNodeData(selectedId, { prompt: stripLightingBlock(currentPrompt) } as never);
-    setMsg("已移除灯位块");
+    // null = 让 3D 导演台恢复 lightPreset（不留残灯，也不撒谎）
+    requestStage3dLighting(null);
+    setMsg("已移除灯位块，3D 灯光已恢复预设");
   };
 
   return (
@@ -148,6 +154,11 @@ export default function LightingPanel({ onClose }: { onClose: () => void }) {
 
           <div className="lp-preview" title="这段文字会被追加到节点提示词末尾">
             {preview}
+          </div>
+          <div className="lp-diagram-note">
+            套用后会同时写进提示词、并驱动「3D 导演台」的灯光。
+            <br />
+            3D 只是<b>打光意图示意</b>，不是出图预览（出图仍由模型按提示词决定）。
           </div>
 
           <div className="lp-actions">

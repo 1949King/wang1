@@ -83,6 +83,7 @@ import { publishStage3dArtifact, registerControlNetArtifacts, sendLatestArtifact
 import { CameraRecorder } from "./cameraRecorder";
 import { disposeObject3D, isWorldVisible, readRenderTargetToDataURL } from "./stage3dGlUtils";
 import { Stage3dCastPanel, useStage3dCast } from "./stage3dCast";
+import { useStage3dLighting } from "./stage3dLighting";
 import CommandPalette, { isTypingTarget, type CommandItem } from "./CommandPalette";
 
 export type StageActor = {
@@ -878,6 +879,8 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
   // 消费 AI 分镜相机计划：applyStage3dCameraPlan 递增 stage3dApplySeq 后，把 pendingStage3dCameras 应用进实时视口
   const stage3dApplySeq = useCanvasStore((state) => state.stage3dApplySeq);
+  // 灯位通道序号：灯位面板介入后（>0）让本文件里的 lightPreset effect 不再覆盖 hemi/dir
+  const stage3dLightingSeq = useCanvasStore((state) => state.stage3dLightingSeq);
   /** 最近一条已导出的 3D 产物（「→ 时间线」按钮的可用性与提示用，通道见 stage3dArtifacts.ts） */
   const last3dArtifact = useLatestStage3dArtifact();
   useEffect(() => {
@@ -1336,12 +1339,16 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     const preset = LIGHT_PRESETS[lightPreset];
     api.scene.background = new THREE.Color(preset.bg);
     api.scene.fog = new THREE.Fog(preset.fog, 18, 42);
-    api.hemi.color.set(preset.hemiSky);
-    api.hemi.groundColor.set(preset.hemiGround);
-    api.hemi.intensity = preset.hemiIntensity;
-    api.dir.color.set(preset.dirColor);
-    api.dir.intensity = preset.dirIntensity;
-    api.dir.position.set(...preset.dirPos);
+    // 灯位面板介入后（seq>0）让位：hemi/dir 归 stage3dLighting 管，这里只留 bg/fog/地面。
+    // 守卫使本 effect 与 useStage3dLighting 顺序无关且幂等（否则两者抢改 hemi/dir，谁后跑谁赢）。
+    if (useCanvasStore.getState().stage3dLightingSeq === 0) {
+      api.hemi.color.set(preset.hemiSky);
+      api.hemi.groundColor.set(preset.hemiGround);
+      api.hemi.intensity = preset.hemiIntensity;
+      api.dir.color.set(preset.dirColor);
+      api.dir.intensity = preset.dirIntensity;
+      api.dir.position.set(...preset.dirPos);
+    }
 
     const oldTex = (api.ground.material as THREE.MeshStandardMaterial).map;
     const newTex = makeGroundTexture(groundPreset);
@@ -1350,7 +1357,7 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
     mat.map = newTex ?? null;
     mat.color.set(newTex ? 0xffffff : groundPreset === "studio-dark" ? 0x141c28 : 0xaaaaaa);
     mat.needsUpdate = true;
-  }, [lightPreset, groundPreset]);
+  }, [lightPreset, groundPreset, stage3dLightingSeq]);
 
   // 全景图环境：equirectangular → PMREM 生成 IBL + 天空球背景
   useEffect(() => {
@@ -2119,6 +2126,10 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
 
   // 缺口①「角色库 → 3D 导演台」消费端。必须放在 pushUndo 之后（它是 const，放前面会 TDZ）。
   useStage3dCast({ actors, setActors, setSelectedId, setSceneMode, onStatus, pushUndo });
+
+  // 24 位灯位 → 3D 灯光消费端（2026-10-12）。与上一行同族通道；只在 seq 变化时应用，
+  // 故首次 render 的 apiRef.current=null 无害（用户点灯位时场景必已初始化）。
+  useStage3dLighting({ api: apiRef.current, preset: LIGHT_PRESETS[lightPreset] });
 
   const addActor = (kind: StageActor["kind"]) => {
     pushUndo();

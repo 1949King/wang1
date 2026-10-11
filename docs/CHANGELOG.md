@@ -1,5 +1,63 @@
 # 拾光剪影 — 变更日志
 
+## 功能 · 24 位灯位 → 3D 导演台灯光可视化（2026-10-12，主程序 V4.43.20 / 画布 0.3.28）
+
+**用户授权解冻 `stage3d-core` + `canvas-magnetic-intent`**。修复「电影级灯位面板与 3D 导演台**零数据流**」的孤儿缺口。
+
+### 问题（读码实测，非猜测）
+| 证据 | 实测 |
+|---|---|
+| `lightingPresets.ts`（24 主光位 + 9 轮廓光）在 `Stage3D.tsx` **0 引用** | grep 空 |
+| 消费者只有 `LightingPanel.tsx` / `lighting.test.ts`，而面板 `apply()` 只写提示词 | `LightingPanel.tsx:57` |
+| `Stage3D.tsx` 自己另有一套 `LIGHT_PRESETS`（4 档死预设），物理上只有 `hemi` + `dir` 两盏灯 | `:231-286` / `:1000-1005` |
+
+⇒ 用户选 24 个方位之一，3D 预览纹丝不动、只能盲选。这正是 zone8 不变量点名的反模式（同一语义被两条链路各写一遍）。
+
+### 做法：接一条单通道（照抄 `stage3dApplySeq` / `stage3dCastSeq` 正统模式）
+- 新增 **`stage3dLighting.ts`**（326 行）作为**唯一映射通道**：`lightPosition` 球坐标→笛卡尔 / `kelvinToRgb`（Tanner Helland 近似）/ `lightStateFor` 快照 / `applyLightingToApi` 副作用 / `useStage3dLighting` 消费端（先 consume 再 apply）。
+- 映射：**主光 → `dir`**（位置/颜色/强度）、**环境 → `hemi`**、**轮廓光 → 新增灯**。
+- 轮廓灯由 `WeakMap<Scene, DirectionalLight[]>` 惰性持有（≤2 盏、`castShadow=false`）⇒ **`apiRef` 类型零改动**。
+- 「双侧轮廓」**真给 2 盏**（120° + 240°，用户拍板不取巧）。
+- `RIM_LIGHTS` 加**可选** `azimuth`/`height`/`azimuths` 结构化字段 ⇒ 既有 `lighting.test.ts` 零回归。
+
+### 优先级（核心：两个 effect 绝不打架）
+- `Stage3D.tsx` 的 `lightPreset` effect 加守卫 **`stage3dLightingSeq === 0`**：未介入时 preset 完全生效（现状不变）；介入后 preset 让位，只保留 `bg`/`fog`/地面 ⇒ 两 effect **顺序无关、幂等**（逻辑互斥）。
+- 「移除灯位」投递 `null` ⇒ 恢复 `lightPreset`，不留残灯、不撒谎。
+- 界面明写 **「3D 只是打光意图示意，不是出图预览」**。
+
+### 冻结区纪律（`stage3d-core` 12 → 14 文件 / 全库 91 → 93 锁点）
+- 备份（主库 6 + 副库 4）→ 写新文件 → 接线（`store.ts` +11 行 / `Stage3D.tsx` +11 行，均在容差内）→ `frozen_zones.json` **字符串手术**（禁 `json.dump`）→ `--update` 重锁 → `OK frozen zones intact (93 locks)`。
+- 顺手修正 `.cursor/rules/frozen-zones.mdc` 既有的 **90 vs 91 漂移**（现统一 93）；CRLF 行尾保持（45→45）。
+- **未动**：端口 18765/3011/3010、GLB 加载与 `bodyFigureUrl`、骨骼绑定、姿势应用、材质渲染、画布预热时机、角色库 schema、磁吸任何阈值。
+
+### 验证
+- **tsc 主库 38 → 38 逐文件一致**（21 riggedHumanoid + 16 Stage3D + 1 infinite-compat，新文件 0 错误）；副库 `tsc -p tsconfig.app.json` 同为 38（防 project references 假绿）。
+- **vitest 26 → 27 文件 / 361 → 406 例全绿**（新增 `stage3dLighting.test.ts` 45 例）。
+- `vite build` rc=0 且产物实测含 **`stage3d-rim-light`** 字面量（不是只看返回码）。
+- 新增 **`_verify/check_stage3d_lighting.mjs`**（真 three 场景端到端 **43 项全过**，已登记进 `run_all_checks` 的 `LIGHT3D`）—— 补 vitest node 环境测不到的 `useEffect` 部分。
+- **7 条反例逐条喂坏版本**确认守卫真会红：① sin/cos 对调 ② 删守卫 ③ consume 挪到 apply 后 ④ hook 提到 `apiRef` 前 ⑤ 删轮廓 azimuth ⑥ kelvin 恒白 ⑦ 忘初始化 store 字段。
+- 双库同步 8 文件字节一致；`check_canvas_dual_repo` 失败项 4 个**全部与本刀零交集**（`infinite-compat.tsx` 既有分叉 mtime 00:57 + 并发会话的 `faceParams*` / `faceHeadParts.ts`）。
+
+### 已知未做
+- 「头部捏脸」卡片（表情/发饰/妆容）是独立一刀，本次不碰。
+- 3D 场景灯位实体可视化（把 24 个灯画成场景里可见的体块）另立刀。
+
+### 提交门禁例外登记（--no-verify 双份登记）
+本刀提交时 `precommit_gates.sh --all` 有 2 道红，**均与本刀零交集**，故按纪律用
+`--no-verify` 提交，并在此（CHANGELOG）+ 提交消息双份登记：
+- **⑥b 双库一致性（5 项）**：`infinite-compat.tsx`（既有分叉，本会话开始前 00:57 已改，
+  在 tsc 基线错误表内）+ 并发会话产物 `FaceCard.tsx`（mtime 06:32，晚于本刀末次写入 06:31）/
+  `faceParams.ts` / `faceParams.test.ts` / `faceHeadParts.ts`。本刀 9 文件主副库字节一致，
+  新增分叉 0。
+- **⑦ tsc 38 > 基线 37（1 项）**：第 38 个错误来自既有脏文件 `plugins/infinite-compat.tsx`
+  （工作区未提交改动，本会话开始前已存在）。本刀 A/B 逐文件核验：Stage3D 16→16、
+  riggedHumanoid 21→21、infinite-compat 1→1、新文件 0，合计 38 = 38（**新增 0**）。
+- **零交集判定**：本刀 16 个暂存文件全部为 06:05–06:31 时间窗内产出，与上述既有/并发
+  文件在 git 层面无重叠（暂存清单经 grep 反查确认无 `infinite-compat` / `faceParams` /
+  `FaceCard` / `editor_module` / `schema-migrations`）。
+
+---
+
 ## 功能 · LibTV 对标补强第三刀：画布前端接线（2026-10-12，主程序 V4.43.19 / 画布 0.3.27）
 
 **用户授权解冻 `canvas-magnetic-intent`**。刀1（Agent 能力）+ 刀2（文本生剧本/落时间线）之后，本刀把能力接到画布 UI —— 7 项「引擎就绪、只差接线」自此 **Agent 与人两个入口都能用**。

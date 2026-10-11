@@ -85,6 +85,8 @@ CHECKS = [
     ("POSECACHE", "_verify/check_pose_thumb_cache.mjs", "数字人姿势元数据 + 缩略图 LRU"),
     ("POSEDOF", "_verify/check_stage3d_pose_dof.mjs",
      "3D 姿势自由度（真 GLB 算关节世界坐标：内旋轴/前倾符号/自然垂手/万向节）"),
+    ("LIGHT3D", "_verify/check_stage3d_lighting.mjs",
+     "24 位灯位 → 3D 灯光（真 three 场景端到端：坐标系/色温/轮廓灯/优先级守卫）"),
     ("STORYAPPLY", "_verify/check_storyboard_apply.py", "分镜记忆回灌（apply 落回 _clips）"),
     ("CANVASROUTES", "_verify/check_canvas_routes.py", "画布端点契约 + 不可达路由"),
     ("CANVASE2E", "_verify/check_canvas_bridge_e2e.py", "画布端点端到端（起真服务）"),

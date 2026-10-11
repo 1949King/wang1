@@ -96,6 +96,8 @@ import {
   animationGrid,
   type CharacterEntry,
 } from "./stores/node-factory";
+// 灯位→3D 灯光快照类型。**type-only**：stage3dLighting.ts 反向 import 本 store，值级会成环
+import type { Stage3dLightState } from "./stage3dLighting";
 
 /** re-export 给外部模块用（保持 import 路径不变） */
 export type {
@@ -452,6 +454,9 @@ type Store = {
   requestStage3dCast: (character: CharacterEntry) => void;
   consumeStage3dCast: () => void;
 
+  // ===== 24 位灯位 → 3D 灯光（2026-10-12）。同族第三通道，照 stage3dCastSeq 正统模式 =====
+  stage3dLightingSeq: number; pendingStage3dLighting: Stage3dLightState | null;
+  requestStage3dLighting: (state: Stage3dLightState | null) => void; consumeStage3dLighting: () => void;
   // ===== Canvas View Preferences =====
   showGrid: boolean;
   smoothLine: boolean;
@@ -644,6 +649,8 @@ export const useCanvasStore = create<Store>((set, get) => ({
   pendingStage3dCameras: null,
   stage3dCastSeq: 0,
   pendingStage3dCast: null,
+  stage3dLightingSeq: 0,
+  pendingStage3dLighting: null,
   activeProjectId: null,
   activeProjectName: "未命名工作区",
   activeCanvasId: null,
@@ -2337,6 +2344,10 @@ export const useCanvasStore = create<Store>((set, get) => ({
     }));
   },
   consumeStage3dCast: () => set({ pendingStage3dCast: null }),
+  requestStage3dLighting: (lightState) => set((s) => ({ pendingStage3dLighting: lightState,
+    stage3dLightingSeq: s.stage3dLightingSeq + 1, viewMode: "stage3d",
+    status: lightState ? "已应用灯位为 3D 打光示意" : "已恢复灯光预设" })),
+  consumeStage3dLighting: () => set({ pendingStage3dLighting: null }),
 
   // ===== Character Library（对接 Python CharacterStore）=====
   characters: [] as CharacterEntry[],
