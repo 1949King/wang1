@@ -708,6 +708,11 @@ class _PresetPreview(QWidget):
         self._node_kind = node_kind
         self._chip_text = chip_text
         self.setMinimumHeight(140)
+        # V4.43.7 修复（重要）：本控件是**自绘 QWidget**、覆盖了预设卡绝大部分面积。
+        # QWidget 默认会接受 mousePressEvent，于是点击被它吞掉、**不冒泡**到父级
+        # PresetCard ⇒ PresetCard.mousePressEvent 收不到 ⇒ activated 信号永不发射
+        # ⇒ 用户「点预设卡没反应 / 点深色不切换」。设为鼠标穿透即修好。
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def paintEvent(self, event):
         p = QPainter(self)

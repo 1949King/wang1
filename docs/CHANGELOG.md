@@ -1,5 +1,76 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.7 (2026-10-11) — 主题切换不生效根治（repolish）+ 预设卡点击穿透 + 工具栏硬编码色
+
+> 用户原话：「其一，切换主题之后为什么点再次切换它就回不去了呢？其二，点开那顶部设置里面的
+> 设置中的外观功能，点其中四个中的一个…它没有切换到对应的深色主题。…最后那张图片里面…
+> 用红线圈起来的地方，你认为这设计合理吗？可读性好吗？」
+
+### 【① 主题切换不生效 → 根治（本版最重要）】
+
+**病根**：`ThemeManager._apply_theme_property()` **只 setProperty、不 repolish**，
+注释写「不使用 unpolish/polish（性能差），依靠 setStyleSheet 全局刷新自动生效」——
+**这个假设是错的**。
+
+**决定性实测**（offscreen，`QPushButton` + `[theme]` 属性选择器）：
+
+| 操作 | 背景色 |
+|---|---|
+| 初始 `theme="dark"` | `#000000` |
+| 只 `setProperty("theme","light")` | **仍 `#000000`**（期望 `#ffffff`，没变） |
+| `unpolish` + `polish` 后 | `#ffffff` ✅ |
+
+**为什么表现为「切一次就回不去」**：`_do_apply_theme()` 先 `app.setStyleSheet(qss)`、
+**后** `_apply_theme_property()`，属性改动落在样式表重算之后 ⇒ 界面停在旧主题。
+而 ThemeManager 内部状态其实**正确交替**（启动日志可证：`light→dark→light→dark…`），
+所以日志看着"正常"，界面却没变 —— 这才是最迷惑人的地方。
+
+**修复**：`_apply_theme_property` 内对每个 widget `setProperty` 后补
+`style().unpolish(w)` + `polish(w)`；并加「属性未变则跳过」以省开销。
+
+### 【② 点外观预设没反应 → 根治】
+
+**病根**：`_PresetPreview` 是**自绘 QWidget**、覆盖预设卡绝大部分面积。QWidget 默认
+**接受** `mousePressEvent` ⇒ 点击被它吞掉、不冒泡到父级 `PresetCard` ⇒
+`PresetCard.mousePressEvent` 收不到 ⇒ `activated` 信号**永不发射**。
+
+**修复**：`_PresetPreview` 设 `WA_TransparentForMouseEvents`。
+
+**实测**：点预览区 → `activated=['dark']`（修复前为空）。
+
+### 【③ 工具栏下拉框可读性（用户截图圈出处）—— 待授权解冻，本版未落地】
+
+**病根**：`character_management_module` 里用了**内联硬编码**深色 ——
+`QComboBox{background:#1a1a1a;color:#eee}` / `title color:#fff` / `hint color:#888` /
+`checkbox color:#ccc`。**内联样式优先级高于全局 QSS** ⇒
+① 深色主题下与工具栏背景几乎同色、文字发暗（看不清）；
+② 浅色主题下变黑框 / 白字白底，完全不可用。
+
+**该文件属 `stage3d-core` 冻结区**（用户 2026-08-20 明确要求冻结，防 GLB / 骨骼绑定 /
+姿势应用 / 材质渲染 / Python 桥接层被误改）。
+
+⇒ 按纪律**未擅自改动，改动已回退**（`git checkout --`）。待用户授权解冻后再落地，
+改动范围**仅限**「去掉内联颜色 → 改用全局主题 QSS（`#titleLabel` / `#hintLabel` /
+`QComboBox[theme]` / `QCheckBox[theme]`）」，**不碰** GLB / 骨骼 / 端口值 / 预热时机。
+
+### 【④ 关于「参考项目为什么做得更好」—— 诚实结论】
+
+| | AI-Canvas-tauri | 拾光剪影（V4.43.6 前） |
+|---|---|---|
+| 太阳系背景 | **8 张真实行星照片** (mercury…neptune PNG) + `setInterval` 每 **80 秒轮播** + 淡入/缩放过渡 1.2s + 星场 60s 漂移动画 | `canvasBackgrounds.ts` **纯 CSS 渐变**、静态 |
+| 磨砂暖光 | **Three.js** 真实光照渲染 + 噪点层 | CSS 线性渐变 |
+| 星云 | **Three.js** canvas | CSS radial 叠加 |
+
+⇒ 差距是「**没搬素材、没做动效**」，**不是能力不可及**。行星素材就在
+`vendor/AI-Canvas-tauri/src/assets/images/bg/`，**可直接复刻**。
+
+### 【验证】
+- 三项修复全部 offscreen 实测通过。
+- 门禁：ruff 棘轮零新增 / frozen_zone 85 locks intact / 规模守卫无新增债务 /
+  stability 250 无新增 / SCOPE 0 命中 / run_all_checks 全绿 / pre-commit 11 道全过。
+
+---
+
 ## V4.43.6 (2026-10-11) — 画布白屏根治（Chromium --no-sandbox）+ 首页三处可读性
 
 > 用户原话：「图一中三个地方我圈了，用红线圈的地方你自己看一下，根本就看不清里面的内容，

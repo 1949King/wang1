@@ -891,16 +891,34 @@ class ThemeManager:
 
     @staticmethod
     def _apply_theme_property(widget: QWidget, theme: str) -> None:
-        """
-        给 widget 及其所有子控件设置 theme 属性
-        不使用 unpolish/polish（性能差），依靠 setStyleSheet 全局刷新自动生效
+        """给 widget 及其所有子控件设置 theme 属性，并 repolish 让属性选择器重新求值。
 
-        关键点：只设置属性，不调用 unpolish/polish
+        ⚠️ V4.43.7 修正（重要）：
+        此前本方法**只 setProperty、不 repolish**，注释写「不使用 unpolish/polish
+        （性能差），依靠 setStyleSheet 全局刷新自动生效」—— **这个假设是错的**。
+        Qt 中动态属性变化后，`QSS[theme="x"]` 属性选择器**不会**自动重新匹配，
+        必须 unpolish + polish。实测（offscreen，QPushButton + [theme] 选择器）：
+
+            初始 dark          → 背景 #000000
+            只 setProperty     → 背景仍 #000000（期望 #ffffff，**没变**）
+            unpolish+polish 后 → 背景 #ffffff（正确）
+
+        ⇒ 这正是用户反馈「点了主题、界面不跟着切 / 再点切不回来」的根因：
+          `_do_apply_theme` 先 `app.setStyleSheet(qss)`、后 `_apply_theme_property`，
+          属性改动落在样式表重算之后，于是界面停留在旧主题。
         """
-        widget.setProperty("theme", theme)
-        # 直接遍历设置属性（不调用 unpolish/polish）
+        def _repolish(w: QWidget) -> None:
+            if w.property("theme") == theme:
+                return  # 属性没变，省一次 repolish
+            w.setProperty("theme", theme)
+            st = w.style()
+            if st is not None:
+                st.unpolish(w)
+                st.polish(w)
+
+        _repolish(widget)
         for child in widget.findChildren(QWidget):
-            child.setProperty("theme", theme)
+            _repolish(child)
 
     # ───── 便利方法：清除子控件的内联样式（可选） ─────
     def clear_inline_styles(self, root: QWidget, preserve_semantic: bool = True) -> None:
