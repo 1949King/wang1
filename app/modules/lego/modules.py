@@ -1592,6 +1592,7 @@ class HomeModule(BaseModule):
         与 _open_recent_project 行为一致。
         """
         try:
+            from pathlib import Path
             from PyQt6.QtWidgets import QFileDialog
             path_str, _ = QFileDialog.getOpenFileName(
                 self,

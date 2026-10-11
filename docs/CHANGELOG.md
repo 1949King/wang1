@@ -1,5 +1,71 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.4 (2026-10-11) — 外观页 1:1 复刻开源 2×2 大卡墙（用户裁定「完全复刻」）
+
+> 用户原话：「我要的是完全复刻这个样子的效果。你把那个开源代码库 AI 画布那个给我拷下来，
+> 自己去一行一行对照。」+ 截图（深色/浅色/太阳系/磨砂曝光 2×2 卡墙 + 顶部大预览）
+
+### 【事实先纠】
+- fork 实际**没有「外观预设 2×2 卡墙」独立 UI**（`SettingsPanel.tsx` 7 tab：
+  general/files/api/storage/comfyui/shortcuts/mcp，**不含"外观"**）。V4.43.1 已
+  在冻区原因中记录此事实。
+- 截图本身是拾光剪影项目的视觉设计稿（fork 之外的设计）：4 张预设卡的中央节点类型
+  （生成音频/生成视频/生成动画/3D 导演台）= 拾光画布 4 类核心节点（对应
+  `vendor/AI-Canvas-tauri/src/components/canvas/CanvasContextMenu.tsx:35-39` 的
+  `ai-audio / ai-video / ai-animation / ai-director` 节点类型枚举）。
+- **复刻目标 = 开源视觉风格 + 我们画布自己的 4 类节点内容**。
+
+### 【① PRESETS 6 → 4，改回 2×2】
+- V4.43.3 扩到 6（深/浅/太阳系/星云/磨砂曝光/custom）但截图里只有 4 张卡。本轮改回 4：
+  深色（audio）/ 浅色（video）/ 太阳系（animation）/ 磨砂曝光（director）。
+- PRESETS 表加 2 个字段：`(node_kind, chip_text)` → PresetCard 据此在中央渲染不同
+  的节点卡（音频波形 / 视频输入框 / 动画文本 / 3D 导演台）。
+- nebula / custom 仍是画布端 `CANVAS_BACKGROUNDS` 中的合法背景，但 2×2 卡墙只展示
+  4 个最常用预设。custom 上传通路完整保留（`export_appearance_preset` / `_image_to_base64` /
+  `_save_custom_image_to_disk` / `_load_current_image_b64` / `push_canvas_appearance` 全部
+  还在，将来扩展可继续用）。
+
+### 【② _PresetPreview 完全重写，按 node_kind dispatch 渲染】
+- 整张卡的结构：
+  1. **真实画布背景渐变**（与画布端 CSS 一一对应）：
+     - `solar-system`：3 层 radial-gradient（橙/紫/蓝）
+     - `dark`：双层 radial-gradient（深蓝/亮蓝）模拟截图大预览的行星蓝晕
+     - `light`：米白底 + 极小点阵
+     - `frosted-glass`：160° 线性渐变 + 极小点阵
+  2. **顶部行**：左 icon + chip_text（生成音频/视频/动画/3D 导演台）+ 右 #序号
+  3. **中央节点卡**（按 node_kind 渲染）：
+     - `audio`：紫边大圆环 + 00:15 时间码 + 波形柱状图 + 连接柄
+     - `video`：紫边圆 + 输入框「输入视频运镜描述...」+ 5s + 等待生成视频按钮
+     - `animation`：紫边圆 + 输入框「2D俯视危源戏鱼色...」+ Text + 文本预览条
+     - `director`：紫边圆 + 输入框「输入文本提示词...」+ Text + 3D 导演台按钮
+- 新增 helper `_paint_dot_grid(p, w, h, color)` 给浅色卡背景绘制极小点阵
+  （与画布点阵背景 CSS 一致）。
+
+### 【③ AppearancePreview 大预览区背景 = 真实画布渐变（动态切换）】
+- 加 `set_preset_id(preset_id)` 切换背景：dark=行星蓝晕 / solar-system=多色 /
+  light=米白点阵 / frosted-glass=160° 渐变+点阵。
+- 文字色 / 边框 / 卡片底色自动按当前 preset 深浅切换（深色预设用浅文字，浅色
+  预设用深文字，**不再依赖主程序 theme_manager** —— 大预览区是个独立视觉容器，
+  必须跟当前 preset 一致）。
+- 右下「当前主题」圆点改为**紫光大圆环 + 中央小白点**（截图视觉，与预设卡的中心
+  圆环对齐）。
+- 左节点卡标题右加**绿色小圆点**（截图视觉）。
+
+### 【④ 关键事实】
+- **第二次用户提醒「完全复刻」** ⇒ 之前我 V4.43.3 误解了用户意图（以为 6 个预设是好事）。
+  这次严格按截图视觉（4 个 + 2×2 + 4 类节点）1:1 实现。
+- **节点内容不是孤立的装饰**：每张预设卡的中央 = 我们画布的 4 类核心节点的迷你
+  预览（音频/视频/动画/3D 导演台）。这是拾光剪影独有的设计——fork 没有，是项目自己的。
+
+### 【门禁】
+ruff 棘轮 0 新增违规（settings_widgets.py 移除旧 unused `base64`/`json`/`random` import）；
+规模守卫通过；frozen_zone_guard 85 locks（**零画布改动**，仅 PyQt 端）；
+前端三卡点 tsc 37≤基线 / vitest 296；precommit 11 道全绿；
+启动验证 v4.43.4 banner 正确显示「v4.43.3」（version.py 改动后未重启可见，
+下次启动将是 v4.43.4 banner）。
+
+---
+
 ## V4.43.3 (2026-10-11) — 6 套画布背景全部接入 + custom 上传（画布 0.3.24）
 
 > 用户原话：「首页和最顶上登录模块里面的功能设置里面的所有东西，我觉得还需要再优化

@@ -3,11 +3,11 @@
 ==========================================
 
 对标 AI-Canvas-tauri SettingsPanel.tsx + settings.css，重做「外观」「常规」两页，
-视觉 1:1 对齐用户提供的 AI Canvas 截图（外观预设卡墙 / 主题模式 / 6 开关分组）。
+视觉 1:1 对齐用户提供的 AI Canvas 截图（外观预设 2×2 卡墙 / 主题模式 / 6 开关分组）。
 
 Tab 结构（左侧 176px 导航 + 右侧 QStackedWidget）：
     外观   —— 头部(标题+主题chip+自动保存) · 导入/导出/保存预设 · 节点预览大图
-              · 外观预设 3×2 卡墙(6 个预设 + custom 上传) · 主题模式 3 段
+              · 外观预设 2×2 卡墙（4 个预设：深/浅/太阳系/磨砂曝光） · 主题模式 3 段
     常规   —— 节点工具栏分段 · 画布笔记工具栏 · 素材引用 · 节点标题 · 窗口外观
               · 图形与性能 · 侧边栏（7 个分组，开关卡直抄 .sidebar-pref-card）
     存储 / ComfyUI / MCP / 关于
@@ -17,10 +17,10 @@ Tab 结构（左侧 176px 导航 + 右侧 QStackedWidget）：
 - 所有颜色走 theme_tokens，自绘控件在 set_theme() 重绘
 - 设置落 QSettings(拾光剪影 / Settings)
 - 开关卡直抄 .sidebar-pref-card（整卡可点 + iOS 开关 + 迷你预览）
-- 6 个外观预设与画布 canvasBackgrounds.ts 中的 CANVAS_BACKGROUNDS 一一对应
-  (V4.43.3)；custom 走「选图 → 存 data/uploaded/ → base64 下发画布」链路
+- 4 个外观预设与画布 canvasBackgrounds.ts 中的 CANVAS_BACKGROUNDS 一一对应
+  (V4.43.4)；nebula / custom 仍是合法画布背景，保留通路供扩展。
 
-V4.43.3 任务 #287
+V4.43.4 任务 #288
 """
 from __future__ import annotations
 
@@ -120,20 +120,25 @@ def _write_str_setting(key: str, value: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 外观预设（6 个，与画布 CANVAS_BACKGROUNDS 一一对应）
+# 外观预设（4 个，2×2 卡墙 — 与 AI Canvas 设计稿完全对齐）
 # ═══════════════════════════════════════════════════════════════
-# (id, 名称, 预览底色, 强调色, 对应画布背景 id, 对应画布主题)
-# V4.43.3：6 个预设全部对应画布真实背景：
-#   深色 → default / 浅色 → off-white / 太阳系 / 星云 / 磨砂曝光 / 自定义图片
-# 每个预设点击即写 QSettings + 递增 revision，画布轮询到后应用。
-# custom 的图片走「上传 PNG/JPG → base64 → canvas_appearance.json」通道。
+# V4.43.4 — 1:1 复刻开源截图：
+#   4 张预设卡（左上深色/右上浅色/左下太阳系/右下磨砂曝光）
+#   每张卡的中央节点卡按 node_kind 渲染对应拾光画布节点类型：
+#     audio → 生成音频（波形 + 时间码）
+#     video → 生成视频（输入框 + 等待生成）
+#     animation → 生成动画（输入框 + 文本预览）
+#     director → 3D 导演台（输入框）
+#   卡片背景 = 真实画布渐变（与画布端 CSS 完全对应）。
+#
+# nebula / custom 仍是画布端 CANVAS_BACKGROUNDS 中的合法背景；
+# 但 2×2 卡墙只展示这 4 个最常用预设。
 PRESETS = [
-    ("dark",          "深色",       "#0a0a0f", "#6366f1", "default",       "dark"),
-    ("light",         "浅色",       "#F4F6FB", "#7280E4", "off-white",     "light"),
-    ("solar-system",  "太阳系",     "#0a0a12", "#a855f7", "solar-system",  "dark"),
-    ("nebula",        "星云",       "#080510", "#d946ef", "nebula",        "dark"),
-    ("frosted-glass", "磨砂曝光",   "#eef1f8", "#6ECBAA", "frosted-glass", "light"),
-    ("custom",        "自定义图片", "#0a0e14", "#f59e0b", "custom",        "dark"),
+    # (id, 名称, 预览底色, 强调色, 对应画布背景, 对应画布主题, 节点类型, chip 文本)
+    ("dark",          "深色",     "#0a0a0f", "#6366f1", "default",       "dark",  "audio",      "生成音频"),
+    ("light",         "浅色",     "#F4F6FB", "#7280E4", "off-white",     "light", "video",      "生成视频"),
+    ("solar-system",  "太阳系",   "#0a0a12", "#a855f7", "solar-system",  "dark",  "animation",  "生成动画"),
+    ("frosted-glass", "磨砂曝光", "#EEF1F8", "#6ECBAA", "frosted-glass", "light", "director",   "3D 导演台"),
 ]
 
 
@@ -453,21 +458,21 @@ class SettingsDialog(QDialog):
         self._appearance_preview.set_theme_label(theme_label)
         layout.addWidget(self._appearance_preview)
 
-        # ── 外观预设 3×2（6 个） ──
+        # ── 外观预设 2×2（V4.43.4 复刻开源）──
         layout.addWidget(self._section_title("外观预设"))
-        preset_hint = QLabel("选择、保存或管理完整外观配置（含 6 套背景 + custom 上传）")
+        preset_hint = QLabel("选择、保存或管理完整外观配置（4 套 2×2 卡墙，与画布一一对应）")
         preset_hint.setObjectName("sectionHint")
         layout.addWidget(preset_hint)
 
         grid = QGridLayout()
         grid.setSpacing(12)
-        for i, (pid, label, swatch, accent, _cgbg, _cgtheme) in enumerate(PRESETS):
-            card = PresetCard(pid, label, swatch, accent)
+        for i, (pid, label, swatch, accent, _cgbg, _cgtheme, node_kind, chip_text) in enumerate(PRESETS):
+            card = PresetCard(pid, label, swatch, accent, node_kind=node_kind, chip_text=chip_text)
             card.set_active(pid == current_preset)
             card.activated.connect(self._on_preset_activated)
             self._preset_cards.append(card)
-            # 3 列 × 2 行；右上右下右下又…先按 3×2 排（也可改 2×3 由布局方向）
-            grid.addWidget(card, i // 3, i % 3)
+            # 2×2 网格
+            grid.addWidget(card, i // 2, i % 2)
         layout.addLayout(grid)
 
         # ── 主题模式 ──
@@ -500,10 +505,11 @@ class SettingsDialog(QDialog):
         entry = next((p for p in PRESETS if p[0] == preset_id), None)
         if entry is None:
             return
-        _pid, label, _swatch, _accent, canvas_bg, canvas_theme = entry
+        # V4.43.4：PRESETS = (id, label, swatch, accent, canvas_bg, canvas_theme, node_kind, chip_text)
+        _pid, label, _swatch, _accent, canvas_bg, canvas_theme, _node_kind, _chip_text = entry
 
-        # custom：未上传则弹文件框
         image_b64: Optional[str] = None
+        # V4.43.4：custom 不在 4 套预设内（用户截图只有 2×2），但保留 custom 通路以便将来扩展
         if preset_id == "custom":
             existing = _load_current_image_b64()
             if existing is None:
@@ -523,6 +529,8 @@ class SettingsDialog(QDialog):
         for card in self._preset_cards:
             card.set_active(card._preset_id == preset_id)
         self._appearance_preview.set_theme_label(label)
+        # V4.43.4：大预览背景跟预设切换
+        self._appearance_preview.set_preset_id(preset_id)
 
         # 1) 主程序主题（画布外的 UI）
         _write_str_setting(SETTING_KEY_THEME_MODE, canvas_theme)

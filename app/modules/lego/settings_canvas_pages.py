@@ -14,7 +14,7 @@
 - PresetCard / AppearancePreview / SegmentedControl / PreferenceCard（settings_widgets.py）
 - 开关卡 = .sidebar-pref-card（88×52 迷你预览 + iOS 开关）
 
-V4.43.3 任务 #287
+V4.43.4 任务 #288
 """
 from __future__ import annotations
 
@@ -81,14 +81,18 @@ def apply_theme_mode_combo(mod, mode: str) -> None:
 
 
 def on_preset_activated(mod, preset_id: str) -> None:
-    """外观预设点击 → 主程序主题 + 画布背景（V4.43.3：6 个预设全部落地 + custom 走上传）"""
+    """外观预设点击 → 主程序主题 + 画布背景（V4.43.4：4 个预设 2×2 卡墙）
+
+    V4.43.4：PRESETS 是 8 元组（id, label, swatch, accent, canvas_bg,
+    canvas_theme, node_kind, chip_text）。custom 不在 4 套内，保留
+    canvas_bg 通路以备扩展。
+    """
     entry = next((p for p in PRESETS if p[0] == preset_id), None)
     if entry is None:
         return
-    _pid, label, _swatch, _accent, canvas_bg, canvas_theme = entry
+    _pid, label, _swatch, _accent, canvas_bg, canvas_theme, _node_kind, _chip_text = entry
 
-    # V4.43.3：custom 卡未上传时弹文件框（settings_panel.SettingsDialog 有完整实现，
-    # settings_module 走的也是同一函数；此处仅做主程序主题 + 画布背景对齐）
+    # V4.43.4：custom 通路保留（4 套不含 custom，但保留自定义背景逻辑）
     image_b64 = None
     if preset_id == "custom":
         from app.modules.lego.settings_panel import _load_current_image_b64
@@ -100,6 +104,7 @@ def on_preset_activated(mod, preset_id: str) -> None:
     prev = getattr(mod, "_appearance_preview", None)
     if prev is not None:
         prev.set_theme_label(label)
+        prev.set_preset_id(preset_id)
 
     # 1) 主程序主题（画布外的 UI）
     _write_str_setting(SETTING_KEY_THEME_MODE, canvas_theme)
@@ -178,18 +183,19 @@ def build_appearance_top_block(mod) -> QWidget:
     mod._appearance_preview.set_theme_label(theme_label)
     layout.addWidget(mod._appearance_preview)
 
-    # 外观预设 3×2（6 个）
+    # 外观预设 2×2（V4.43.4 复刻开源 4 套卡墙）
     layout.addWidget(_section("外观预设"))
-    layout.addWidget(_hint("选择、保存或管理完整外观配置（含 6 套背景 + custom 上传）"))
+    layout.addWidget(_hint("选择、保存或管理完整外观配置（4 套 2×2 卡墙，与画布一一对应）"))
     mod._preset_cards = []
     grid = QGridLayout()
     grid.setSpacing(12)
-    for i, (pid, label, swatch, accent, _cgbg, _cgtheme) in enumerate(PRESETS):
-        card = PresetCard(pid, label, swatch, accent)
+    for i, (pid, label, swatch, accent, _cgbg, _cgtheme, node_kind, chip_text) in enumerate(PRESETS):
+        card = PresetCard(pid, label, swatch, accent, node_kind=node_kind, chip_text=chip_text)
         card.set_active(pid == current_preset)
         card.activated.connect(lambda p, m=mod: on_preset_activated(m, p))
         mod._preset_cards.append(card)
-        grid.addWidget(card, i // 3, i % 3)
+        # 2×2 网格
+        grid.addWidget(card, i // 2, i % 2)
     layout.addLayout(grid)
 
     # 主题模式 3 段
