@@ -20,6 +20,11 @@ import { useEffect, useState } from "react";
 import { useCanvasStore } from "../store";
 import { breakdownStoryboard } from "../bridge";
 import { repairImageViaHost } from "../canvasRepair";
+import {
+  enhanceImageViaHost,
+  scriptWriteViaHost,
+  toEnhanceDataUrl,
+} from "../canvasEnhanceActions";
 import { yuePlanViaHost, yueTranscribeViaHost } from "../canvasYue";
 import {
   APERTURES,
@@ -128,6 +133,13 @@ export default function NoviceInspector() {
   // YuE 翻唱前置：参考曲 → 旋律谱（独立环境 SheetSage2，慢）
   const [trBusy, setTrBusy] = useState(false);
   const [trMsg, setTrMsg] = useState("");
+  // AI 增强 / AI 编剧（LibTV 对标补强 刀3，2026-10-12 用户授权解冻 canvas-magnetic-intent）：
+  // 图像节点超分/抠像（本地引擎不花云端额度）+ 剧本节点 AI 写剧本（走 LLM）。
+  // 均显式点击触发 + 诚实回报实际引擎（degraded/降级必标注）。
+  const [enhBusy, setEnhBusy] = useState(false);
+  const [enhMsg, setEnhMsg] = useState("");
+  const [swBusy, setSwBusy] = useState(false);
+  const [swMsg, setSwMsg] = useState("");
 
   // 双击卡片 = 打开精细编辑：订阅 store 的双击信号，自动展开进阶设置
   const proEditNonce = useCanvasStore((s) => s.proEditNonce);
@@ -465,6 +477,87 @@ export default function NoviceInspector() {
     }
   };
 
+  /** AI 增强（刀3）：超分/抠像共用后端 /host/canvas-enhance 意图级实现（Agent 能力同源）。
+   *  如实回报实际引擎：degraded 必标注，绝不把双三次插值说成 AI 超分。 */
+  const doEnhance = async (intent: "sharpen" | "cutout") => {
+    const img = (d.imageUrl as string) || "";
+    if (!img || enhBusy) return;
+    setEnhBusy(true);
+    setEnhMsg(
+      intent === "sharpen"
+        ? "正在 AI 超分（standard 档 OpenCV ESPCN，不下载模型）…"
+        : "正在 AI 抠像（MODNet，模型未就绪会如实报错）…",
+    );
+    try {
+      // 后端只认 data URL；节点图可能是 /inbox_file/…，先归一化
+      const dataUrl = await toEnhanceDataUrl(img);
+      if (!dataUrl) {
+        setEnhMsg("图片读取失败（无法把节点图转成 data URL）");
+        return;
+      }
+      const res = await enhanceImageViaHost({
+        image: dataUrl,
+        intents: [intent],
+        quality: "standard",
+      });
+      const step = (res.applied || []).find((a) => a.intent === intent);
+      if (res.ok && res.changed && res.image_data_url && step) {
+        updateSelectedData({ imageUrl: res.image_data_url });
+        const note = step.degraded
+          ? `⚠️ 降级：${step.reason || step.engine || "非 AI 路径"}`
+          : `引擎 ${step.engine || "unknown"}`;
+        setEnhMsg(
+          intent === "sharpen" ? `已超分 ×2 · ${note}` : `已抠像（透明底） · ${note}`,
+        );
+      } else {
+        const why =
+          (res.skipped || []).find((s) => s.intent === intent)?.reason ||
+          res.message ||
+          "未生效（原图未动）";
+        setEnhMsg(String(why));
+      }
+    } catch (e) {
+      setEnhMsg(`AI 增强异常: ${e}`);
+    } finally {
+      setEnhBusy(false);
+    }
+  };
+
+  /** AI 写剧本（刀3）：卡片标题当主题 → LLM 完整剧本写入 content。
+   *  已有正文不覆盖（想重写先清空）；模板降级 fallback 如实标注。 */
+  const doScriptWrite = async () => {
+    if (swBusy) return;
+    const topic = String(d.title || "").trim();
+    const content = String(d.content || "");
+    if (!topic && !content.trim()) {
+      setSwMsg("先在卡片标题里写主题（或先写一句梗概）");
+      return;
+    }
+    if (content.trim()) {
+      setSwMsg("卡片已有正文，不覆盖——想重写就先清空内容再点");
+      return;
+    }
+    setSwBusy(true);
+    setSwMsg("正在生成剧本…（云 → 本地 → 模板三级降级）");
+    try {
+      const res = await scriptWriteViaHost({ topic: topic || content.trim() });
+      if (res.ok && res.script) {
+        updateSelectedData({ content: res.script });
+        setSwMsg(
+          res.fallback
+            ? "⚠️ LLM 不可用，已写入模板占位剧本（如实标注）"
+            : "剧本已生成，可直接在卡片上修改",
+        );
+      } else {
+        setSwMsg(res.message || "剧本生成失败");
+      }
+    } catch (e) {
+      setSwMsg(`剧本生成异常: ${e}`);
+    } finally {
+      setSwBusy(false);
+    }
+  };
+
   /** YuE 符号规划：歌词+风格 → 可编辑的旋律/和弦 ABC 谱（不出音频，也不花钱渲染）。 */
   const doYuePlan = async () => {
     if (planBusy) return;
@@ -761,6 +854,41 @@ export default function NoviceInspector() {
               </div>
             ) : null}
             {repairMsg ? <div className="nv-loop-msg">{repairMsg}</div> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* AI 增强（LibTV 对标补强 刀3，2026-10-12 用户授权解冻）：图像节点本地引擎
+          超分/抠像，与 Agent 能力 canvas.ai_upscale / canvas.ai_matte 同一后端。
+          复用 .nv-loop-* 既有样式（不改 novice-inspector.css）；如实回报引擎与降级。
+          不改：磁吸阈值/卡片尺寸 240×200/gap/三段式阻力/跟手/单轴吸附/让位/Bond/方向无语义/空间记忆配色。 */}
+      {kind === "image" && typeof d.imageUrl === "string" && d.imageUrl ? (
+        <div className="nv-insp-field nv-insp-loop">
+          <label>AI 增强</label>
+          <div className="nv-loop-body">
+            <div className="nv-loop-row">
+              <button
+                type="button"
+                className="nv-loop-repair"
+                disabled={enhBusy}
+                onClick={() => doEnhance("sharpen")}
+                title="本地超分 ×2（standard 档 OpenCV ESPCN，不下载模型；high 档 RealESRGAN 请走 Agent 能力 canvas.ai_upscale）"
+              >
+                {enhBusy ? "处理中…" : "AI 超分 ×2"}
+              </button>
+            </div>
+            <div className="nv-loop-row">
+              <button
+                type="button"
+                className="nv-loop-repair"
+                disabled={enhBusy}
+                onClick={() => doEnhance("cutout")}
+                title="主体分离 → 透明底（MODNet；模型未就绪时如实报错，不硬切背景）"
+              >
+                {enhBusy ? "处理中…" : "AI 抠像（透明底）"}
+              </button>
+            </div>
+            {enhMsg ? <div className="nv-loop-msg">{enhMsg}</div> : null}
           </div>
         </div>
       ) : null}
@@ -1131,6 +1259,29 @@ export default function NoviceInspector() {
                 />
               </div>
             </>
+          ) : null}
+
+          {/* AI 编剧（LibTV 对标补强 刀3，2026-10-12 用户授权解冻）：剧本卡片标题当
+              主题 → LLM 完整剧本（pipeline.script_write / /host/script-write 同源）。
+              已有正文不覆盖；模板降级如实标注。复用 .nv-loop-* 既有样式。 */}
+          {kind === "script" ? (
+            <div className="nv-insp-field nv-insp-loop">
+              <label>AI 编剧</label>
+              <div className="nv-loop-body">
+                <div className="nv-loop-row">
+                  <button
+                    type="button"
+                    className="nv-loop-repair"
+                    disabled={swBusy}
+                    onClick={doScriptWrite}
+                    title="把卡片标题当主题，LLM 生成完整剧本（云→本地→模板三级降级）"
+                  >
+                    {swBusy ? "写作中…" : "AI 生成剧本"}
+                  </button>
+                </div>
+                {swMsg ? <div className="nv-loop-msg">{swMsg}</div> : null}
+              </div>
+            </div>
           ) : null}
 
           {kind === "panorama" ? (

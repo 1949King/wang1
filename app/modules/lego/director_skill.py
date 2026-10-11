@@ -89,7 +89,7 @@ class DirectorSkill(Skill):
     # 步骤 1：生成剧本
     # ────────────────────────────────────────────────────────────────
     def _generate_script(self, context) -> StepResult:
-        """调 LLM 生成完整剧本（场景/对白/动作）"""
+        """调 LLM 生成完整剧本（场景/对白/动作）—— 薄委托 script_writer（单一真源）"""
         # 步骤1 是最早执行的，在此同步 use_blender 标志到 variables
         # 供步骤5的 _should_use_blender condition 读取（condition 在步骤执行前求值）
         context.set_variable("_use_blender", bool(context.get_input("use_blender", False)))
@@ -105,58 +105,19 @@ class DirectorSkill(Skill):
         topic = context.get_input("topic") or "30秒短视频"
         self._report_progress(10, f"正在生成剧本: {topic}")
 
-        try:
-            from app.core.ai_engine import AIEngine
-            engine = AIEngine()
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "你是专业短视频编剧。根据用户主题创作 30 秒短视频剧本，"
-                        "包含 3-5 个场景，每场景标注：场景描述、对白、动作、时长。"
-                        "输出纯文本，不要 Markdown 代码块。"
-                    )
-                },
-                {"role": "user", "content": f"主题：{topic}\n\n请创作剧本。"}
-            ]
-            full = ""
-            # chat_with_fallback 三级降级：云 → Ollama → 模板
-            for chunk in engine.chat_with_fallback(
-                messages,
-                template=lambda: self._fallback_script(topic)
-            ):
-                full += chunk
-            is_fallback = not full.strip()
-            full = full.strip() or self._fallback_script(topic)
-            context.set_variable("script", full)
-            context.set_variable("topic", topic)
-            context.set_variable("script_is_template", is_fallback)
-            return StepResult(success=True, output={"script": full, "fallback": is_fallback})
-        except Exception as e:
-            # 降级：用本地模板剧本，不阻断
-            fallback = self._fallback_script(topic)
-            context.set_variable("script", fallback)
-            context.set_variable("topic", topic)
-            context.set_variable("script_is_template", True)
-            return StepResult(
-                success=True,
-                output={"script": fallback, "fallback": True, "error": str(e)}
-            )
+        # 单一真源：app/core/ai/script_writer.py（Agent 能力 pipeline.script_write 同源）
+        from app.core.ai.script_writer import write_script
+        res = write_script(topic)
+        context.set_variable("script", res["script"])
+        context.set_variable("topic", topic)
+        context.set_variable("script_is_template", bool(res.get("fallback")))
+        return StepResult(success=True, output={
+            "script": res["script"], "fallback": bool(res.get("fallback"))})
 
     def _fallback_script(self, topic: str) -> str:
-        """LLM 不可用时的占位剧本"""
-        return (
-            f"# {topic}\n\n"
-            "【场景1 · 0-5s · 开场】\n"
-            "动作：镜头从远景推近，展现主体。\n"
-            "对白：今天，带你看一个不一样的故事。\n\n"
-            "【场景2 · 5-20s · 主体展示】\n"
-            "动作：特写镜头，展示核心内容。\n"
-            "对白：这就是主角，专注每一个细节。\n\n"
-            "【场景3 · 20-30s · 收尾】\n"
-            "动作：镜头拉远，定格。\n"
-            "对白：感谢观看，期待下次相遇。\n"
-        )
+        """LLM 不可用时的占位剧本 —— 薄委托 script_writer（单一真源）"""
+        from app.core.ai.script_writer import fallback_script
+        return fallback_script(topic)
 
     # ────────────────────────────────────────────────────────────────
     # 步骤 2：生成分镜表
@@ -429,39 +390,26 @@ class DirectorSkill(Skill):
     # ────────────────────────────────────────────────────────────────
     # 步骤 5.5：落地时间线（条件执行，2026-09-26 LibTV 对标 P0-1）
     # ────────────────────────────────────────────────────────────────
-    # 视频扩展名白名单（音频不进时间线片段，避免把 BGM 当成镜头素材）
-    _MEDIA_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts",
-                   ".flv", ".wmv", ".mpg", ".mpeg")
+    # 视频扩展名白名单已迁至 app/core/ai/director_timeline.py::MEDIA_EXTS（单一真源）
 
     def _should_apply_timeline(self, variables: Dict) -> bool:
         """条件：inputs 给了 source_dir 且已有分镜表。"""
         return bool(variables.get("_source_dir") and variables.get("storyboard"))
 
     def _collect_media_files(self, source_dir: str, cap: int = 200) -> List[str]:
-        """递归收集素材目录里的视频文件（按路径排序，数量封顶）。"""
-        found: List[str] = []
-        for root, _dirs, files in os.walk(source_dir):
-            for f in sorted(files):
-                if os.path.splitext(f)[1].lower() in self._MEDIA_EXTS:
-                    found.append(os.path.join(root, f))
-                    if len(found) >= cap:
-                        return found
-        return found
+        """递归收集素材目录里的视频文件 —— 薄委托 director_timeline（单一真源）"""
+        from app.core.ai.director_timeline import collect_media_files
+        return collect_media_files(source_dir, cap=cap)
 
     def _apply_to_timeline(self, context) -> StepResult:
-        """把素材按分镜顺序加入剪辑时间线。
+        """把素材按分镜顺序加入剪辑时间线 —— 薄委托 director_timeline（单一真源）。
 
         机制：发 EventBus ``MATERIAL_TO_TIMELINE`` 批量载荷 —— 与画布回流
-        （canvas_bridge.push_to_timeline）和 Agent 预览闭环
-        （preview_validation_loop）用的是同一条总线事件，
-        ``editor_module.py:582`` 订阅 ``_on_material_dropped`` 批量分支
-        （载荷 ``{"clips":[{"path":...}...], "source":...}``），
+        （canvas_bridge.push_to_timeline）用的是同一条总线事件，
+        ``editor_module.py:582`` 订阅 ``_on_material_dropped`` 批量分支，
         最终落到 ``EditorModule._clips``（时间线真相源）。
 
-        线程说明：Skill 在工坊子线程执行，emit 同步触发订阅者 —— 与
-        画布 HTTP 服务线程的既有调用路径一致，不引入新的线程模型。
-
-        如实边界：
+        如实边界（详见 app/core/ai/director_timeline.py 模块注释）：
           - 加入的片段按**素材原始时长**排布；分镜表的精确裁剪点仍在
             剪辑指令里（可用「裁剪片段/重锚片段」能力二次调整）。
           - 若剪辑模块未打开（无订阅者），不落地，报告如实标注。
@@ -469,55 +417,17 @@ class DirectorSkill(Skill):
         source_dir = context.get_variable("_source_dir") or ""
         storyboard = context.get_variable("storyboard") or []
 
-        def _skip(reason: str) -> StepResult:
-            context.set_variable("timeline_applied", False)
-            context.set_variable("timeline_apply_note", reason)
-            return StepResult(success=True, output={"applied": False, "reason": reason})
+        from app.core.ai.director_timeline import apply_storyboard_to_timeline
+        res = apply_storyboard_to_timeline(source_dir, storyboard)
 
-        if not os.path.isdir(source_dir):
-            return _skip(f"素材目录不存在: {source_dir}")
-
-        files = self._collect_media_files(source_dir)
-        if not files:
-            return _skip(f"素材目录中没有可用视频文件: {source_dir}")
-
-        # 分镜 → 素材循环映射（素材少于分镜数时循环复用）
-        clips_payload = []
-        for i, shot in enumerate(storyboard):
-            f = files[i % len(files)]
-            desc = str(shot.get("description") or "").strip()
-            clips_payload.append({
-                "path": f,
-                "title": f"镜{shot.get('id', i + 1)} {desc[:12]}".strip(),
-            })
-
-        # 订阅者检查：剪辑模块未打开时不发事件（否则静默丢失）
-        from .core import EventBus, EventType
-        bus = EventBus.get_instance()
-        listeners = getattr(bus, "_listeners", {}).get(
-            EventType.MATERIAL_TO_TIMELINE, []) or []
-        if not listeners:
-            return _skip("剪辑模块未打开（时间线无 MATERIAL_TO_TIMELINE 订阅者）")
-
-        self._report_progress(90, f"正在把 {len(clips_payload)} 个素材按分镜顺序加入时间线...")
-        try:
-            bus.emit(
-                EventType.MATERIAL_TO_TIMELINE,
-                {"clips": clips_payload, "source": "director_skill"},
-                source="director_skill",
-            )
-        except Exception as e:
-            return _skip(f"发送时间线事件失败: {e}")
-
-        context.set_variable("timeline_applied", True)
-        context.set_variable("timeline_apply_note",
-                             f"已按分镜顺序加入 {len(clips_payload)} 段素材（素材原始时长）")
-        return StepResult(success=True, output={
-            "applied": True,
-            "clips": len(clips_payload),
-            "files_used": min(len(files), len(clips_payload)),
-            "total_files_found": len(files),
-        })
+        applied = bool(res.get("applied"))
+        note = str(res.get("note") or res.get("reason") or "")
+        context.set_variable("timeline_applied", applied)
+        context.set_variable("timeline_apply_note", note)
+        if applied:
+            self._report_progress(
+                90, f"正在把 {res.get('clips')} 个素材按分镜顺序加入时间线...")
+        return StepResult(success=True, output=res)
 
     # ────────────────────────────────────────────────────────────────
     # 步骤 6：合成导演报告

@@ -1649,6 +1649,25 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         canvas_handlers.concat_videos, "拼接多段视频成片（FFmpeg）")
     dispatcher.register("canvas.image_to_video", CapabilityCategory.CANVAS,
                         canvas_handlers.image_to_video, "静帧图转伪视频（成片闭环用）")
+    # LibTV 对标补强（2026-10-12）：引擎就绪但此前 Agent 调不到；独立模块防本文件破 2000 行
+    from app.core.capability_handlers_media import MediaCapabilityHandlers
+    media_handlers = MediaCapabilityHandlers()
+    dispatcher.register("canvas.ai_upscale", CapabilityCategory.CANVAS,
+                        media_handlers.ai_upscale, "AI 超分放大（ESPCN/RealESRGAN，如实回报引擎）")
+    dispatcher.register("canvas.ai_matte", CapabilityCategory.CANVAS,
+                        media_handlers.ai_matte, "AI 抠像换背景（降级必标注）")
+    dispatcher.register("canvas.video_depth", CapabilityCategory.CANVAS,
+                        media_handlers.video_depth, "深度视频提取（模型缺失时诚实失败）")
+    dispatcher.register("canvas.reference_breakdown", CapabilityCategory.CANVAS,
+                        media_handlers.reference_breakdown, "逐帧拉片 L1（参考片→结构化镜头表）")
+    dispatcher.register("canvas.segment_retake", CapabilityCategory.CANVAS,
+                        media_handlers.segment_retake, "片段重拍（保音轨/时长对齐）")
+    # LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线
+    # （DirectorSkill 同源薄委托 → script_writer / director_timeline 单一真源）
+    dispatcher.register("pipeline.script_write", CapabilityCategory.PIPELINE,
+                        media_handlers.script_write, "文本生剧本（主题→LLM 剧本，降级如实标注）")
+    dispatcher.register("pipeline.director_apply_timeline", CapabilityCategory.PIPELINE,
+                        media_handlers.director_apply_timeline, "导演结果落时间线（分镜+素材→入轨）")
     # YuE（乐）全曲生成：符号规划 / 渲染整曲 / 翻唱转录（本地或远程执行端，非云付费）
     dispatcher.register("canvas.yue_plan", CapabilityCategory.CANVAS,
                         canvas_handlers.yue_plan, "YuE 规划可编辑乐谱（不出音频）")

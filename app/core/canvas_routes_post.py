@@ -1737,6 +1737,37 @@ class CanvasPostRoutesMixin:
         self._json(200, res)
         return
 
+    @_route_post("/host/script-write")
+    def _p_host_script_write(self, parsed, raw: bytes, ctype: str) -> None:
+        """文本生剧本（LibTV 对标补强 刀3，2026-10-12）：主题 → LLM 完整剧本。
+
+        与 `pipeline.script_write` 能力、DirectorSkill 步骤1 **同一实现**
+        （app/core/ai/script_writer.py 单一真源）—— 本端点供画布 ScriptNode 前端入口调用。
+        三级降级：云 → Ollama → 模板；模板降级 fallback=True **如实标注**。
+        """
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.ai.script_writer import write_script
+        topic = str(data.get("topic") or "").strip()
+        if not topic:
+            self._json(400, {"ok": False, "message": "缺少 topic（主题/梗概）"})
+            return
+        res = write_script(
+            topic,
+            duration_seconds=int(data.get("duration_seconds") or 30),
+            scene_count=int(data["scene_count"]) if data.get("scene_count") else None,
+            style=str(data.get("style") or ""),
+        )
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
     @_route_post("/host/video-depth")
     def _p_host_video_depth(self, parsed, raw: bytes, ctype: str) -> None:
         """深度视频提取（对标 LibTV 深度提取）：参考片 → 灰度**深度**视频。

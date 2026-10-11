@@ -70,7 +70,7 @@
     "file:vendor/shiguang-canvas/src/magnetic/StackBadge.tsx": "5e341c4a6a7fc76d",
     "file:vendor/shiguang-canvas/src/magnetic/reflow.ts": "b36ebdeb585fa625",
     "file:vendor/shiguang-canvas/src/magnetic/SlotGhost.tsx": "33e3b1ab105b061f",
-    "file:vendor/shiguang-canvas/src/canvasVersion.ts": "734a1de0e28f7aa2",
+    "file:vendor/shiguang-canvas/src/canvasVersion.ts": "440366c6ce158e8e",
     "file:vendor/shiguang-canvas/src/AppNav.tsx": "a90386995e357cd7",
     "file:vendor/shiguang-canvas/src/magnetic/StatusBadge.tsx": "b0b1d8632f93da61",
     "file:vendor/shiguang-canvas/src/magnetic/types.ts": "a5fa6fa646e789ab",
@@ -88,9 +88,10 @@
     "file:vendor/shiguang-canvas/src/components/canvas/CanvasEmptyState.tsx": "7c411ff078495c06",
     "file:vendor/shiguang-canvas/src/novice/types.ts": "792b2618cd818825",
     "file:vendor/shiguang-canvas/src/novice/NoviceCard.tsx": "6de7e9d4997345aa",
-    "file:vendor/shiguang-canvas/src/novice/NoviceInspector.tsx": "78d4944945296b24",
+    "file:vendor/shiguang-canvas/src/novice/NoviceInspector.tsx": "ad9bedd24d3a44cf",
     "file:vendor/shiguang-canvas/src/novice/novice-cards.css": "dcd3d53050c7f7c5",
     "file:vendor/shiguang-canvas/src/novice/novice-inspector.css": "c6a15d778fbb8a01",
-    "file:vendor/shiguang-canvas/src/novice/index.ts": "dd0b5dbf887829f0"
+    "file:vendor/shiguang-canvas/src/novice/index.ts": "dd0b5dbf887829f0",
+    "file:vendor/shiguang-canvas/src/canvasEnhanceActions.ts": "31cd37f43d673d62"
   }
 }

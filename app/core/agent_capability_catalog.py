@@ -126,6 +126,30 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("canvas.image_to_video", "canvas", "media_write", False,
      "静帧图转伪视频（成片闭环用）", "cc", "图转视频",
      ["图转视频", "静帧", "still", "图片转视频"]),
+    # ── LibTV 对标补强（2026-10-12）：引擎早已就绪、只差 Agent 接线 ──
+    # 全部复用既有 /host/* 端点背后的同一实现；本地引擎非云付费 ⇒ paid=False。
+    # 权重缺失时**诚实失败**（回传下载指引），绝不静默降级冒充（深度红线见 video_depth.py）。
+    # 处理器独立成模块 capability_handlers_media.py（防 capability_handlers.py 破 2000 行守卫）。
+    ("canvas.ai_upscale", "canvas", "media_write", False,
+     "AI 超分放大：fast/standard 档走 OpenCV ESPCN 不下载，high 档 RealESRGAN 首次需下载",
+     "right", "AI超分",
+     ["超分", "放大", "高清", "upscale", "sharpen", "增强画质", "提分辨率"]),
+    ("canvas.ai_matte", "canvas", "media_write", False,
+     "AI 抠像换背景：主体分离 → 纯色底/透明底（如实回报实际引擎，降级必标注）",
+     "right", "AI抠像",
+     ["抠像", "抠图", "换背景", "matting", "cutout", "透明底", "去背景"]),
+    ("canvas.video_depth", "canvas", "media_write", False,
+     "深度视频提取：参考片 → 灰度深度视频（只搬运运动/运镜；模型缺失时诚实失败）",
+     "right", "深度提取",
+     ["深度", "depth", "深度视频", "深度动作", "运镜搬运", "深度图"]),
+    ("canvas.reference_breakdown", "canvas", "file_write", False,
+     "逐帧拉片 L1：参考片 → 结构化镜头表（切点/时长/关键帧落盘，ffmpeg+OpenCV 零权重）",
+     "left", "逐帧拉片",
+     ["拉片", "拆镜头", "镜头表", "breakdown", "切点", "参考片拆解", "逐帧"]),
+    ("canvas.segment_retake", "canvas", "media_write", False,
+     "片段重拍：只替换视频指定时间段（保音轨/时长对齐，接缝风险如实报告）",
+     "left", "片段重拍",
+     ["重拍", "替换片段", "retake", "片段替换", "局部替换", "splice"]),
     # ── YuE（乐）全曲生成（2026-09-28；本地/远程执行端 ⇒ 非云付费，paid=False）──
     # 三段式对齐画布意图分层：plan 出可编辑谱=「你的意图」，render 出整曲=「系统的事」。
     # ⚠️ 执行端未配置时诚实失败（返回安装指引），不造假音频。
@@ -250,6 +274,22 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("pipeline.director_camera_plan", "pipeline", "read", False,
      "导演分身·机位/运镜规划：分镜表→机位+运镜路径（可喂 Stage3D）", "left", "导演机位规划",
      ["机位", "运镜", "相机", "提示词", "camera", "camera_plan", "导演", "导演分身"]),
+    # ── LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线 ──
+    # 单一真源：script_writer.py / director_timeline.py（DirectorSkill 同源薄委托）。
+    # script_write 走 LLM 云→Ollama→模板三级降级 ⇒ 云端有花费 paid=True；
+    # 模板降级时 fallback=True 如实标注（绝不说成 LLM 原创）。
+    ("pipeline.script_write", "pipeline", "read", True,
+     "文本生剧本：主题/梗概 → LLM 完整剧本（场景/对白/动作/时长；降级如实标注）",
+     "right", "文本生剧本",
+     ["写剧本", "生成剧本", "剧本生成", "编剧", "screenplay", "script_write",
+      "原创剧本", "改编"]),
+    # effect=canvas_write：落轨写入 EditorModule._clips（时间线真相源）；
+    # 剪辑模块未打开（无订阅者）时不发事件、如实报告（与 editor.send_selected_to_canvas 同类）。
+    ("pipeline.director_apply_timeline", "pipeline", "canvas_write", False,
+     "导演结果落时间线：分镜表+素材目录 → 按镜序入轨（无订阅者时如实报告）",
+     "left", "导演落时间线",
+     ["落时间线", "入轨", "分镜入轨", "素材入轨", "director_apply", "落轨",
+      "分镜落时间线"]),
 ] + _canvas_node_catalog_rows()
 
 # 策略层专属工具：只在 agent_policy 有 effect/paid，**没有** dispatcher handler，
