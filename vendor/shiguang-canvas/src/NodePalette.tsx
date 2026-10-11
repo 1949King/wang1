@@ -9,31 +9,71 @@ export type PaletteItem = {
   keywords: string;
   hint: string;
   plugin?: boolean;
+  /** V4.41.19 AI 画布重组：节点大类（左侧 sidebar 分组 + Ctrl+K 分组用） */
+  category?: NodeCategory;
 };
 
-/** 内置节点（拾光 + infinite 核心对齐） */
+/** V4.41.19 节点五大类（业界共识「左=库」按类别分块；空类「双击空白/搜索/临时」已删） */
+export const NODE_CATEGORIES = [
+  { id: "create", title: "创作", icon: "✍️" },
+  { id: "media", title: "媒体", icon: "🎞️" },
+  { id: "generate", title: "生成", icon: "✨" },
+  { id: "space", title: "空间", icon: "🧭" },
+  { id: "note", title: "标注", icon: "📌" },
+] as const;
+
+export type NodeCategory = (typeof NODE_CATEGORIES)[number]["id"];
+
+/** 内置节点（拾光 + infinite 核心对齐 · V4.41.19 按 5 大类编目） */
 export const NODE_PALETTE: PaletteItem[] = [
-  { type: "script", label: "剧本", keywords: "script 剧本 text", hint: "剧本文本节点" },
-  { type: "shot", label: "镜头", keywords: "shot 镜头 分镜", hint: "分镜 / 生图主节点" },
-  { type: "prompt", label: "提示词", keywords: "prompt 提示词 style", hint: "可复用提示词" },
-  { type: "text", label: "文本", keywords: "text 文本 infinite", hint: "infinite 对齐 · 说明/提示" },
-  { type: "config", label: "生成配置", keywords: "config 配置 generation", hint: "infinite 对齐 · 锁定生成参数" },
-  { type: "image", label: "图片", keywords: "image 图片 图", hint: "图片资产节点" },
-  { type: "video", label: "视频", keywords: "video 视频 运镜 参考", hint: "视频生成 / 可上传参考片段" },
-  { type: "generator", label: "生成器", keywords: "generator 生成", hint: "汇聚上游批量生成" },
-  { type: "group", label: "编组", keywords: "group 编组 组", hint: "容器编组" },
-  { type: "audio", label: "音频", keywords: "audio 音频 配音", hint: "音频节点" },
-  { type: "markdown", label: "Markdown", keywords: "markdown md 文档 说明", hint: "AI-Canvas 对齐 · 文档节点" },
-  { type: "shotlist", label: "分镜表", keywords: "shotlist 分镜表 表格", hint: "AI-Canvas 对齐 · 可编辑镜号表" },
-  { type: "storyboard", label: "宫格分镜", keywords: "storyboard 宫格 九宫格", hint: "AI-Canvas 对齐 · 交互裁格" },
-  { type: "director", label: "3D 导演台", keywords: "director stage3d 导演台 3d", hint: "自研 Stage3D · 截图回写" },
-  { type: "directorCard", label: "导演卡", keywords: "directorCard 导演卡 剧本 拆解 拉片", hint: "剧本输入 → 自动拆解分镜" },
-  { type: "digitalHuman", label: "数字人", keywords: "digital human 数字人 tts 配音 口型", hint: "形象 + 台词配音；口型后置" },
-  { type: "animation", label: "逐帧动画", keywords: "animation sprite 逐帧 动作", hint: "Sprite Sheet / 占位 / AI" },
-  { type: "panorama", label: "全景", keywords: "panorama 全景 360", hint: "等距柱状图环视" },
-  { type: "note", label: "画布笔记", keywords: "note 笔记 标注 箭头", hint: "文字 / 形状标注" },
-  { type: "source", label: "源文件", keywords: "source 源文件 本地 上传", hint: "本地图/视频/音频/文本" },
+  // ── 创作 ─────────────────────────────────────────────
+  { type: "script", label: "剧本", keywords: "script 剧本 text", hint: "剧本文本节点", category: "create" },
+  { type: "directorCard", label: "导演卡", keywords: "directorCard 导演卡 剧本 拆解 拉片", hint: "剧本输入 → 自动拆解分镜", category: "create" },
+  { type: "shot", label: "镜头", keywords: "shot 镜头 分镜", hint: "分镜 / 生图主节点", category: "create" },
+  { type: "shotlist", label: "分镜表", keywords: "shotlist 分镜表 表格", hint: "AI-Canvas 对齐 · 可编辑镜号表", category: "create" },
+  { type: "storyboard", label: "宫格分镜", keywords: "storyboard 宫格 九宫格", hint: "AI-Canvas 对齐 · 交互裁格", category: "create" },
+  { type: "prompt", label: "提示词", keywords: "prompt 提示词 style", hint: "可复用提示词", category: "create" },
+  { type: "text", label: "文本", keywords: "text 文本 infinite", hint: "infinite 对齐 · 说明/提示", category: "create" },
+  // ── 媒体 ─────────────────────────────────────────────
+  { type: "image", label: "图片", keywords: "image 图片 图", hint: "图片资产节点", category: "media" },
+  { type: "video", label: "视频", keywords: "video 视频 运镜 参考", hint: "视频生成 / 可上传参考片段", category: "media" },
+  { type: "audio", label: "音频", keywords: "audio 音频 配音", hint: "音频节点", category: "media" },
+  { type: "source", label: "源文件", keywords: "source 源文件 本地 上传", hint: "本地图/视频/音频/文本", category: "media" },
+  // ── 生成 ─────────────────────────────────────────────
+  { type: "generator", label: "生成器", keywords: "generator 生成", hint: "汇聚上游批量生成", category: "generate" },
+  { type: "config", label: "生成配置", keywords: "config 配置 generation", hint: "infinite 对齐 · 锁定生成参数", category: "generate" },
+  { type: "digitalHuman", label: "数字人", keywords: "digital human 数字人 tts 配音 口型", hint: "形象 + 台词配音；口型后置", category: "generate" },
+  { type: "animation", label: "逐帧动画", keywords: "animation sprite 逐帧 动作", hint: "Sprite Sheet / 占位 / AI", category: "generate" },
+  // ── 空间 ─────────────────────────────────────────────
+  { type: "director", label: "3D 导演台", keywords: "director stage3d 导演台 3d", hint: "自研 Stage3D · 截图回写", category: "space" },
+  { type: "panorama", label: "全景", keywords: "panorama 全景 360", hint: "等距柱状图环视", category: "space" },
+  { type: "group", label: "编组", keywords: "group 编组 组", hint: "容器编组", category: "space" },
+  // ── 标注 ─────────────────────────────────────────────
+  { type: "markdown", label: "Markdown", keywords: "markdown md 文档 说明", hint: "AI-Canvas 对齐 · 文档节点", category: "note" },
+  { type: "note", label: "画布笔记", keywords: "note 笔记 标注 箭头", hint: "文字 / 形状标注", category: "note" },
 ];
+
+/** 按大类分组（左侧 sidebar / Ctrl+K 共用；插件节点无 category 归「扩展」组） */
+export function groupPaletteByCategory(items: PaletteItem[]): { cat: string; title: string; icon: string; items: PaletteItem[] }[] {
+  const groups = new Map<string, { cat: string; title: string; icon: string; items: PaletteItem[] }>();
+  // 先按内置 5 类建组（保持声明顺序）
+  NODE_CATEGORIES.forEach((c) => {
+    groups.set(c.id, { cat: c.id, title: c.title, icon: c.icon, items: [] });
+  });
+  let ext = groups.get("__ext__");
+  items.forEach((it) => {
+    if (it.category && groups.has(it.category)) {
+      groups.get(it.category)!.items.push(it);
+    } else {
+      if (!ext) {
+        ext = { cat: "__ext__", title: "扩展", icon: "🧩", items: [] };
+        groups.set("__ext__", ext);
+      }
+      ext.items.push(it);
+    }
+  });
+  return Array.from(groups.values()).filter((g) => g.items.length > 0);
+}
 
 const BUILTIN_TYPES = new Set(NODE_PALETTE.map((p) => p.type));
 

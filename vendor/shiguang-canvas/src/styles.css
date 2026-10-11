@@ -3551,3 +3551,70 @@ kbd {
   opacity: 1;
 }
 
+
+/* ═══ V4.41.19 AI 画布重组：左侧 sidebar「添加节点」5 大类分块样式 ═══
+   （业界共识「左=库按类别分块」；替代原 20+ 按钮平铺堆叠） */
+.node-cat-group {
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  margin: 0 0 6px;
+  background: rgba(30, 41, 59, 0.25);
+}
+.node-cat-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6edf3;
+  list-style: none;
+}
+.node-cat-group > summary::-webkit-details-marker {
+  display: none;
+}
+.node-cat-group > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: #6e7681;
+  transition: transform 0.12s ease;
+}
+.node-cat-group[open] > summary::before {
+  transform: rotate(90deg);
+}
+.node-cat-ico {
+  font-size: 13px;
+}
+.node-cat-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #6e7681;
+}
+.node-cat-items {
+  padding: 2px 8px 8px;
+}
+
+/* 浅色主题双写 */
+body.theme-light .node-cat-group {
+  border-color: #d0d7de;
+  background: rgba(246, 248, 250, 0.6);
+}
+body.theme-light .node-cat-group > summary {
+  color: #1f2328;
+}
+body.theme-light .node-cat-group > summary::before {
+  color: #8b949e;
+}
+body.theme-light .node-cat-count {
+  color: #6e7781;
+}
+
+/* 动效无障碍 */
+@media (prefers-reduced-motion: reduce) {
+  .node-cat-group > summary::before {
+    transition: none;
+  }
+}

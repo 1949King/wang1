@@ -1,0 +1,127 @@
+/**
+ * AgentPanel 专属样式（V4.41.19 从 styles.css 拆出 + 本轮 AI 画布重组新增）
+ * 注意：styles.css 在 canvas-magnetic-intent 冻结区，AgentPanel 增量样式放这里。
+ */
+
+/* ── 工具 Tab：按 extension_type 分组的折叠块 ─────────────── */
+.sg-tool-group {
+  margin-bottom: 4px;
+  border-bottom: 1px solid #1e293b;
+}
+.sg-tool-group:last-child {
+  border-bottom: none;
+}
+.sg-tool-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: #8b949e;
+  list-style: none;
+}
+.sg-tool-group > summary::-webkit-details-marker {
+  display: none;
+}
+.sg-tool-group > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: #6e7681;
+  transition: transform 0.12s ease;
+}
+.sg-tool-group[open] > summary::before {
+  transform: rotate(90deg);
+}
+.sg-tool-group-title {
+  font-weight: 600;
+  color: #e6edf3;
+}
+.sg-tool-group-count {
+  font-size: 11px;
+  color: #6e7681;
+}
+.sg-tool-group-body {
+  padding: 0 0 4px;
+}
+
+/* ── 4 tab 图标 + 更清爽的 tab 切换条 ───────────────────── */
+.sg-agent-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 6px;
+  flex-shrink: 0;
+}
+.sg-agent-tabs .btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 0;
+  white-space: nowrap;
+}
+
+/* ── 对话 Tab：分块视觉（模型/快捷/消息/引用/附件/输入）────── */
+.sg-chat-section {
+  margin: 0 8px 6px;
+  padding: 6px 8px;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.35);
+}
+.sg-chat-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: #8b949e;
+  list-style: none;
+}
+.sg-chat-section > summary::-webkit-details-marker {
+  display: none;
+}
+.sg-chat-section > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: #6e7681;
+  transition: transform 0.12s ease;
+}
+.sg-chat-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+.sg-chat-section-body {
+  padding-top: 6px;
+}
+
+/* ── 浅色主题双写 ────────────────────────────────────────── */
+body.theme-light .sg-tool-group {
+  border-bottom-color: #d0d7de;
+}
+body.theme-light .sg-tool-group > summary {
+  color: #57606a;
+}
+body.theme-light .sg-tool-group > summary::before {
+  color: #8b949e;
+}
+body.theme-light .sg-tool-group-title {
+  color: #1f2328;
+}
+body.theme-light .sg-tool-group-count {
+  color: #6e7781;
+}
+body.theme-light .sg-chat-section {
+  border-color: #d0d7de;
+  background: rgba(246, 248, 250, 0.6);
+}
+body.theme-light .sg-chat-section > summary {
+  color: #57606a;
+}
+
+/* ── 动效无障碍：减少动态则关掉 ──────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .sg-tool-group > summary::before,
+  .sg-chat-section > summary::before {
+    transition: none;
+  }
+}

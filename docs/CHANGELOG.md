@@ -1,5 +1,30 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.19 (2026-10-11) — AI 画布重组（画布 0.3.18「AI 画布重组」）
+
+> 治「AI 画布 5 面板同屏 40+ 控件堆叠看着乱」（用户截图反馈）。
+> 先调研 8 款主流画布（Excalidraw/tldraw/Figma/Miro/MasterGo/TapNow/ComfyUI/剪映 Hub）得出业界共识：
+> **左=库按类别分块 / 顶=全局单入口 / 右=详情 / 底=状态 / AI=单一入口**，然后按方案 B 落地。
+> 报告：`docs/_reports/2026-10-11-AI画布布局调研与优化方案.md`
+
+### 改动
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| ① 左 sidebar 5 大类 | 20+ 节点按钮**平铺堆叠**（剧本/镜头/提示词/文本/生成配置/图片/视频/生成器/编组/音频/Markdown/分镜表/宫格分镜/3D 导演台/导演卡/数字人/逐帧动画/全景/笔记/源文件 全部一列） | NodePalette 加 `category` 字段分 5 大类（✍️创作 7 / 🎞️媒体 4 / ✨生成 4 / 🧭空间 3 / 📌标注 2 + 🧩插件扩展动态组）；侧栏每组一个 `<details>` 折叠块（图标+标题+计数），创作类默认展开，其余折叠；每按钮加 title 提示 |
+| ② Agent 入口 3→1 | 顶栏 `💬 Agent` + 右下 FAB `Agent` + 命令面板项**三重入口**（桌宠 MutationObserver 一直在偷偷隐 FAB） | 删右下 FAB 本体（桌宠 no-op 无害）；收敛为：**顶栏 💬 Agent（主）+ 桌宠拾岚（伴）+ Ctrl+K 搜索项** |
+| ③ Ctrl+K 命令中枢 S5 雏形 | 命令面板 18 项（仅内置命令） | **~100 项**：+ 节点分类直入（搜「分镜」→「添加『分镜表』节点」直接执行）；+ Agent 工具直入（listProjectTools 拉一次 60 条，搜到跳 Agent 面板运行）——「让 80% 功能不需要直接暴露」 |
+| ④ AgentPanel 工具 Tab 分组 | 80 行工具**平铺**（`tools.slice(0, 80)` 一列到底，仅搜索框过滤） | 按 `extension_type` 自动分组折叠（数量多者优先、前 2 组默认展开、**搜索时自动全展开**）；每组标题+计数 |
+| ⑤ 4 tab 图标 + 对话 Tab 分块 | `对话/模型/工具/预算` 纯文字；对话 Tab 模型下拉裸露 | `💬 对话 / 🧠 模型 / 🛠 工具 / 💰 预算`；模型选择包进可折叠块 `sg-chat-section`（默认展开可折） |
+
+### 技术
+
+- 新建 `agentPanel.css`（AgentPanel 增量样式，**styles.css 冻结区零增量**：分组块/折叠箭头/浅色主题双写/reduced-motion）
+- `styles.css` 仅追加 `.node-cat-group` 分组块样式（67 行，磁吸不变量零触碰）
+- `groupPaletteByCategory()` 纯函数：内置 5 类保持声明顺序，插件节点无 category 归「🧩扩展」组
+- 门禁：tsc 37=基线（0 新增）· vitest 22 文件 **291/291** · vite build 6.8s · frozen_zone_guard `--update` 重锁
+- 冻结区：canvas-magnetic-intent 用户授权解冻，**只动 5 个目标文件**（NodePalette/CanvasShell/styles.css），magnetic/* 与 novice/* 零触碰
+
 ## V4.41.18 (2026-10-10) — AgentOS S1 窗口管理（画布 0.3.17）
 
 > AgentOS 演进第一刀（S1 窗口管理 → S2 进程模型 → S3 通知中心 → S4 技能仓库 → S5 命令中枢）。

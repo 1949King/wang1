@@ -26,13 +26,17 @@ import {
   importComfyWorkflowText,
   getComfyEngineStatus,
   type ComfyEngineStatus,
+  listProjectTools,
+  type ProjectTool,
 } from "./bridge";
+import { nodeCommandItems, agentToolCommandItems, useAgentCmdTools } from "./canvasCommandsExtra";
+import AddNodeGroups from "./AddNodeGroups";
 import AppNav, { type AppRoute } from "./AppNav";
 import { CANVAS_VERSION_LABEL, CANVAS_VERSION_TITLE } from "./canvasVersion";
 import { MusicYueFields } from "./musicYueFields";
 import type { PromptItem } from "./promptLibrary";
 import HomeLanding from "./HomeLanding";
-import NodePalette, { buildAddNodeItems, isBuiltinNodeKind } from "./NodePalette";
+import NodePalette, { buildAddNodeItems, groupPaletteByCategory, isBuiltinNodeKind } from "./NodePalette";
 import CommandPalette, { type CommandItem } from "./CommandPalette";
 import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
@@ -394,6 +398,10 @@ export default function CanvasShell(props: CanvasShellProps) {
     [isNovice, registryNodeTypes],
   );
   const addNodeItems = useMemo(() => buildAddNodeItems(), [registryVersion]);
+  /** V4.41.19 AI 画布重组：左侧 sidebar「添加节点」按 5 大类分块（创作/媒体/生成/空间/标注 + 插件扩展） */
+  const addNodeGroups = useMemo(() => groupPaletteByCategory(addNodeItems), [addNodeItems]);
+  /** AgentOS S5 雏形：挂载时拉一次 Agent 工具表供 Ctrl+K 命令面板搜索 */
+  const agentCmdTools = useAgentCmdTools();
   const pickNodeByType = (type: string, pos?: { x: number; y: number }) => {
     if (isBuiltinNodeKind(type)) addNode(type, pos);
     else addRegistryNode(type, pos);
@@ -780,11 +788,14 @@ export default function CanvasShell(props: CanvasShellProps) {
       { id: "stage3d", label: "打开 3D 导演台", keywords: "3d stage", run: () => { useCanvasStore.getState().clearDirectorTarget(); setViewMode("stage3d"); } },
       { id: "add-digital-human", label: "添加数字人节点", keywords: "digital human 数字人 tts 配音", run: () => addNode("digitalHuman") },
       { id: "agent", label: "打开 Agent 面板", keywords: "agent 对话", run: () => setAgentPanelOpen(true) },
+      /* ── V4.41.19 AgentOS S5 雏形：节点分类 + Agent 工具直入命令面板 ── */
+      ...nodeCommandItems(addNodeItems, pickNodeByType),
+      ...agentToolCommandItems(agentCmdTools, () => setAgentPanelOpen(true)),
     ],
     [
       saveProject, undoGraph, redoGraph, copySelected, pasteClipboard, duplicateSelected,
       selectAll, removeSelected, onGroupSelected, onGenerate, onSendToEditor, onSendAllToEditor, onBreakdown, setViewMode,
-      addNode,
+      addNode, addNodeItems, agentCmdTools,
     ],
   );
 
@@ -1127,22 +1138,8 @@ export default function CanvasShell(props: CanvasShellProps) {
                 <p className="muted" style={{ margin: "0 0 8px", fontSize: 11 }}>
                   双击空白或按 <kbd>/</kbd> 搜索添加；也可把下方按钮<strong>拖到画布</strong>
                 </p>
-                <div className="btn-row">
-                  {addNodeItems.map((it) => (
-                    <button
-                      key={it.type}
-                      className="btn"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("application/shiguang-node", it.type);
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => pickNodeByType(it.type)}
-                    >
-                      {it.label}
-                    </button>
-                  ))}
-                </div>
+                {/* V4.41.19 AI 画布重组：20+ 节点按 5 大类分块（组件拆至 AddNodeGroups.tsx） */}
+                <AddNodeGroups groups={addNodeGroups} onPick={pickNodeByType} />
                 <div className="btn-row">
                   <button className="btn" onClick={duplicateSelected} disabled={!selectedData}>
                     复制选中
@@ -3192,17 +3189,9 @@ export default function CanvasShell(props: CanvasShellProps) {
         </div>
         </>
       ) : null}
-      {!agentPanelOpen && showWorkspace ? (
-        <button
-          type="button"
-          className="sg-agent-fab primary"
-          data-sg-no-autoclick="1"
-          onClick={() => setAgentPanelOpen(true)}
-          title="打开 Agent-IM 侧栏"
-        >
-          Agent
-        </button>
-      ) : null}
+      {/* V4.41.19 AI 画布重组：删除右下 FAB「Agent」浮动按钮——与顶栏 💬 Agent、
+          桌宠拾岚三重入口重复（AgentPet.tsx 一直在用 MutationObserver 隐掉它）。
+          Agent 入口收敛为：顶栏 💬 Agent（主）+ 桌宠（伴）+ 命令面板（可搜索）。 */}
       <Suspense fallback={null}>
         <MaskEditDialog
           open={maskOpen}

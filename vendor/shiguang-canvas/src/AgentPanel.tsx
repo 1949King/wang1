@@ -24,6 +24,7 @@ import {
 } from "./bridge";
 import { useCanvasStore, type NodeData } from "./store";
 import ConfirmDialog from "./ConfirmDialog";
+import "./agentPanel.css";
 import {
   decideCanvasTool,
   loadAgentMode,
@@ -698,6 +699,25 @@ export default function AgentPanel({
       .slice(0, 80);
   }, [tools, toolFilter]);
 
+  /**
+   * V4.41.19 AI 画布重组：80 行工具按 extension_type 自动分组 + 可折叠块。
+   * 每组一个 <details>，默认前 2 组展开、其余折叠；搜索时自动全展开。
+   */
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const groupedTools = useMemo(() => {
+    const byType = new Map<string, ProjectTool[]>();
+    filteredTools.forEach((t) => {
+      const key = t.extension_type || "other";
+      if (!byType.has(key)) byType.set(key, []);
+      byType.get(key)!.push(t);
+    });
+    // 按类型名稳定排序，数量多的类型放前面
+    return Array.from(byType.entries())
+      .map(([type, items]) => ({ type, items }))
+      .sort((a, b) => b.items.length - a.items.length || a.type.localeCompare(b.type));
+  }, [filteredTools]);
+  const toolFilterActive = toolFilter.trim().length > 0;
+
   const resolveModel = () => {
     if (!modelKey.includes("::")) return { provider: modelKey, model: "" };
     const [p, ...rest] = modelKey.split("::");
@@ -1018,10 +1038,10 @@ export default function AgentPanel({
       <div className="sg-agent-tabs">
         {(
           [
-            ["chat", "对话"],
-            ["models", "模型"],
-            ["tools", "工具"],
-            ["budget", "预算"],
+            ["chat", "💬 对话"],
+            ["models", "🧠 模型"],
+            ["tools", "🛠 工具"],
+            ["budget", "💰 预算"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -1037,26 +1057,29 @@ export default function AgentPanel({
 
       {tab === "chat" ? (
         <div className="sg-agent-chat">
-          <div className="field" style={{ marginBottom: 6 }}>
-            <label>对话模型</label>
-            <select value={modelKey} onChange={(e) => setModelKey(e.target.value)}>
-              <option value="">自动 / 激活 Provider</option>
-              {providers.map((p) =>
-                (p.models.length ? p.models : [""]).map((m) => (
-                  <option
-                    key={`${p.id}::${m}`}
-                    value={`${p.id}::${m}`}
-                    disabled={!p.configured}
-                  >
-                    {p.active ? "★ " : ""}
-                    {p.name}
-                    {m ? ` / ${m}` : ""}
-                    {p.configured ? "" : "（未配置）"}
-                  </option>
-                )),
-              )}
-            </select>
-          </div>
+          {/* V4.41.19 AI 画布重组：模型选择包进可折叠块（默认展开，可折省空间） */}
+          <details className="sg-chat-section" open>
+            <summary>⚙️ 对话模型</summary>
+            <div className="sg-chat-section-body">
+              <select value={modelKey} onChange={(e) => setModelKey(e.target.value)}>
+                <option value="">自动 / 激活 Provider</option>
+                {providers.map((p) =>
+                  (p.models.length ? p.models : [""]).map((m) => (
+                    <option
+                      key={`${p.id}::${m}`}
+                      value={`${p.id}::${m}`}
+                      disabled={!p.configured}
+                    >
+                      {p.active ? "★ " : ""}
+                      {p.name}
+                      {m ? ` / ${m}` : ""}
+                      {p.configured ? "" : "（未配置）"}
+                    </option>
+                  )),
+                )}
+              </select>
+            </div>
+          </details>
 
           <button
             type="button"
@@ -1358,41 +1381,68 @@ export default function AgentPanel({
           {filteredTools.length === 0 ? (
             <p className="muted">暂无工具。请打开一次「拓展中心」或「剪辑」页。</p>
           ) : (
-            filteredTools.map((t) => (
-              <div key={`${t.extension_id}:${t.tool_id}`} className="sg-tool-row">
-                <div>
-                  <strong>{t.tool_name || t.tool_id}</strong>
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {t.extension_type} · {t.extension_name}
-                    {t.description ? ` — ${t.description.slice(0, 60)}` : ""}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true);
-                    const res = await runProjectToolViaHost({
-                      extension_id: t.extension_id,
-                      tool_id: t.tool_id,
-                      skill_id: t.extension_type === "skill" ? t.extension_id : "",
-                      agent_mode: agentMode,
-                      session_id: sid,
-                      approved: true,
-                    });
-                    push(
-                      "assistant",
-                      `运行 ${t.tool_name}: ${res.message || (res.ok ? "完成" : "失败")}`,
-                    );
-                    setTab("chat");
-                    setBusy(false);
+            /* V4.41.19 AI 画布重组：按 extension_type 分组折叠，替代 80 行平铺 */
+            groupedTools.map((g) => {
+              const gOpen = toolFilterActive
+                ? true
+                : collapsedGroups[g.type] === undefined
+                  ? groupedTools.findIndex((x) => x.type === g.type) < 2
+                  : !collapsedGroups[g.type];
+              return (
+                <details
+                  key={g.type}
+                  className="sg-tool-group"
+                  open={gOpen}
+                  onToggle={(e) => {
+                    const el = e.target as HTMLDetailsElement;
+                    if (!toolFilterActive && collapsedGroups[g.type] === undefined && el.open) return;
+                    setCollapsedGroups((m) => ({ ...m, [g.type]: !el.open }));
                   }}
                 >
-                  运行
-                </button>
-              </div>
-            ))
+                  <summary>
+                    <span className="sg-tool-group-title">{g.type}</span>
+                    <span className="sg-tool-group-count">{g.items.length} 项</span>
+                  </summary>
+                  <div className="sg-tool-group-body">
+                    {g.items.map((t) => (
+                      <div key={`${t.extension_id}:${t.tool_id}`} className="sg-tool-row">
+                        <div>
+                          <strong>{t.tool_name || t.tool_id}</strong>
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {t.extension_name}
+                            {t.description ? ` — ${t.description.slice(0, 60)}` : ""}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true);
+                            const res = await runProjectToolViaHost({
+                              extension_id: t.extension_id,
+                              tool_id: t.tool_id,
+                              skill_id: t.extension_type === "skill" ? t.extension_id : "",
+                              agent_mode: agentMode,
+                              session_id: sid,
+                              approved: true,
+                            });
+                            push(
+                              "assistant",
+                              `运行 ${t.tool_name}: ${res.message || (res.ok ? "完成" : "失败")}`,
+                            );
+                            setTab("chat");
+                            setBusy(false);
+                          }}
+                        >
+                          运行
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })
           )}
         </div>
       ) : null}

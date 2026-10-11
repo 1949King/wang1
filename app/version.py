@@ -1,30 +1,30 @@
-__version__ = "4.41.18"
+__version__ = "4.41.19"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 41,
-    "patch": 18,
-    "codename": "AgentOS S1 窗口管理（画布 0.3.17）",
-    "release_date": "2026-10-10",
+    "patch": 19,
+    "codename": "AI 画布重组（画布 0.3.18）",
+    "release_date": "2026-10-11",
     "description": (
-        "V4.41.18: AgentOS 演进第一刀「窗口管理」（画布 0.3.16 → 0.3.17「窗口管理」）。"
-        "解决真实痛点：4 面板此前全部固定叠在底部同一坐标（bottom:58px 居中），同开必互相覆盖。"
-        "\n【① 可拖动】拖 header 移动（抓起即置顶），位置归一化 (x,y)∈[0,1]² "
-        "localStorage 持久化（同桌宠 usePetDrag 范式，换窗口尺寸按比例落位）；"
-        "双模式定位——未拖过保持 CSS 底部居中，拖过 5px 阈值那一刻用 getBoundingClientRect "
-        "换算切 JS 内联定位（left/top+transform:none+bottom:auto 一次写全），零跳动；"
-        "拖拽逐帧直写 el.style 零重渲染，React style 只持 zIndex。"
-        "\n【② 点击置顶】z = 47 + 层叠序（顺序数组派生，非计数器）——4 面板恒在 47..50，"
-        "轮转置顶永不撞车无需重整；竞争者 fab(60)/agent-panel(70)/lightbox(9000) 全在安全距离。"
-        "\n【③ 最小化到 dock】面板「—」收起，dock 右侧出现恢复图标"
-        "（与工具板同源图标 ⏱▤💡🎬，点击恢复到存储位置）；最小化不持久化（刷新还原），"
-        "open=false 时 subscribe 联动自动清 minimized+层叠序（无死状态）；"
-        "最小化时快捷键=关闭（开关灯语义一致）。"
-        "\n【边界纪律】DOCK_RESERVE=64 底部 clamp——面板拖不进 dock 带，"
-        "maxHeight 动态钳制防内容长高越界；上沿 INSET=8。"
-        "\n【门禁】tsc 37=基线 · vitest 291/291（+17 窗口管理用例）· "
-        "run_all_checks 75 全绿 · 双库无漂移。"
-        "\n上一版 V4.41.17「图库灯箱与相机跟随」见 docs/CHANGELOG.md。"
+        "V4.41.19: AI 画布重组 —— 治「5 面板同屏 40+ 控件堆叠看着乱」"
+        "（用户截图反馈，对标 8 款主流画布业界共识：左=库按类别分块 / 顶=全局单入口 / AI=单一入口）。"
+        "\n【调研】8 款主流画布（Excalidraw/tldraw/Figma/Miro/MasterGo/TapNow/ComfyUI/剪映Hub）"
+        "布局对比报告 docs/_reports/2026-10-11-AI画布布局调研与优化方案.md。"
+        "\n【① 左 sidebar 5 大类】NodePalette.tsx 加 category 字段（创作/媒体/生成/空间/标注），"
+        "CanvasShell 侧栏「添加节点」20+ 按钮平铺改分组折叠块（每组图标+计数），删除空类。"
+        "\n【② Agent 入口 3→1】删右下 FAB 浮动按钮（与顶栏 💬 Agent、桌宠拾岚三重重复；"
+        "桌宠 MutationObserver 本就在隐它，删本体后 no-op 无害）；保留顶栏 Agent + 桌宠 + 命令面板搜索项。"
+        "\n【③ Ctrl+K 命令中枢 S5 雏形】命令面板 items 从 18 扩到 ~100："
+        "节点分类直入（搜到即可加）+ Agent 工具直入（listProjectTools 一次拉 60 条，搜到跳 Agent 面板）。"
+        "让 80% 的功能不需要直接暴露在界面上。"
+        "\n【④ AgentPanel 工具 Tab 分组】80 行工具平铺改按 extension_type 自动分组折叠"
+        "（数量多者优先，前 2 组默认展开，搜索时自动全展）；新建 agentPanel.css（styles.css 冻结区零增量）。"
+        "\n【⑤ 4 tab 加图标】💬 对话 / 🧠 模型 / 🛠 工具 / 💰 预算；"
+        "对话 Tab 模型选择包进可折叠块 sg-chat-section。"
+        "\n【门禁】tsc 37=基线 0 新增 · vitest 291/291 · vite build 6.8s · "
+        "frozen_zone_guard --update 重锁。"
+        "\n上一版 V4.41.18「AgentOS S1 窗口管理」见 docs/CHANGELOG.md。"
     ),
 }
