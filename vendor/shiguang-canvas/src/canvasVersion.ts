@@ -19,7 +19,7 @@
  */
 
 /** 画布语义化版本（不带 v 前缀，便于与 package.json 对齐） */
-export const CANVAS_VERSION = "0.3.19";
+export const CANVAS_VERSION = "0.3.20";
 
 /** 画布版本显示串（带 v 前缀，供导航栏渲染） */
 export const CANVAS_VERSION_LABEL = `v${CANVAS_VERSION}`;

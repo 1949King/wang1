@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { NodeData } from "./store";
 import { listNodeDefinitions } from "./plugins/node-registry";
 import { isPluginNodeType } from "./infiniteCoreNodes";
+import { NOVICE_ENTRY, NOVICE_STAGE_GROUPS } from "./novice/types";
 
 export type PaletteItem = {
   type: string;
@@ -193,6 +194,60 @@ export default function NodePalette({ open, x, y, onClose, onPick }: Props) {
 /** 左侧按钮栏用：内置 + 插件节点 */
 export function buildAddNodeItems(): PaletteItem[] {
   return buildFullPalette();
+}
+
+/**
+ * 小白模式「意图入口」分组（P0，2026-10-11）：21 种内置卡片**全量**按 7 个创作阶段
+ * 分组（开始创作/做画面/做声音/摆位与实拍/批量与设定/素材与笔记/整理），
+ * 插件节点保留在「扩展」组 —— 与专业模式的 5 大类并存，互不影响。
+ *
+ * 措辞与分组来自 novice/types.ts 的 NOVICE_ENTRY（用户拍板的 2026-10-11 原型 v3）。
+ * 返回结构兼容 AddNodeGroups 组件（cat/title/icon/items）。
+ */
+export function buildNoviceAddNodeGroups(): {
+  cat: string;
+  title: string;
+  icon: string;
+  items: PaletteItem[];
+}[] {
+  // 技术名查表：专业模式 label（hover 提示里带原名，小白↔专业互认）
+  const techLabel = new Map(NODE_PALETTE.map((p) => [p.type, p.label]));
+  const groups: { cat: string; title: string; icon: string; items: PaletteItem[] }[] =
+    NOVICE_STAGE_GROUPS.map((g) => ({
+      cat: g.id,
+      title: g.title,
+      icon: g.icon,
+      items: [] as PaletteItem[],
+    }));
+  const byStage = new Map(groups.map((g) => [g.cat, g]));
+
+  // 21 种内置 kind 全量入组（一个不少 —— 改变组织方式，不减少可见性）
+  for (const [kind, entry] of Object.entries(NOVICE_ENTRY)) {
+    const bucket = byStage.get(entry.stage);
+    if (!bucket) continue;
+    const tech = techLabel.get(kind) || kind;
+    bucket.items.push({
+      type: kind,
+      label: entry.name,
+      keywords: `${kind} ${entry.name} ${tech} ${entry.desc}`,
+      hint: `${entry.desc}（专业模式：${tech}）`,
+    });
+  }
+
+  // 插件节点照旧归「扩展」组（与 groupPaletteByCategory 同款行为）
+  const pluginItems: PaletteItem[] = listNodeDefinitions()
+    .filter((d) => d.showInCreateMenu !== false && isPluginNodeType(d.type))
+    .map((d) => ({
+      type: d.type,
+      label: d.title,
+      keywords: `${d.type} ${d.title} ${d.description || ""} plugin`,
+      hint: d.description || "插件节点",
+      plugin: true,
+    }));
+  if (pluginItems.length) {
+    groups.push({ cat: "__ext__", title: "扩展", icon: "🧩", items: pluginItems });
+  }
+  return groups.filter((g) => g.items.length > 0);
 }
 
 /** 判断是否为内置 kind（非插件 registry type） */

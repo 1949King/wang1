@@ -1,11 +1,11 @@
-__version__ = "4.41.20"
+__version__ = "4.41.21"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 41,
-    "patch": 20,
-    "codename": "生成/入轨 浮层化（画布 0.3.19）",
+    "patch": 21,
+    "codename": "小白意图入口（画布 0.3.20）",
     "release_date": "2026-10-11",
     "description": (
         "V4.41.20: 生成/入轨 浮层化 — 治「左侧栏最底下的「生成 / 入轨」高频入口放最深处、"

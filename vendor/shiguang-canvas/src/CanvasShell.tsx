@@ -36,7 +36,7 @@ import { CANVAS_VERSION_LABEL, CANVAS_VERSION_TITLE } from "./canvasVersion";
 import { MusicYueFields } from "./musicYueFields";
 import type { PromptItem } from "./promptLibrary";
 import HomeLanding from "./HomeLanding";
-import NodePalette, { buildAddNodeItems, groupPaletteByCategory, isBuiltinNodeKind } from "./NodePalette";
+import NodePalette, { buildAddNodeItems, buildNoviceAddNodeGroups, groupPaletteByCategory, isBuiltinNodeKind } from "./NodePalette";
 import CommandPalette, { type CommandItem } from "./CommandPalette";
 import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
@@ -70,7 +70,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { getGraphPast, getGraphFuture } from "./stores/history-store";
 // V4.41.20：顶栏 🚀 生成按钮 → toggle generateOpen
 import { useToolboxStore } from "./toolboxStore";
-import { buildNoviceNodeTypes, NoviceInspector } from "./novice";
+import { buildNoviceNodeTypes, NoviceInspector, NOVICE_ENTRY } from "./novice";
 import type { CanvasTier } from "./store";
 
 /** 重面板按需分包：缩短首屏 JS，打开对应模式/侧栏再拉 chunk */
@@ -376,11 +376,25 @@ export default function CanvasShell(props: CanvasShellProps) {
   const addNodeItems = useMemo(() => buildAddNodeItems(), [registryVersion]);
   /** V4.41.19 AI 画布重组：左侧 sidebar「添加节点」按 5 大类分块（创作/媒体/生成/空间/标注 + 插件扩展） */
   const addNodeGroups = useMemo(() => groupPaletteByCategory(addNodeItems), [addNodeItems]);
+  /** P0 小白模式（2026-10-11）：同一批卡片按「创作阶段 7 组」呈现（21 种全量，入口小白名） */
+  const noviceNodeGroups = useMemo(() => buildNoviceAddNodeGroups(), [registryVersion]);
   /** AgentOS S5 雏形：挂载时拉一次 Agent 工具表供 Ctrl+K 命令面板搜索 */
   const agentCmdTools = useAgentCmdTools();
   const pickNodeByType = (type: string, pos?: { x: number; y: number }) => {
-    if (isBuiltinNodeKind(type)) addNode(type, pos);
-    else addRegistryNode(type, pos);
+    if (isBuiltinNodeKind(type)) {
+      const id = addNode(type, pos);
+      // P0 小白模式：建卡后把默认技术标题换成小白入口名 + 序号（如「画面 2」）。
+      // 专业模式零变化（走 makeNode 原有技术名）；用户此后可自由改标题。
+      if (isNovice) {
+        const entry = NOVICE_ENTRY[type];
+        if (entry) {
+          const same = useCanvasStore
+            .getState()
+            .nodes.filter((n) => (n.data as { kind?: string }).kind === type).length;
+          useCanvasStore.getState().updateNodeData(id, { title: `${entry.name} ${same}` });
+        }
+      }
+    } else addRegistryNode(type, pos);
   };
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
   const [palette, setPalette] = useState<PaletteState>({
@@ -1125,8 +1139,10 @@ export default function CanvasShell(props: CanvasShellProps) {
                 <p className="muted" style={{ margin: "0 0 8px", fontSize: 11 }}>
                   双击空白或按 <kbd>/</kbd> 搜索添加；也可把下方按钮<strong>拖到画布</strong>
                 </p>
-                {/* V4.41.19 AI 画布重组：20+ 节点按 5 大类分块（组件拆至 AddNodeGroups.tsx） */}
-                <AddNodeGroups groups={addNodeGroups} onPick={pickNodeByType} />
+                {/* V4.41.19 AI 画布重组：20+ 节点按 5 大类分块（组件拆至 AddNodeGroups.tsx）。
+                    P0 小白模式（2026-10-11）：同一批卡片按「创作阶段 7 组」+ 意图入口名呈现，
+                    专业模式保持 5 大类技术命名不变 —— 同一数据，两种读法。 */}
+                <AddNodeGroups groups={isNovice ? noviceNodeGroups : addNodeGroups} onPick={pickNodeByType} />
                 <div className="btn-row">
                   <button className="btn" onClick={duplicateSelected} disabled={!selectedData}>
                     复制选中

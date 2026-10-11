@@ -275,3 +275,87 @@ export function lampOf(status?: string): NoviceLamp {
       return "idle";
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  小白模式意图入口（P0，2026-10-11 用户拍板「按这个方案进行」）
+// ══════════════════════════════════════════════════════════════════════════
+//
+// 设计边界（用户裁定，写死防止走偏）：
+//   · **不修改任何既有 kind / 字段 / KIND_STYLE / KIND_TEXT_FIELD**——专业模式的
+//     技术命名是「最直接的表意」，改了就变味。本表只是小白模式下的一层**呈现映射**。
+//   · 21 种内置卡片**一种不少全部可用**，按「创作阶段」分 7 组组织——
+//     改变的是组织方式，不是可见性（2026-10-11 教训：藏卡片 = 越权）。
+//   · 每个入口 hover 提示里带专业模式原名，小白 ↔ 专业随时互认。
+//
+// 消费方：NodePalette.buildNoviceAddNodeGroups（左栏分组渲染）、
+//         CanvasShell.pickNodeByType（小白模式建卡后写小白标题）。
+
+/** 小白模式创作阶段分组（7 组，按创作流程排序） */
+export type NoviceStage =
+  | "start"      // 开始创作
+  | "frame"      // 做画面
+  | "audio"      // 做声音
+  | "stage"      // 摆位与实拍
+  | "batch"      // 批量与设定
+  | "notes"      // 素材与笔记
+  | "organize";  // 整理
+
+export const NOVICE_STAGE_GROUPS: { id: NoviceStage; title: string; icon: string }[] = [
+  { id: "start", title: "开始创作", icon: "✍" },
+  { id: "frame", title: "做画面", icon: "🎬" },
+  { id: "audio", title: "做声音", icon: "🔊" },
+  { id: "stage", title: "摆位与实拍", icon: "🧍" },
+  { id: "batch", title: "批量与设定", icon: "⚙" },
+  { id: "notes", title: "素材与笔记", icon: "📎" },
+  { id: "organize", title: "整理", icon: "🗂" },
+];
+
+/** 单个意图入口：小白名 + 一句话说明 + 所属阶段 */
+export type NoviceEntry = {
+  /** 小白模式显示名（左栏入口 + 建卡后的默认标题） */
+  name: string;
+  /** 一句话说明（左栏副文本） */
+  desc: string;
+  /** 所属创作阶段分组 */
+  stage: NoviceStage;
+};
+
+/**
+ * 21 种内置 kind → 意图入口（**全量覆盖，一个不少**）。
+ * name 的措辞对齐 2026-10-11 网页原型 v3（用户已过目拍板）。
+ */
+export const NOVICE_ENTRY: Record<string, NoviceEntry> = {
+  // ── 开始创作 ──
+  directorCard: { name: "写个故事", desc: "一段剧情自动拆成分镜", stage: "start" },
+  shot: { name: "出一张画面", desc: "分镜画面 · 有景别焦段", stage: "start" },
+  script: { name: "写剧本", desc: "剧本大纲，会自动拆分镜", stage: "start" },
+  shotlist: { name: "分镜表", desc: "可编辑的镜号表", stage: "start" },
+  storyboard: { name: "宫格分镜", desc: "九宫格排版 + 交互裁格", stage: "start" },
+  // ── 做画面 ──
+  image: { name: "做张插图", desc: "独立画面资产", stage: "frame" },
+  video: { name: "让它动起来", desc: "视频 · 有运镜和时长", stage: "frame" },
+  panorama: { name: "做全景", desc: "360° 可旋转场景", stage: "frame" },
+  animation: { name: "做动画", desc: "逐帧精灵图 · 可循环播", stage: "frame" },
+  // ── 做声音 ──
+  audio: { name: "配句台词", desc: "配音 / 声音风格", stage: "audio" },
+  music: { name: "配段音乐", desc: "整曲 · Suno / YuE 乐", stage: "audio" },
+  digitalHuman: { name: "做数字人", desc: "形象 + 台词配音", stage: "audio" },
+  // ── 摆位与实拍 ──
+  director: { name: "摆个人物", desc: "3D 摆姿势和机位", stage: "stage" },
+  source: { name: "放素材", desc: "本地图 / 视频 / 音频", stage: "stage" },
+  // ── 批量与设定 ──
+  generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch" },
+  config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch" },
+  prompt: { name: "提示词", desc: "可复用的风格描述", stage: "batch" },
+  text: { name: "文本块", desc: "说明 / 备注", stage: "batch" },
+  // ── 素材与笔记 ──
+  markdown: { name: "文档", desc: "策划案 / 台词本", stage: "notes" },
+  note: { name: "便签", desc: "随手记 / 标注", stage: "notes" },
+  // ── 整理 ──
+  group: { name: "编组", desc: "把卡片装进容器", stage: "organize" },
+};
+
+/** 取 kind 的小白入口（未知 kind 返回 null，调用方回落技术名） */
+export function noviceEntryFor(kind: string): NoviceEntry | null {
+  return NOVICE_ENTRY[kind] || null;
+}

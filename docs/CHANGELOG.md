@@ -1,5 +1,30 @@
 # 拾光剪影 — 变更日志
 
+## V4.41.21 (2026-10-11) — 小白意图入口（P0：左栏 7 组创作阶段 + 建卡小白命名）
+
+> 用户拍板「按这个方案进行」（2026-10-11 网页原型 v3 + 《意图编译范式 2.0》）。
+> 本刀只动 P0：**改变组织方式，不减少可见性**（21 种卡片一种不少）。
+> 冻结区 canvas-magnetic-intent 已获解冻授权执行，改后重锁。
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `vendor/shiguang-canvas/src/novice/types.ts` | 新增 `NOVICE_STAGE_GROUPS`（7 个创作阶段组：开始创作/做画面/做声音/摆位与实拍/批量与设定/素材与笔记/整理）+ `NOVICE_ENTRY`（21 种内置 kind → 小白入口名 + 一句话说明 + 所属阶段，**全量覆盖**）+ `noviceEntryFor()`。既有 `KIND_STYLE`/`KIND_TEXT_FIELD`/`noviceHint` 一概不动 |
+| `vendor/shiguang-canvas/src/NodePalette.tsx` | 新增 `buildNoviceAddNodeGroups()`：21 种内置按 7 组组织、入口用小白名、hover 带专业模式原名（小白↔专业互认）、插件节点照旧归「扩展」组。既有 `NODE_PALETTE`/`groupPaletteByCategory` 零变化 |
+| `vendor/shiguang-canvas/src/CanvasShell.tsx` | 左栏「添加节点」小白/专业分流（`isNovice ? noviceNodeGroups : addNodeGroups`）；`pickNodeByType` 小白模式建卡后把默认技术标题换成「小白名 + 序号」（如「画面 2」），专业模式零变化 |
+| `vendor/shiguang-canvas/src/novice/entry.test.ts` | 新增 5 例：21 种全量覆盖（缺一即红）/ stage 合法性 / 未知 kind 返回 null 不编造 / 分组完整性与小白名 / ★专业模式零变化（5 大类与技术名不受污染） |
+
+### 设计纪律（写死防走偏）
+
+- **不修改任何既有 kind / 字段 / 技术命名**——专业模式的命名是「最直接的表意」，改了就变味（用户原话）。
+- 21 种**一个不少**：2026-10-11 教训——「降低门槛」= 改变组织方式，**不是减少可见性**。
+- 小白标题只在**建卡瞬间**写入 `title` 字段（与用户自己改标题同权，非影子数据）；用户改名后不再覆盖。
+
+### 验证
+
+vitest **296/296**（291 既有 + 5 新增）· vite build ✓ · tsc 零新增错误（Stage3D/riggedHumanoid 为既有存量）· 冻结区重锁（frozen_zone_guard --update）· 改前 11 文件 zip 备份 `docs/_archive/2026-10-11-novice-p0-unfreeze/`。
+
 ## V4.41.20 (2026-10-11) — 生成/入轨 浮层化（画布 0.3.19「生成/入轨 浮层化」）
 
 > 治「左侧栏最底下的「生成 / 入轨」高频入口放最深处、要滚半天找不到」（用户截图反馈）。
