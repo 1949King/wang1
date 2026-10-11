@@ -231,8 +231,8 @@ class NotificationCenterPanel(QFrame):
         try:
             if self._store is not None:
                 self._store.unregister_callback(self._on_store_changed)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("析构 unregister_callback 失败（已忽略）: %s", e)
 
     # ─────────── UI 构造 ───────────
     def _build_ui(self):

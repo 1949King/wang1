@@ -1552,8 +1552,8 @@ class MainWindow(QMainWindow):
                     type=TYPE_UPDATE,
                     level=LEVEL_INFO,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("写入检查更新通知失败（已忽略，不阻断更新）: %s", e)
             self.show_status("正在检查更新…", "#3b82f6")
         except Exception as e:
             logger.error("触发更新检查失败: %s", e)
@@ -1581,8 +1581,8 @@ class MainWindow(QMainWindow):
         if panel is not None:
             try:
                 panel.refresh_unread_badge()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("刷新用户中心徽章失败（已忽略）: %s", e)
 
     def _popup_notification_center(self):
         """在 _notif_btn 正下方弹出通知中心面板"""

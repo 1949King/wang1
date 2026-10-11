@@ -311,7 +311,7 @@ class NotificationStore:
             try:
                 self._callbacks.remove(fn)
             except ValueError:
-                pass
+                logger.debug("unregister_callback: 函数未注册（重复 unregister 合法）", exc_info=True)
 
     def _fire_callbacks(self, event: str, notification: Notification) -> None:
         with self._lock:
