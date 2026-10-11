@@ -1,7 +1,7 @@
 {
   "name": "shiguang-canvas",
   "private": true,
-  "version": "0.3.20",
+  "version": "0.3.21",
   "type": "module",
   "description": "拾光剪影自研导演台画布 — LibTV 向节点工作流（替代 infinite-canvas 主路径）",
   "scripts": {

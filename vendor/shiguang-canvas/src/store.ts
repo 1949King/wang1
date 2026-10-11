@@ -142,12 +142,27 @@ export type CanvasTier = "novice" | "pro";
 /** 档位持久化 key */
 export const TIER_STORAGE_KEY = "shiguang-canvas:tier:v1";
 
+/** 主题持久化 key（V4.41.22 引入） */
+export const THEME_STORAGE_KEY = "shiguang-canvas:theme:v1";
+
+/** 主题：暗色（默认）/ 浅色。沿用项目品牌色（深藏蓝 + 主蓝 + 强调橙） */
+export type CanvasTheme = "dark" | "light";
+
 /** 读取已保存的档位，默认专业模式（存量用户行为不变） */
 export function readStoredTier(): CanvasTier {
   try {
     return localStorage.getItem(TIER_STORAGE_KEY) === "novice" ? "novice" : "pro";
   } catch {
     return "pro";
+  }
+}
+
+/** 读取已保存的主题，默认暗色（存量用户行为不变） */
+export function readStoredTheme(): CanvasTheme {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
   }
 }
 
@@ -251,6 +266,8 @@ type Store = {
   magneticMode: boolean;
   /** 画布档位：小白模式 = 磁吸意图画布；专业模式 = 节点画布 */
   editorTier: CanvasTier;
+  /** 当前主题（V4.41.22 引入）：暗色 / 浅色 */
+  theme: CanvasTheme;
   /** 脏版本号：任何节点/连线变动 +1，用于触发 auto-save 的 useEffect 依赖 */
   dirtyVersion: number;
   /** 3D 导演台场景快照（saveProject 时打包，loadProject 时恢复） */
@@ -265,6 +282,8 @@ type Store = {
   setStatus: (s: string) => void;
   setMeta: (dramaTitle: string, episode: string) => void;
   setViewMode: (m: ViewMode) => void;
+  /** 切换主题（V4.41.22 引入）：持久化 + 同步 document.documentElement[data-theme] */
+  setTheme: (t: CanvasTheme) => void;
   setCanvasLayoutMode: (m: CanvasLayoutMode) => void;
   setMagneticMode: (on: boolean) => void;
   /** 切换画布档位（会持久化；小白模式强制开启磁吸） */
@@ -611,6 +630,7 @@ export const useCanvasStore = create<Store>((set, get) => ({
   canvasLayoutMode: "flow",
   magneticMode: true,
   editorTier: readStoredTier(),
+  theme: readStoredTheme(),
   directorTargetNodeId: null,
   stage3dApplySeq: 0,
   pendingStage3dCameras: null,
@@ -656,6 +676,17 @@ export const useCanvasStore = create<Store>((set, get) => ({
   },
   setStatus: (status) => set({ status }),
   setMeta: (dramaTitle, episode) => set({ dramaTitle, episode }),
+  setTheme: (theme) => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      /* localStorage 写入失败（沙箱/隐私模式）不影响内存切换 */
+    }
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    set({ theme });
+  },
   setViewMode: (viewMode) => set({ viewMode: normalizeViewMode(viewMode) }),
   openDirectorForNode: (nodeId) => {
     const n = get().nodes.find((x) => x.id === nodeId);

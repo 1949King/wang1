@@ -1,5 +1,5 @@
 /** 顶栏导航 — 对齐 infinite-canvas 落地页信息架构 */
-import type { CanvasTier } from "./store";
+import type { CanvasTheme, CanvasTier } from "./store";
 
 export type AppRoute =
   | "home"
@@ -38,6 +38,10 @@ type Props = {
   /** 当前画布档位：小白模式 / 专业模式 */
   tier: CanvasTier;
   onTierChange: (t: CanvasTier) => void;
+  /** 当前主题（V4.41.22 引入）：暗色 / 浅色 */
+  theme: CanvasTheme;
+  /** 切换主题回调（Ctrl+Shift+T 也走它） */
+  onThemeChange: (t: CanvasTheme) => void;
 };
 
 export default function AppNav({
@@ -47,6 +51,8 @@ export default function AppNav({
   versionTitle = "拾光导演台",
   tier,
   onTierChange,
+  theme,
+  onThemeChange,
 }: Props) {
   return (
     <nav className="ic-nav" aria-label="主导航">
@@ -72,6 +78,16 @@ export default function AppNav({
         ))}
       </div>
       <div className="ic-nav-right">
+        {/* V4.41.22 主题切换（用户授权解冻 canvas-magnetic-intent）：暗色默认 / 浅色 */}
+        <button
+          type="button"
+          className="ic-theme-btn"
+          aria-label={theme === "dark" ? "切换到浅色主题" : "切换到暗色主题"}
+          title={theme === "dark" ? "当前：暗色（Ctrl+Shift+T 切换）" : "当前：浅色（Ctrl+Shift+T 切换）"}
+          onClick={() => onThemeChange(theme === "dark" ? "light" : "dark")}
+        >
+          <span aria-hidden>{theme === "dark" ? "☀" : "☾"}</span>
+        </button>
         <div
           className="ic-tier-seg"
           role="group"

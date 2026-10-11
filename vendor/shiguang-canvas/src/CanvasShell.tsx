@@ -41,7 +41,7 @@ import CommandPalette, { type CommandItem } from "./CommandPalette";
 import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
 import { LibTvBottomDock } from "./LibTvChrome";
-import { type NodeData, type ViewMode, type CanvasLayoutMode, type ShotData, useCanvasStore } from "./store";
+import { type NodeData, type ViewMode, type CanvasLayoutMode, type CanvasTheme, type ShotData, useCanvasStore } from "./store";
 import { useMagneticDrag } from "./magnetic/useMagneticDrag";
 import { MagneticLines } from "./magnetic/MagneticLines";
 import { SlotGhost } from "./magnetic/SlotGhost";
@@ -356,6 +356,8 @@ export default function CanvasShell(props: CanvasShellProps) {
   /** 画布档位：小白模式（磁吸意图画布）/ 专业模式（节点画布） */
   const editorTier = useCanvasStore((s) => s.editorTier);
   const setEditorTier = useCanvasStore((s) => s.setEditorTier);
+  const theme = useCanvasStore((s) => s.theme);
+  const setTheme = useCanvasStore((s) => s.setTheme);
   /** 小白模式：卡片靠磁吸建立关系，不暴露连线与专业参数 */
   const isNovice = editorTier === "novice";
   // 从 registry 动态读 nodeTypes：内置节点 + 插件节点统一入口
@@ -412,6 +414,13 @@ export default function CanvasShell(props: CanvasShellProps) {
   // 持久化折叠偏好：用户手动折叠/展开后记住
   useEffect(() => { localStorage.setItem("shiguang-canvas:left-collapsed", leftCollapsed ? "1" : "0"); }, [leftCollapsed]);
   useEffect(() => { localStorage.setItem("shiguang-canvas:right-collapsed", rightCollapsed ? "1" : "0"); }, [rightCollapsed]);
+  // V4.41.22 主题系统（用户授权解冻 canvas-magnetic-intent）：挂载时把 store.theme 同步到 documentElement
+  // 触发 [data-theme] 选择器；后续切换走 store.setTheme 持久化 + 同步 DOM。
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+  }, [theme]);
   // V4.41.17 时序预览相机跟随：CanvasOverlays 每步派发 sg-preview-focus（detail=节点 id），
   // 这里把视窗平滑移到当前节点（maxZoom 防止单节点被放得过大）。冻结区已授权的唯一新增。
   useEffect(() => {
@@ -847,6 +856,8 @@ export default function CanvasShell(props: CanvasShellProps) {
         versionTitle={CANVAS_VERSION_TITLE}
         tier={editorTier}
         onTierChange={(t: CanvasTier) => setEditorTier(t)}
+        theme={theme}
+        onThemeChange={(t: CanvasTheme) => setTheme(t)}
       />
 
       {viewMode === "home" ? (

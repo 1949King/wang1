@@ -79,6 +79,8 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
   const saveProject = useCanvasStore((s) => s.saveProject);
   const addNode = useCanvasStore((s) => s.addNode);
   const setStatus = useCanvasStore((s) => s.setStatus);
+  const theme = useCanvasStore((s) => s.theme);
+  const setTheme = useCanvasStore((s) => s.setTheme);
 
   const onKey = useCallback(
     (ev: KeyboardEvent) => {
@@ -241,6 +243,17 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
           onBreakdown();
           break;
       }
+
+      // ── Ctrl/Cmd + Shift 组合键 ──
+      if (!mod || !ev.shiftKey) return;
+      switch (key.toLowerCase()) {
+        case "t":
+          // Ctrl+Shift+T 切换主题（V4.41.22 引入）
+          ev.preventDefault();
+          setTheme(theme === "dark" ? "light" : "dark");
+          setStatus(`已切换到${theme === "dark" ? "浅色" : "暗色"}主题`);
+          break;
+      }
     },
     [
       viewMode,
@@ -268,6 +281,8 @@ export function useKeyboardShortcuts(deps: ShortcutDeps) {
       saveProject,
       addNode,
       setStatus,
+      theme,
+      setTheme,
     ],
   );
 

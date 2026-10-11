@@ -1,5 +1,28 @@
 # 拾光剪影 — 变更日志
 
+## 画布 0.3.21 (2026-10-11) — 主题系统 P1（V4.41.22 解冻延续）
+
+> 用户授权解冻 `canvas-magnetic-intent`，延续 V4.41.22 主题系统工作。
+> 本次让画布端可以跟主程序一样做 dark/light 主题切换 + 主题变量沉淀。
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `vendor/shiguang-canvas/src/styles.css` | 引入 `:root` + `html[data-theme='dark']` 双轨 + `html[data-theme='light']` 浅色主题；新增 `--accent-strong` / `--accent-soft` / `--orange` / `--brand-deep` 主题变量；沿用品牌色（深藏蓝 #172033 + 主蓝 #2563eb + 强调橙 #f97316） |
+| `vendor/shiguang-canvas/src/store.ts` | 新增 `theme` / `setTheme` 到 canvas store，与主程序 ThemeManager 概念对齐 |
+| `vendor/shiguang-canvas/src/hooks/useKeyboardShortcuts.ts` | `Ctrl/Cmd + Shift + T` 切换主题快捷键（V4.41.22 引入） |
+| `vendor/shiguang-canvas/src/CanvasShell.tsx` | 接入主题变量 + 主题切换响应 |
+| `vendor/shiguang-canvas/src/AppNav.tsx` | 主题切换 UI 接入 |
+| `vendor/shiguang-canvas/src/canvasVersion.ts` | 0.3.20 → 0.3.21，codename "生成/入轨 浮层化" → "主题系统 P1（V4.41.22）" |
+| `vendor/shiguang-canvas/package.json` | 0.3.20 → 0.3.21 |
+
+### 纪律
+
+- frozen_zone_guard 主动重锁基线（`python scripts/frozen_zone_guard.py --update`，85 锁点）
+- 三件套同步：canvasVersion.ts → package.json → CHANGELOG
+- 与主程序 V4.42.x 独立版本号（画布可单独迭代）
+
 ## V4.42.1 (2026-10-11) — 通知中心面板 + 反馈通道
 
 > 把 V4.42.0 的两处 status bar 占位（通知/反馈）换成真实组件。headerBar 🔔 按钮点开就是真通知中心；UserCenterPanel 底部「意见反馈」点开就是真反馈对话框。
