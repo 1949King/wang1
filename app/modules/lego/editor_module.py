@@ -4804,39 +4804,43 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             logger.error(f'自动保存失败: {e}')
 
     def _maybe_restore_autosave(self):
-        """空工程时询问是否恢复自动保存。"""
+        """**仅在上次「异常退出」时**询问是否恢复自动保存（V4.43.13）。
+
+        策略（该不该弹 / 弹几次 / 过期怎么办）全部收敛到 `autosave_recovery` 模块，
+        见其模块头注释 —— 对标 Premiere（仅崩溃弹、且只弹一次）/ Office（正常关闭即删
+        恢复文件）/ NightOS（`awake` 标记残留即判崩溃）。
+
+        历史缺陷（用户「每次一开程序就弹，弹的还是两个月前的文件」）：
+        关闭时无清理 + 提示标记只在内存 + 无崩溃判定 ⇒ 每次都弹。
+        """
         if getattr(self, "_autosave_prompted", False):
             return
         self._autosave_prompted = True
         if getattr(self, "_clips", None):
             return
-        latest = os.path.join(os.getcwd(), "autosave", "latest.timeline")
-        if not os.path.isfile(latest):
+
+        from . import autosave_recovery as ar
+
+        if not ar.begin_session():          # 上次正常关闭 ⇒ 不打扰
             return
-        try:
-            mtime = os.path.getmtime(latest)
-            from datetime import datetime
-            mtime_s = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            reply = QMessageBox.question(
-                self,
-                "恢复自动保存",
-                f"发现 autosave/latest.timeline\n修改时间：{mtime_s}\n\n是否恢复？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                try:
-                    self.import_project(latest)
-                except Exception as ie:
-                    QMessageBox.warning(
-                        self, "恢复失败",
-                        f"无法恢复自动保存工程：\n{ie}",
-                    )
-        except Exception as e:
+        mtime = ar.take_pending()           # 存档缺失 / 过期 / 已问过 ⇒ None
+        if mtime is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "恢复自动保存",
+            f"上次未正常退出，发现自动保存的工程：\n"
+            f"autosave/latest.timeline\n修改时间：{ar.describe_mtime(mtime)}\n\n是否恢复？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        ar.remember_prompted(mtime)         # 无论选是/否，这一版都不再问
+        if reply == QMessageBox.StandardButton.Yes:
             try:
-                QMessageBox.warning(self, "恢复自动保存", f"询问失败：{e}")
-            except Exception:
-                logger.error(f'autosave 恢复询问失败: {e}')
+                self.import_project(ar.latest_path())
+            except Exception as ie:
+                QMessageBox.warning(self, "恢复失败", f"无法恢复自动保存工程：\n{ie}")
 
     def _on_clip_trim_committed(self, clip_data):
         """片段拖拽/裁剪松手：同步内核、撤销栈并标记脏"""
