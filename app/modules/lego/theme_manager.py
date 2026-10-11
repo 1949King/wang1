@@ -10,6 +10,15 @@
 - 使用属性选择器（[theme="light"]/[theme="dark"]）自动响应
 - 主窗口的 setProperty("theme", ...) 触发子控件级联更新
 - 防递归标志位避免 EventBus 往复触发
+
+V4.43.0 升级：
+- 颜色 token 从内联 dict 改为单一真相源 app.core.theme_tokens.DARK_TOKENS / LIGHT_TOKENS
+- 保留所有旧 key 名（bg_main / text_primary / accent 等），无破坏性更新
+- 新增 key：brand / brand_light / brand_pale / warning / info / accent_amber / glass_* 等
+  → AI-Canvas-tauri (tenney95/AI-Canvas-tauri) base.css 行 12-470 直接搬运
+- QSS 新增选择器：#brandBtn / #warningBtn / #infoBtn / #successBtn / #glassPanel / #chip /
+  #preferenceCard（借鉴 .sidebar-pref-card 4 开关视觉）
+- 项目主蓝 #2f7bff（accent）保留 —— 深度嵌入 modules.py QSS，不随 AI-Canvas 改 indigo
 """
 
 from __future__ import annotations
@@ -20,6 +29,8 @@ from typing import Optional
 
 from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtCore import QSettings
+
+from app.core.theme_tokens import DARK_TOKENS, LIGHT_TOKENS
 
 logger = logging.getLogger("AI短剧编辑器.theme")
 
@@ -35,50 +46,9 @@ class ThemeManager:
 
     _instance: Optional["ThemeManager"] = None
 
-    # ───── 颜色常量表 ─────
-    COLORS_DARK = {
-        "bg_main": "#070a12",
-        "bg_secondary": "#101621",
-        "bg_tertiary": "#172033",
-        "bg_hover": "#1f2b42",
-        "text_primary": "#edf3ff",
-        "text_secondary": "#aab6cc",
-        "text_disabled": "#667085",
-        "text_on_accent": "#f8fbff",
-        "border": "#253044",
-        "border_light": "#1c2638",
-        "accent": "#2f7bff",
-        "accent_hover": "#4d8dff",
-        "accent_soft": "#102a4d",
-        "focus": "#6ba4ff",
-        "success": "#2dd4bf",
-        "danger": "#fb7185",
-        "scrollbar_bg": "#0d1320",
-        "scrollbar_handle": "#2a3650",
-        "scrollbar_hover": "#3a4a68",
-    }
-
-    COLORS_LIGHT = {
-        "bg_main": "#f4f7fb",
-        "bg_secondary": "#fcfdff",
-        "bg_tertiary": "#eaf0f7",
-        "bg_hover": "#dde7f4",
-        "text_primary": "#172033",
-        "text_secondary": "#56657a",
-        "text_disabled": "#8a97aa",
-        "text_on_accent": "#f8fbff",
-        "border": "#d7e0ec",
-        "border_light": "#e3eaf3",
-        "accent": "#2563eb",
-        "accent_hover": "#1d4ed8",
-        "accent_soft": "#dbeafe",
-        "focus": "#3b82f6",
-        "success": "#0f766e",
-        "danger": "#e11d48",
-        "scrollbar_bg": "#edf2f7",
-        "scrollbar_handle": "#c2ccda",
-        "scrollbar_hover": "#98a8bd",
-    }
+    # ───── 颜色常量表（V4.43.0 改为从 theme_tokens 派生，单一真相源）─────
+    COLORS_DARK = DARK_TOKENS
+    COLORS_LIGHT = LIGHT_TOKENS
 
     # ───── 预编译的 QSS 模板 ─────
     @staticmethod
@@ -389,6 +359,411 @@ class ThemeManager:
             background-color: {c['accent']};
             color: {c['text_on_accent']};
             border-radius: 6px;
+        }}
+
+        /* ═══════════════════════════════════════════════════════════════════
+           V4.43.0 新增 — 借鉴 AI-Canvas-tauri base.css / settings.css 的视觉
+           ─────────────────────────────────────────────────────────────────── */
+
+        /* ── 品牌色按钮（紫罗兰）—— #brandBtn 用于玻璃面板内 CTA ── */
+        QPushButton[theme="{theme_name}"]#brandBtn {{
+            background-color: {c['brand']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+        }}
+        QPushButton[theme="{theme_name}"]#brandBtn:hover {{
+            background-color: {c['brand_light']};
+        }}
+        QPushButton[theme="{theme_name}"]#brandBtn:pressed {{
+            background-color: {c['brand_pale']};
+            color: {c['bg_main']};
+        }}
+
+        /* ── 语义按钮变体 ── */
+        QPushButton[theme="{theme_name}"]#successBtn {{
+            background-color: {c['success']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }}
+        QPushButton[theme="{theme_name}"]#successBtn:hover {{
+            background-color: {c['success_light']};
+        }}
+        QPushButton[theme="{theme_name}"]#dangerBtn2 {{
+            background-color: {c['danger']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }}
+        QPushButton[theme="{theme_name}"]#dangerBtn2:hover {{
+            background-color: {c['danger_light']};
+        }}
+        QPushButton[theme="{theme_name}"]#warningBtn {{
+            background-color: {c['warning']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }}
+        QPushButton[theme="{theme_name}"]#infoBtn {{
+            background-color: {c['info']};
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }}
+        QPushButton[theme="{theme_name}"]#amberBtn {{
+            background-color: {c['accent_amber']};
+            color: {c['bg_main']};
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+        }}
+
+        /* ── 玻璃面板 #glassPanel —— 借鉴 AI-Canvas --glass-bg + --glass-ring ── */
+        QFrame[theme="{theme_name}"]#glassPanel {{
+            background-color: {c['glass_bg']};
+            border: 1px solid {c['glass_ring']};
+            border-radius: 14px;
+        }}
+        QFrame[theme="{theme_name}"]#glassPanelSoft {{
+            background-color: {c['glass_bg_light']};
+            border: 1px solid {c['glass_ring']};
+            border-radius: 12px;
+        }}
+
+        /* ── Chip / Badge —— AI-Canvas 厂商徽标 + 工作流 chip ── */
+        QLabel[theme="{theme_name}"]#chip {{
+            background-color: {c['brand_alpha_15']};
+            color: {c['brand_light']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipSuccess {{
+            background-color: {c['success_bg']};
+            color: {c['success_text']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipWarning {{
+            background-color: {c['warning_bg']};
+            color: {c['warning']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipDanger {{
+            background-color: {c['danger_bg']};
+            color: {c['danger_light']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipInfo {{
+            background-color: {c['info_bg']};
+            color: {c['info_light']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipAmber {{
+            background-color: {c['accent_amber_bg']};
+            color: {c['accent_amber_text']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#chipMuted {{
+            background-color: {c['bg_hover']};
+            color: {c['text_secondary']};
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 500;
+        }}
+
+        /* ── 偏好卡 —— 借鉴 AI-Canvas .sidebar-pref-card（4 开关视觉）── */
+        QFrame[theme="{theme_name}"]#preferenceCard {{
+            background-color: {c['bg_tertiary']};
+            border: 1px solid {c['border']};
+            border-radius: 12px;
+        }}
+        QFrame[theme="{theme_name}"]#preferenceCard:hover {{
+            border-color: {c['border_focus']};
+        }}
+
+        /* ── 浮层 / 卡片（subpanel）── */
+        QFrame[theme="{theme_name}"]#subpanelCard {{
+            background-color: {c['card_bg']};
+            border: 1px solid {c['card_border']};
+            border-radius: 12px;
+        }}
+
+        /* ── 浮动 Header / Titlebar —— AI-Canvas .app-header (top-2 + backdrop-blur) ── */
+        QFrame[theme="{theme_name}"]#floatingHeader {{
+            background-color: {c['glass_panel_bg']};
+            border: 1px solid {c['glass_ring']};
+            border-radius: 14px;
+        }}
+
+        /* ── 侧边栏悬浮样式 —— 借鉴 .sidebar-floating ── */
+        QFrame[theme="{theme_name}"]#floatingSidebar {{
+            background-color: {c['glass_panel_bg']};
+            border: 1px solid {c['glass_ring']};
+            border-radius: 14px;
+        }}
+        QFrame[theme="{theme_name}"]#floatingSidebarCollapsed {{
+            background-color: {c['glass_bg']};
+            border: 1px solid {c['glass_ring']};
+            border-radius: 14px;
+        }}
+
+        /* ── 工具按钮（圆形图标按钮，参考 .sidebar-btn-v3 36×36）── */
+        QPushButton[theme="{theme_name}"]#toolBtn {{
+            background-color: transparent;
+            color: {c['text_secondary']};
+            border: 1px solid transparent;
+            border-radius: 8px;
+            min-width: 36px;
+            min-height: 36px;
+            max-width: 36px;
+            max-height: 36px;
+            font-size: 16px;
+            padding: 0;
+        }}
+        QPushButton[theme="{theme_name}"]#toolBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['text_primary']};
+            border-color: {c['border_focus']};
+        }}
+        QPushButton[theme="{theme_name}"]#toolBtn:checked,
+        QPushButton[theme="{theme_name}"]#toolBtnActive {{
+            background-color: {c['brand_alpha_15']};
+            color: {c['brand_light']};
+            border-color: {c['brand']};
+        }}
+
+        /* ── 分隔线（separator）── */
+        QFrame[theme="{theme_name}"]#separatorH {{
+            background-color: {c['separator_color']};
+            max-height: 1px;
+            min-height: 1px;
+            border: none;
+        }}
+        QFrame[theme="{theme_name}"]#separatorV {{
+            background-color: {c['separator_color']};
+            max-width: 1px;
+            min-width: 1px;
+            border: none;
+        }}
+
+        /* ═══════════════════════════════════════════════════════════════════
+           V4.43.1 新增 — 设置面板（对齐 AI Canvas 外观/常规页截图）
+           ─────────────────────────────────────────────────────────────────── */
+
+        /* ── 设置导航（左 184px）── */
+        QLabel[theme="{theme_name}"]#settingsNavHeader {{
+            background-color: {c['bg_secondary']};
+            color: {c['text_primary']};
+            font-size: 15px;
+            font-weight: 700;
+            padding-left: 20px;
+            border-bottom: 1px solid {c['border_light']};
+        }}
+        QWidget[theme="{theme_name}"]#settingsNavHolder {{
+            background-color: {c['bg_secondary']};
+            border-right: 1px solid {c['border_light']};
+        }}
+        QListWidget[theme="{theme_name}"]#settingsNav {{
+            background-color: {c['bg_secondary']};
+            border: none;
+            outline: none;
+            padding: 10px 8px;
+        }}
+        QListWidget[theme="{theme_name}"]#settingsNav::item {{
+            color: {c['text_secondary']};
+            border-radius: 8px;
+            padding: 8px 12px;
+        }}
+        QListWidget[theme="{theme_name}"]#settingsNav::item:selected {{
+            background-color: {c['brand_alpha_15']};
+            color: {c['brand_light']};
+            font-weight: 600;
+        }}
+        QListWidget[theme="{theme_name}"]#settingsNav::item:hover:!selected {{
+            background-color: {c['bg_hover']};
+        }}
+        QWidget[theme="{theme_name}"]#settingsStack {{
+            background-color: {c['bg_main']};
+        }}
+        QScrollArea[theme="{theme_name}"]#settingsContent {{
+            background-color: {c['bg_main']};
+            border: none;
+        }}
+        QScrollArea[theme="{theme_name}"]#settingsContent > QWidget > QWidget {{
+            background-color: {c['bg_main']};
+        }}
+        QWidget[theme="{theme_name}"]#settingsPage {{
+            background-color: {c['bg_main']};
+        }}
+
+        /* ── 标题 / 提示 / 分组 ── */
+        QLabel[theme="{theme_name}"]#settingsBigTitle {{
+            color: {c['text_primary']};
+            font-size: 20px;
+            font-weight: 700;
+        }}
+        QLabel[theme="{theme_name}"]#settingsPageHint {{
+            color: {c['text_muted']};
+            font-size: 12px;
+        }}
+        QLabel[theme="{theme_name}"]#sectionTitle {{
+            color: {c['text_primary']};
+            font-size: 13px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#sectionHint {{
+            color: {c['text_muted']};
+            font-size: 11px;
+        }}
+        QLabel[theme="{theme_name}"]#settingsFootnote {{
+            color: {c['text_muted']};
+            font-size: 11px;
+            line-height: 1.5;
+        }}
+        QLabel[theme="{theme_name}"]#appearanceHeadIcon {{
+            font-size: 20px;
+        }}
+        QLabel[theme="{theme_name}"]#autoSaveBadge {{
+            color: {c['success_text']};
+            background-color: {c['success_bg']};
+            border-radius: 10px;
+            padding: 3px 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+
+        /* ── 分段控件（节点工具栏 / 主题模式）── */
+        QFrame[theme="{theme_name}"]#segmentedBar {{
+            background-color: {c['card_bg']};
+            border: 1px solid {c['card_border']};
+            border-radius: 10px;
+        }}
+        QPushButton[theme="{theme_name}"]#segmentedBtn {{
+            color: {c['text_secondary']};
+            background-color: transparent;
+            border: none;
+            border-radius: 7px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }}
+        QPushButton[theme="{theme_name}"]#segmentedBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['text_primary']};
+        }}
+        QPushButton[theme="{theme_name}"]#segmentedBtn:checked {{
+            background-color: {c['brand_alpha_15']};
+            color: {c['brand_light']};
+            font-weight: 600;
+        }}
+
+        /* ── 偏好卡（.sidebar-pref-card）── */
+        QFrame[theme="{theme_name}"]#prefCard {{
+            background-color: {c['card_bg']};
+            border: 1px solid {c['card_border']};
+            border-radius: 10px;
+        }}
+        QFrame[theme="{theme_name}"]#prefCard:hover {{
+            background-color: {c['bg_hover']};
+        }}
+        QFrame[theme="{theme_name}"]#prefCard[prefActive="true"] {{
+            border-color: {c['brand_alpha_30']};
+        }}
+        QLabel[theme="{theme_name}"]#prefTitle {{
+            color: {c['text_primary']};
+            font-size: 13px;
+            font-weight: 500;
+        }}
+        QLabel[theme="{theme_name}"]#prefDesc {{
+            color: {c['text_muted']};
+            font-size: 11px;
+        }}
+
+        /* ── 外观预设卡（2×2）── */
+        QFrame[theme="{theme_name}"]#presetCard {{
+            background-color: {c['card_bg']};
+            border: 1px solid {c['card_border']};
+            border-radius: 12px;
+        }}
+        QFrame[theme="{theme_name}"]#presetCard:hover {{
+            border-color: {c['border_focus']};
+        }}
+        QFrame[theme="{theme_name}"]#presetCard[presetActive="true"] {{
+            border: 2px solid {c['brand']};
+            background-color: {c['brand_alpha_10']};
+        }}
+        QLabel[theme="{theme_name}"]#presetName {{
+            color: {c['text_primary']};
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QLabel[theme="{theme_name}"]#presetDot {{
+            font-size: 10px;
+        }}
+        QLabel[theme="{theme_name}"]#chipBrand {{
+            background-color: {c['brand_alpha_15']};
+            color: {c['brand_light']};
+            border-radius: 10px;
+            padding: 3px 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+
+        /* ── 外观大预览容器 ── */
+        QFrame[theme="{theme_name}"]#appearancePreview {{
+            background-color: {c['card_bg']};
+            border: 1px solid {c['card_border']};
+            border-radius: 14px;
+        }}
+
+        /* ── 工具按钮（导入 / 导出 / 保存预设 / 覆盖）── */
+        QPushButton[theme="{theme_name}"]#ghostBtn {{
+            color: {c['text_primary']};
+            background-color: {c['bg_tertiary']};
+            border: 1px solid {c['border']};
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 12px;
+        }}
+        QPushButton[theme="{theme_name}"]#ghostBtn:hover {{
+            background-color: {c['bg_hover']};
+            border-color: {c['border_focus']};
+        }}
+        QPushButton[theme="{theme_name}"]#overrideBtn {{
+            color: {c['text_disabled']};
+            background-color: transparent;
+            border: 1px solid {c['border_light']};
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 12px;
+        }}
+        QPushButton[theme="{theme_name}"]#overrideBtn:disabled {{
+            color: {c['text_disabled']};
         }}
         """
 

@@ -1,5 +1,221 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.2 (2026-10-11) — 设置入口收口 + 画布背景预设（画布 0.3.23）
+
+> 用户原话「为什么不把设置模块的功能全都移到…设置去，这样把侧边栏那个直接取消掉，然后登录界面的功能
+> 就是全部完整的了。还有它那里面的外观功能和开源项目里面的 AI 画布那个是一样的吗？可以从外部自行导入
+> 其他样式的外观吗？以及它那个开源代码里面的那几个可以拿过来用吗？」
+> 用户裁定：① 取消侧边栏「设置」，保留顶栏 ⚙ + 用户中心 👤；② 外观「做真：移植画布背景预设（需解冻画布）」。
+
+### 前提纠正（有证据）
+
+| 用户假设 | 实测 |
+|---|---|
+| 「登录界面里面那个设置」 | **登录窗口无任何设置** —— `login_window.py`(916 行) 只有 `LoginWidget`/`RegisterWidget`/`DeviceManagerDialog`/`LoginWindow`/`ActivationWindow`，grep「设置」只命中「请设置密码」 |
+| — | `modules.py:1234 _show_login_dialog`（标题「登录信息与设置」）是**死代码**：全库仅 1 处定义、0 处调用 |
+| 真正的设置入口 | 3 处：左侧导航「设置」模块 / 顶栏 ⚙ / 用户中心 `user_center_panel.py:242` 的 ⚙ 设置行（后两者→`main_window._show_settings`） |
+
+### ① 设置从左侧导航撤出
+
+| 文件 | 改动 |
+|---|---|
+| `app/modules/lego/module_registry.py` | `ModuleDefinition` 新增 `nav_hidden: NotRequired[bool]`；settings 条目设 `"nav_hidden": True` |
+| `app/modules/lego/main_window.py` | `register_module_lazy` 中 `if not mod_def.get("nav_hidden"): self._nav_bar.add_module(...)` |
+
+设置**仍注册、仍可 `switch_to_module("settings")`**（弹窗失败时 `_show_settings` 回落到页内模块）。
+验证：`会进导航: [home, editor, help, copywriting, tasks, materials, models, characters, extensions]` / `已隐藏: [settings]`。
+
+### ② 画布背景预设（移植开源 backgroundOptions.ts）
+
+| 文件 | 冻结区 | 改动 |
+|---|---|---|
+| `vendor/shiguang-canvas/src/canvasBackgrounds.ts` | 否（新建） | 6 个背景预设 + **运行时注入 `<style>`** + `html[data-canvas-bg]` 属性；`applyCanvasBackground()` / `readStoredCanvasBackground()` / `initCanvasBackground()`（含 2.5s 轮询 + `window.__shiguangSetCanvasBackground` 全局） |
+| `vendor/shiguang-canvas/src/main.tsx` | 否 | 接线 `initCanvasBackground()` |
+| `vendor/shiguang-canvas/src/canvasVersion.ts` | **是** | 0.3.22 → 0.3.23（唯一冻结区改动） |
+| `vendor/shiguang-canvas/package.json` | 否 | 0.3.22 → 0.3.23 |
+| `app/core/canvas_routes_get.py` | 否 | 新增 `GET /host/canvas-settings`（读 `data/canvas_appearance.json`） |
+| `app/modules/lego/settings_panel.py` | 否 | `PRESETS` 扩为 6 元组（+画布背景 id +主题）；新增 `push_canvas_appearance()` 写 JSON + 递增 revision |
+| `app/modules/lego/settings_canvas_pages.py` | 否 | `on_preset_activated` / `on_theme_mode_changed` 调 `push_canvas_appearance` |
+
+**设计要点：**
+
+- **只动 1 个冻结文件**：背景用「运行时注入 CSS + html 属性」，`styles.css` / `store.ts` / `CanvasShell.tsx` 一字未改
+  （协作对象替换思路 —— 见 `frozen-zone-release` 技能「换协作对象 ≫ 解冻」）。
+- **revision 增量应用**：画布 2.5s 轮询，只在 `revision` 变化时应用 ⇒ 不覆盖用户在画布内的本地主题切换按钮。
+- **单一真相源 = JSON 文件**（`data/canvas_appearance.json`）而非 QSettings：
+  实测沙箱/无注册表写权限环境下 `QSettings` 写入返回 `Status.AccessError`（注册表被拦），JSON 落盘才可靠。
+- 4 个预设**全部落地为真实画布背景**（不再是占位）：
+
+| 预设 | 画布背景 | 画布主题 |
+|---|---|---|
+| 深色 | `default`（#0a0e14） | dark |
+| 浅色 | `off-white` | light |
+| 太阳系 | `solar-system`（紫/橙径向渐变） | dark |
+| 磨砂曝光 | `frosted-glass`（暖白线性渐变） | light |
+
+### 验证表
+
+| 项 | 结果 |
+|---|---|
+| 画布 tsc | 37 处 = **存量基线**（riggedHumanoid.ts 21 + Stage3D.tsx 16），新文件 0 错误 |
+| 画布 vitest | **296 / 296**（23 文件） |
+| 画布 vite build | **rc=0**（main 846.59 → 849.56 kB，+2.97 = 新模块；dist 含 `sg-canvas-bg-style` 字面量） |
+| 副库 tsc | **rc=0 / 0 错误**（优于历史基线 54 行，判据「不超过基线」） |
+| 双库漂移 | **0 新增漂移**（0 新分叉 / 0 新缺失） |
+| 冻结区漂移清单 | 仅 `canvasVersion.ts`（**一个不多一个不少**）→ `--update` 重锁 → 复跑 `85 locks intact` |
+| 路由守卫 | `check_canvas_routes` OK（路由表 86 条 / 老链 1 条，不重叠；无不可达端点） |
+| 预设下发 | 4 预设 + 主题模式全部正确写 JSON（bg/theme/rev 逐项核对通过） |
+| ruff 棘轮 / 规模守卫 | 见 run_all_checks |
+
+### 保留不变量
+
+磁吸 / 咬合 / reflow / 空间记忆 **全部未触碰**（本次未改任何 magnetic/* 文件）。
+
+### 已知未做
+
+- `导入 / 导出 / 保存预设` 三按钮仍是空壳（只打日志）——**外观配置外部导入**（JSON 导出/导入）留待下一轮。
+- 开源其余可移植项：`StorageHealthCenter`（圆环图）/ `FileAppSettings` / `SubAgentSettings` /
+  `HelpCenterDialog`（10 分类）/ `ProtocolImportPanel` —— 见本轮问答清单。
+
+---
+
+## V4.43.1 (2026-10-11) — 设置模块「外观/常规」对齐 AI Canvas
+
+> 用户原话「关于项目里面的外观常规设置，就是设置模块里面的那些功能请借鉴 AI 画布开源项目的
+> 里面的效果进行优化，去直接参考他们代码，如果能抄过来的话直接抄」，附 3 张 AI Canvas 设置截图
+> （外观预设卡墙 + 常规 6 开关分组 + 项目/资源库页）。
+>
+> **说明**：截图 1 的「外观」预设卡墙是 AI Canvas **更新的上游功能**，我方 vendor/AI-Canvas-tauri
+> fork（SettingsPanel.tsx 761 行）里**没有**该 tab（只有 general/files/api/storage/comfyui/shortcuts/mcp）。
+> 故按截图设计 + fork 既有 `.sidebar-pref-card` 模式实现（settings.css 行 548-665 全套直抄）。
+
+### 改动（6 文件）
+
+| 文件 | 行数 | 改动 |
+|---|---|---|
+| `app/modules/lego/settings_widgets.py` | **+660 新建** | 可复用控件：`ToggleSwitch`（自绘 40×24 iOS 开关，`OutBack` 弹簧过冲对应 `--ease-spring`）/ `SegmentedControl`（分段单选）/ `MiniPreview`（88×52 自绘迷你界面，6 种形态）/ `PreferenceCard`（`.sidebar-pref-card`：预览+标题描述+开关，整卡可点）/ `PresetCard`（预设卡）/ `AppearancePreview`（外观大预览） |
+| `app/modules/lego/settings_canvas_pages.py` | **+277 新建** | `build_appearance_top_block` / `build_general_top_block` + 主题模式桥接（`on_theme_mode_changed` / `on_preset_activated`）。**抽出来的原因**：settings_module.py 已 2823 行超规模守卫基线，禁止继续变大 |
+| `app/modules/lego/settings_panel.py` | **重写 545 行** | 设置键单一真相源（9 个 key）+ `PRESETS`（4 预设）+ `THEME_MODE_OPTIONS` + 模态 `SettingsDialog`（6 tab：外观/常规/存储/ComfyUI/MCP/关于） |
+| `app/modules/lego/settings_module.py` | +19（2823→2842） | `_create_appearance_tab` / `_create_general_tab` 顶部改为一行调用新区块；旧主题下拉 `_theme_combo` 隐藏，由顶部「主题模式」分段驱动（**复用既有 `_on_theme_changed` 全链路**）。既有功能（导航栏模式/自定义颜色 8 色/字体/启动/项目/性能）全保留 |
+| `app/modules/lego/theme_manager.py` | +195 | QSS 新增设置控件选择器：`#settingsNav*` / `#settingsHeader` / `#segmentedBar`+`#segmentedBtn` / `#prefCard`(`[prefActive="true"]`) / `#presetCard`(`[presetActive="true"]`) / `#chipBrand` / `#ghostBtn` / `#overrideBtn` / `#autoSaveBadge` / `#sectionTitle`+`#sectionHint` / `#settingsBigTitle` / `#appearancePreview` |
+| `app/modules/lego/main_window.py` | +12 | `_show_settings`：⚙ 顶栏按钮 → 弹出模态 `SettingsDialog`（对齐 AI Canvas 弹窗形态），失败自动回落页内 SettingsModule |
+
+### 外观页结构（对齐截图 1）
+
+```
+✨ 外观  [深色]                              ● 自动保存
+外观预设包含画布、节点、连接线、连接手柄和所有页面配色
+[⬇导入] [⬆导出] [💾保存预设] [🚫覆盖当前预设(禁用)]
+┌────────────────────────────────────────────────┐
+│ [节点预览]  输入提示词... 12字     ┄┄┄┄  ● 当前主题 │
+│ [🖼 IMG/MP4]                             深色  │
+└────────────────────────────────────────────────┘
+外观预设 — 选择、保存或管理完整外观配置
+┌─深色(当前使用)──┐ ┌─浅色──────────┐
+└────────────────┘ └───────────────┘
+┌─太阳系─────────┐ ┌─磨砂曝光──────┐
+└────────────────┘ └───────────────┘
+主题模式 — 选择整套界面的明暗基调
+[ 深色 ] [ 浅色 ] [ 跟随系统 ]
+```
+
+### 常规页结构（对齐截图 2）
+
+```
+节点工具栏
+[ ○ 极简图标 | ▤ 图标+文本 ]
+画布笔记工具栏 / 素材引用 / 节点标题 / 窗口外观 / 图形与性能 / 侧边栏
+（6 张 .sidebar-pref-card：迷你预览 + 标题/描述 + iOS 开关，整卡可点）
+图形与性能 卡带「卡顿或页面显示不全时开启」琥珀徽标
+开启后将保存并自动重启，正在运行的任务会中断；关闭后下次启动恢复原生图形设置。
+```
+
+### 关键设计
+
+| 项 | 决策 |
+|---|---|
+| 模块 vs 弹窗 | 两处同源：⚙ 顶栏 → 模态弹窗（对齐截图）；左侧导航 → 页内模块 |
+| 既有功能 | 一个不删；主题下拉改隐藏，由新分段控件驱动（逻辑链路不变） |
+| 文件规模 | 新代码全部放独立文件，settings_module 只 +19（≤容差 30） |
+| 颜色 | 全部走 `ThemeManager.get_colors()` / theme_tokens，自绘控件 `set_theme()` 重绘 |
+| 动画 | `ToggleSwitch` 用 `QPropertyAnimation(self, ..., self)`（parent 防 GC，floating_sidebar 同款教训） |
+
+### 门禁
+
+- ✅ **ruff 棘轮**：166 文件 0 新增违规
+- ✅ **单文件规模守卫**：12 基线无新增债务（settings_module 2823→2842，+19 ≤ 容差 30）
+- ✅ **frozen_zone_guard**：85 locks intact（本轮未碰画布冻结区）
+- ✅ **run_all_checks**：75/75 项
+- ✅ **视觉验证**：外观/常规两页 PNG 渲染逐页确认（对齐截图）
+
+### 视觉验证产物
+
+`_shot_appearance.png` / `_shot_general.png`（临时渲染，验收后清理）
+
+---
+
+## V4.43.0 (2026-10-11) — 外观大改版（借鉴 AI-Canvas-tauri）
+
+> 用户原话「主题部分的配色以及外观可以跟它一样,然后就是它外观功能可以直接抄过来,
+> 然后常规的这些就只做借鉴,然后还有侧边栏悬浮那个也可以拿过来用,
+> 然后画布笔记工具栏这个也行,然后素材引用节点标题窗口外观以及性能与图形这些可以做个参考,
+> 反正就是常规和外观里面的功能尽量拿过来全一点。」
+>
+> AI-Canvas-tauri = vendor/AI-Canvas-tauri/（我方 fork 的 tenney95/AI-Canvas-tauri）
+> **直接抄 = 主题配色 + 外观功能 + 侧边栏悬浮;借鉴 = 常规功能（项目卡墙/资源库/ComfyUI/MCP/Agent 入口）**
+> 二期 V4.44.0 再做：画布笔记工具栏 / 帮助中心 / Toast 顶层 / Logo SVG（均需解冻画布）
+
+### 改动（10 项）
+
+| 文件 | 行数 | 改动 |
+|---|---|---|
+| `app/core/theme_tokens.py` | **+245 新建** | 主题配色 token 单一真相源。DARK_TOKENS / LIGHT_TOKENS / MOTION_TOKENS 三表,57 keys/套,直接照搬 AI-Canvas base.css 行 12-470（暗色 + 浅色马卡龙）。LEGACY_KEYS 19 个保持 100% 向后兼容 |
+| `app/modules/lego/theme_manager.py` | +179 | COLORS_DARK/LIGHT 改为从 DARK_TOKENS/LIGHT_TOKENS 派生（无破坏性更新）;QSS 新增 8 套选择器：#brandBtn/#successBtn/#dangerBtn2/#warningBtn/#infoBtn/#amberBtn、#glassPanel/#glassPanelSoft、#chip/#chipSuccess/#chipWarning/#chipDanger/#chipInfo/#chipAmber/#chipMuted、#preferenceCard、#subpanelCard/#floatingHeader/#floatingSidebar、#toolBtn（直抄 .sidebar-btn-v3 36×36）、#separatorH/#separatorV |
+| `app/modules/lego/floating_sidebar.py` | **+192 新建** | FloatingSidebar(QFrame) = 6 模块入口 + 分隔线 + 用户齿轮菜单（设置/帮助/关于）。直抄 Sidebar.tsx 行 660-787 + sidebar.css 行 4-23 形态。支持停靠 left:12px / 半隐 left:-26px 两种模式，动画用 QPropertyAnimation + OutExpo（对应 --ease-out-expo）+ 300ms（--dur-slow）|
+| `app/modules/lego/home_project_card.py` | **+210 新建** | ProjectCard(QFrame) = 缩略图占位（emoji 居中）+ 标题（ellipsis）+ 元数据行 + 3 操作按钮（重命名 / 复制 / 删除）hover 显示。借鉴 ProjectLibraryModal.tsx 行 1-150 结构 |
+| `app/modules/lego/home_recent_resources.py` | **+140 新建** | RecentResourcesPanel(QFrame) = 横向滚动条 + 资源 chip 行。借鉴 ProjectAssetsOverlay.tsx 行 1-100（资源库最近使用）|
+| `app/modules/lego/home_sub_widgets.py` | **+160 新建** | ComfyUISummaryCard + McpSummaryCard。直抄 ComfyUISettings + McpControlSettings 摘要视觉 |
+| `app/modules/lego/home_tools_grid.py` | **+110 新建** | HomeToolsGrid = 4 列 × 2 行 _ToolCard（图标 + 标题 + 副标题）。8 工具：📁项目库 / 💾存储管理 / 🎨画布 / 🖥ComfyUI / 🤖Agent / ⚙设置 / 📊统计 / ❓帮助 |
+| `app/modules/lego/modules.py` | +155 | HomeModule 重构：旧 4 段（标题 + 快速开始 + 今日统计 + 最近项目 QListWidget）→ 新 4 段（标题 + 紧凑统计 chip + 最近资源滚动条 + 项目卡片墙+工具入口 + ComfyUI/MCP 双摘要卡）。新增信号：_on_resource_clicked / _on_tool_clicked / _on_comfyui_start / _on_mcp_copy_config。删除项目走回收站（落 .git/info/exclude,见 personal_files_safety 规则）|
+| `app/modules/lego/settings_panel.py` | **+295 新建** | SettingsDialog(QDialog) = 左侧 176px 导航 + 右侧 QStackedWidget。6 tab：外观 / 交互 / 存储 / ComfyUI / MCP / 关于。**4 偏好卡（交互页）**：笔记工具栏 / 节点标题 / 玻璃外框 / 侧边栏悬浮。直抄 `.sidebar-pref-card` 视觉。设置落 QSettings（拾光剪影 / Settings）|
+| `app/modules/lego/about_dialog.py` | **+140 新建** | AboutDialog(QDialog) = Logo + 版本 + 检查更新按钮 + 8 能力徽标 + 7 技术栈 chip + GitHub。直抄 AvatarMenu About 部分（Sidebar.tsx 行 419-561）。与 SettingsDialog 的 About 页可独立触发 |
+
+### 关键设计纪律
+
+| 类别 | 纪律 |
+|---|---|
+| 单一真相源 | 颜色 = theme_tokens.py（不要在 QSS 里再硬编码 hex）|
+| 旧 key 兼容 | LEGACY_KEYS 19 个 100% 保留 → 无破坏性更新 |
+| 项目主蓝 | accent #2f7bff 保留（深度嵌入 modules.py QSS，不随 AI-Canvas 改 indigo）|
+| 新品牌色 | brand #6366f1（紫罗兰）= chip / badge / 玻璃面板专用 |
+| 冻结区 | 本轮全部改动在 app/ 主程序，不动画布 → frozen_zone_guard 0 解冻 |
+| CANVASDUAL | 本轮未碰画布 → check_canvas_dual_repo 0 漂移 |
+| 动效 token | ease_out_expo / ease_spring / dur_fast/normal/slow 整套搬到 MOTION_TOKENS,QPropertyAnimation 直接读 |
+| 信号契约 | 新组件只发信号（navigate_to / tool_clicked / preference_changed），业务跳转交给 main_window |
+
+### 门禁
+
+- **ruff gate**：166 文件 0 新增违规,modules.py 还从 76 → 74 收敛 ✓
+- **file_size 守卫**：8 新文件均 < 2000 行,无 baseline 上调 ✓
+- **run_all_checks**：75 项全部通过 ✓
+- **frozen_zone_guard**：本轮 0 解冻 ✓
+- **check_canvas_dual_repo**：本轮 0 漂移 ✓
+- **Qt6 启动验证**：12 秒超时内无崩溃,主题切换正常 ✓
+
+### 二期 V4.44.0（放冻结区,不在本期）
+
+| 项 | 借鉴源头 | 工作量 |
+|---|---|---|
+| 画布笔记工具栏 | CanvasDrawingToolbar.tsx 60 行（10 工具）| 解冻 canvas-magnetic-intent 33+ 锁点 |
+| 帮助中心 | HelpCenterDialog.tsx 623 行（10 分类）| 重写拾光剪影内容 |
+| Toast 顶层组件 | Toast.tsx 87 行 + base.css 行 594-619 | 与 V4.42.1 NotificationCenterPanel 互补 |
+| Logo SVG 替换 | Header.tsx 行 42-73 渐变蓝紫红四角星 | 单文件替换 |
+| 节点标题形态 | .node-label（nodes.css 1447 行）| 画布节点系统重构 |
+| 引用节点监听 | useReferencedImageWatcher.ts | PyQt6 QFileSystemWatcher 移植 |
+| 开屏动画 | SplashScreen.tsx 11085 B | GSAP 时间线 → QPropertyAnimation 移植 |
+
+---
+
 ## 画布 0.3.22 (2026-10-11) — 快捷键可视化（V4.42.2 解冻延续）
 
 > 用户原话「图片里面反馈的就是可视化不足」+「关于主题切换这个还是需要去深度的改造一下」。

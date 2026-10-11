@@ -489,25 +489,34 @@ class SettingsModule(BaseModule):
         return widget
     
     def _create_appearance_tab(self) -> QWidget:
-        """外观设置标签页：合并主题 + 字体 于同一页面"""
+        """外观设置标签页：AI-Canvas 风格预设卡墙 + 主题模式（顶部）
+        + 既有导航栏模式 / 自定义颜色 / 字体设置（保留在下）
+
+        V4.43.1：顶部区块抽到 settings_canvas_pages.build_appearance_top_block
+        （settings_module.py 已超规模守卫基线，禁止继续变大）
+        """
+        from .settings_canvas_pages import build_appearance_top_block
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(24)
+        layout.setSpacing(16)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+        # ═══ 〇、AI-Canvas 风格顶部区块（头部 + 工具 + 大预览 + 预设卡墙 + 主题模式）═══
+        layout.addWidget(build_appearance_top_block(self))
+
         # ═══════════════════════════════════════════════════════
-        # 一、主题设置
+        # 一、主题设置（保留既有导航栏模式 / 当前生效，主题下拉隐藏由分段驱动）
         # ═══════════════════════════════════════════════════════
         theme_group = QGroupBox("主题设置")
         theme_layout = QFormLayout(theme_group)
 
-        self._theme_combo = QComboBox()
+        self._theme_combo = QComboBox(theme_group)   # 有 parent 防 GC
         self._theme_combo.addItems(self.THEMES.values())
         self._theme_combo.setCurrentIndex(0)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        self._theme_combo.setMinimumWidth(200)
-        theme_layout.addRow("主题:", self._theme_combo)
+        self._theme_combo.setVisible(False)          # 由顶部「主题模式」分段控件驱动
 
         # 导航栏显示模式：图标+名称 / 仅图标（悬浮显示名称）
         self._nav_mode_combo = QComboBox()
@@ -672,12 +681,22 @@ class SettingsModule(BaseModule):
         return widget
     
     def _create_general_tab(self) -> QWidget:
-        """创建常规设置标签页"""
+        """常规设置标签页：AI-Canvas 风格 6 开关分组（顶部）+ 既有启动/项目/性能（保留在下）
+
+        V4.43.1：顶部区块抽到 settings_canvas_pages.build_general_top_block
+        （settings_module.py 已超规模守卫基线，禁止继续变大）
+        """
+        from .settings_canvas_pages import build_general_top_block
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        
+        layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # ═══ AI-Canvas 风格顶部区块（节点工具栏分段 + 6 个 .sidebar-pref-card 开关）═══
+        layout.addWidget(build_general_top_block(self))
+
         startup_group = QGroupBox("启动设置")
         startup_group
         startup_layout = QFormLayout(startup_group)

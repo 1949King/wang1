@@ -725,3 +725,38 @@ class CanvasGetRoutesMixin:
             logger.exception("[/host/enhance-intents] 失败")
             self._json(500, {"ok": False, "message": str(e)})
         return
+
+    # ── GET /host/canvas-settings：画布外观/主题设置（V4.43.2） ──
+    # 供画布 `canvasBackgrounds.ts` 轮询：按 revision 增量应用外观预设 + 主题。
+    # 单一真相源 = `data/canvas_appearance.json`（settings_panel.push_canvas_appearance 写）。
+    # 用 JSON 文件而非 QSettings：沙箱 / 无注册表写权限环境也能落盘，画布通道可直接读。
+    # revision 机制的意义：只在**设置真的被改过**时画布才覆盖本地值，
+    # 否则会每 2.5s 把用户在画布里的主题切换按钮按回去。
+    @_route_get("/host/canvas-settings")
+    def _route_host_canvas_settings(self, parsed=None):
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+
+            f = _Path(__file__).resolve().parents[2] / "data" / "canvas_appearance.json"
+            payload = {"revision": 0, "canvas_background": "default", "theme": "dark"}
+            if f.exists():
+                try:
+                    data = _json.loads(f.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        payload.update({
+                            "revision": int(data.get("revision", 0) or 0),
+                            "canvas_background": str(data.get("canvas_background", "default")),
+                            "theme": str(data.get("theme", "dark")),
+                        })
+                except Exception as e:
+                    logger.debug("[/host/canvas-settings] 读文件失败: %s", e)
+            self._json(200, {"ok": True, **payload})
+        except Exception as e:
+            logger.exception("[/host/canvas-settings] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+        return

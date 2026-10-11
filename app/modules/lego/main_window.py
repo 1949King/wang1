@@ -1007,7 +1007,10 @@ class MainWindow(QMainWindow):
         )
         info._mod_def = mod_def  # 保存模块定义用于延迟加载
         self._modules[module_id] = info
-        self._nav_bar.add_module(module_id, name, icon)
+        # nav_hidden：不进左侧导航栏（仍注册、仍可 switch_to_module 打开）
+        # V4.43.2：设置模块从导航撤出，改由「顶栏 ⚙ / 用户中心 👤」进入
+        if not mod_def.get("nav_hidden"):
+            self._nav_bar.add_module(module_id, name, icon)
     
     def _get_widget_class_lazy(self, module_id: str):
         """延迟获取 widget_class"""
@@ -1391,7 +1394,21 @@ class MainWindow(QMainWindow):
         self.switch_to_module("help")
     
     def _show_settings(self):
-        """显示设置界面"""
+        """显示设置界面
+
+        V4.43.1：⚙ 顶栏按钮改为弹出模态设置弹窗（对齐 AI Canvas 设置截图形态）。
+        左侧导航栏「设置」入口仍切到页内 SettingsModule（两处均可达，内容同源）。
+        """
+        try:
+            from .settings_panel import SettingsDialog
+            dlg = SettingsDialog.instance(self)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        except Exception as e:
+            logger.warning("打开设置弹窗失败，回落页内设置模块: %s", e)
+        # 回落：切到页内设置模块
         from .settings_module import SettingsModule
         if "settings" in self._modules and not self._modules["settings"].instance:
             self.set_module_widget("settings", SettingsModule())

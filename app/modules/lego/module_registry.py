@@ -77,6 +77,9 @@ class ModuleDefinition(TypedDict):
     default_enabled: bool
     can_disable: bool
     optional: NotRequired[bool]  # 模块文件可能不存在，导入失败时静默跳过
+    #: 不进左侧导航栏（仍注册、仍可 switch_to_module 打开）。
+    #: 用途：设置模块改为从「顶栏 ⚙ / 用户中心 👤」进入（V4.43.2 按用户要求收口）。
+    nav_hidden: NotRequired[bool]
 
 
 class EnrichedModuleInfo(ModuleDefinition):
@@ -130,6 +133,8 @@ _MODULE_DEFINITIONS: list[ModuleDefinition] = [
         "import_class": "SettingsModule",
         "default_enabled": True,
         "can_disable": False,
+        # V4.43.2：设置从左侧导航撤出，改由「顶栏 ⚙ / 用户中心 👤」弹出（内容同源）
+        "nav_hidden": True,
     },
     {
         "id": "help",

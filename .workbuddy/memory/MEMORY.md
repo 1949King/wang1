@@ -3,7 +3,7 @@
 > 结构化知识库（优先）：`docs/_archive/knowledge/INDEX.md`（00–19，**已归档到 `_archive/`**）
 >   常查：00 概览 · 05 已知问题 · 08 冻结区 · 17 磁吸不变量 · 17 动捕设计 · 19 画布概论
 > 版本历史：`docs/CHANGELOG.md`；逐轮明细：`.workbuddy/memory/YYYY-MM-DD.md`
-> 本文件只留「北极星 + 核心不变量 + 用户偏好」摘要，细节一律查知识库。复核 **2026-09-21**
+> 本文件只留「北极星 + 核心不变量 + 用户偏好」摘要，细节一律查知识库。复核 **2026-10-11**
 > 排查方法沉淀：`~/.workbuddy/skills/git-mass-deletion-triage/`（删定性）· `ast-scope-nameerror-hunt`（NameError 扫描）
 
 ## 一、产品北极星
@@ -11,6 +11,10 @@
 闭环 7 阶段，V4.19.0 起「发布/数据采集/优化建议」随账号运营下线，活路径收敛为「剪辑精剪 + AI 画布」两条：精剪 → 人工改 → 文案 → 选题。
 - C3 剪辑 workflow_hint ✅；仍缺：选题自动导入时间线 / 一键粗剪写 `_clips`
 - 优先级：**先剪辑（稳→快→全→可维护），后 AI 闭环**
+- **V4.43.0「外观大改版」已上线**：借 AI-Canvas-tauri 风格直抄外观（主题+侧边栏）+ 借鉴结构（首页+设置）。二期 V4.44.0 做画布笔记工具栏 / 帮助中心（需解冻）
+- **V4.43.1「设置模块对齐 AI Canvas」已上线**：设置「外观」「常规」两页顶部新增 AI-Canvas 风格区块（外观预设 2×2 + 主题模式 3 段 + 大预览；节点工具栏分段 + 6 个 `.sidebar-pref-card` 开关）。新控件库 `settings_widgets.py` + 页区块 `settings_canvas_pages.py`。⚙ 顶栏 → 模态弹窗；左侧导航 → 页内模块（两处同源）
+- **V4.43.2「设置收口 + 画布背景预设」已上线**：① 设置从左侧导航撤出（`module_registry` 新增 `nav_hidden` 字段），保留顶栏 ⚙ + 用户中心 👤；② 画布背景 6 预设（移植开源 `backgroundOptions.ts`）用**运行时注入 `<style>`** 实现，**冻结区只动 `canvasVersion.ts`**（画布 0.3.23）；③ 画布通道 = `data/canvas_appearance.json` + `GET /host/canvas-settings`（**别用 QSettings —— 沙箱写注册表返回 `Status.AccessError`**）
+- **登录窗口无设置**（`login_window.py` 只有登录/注册/设备管理）；`modules.py:1234 _show_login_dialog`「登录信息与设置」是死代码
 
 ## 二、核心不变量（改动前必读，错了代价大）
 
@@ -21,8 +25,9 @@
 5. **Agent 常量单一来源** = `app/core/agent_constants.py`（`STATUS_*` + `ERR_WAITING_APPROVAL`），禁裸字符串。
 6. **能力元数据单一来源** = `app/core/agent_capability_catalog.py`；新增能力唯一入口 = 目录表加一行（`verify_catalog_consistency()` 守卫）。
 7. **音画纠偏 ~280ms（冻结区）**，勿压回 80ms。
-8. **内联样式 = 主题盲区**：每新增一个 `setStyleSheet` 内联控件，必须回 `set_theme()` 补刷新（对比度：深色底 `#edf3ff` / 浅色底 `#172033`）。
-9. **静默 except 判定线**：UI 绘制 `pass` 可接受；状态机/资源路径 `pass` 不可接受（须 `logger.debug(..., exc_info=True)`）。例外 `except RuntimeError: pass` 有意保留。
+8. **内联样式 = 主题盲区**：每新增一个 `setStyleSheet` 内联控件，必须回 `set_theme()` 补刷新（对比度：深色底 `#edf3ff` / 浅色底 `#172033`）。**V4.43.0 新解**：新控件一律走 `theme_manager._build_qss` 模板（#brandBtn/#chip/#glassPanel 等），不要写内联 hex。
+9. **主题配色单一真相源** = `app/core/theme_tokens.py`（V4.43.0 起）。DARK_TOKENS / LIGHT_TOKENS / MOTION_TOKENS 三表，57 keys/套。**项目主蓝 #2f7bff（accent）保留**（深度嵌入 modules.py QSS），**品牌紫罗兰 #6366f1（brand）新增**（chip/badge/玻璃面板专用）。LEGACY_KEYS 19 个 100% 保留 = 无破坏性更新。
+10. **静默 except 判定线**：UI 绘制 `pass` 可接受；状态机/资源路径 `pass` 不可接受（须 `logger.debug(..., exc_info=True)`）。例外 `except RuntimeError: pass` 有意保留。
 10. **沙箱 wmic 黑名单**：import app 链触发 config_manager 的 wmic；验证脚本用 subprocess 包一层、写干净 UTF-8 再读。
 11. **清理纪律（2026-09-21 血泪）**：临时文件**禁止用 `_*` 等宽 glob 清理**。必须① 显式列名单删除；② 删除前先 `git ls-files <候选>` 区分「项目自有 / 本次新建」；③ 未在 git 里的产物先确认有无副本（我曾用 `_*` 误删 6 个项目自有文件，3 个 git 跟踪的救回，3 个未跟踪 PNG 永久丢失）。
 12. **git 已补-commit（2026-09-21）**：此前 HEAD 停在 2026-09-12（27 次提交），~9 天改动未提交。现已拆成 **10 个语义提交**固化（`d67f80a..5809fa3`）：config / vendor(openshot 移除 7309) / clean ×2 / core / editor / plugins / canvas / docs / verify。**只在本机，未 push**（`origin = github.com/1949King/shiguangjianying`）。四条踩坑纪律见下表。

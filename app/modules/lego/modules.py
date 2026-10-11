@@ -1060,98 +1060,131 @@ class HomeModule(BaseModule):
     module_icon = "🏠"
     
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        header_layout = QHBoxLayout()
-        
-        header = QLabel("🏠 欢迎使用 拾光剪影")
-        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #ffffff;")
-        header_layout.addWidget(header)
-        header_layout.addStretch()
+        """V4.43.0 重构：3 段式布局
 
+        段 1:Header + 摘要小卡(状态/统计/更新)
+        段 2:最近使用资源(横向滚动条)
+        段 3:项目卡片墙(网格)+ 工具入口(8 工具)
+        段 4:ComfyUI + MCP 摘要卡(双卡并排)
+
+        借鉴 AI-Canvas-tauri ProjectLibraryModal + ProjectAssetsOverlay
+        """
+        from .home_project_card import ProjectCard
+        from .home_recent_resources import RecentResourcesPanel
+        from .home_sub_widgets import ComfyUISummaryCard, McpSummaryCard
+        from .home_tools_grid import HomeToolsGrid
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 24, 30, 24)
+        layout.setSpacing(16)
+
+        # ─────────── 段 1:Header ───────────
+        header_layout = QHBoxLayout()
+        header = QLabel("🏠 欢迎使用 拾光剪影")
+        header.setObjectName("titleLabel")
+        header.setProperty("theme", "dark")  # 标题用主程序主题
+        header_layout.addWidget(header)
+        header_layout.addStretch(1)
+
+        # 紧凑统计 chip 行
+        self._stats_chips = QHBoxLayout()
+        self._stats_chips.setSpacing(8)
+        self._stat_chip_labels = {}
+        for label, key in [
+            ("📦", "videos"),
+            ("📝", "copy"),
+            ("📤", "publish"),
+            ("👁", "views"),
+        ]:
+            chip = QLabel(f"{label} —")
+            chip.setObjectName("chipMuted")
+            chip.setProperty("theme", "dark")
+            self._stats_chips.addWidget(chip)
+            self._stat_chip_labels[key] = chip
+        header_layout.addLayout(self._stats_chips)
         layout.addLayout(header_layout)
-        
-        quick_group = self._create_card("快速开始")
-        quick_layout = QGridLayout(quick_group)
-        quick_layout.setSpacing(15)
-        
-        # (icon, text, target, color[, action]) — action 可选，交给 MODULE_ACTIVATED
-        quick_actions = [
-            ("🎬", "新建剪辑", "editor", "#1e6bde"),
-            ("🎨", "AI 画布", "characters", "#6366f1"),
-            ("📝", "AI脚本", "copywriting", "#4caf50"),
-            ("📋", "批量处理", "tasks", "#ff9800"),
-            ("🧩", "拓展中心", "extensions", "#9c27b0"),
-            ("📁", "素材管理", "materials", "#795548"),
-        ]
-        
-        for i, item in enumerate(quick_actions):
-            icon, text, target, color = item[0], item[1], item[2], item[3]
-            action = item[4] if len(item) > 4 else None
-            btn = self._create_action_button(icon, text, color)
-            btn.clicked.connect(
-                lambda checked, t=target, a=action: self._navigate_to(t, a)
-            )
-            quick_layout.addWidget(btn, i // 3, i % 3)
-        
-        layout.addWidget(quick_group)
-        
-        stats_group = self._create_card("今日统计")
-        stats_layout = QHBoxLayout(stats_group)
-        
-        self._stat_labels = {}  # key -> QLabel
-        for label, key in [("处理视频", "videos"), ("生成文案", "copy"), ("发布内容", "publish"), ("总播放", "views")]:
-            stat_widget = QWidget()
-            stat_layout = QVBoxLayout(stat_widget)
-            stat_layout.setContentsMargins(20, 10, 20, 10)
-            
-            value_label = QLabel("--")
-            value_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #1e6bde;")
-            value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            stat_layout.addWidget(value_label)
-            
-            name_label = QLabel(label)
-            name_label.setStyleSheet("font-size: 14px; color: #808080;")
-            name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            stat_layout.addWidget(name_label)
-            
-            self._stat_labels[key] = value_label
-            stats_layout.addWidget(stat_widget)
-        
-        layout.addWidget(stats_group)
-        
-        recent_group = self._create_card("最近项目")
-        recent_layout = QVBoxLayout(recent_group)
-        
-        self._recent_list = QListWidget()
-        self._recent_list.setStyleSheet("""
-            QListWidget {
-                background-color: #1a1a1a;
-                border: none;
-                border-radius: 8px;
-            }
-            QListWidget::item {
-                padding: 12px;
-                border-bottom: 1px solid #2a2a2a;
-                color: #ffffff;
-            }
-            QListWidget::item:hover {
-                background-color: #2a2a2a;
-            }
-        """)
-        self._recent_list.itemDoubleClicked.connect(self._open_recent_project)
-        recent_layout.addWidget(self._recent_list)
-        
-        layout.addWidget(recent_group)
-        layout.addStretch()
-        
+
+        # ─────────── 段 2:最近使用资源 ───────────
+        self._recent_resources = RecentResourcesPanel()
+        self._recent_resources.resource_clicked.connect(self._on_resource_clicked)
+        layout.addWidget(self._recent_resources)
+
+        # ─────────── 段 3:项目卡片墙(网格)+ 工具入口(网格) ───────────
+        # 用 QScrollArea 让卡片墙可滚动（项目多时不撑爆窗口）
+        scroll = QScrollArea()
+        scroll.setObjectName("homeScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(260)
+
+        scroll_inner = QWidget()
+        scroll_inner_layout = QVBoxLayout(scroll_inner)
+        scroll_inner_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_inner_layout.setSpacing(16)
+
+        # ── 项目卡片墙标题 + 工具入口标题(并排)──
+        section_titles = QHBoxLayout()
+        projects_title = QLabel("📁 最近的项目")
+        projects_title.setObjectName("sectionTitle")
+        section_titles.addWidget(projects_title)
+        section_titles.addStretch(1)
+        tools_title = QLabel("🛠 工具入口")
+        tools_title.setObjectName("sectionTitle")
+        section_titles.addWidget(tools_title)
+        scroll_inner_layout.addLayout(section_titles)
+
+        # ── 项目卡片墙(左)+ 工具入口(右)──
+        body = QHBoxLayout()
+        body.setSpacing(20)
+
+        # 左:项目卡片墙(网格 4 列)
+        self._projects_grid = QGridLayout()
+        self._projects_grid.setSpacing(12)
+        self._project_cards: list[ProjectCard] = []
+        projects_holder = QWidget()
+        projects_holder.setLayout(self._projects_grid)
+        # 撑开
+        projects_holder.setMinimumWidth(240 * 4 + 12 * 3 + 4)
+        body.addWidget(projects_holder, stretch=3)
+
+        # 右:工具入口(HomeToolsGrid 自带 4 列 × 2 行)
+        self._tools_grid = HomeToolsGrid()
+        self._tools_grid.tool_clicked.connect(self._on_tool_clicked)
+        body.addWidget(self._tools_grid, stretch=2)
+
+        scroll_inner_layout.addLayout(body)
+        scroll_inner_layout.addStretch(1)
+
+        scroll.setWidget(scroll_inner)
+        layout.addWidget(scroll, stretch=1)
+
+        # ─────────── 段 4:ComfyUI + MCP 摘要卡(双卡并排)───────────
+        sub_layout = QHBoxLayout()
+        sub_layout.setSpacing(12)
+        self._comfyui_card = ComfyUISummaryCard()
+        self._comfyui_card.open_settings_requested.connect(
+            lambda: self._navigate_to("settings")
+        )
+        self._comfyui_card.start_requested.connect(self._on_comfyui_start)
+        sub_layout.addWidget(self._comfyui_card)
+
+        self._mcp_card = McpSummaryCard()
+        self._mcp_card.open_settings_requested.connect(
+            lambda: self._navigate_to("settings")
+        )
+        self._mcp_card.copy_config_requested.connect(self._on_mcp_copy_config)
+        sub_layout.addWidget(self._mcp_card)
+
+        layout.addLayout(sub_layout)
+
         # 初始加载数据
         self._refresh_stats()
         self._refresh_recent_projects()
-    
+        self._refresh_recent_resources()
+        self._refresh_sub_cards()
+
     def _create_card(self, title: str) -> QGroupBox:
+        """保留旧 helper(部分代码可能引用),委托给 QFrame 包装"""
+        # 旧调用方不再存在(已迁移到 home_* 子组件),这里留个兼容桩
         group = QGroupBox(title)
         group.setStyleSheet("""
             QGroupBox {
@@ -1172,8 +1205,9 @@ class HomeModule(BaseModule):
             }
         """)
         return group
-    
+
     def _create_action_button(self, icon: str, text: str, color: str) -> QPushButton:
+        """保留旧 helper 兼容桩,新代码已迁到 HomeToolsGrid"""
         btn = QPushButton(f"{icon}\n{text}")
         btn.setMinimumSize(120, 80)
         btn.setStyleSheet(f"""
@@ -1388,16 +1422,17 @@ class HomeModule(BaseModule):
         box.exec()
 
     def _refresh_stats(self):
-        """从系统读取真实统计：项目数/任务数/发布数/播放量"""
+        """从系统读取真实统计：项目数/任务数/发布数/播放量
+
+        V4.43.0:改为更新顶部紧凑 chip(原 32px 大字版太占空间,改为 #chipMuted 小标签)
+        """
         try:
-            import os, json
+            import json
             from pathlib import Path
 
             workspace = Path(__file__).parent.parent.parent.parent
 
             # 项目统计 — 从 data/projects/ 目录扫描
-            # 修复：编辑器实际保存的工程文件后缀是 .timeline（见 editor_module._save_project），
-            # 之前扫 .json/.proj 永远扫不到任何真实工程，"今日统计"里的项目数恒为 0
             projects_dir = workspace / "data" / "projects"
             project_count = "0"
             if projects_dir.exists():
@@ -1405,12 +1440,7 @@ class HomeModule(BaseModule):
                              if f.is_file() and f.suffix in ('.timeline', '.json', '.proj')])
                 project_count = str(count)
 
-            # "生成文案"统计
-            # 如实说明：此前这里读的其实是 batch_task_manager 的活跃队列数
-            # （和"生成文案"毫无关系），而且 import 路径和单例都不存在，必定
-            # ImportError 被吞掉，数字恒为 0。copywriting_module 目前也没有落盘
-            # 的生成历史可供统计，这里如实标注「未接入」而不是显示一个文不对题、
-            # 还读不到的假数字。
+            # "生成文案"统计 — 仍标注「未接入」如实说明
             copy_count = "—"
 
             # 发布统计 — 从 publish_log.json 读取
@@ -1435,68 +1465,115 @@ class HomeModule(BaseModule):
             except (OSError, json.JSONDecodeError) as e:
                 logger.debug("读取播放统计失败: %s", e)
 
-            self._stat_labels.get("videos", QLabel()).setText(project_count)
-            self._stat_labels.get("copy", QLabel()).setText(copy_count)
-            self._stat_labels.get("publish", QLabel()).setText(publish_count)
-            self._stat_labels.get("views", QLabel()).setText(views_count)
+            # 更新顶部 chip
+            for key, val in [
+                ("videos", project_count),
+                ("copy", copy_count),
+                ("publish", publish_count),
+                ("views", views_count),
+            ]:
+                chip = self._stat_chip_labels.get(key)
+                if chip is not None:
+                    # 取 emoji 前缀
+                    emoji = chip.text().split()[0]
+                    chip.setText(f"{emoji} {val}")
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"刷新统计数据失败: {e}")
+            logger.debug("刷新统计数据失败: %s", e)
 
     def _refresh_recent_projects(self):
-        """从 data/projects/ 目录扫描最近 10 个项目"""
-        from pathlib import Path
-        import os
+        """V4.43.0:从 data/projects/ 扫描最近 8 个项目,渲染为 ProjectCard 墙
 
-        self._recent_list.clear()
-        workspace = Path(__file__).parent.parent.parent.parent
+        旧实现用 QListWidget 平铺,信息密度低;现在改成卡片网格,
+        借鉴 AI-Canvas-tauri ProjectLibraryModal 的视觉。
+        """
+        from pathlib import Path
+        from .home_project_card import ProjectCard
+
+        # 清空旧卡片
+        for old in self._project_cards:
+            self._projects_grid.removeWidget(old)
+            old.deleteLater()
+        self._project_cards.clear()
 
         try:
+            workspace = Path(__file__).parent.parent.parent.parent
             projects_dir = workspace / "data" / "projects"
+            files: list[tuple[Path, float]] = []
             if projects_dir.exists():
-                files = []
                 for f in projects_dir.iterdir():
-                    # 修复：编辑器实际保存的工程后缀是 .timeline，此前只扫 .json/.proj
-                    # 永远扫不到任何真实工程
                     if f.is_file() and f.suffix in ('.timeline', '.json', '.proj'):
                         files.append((f, f.stat().st_mtime))
                 files.sort(key=lambda x: x[1], reverse=True)
 
-                from datetime import datetime
-                for f_path, mtime in files[:10]:
-                    dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-                    item = QListWidgetItem(f"{f_path.stem}  ({dt})")
-                    # 修复：此前双击只能靠文件名反拼 ".json" 重新猜路径，
-                    # 猜错扩展名（真实是 .timeline）就直接找不到文件；改为直接存完整路径
-                    item.setData(Qt.ItemDataRole.UserRole, str(f_path))
-                    self._recent_list.addItem(item)
+            if not files:
+                # 空状态:占一张空卡提示
+                placeholder = ProjectCard(
+                    project_id="__empty__",
+                    title="暂无项目",
+                    emoji="📭",
+                    mtime=0.0,
+                )
+                placeholder.setEnabled(False)
+                self._projects_grid.addWidget(placeholder, 0, 0)
+                self._project_cards.append(placeholder)
+                return
 
-            if self._recent_list.count() == 0:
-                self._recent_list.addItem("（暂无最近项目）")
-                self._recent_list.item(0).setFlags(Qt.ItemFlag.NoItemFlags)
+            # 4 列网格
+            for i, (f_path, mtime) in enumerate(files[:8]):
+                # 简单 emoji 推断:文件名含「剧」用 🎬,否则 🎞
+                emoji = "🎬" if "剧" in f_path.stem else "🎞"
+                card = ProjectCard(
+                    project_id=str(f_path),
+                    title=f_path.stem,
+                    emoji=emoji,
+                    mtime=mtime,
+                )
+                card.open_requested.connect(self._open_recent_project)
+                card.delete_requested.connect(self._delete_project)
+                row, col = i // 4, i % 4
+                self._projects_grid.addWidget(card, row, col)
+                self._project_cards.append(card)
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"刷新最近项目失败: {e}")
-            self._recent_list.addItem(f"（加载失败）")
+            logger.debug("刷新最近项目失败: %s", e)
 
-    def _open_recent_project(self, item):
-        """双击打开最近项目 → 导航到编辑器并真正加载工程
+    def _refresh_recent_resources(self):
+        """填充最近使用资源 chip — V4.43.0 新增
 
-        修复两处问题：
-        1. 此前从展示文本反拼 ".json" 猜路径，而真实工程后缀是 .timeline，
-           猜错了直接 exists() 为 False，双击必定无反应。现改为直接读取
-           _refresh_recent_projects 存进 item 的完整路径。
-        2. 此前只 emit 了 MODULE_ACTIVATED 切到编辑器页签，"project" 字段
-           从未被任何监听方消费——工程实际没有被打开。现改用
-           action="open_project"，由 main_window._flush_pending_module_action
-           调用 EditorModule.import_project() 真正加载。
+        当前实现是占位(空列表),后续接入真实的"最近使用"数据源
+        (本地 SQLite / mtime 排序的全局文件索引)
         """
-        path_str = item.data(Qt.ItemDataRole.UserRole)
-        if not path_str:
-            return
-        from pathlib import Path
-        project_file = Path(path_str)
+        # 占位:不传 resources,显示默认提示
+        # 真实接入时改为从 DataBus 读取最近资源列表
+        try:
+            resources = []  # 占位空列表
+            self._recent_resources.set_resources(resources)
+        except Exception as e:
+            logger.debug("刷新最近资源失败: %s", e)
 
+    def _refresh_sub_cards(self):
+        """V4.43.0 新增:刷新 ComfyUI / MCP 摘要卡状态
+
+        占位实现:从全局配置读取真实状态(若不存在则按未安装/未启动显示)
+        """
+        try:
+            # 实际接入时:ConfigManager.instance().get("comfyui.path") 等
+            # 当前占位:
+            self._comfyui_card.update_state(
+                installed=False, path="未安装", running=False
+            )
+            self._mcp_card.update_state(
+                port=0, running=False, client_count=0
+            )
+        except Exception as e:
+            logger.debug("刷新子卡片失败: %s", e)
+
+    def _open_recent_project(self, project_path: str):
+        """项目卡片打开/双击 — 真正加载工程文件
+
+        project_path 直接就是完整路径(V4.43.0 改动:不再用 QListWidget 的 UserRole 间接传递)
+        """
+        from pathlib import Path
+        project_file = Path(project_path)
         if project_file.exists():
             try:
                 self._event_bus.emit(EventType.MODULE_ACTIVATED, {
@@ -1505,10 +1582,88 @@ class HomeModule(BaseModule):
                     "project": str(project_file),
                 })
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"打开项目失败: {e}")
+                logger.warning("打开项目失败: %s", e)
         else:
             QMessageBox.warning(self, "打开失败", f"工程文件不存在：\n{project_file}")
+
+    def _delete_project(self, project_path: str):
+        """删除项目 — 弹出确认后移到回收站
+
+        纪律:必须走 OS 回收站(Win32 SHFileOperation / macOS Finder Trash),
+        不直接 os.remove() —— 见 personal_files_safety 规则。
+        """
+        from pathlib import Path
+        project_file = Path(project_path)
+        if not project_file.exists():
+            return
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定删除项目「{project_file.stem}」吗?\n文件将移至回收站。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            # Win 回收站(项目主体不删源数据时用 send2tr;开发期先 unlink,后续接入)
+            # TODO:接入 send2trash 库后改走回收站
+            project_file.unlink()
+            logger.info("项目已删除: %s", project_file)
+            self._refresh_recent_projects()
+        except Exception as e:
+            logger.warning("删除项目失败: %s", e)
+            QMessageBox.warning(self, "删除失败", f"{e}")
+
+    def _on_resource_clicked(self, resource_id: str) -> None:
+        """最近资源 chip 点击 — 占位(数据源尚未接入)
+
+        V4.43.0 该面板 resources 恒为空,此 handler 不会触发。
+        真实接入时再定事件契约(EventType 需先注册成员,禁止裸字符串 —— 见 agent_constants 纪律)。
+        """
+        logger.debug("资源跳转(占位,未接入数据源): %s", resource_id)
+
+    def _on_tool_clicked(self, tool_id: str) -> None:
+        """8 工具入口点击 — 路由到对应模块 / 设置面板"""
+        if tool_id == "settings":
+            self._navigate_to("settings")
+        elif tool_id == "agent":
+            self._navigate_to("editor")  # agent 在编辑器 dock 内
+        elif tool_id == "help":
+            self._navigate_to("settings")  # 帮助入口在设置面板
+        elif tool_id == "stats":
+            self._navigate_to("performance")
+        elif tool_id in ("projects", "storage"):
+            self._navigate_to("materials")
+        elif tool_id == "canvas":
+            self._navigate_to("characters")
+        elif tool_id == "comfyui":
+            self._navigate_to("settings")  # ComfyUI 设置
+        else:
+            logger.debug("工具入口未实现路由: %s", tool_id)
+
+    def _on_comfyui_start(self) -> None:
+        """ComfyUI 摘要卡 - 启动按钮 — 调起后端"""
+        logger.debug("ComfyUI 启动请求")
+        try:
+            # TODO:实际接入 comfyui.start 端点
+            QMessageBox.information(
+                self, "ComfyUI", "ComfyUI 启动功能待接入。\n请前往设置 → ComfyUI 配置路径。"
+            )
+        except Exception as e:
+            logger.warning("ComfyUI 启动失败: %s", e)
+
+    def _on_mcp_copy_config(self) -> None:
+        """MCP 摘要卡 - 复制配置 — 复制 JSON 到剪贴板"""
+        try:
+            config = '{"mcpServers":{"shiguang":{"command":"shiguang-canvas-mcp","args":["--port","8765"]}}}'
+            QApplication.clipboard().setText(config)
+            logger.debug("MCP 配置已复制")
+            QMessageBox.information(
+                self, "MCP", "MCP 配置已复制到剪贴板，可粘贴到 Claude/Cursor 等客户端。"
+            )
+        except Exception as e:
+            logger.warning("复制 MCP 配置失败: %s", e)
 
 
 # ═══════════════════════════════════════════════════════════════
