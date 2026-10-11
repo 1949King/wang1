@@ -979,13 +979,13 @@ class Application:
                 if user:
                     self._safe_print(f"\n欢迎回来, {user.nickname}!")  # type: ignore[reportAttributeAccessIssue]
             else:
-                self._safe_print("\n未登录 - 请点击右上角登录/激活按钮")
+                self._safe_print("\n未登录 - 请点击右上角 👤 头像按钮登录（V4.42.0 起顶 navbar 改 4 按钮）")
             
             self._safe_print("\n" + "=" * 60)
             self._safe_print("[OK] 启动完成!")
             self._safe_print("   - 左侧导航栏: 点击切换模块")
             self._safe_print("   - 标签页: 同一模块内功能切换")
-            self._safe_print("   - 右上角: 登录/激活按钮")
+            self._safe_print("   - 右上角 4 按钮：🔔 通知 / 🎨 主题 / ⚙ 设置 / 👤 用户中心")
             self._safe_print("   - 状态栏: 显示执行状态和时间码")
             self._safe_print("=" * 60 + "\n")
             
