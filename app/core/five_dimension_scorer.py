@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -26,6 +27,35 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() not in ("0", "false", "off", "no", "")
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(str(os.environ.get(name, default)).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+#: 是否启用真实像素审美分析（关掉就退回旧的固定基线行为）
+_AESTHETIC_ENV = "SHIGUANG_AESTHETIC_ANALYSIS"
+#: 每个镜头抽帧数
+_AESTHETIC_FRAMES_ENV = "SHIGUANG_AESTHETIC_FRAMES"
+
+#: 维度名 → 中文（建议文案 / 提示共用，避免各处重复）
+DIM_LABELS = {
+    "visual_quality": "画面质量",
+    "narrative_highlight": "高光叙事",
+    "copy_match": "文案匹配",
+    "bgm_match": "BGM适配",
+    "shot_duration": "镜头时长",
+}
 
 
 class ScoreGrade(str, Enum):
@@ -52,6 +82,9 @@ class ClipFeatures:
     # 70 分基线填充，这里记录哪些维度是基线估值（而非真实 AI/人工评分），
     # 供 ScoreResult/UI 判断要不要提示用户"部分分数是估算的"
     estimated_dims: List[str] = field(default_factory=list)
+    #: 真实像素分析明细（sharpness/contrast/colorfulness/noise 及子分）；
+    #: 未做分析（无 path / 关开关 / 读不到帧）时为空 dict
+    visual_metrics: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -64,6 +97,7 @@ class ScoreResult:
     should_drop: bool = False             # D 级 (<60) 直接剔除
     suggestions: List[str] = field(default_factory=list)  # 优化建议
     estimated_dims: List[str] = field(default_factory=list)  # 用了固定基线（非真实评分）的维度
+    metrics: Dict[str, Any] = field(default_factory=dict)  # 真实像素分析明细（可空）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -75,6 +109,8 @@ class ScoreResult:
             "suggestions": self.suggestions,
             "estimated_dims": self.estimated_dims,
             "is_fully_estimated": len(self.estimated_dims) >= len(self.dimensions),
+            "metrics": self.metrics,
+            "measured_dims": [d for d in self.dimensions if d not in self.estimated_dims],
         }
 
 
@@ -156,6 +192,7 @@ class FiveDimensionScorer:
             should_drop=should_drop,
             suggestions=suggestions,
             estimated_dims=list(features.estimated_dims),
+            metrics=dict(features.visual_metrics or {}),
         )
 
     def score_batch(self, features_list: List[ClipFeatures]) -> List[ScoreResult]:
@@ -183,37 +220,101 @@ class FiveDimensionScorer:
         """
         从镜头元数据提取特征
 
-        智能评分策略：
-        - 若 quality_scores 包含显式分数 → 直接使用（尊重 AI/人工 评分）
-        - 若 quality_scores 为空或缺失 → 使用 SMART_BASELINE (70) 作为起点，
-          保证素材不因元数据缺失被误判为 D 级，仍可进入精剪流程
-        - 若 quality_scores 部分填充 → 已填用实际分，缺失用基线
+        评分来源优先级（逐维独立判定，且**如实登记**哪些维度是估算的）：
+
+        1. ``quality_scores`` 里有显式分 → 用显式分（尊重 AI/人工评分）
+        2. **真实测量**（本版新增，可用 ``SHIGUANG_AESTHETIC_ANALYSIS=0`` 关闭）：
+           - ``visual_quality`` ← ``aesthetic_analyzer`` 抽帧测量（清晰度/曝光/对比度/
+             彩色度/噪声 → 0-100），不再是固定 70
+           - ``shot_duration`` ← 真实时长对照「1.5~4s 舒适区」曲线
+        3. 兜底 → ``_SMART_BASELINE``，并记入 ``estimated_dims``
 
         参数：
-            clip_meta: 镜头元数据，可包含 path/duration/quality_scores 等
+            clip_meta: 镜头元数据，可含 path/duration/quality_scores；
+                       置 ``skip_aesthetic_analysis=True`` 可跳过像素测量。
         """
         clip_id = clip_meta.get("id") or clip_meta.get("clip_id") or uuid.uuid4().hex[:8]
-        scores = clip_meta.get("quality_scores", {})
+        scores = clip_meta.get("quality_scores") or {}
+        if not isinstance(scores, dict):
+            scores = {}
+        path = str(clip_meta.get("path") or "")
+        try:
+            duration = float(clip_meta.get("duration", 0) or 0)
+        except (TypeError, ValueError):
+            duration = 0.0
         estimated_dims: List[str] = []
+        metrics: Dict[str, Any] = {}
+
+        def _explicit(key: str) -> bool:
+            return key in scores and scores[key] is not None
 
         def _dim(key: str) -> float:
             """单维评分：有显式分用显式分，否则用基线（并记录为估算维度）"""
-            if key in scores and scores[key] is not None:
+            if _explicit(key):
                 return float(scores[key])
             estimated_dims.append(key)
             return self._SMART_BASELINE
 
+        # —— 画面质量：显式 > 真实像素测量 > 基线 ——
+        if _explicit("visual_quality"):
+            visual_quality = float(scores["visual_quality"])
+        else:
+            visual_quality = None
+            if self.aesthetic_enabled and not clip_meta.get("skip_aesthetic_analysis"):
+                metrics = self._measure_visual(path) or {}
+                if "visual_quality" in metrics:
+                    visual_quality = float(metrics["visual_quality"])
+            if visual_quality is None:
+                estimated_dims.append("visual_quality")
+                visual_quality = self._SMART_BASELINE
+
+        # —— 镜头时长：显式 > 真实时长曲线 > 基线 ——
+        if _explicit("shot_duration"):
+            shot_duration = float(scores["shot_duration"])
+        elif duration > 0:
+            try:
+                from app.core.ai.aesthetic_analyzer import duration_reasonableness
+
+                shot_duration = duration_reasonableness(duration)
+            except Exception as e:
+                logger.debug("时长合理性计算失败: %s", e)
+                estimated_dims.append("shot_duration")
+                shot_duration = self._SMART_BASELINE
+        else:
+            estimated_dims.append("shot_duration")
+            shot_duration = self._SMART_BASELINE
+
         return ClipFeatures(
             clip_id=clip_id,
-            path=clip_meta.get("path", ""),
-            duration=float(clip_meta.get("duration", 0)),
-            visual_quality=_dim("visual_quality"),
+            path=path,
+            duration=duration,
+            visual_quality=visual_quality,
             narrative_highlight=_dim("narrative_highlight"),
             copy_match=_dim("copy_match"),
             bgm_match=_dim("bgm_match"),
-            shot_duration_reasonableness=_dim("shot_duration"),
+            shot_duration_reasonableness=shot_duration,
             estimated_dims=estimated_dims,
+            visual_metrics=metrics,
         )
+
+    # ─────────── 真实像素测量 ───────────
+
+    @property
+    def aesthetic_enabled(self) -> bool:
+        """是否启用真实像素审美分析（环境变量，默认开）。"""
+        return _env_flag(_AESTHETIC_ENV, True)
+
+    def _measure_visual(self, path: str) -> Optional[Dict[str, Any]]:
+        """调 ``aesthetic_analyzer`` 测真实画面质量；不可用/失败返回 None。"""
+        if not path:
+            return None
+        try:
+            from app.core.ai.aesthetic_analyzer import analyze_media
+
+            return analyze_media(path, max_frames=_env_int(_AESTHETIC_FRAMES_ENV, 9))
+        except Exception as e:
+            logger.debug("画面审美分析失败 %s: %s", path, e)
+            return None
 
     def _compute_grade(self, total: float) -> ScoreGrade:
         """根据总分映射 S/A/B/C/D"""
@@ -230,13 +331,7 @@ class FiveDimensionScorer:
         min_score = dimensions[min_dim]
 
         if min_score < 60:
-            dim_names = {
-                "visual_quality": "画面质量",
-                "narrative_highlight": "高光叙事",
-                "copy_match": "文案匹配",
-                "bgm_match": "BGM适配",
-                "shot_duration": "镜头时长",
-            }
+            dim_names = DIM_LABELS
             suggestions.append(f"建议优先提升{dim_names.get(min_dim, min_dim)}（当前 {min_score:.0f} 分）")
 
         if dimensions["visual_quality"] < 70:

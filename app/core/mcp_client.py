@@ -78,6 +78,16 @@ class McpToolInfo:
     server_name: str = ""
 
 
+def _sdk_available() -> bool:
+    """官方 ``mcp`` 包是否可用（惰性探测，不硬依赖）。"""
+    try:
+        from app.core import mcp_sdk_backend
+
+        return mcp_sdk_backend.available()
+    except Exception:
+        return False
+
+
 class McpClientManager:
     """
     MCP 客户端管理器
@@ -95,11 +105,21 @@ class McpClientManager:
         self._lock = threading.Lock()
         self._tools: List[McpToolInfo] = []
         self._server_name = ""
+        #: 实际使用的后端："native"（手写 JSON-RPC） / "sdk"（官方 mcp 包）
+        self._backend = "native"
+        self._sdk: Optional[Any] = None
+        #: auto 模式下 SDK 失败时保留的诊断信息
+        self._sdk_soft_error: Optional[str] = None
 
     @property
     def state(self) -> McpConnectionState:
         """获取连接状态"""
         return self._state
+
+    @property
+    def backend(self) -> str:
+        """当前实际使用的后端（native / sdk）。"""
+        return self._backend
 
     @property
     def is_connected(self) -> bool:
@@ -127,6 +147,8 @@ class McpClientManager:
                 - args: stdio 模式下的参数
                 - url: SSE 模式下的 URL
                 - name: 服务器名称
+                - backend: 后端选择 "auto"(默认) / "native" / "sdk"
+                  auto = 装了官方 ``mcp`` 包就用它，否则回退手写实现
 
         Returns:
             是否连接成功
@@ -137,14 +159,36 @@ class McpClientManager:
         self._state = McpConnectionState.CONNECTING
         self._last_error = None
 
+        # 后端选择：native（手写） / sdk（官方 mcp 包） / auto（有 SDK 就用）
+        pref = str(config.get("backend") or "auto").strip().lower()
+        sdk_ok = _sdk_available()
+        if pref == "native":
+            use_sdk = False
+        elif pref == "sdk":
+            if not sdk_ok:
+                # 显式要 SDK 却没装：诚实失败，绝不静默降级
+                self._backend = "sdk"
+                self._last_error = "指定 backend=sdk，但未安装官方 MCP SDK（pip install mcp）"
+                self._state = McpConnectionState.ERROR
+                return False
+            use_sdk = True
+        else:  # auto
+            use_sdk = sdk_ok
+
         try:
-            if transport_type == McpTransportType.STDIO:
-                success = self._connect_stdio(config)
-            elif transport_type == McpTransportType.SSE:
-                success = self._connect_sse(config)
+            if use_sdk:
+                self._backend = "sdk"
+                success = self._connect_sdk(config)
+                if not success and pref == "auto":
+                    # auto 模式下 SDK 失败 → 回退手写实现（保留 SDK 报错供诊断）
+                    logger.warning("MCP 官方 SDK 连接失败，回退手写实现: %s", self._last_error)
+                    self._sdk_soft_error = self._last_error
+                    self._sdk = None
+                    self._backend = "native"
+                    success = self._connect_native(transport_type, config)
             else:
-                self._last_error = f"不支持的传输类型: {transport_type}"
-                success = False
+                self._backend = "native"
+                success = self._connect_native(transport_type, config)
 
             if success:
                 self._state = McpConnectionState.CONNECTED
@@ -160,9 +204,47 @@ class McpClientManager:
             logger.error(f"连接 MCP Server 失败: {e}")
             return False
 
+    def _connect_native(self, transport_type: str, config: Dict[str, Any]) -> bool:
+        """原手写 JSON-RPC 实现。"""
+        if transport_type == McpTransportType.STDIO:
+            return self._connect_stdio(config)
+        if transport_type == McpTransportType.SSE:
+            return self._connect_sse(config)
+        self._last_error = f"不支持的传输类型: {transport_type}"
+        return False
+
+    def _connect_sdk(self, config: Dict[str, Any]) -> bool:
+        """官方 mcp SDK 后端（后台线程跑 asyncio）。"""
+        try:
+            from app.core.mcp_sdk_backend import McpSdkSession
+        except Exception as e:
+            self._last_error = f"加载 MCP SDK 后端失败: {e}"
+            return False
+        sdk = McpSdkSession()
+        ok = sdk.open(config)
+        if not ok:
+            self._last_error = sdk.error or "MCP SDK 连接失败"
+            try:
+                sdk.close()
+            except Exception:
+                logger.debug("SDK 连接失败后清理会话异常", exc_info=True)
+            return False
+        self._sdk = sdk
+        self._session_id = sdk.session_id
+        logger.info("MCP 已连接（官方 SDK 后端）: %s", self._server_name)
+        return True
+
     def disconnect(self):
         """断开连接"""
         try:
+            # 官方 SDK 后端：关闭 asyncio 会话与传输
+            if self._sdk is not None:
+                try:
+                    self._sdk.close()
+                except Exception as e:
+                    logger.debug("关闭 MCP SDK 会话失败: %s", e)
+                self._sdk = None
+
             if self._process:
                 # 发送 shutdown 请求
                 self._send_request("shutdown", {})
@@ -181,6 +263,7 @@ class McpClientManager:
             self._state = McpConnectionState.DISCONNECTED
             self._session_id = None
             self._tools = []
+            self._backend = "native"
             logger.info(f"已断开 MCP Server: {self._server_name}")
         except Exception as e:
             logger.error(f"断开连接失败: {e}")
@@ -221,6 +304,13 @@ class McpClientManager:
             return None
 
         try:
+            # 官方 SDK 后端：直接交给 SDK（它自己管理会话与分页）
+            if self._backend == "sdk" and self._sdk is not None:
+                result = self._sdk.call_tool(tool_name, arguments or {})
+                if result is None:
+                    self._last_error = self._sdk.error or f"工具调用无返回: {tool_name}"
+                return result
+
             # 查找工具
             tool = next((t for t in self._tools if t.name == tool_name), None)
             if not tool:
@@ -333,6 +423,23 @@ class McpClientManager:
     def _fetch_tools(self):
         """获取远程工具列表"""
         try:
+            # 官方 SDK 后端：连接时已抓过，直接用
+            if self._backend == "sdk" and self._sdk is not None:
+                self._tools = [
+                    McpToolInfo(
+                        name=str(t.get("name", "")),
+                        description=str(t.get("description", "") or ""),
+                        parameters=t.get("parameters", {}) or {},
+                        server_name=self._server_name,
+                    )
+                    for t in (self._sdk.list_tools() or [])
+                    if t.get("name")
+                ]
+                logger.info(
+                    f"已加载 {len(self._tools)} 个工具（官方 SDK 后端）: {self._server_name}"
+                )
+                return
+
             result = self._send_request("tools/list", {})
             if result and isinstance(result, dict):
                 tools_data = result.get("tools", [])

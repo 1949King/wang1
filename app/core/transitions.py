@@ -9,8 +9,6 @@
 - 可扩展注册自定义转场
 - FFmpeg 渲染支持
 """
-import os
-import math
 import logging
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
@@ -43,6 +41,39 @@ class TransitionDef:
     duration_default: float = 0.5
     description: str = ""
     params: List[str] = None  # 额外参数
+    # 别名：本条目与另一个转场共用同一个 ffmpeg xfade 效果（无独立实现）。
+    # 用于对「看起来是两个转场、实际渲染完全相同」如实标注，UI 可据此折叠展示。
+    alias_of: Optional[str] = None
+
+
+# ffmpeg xfade 支持的 transition= 名全集（本机 ffmpeg 8.x 实测，共 58 个）。
+# 用途：新增转场时自检，防止写入拼错/臆造的滤镜名（渲染时才报错，排查成本高）。
+# 注意 `custom` 需配合 expr 参数，不在此列。
+KNOWN_XFADE_NAMES = frozenset({
+    "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+    "slideleft", "slideright", "slideup", "slidedown",
+    "circlecrop", "rectcrop", "distance", "fadeblack", "fadewhite", "radial",
+    "smoothleft", "smoothright", "smoothup", "smoothdown",
+    "circleopen", "circleclose", "vertopen", "vertclose",
+    "horzopen", "horzclose", "dissolve", "pixelize",
+    "diagtl", "diagtr", "diagbl", "diagbr",
+    "hlslice", "hrslice", "vuslice", "vdslice", "hblur", "fadegrays",
+    "wipetl", "wipetr", "wipebl", "wipebr", "squeezeh", "squeezev",
+    "zoomin", "fadefast", "fadeslow",
+    "hlwind", "hrwind", "vuwind", "vdwind",
+    "coverleft", "coverright", "coverup", "coverdown",
+    "revealleft", "revealright", "revealup", "revealdown",
+})
+
+
+def _xfade_name_of(ffmpeg_filter: str) -> str:
+    """从滤镜表达式里抽出 transition= 名（无则返回空串）。"""
+    marker = "transition="
+    idx = ffmpeg_filter.find(marker)
+    if idx < 0:
+        return ""
+    rest = ffmpeg_filter[idx + len(marker):]
+    return rest.split(":", 1)[0].strip()
 
 
 # 50+ 转场定义
@@ -161,13 +192,19 @@ TRANSITIONS: Dict[str, TransitionDef] = {
         id="slidedown", name="下滑", category=TransitionCategory.SLIDE,
         ffmpeg_filter="xfade=transition=slidedown:duration={duration}:offset={offset}",
     ),
+    # 修正（2026-10-11）：ffmpeg xfade 无 slide*_push 变体（原写死名渲染必报错），
+    # 已改映射到 slideleft / slideright 并标 alias_of（推进与滑动在 xfade 上无独立实现）。
     "slideleft_push": TransitionDef(
         id="slideleft_push", name="左推", category=TransitionCategory.SLIDE,
-        ffmpeg_filter="xfade=transition=slideleft_push:duration={duration}:offset={offset}",
+        ffmpeg_filter="xfade=transition=slideleft:duration={duration}:offset={offset}",
+        description="左向推进（ffmpeg 无 push 变体，复用 slideleft）",
+        alias_of="slideleft",
     ),
     "slideright_push": TransitionDef(
         id="slideright_push", name="右推", category=TransitionCategory.SLIDE,
-        ffmpeg_filter="xfade=transition=slideright_push:duration={duration}:offset={offset}",
+        ffmpeg_filter="xfade=transition=slideright:duration={duration}:offset={offset}",
+        description="右向推进（ffmpeg 无 push 变体，复用 slideright）",
+        alias_of="slideright",
     ),
 
     # ========== 缩放 (Zoom) ==========
@@ -277,16 +314,23 @@ TRANSITIONS: Dict[str, TransitionDef] = {
         id="radial", name="径向擦除", category=TransitionCategory.LIGHT,
         ffmpeg_filter="xfade=transition=radial:duration={duration}:offset={offset}",
     ),
+    # 修正（2026-10-11）：原 transition=hlreplace 非 ffmpeg xfade 支持名（渲染必报错），
+    # 已改映射到语义最近的 fadegrays（经灰度过渡），并标 alias_of 如实说明无独立实现。
     "hlreplace": TransitionDef(
         id="hlreplace", name="亮度替换", category=TransitionCategory.LIGHT,
-        ffmpeg_filter="xfade=transition=hlreplace:duration={duration}:offset={offset}",
+        ffmpeg_filter="xfade=transition=fadegrays:duration={duration}:offset={offset}",
+        description="经灰度的亮度过渡（ffmpeg 无 luma 专用 xfade，复用 fadegrays）",
+        alias_of="fadegrays",
     ),
 
     # ========== 故障 (Glitch) ==========
+    # 如实标注：ffmpeg 无 glitch xfade，本项复用 pixelize（alias_of），
+    # 真实「RGB 错位/块位移」由 transition_plugin_registry 的 bake 路径承担。
     "glitch": TransitionDef(
         id="glitch", name="故障效果", category=TransitionCategory.GLITCH,
         ffmpeg_filter="xfade=transition=pixelize:duration={duration}:offset={offset}",
-        description="模拟信号故障的故障切换效果",
+        description="模拟信号故障（xfade 复用 pixelize，精确效果走插件烘焙）",
+        alias_of="pixelize",
     ),
 
     # ========== 电影 (Cinema) ==========
@@ -294,14 +338,52 @@ TRANSITIONS: Dict[str, TransitionDef] = {
         id="iris_in", name="光圈进入", category=TransitionCategory.CINEMA,
         ffmpeg_filter="xfade=transition=circleopen:duration={duration}:offset={offset}",
         description="经典老电影风格",
+        alias_of="circleopen",
     ),
     "iris_out": TransitionDef(
         id="iris_out", name="光圈退出", category=TransitionCategory.CINEMA,
         ffmpeg_filter="xfade=transition=circleclose:duration={duration}:offset={offset}",
+        alias_of="circleclose",
     ),
     "wipe_circle": TransitionDef(
         id="wipe_circle", name="圆形擦除", category=TransitionCategory.CINEMA,
         ffmpeg_filter="xfade=transition=radial:duration={duration}:offset={offset}",
+        alias_of="radial",
+    ),
+
+    # ========== 补齐（2026-10-11）：ffmpeg 支持但原表缺失的 7 个真转场 ==========
+    "circlecrop": TransitionDef(
+        id="circlecrop", name="圆形裁剪", category=TransitionCategory.ZOOM,
+        ffmpeg_filter="xfade=transition=circlecrop:duration={duration}:offset={offset}",
+        description="以圆形窗口裁剪过渡",
+    ),
+    "rectcrop": TransitionDef(
+        id="rectcrop", name="矩形裁剪", category=TransitionCategory.ZOOM,
+        ffmpeg_filter="xfade=transition=rectcrop:duration={duration}:offset={offset}",
+        description="以矩形窗口裁剪过渡",
+    ),
+    "distance": TransitionDef(
+        id="distance", name="距离过渡", category=TransitionCategory.BASIC,
+        ffmpeg_filter="xfade=transition=distance:duration={duration}:offset={offset}",
+        description="基于距离场的过渡（形状先在远处溶解）",
+    ),
+    "revealup": TransitionDef(
+        id="revealup", name="上揭开", category=TransitionCategory.THREE_D,
+        ffmpeg_filter="xfade=transition=revealup:duration={duration}:offset={offset}",
+    ),
+    "revealdown": TransitionDef(
+        id="revealdown", name="下揭开", category=TransitionCategory.THREE_D,
+        ffmpeg_filter="xfade=transition=revealdown:duration={duration}:offset={offset}",
+    ),
+    "squeezeh": TransitionDef(
+        id="squeezeh", name="水平挤压", category=TransitionCategory.SPIN,
+        ffmpeg_filter="xfade=transition=squeezeh:duration={duration}:offset={offset}",
+        description="画面横向挤压收束",
+    ),
+    "squeezev": TransitionDef(
+        id="squeezev", name="垂直挤压", category=TransitionCategory.SPIN,
+        ffmpeg_filter="xfade=transition=squeezev:duration={duration}:offset={offset}",
+        description="画面纵向挤压收束",
     ),
 }
 
@@ -344,12 +426,45 @@ def build_transition_filter(trans_id: str, duration: float, offset: float) -> st
     return td.ffmpeg_filter.format(duration=duration, offset=offset)
 
 
+def get_unique_transitions() -> List[TransitionDef]:
+    """获取「有独立实现」的转场（剔除 alias_of 别名/复用项）。
+
+    UI 展示、能力计数应优先用它，避免把「左推/左滑」「故障/像素化」这类
+    xfade 完全相同、仅命名不同的条目当成两个转场。
+    """
+    return [t for t in TRANSITIONS.values() if not t.alias_of]
+
+
+def get_aliases() -> Dict[str, str]:
+    """别名映射 {别名 id: 复用的真实转场 id}。"""
+    return {t.id: t.alias_of for t in TRANSITIONS.values() if t.alias_of}
+
+
+def validate_transition_names() -> List[str]:
+    """自检：返回引用了非 ffmpeg xfade 支持名的转场 id 列表（空 = 全部合法）。
+
+    新增转场时调用；防止再次写入 hlreplace / slideleft_push 这类渲染必报错的臆造名。
+    """
+    bad: List[str] = []
+    for t in TRANSITIONS.values():
+        name = _xfade_name_of(t.ffmpeg_filter)
+        if name and name not in KNOWN_XFADE_NAMES:
+            bad.append(t.id)
+    return bad
+
+
 # 注册自定义转场
 def register_transition(trans_def: TransitionDef):
     """注册自定义转场"""
+    name = _xfade_name_of(trans_def.ffmpeg_filter)
+    if name and name not in KNOWN_XFADE_NAMES:
+        logger.warning(
+            "转场 %s 引用未知 xfade 名 %r —— ffmpeg 渲染时会报错", trans_def.id, name
+        )
     TRANSITIONS[trans_def.id] = trans_def
     logger.info(f"注册自定义转场: {trans_def.id}")
 
 
 # 统计
 TRANSITION_COUNT = len(TRANSITIONS)
+TRANSITION_UNIQUE_COUNT = len(get_unique_transitions())

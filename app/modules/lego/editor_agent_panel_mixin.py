@@ -308,6 +308,7 @@ class EditorAgentPanelMixin:
 
     def _create_edit_agent_panel(self) -> QWidget:
         """创建剪辑 Agent 对话面板（嵌入右侧工具栏标签页）。"""
+        self._register_plugin_manager_provider()   # 尽早注入，供扩展门面取传统插件
         panel = QWidget()
         panel.setObjectName("editAgentPanel")
         S = self._agent_panel_styles()          # 主题感知样式（不再硬编颜色）
@@ -1311,75 +1312,41 @@ class EditorAgentPanelMixin:
     # ======================================================================
     # 抽取自 editor_module.py L11891-11959
     # ======================================================================
-    def _get_agent_extensions_context(self) -> List[Dict[str, Any]]:
-        """收集拓展中心可用工具，供 Agent 调用。"""
-        tools = []
+    def _register_plugin_manager_provider(self) -> None:
+        """把 PluginManager 登记给扩展门面（幂等，供 capability_handlers 等取用）。
+
+        历史上 capability_handlers 那侧够不到传统插件：因为它没有编辑器引用，
+        拿不到 PluginManager。这里把「怎么取 PluginManager」注入门面，两边共用。
+        """
         try:
-            from app.core.extension_base import get_extensions_registry
-            registry = get_extensions_registry()
-            for ext in registry.list_all():
-                if not ext.is_enabled and not ext.is_available:
-                    continue
-                ext_tools = ext.get_tools() or []
-                for t in ext_tools:
-                    tools.append({
-                        "extension_id": ext.info.id,
-                        "extension_name": ext.info.name,
-                        "extension_type": ext.extension_type.value,
-                        "tool_id": t.id,
-                        "tool_name": t.name,
-                        "description": t.description,
-                    })
+            from app.core.extension_facade import set_plugin_manager_provider
+
+            set_plugin_manager_provider(self._ensure_plugin_manager)
+        except Exception as e:
+            logger.debug(f"登记 PluginManager provider 失败: {e}")
+
+    def _get_agent_extensions_context(self) -> List[Dict[str, Any]]:
+        """收集拓展中心可用工具，供 Agent 调用。
+
+        三源（ExtensionsRegistry / SkillEngine / 传统 PluginManager）的合并逻辑
+        统一收敛到 :mod:`app.core.extension_facade`，不再与 capability_handlers
+        各写一份（历史上两处不一致：capability 那侧够不到传统插件）。
+        """
+        try:
+            from app.core.extension_facade import list_unified_tools
+
+            # _ensure_plugin_manager 内置懒加载（首次调用初始化，后续直接返回）
+            plugin_mgr = None
+            try:
+                plugin_mgr = self._ensure_plugin_manager()
+            except Exception as e:
+                logger.debug(f"获取 PluginManager 失败: {e}")
+            # 登记给扩展门面（幂等）：此后无编辑器引用的调用点也能看到传统插件
+            self._register_plugin_manager_provider()
+            return list_unified_tools(plugin_manager=plugin_mgr)
         except Exception as e:
             logger.debug(f"收集拓展中心工具失败: {e}")
-
-        # 补充 SkillEngine 中的技能（兼容直接注册的 Skill）
-        try:
-            # 触发外部 skill 注册（幂等：仅首次实际扫描 app/skills/external/，
-            # 后续调用直接返回 0）。修复 Agent 面板看不到外部 skill 的问题：
-            # 外部 skill 注册原本只在 extensions_module._refresh_skill_list 触发，
-            # 若用户未打开拓展中心标签页，Agent 调用 list_all() 会拿不到外部 skill。
-            try:
-                from app.skills.external_loader import ensure_external_skills_registered
-                ensure_external_skills_registered()
-            except Exception as ext_e:
-                logger.debug(f"外部 skill 注册失败（不影响内置 skill）: {ext_e}")
-            from .skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                tools.append({
-                    "extension_id": skill.skill_id,
-                    "extension_name": skill.skill_name,
-                    "extension_type": "skill",
-                    "tool_id": skill.skill_id,
-                    "tool_name": skill.skill_name,
-                    "description": getattr(skill, "skill_description", ""),
-                })
-        except Exception as e:
-            logger.debug(f"收集 SkillEngine 技能失败: {e}")
-
-        # 补充 PluginManager 管理的传统插件（修复 Agent 看不到传统插件的问题：
-        # 原逻辑只收集 ExtensionsRegistry 和 SkillEngine，AI特效等
-        # PluginManager 管理的插件对 Agent 不可见，模型无法生成 call_extension 指令）
-        try:
-            # _ensure_plugin_manager 内置 lazy load（首次调用初始化，后续直接返回）
-            plugin_mgr = self._ensure_plugin_manager()
-            if plugin_mgr is not None:
-                for plugin in plugin_mgr.list_plugins(enabled_only=True):
-                    plugin_id = getattr(plugin, "id", None)
-                    if not plugin_id:
-                        continue
-                    tools.append({
-                        "extension_id": plugin_id,
-                        "extension_name": getattr(plugin, "name", plugin_id),
-                        "extension_type": "plugin",
-                        "tool_id": plugin_id,
-                        "tool_name": getattr(plugin, "name", plugin_id),
-                        "description": getattr(plugin, "description", ""),
-                    })
-        except Exception as e:
-            logger.debug(f"收集 PluginManager 插件失败: {e}")
-
-        return tools
+            return []
 
     # ======================================================================
     # 抽取自 editor_module.py L11961-12026
@@ -1656,62 +1623,45 @@ class EditorAgentPanelMixin:
         except Exception as e:
             logger.debug(f"[Agent] dispatcher 调用失败，回退原逻辑: {e}")
 
-        # 原逻辑 fallback（保留向后兼容）
+        # 原逻辑 fallback（保留向后兼容）：三源统一由 extension_facade 处理
         ext_id = params.get("extension_id") or params.get("extensionId")
         tool_id = params.get("tool_id") or params.get("toolId") or ext_id
         call_params = params.get("params") or {}
         if not ext_id:
             return {"action": "call_extension", "success": False, "message": "缺少 extension_id 参数"}
-
-        # 优先从 ExtensionsRegistry 查找
         try:
-            from app.core.extension_base import get_extensions_registry
-            registry = get_extensions_registry()
-            ext = registry.get(ext_id)
-            if ext is not None:
-                if not ext.is_available:
-                    if not ext.initialize():
-                        return {"action": "call_extension", "success": False,
-                                "message": f"扩展 {ext.info.name} 初始化失败: {ext.error}"}
-                result = ext.run(tool_id, **call_params)
-                msg = self._format_extension_result(result)
-                return {"action": "call_extension", "success": True,
-                        "message": f"已调用 {ext.info.name}.{tool_id}: {msg}"}
-        except Exception as e:
-            logger.warning(f"Agent 调用 ExtensionsRegistry 失败: {e}")
+            from app.core.extension_facade import (
+                SOURCE_PLUGIN,
+                SOURCE_REGISTRY,
+                SOURCE_SKILL,
+                run_unified_tool,
+            )
 
-        # 回退到 SkillEngine
-        try:
-            from .skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                if skill.skill_id == ext_id:
-                    from .extensions_context import ExtensionsContext
-                    ctx = ExtensionsContext(inputs=call_params)
-                    result = skill.execute(ctx)
-                    msg = self._format_extension_result(result)
-                    return {"action": "call_extension", "success": True,
-                            "message": f"已执行技能 {skill.skill_name}: {msg}"}
+            plugin_mgr = None
+            try:
+                plugin_mgr = self._ensure_plugin_manager()
+            except Exception as e:
+                logger.debug(f"获取 PluginManager 失败: {e}")
+            out = run_unified_tool(ext_id, tool_id, call_params, plugin_manager=plugin_mgr)
+            if not out.get("ok"):
+                return {"action": "call_extension", "success": False,
+                        "message": out.get("message") or f"未找到扩展: {ext_id}"}
+            msg = self._format_extension_result(out.get("result"))
+            name = out.get("name") or ext_id
+            source = out.get("source")
+            if source == SOURCE_REGISTRY:
+                text = f"已调用 {name}.{tool_id}: {msg}"
+            elif source == SOURCE_SKILL:
+                text = f"已执行技能 {name}: {msg}"
+            elif source == SOURCE_PLUGIN:
+                text = f"已调用插件 {name}: {msg}"
+            else:
+                text = msg
+            return {"action": "call_extension", "success": True, "message": text}
         except Exception as e:
-            logger.warning(f"Agent 调用 SkillEngine 失败: {e}")
-
-        # 回退到 PluginManager（传统插件：AI特效工坊等）
-        # 修复 Agent 看不到 PluginManager 管理的传统插件问题：
-        # 原逻辑只走 ExtensionsRegistry + SkillEngine，传统插件无法被调用
-        try:
-            plugin_mgr = self._ensure_plugin_manager()
-            if plugin_mgr is not None:
-                plugin = plugin_mgr.get_plugin(ext_id)
-                if plugin is not None and getattr(plugin, "enabled", False):
-                    # PluginManager.run_plugin 内部已 try/except，失败返回 None
-                    result = plugin_mgr.run_plugin(ext_id, **call_params)
-                    msg = self._format_extension_result(result)
-                    return {"action": "call_extension", "success": True,
-                            "message": f"已调用插件 {getattr(plugin, 'name', ext_id)}: {msg}"}
-        except Exception as e:
-            logger.warning(f"Agent 调用 PluginManager 失败: {e}")
-
-        return {"action": "call_extension", "success": False,
-                "message": f"未找到扩展: {ext_id}"}
+            logger.warning(f"Agent 调用扩展失败: {e}")
+            return {"action": "call_extension", "success": False,
+                    "message": f"调用扩展失败: {e}"}
 
     # ======================================================================
     # 抽取自 editor_module.py L12819-12946

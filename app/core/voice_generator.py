@@ -5,7 +5,7 @@ AI配音生成引擎
 
 import numpy as np
 import os
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import RLock
@@ -30,10 +30,43 @@ logger = logging.getLogger("AI短剧编辑器.core.voice_generator")
 ENV_ALLOW_PLACEHOLDER_TTS = "SHIGUANG_ALLOW_PLACEHOLDER_TTS"
 _TRUTHY = {"1", "true", "yes", "on"}
 
+# ── Piper（本地离线 TTS，2026-10-11 接入）────────────────────
+# 动机：原链路 Coqui→gTTS→edge-tts 里只有 gTTS 是本机实装的，且 gTTS **要联网**；
+# 对「素材库仅本机」的离线场景，需要一条**纯本地**通路。Piper 轻量、离线、快，
+# 是离线 TTS 的业界首选（与 whisper 之于 ASR 对位）。
+# 与 YuE 同纪律：**模型未配置必须诚实失败**，绝不因缺模型就退回假音频。
+# 配置：SHIGUANG_PIPER_MODEL 指向 .onnx；或 SHIGUANG_PIPER_HOME 指向含 .onnx 的目录。
+ENV_PIPER_MODEL = "SHIGUANG_PIPER_MODEL"
+ENV_PIPER_HOME = "SHIGUANG_PIPER_HOME"
+
 
 def allow_placeholder_tts() -> bool:
     """是否允许「真 TTS 全挂时返回正弦波占位」（默认否 —— 默认诚实失败）。"""
     return os.environ.get(ENV_ALLOW_PLACEHOLDER_TTS, "").strip().lower() in _TRUTHY
+
+
+def piper_model_path() -> Optional[str]:
+    """定位 Piper 语音模型（.onnx）：env 显式路径 → env 目录 → 常见约定目录。
+
+    找不到返回 None（调用方据此诚实跳过 Piper，而非报错）。
+    """
+    import glob
+
+    explicit = os.environ.get(ENV_PIPER_MODEL, "").strip()
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    home = os.environ.get(ENV_PIPER_HOME, "").strip()
+    dirs = [home] if home else []
+    dirs += [
+        os.path.join(os.getcwd(), "models", "piper"),
+        os.path.join(os.getcwd(), "data", "piper"),
+    ]
+    for d in dirs:
+        if d and os.path.isdir(d):
+            found = sorted(glob.glob(os.path.join(d, "*.onnx")))
+            if found:
+                return found[0]
+    return None
 
 
 class VoiceStyle(Enum):
@@ -315,9 +348,63 @@ class AIVoiceGenerator:
                     error_message=str(e)
                 )
     
+    def _try_piper_tts(self, text: str, sample_rate: int) -> Optional[np.ndarray]:
+        """本地 Piper 合成；模型/引擎不可用返回 None（诚实跳过，不报错）。
+
+        走 CLI（`piper` 或 `python -m piper`，跨版本稳定），文本经 stdin UTF-8 传入
+        （中文必需）；产出 wav 再交 ffmpeg 转 f32le 单声道。
+        """
+        model = piper_model_path()
+        if not model:
+            logger.debug(
+                "[VoiceGenerator] Piper 未配置模型（%s / %s），跳过",
+                ENV_PIPER_MODEL, ENV_PIPER_HOME)
+            return None
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        exe = shutil.which("piper")
+        cmd = [exe] if exe else [sys.executable, "-m", "piper"]
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp.close()
+        try:
+            proc = subprocess.run(
+                cmd + ["--model", model, "--output_file", tmp.name],
+                input=text.encode("utf-8"), capture_output=True, timeout=90,
+                creationflags=no_window,
+            )
+            ok = (proc.returncode == 0 and os.path.exists(tmp.name)
+                  and os.path.getsize(tmp.name) >= 128)
+            if not ok:
+                logger.debug(
+                    "[VoiceGenerator] Piper 未产出音频：rc=%s err=%s",
+                    proc.returncode, (proc.stderr or b"")[-200:])
+                return None
+            conv = subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp.name,
+                 "-f", "f32le", "-acodec", "pcm_f32le",
+                 "-ar", str(sample_rate), "-ac", "1", "pipe:1"],
+                capture_output=True, timeout=60, creationflags=no_window,
+            )
+            if conv.returncode == 0 and conv.stdout:
+                return np.frombuffer(conv.stdout, dtype=np.float32)
+        except FileNotFoundError:
+            logger.debug("[VoiceGenerator] Piper 未安装（pip install piper-tts）")
+        except Exception as e:
+            logger.debug(f"[VoiceGenerator] Piper 合成失败: {e}")
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                logger.debug("清理 Piper 临时音频失败: %s", tmp.name, exc_info=True)
+        return None
+
     def _generate_tts_audio(self, request: VoiceGenerationRequest,
                              voice_profile: VoiceProfile) -> Optional[np.ndarray]:
-        """真实 TTS 语音生成 - 优先 Coqui，回退 gTTS，再回退 edge-tts。
+        """真实 TTS 语音生成 - 优先 Coqui → Piper(本地) → gTTS → edge-tts。
 
         Returns:
             一维 float32 音频；**所有引擎都不可用时返回 None**（诚实失败）。
@@ -351,6 +438,11 @@ class AIVoiceGenerator:
             logger.debug(f"[VoiceGenerator] pyttsx3不可用: {e}")
         except Exception as e:
             logger.debug(f"[VoiceGenerator] pyttsx3生成音频失败: {e}")
+
+        # 尝试 Piper（本地离线，优先于需要联网的 gTTS / edge-tts）
+        audio = self._try_piper_tts(text, sample_rate)
+        if audio is not None:
+            return audio
 
         # 尝试 gTTS
         try:
@@ -406,8 +498,11 @@ class AIVoiceGenerator:
         # 结果）；只有显式打开 SHIGUANG_ALLOW_PLACEHOLDER_TTS=1 才返回占位音，
         # 且调用链会把它标成 is_placeholder=True。
         logger.warning(
-            "[VoiceGenerator] 所有真实 TTS 引擎均不可用（Coqui/gTTS/edge-tts）"
-            "text=%r", text[:40])
+            "[VoiceGenerator] 所有真实 TTS 引擎均不可用"
+            "（Coqui/Piper/gTTS/edge-tts）text=%r", text[:40])
+        logger.info(
+            "[VoiceGenerator] 离线配音可配置 Piper：pip install piper-tts，"
+            "并设置 %s 指向中文 .onnx 模型（如 zh_CN-huayan-medium）", ENV_PIPER_MODEL)
         if not allow_placeholder_tts():
             logger.error(
                 "[VoiceGenerator] 诚实失败：不返回假音频。"

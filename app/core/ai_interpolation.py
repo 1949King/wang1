@@ -1,20 +1,21 @@
 """
-线性补帧引擎（非神经网络）
-==========================
-基于前后帧做场景变化检测与线性混合插值，改善预览观感。
+运动补偿补帧引擎（非神经网络）
+==============================
+基于前后帧做场景变化检测，并用**光流运动补偿**生成中间帧，改善预览观感。
 
 说明（诚实预期）：
 - 不是深度学习插帧（无 RIFE / DAIN 等模型）
-- 实现为帧差检测 + 线性混合（alpha blend）
+- 实现为帧差检测 + Farneback 光流前/后向 warp + 加权合成（auto/flow）；
+  光流不可用时回退线性混合（blend）
 - 默认可关闭；开启后可在时间轴标记补帧位置
 
-历史命名含「AI」仅为兼容；UI/日志应使用「线性补帧」。
+历史命名含「AI」仅为兼容；UI/日志应使用「运动补偿补帧 / 线性补帧」。
 """
 
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal, QThread
 import logging
 import threading
 import time
@@ -172,7 +173,7 @@ class SceneChangeDetector:
 
 
 class ContextAwareInterpolator:
-    """线性混合补帧器（非神经网络）"""
+    """运动补偿补帧器（光流优先，线性混合回退；非神经网络）"""
     
     def __init__(self):
         self._scene_detector = SceneChangeDetector()
@@ -180,6 +181,19 @@ class ContextAwareInterpolator:
         self._mode = InterpolationMode.SMART
         self._inserted_frames = []
         self._markers = []
+        # 插值方法：auto = 光流运动补偿（失败回退线性混合）；flow / blend 可强制。
+        self._method = "auto"
+        self._last_method_used = ""
+
+    def set_method(self, method: str):
+        """设置插值方法：auto / flow / blend。"""
+        m = str(method or "auto").strip().lower()
+        self._method = m if m in ("auto", "flow", "blend") else "auto"
+
+    @property
+    def last_method_used(self) -> str:
+        """上一帧实际采用的插值方法（flow / blend / none），供 UI/日志展示。"""
+        return self._last_method_used
     
     def set_mode(self, mode: InterpolationMode):
         """设置补帧模式"""
@@ -190,45 +204,83 @@ class ContextAwareInterpolator:
         self._interpolation_enabled = enabled
     
     def process_frame(self, frame: np.ndarray, frame_time: float) -> List[np.ndarray]:
-        """处理帧，返回需要插入的中间帧（线性混合）"""
+        """处理帧，返回需要插入的中间帧（运动补偿优先）。
+
+        **关键**：必须在 `analyze_frame` 之前抓取「上一帧」——`analyze_frame`
+        结束时会执行 `_last_frame = frame`；若之后再取，拿到的就是当前帧本身，
+        插值结果退化为当前帧的拷贝（这是原实现的真实缺陷：根本没有中间帧）。
+        """
         if not self._interpolation_enabled or self._mode == InterpolationMode.DISABLED:
             return []
-        
+        prev = self._scene_detector._last_frame
+
         if self._mode == InterpolationMode.ALWAYS:
-            return self._generate_interpolated_frames(frame, frame_time)
-        
+            self._scene_detector.analyze_frame(frame, frame_time)  # 同步缓冲区/上一帧
+            if prev is None:
+                return []
+            return self._generate_interpolated_frames(prev, frame, 1)
+
         analysis = self._scene_detector.analyze_frame(frame, frame_time)
-        
-        if analysis.needs_interpolation:
+        if analysis.needs_interpolation and prev is not None:
             return self._generate_interpolated_frames(
-                frame, frame_time, 
-                count=analysis.interpolation_count,
-                diff_type=analysis.difference_type
+                prev, frame, analysis.interpolation_count
             )
-        
         return []
-    
-    def _generate_interpolated_frames(self, frame: np.ndarray, frame_time: float, 
-                                     count: int = 1, 
-                                     diff_type: FrameDifferenceType = None) -> List[np.ndarray]:
-        """生成线性混合中间帧"""
-        if self._scene_detector._last_frame is None:
+
+    def _generate_interpolated_frames(self, prev: np.ndarray, cur: np.ndarray,
+                                      count: int = 1) -> List[np.ndarray]:
+        """在 prev → cur 之间生成 count 个中间帧。"""
+        if prev is None or cur is None or prev.shape != cur.shape:
             return []
-        
-        frames = []
-        for i in range(count):
-            alpha = (i + 1) / (count + 1)
-            interpolated = self._linear_interpolate(
-                self._scene_detector._last_frame, 
-                frame, 
-                alpha
+        return [self._interpolate_pair(prev, cur, (i + 1) / (count + 1))
+                for i in range(count)]
+
+    def _interpolate_pair(self, prev: np.ndarray, cur: np.ndarray, alpha: float) -> np.ndarray:
+        """单帧插值：auto/flow 走光流运动补偿，失败回退线性混合。"""
+        if self._method in ("auto", "flow") and CV2_AVAILABLE:
+            flowed = self._flow_interpolate(prev, cur, alpha)
+            if flowed is not None:
+                self._last_method_used = "flow"
+                return flowed
+        self._last_method_used = "blend"
+        return self._linear_interpolate(prev, cur, alpha)
+
+    def _flow_interpolate(self, prev: np.ndarray, cur: np.ndarray,
+                          alpha: float) -> Optional[np.ndarray]:
+        """光流运动补偿插值（Farneback 前/后向 warp + 加权），非神经网络。
+
+        相比直接 alpha blend（运动时会重影），先把 prev 沿正向光流前推 alpha、
+        把 cur 沿反向光流后推 (1-alpha)，再加权合成——对平移与镜头运动明显更自然。
+        任何异常返回 None，由调用方回退线性混合（不抛错、不阻断渲染）。
+        """
+        try:
+            g1 = cv2.cvtColor(prev, cv2.COLOR_RGB2GRAY)
+            g2 = cv2.cvtColor(cur, cv2.COLOR_RGB2GRAY)
+            flow = cv2.calcOpticalFlowFarneback(g1, g2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            h, w = g1.shape[:2]
+            grid_x, grid_y = np.meshgrid(
+                np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32)
             )
-            frames.append(interpolated)
-        
-        return frames
-    
+            fx, fy = flow[..., 0], flow[..., 1]
+            warp_prev = cv2.remap(
+                prev, (grid_x + fx * alpha).astype(np.float32),
+                (grid_y + fy * alpha).astype(np.float32),
+                cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+            )
+            warp_cur = cv2.remap(
+                cur, (grid_x - fx * (1.0 - alpha)).astype(np.float32),
+                (grid_y - fy * (1.0 - alpha)).astype(np.float32),
+                cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+            )
+            out = (warp_prev.astype(np.float32) * (1.0 - alpha)
+                   + warp_cur.astype(np.float32) * alpha)
+            return np.clip(out, 0, 255).astype(np.uint8)
+        except Exception as e:
+            logger.debug(f"光流插值失败，回退线性混合: {e}")
+            return None
+
     def _linear_interpolate(self, frame1: np.ndarray, frame2: np.ndarray, alpha: float) -> np.ndarray:
-        """线性插值（alpha blend），非光流/神经网络"""
+        """线性插值（alpha blend）——光流不可用时的回退路径。"""
         result = frame1.astype(np.float32) * (1 - alpha) + frame2.astype(np.float32) * alpha
         return result.astype(np.uint8)
     

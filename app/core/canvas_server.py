@@ -1722,9 +1722,16 @@ class CanvasBridgeServer:
             try:
                 from app.core.agent_session import agent_sessions
 
+                # 先恢复上次的会话检查点（恢复后一律为暂停态），再统一置暂停
+                _ckpt = agent_sessions.load_checkpoint()
+                if _ckpt.get("restored"):
+                    logger.info(
+                        "Agent 会话检查点已恢复：%d 个（%d 个暂停待续跑）",
+                        _ckpt.get("restored"), _ckpt.get("paused"),
+                    )
                 agent_sessions.mark_restart_paused()
             except Exception:
-                logger.debug("mark_restart_paused failed", exc_info=True)
+                logger.debug("agent checkpoint / mark_restart_paused failed", exc_info=True)
             return True
         except OSError as e:
             # 端口占用：假定已有桥在跑

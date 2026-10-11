@@ -966,42 +966,27 @@ class ExtensionCapabilityHandlers:
 
     def run_extension(self, req: CapabilityRequest) -> CapabilityResult:
         """
-        运行 ExtensionsRegistry 中的 Plugin/Skill/MCP
-        保留既有 fallback 顺序：ExtensionsRegistry → SkillEngine
+        运行扩展（三源统一：ExtensionsRegistry → SkillEngine → PluginManager）
+
+        原先只走「注册表 → 技能」两源，**够不到 PluginManager 传统插件**
+        （AI特效工坊等），Agent 调用会误报「未找到扩展」。现统一交给
+        :func:`app.core.extension_facade.run_unified_tool`。
         """
+        from app.core.extension_facade import run_unified_tool
+
         ext_id = req.params.get("extension_id") or req.params.get("ext_id")
         tool_id = req.params.get("tool_id") or ext_id
         call_params = req.params.get("params") or {}
         if not ext_id:
             return CapabilityResult(req.request_id, False, error="缺少 extension_id")
 
-        # ① ExtensionsRegistry 优先
-        try:
-            from app.core.extension_base import get_extensions_registry
-            registry = get_extensions_registry()
-            ext = registry.get(ext_id)
-            if ext is not None:
-                if not ext.is_available and not ext.initialize():
-                    return CapabilityResult(req.request_id, False,
-                                            error=f"扩展 {ext.info.name} 初始化失败: {ext.error}")
-                result = ext.run(tool_id, **call_params)
-                return CapabilityResult(req.request_id, True, output={"result": result})
-        except Exception as e:
-            logger.warning(f"[ext.run_extension] ExtensionsRegistry 失败: {e}")
-
-        # ② 回退 SkillEngine
-        try:
-            from app.modules.lego.skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                if skill.skill_id == ext_id:
-                    from app.core.extensions_context import ExtensionsContext
-                    ctx = ExtensionsContext(inputs=call_params)
-                    result = skill.execute(ctx)
-                    return CapabilityResult(req.request_id, True, output={"result": result})
-        except Exception as e:
-            logger.warning(f"[ext.run_extension] SkillEngine 失败: {e}")
-
-        return CapabilityResult(req.request_id, False, error=f"未找到扩展: {ext_id}")
+        out = run_unified_tool(ext_id, tool_id, call_params)
+        if out.get("ok"):
+            return CapabilityResult(req.request_id, True, output={"result": out.get("result")})
+        return CapabilityResult(
+            req.request_id, False,
+            error=out.get("message") or f"未找到扩展: {ext_id}",
+        )
 
     def run_skill(self, req: CapabilityRequest) -> CapabilityResult:
         """直接通过 SkillEngine 执行 Skill"""
@@ -1015,32 +1000,10 @@ class ExtensionCapabilityHandlers:
                                 output=result, error=result.get("error"))
 
     def list_tools(self, req: CapabilityRequest) -> CapabilityResult:
-        """列出所有可用拓展工具（供 Agent 构建提示词）"""
-        tools: List[Dict[str, Any]] = []
-        try:
-            from app.core.extension_base import get_extensions_registry
-            for ext in get_extensions_registry().list_all():
-                if not (ext.is_enabled or ext.is_available):
-                    continue
-                for t in (ext.get_tools() or []):
-                    tools.append({
-                        "extension_id": ext.info.id, "extension_name": ext.info.name,
-                        "extension_type": ext.extension_type.value,
-                        "tool_id": t.id, "tool_name": t.name, "description": t.description,
-                    })
-        except Exception as e:
-            logger.debug(f"list_tools ExtensionsRegistry 失败: {e}")
-        try:
-            from app.modules.lego.skill_engine import skill_engine
-            for skill in skill_engine.list_all():
-                tools.append({
-                    "extension_id": skill.skill_id, "extension_name": skill.skill_name,
-                    "extension_type": "skill", "tool_id": skill.skill_id,
-                    "tool_name": skill.skill_name,
-                    "description": getattr(skill, "skill_description", ""),
-                })
-        except Exception as e:
-            logger.debug(f"list_tools SkillEngine 失败: {e}")
+        """列出所有可用拓展工具（供 Agent 构建提示词）——三源统一。"""
+        from app.core.extension_facade import list_unified_tools
+
+        tools = list_unified_tools()
         return CapabilityResult(req.request_id, True, output={"tools": tools})
 
 

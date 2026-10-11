@@ -35,6 +35,7 @@ EditorExportPanelMixin：从 editor_module.py 抽出的视频导出相关方法�
 """
 
 import os
+import re
 import time
 import shutil
 import logging
@@ -142,6 +143,82 @@ class EditorExportPanelMixin:
         from app.modules.lego.editor_export import build_edited_video
         return build_edited_video(self, output_path)
 
+    # ────────────── 时间线互操作导出（OTIO / EDL / FCPXML）──────────────
+
+    def _export_timeline_document(
+        self, save_path: str, resolution: str = "", fps: str = ""
+    ) -> bool:
+        """把当前时间线导出为 OTIO / EDL / FCPXML（**不渲染视频**）。
+
+        * 未安装 ``opentimelineio`` 时明确失败，绝不产出空/假文件；
+        * 真正的 OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PyQt6 之后段错误）；
+        * EDL(CMX3600) 天生只支持单条视频轨，多轨时会自动取主力视频轨（并告知）。
+        """
+        from app.core.interchange import otio_adapter
+        from app.core.interchange.editor_timeline_bridge import (
+            adapter_for_path,
+            clips_to_timeline,
+        )
+
+        if not otio_adapter.is_available():
+            QMessageBox.warning(
+                self, "导出失败",
+                "未安装 opentimelineio，无法导出 OTIO / EDL / FCPXML。\n"
+                "请执行：pip install opentimelineio\n"
+                "（EDL / FCPXML 另需：pip install otio-cmx3600-adapter otio-fcp-adapter）",
+            )
+            return False
+
+        width, height = 1920, 1080
+        m = re.match(r"\s*(\d+)\s*[xX*]\s*(\d+)", str(resolution or ""))
+        if m:
+            width, height = int(m.group(1)), int(m.group(2))
+        try:
+            fps_val = float(re.sub(r"[^\d.]", "", str(fps or "")) or 30.0)
+        except (TypeError, ValueError):
+            fps_val = 30.0
+        if fps_val <= 0:
+            fps_val = 30.0
+
+        clips = list(getattr(self, "_clips", None) or [])
+        if not clips:
+            QMessageBox.warning(self, "导出失败", "时间线为空，没有可导出的片段")
+            return False
+
+        project_name = os.path.splitext(os.path.basename(save_path))[0]
+        try:
+            self._notify_edit("导出时间线（OTIO / EDL / FCPXML）…")
+            timeline = clips_to_timeline(
+                clips,
+                name=project_name or "拾光剪影时间线",
+                fps=fps_val,
+                width=width,
+                height=height,
+            )
+            otio_adapter.export_otio(timeline, save_path, adapter=adapter_for_path(save_path))
+        except Exception as e:
+            logger.error("时间线导出失败: %s", e)
+            QMessageBox.warning(self, "导出失败", f"时间线导出失败：\n{e}")
+            return False
+
+        fmt = os.path.splitext(save_path)[1].lstrip(".").upper() or "OTIO"
+        video_tracks = sum(
+            1 for t in timeline.tracks if getattr(t, "type", None) and t.type.value != "audio"
+        )
+        extra = (
+            "\n提示：EDL 仅支持单条视频轨，已取片段最多的主力视频轨；"
+            "需保留全部轨道请改用 OTIO / FCPXML。" if video_tracks > 1 and fmt == "EDL" else ""
+        )
+        self._notify_edit("时间线导出完成")
+        QMessageBox.information(
+            self, "导出成功",
+            f"时间线已导出（{fmt}）：\n{save_path}\n\n"
+            f"片段：{sum(len(t.clips) for t in timeline.tracks)} 个｜"
+            f"轨道：{len(timeline.tracks)} 条\n"
+            f"可导入 Premiere / DaVinci Resolve / Final Cut 等专业剪辑软件。{extra}",
+        )
+        return True
+
     # ────────────── 主导出流程 ──────────────
 
     def _export_video(self):
@@ -230,6 +307,51 @@ class EditorExportPanelMixin:
             if not source_clip_path:
                 QMessageBox.warning(self, "导出失败", "没有可导出的视频片段")
                 return
+
+            # ── 先让用户选导出位置与格式（含时间线互操作格式）──
+            # 放在拼接/转码之前：若选的是 OTIO/EDL/FCPXML，直接导出时间线文档，
+            # 省掉整条 ffmpeg 拼接渲染（秒级完成）。
+            from PyQt6.QtWidgets import QFileDialog
+            base_name = os.path.basename(source_clip_path)
+            kernel_prefix = "Pro" if self._kernel_mode == "pro" else "Fast"
+            default_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"
+            _format_filters = {
+                "mp4": "MP4 视频 (*.mp4)",
+                "mov": "MOV 视频 (*.mov)",
+                "mkv": "MKV 视频 (*.mkv)",
+                "avi": "AVI 视频 (*.avi)",
+            }
+            filter_str = _format_filters.get(format, "视频文件 (*.*)")
+            # 装了 opentimelineio 才提供互操作格式（未装则不出现，避免误导）
+            try:
+                from app.core.interchange import otio_adapter as _oa
+                if _oa.is_available():
+                    from app.core.interchange.editor_timeline_bridge import (
+                        timeline_export_filters,
+                    )
+                    filter_str += ";;" + timeline_export_filters()
+            except Exception as _ie:
+                logger.debug("时间线互操作格式探测失败: %s", _ie)
+            save_path, _sel_filter = QFileDialog.getSaveFileName(
+                self, "选择导出位置", default_name, filter_str
+            )
+            if not save_path:
+                self._notify_edit("导出已取消")
+                return
+            # 时间线互操作（OTIO / EDL / FCPXML）：只导出时间线文档，不渲染视频
+            try:
+                from app.core.interchange.editor_timeline_bridge import (
+                    is_timeline_extension,
+                )
+                if is_timeline_extension(save_path):
+                    self._export_timeline_document(save_path, resolution, fps)
+                    return
+            except Exception as _ie:
+                logger.debug("时间线导出判定失败: %s", _ie)
+            # 确保扩展名与用户选择的格式一致
+            if not save_path.lower().endswith(f".{format}"):
+                save_path = os.path.splitext(save_path)[0] + f".{format}"
+            output_path = save_path
             edited_temp_path = None
             self._last_export_error = ""
             self._notify_edit("导出：准备中…")
@@ -303,31 +425,6 @@ class EditorExportPanelMixin:
                 "默认": "通用HD",
             }
             render_platform = platform_map.get(platform, "通用HD")
-
-            # ── 让用户选择导出路径（替代硬编码 "短剧AI剪辑输出"）──
-            from PyQt6.QtWidgets import QFileDialog
-            base_name = os.path.basename(source_clip_path)
-            kernel_prefix = "Pro" if self._kernel_mode == "pro" else "Fast"
-            default_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"
-
-            _format_filters = {
-                "mp4": "MP4 视频 (*.mp4)",
-                "mov": "MOV 视频 (*.mov)",
-                "mkv": "MKV 视频 (*.mkv)",
-                "avi": "AVI 视频 (*.avi)",
-            }
-            filter_str = _format_filters.get(format, "视频文件 (*.*)")
-
-            save_path, _sel_filter = QFileDialog.getSaveFileName(
-                self, "选择导出位置", default_name, filter_str
-            )
-            if not save_path:
-                self._notify_edit("导出已取消")
-                return
-            # 确保扩展名与用户选择的格式一致
-            if not save_path.lower().endswith(f".{format}"):
-                save_path = os.path.splitext(save_path)[0] + f".{format}"
-            output_path = save_path
 
             # 无 FFmpeg 时：未剪辑可直接复制；有剪辑则明确提示
             # 使用统一的 FFmpeg 路径检测（包含项目内置的 thirdparty/ffmpeg）
