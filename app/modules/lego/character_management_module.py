@@ -599,25 +599,30 @@ class CharacterManagementModule(BaseModule):
         # 顶栏
         header = QHBoxLayout()
         title = QLabel(f"{self.module_icon} {self.module_name}")
-        title.setStyleSheet("font-size:18px;font-weight:bold;color:#fff;")
+        # V4.43.8（用户授权解冻 stage3d-core）：去掉内联 color:#fff —— 浅色主题下白字白底
+        # 不可见。颜色交给全局 QSS 的 #titleLabel，只保留字号/字重。
+        title.setObjectName("titleLabel")
+        title.setStyleSheet("font-size:18px;font-weight:bold;")
         header.addWidget(title)
 
         hint = QLabel("无限画布生图/生视频 → 发送到剪辑 · 角色库挂资产")
-        hint.setStyleSheet("color:#888;font-size:11px;margin-left:8px;")
+        hint.setObjectName("hintLabel")
+        hint.setStyleSheet("font-size:11px;margin-left:8px;")
         header.addWidget(hint)
         header.addStretch()
 
         self._char_combo = QComboBox()
         self._char_combo.setMinimumWidth(140)
-        self._char_combo.setStyleSheet(
-            "QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;padding:4px 8px;border-radius:4px;}"
-        )
+        # V4.43.8（用户授权解冻 stage3d-core）：删掉内联硬编码深色框（#1a1a1a）。
+        # 内联样式**优先于**全局 QSS，导致：① 深色下与工具栏背景几乎同色、文字发暗
+        # （用户截图圈出的「看不清」）；② 浅色下变黑框、与浅色工具栏撞色。
+        # 改走全局 QComboBox[theme] 样式，随主题自适应。**未动** GLB/骨骼/端口/预热时机。
         self._refresh_char_combo()
         header.addWidget(QLabel("挂到角色:"))
         header.addWidget(self._char_combo)
 
         self._interp_check = QCheckBox("入轨后线性补帧")
-        self._interp_check.setStyleSheet("color:#ccc;")
+        # V4.43.8：去掉内联 color:#ccc，交给全局 QCheckBox[theme] 样式
         self._interp_check.setToolTip("非神经网络：帧差 + 线性混合（ai_interpolation）")
         header.addWidget(self._interp_check)
 

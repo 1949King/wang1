@@ -52,7 +52,7 @@
     "file:vendor/shiguang-canvas/src/stage3dControlNet.ts": "016494545f3963b8",
     "file:app/core/canvas_bridge.py": "da254b7708c1feaa",
     "file:app/core/canvas_runtime.py": "b95d7d6d52de2f4a",
-    "file:app/modules/lego/character_management_module.py": "d11f8ee078d5352c",
+    "file:app/modules/lego/character_management_module.py": "10d597e2b305a4cb",
     "file:scripts/export_vinchau_glb.py": "8935e0bfc63ba9bf",
     "file:vendor/shiguang-canvas/src/magnetic/CardStack.ts": "1b7e9cc6f6ea20f9",
     "file:vendor/shiguang-canvas/src/magnetic/FloatingToolbar.tsx": "608da791f374270c",
