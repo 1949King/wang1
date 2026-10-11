@@ -129,7 +129,10 @@ class _NotificationCard(QFrame):
             content = QLabel(self._n.body, self)
             content.setObjectName("notifCardBody")
             content.setWordWrap(True)
-            content.setMaximumHeight(48)
+            # V4.43.12：原先硬限高 48px ⇒ 稍长的正文**被直接裁掉**（用户反馈
+            # 「内容显示不完整」）。改为不设像素上限，让 wordWrap 自然撑开、由外层
+            # QScrollArea 负责滚动；仅设一个宽松上限（约 6 行）防止极端长文本占满整屏。
+            content.setMaximumHeight(144)
             body.addWidget(content)
 
         meta_row = QHBoxLayout()

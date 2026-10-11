@@ -1,5 +1,42 @@
 # 拾光剪影 — 变更日志
 
+## V4.43.12 (2026-10-11) — 通知中心补全主题样式（17 个 objectName 此前零 QSS）+ 正文不再被裁
+
+> 用户原话：「还有一个就是关于在深色模式下的通知中心，它里面的内容还是显示不完整，
+> 以及它的有点问题。」
+
+### 【根因（两条，同源）】
+
+| # | 根因 | 后果 |
+|---|---|---|
+| ① | **17 个 objectName 一条 QSS 都没写** —— `notificationCenterPanel` / `notifHeader` / `notifHeaderTitle` / `notifCard` / `notifCardTitle` / `notifCardBody` / `notifCardTime` / `notifScroll` / `notifFilterTab` / `notifFooterBtn` … 只在 `setObjectName()` 起了名，`theme_manager._build_qss` **零引用** | 全走 Qt 默认样式：**浅色下「浅底黑字」勉强可读，深色下直接不可用**（正是用户限定的「深色模式下」） |
+| ② | `_NotificationCard` 正文 `content.setMaximumHeight(48)` | 稍长正文**被直接裁掉**（「显示不完整」的字面含义） |
+
+### 【修复】
+- `theme_manager._build_qss` 补全通知中心全套样式（面板/卡片底色、标题与正文层级、按钮
+  hover、filter tab 选中态、滚动区透明），全部走主题变量，**随主题自适应**。
+- 正文限高 **48 → 144**（约 6 行）：不再裁切常见长度；仍留上限防极端长文本占满整屏，
+  超出由外层 `QScrollArea` 承担。
+
+### 【验证（实测）】
+
+| 主题 | QSS 长度 | `#notifCardBody` 实际颜色 |
+|---|---|---|
+| light | 26282 字符 | `#6E7488` |
+| dark | 26115 字符 | `#8888a0` |
+
+两主题 QSS 构建成功、新规则齐备、**颜色不同 ⇒ 主题自适应确实生效**（无 KeyError）。
+门禁：ruff 棘轮零新增 / frozen_zone 85 locks intact / 规模守卫无新增 / stability 250 / SCOPE 0。
+
+### 【同类病根（本日第 3 次）】
+「`setObjectName` 了但 QSS 没写」= 控件**静默退回 Qt 默认样式**。本日已撞同一堵墙三次：
+① 顶栏 `headerBarIconBtn`（V4.43.6） ② 角色工具栏内联硬编码（V4.43.8）
+③ 通知中心 17 个 objectName（本版）。
+
+> **纪律：新增任何 `setObjectName("x")` 后，必须 grep 一次 `#x` 是否在 QSS 里。**
+
+---
+
 ## V4.43.11 (2026-10-11) — 热修：设置打不开（V4.43.9 回归）
 
 > 用户原话：「就是设置呃首页中的最顶上的设置图标的功能打不开，以及登录里面的设置也打不开，

@@ -338,6 +338,89 @@ class ThemeManager:
         QPushButton[theme="{theme_name}"]#headerBarIconBtn:pressed {{
             background-color: {c['bg_tertiary']};
         }}
+        /* ── 通知中心下拉面板（V4.43.12 补全）──
+           此前该面板用了 **17 个 objectName 但全局 QSS 一条都没写**：浅色主题下靠
+           Qt 默认的「浅底黑字」勉强可读，**深色主题下直接不可用**（用户反馈
+           「深色模式下的通知中心，它里面的内容还是显示不完整」）。
+           现按主题变量补全：面板/卡片底色、标题与正文的层级、按钮 hover、tab 选中态。 */
+        QFrame[theme="{theme_name}"]#notificationCenterPanel {{
+            background-color: {c['bg_secondary']};
+            border: 1px solid {c['border']};
+            border-radius: 12px;
+        }}
+        QFrame[theme="{theme_name}"]#notifHeader,
+        QFrame[theme="{theme_name}"]#notifFilterBar,
+        QFrame[theme="{theme_name}"]#notifFooter {{
+            background-color: transparent;
+            border: none;
+        }}
+        QLabel[theme="{theme_name}"]#notifHeaderTitle {{
+            color: {c['text_primary']};
+            font-size: 14px;
+            font-weight: 700;
+        }}
+        QPushButton[theme="{theme_name}"]#notifHeaderBtn,
+        QPushButton[theme="{theme_name}"]#notifHeaderCloseBtn,
+        QPushButton[theme="{theme_name}"]#notifCardCloseBtn {{
+            background-color: transparent;
+            color: {c['text_secondary']};
+            border: none;
+            border-radius: 6px;
+        }}
+        QPushButton[theme="{theme_name}"]#notifHeaderBtn:hover,
+        QPushButton[theme="{theme_name}"]#notifHeaderCloseBtn:hover,
+        QPushButton[theme="{theme_name}"]#notifCardCloseBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['text_primary']};
+        }}
+        QPushButton[theme="{theme_name}"]#notifFilterTab,
+        QPushButton[theme="{theme_name}"]#notifFooterBtn {{
+            background-color: {c['bg_tertiary']};
+            color: {c['text_secondary']};
+            border: 1px solid {c['border_light']};
+            border-radius: 6px;
+            padding: 2px 10px;
+        }}
+        QPushButton[theme="{theme_name}"]#notifFilterTab:hover,
+        QPushButton[theme="{theme_name}"]#notifFooterBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['text_primary']};
+        }}
+        QPushButton[theme="{theme_name}"]#notifFilterTab:checked {{
+            background-color: {c['accent']};
+            color: {c['text_on_accent']};
+            border-color: {c['accent']};
+        }}
+        QFrame[theme="{theme_name}"]#notifCard {{
+            background-color: {c['bg_tertiary']};
+            border: 1px solid {c['border_light']};
+            border-radius: 8px;
+        }}
+        QFrame[theme="{theme_name}"]#notifCard:hover {{
+            background-color: {c['bg_hover']};
+            border-color: {c['border_focus']};
+        }}
+        QLabel[theme="{theme_name}"]#notifCardTitle {{
+            color: {c['text_primary']};
+            font-size: 13px;
+        }}
+        QLabel[theme="{theme_name}"]#notifCardBody {{
+            color: {c['text_secondary']};
+            font-size: 12px;
+        }}
+        QLabel[theme="{theme_name}"]#notifCardTime {{
+            color: {c['text_muted']};
+            font-size: 11px;
+        }}
+        QLabel[theme="{theme_name}"]#notifEmpty {{
+            color: {c['text_muted']};
+            font-size: 12px;
+        }}
+        QScrollArea[theme="{theme_name}"]#notifScroll,
+        QScrollArea[theme="{theme_name}"]#notifScroll > QWidget > QWidget {{
+            background-color: transparent;
+            border: none;
+        }}
         QFrame[theme="{theme_name}"]#bottomBar {{
             background-color: {c['bg_secondary']};
             border-top: 1px solid {c['border_light']};
