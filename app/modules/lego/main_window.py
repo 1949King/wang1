@@ -1477,8 +1477,8 @@ class MainWindow(QMainWindow):
         self.show_status(f"已切换到{('浅色' if new_theme == 'light' else '深色')}主题", "#4caf50")
 
     def _on_notif_btn_clicked(self):
-        """通知按钮 — 暂作为统一入口占位，复用用户中心面板"""
-        self._popup_user_center()
+        """通知按钮 — 弹通知中心面板（V4.42.1 起不再是复用用户中心）"""
+        self._popup_notification_center()
 
     def _on_user_btn_clicked(self):
         """用户中心按钮 — 弹面板"""
@@ -1527,26 +1527,97 @@ class MainWindow(QMainWindow):
         self.show_status("已退出登录", "#fbbf24")
 
     def _on_feedback_clicked(self):
-        """意见反馈 — 暂用 status bar 提示（P1 接入真实反馈入口）"""
-        self.show_status("反馈通道建设中，请先到帮助文档查看临时联系方式", "#3b82f6")
+        """意见反馈 — 弹 FeedbackDialog"""
+        self._popup_feedback_dialog()
 
     def _on_notifications_clicked(self):
-        """通知中心 — 暂用 status bar 提示（P1 接入 NotificationCenterPanel）"""
-        self.show_status("通知中心建设中，详见用户中心面板", "#3b82f6")
+        """通知中心 — 弹 NotificationCenterPanel"""
+        self._popup_notification_center()
 
     def _on_register_clicked(self):
         """注册入口 — 直接复用登录窗口并切到注册 Tab"""
         self._on_login_clicked()
 
     def _on_check_update_clicked(self):
-        """检查更新 — 调 update_manager.check_async()"""
+        """检查更新 — 调 update_manager.check_async()，并写通知中心留痕"""
         try:
             from app.core.update_manager import update_manager
             update_manager.check_async()
+            # 把触发动作写到通知中心（让用户有可视化的等待反馈）
+            try:
+                from app.core.notification_store import notification_store, TYPE_UPDATE, LEVEL_INFO
+                notification_store().notify(
+                    title="开始检查更新",
+                    body="后台正在查询最新版本，完成后会写入通知中心",
+                    type=TYPE_UPDATE,
+                    level=LEVEL_INFO,
+                )
+            except Exception:
+                pass
             self.show_status("正在检查更新…", "#3b82f6")
         except Exception as e:
             logger.error("触发更新检查失败: %s", e)
             self.show_status("检查更新失败，请稍后重试", "#ef4444")
+
+    def _popup_feedback_dialog(self):
+        """弹 FeedbackDialog"""
+        from .feedback_dialog import FeedbackDialog
+        dialog = FeedbackDialog(parent=self)
+        dialog.submitted.connect(self._on_feedback_submitted)
+        dialog.exec()
+
+    def _on_feedback_submitted(self, payload: dict):
+        """反馈提交成功回调"""
+        try:
+            from app.core.notification_store import LEVEL_SUCCESS
+            self.show_status(
+                f"感谢反馈（{payload.get('category','')}）",
+                "#10b981" if LEVEL_SUCCESS == LEVEL_SUCCESS else "#3b82f6",
+            )
+        except Exception:
+            self.show_status("感谢反馈", "#10b981")
+        # 顺手刷新通知中心徽章
+        panel = getattr(self, "_user_center_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_unread_badge()
+            except Exception:
+                pass
+
+    def _popup_notification_center(self):
+        """在 _notif_btn 正下方弹出通知中心面板"""
+        from .notification_center_panel import NotificationCenterPanel
+        panel = getattr(self, "_notification_center_panel", None)
+        if panel is None:
+            from app.core.notification_store import notification_store
+            panel = NotificationCenterPanel(
+                notification_store=notification_store(),
+                theme_manager=ThemeManager.instance(),
+                parent=self,
+            )
+            # 通知中心面板内的"意见反馈/检查更新"按钮：复用 main_window 入口
+            panel.feedback_requested.connect(self._on_feedback_clicked)
+            panel.check_update_requested.connect(self._on_check_update_clicked)
+            # mark_all_read / clear_all 触发后，刷新 user_center_panel 的徽章
+            panel.mark_all_read_requested.connect(self._refresh_user_badge)
+            panel.clear_all_requested.connect(self._refresh_user_badge)
+            panel.delete_requested.connect(self._refresh_user_badge)
+            panel.item_clicked.connect(self._refresh_user_badge)
+            self._notification_center_panel = panel
+        try:
+            panel.refresh()
+        except Exception as e:
+            logger.debug("刷新通知中心面板失败: %s", e)
+        panel.popup_below(self._notif_btn)
+
+    def _refresh_user_badge(self, *_args):
+        """通知中心变更后刷新 user_center_panel 的未读徽章"""
+        panel = getattr(self, "_user_center_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_unread_badge()
+            except Exception as e:
+                logger.debug("刷新用户中心徽章失败: %s", e)
     
     def _restore_window_geometry(self):
         """按「记住窗口大小和位置」设置恢复上次退出时的窗口几何信息。

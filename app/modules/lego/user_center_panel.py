@@ -302,18 +302,22 @@ class UserCenterPanel(QFrame):
         self.auth_state_changed.emit(logged_in)
 
     def _refresh_update_hint(self):
-        """从 update_manager 拉取是否有新版，更新右上角徽章"""
+        """从 notification_store 拉取未读数，更新右上角徽章（V4.42.1 起取代 update_manager）"""
         try:
-            info = self._um.get_current_info() if self._um else None
+            from app.core.notification_store import notification_store
+            count = notification_store().unread_count()
         except Exception as e:
-            logger.debug("读取更新信息失败: %s", e)
-            info = None
-
-        if info and getattr(info, "has_update", False):
-            self._unread_badge.setText("新")
+            logger.debug("读取未读通知数失败: %s", e)
+            count = 0
+        if count > 0:
+            self._unread_badge.setText(str(count) if count < 100 else "99+")
             self._unread_badge.show()
         else:
             self._unread_badge.hide()
+
+    def refresh_unread_badge(self):
+        """公开方法：让 main_window 在通知中心变更后主动拉一次徽章"""
+        self._refresh_update_hint()
 
     # ─────────── 主题 ───────────
     def _apply_theme(self):

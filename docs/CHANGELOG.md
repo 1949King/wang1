@@ -1,5 +1,44 @@
 # 拾光剪影 — 变更日志
 
+## V4.42.1 (2026-10-11) — 通知中心面板 + 反馈通道
+
+> 把 V4.42.0 的两处 status bar 占位（通知/反馈）换成真实组件。headerBar 🔔 按钮点开就是真通知中心；UserCenterPanel 底部「意见反馈」点开就是真反馈对话框。
+> 画布版本不动（独立版本号），本次仅主程序改动。
+
+### 改动
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| ① 通知中心 | status bar 提示「建设中」 | `NotificationCenterPanel`（499 行 QFrame+Popup）：6 段布局（标题+过滤标签+滚动列表+空状态+底部三按钮），挂在 headerBar 🔔 按钮下方 |
+| ② 通知数据契约 | 无 | `NotificationStore`（336 行）：单例 + JSON 持久化 + RLock + 500 条 FIFO 限额 + callback 机制；5 类（system/update/feedback/alert/info）× 4 级（info/success/warning/error） |
+| ③ 反馈入口 | status bar 提示「建设中」 | `FeedbackDialog`（284 行 QDialog 模态）：5 类（问题反馈/功能建议/Bug/合规/其他）+ 3 级严重度 + 选填邮箱 + 必填描述 |
+| ④ 反馈提交路径 | 无 | ① 永远写 NotificationStore（feedback 类型）② 选走 Webhook POST（QSettings `feedback/webhook_url`，10s 超时）③ 状态条兜底 |
+| ⑤ 徽章源 | `update_manager.get_current_info()` | `notification_store().unread_count()`；新 `refresh_unread_badge()` 公开方法 |
+| ⑥ 检查更新反馈 | 无 | `_on_check_update_clicked` 增加「开始检查更新」消息写入通知中心，用户有可视化等待反馈 |
+| ⑦ 信号同步 | 无 | NotificationCenterPanel 内 feedback/check_update 信号回连 main_window 入口；4 个动作信号（mark_all_read/clear_all/delete/item_clicked）触发 `_refresh_user_badge` |
+
+### 文件
+
+- 新建：`app/core/notification_store.py`（336 行）
+- 新建：`app/modules/lego/notification_center_panel.py`（499 行）
+- 新建：`app/modules/lego/feedback_dialog.py`（284 行）
+- 改：`app/modules/lego/main_window.py`（1653 → 1823 行，+170 行；6 新方法 + 4 信号接线）
+- 改：`app/modules/lego/user_center_panel.py`（402 行未变；改 `_refresh_update_hint` 内部实现）
+- 改：`app/version.py` 4.42.0 → 4.42.1
+
+### 纪律
+
+- **零冻结区触碰**：3 新文件 + 改的 2 文件均非冻结；未解冻任何符号。
+- **零 CANVASDUAL 影响**：纯 Python 改动，副库无需同步。
+- **零新增 ruff 违规**：3 新文件 `All checks passed!`；user_center_panel.py 0 新增；main_window.py 12 项 = 基线 12。
+- **画布版本不动**：`vendor/shiguang-canvas/src/canvasVersion.ts` 仍为 0.3.20。
+- **NotificationCenterPanel 零业务耦合**：仅持 NotificationStore 引用 + 发信号；main_window 接线。
+- **FeedbackDialog 三层提交**：本地 → Webhook → 状态条；任何一层失败不阻断其它层。
+
+### 验证
+
+ruff 166 文件零新增 · sizeratchet 通过 · run_all_checks **75/75** 全过 · 3 新文件 ruff All checks passed · 烟雾测试通过（CRUD + 过滤 + callback） · 导入测试通过 · size `main_window.py` 1823 行 ≤ 2000 阈值。
+
 ## V4.42.0 (2026-10-11) — 用户中心面板（顶 navbar 4 按钮）
 
 > 用户二轮反馈：「我要的是在整个项目的最顶上那儿增加，而不是在画布模块里面去增加，这样没有意义。画木块也是在这个项目里面的一个一个模块功能而已。」
