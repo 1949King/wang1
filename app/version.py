@@ -1,11 +1,11 @@
-__version__ = "4.43.20"
+__version__ = "4.43.21"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 43,
-    "patch": 20,
-    "codename": "24 位灯位 → 3D 导演台灯光可视化",
+    "patch": 21,
+    "codename": "捏脸卡片独立完善刀：A/C/D 扩展 + 预设存取/导入导出",
     "release_date": "2026-10-12",
     "description": (
         "V4.43.20：修复「电影级灯位面板与 3D 导演台零数据流」的孤儿缺口"
