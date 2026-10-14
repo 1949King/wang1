@@ -27,6 +27,21 @@ import {
 } from "../canvasEnhanceActions";
 import { yuePlanViaHost, yueTranscribeViaHost } from "../canvasYue";
 import {
+  bucketComplianceLevels,
+  checkScriptCompliance,
+  collectComplianceCharacters,
+  collectComplianceShots,
+  complianceHeadline,
+  type ComplianceResult,
+} from "../hostCompliance";
+import {
+  fetchEnhanceIntents,
+  intentButtonLabel,
+  selectDirectIntents,
+  type EnhanceIntent,
+  type EnhanceIntentCatalog,
+} from "../hostEnhanceIntents";
+import {
   APERTURES,
   CAMERA_MOTIONS,
   FOCAL_LENGTHS,
@@ -106,6 +121,18 @@ type LooseData = Record<string, unknown> & {
   pitch?: number;
 };
 
+/**
+ * 增强意图目录不可用时的回落集合（Wave 0 #13）。
+ * 文案与后端 `ENHANCE_INTENTS`（app/core/canvas_enhance.py:54）逐字对齐 ——
+ * 只用于「bridge 没起来 / 端点失败」，此时前端给老行为，不白屏。
+ * 目录一旦拉到，本常量即被后端数据取代（后端是单一真源）。
+ */
+const FALLBACK_INTENTS: EnhanceIntent[] = [
+  { id: "face", label: "修复人脸", hint: "让面部更清晰自然；没有检测到人脸时原样返回" },
+  { id: "cutout", label: "抠像换背景", hint: "把主体从背景里分离出来；可换成纯色底或保留透明底" },
+  { id: "sharpen", label: "超分放大", hint: "放大画面并补细节；高质量档更清晰但更慢" },
+];
+
 export default function NoviceInspector() {
   const selectedId = useCanvasStore((s) => s.selectedId);
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === s.selectedId));
@@ -138,8 +165,14 @@ export default function NoviceInspector() {
   // 均显式点击触发 + 诚实回报实际引擎（degraded/降级必标注）。
   const [enhBusy, setEnhBusy] = useState(false);
   const [enhMsg, setEnhMsg] = useState("");
+  // 增强意图目录（Wave 0 #13）：后端下发，取代硬编码的两个按钮。空 =尚未拉到/拉取失败。
+  const [intentsCat, setIntentsCat] = useState<EnhanceIntentCatalog | null>(null);
   const [swBusy, setSwBusy] = useState(false);
   const [swMsg, setSwMsg] = useState("");
+  // 剧本合规守护（Wave 0 #13）：显式点击触发。判定全在后端，前端只展示。
+  const [cpBusy, setCpBusy] = useState(false);
+  const [cpMsg, setCpMsg] = useState("");
+  const [cpRes, setCpRes] = useState<ComplianceResult | null>(null);
 
   // 双击卡片 = 打开精细编辑：订阅 store 的双击信号，自动展开进阶设置
   const proEditNonce = useCanvasStore((s) => s.proEditNonce);
@@ -149,6 +182,18 @@ export default function NoviceInspector() {
       setProOpen(false);
     }
   }, [proEditNonce]);
+
+  // 增强意图目录：挂载即拉一次（纯只读目录端点，不加载任何模型，见 canvas_enhance.available_intents）。
+  // 失败不重试 —— 回落 FALLBACK_INTENTS 即老行为，反复打一个失败端点是噪音。
+  useEffect(() => {
+    let alive = true;
+    void fetchEnhanceIntents().then((cat) => {
+      if (alive && cat?.ok) setIntentsCat(cat);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /** 意图胶囊解析：打一句话 → 建导演卡承载意图 → 调 LLM 拆镜 → 自动铺出分镜序列 */
   const runIntentBreakdown = async () => {
@@ -477,17 +522,24 @@ export default function NoviceInspector() {
     }
   };
 
-  /** AI 增强（刀3）：超分/抠像共用后端 /host/canvas-enhance 意图级实现（Agent 能力同源）。
-   *  如实回报实际引擎：degraded 必标注，绝不把双三次插值说成 AI 超分。 */
-  const doEnhance = async (intent: "sharpen" | "cutout") => {
+  /** AI 增强（刀3）：共用后端 /host/canvas-enhance 意图级实现（Agent 能力 canvas.ai_upscale /
+   *  canvas.ai_matte 同一后端 canvas_enhance.apply_intents）。
+   *  如实回报实际引擎：degraded 必标注，绝不把双三次插值说成 AI 超分。
+   *
+   *  Wave 0 #13（2026-10-15）：意图列表不再硬编码 —— 由 GET /host/enhance-intents 下发
+   *  （hostEnhanceIntents.selectDirectIntents）。原先这里是字面量 `"sharpen" | "cutout"`，
+   *  后端 ENHANCE_INTENTS 里的 `face`（修复人脸）前端完全够不着。
+   *  拉不到目录时回落到 FALLBACK_INTENTS（老行为，不白屏）。 */
+  const doEnhance = async (intent: string) => {
     const img = (d.imageUrl as string) || "";
     if (!img || enhBusy) return;
+    const label =
+      selectDirectIntents(intentsCat).find((i) => i.id === intent)?.label ||
+      FALLBACK_INTENTS.find((i) => i.id === intent)?.label ||
+      intent;
     setEnhBusy(true);
-    setEnhMsg(
-      intent === "sharpen"
-        ? "正在 AI 超分（standard 档 OpenCV ESPCN，不下载模型）…"
-        : "正在 AI 抠像（MODNet，模型未就绪会如实报错）…",
-    );
+    // 进行中文案用后端 label，不自造描述（自造=可能与实际引擎不符）
+    setEnhMsg(`正在「${label}」…（本地引擎，结果如实回报）`);
     try {
       // 后端只认 data URL；节点图可能是 /inbox_file/…，先归一化
       const dataUrl = await toEnhanceDataUrl(img);
@@ -506,9 +558,8 @@ export default function NoviceInspector() {
         const note = step.degraded
           ? `⚠️ 降级：${step.reason || step.engine || "非 AI 路径"}`
           : `引擎 ${step.engine || "unknown"}`;
-        setEnhMsg(
-          intent === "sharpen" ? `已超分 ×2 · ${note}` : `已抠像（透明底） · ${note}`,
-        );
+        // 完成文案用后端回的 label（apply_intents 的 applied[].label），前端不编
+        setEnhMsg(`已「${step.label || label}」 · ${note}`);
       } else {
         const why =
           (res.skipped || []).find((s) => s.intent === intent)?.reason ||
@@ -555,6 +606,38 @@ export default function NoviceInspector() {
       setSwMsg(`剧本生成异常: ${e}`);
     } finally {
       setSwBusy(false);
+    }
+  };
+
+  /** 剧本合规守护（Wave 0 #13 孤儿端点接线第2 条，2026-10-15）：
+   *  调 POST /host/compliance-check。后端 script_compliance_check 是唯一判定源
+   *  （app/core/project_agent_host.py:741），前端**不复制任何一条检查规则**，
+   *  只把返回的 suggestions 按 level 分桶展示。
+   *  收集范围：画布上全部 shot 节点（有title 或 prompt）+ character 节点（有 characterName）。
+   *  ⚠️ 后端会同时 SSE 推 compliance.report（AgentPanel 已消费）⇒ 这里不新增推送通道。
+   */
+  const runComplianceCheck = async () => {
+    if (cpBusy) return;
+    const content = String(d.content || "").trim();
+    if (!content) {
+      setCpMsg("剧本是空的，先写正文再查合规");
+      return;
+    }
+    setCpBusy(true);
+    setCpMsg("正在检查（本地启发式 + AI 审查，AI 较慢）…");
+    try {
+      const st = useCanvasStore.getState();
+      const res = await checkScriptCompliance({
+        script: content,
+        shots: collectComplianceShots(st.nodes),
+        characters: collectComplianceCharacters(st.nodes),
+      });
+      setCpRes(res);
+      setCpMsg(complianceHeadline(res) || "检查完成");
+    } catch (e) {
+      setCpMsg(`合规检查异常: ${e}`);
+    } finally {
+      setCpBusy(false);
     }
   };
 
@@ -860,34 +943,36 @@ export default function NoviceInspector() {
 
       {/* AI 增强（LibTV 对标补强 刀3，2026-10-12 用户授权解冻）：图像节点本地引擎
           超分/抠像，与 Agent 能力 canvas.ai_upscale / canvas.ai_matte 同一后端。
-          复用 .nv-loop-* 既有样式（不改 novice-inspector.css）；如实回报引擎与降级。
-          不改：磁吸阈值/卡片尺寸 240×200/gap/三段式阻力/跟手/单轴吸附/让位/Bond/方向无语义/空间记忆配色。 */}
+          复用 .nv-loop-* 既有样式；如实回报引擎与降级。
+          不改：磁吸阈值/卡片尺寸 240×200/gap/三段式阻力/跟手/单轴吸附/让位/Bond/方向无语义/空间记忆配色。
+          Wave 0 #13（2026-10-15）：按钮由 GET /host/enhance-intents 目录驱动
+          （原先硬编码两个，现后端 face 意图也能用）。heal/style 因缺参数控件不渲染
+          —— 见 hostEnhanceIntents.ts 判据表。 */}
       {kind === "image" && typeof d.imageUrl === "string" && d.imageUrl ? (
         <div className="nv-insp-field nv-insp-loop">
           <label>AI 增强</label>
           <div className="nv-loop-body">
-            <div className="nv-loop-row">
-              <button
-                type="button"
-                className="nv-loop-repair"
-                disabled={enhBusy}
-                onClick={() => doEnhance("sharpen")}
-                title="本地超分 ×2（standard 档 OpenCV ESPCN，不下载模型；high 档 RealESRGAN 请走 Agent 能力 canvas.ai_upscale）"
-              >
-                {enhBusy ? "处理中…" : "AI 超分 ×2"}
-              </button>
-            </div>
-            <div className="nv-loop-row">
-              <button
-                type="button"
-                className="nv-loop-repair"
-                disabled={enhBusy}
-                onClick={() => doEnhance("cutout")}
-                title="主体分离 → 透明底（MODNet；模型未就绪时如实报错，不硬切背景）"
-              >
-                {enhBusy ? "处理中…" : "AI 抠像（透明底）"}
-              </button>
-            </div>
+            {(() => {
+              // 目录优先；拉不到（bridge 未起/端点失败）回落 FALLBACK_INTENTS，不白屏。
+              const intents = selectDirectIntents(intentsCat);
+              const shown = intents.length ? intents : FALLBACK_INTENTS;
+              return shown.map((it) => (
+                <div className="nv-loop-row" key={it.id}>
+                  <button
+                    type="button"
+                    className="nv-loop-repair"
+                    disabled={enhBusy}
+                    onClick={() => doEnhance(it.id)}
+                    title={it.hint || intentButtonLabel(it)}
+                  >
+                    {enhBusy ? "处理中…" : `AI ${intentButtonLabel(it)}`}
+                  </button>
+                </div>
+              ));
+            })()}
+            {intentsCat === null ? (
+              <div className="nv-loop-msg">意图目录未取到，用内置清单</div>
+            ) : null}
             {enhMsg ? <div className="nv-loop-msg">{enhMsg}</div> : null}
           </div>
         </div>
@@ -1278,8 +1363,40 @@ export default function NoviceInspector() {
                   >
                     {swBusy ? "写作中…" : "AI 生成剧本"}
                   </button>
+                  <button
+                    type="button"
+                    className="nv-loop-repair"
+                    disabled={cpBusy}
+                    onClick={runComplianceCheck}
+                    title="对照画布上的镜头与角色做一致性检查（角色冲突 / 场景遗漏 / 节奏断裂 / Prompt 偏离），提审前查一遍"
+                  >
+                    {cpBusy ? "检查中…" : "🛡️ 合规检查"}
+                  </button>
                 </div>
                 {swMsg ? <div className="nv-loop-msg">{swMsg}</div> : null}
+                {cpMsg ? <div className="nv-loop-msg">{cpMsg}</div> : null}
+                {(() => {
+                  // 分桶渲染：warning 置前且标红，info 标黄，其余（ok 等）中性。
+                  // 逐条 message 来自后端 suggestions，前端不加工文案。
+                  const sug = cpRes?.suggestions || [];
+                  if (!sug.length) return null;
+                  const b = bucketComplianceLevels(sug);
+                  return (
+                    <ul className="nv-cp-list">
+                      {[...b.warning, ...b.info, ...b.other].map((s, i) => {
+                        const lv = String(s.level || "").trim().toLowerCase();
+                        const cls =
+                          lv === "warning" ? "warn" : lv === "info" ? "info" : "other";
+                        return (
+                          <li key={i} className={`nv-cp-item ${cls}`}>
+                            <b>{s.category || "建议"}</b>
+                            {s.message || ""}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  );
+                })()}
               </div>
             </div>
           ) : null}

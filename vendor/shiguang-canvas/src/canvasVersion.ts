@@ -19,13 +19,13 @@
  */
 
 /** 画布语义化版本（不带 v 前缀，便于与 package.json 对齐） */
-export const CANVAS_VERSION = "0.3.30";
+export const CANVAS_VERSION = "0.3.31";
 
 /** 画布版本显示串（带 v 前缀，供导航栏渲染） */
 export const CANVAS_VERSION_LABEL = `v${CANVAS_VERSION}`;
 
 /** 版本代号：跟随本版主题命名，便于口头指代 */
-export const CANVAS_VERSION_CODENAME = "角色节点接线 + Agent 桌宠跨画布事件化 + #185 崩溃根因（V4.43.22）";
+export const CANVAS_VERSION_CODENAME = "合规检查 + 增强意图目录接线（Wave 0 #13 第 2/3 条）";
 
 /** 导航栏版本号的 tooltip 文案 */
 export const CANVAS_VERSION_TITLE = `拾光导演台 · ${CANVAS_VERSION_CODENAME}`;

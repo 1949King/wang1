@@ -576,6 +576,51 @@
   padding-top: 2px;
 }
 
+/* ── 剧本合规守护结果列表（Wave 0 #13，2026-10-15）──
+   走 CSS 而非内联 style：项目不变量「内联样式 = 主题盲区」。 */
+.nv-cp-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.nv-cp-item {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border-left: 2px solid #3a4a6a;
+  background: #12151f;
+  color: #c7cbd8;
+}
+
+.nv-cp-item b {
+  color: #8b93a7;
+  margin-right: 5px;
+  font-weight: 600;
+}
+
+/* warning = 提审会被打回的口径级问题，标红 */
+.nv-cp-item.warn {
+  border-left-color: #e05c5c;
+}
+
+/* info = 值得看一眼（遗留绑定、过度拆分） */
+.nv-cp-item.info {
+  border-left-color: #f0b84a;
+}
+
+/* ok / 其他级别：中性，不抢注意力 */
+.nv-cp-item.other {
+  border-left-color: #3a4a6a;
+  opacity: 0.85;
+}
+
 /* ── YuE（乐）全曲生成面板（2026-09-28）── */
 .nv-insp-yue .nv-yue-body {
   display: flex;
