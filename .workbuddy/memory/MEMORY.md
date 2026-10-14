@@ -27,7 +27,10 @@
 - **体积守卫余量见底**（2026-10-12）：`bridge.ts` 2043/2046（**禁改**）；`store.ts` 2502/2513；`Stage3D.tsx` 4604/4653；`riggedHumanoid.ts` 3159/3189；`CanvasShell.tsx` 3113/3229 ⇒ **新逻辑另开文件，拆模块不抬基线**。
 - **静默失效坑**：① `HUMAN_PRESETS[].heightScale` 在导演台被 `Stage3D.tsx:1489` 的 `actor.scale` 覆盖 ⇒ 体型缩放用 `VARIANT_SCALE`；② 角色库动态表单只认 `text/string`，enum 字段须 `_ENUM_SOURCES` + `_enum_combos` 五处同步。均已由 `check_character_schema.py` ⑦⑧ 锁住（反例 5/5 报红）。
 - **两条单通道（禁止造第二套）**：① 3D 产物入轨 = `stage3dArtifacts.ts::sendArtifactToTimeline()` → `POST /ingest_path`（data URL 先 `/host/upload-asset` 落盘）；② 角色库→导演台 = store `requestStage3dCast` → `stage3dCastSeq` 递增 → `useStage3dCast()` 消费。全链路零随机（id 哈希配色）。
-- **孤儿端点缺口**：「后端齐全、前端无调用者」⇒ 接线性价比远高于造新。⚠️ **差集法本身必须先自检**（2026-10-15 两轮结论都不可信）：三个扫描面（画布 `src` 非注释非测试行 / `canvas_server.py` 的 JS 字面量 / `app/**/*.py` 的 URL 拼接），`plugins/*` 由 Qt 侧 urllib 直调不算孤儿。当前基线：**85 端点 = 已接线 70 + 真孤儿 15**。
+- **孤儿端点缺口**：「后端齐全、前端无调用者」⇒ 接线性价比远高于造新。⚠️ **差集法本身必须先自检**（2026-10-15 三轮结论都不可信）：**四个扫描面**（画布 `src` 非注释非测试行 / `canvas_server.py` 的 JS 字面量 / `app/**/*.py` 的 URL 拼接 / **副库 Rust `src-tauri/src/lib.rs`**——第四面是 2026-10-15 第 4/5 条补上的，否则 `/host/tauri-closing` 被误报成孤儿）。基线：**85 端点 = 已接线 70 + 真孤儿 15** ⇒ 第 4/5 条消掉 2 组（3 端点）⇒ **剩 11**。已判定**不该接**的：`providers`（= `ai-config-patch` 别名，同一 handler）、`generate-video`/`video-generate`（被 `/host/generation/submit` 取代的历史端点）、`reference-breakdown` L1（L2 的子集）。
+- 🔴 **「半成品缺口」是独立一类**（前端比后端多走一步、停在半路）：`referenceBreakdownL2` 桥函数 + 类型 + re-export 早就在，**零 UI 调用者**。找法 = grep 桥函数定义，看有没有 UI 层 import 它。
+- 🔴 **「没测出来」≠「测出来了」**（2026-10-15 新增铁律）：后端给空串的字段（深度拉片 `景别`/`运镜`）前端**原样保留空串，绝不填默认值**；非法数值落 0 不猜；`keyframe` 是磁盘绝对路径 ⇒ **不塞 `frameUrl`**（WebView 加载不了 `D:\`）；要开云端视觉（素材出域）默认 false + 用户显式勾选。
+- 🔴 **破坏性快照的三条限制**（`project-snapshot`）：① docstring 说「每次导出自动 push」但**实测 export 没调 push** ⇒ **只有 import 会长栈，空栈是真实状态**；② `list()` 白名单裁剪没有 clips；③ 🔴 **`restore` 不 push 且前端无 push 端点 ⇒ 回滚不可再回滚**，唯一兜底是先导出，二次确认必须写明。
 - 🔴 **同名不同义的常量 = 本项目高频坑**（踩过 3 次：`bridge.ts` 的 `warnings` 字段不对称、`/host/enhance-intents` 的 `quality_tiers`=fast/standard/high vs 前端 `QUALITY_TIERS`=draft/standard/fine/cinema）。**接线时凡带 `quality/tier/mode/level` 的后端字段，先核前端同名常量是不是同一语义**，不确定就别暴露那个字段 + 写测试反锁。
 - **端点接线三条硬纪律**：① 判定逻辑一律留后端，前端只展示（结论文案**逐字用后端 `summary`**，不自造）；② **不渲染「点了必然失败」的死按钮**（`heal` 缺遮罩入口、`style` 无风格选择器会静默套默认 cyberpunk ⇒ 白名单只留 `face/cutout/sharpen`，用 `excludedIntents()` 如实说明）；③ 后端同函数已 SSE 推的事件（如 `compliance.report`）**不新增第二条 HTTP 推送通道**。
 - **YuE 全曲**：本机跑不动 ⇒ 只能远程 `SHIGUANG_YUE_ENDPOINT` / 本地 `SHIGUANG_YUE_HOME`；执行端不可用必须诚实失败，绝不假音频/静默降级。
@@ -48,7 +51,10 @@
 - **行尾纪律**：Edit 保留 CRLF；画布 `src/*.ts(x)`、`现行技术文档.md`、`frozen_zones.json`、`.workbuddy/memory/*` = LF；`version.py`、`CHANGELOG.md`、`.cursor/rules/*.mdc` = CRLF。重写 CRLF = Write 临时文件 → Python 换行 → 写回；`version.py` 用整体 Write。
 - **提交**：必须原生 bash 发起（生成 `.sh` + `git commit -F 消息文件`，别用 Python 派生 git）；**永不裸 `git commit`**；版本号提交前最后一步写，被覆盖**换号不抢回**；`--no-verify` 是最后手段须双份登记（CHANGELOG + 提交消息）+ 归属与零交集判定。
 - 🔴 **禁 `git add -A`**（2026-10-15 复发两次，D8C低那轮夹带 46+ 文件）：它本身就是绕过「暂存范围确认」的手法，不只是「忘了确认」。⇒ 一律**精确 pathspec**；`.cursor/` 被 gitignore 但已跟踪 ⇒ 需 `git add -f`。
-- 🔴 **`frozen_zones.json` 改 files 列表禁止 `sorted()`**（2026-10-15 又踩）：一排序 35 项顺序全变，diff 从 8/5 纯增量变成 24/21。正解 = **取 HEAD 原顺序 + 尾部追加**（`subprocess` 读 `git show HEAD:` 再拼）。
+- 🔴 **`frozen_zones.json` 改 files 列表禁止 `sorted()`**（2026-10-15 踩了两次）：一排序 35 项顺序全变，diff 从 8/5 纯增量变成 24/21。正解 = **取 HEAD 原顺序 + 尾部追加**（`subprocess` 读 `git show HEAD:` 再拼）。
+- 🔴 **`frozen_zone_guard.py --update` 必须是最后一次动冻结文件之后**（2026-10-15 踩）：先重锁、后改 `canvasVersion.ts`（版本号也是 zone8 文件）⇒ 门禁 ③ 又报漂移，白跑一轮。正序：**改完全部文件 → 最后 `--update` → 再 `git add` → 再跑门禁**。
+- ⚠️ **`precommit_gates.sh` 各道口径不一致**：① ruff 按**已暂存**的 `.py` 筛范围 ⇒ 未暂存时打印「无可检查的受控 .py」是**正常空跑**不是失败；但 ③ 冻结区按**工作区全量**算 ⇒ 未暂存也拦。别把空跑误判成失败（或反之）。
+- **`check_canvas_dual_repo` 报「新分叉: X」时的正确处置**：先 `git show HEAD:<主库文件>` 与副库文件 `diff -q` ⇒ **一致**说明分叉确由本轮引起，直接同步；**不一致**是历史分叉，要人工核对。**别直接 `--update` 洗掉**。
 - **Markdown 工具噪音**：Prettier 类编辑器会自动重排表格对齐 + 加尾随空格（`docs/画布可借鉴清单落地规划_2026-10-15.md` 被改）⇒ 提交前 `git status` 逐项核，非本轮改动一律 `git checkout --` 回退。
 - **ruff 门禁 = 逐文件存量棘轮**（`scripts/ruff_gate.py`）；`.venv312` 无 ruff，用 `C:/Python314/python.exe -m ruff`。
 - **回归**：`_verify/run_all_checks.py` 优先 `.venv312`；失败定性顺序 ① 跑错解释器 ② 撞并发会话 ③ 才当真回归。`check_canvas_bridge_e2e.py` 真起服务最有价值。
