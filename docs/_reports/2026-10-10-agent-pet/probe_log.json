@@ -1,0 +1,133 @@
+{
+  "base": "http://127.0.0.1:3039",
+  "steps": [
+    {
+      "step": "page_loaded",
+      "href": "http://127.0.0.1:3039/",
+      "title": "拾光导演台 · Shiguang Canvas",
+      "readyState": "complete"
+    },
+    {
+      "step": "pet_appear",
+      "afterMs": 500,
+      "present": true,
+      "state": "idle",
+      "mini": false,
+      "box": {
+        "x": 1416,
+        "y": 420,
+        "w": 132,
+        "h": 132
+      },
+      "bubble": null,
+      "name": "拾岚",
+      "canvasCount": 1,
+      "canvasSize": {
+        "w": 132,
+        "h": 132
+      },
+      "agentOpen": false,
+      "modalOpen": false
+    },
+    {
+      "step": "dynamic_frames",
+      "files": [
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_0.png",
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_1.png",
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_2.png",
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_3.png"
+      ],
+      "interval": "420ms",
+      "petBox": {
+        "x": 1416,
+        "y": 420,
+        "w": 132,
+        "h": 132
+      }
+    },
+    {
+      "step": "after_click_pet",
+      "clickedAt": {
+        "x": 1482,
+        "y": 486
+      },
+      "present": true,
+      "state": "idle",
+      "mini": true,
+      "box": {
+        "x": 1154,
+        "y": 496,
+        "w": 56,
+        "h": 56
+      },
+      "bubble": null,
+      "name": null,
+      "canvasCount": 1,
+      "canvasSize": {
+        "w": 56,
+        "h": 56
+      },
+      "agentOpen": true,
+      "modalOpen": false
+    },
+    {
+      "step": "agent_input_focus",
+      "found": true,
+      "active": true,
+      "disabled": false
+    },
+    {
+      "step": "agent_input_typed",
+      "value": "/generate"
+    },
+    {
+      "step": "awaiting_reached",
+      "via": "/generate 命令",
+      "files": [
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_await_0.png",
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_await_1.png",
+        "D:\\拾光剪影\\.workbuddy\\tmp\\petshot\\dyn_await_2.png"
+      ],
+      "present": true,
+      "state": "awaiting",
+      "mini": true,
+      "box": {
+        "x": 1154,
+        "y": 496,
+        "w": 56,
+        "h": 56
+      },
+      "bubble": null,
+      "name": null,
+      "canvasCount": 1,
+      "canvasSize": {
+        "w": 56,
+        "h": 56
+      },
+      "agentOpen": true,
+      "modalOpen": true
+    },
+    {
+      "step": "after_modal_close",
+      "present": true,
+      "state": "idle",
+      "mini": true,
+      "box": {
+        "x": 1154,
+        "y": 496,
+        "w": 56,
+        "h": 56
+      },
+      "bubble": null,
+      "name": null,
+      "canvasCount": 1,
+      "canvasSize": {
+        "w": 56,
+        "h": 56
+      },
+      "agentOpen": true,
+      "modalOpen": false
+    }
+  ],
+  "ok": true
+}

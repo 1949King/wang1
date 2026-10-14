@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# 拾光剪影 · 提交前卡点（可入库版本，11 道）
+# 拾光剪影 · 提交前卡点（可入库版本，14 道）
 #
 # 本文件是**唯一真相源**；.git/hooks/pre-commit 只是一层 3 行 shim 调它。
 # 为什么要把 hook 内容搬进仓库（2026-10-09）：
@@ -168,9 +168,13 @@ else
         echo "   ✓ vitest 单测通过（${VT_N:-?} 个）"
     fi
     # ⑦c 前端质量棘轮（check_canvas_frontend_quality.mjs）
-    # 报告型脚本改造为卡点：dupNames ≤8 / fnOver300 ≤10 / cycloOver60 ≤5
-    # 只减不增。基线 8 组同名已人工定性＝启发式误报（多行箭头回调/局部
+    # 报告型脚本改造为卡点：dupNames ≤10 / fnOver300 ≤10 / cycloOver60 ≤5
+    # 只减不增。基线组同名已人工定性＝启发式误报（多行箭头回调/局部
     # 同名，非模块级静默覆盖），新增同名即拦。
+    # 2026-10-14 dupNames 8→10：新增 2 组均来自 AppErrorBoundary.tsx —— 细分
+    # ErrorBoundary 后同文件出现两个 class，各自定义 React 生命周期
+    # componentDidCatch / render（属不同类，非静默覆盖）。逐项核对确认无模块级
+    # 同名覆盖，按既有先例（fnOver300 9→10）人工定性记录为启发式误报。
     # 2026-10-07 fnOver300 9→10：新增档来自 stage3dPoseLibrary.ts，该文件里
     # defaultPose() 本体只有 3 行，但其后紧跟 541 行 POSE_PRESETS **数据表**，
     # 而本脚本的 len 是「到下一个函数起点」的近似 ⇒ 把数据表算进了前一个函数
@@ -183,7 +187,7 @@ else
         echo "   ✗ 前端质量扫描执行失败"
         fail=1
     else
-        Q_VERDICT=$(printf '%s' "$Q_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s).summary;const base={dupNames:8,fnOver300:10,cycloOver60:5};const bad=Object.entries(base).filter(([k,v])=>(j[k]||0)>v);if(bad.length){console.log('FAIL '+bad.map(([k,v])=>k+'='+j[k]+'>'+v).join(' '))}else{console.log('OK dupNames='+j.dupNames+'/8 fnOver300='+j.fnOver300+'/10 cycloOver60='+j.cycloOver60+'/5')}});")
+        Q_VERDICT=$(printf '%s' "$Q_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s).summary;const base={dupNames:10,fnOver300:10,cycloOver60:5};const bad=Object.entries(base).filter(([k,v])=>(j[k]||0)>v);if(bad.length){console.log('FAIL '+bad.map(([k,v])=>k+'='+j[k]+'>'+v).join(' '))}else{console.log('OK dupNames='+j.dupNames+'/10 fnOver300='+j.fnOver300+'/10 cycloOver60='+j.cycloOver60+'/5')}});")
         case "$Q_VERDICT" in
             OK*) echo "   ✓ 质量棘轮 ${Q_VERDICT#OK }" ;;
             *)   echo "   ✗ 质量棘轮新增超限：${Q_VERDICT#FAIL }"; fail=1 ;;
@@ -216,10 +220,25 @@ echo "── ⑪ 素材不出域开关（SHIGUANG_NO_EGRESS 硬约束）"
 # 开关能表达「这一单不许出域」。纯逻辑断言，毫秒级。
 "$PY" _verify/check_provider_egress.py || fail=1
 
+echo "── ⑫ 文档一致性（版本三角 / 冻结区清单 / 版本锚点 / 快照新鲜度）"
+# 2026-10-11 补：上下文包生成当天即实证漂移（editor_module.py 9,717 → 9,746）。
+# ERROR 级（画布版本三角 / 冻结区清单同步）阻断；WARN 级（版本锚点 / 快照新鲜度）
+# 仅提示、不阻断 —— 纪律：门禁一常红就没人看（stability_gate 曾因草稿噪声长期红）。
+# 自证：python scripts/doc_consistency_gate.py --selfcheck（注入漂移验证「能拦」）。
+"$PY" scripts/doc_consistency_gate.py || fail=1
+
+echo "── ⑬ 画布 selector 反模式（防 React #185 无限重渲染白屏）"
+# 2026-10-14 用户授权：zustand v5 + React 19 下，selector 每次返回新数组/新对象
+# （`.filter/.map/.slice` 或 `=> ({...})` / 展开 `{ ...`）⇒ useSyncExternalStore 判定
+# 快照恒变 ⇒ 无限重渲染 ⇒ 画布白屏「画布遇到渲染错误」。这是**一类**脆弱写法，
+# 必须守住红线：选择器要么返回稳定引用，要么显式包 useShallow/useCanvasShallow。
+# 纯文本扫描、毫秒级、无项目依赖，故与冻结区守卫一样常跑（不随暂存内容跳过）。
+"$PY" _verify/check_canvas_selectors.py || fail=1
+
 if [ "$fail" -ne 0 ]; then
     echo ""
     echo "✗ 提交前卡点未通过，请修复后重试（紧急跳过：git commit --no-verify）"
     exit 1
 fi
-echo "✓ 提交前卡点全部通过（12 道）"
+echo "✓ 提交前卡点全部通过（14 道）"
 exit 0

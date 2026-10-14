@@ -139,10 +139,13 @@ def main() -> int:
           reordered == ["cogvideo", "seedance", "local"])
 
     # ── 7. 组合路由（P0-3 + P0-1）──
-    # duration=8 双渠道都存活 → 能力筛过后再被池重排（cogvideo 有号 → 排前）
+    # duration=8 → 能力链 = kling/seedance/cogvideo/local：kling 置首后是默认链
+    # 第一位，dashscope 因 max_duration=5s 被 8s 规格筛掉（见 provider_caps.supports）；
+    # 池里只有 cogvideo 有健康账号 ⇒ 池内重排把 cogvideo 提到最前，
+    # 其余保持能力链相对顺序，local 永远垫底。
     combined = pool6.resolve_order("auto", spec={"duration": 8.0})
     check("组合路由：能力筛选 + 池内重排",
-          combined == ["cogvideo", "seedance", "local"])
+          combined == ["cogvideo", "kling", "seedance", "local"])
 
     # ── 8. credential 掩码 ──
     masked = pool.list_accounts("seedance")

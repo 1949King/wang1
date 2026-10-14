@@ -67,32 +67,32 @@ def main() -> int:
     pc = _load("provider_caps.py")
     pp = _load("provider_pool.py")
 
-    # ════════════ 1. caps.quote（纯声明估算）════════════
+    # ════════ 1. caps.quote（纯声明估算）════════════
     q = pc.quote("auto", count=6)
-    # V4.37.3 起 dashscope（万相）进表且排首位（tier 同为 1，声明在先）
-    check("auto 报价取 tier 首位 dashscope", q["provider"] == "dashscope")
-    check("单价×段数", q["price_per_clip"] == 1.5 and q["cost_estimate"] == 9.0)
+    # 2026-10-14：默认后端切为 kling（quality_tier=2，auto 置首）
+    check("auto 报价取 tier 首位 kling", q["provider"] == "kling")
+    check("单价×段数", q["price_per_clip"] == 3.5 and q["cost_estimate"] == 21.0)
     check("币种 CNY + 估算声明", q["currency"] == "CNY" and "估算" in q["note"])
     check("回退链包含 local", q["fallback_chain"][-1] == "local")
     q = pc.quote("cogvideo", count=5)
     check("指定渠道按其单价", q["price_per_clip"] == 0.8 and q["cost_estimate"] == 4.0)
     q = pc.quote("auto", count=3, spec={"first_last_frame": True})
-    check("首尾帧 spec → cogvideo 被排除仍报 seedance", q["provider"] == "seedance")
+    check("首尾帧 spec → kling/cogvideo 被排除仍报 seedance", q["provider"] == "seedance")
     q = pc.quote("cogvideo", count=3, spec={"first_last_frame": True})
     check("指定不支持渠道 → local ¥0", q["provider"] == "local" and q["cost_estimate"] == 0.0)
     q = pc.quote("local", count=4)
     check("local 免费", q["cost_estimate"] == 0.0)
     q = pc.quote("auto", count=0)
-    check("count=0 按 1 段报", q["count"] == 1 and q["cost_estimate"] == 1.5)
+    check("count=0 按 1 段报", q["count"] == 1 and q["cost_estimate"] == 3.5)
 
     # ════════════ 2. pool.quote（账号视角）════════════
     tmpdir = tempfile.mkdtemp(prefix="sg_quote_test_")
 
-    # 2a. 空池：无账号渠道仍可接单（走环境变量 Key 的场景）
+    # 2a. 空池：无账号渠道仍可接单（走模型广场渠道解析的场景）
     pool = pp.ProviderPool(store_path=os.path.join(tmpdir, "a.json"))
     q = pool.quote("auto", count=5)
-    check("空池 auto → 仍报 dashscope（无号不等于死号）",
-          q["provider"] == "dashscope" and q["cost_estimate"] == 7.5)
+    check("空池 auto → 仍报 kling（无号不等于死号）",
+          q["provider"] == "kling" and q["cost_estimate"] == 17.5)
     check("空池 → 无账号 id / cloud_available", q["account_id"] == "" and q["cloud_available"])
 
     # 2b. seedance 死号 + cogvideo 健康号 → 死号跳过、报 cogvideo

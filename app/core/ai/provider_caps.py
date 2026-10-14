@@ -86,6 +86,22 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
         "quality_tier": 1,
         "price_per_clip": 0.8,
     },
+    "kling": {
+        # 可灵（快手开放平台，submit + poll 链路，见 canvas_aigc.py L1857）
+        # 2026-10-14 起设为 auto 默认首选：短剧预演画质/运镜稳定性第一梯队。
+        # 注意：当前链路只提交 prompt + 可选首帧图（std 模式），
+        # duration 未随请求下发（服务端按 model_name 定长），故 max_duration
+        # 记 10.0 保守值，避免被 spec 的 duration 误筛。
+        "name": "可灵 Kling（快手开放平台）",
+        "text_to_video": True,
+        "image_to_video": True,
+        "first_last_frame": False,   # 当前接线只下发首帧图，尾帧未接
+        "lip_sync": False,
+        "max_duration": 10.0,
+        "resolutions": ["480p", "720p", "1080p"],  # 当前接线不按 size 裁剪，服务端按 mode 定档
+        "quality_tier": 2,
+        "price_per_clip": 3.5,       # 估算（std 模式 5s 段），实际以可灵账单为准
+    },
     "local": {
         "name": "本地占位生成（FFmpeg 色块）",
         "text_to_video": True,
@@ -100,8 +116,11 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
 }
 
 # auto 模式下真实 provider 的基础顺序（local 由 resolve_order 统一追加，不写在这）
-# dashscope 排最前：2026-09-22 实测它是唯一有可用客户端模块 + key 的渠道
-DEFAULT_REAL_ORDER: List[str] = ["dashscope", "seedance", "cogvideo"]
+# 2026-10-14：kling 置首 —— 用户明确要求「切换默认后端为 Kling」。
+# kling 画质/运镜属第一梯队（quality_tier=2），承接短剧预演主生成位；
+# dashscope 次之（唯一长期有可用客户端的低价渠道），seedance/cogvideo 兜底。
+# ⚠️ 无 kling Key 时按既有纪律诚实失败并顺延下一渠道，不会假成功。
+DEFAULT_REAL_ORDER: List[str] = ["kling", "dashscope", "seedance", "cogvideo"]
 
 # 收益函数 λ_c：每元单价愿意牺牲多少期望质量（规格书 §11 V = q̂ − λ_c·ĉ）
 # 语义：两个渠道期望质量差 > λ_c×价差 时，贵的才排前面

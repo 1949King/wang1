@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光剪影 · 全库隐藏 Bug 审计报告（2026-10-12）</title>
+<style>
+  :root {
+    --bg: #0f1522; --panel: #172033; --panel2: #1c2740; --line: #2a3752;
+    --txt: #edf3ff; --dim: #9fb0cc; --accent: #2f7bff; --brand: #6366f1;
+    --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--txt); font-family: "Microsoft YaHei", system-ui, sans-serif; line-height: 1.7; padding: 40px 20px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  h1 .v { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 28px; }
+  h2 { font-size: 19px; margin: 34px 0 14px; padding-left: 12px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; margin: 18px 0 8px; color: #cdd9f0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin: 12px 0; }
+  .verdict { background: linear-gradient(135deg, #16233f, #172033); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; margin-bottom: 24px; }
+  .verdict .big { font-size: 21px; font-weight: 700; color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th { background: var(--panel2); color: var(--dim); text-align: left; padding: 8px 12px; border: 1px solid var(--line); font-weight: 600; white-space: nowrap; }
+  td { padding: 7px 12px; border: 1px solid var(--line); vertical-align: top; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  code { background: #0c111d; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-family: Consolas, monospace; font-size: 12.5px; color: #8ec4ff; }
+  .tag { display: inline-block; border-radius: 4px; padding: 1px 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .t-a { background: rgba(52,211,153,.15); color: var(--ok); border: 1px solid rgba(52,211,153,.4); }
+  .t-b { background: rgba(251,191,36,.15); color: var(--warn); border: 1px solid rgba(251,191,36,.4); }
+  .t-c { background: rgba(248,113,113,.15); color: var(--bad); border: 1px solid rgba(248,113,113,.4); }
+  .t-d { background: rgba(99,102,241,.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,.4); }
+  .t-none { background: rgba(159,176,204,.12); color: var(--dim); border: 1px solid rgba(159,176,204,.3); }
+  .t-info { background: rgba(47,123,255,.12); color: #7faaff; border: 1px solid rgba(47,123,255,.4); }
+  .dim { color: var(--dim); }
+  .num { font-family: Consolas, monospace; font-weight: 700; }
+  ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .foot { margin-top: 36px; color: var(--dim); font-size: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>拾光剪影 · 全库隐藏 Bug 审计报告 <span class="v">V4.43.19 基线</span></h1>
+<div class="sub">审计日期 2026-10-12 · 范围 = 主仓库项目代码 751~805 个 .py + 529 文件 NameError 级深扫 · 工具 = AST 静态扫描器（自测 10/10）+ 逐条源码复核</div>
+
+<div class="verdict">
+  <div class="big">总结论：项目代码没有「一跑就崩」级隐藏 bug —— 6 类缺陷族扫描，崩溃级真命中 = 0。</div>
+  <div style="margin-top:8px;">
+    全库最危险的两类（NameError 未定义名字 / 类内重复方法静默覆盖）双双 <b>0 命中</b>；网络调用 71 处里 70 处有 timeout；可变默认参数项目代码 0 处。真需要动手的只有 <b>A 层 3 项小型修复（约 30 行改动、零冻结区）</b>。此前的 7056 条「缺 timeout」与 269 条「open 缺 encoding」均为扫描器假阳性，已按接收者/AST 精化排除。
+  </div>
+</div>
+
+<h2>一、扫描范围与方法</h2>
+<div class="card">
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>扫描对象</td><td>主仓库全部 .py（两次口径：精扫 751 个 / 含 thirdparty 805 个）+ NameError 级深扫 529 个测试外源文件</td></tr>
+<tr><td>检测器</td><td>AST 扫描器（<code>.workbuddy/tmp/scan_hidden_bugs.py</code> 等），阳性自测 10 用例全过（证明检测器没瞎）</td></tr>
+<tr><td class="dim">跳过范围</td><td class="dim"><code>vendor/</code>（第三方参考库）、<code>thirdparty/</code>（MuseTalk 上游）、<code>.venv*/</code>、<code>node_modules</code>、<code>pip-install-*/pip-*</code>（沙箱残留）、<code>dist/build/__pycache__/_archive/.workbuddy</code>、画布 TS/TSX（走 tsc/vitest 门禁，不在本次 Python 审计范围）</td></tr>
+<tr><td>缺陷族（6 类）</td><td>① NameError 级（未定义名字/定义顺序）② 类内重复方法 ③ 可变默认参数 ④ <code>open()</code> 缺 encoding ⑤ <code>isinstance(x, typing.X)</code> 弃用别名 ⑥ 网络调用缺 timeout</td></tr>
+</table>
+</div>
+
+<h2>二、六类缺陷族 · 结果总表</h2>
+<table>
+<tr><th>缺陷族</th><th>命中</th><th>定性</th><th>分层</th></tr>
+<tr><td>① NameError 级（未定义名字 / 定义顺序反）</td><td class="num">0</td><td>此前 ast-scope-nameerror-hunt 清库彻底，本轮复扫仍 0</td><td><span class="tag t-none">无需动作</span></td></tr>
+<tr><td>② 类内重复方法定义</td><td class="num">0 真</td><td>5 条候选全是 <code>@property + @x.setter</code> 配对（快扫未区分 deco_kind），逐条读源码排除</td><td><span class="tag t-none">无需动作</span></td></tr>
+<tr><td>③ 可变默认参数 <code>def f(x=[])</code></td><td class="num">0</td><td>项目代码 0；8 条命中全在 thirdparty/MuseTalk（范围外）</td><td><span class="tag t-none">无需动作</span></td></tr>
+<tr><td>④ 内建 <code>open()</code> 缺 encoding</td><td class="num">5</td><td>全部读写 ASCII 数据（Info.plist / desktop.sh / uninstall.sh / ffmpeg signalstats），本机 locale=utf-8 也不触发；纯防御性加固</td><td><span class="tag t-a">A 可直接修</span></td></tr>
+<tr><td>⑤ <code>isinstance(x, typing.Mapping/Sequence)</code></td><td class="num">22</td><td>5 个文件确认从 <code>typing</code> 导入；运行时可用（3.5.3+ 即支持），3.9 起 DeprecationWarning，属「未来移除地雷」</td><td><span class="tag t-a">A 可直接修</span></td></tr>
+<tr><td>⑥ 网络调用缺 timeout</td><td class="num">1</td><td>71 处网络调用逐一定位，70 处有 timeout（alert_system=10s / providers=120s / mcp_client=10s / yue·dashscope·diffusers=30~60s）；仅 dev 安装器 1 处漏网</td><td><span class="tag t-a">A 可直接修</span></td></tr>
+</table>
+
+<h2>三、分层清单</h2>
+
+<h3>A 层 · 可直接修（小、零冻结区、非共享文件）</h3>
+<div class="card">
+<table>
+<tr><th>#</th><th>位置</th><th>问题</th><th>修法</th><th>风险</th></tr>
+<tr><td>A1</td><td><code>app/core/video_processing/cpp_engine/install_ffmpeg_dev.py:28</code></td><td><code>requests.head(FFMPEG_URL, allow_redirects=True)</code> 无 timeout —— 网络不通时该 dev 脚本无限挂起（同函数第 39 行的 <code>get</code> 反而有 timeout=300）</td><td>加 <code>timeout=30</code></td><td>极低（独立 dev 安装器，不在主链路）</td></tr>
+<tr><td>A2</td><td><code>app/skills/external/video-use/helpers/grade.py:130</code>、<code>installer.py:161/181/245</code>、<code>tests/unit/test_platform_integration.py:37</code></td><td>5 处内建 <code>open()</code> 无 encoding（当前全 ASCII，不触发）</td><td>补 <code>encoding="utf-8"</code>（防御 GBK 机器可移植性）</td><td>极低</td></tr>
+<tr><td>A3</td><td><code>app/core/editor_canvas_link.py</code>(×5)、<code>app/core/project_snapshot.py</code>(×6)、<code>app/core/text_frame_map.py</code>(×1)、<code>app/core/glue/convert.py</code>(×6)、<code>app/core/glue/validate.py</code>(×4)</td><td>22 处 <code>isinstance(x, typing.Mapping/Sequence)</code> —— 弃用别名，未来 Python 移除时 5 个核心文件同时 ImportError</td><td>import 从 <code>typing</code> 换 <code>collections.abc</code>（行为完全等价）</td><td>低，但触及 core 文件 ⇒ 修后必跑 <code>_verify/run_all_checks.py</code>（5 文件均不在冻结区，无需解冻）</td></tr>
+</table>
+<p class="dim">注：A3 的 <code>canvas_server.py:809</code> 与 <code>otio_adapter.py:458/460</code> 经 import 来源核实实为 <code>collections.abc</code>，非命中（快扫误报已排除）。</p>
+</div>
+
+<h3>B 层 · 需拍板</h3>
+<div class="card">
+<table>
+<tr><th>#</th><th>事项</th><th>建议</th></tr>
+<tr><td>B1</td><td>是否把本次 6 类检查固化成 <code>_verify/</code> 常驻检查器（如 <code>check_hidden_bug_families.py</code>，挂进 run_all_checks）？本次审计的 3 个扫描器目前是 .workbuddy/tmp 临时件。</td><td>建议固化 ④⑤⑥ 三类（误报已清零、规则简单稳定）；②③ 留一次性审计。按纪律：固化必须带反例验证（喂违规版本确认报红），否则可能是永远绿的摆设。</td></tr>
+<tr><td>B2</td><td>真缺口 9 刀的启动点（A1 场景库起步 / A2 冻结区策略二选一（推荐旁挂新函数）/ C 线对外 OpenAPI 做不做）仍待拍板。</td><td>与本审计无依赖，随时可「开始」。</td></tr>
+</table>
+</div>
+
+<h3>C 层 · 需解冻</h3>
+<div class="card">
+<p><span class="tag t-none">无</span> —— 本次审计未发现任何冻结区文件内的隐藏 bug。9 zone / 91 锁点内代码本轮零新增问题（画布 TS/TSX 属 tsc/vitest 门禁管辖，tsc 基线 38 条为已知存量）。</p>
+</div>
+
+<h3>D 层 · 算法/架构层</h3>
+<div class="card">
+<p><span class="tag t-none">无新发现</span> —— 架构级缺口（编剧生产端 / 抽卡选优闭环 / 资产母版层 / 审美治理层）维持 2026-10-12 已定稿的 9 刀规划，本审计未新增架构问题。</p>
+</div>
+
+<h2>四、已知既有问题（引用登记，只报不改）</h2>
+<div class="card">
+<table>
+<tr><th>问题</th><th>状态</th></tr>
+<tr><td><code>_verify/check_global_price.py:155</code> 硬编码 <code>record_spend(90.0)</code> 日期炸弹（月初必红）</td><td class="dim">既有，只报不擅改</td></tr>
+<tr><td>主/副库 tsc 存量 38 条（riggedHumanoid 21 + Stage3D 16 + 1）</td><td class="dim">既有基线</td></tr>
+<tr><td>stability_gate 29 项 print（<code>app/test_video_editing_e2e.py</code>，并发会话未跟踪文件）</td><td class="dim">归属并发会话</td></tr>
+<tr><td><code>infinite-compat.tsx</code> 新分叉 + tsc 37→38</td><td class="dim">归属并发会话在途代码</td></tr>
+<tr><td>thirdparty/MuseTalk 8 处可变默认参数 + whisper urlopen 无 timeout</td><td class="dim">上游代码，范围外不动</td></tr>
+</table>
+</div>
+
+<h2>五、审计方法注记（防复踩）</h2>
+<div class="card">
+<ul>
+<li><b>网络 timeout 检查必须按接收者过滤</b>：按函数名匹配 <code>post/get/put/delete/request</code> 会命中全部字典 <code>.get()</code> —— 7056 条假阳性洪水；正确做法 = AST 只认 <code>requests.X(...)</code>（Attribute.value 是 requests 别名）、<code>urllib.request.urlopen</code> Attribute 链、以及经 ImportFrom 追踪的 <code>from requests import post</code> 直呼。</li>
+<li><b>open 检查必须用 AST 裸 Name</b>：子串匹配会把 <code>subprocess.Popen(</code>、<code>Image.open(</code>、<code>webbrowser.open(</code>、<code>av.open(</code>、<code>sdk.open(</code>、<code>_ensure_preview_source_open(</code> 全算进去 —— 269 条假阳性；AST 化后剩 5 条真命中。</li>
+<li><b>isinstance 检查必须核 import 来源</b>：名字叫 <code>Mapping</code> 不等于来自 typing —— <code>collections.abc.Mapping</code> 是完全正确的写法。</li>
+<li><b>dup_method 必须区分 deco_kind</b>：<code>@x.setter</code> 是 <code>ast.Attribute</code> 无 <code>.id</code>，与 <code>@property</code> 配对不是重复定义。</li>
+</ul>
+</div>
+
+<div class="foot">
+拾光剪影 · 隐藏 bug 审计 · 2026-10-12 · 审计工具：AST 扫描器 ×3（scan_hidden_bugs / scan_net_timeout / scan_refined）· 结论基线 V4.43.19（commit aeee5a35）
+</div>
+
+</div>
+</body>
+</html>

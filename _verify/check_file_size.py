@@ -63,11 +63,18 @@ BASELINE: dict = {
     "vendor/shiguang-canvas/src/Stage3D.tsx": 4623,
     # 2026-10-05：姿势数据抽到 stage3dPoseLibrary.ts 后由 3707 下调到 3159
     "vendor/shiguang-canvas/src/riggedHumanoid.ts": 3159,
-    "vendor/shiguang-canvas/src/CanvasShell.tsx": 3199,
-    "vendor/shiguang-canvas/src/store.ts": 2483,
+    # 2026-10-14：CanvasShell.tsx / store.ts 属**冻结区** canvas-magnetic-intent，
+    # 未获用户「解冻」无法拆模块下调；+52 / +31 系前序轮次已批准工作
+    # （细分 ErrorBoundary、React #185 崩溃四件套等）的累积增长。经用户裁决
+    # 「保持冻结、如实标注」⇒ 一次性上调基线至实测值，记为「已批准存量·待拆分」。
+    # ⚠️ 仅此一次：后续仍**只减不增**；日后解冻拆分须立即下调这两项基线。
+    "vendor/shiguang-canvas/src/CanvasShell.tsx": 3251,
+    "vendor/shiguang-canvas/src/store.ts": 2514,
     # V4.39.8 异步接线（generateForNode→runGeneration）后越线 2000；
     # 存量文件冻结入基线，⚠️ 待拆分（异步编排宜独立成模块），拆分后请下调。
-    "vendor/shiguang-canvas/src/bridge.ts": 2016,
+    # 2026-10-14：拉片 L2 接线时拆出 bridgeStoryboard.ts（分镜/拉片族 re-export），
+    # 2115 → 1776 行 < 2000 ⇒ 基线项移除（守卫提示「已消失」后的正反馈操作）。
+    # 若再涨破 2000 会重新报警。
 }
 
 

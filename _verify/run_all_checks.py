@@ -175,6 +175,8 @@ CHECKS = [
     ("WFEXEC", "_verify/check_canvas_workflow.py", "画布图执行 + 增量缓存接线一致性"),
     # ── 画布端口模型（typed slots，前端真源 ↔ 后端镜像）（2026-09-28）──
     ("PORTMODEL", "_verify/check_port_model.py", "画布端口模型一致性 + 类型判据"),
+    # ── 画布 selector 反模式（防 React #185 无限重渲染崩溃）（2026-10-14）──
+    ("SELECTOR", "_verify/check_canvas_selectors.py", "画布 selector 新引用反模式（稳定引用 / useShallow）"),
     # ── 画布意图级增强层（能力升格成意图而非节点）（2026-09-30）──
     ("ENHANCE", "_verify/check_canvas_enhance.py", "意图级增强层：不泄漏模型名 + 诚实报告"),
     # ── 本地（Ollama）模型接线（2026-09-30）──

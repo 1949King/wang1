@@ -64,6 +64,9 @@ CHARACTER_FIELD_SCHEMA = [
     ("temperament",    "气质倾向",   "text",    False, "visual"),  # 如: 清冷疏离 / 温润克己
     ("memory_anchors", "标志性符号", "text",    False, "visual"),  # 跨集可辨识的固定视觉符号
     ("personality",    "性格特征",   "text",    False, "visual"),  # 性格描述
+    # 捏脸卡片（FaceCard.tsx）写回的 faceParams JSON 串。放 visual 组 ⇒ 进生图提示词；
+    # 由 canvas_bridge.build_character_prompt 转成文字（结构/枚举/色板的唯一真相源在画布侧 faceParams.ts）。
+    ("face_params", "捏脸参数（画布捏脸卡片写入）", "text", False, "visual"),
     # ---- 内在人格（剧本一致性；不进提示词）----
     ("values",           "价值排序",   "text",  False, "inner"),  # 最看重什么、如何排序
     ("core_desire",      "核心欲望",   "text",  False, "inner"),  # 驱动行动的根本诉求

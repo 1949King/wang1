@@ -21,6 +21,7 @@ EditorAgentDockMixin：剪辑 Agent 的**右侧独立竖栏**（LibTV 规格）�
 from __future__ import annotations
 
 import logging
+import threading
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
@@ -223,6 +224,7 @@ class EditorAgentDockMixin:
         lbl4 = QLabel("Provider")
         self._agent_provider_combo = QComboBox()
         self._agent_provider_combo.addItem("Auto（自动）", "auto")
+        self._agent_provider_combo.addItem("可灵 Kling", "kling")
         self._agent_provider_combo.addItem("Seedance", "seedance")
         self._agent_provider_combo.addItem("CogVideo", "cogvideo")
         self._agent_provider_combo.addItem("本地占位", "local")
@@ -250,3 +252,97 @@ class EditorAgentDockMixin:
 
         # 首次加载时刷新 provider 状态
         QTimer.singleShot(300, self._refresh_provider_status)
+
+    # ======================================================================
+    # 本地思考开关（仅本地 Ollama 推理模型，如 qwen3）
+    # 落点说明：这些是 Agent 面板的辅助逻辑，放本文件是为了不增长已超标的
+    # editor_agent_panel_mixin.py（size ratchet 只减不增）。
+    # ======================================================================
+    _LOCAL_THINK_TIP = (
+        "本地思考（仅本地 Ollama 推理模型，如 qwen3）：\n"
+        "  关闭 = 直接作答，最快（实测首字约 16s→2s）\n"
+        "  开启 = 先推理再作答，更严谨但慢很多\n"
+        "云端模型不受此开关影响。"
+    )
+
+    def _agent_local_think_enabled(self) -> bool:
+        """读取「本地思考」偏好（QSettings，跨会话，默认关闭=最快）。"""
+        try:
+            from PyQt6.QtCore import QSettings
+            return bool(QSettings("ShiguangEditor", "AgentPanel").value(
+                "local_think_enabled", False, type=bool))
+        except Exception:
+            return False
+
+    def _on_agent_local_think_toggled(self, checked: bool) -> None:
+        """持久化「本地思考」偏好并刷新提示。"""
+        try:
+            from PyQt6.QtCore import QSettings
+            QSettings("ShiguangEditor", "AgentPanel").setValue(
+                "local_think_enabled", bool(checked))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 保存本地思考偏好失败: {e}")
+        self._refresh_local_think_tooltip()
+
+    def _refresh_local_think_tooltip(self) -> None:
+        """按当前开关状态刷新 🧠 按钮提示（无该按钮时静默跳过）。"""
+        btn = getattr(self, "_edit_agent_think_btn", None)
+        if btn is None:
+            return
+        state = "开启（更严谨、慢）" if btn.isChecked() else "关闭（最快）"
+        btn.setToolTip(f"{self._LOCAL_THINK_TIP}\n当前：{state}")
+
+    # ======================================================================
+    # 本地模型后台探测（避免首次打开面板同步等 Ollama ~4s）
+    # ======================================================================
+    def _seed_edit_agent_models_placeholder(self) -> None:
+        """占位填充模型下拉，避免后台探测期间下拉为空。"""
+        combo = getattr(self, "_edit_agent_model_combo", None)
+        if combo is not None and combo.count() == 0:
+            combo.addItem("自动（探测中…）", ("", ""))
+
+    def _warm_local_models_async(self) -> None:
+        """后台预热本地模型探测缓存，避免 UI 线程同步等 Ollama。
+
+        本机 `/api/tags` 实测约 4s；直接在面板构建里同步调用会让 UI 冻结。
+        这里改为守护线程探测（结果进 model_config 的 300s TTL 缓存），主线程
+        用轻量 QTimer 轮询完成后再刷新一次下拉，全程不阻塞界面。
+        """
+        if getattr(self, "_agent_models_warming", False):
+            return
+        self._agent_models_warming = True
+        self._agent_models_probe_done = False
+
+        def _work():
+            try:
+                from app.modules.lego.model_config import discover_local_models
+                discover_local_models(force=True)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[Agent] 后台探测本地模型失败: {e}")
+            finally:
+                self._agent_models_probe_done = True
+
+        threading.Thread(
+            target=_work, daemon=True, name="agent-local-models-probe"
+        ).start()
+
+        timer = getattr(self, "_agent_models_poll_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(400)
+            timer.timeout.connect(self._on_local_models_probe_poll)
+            self._agent_models_poll_timer = timer
+        timer.start()
+
+    def _on_local_models_probe_poll(self) -> None:
+        """轮询后台探测是否完成；完成后刷新模型下拉并停表。"""
+        if not getattr(self, "_agent_models_probe_done", False):
+            return
+        timer = getattr(self, "_agent_models_poll_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._agent_models_warming = False
+        try:
+            self._refresh_edit_agent_models()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Agent] 探测完成后刷新模型下拉失败: {e}")

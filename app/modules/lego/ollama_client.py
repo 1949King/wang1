@@ -659,18 +659,50 @@ class OllamaClient:
         model: str,
         messages: List[Dict[str, str]],
         stream: bool = False,
-        options: Optional[Dict[str, Any]] = None
+        options: Optional[Dict[str, Any]] = None,
+        think: Optional[bool] = None,
+        images: Optional[List[str]] = None,
+        format: Optional[str] = None
     ) -> Generator[str, None, None]:
-        """对话模式"""
-        
+        """对话模式。
+
+        think: 推理模型（qwen3 等）的「思考开关」。
+          None  → 不发送该字段，交给 Ollama 默认（思考模型默认开启）；
+          False → 关闭思考，直接作答（响应更快，实测约 16s → 2s）；
+          True  → 强制开启思考。
+        ⚠️ 仅对支持思考的模型有意义，普通模型会忽略该字段，不影响调用。
+
+        images: 视觉模型入参 —— base64 图片列表（**不含** data: 前缀）。
+          按 Ollama /api/chat 约定，images 挂在**最后一条 user 消息**上；
+          内部浅拷贝 messages，不回写调用方入参，向后兼容纯文本调用。
+        format: 强制输出格式（如 "json"），让 Ollama 保证结构化返回。
+        """
+
+        payload_messages: List[Dict[str, Any]] = messages
+        if images:
+            # 浅拷贝：只改最后一条 user 消息，避免污染调用方的 messages
+            payload_messages = [dict(m) for m in messages]
+            for m in reversed(payload_messages):
+                if m.get("role") == "user":
+                    m["images"] = list(images)
+                    break
+
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": payload_messages,
             "stream": stream
         }
         
         if options:
             payload["options"] = options
+
+        # 思考开关：仅在显式指定时下发，避免影响不支持该字段的模型
+        if think is not None:
+            payload["think"] = bool(think)
+
+        # 输出格式（如 "json"）：让 Ollama 保证合法的结构化返回
+        if format:
+            payload["format"] = format
         
         try:
             session = requests.Session()

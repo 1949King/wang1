@@ -1387,6 +1387,46 @@ class CanvasPostRoutesMixin:
             self._json(500, {"ok": False, "message": str(e)})
         return
 
+    # ── POST /host/character-update：画布捏脸卡片写回角色库 ──────────────
+    # 画布是 WebView，改角色库只能经 HTTP 落库（角色库 JSON 由 Python 独占写）。
+    # 只接受 CHARACTER_FIELD_SCHEMA 白名单字段 + avatar_url，防画布侧误传任意键污染角色库。
+    # 一次性回写「捏脸参数（face_params）」与「参考图（avatar_url）」两条通道。
+    # 一致性校验：_verify/check_character_schema.py
+    @_route_post("/host/character-update")
+    def _p_host_character_update(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        char_id = str(body.get("id") or "").strip()
+        if not char_id:
+            self._json(400, {"ok": False, "message": "missing id"})
+            return
+        try:
+            from app.modules.lego.character_management_module import (
+                CHARACTER_FIELD_SCHEMA,
+                CharacterStore,
+            )
+
+            allowed = {f[0] for f in CHARACTER_FIELD_SCHEMA} | {"avatar_url"}
+            payload = body.get("data") if isinstance(body.get("data"), dict) else {}
+            data = {k: v for k, v in payload.items() if k in allowed}
+            if not data:
+                self._json(400, {"ok": False, "message": "no updatable field"})
+                return
+            ok = CharacterStore().update(char_id, data)
+            self._json(200 if ok else 404, {"ok": bool(ok), "id": char_id})
+        except Exception as exc:
+            logger.warning(f"/host/character-update 失败: {exc}")
+            self._json(500, {"ok": False, "message": str(exc)})
+        return
+
     # ── POST /host/canvas-enhance：意图级增强（修复人脸/超分/抠像/风格/局部修图） ──
     # 设计：**能力升格成「意图」，不是「节点」** —— 用户传一个有序列表，
     # 系统选实现并**如实回报实际用了哪个引擎**（绝不把双三次插值说成 AI 超分）。
@@ -1818,7 +1858,11 @@ class CanvasPostRoutesMixin:
         if not video:
             self._json(400, {"ok": False, "message": "需要 video_path", "shots": []})
             return
-        res = rb.build_shot_table(video, out_dir=out_dir, threshold=threshold, with_depth=True)
+        # 景别/描述 enrich 走云端视觉模型（素材出域，需前端显式传 use_vision=True）
+        res = rb.build_shot_table(video, out_dir=out_dir, threshold=threshold,
+                                  with_depth=True,
+                                  use_vision=bool(data.get("use_vision")),
+                                  vision_model=str(data.get("vision_model") or ""))
         code = 200 if res.get("ok") else 400
         self._json(code, res)
         return

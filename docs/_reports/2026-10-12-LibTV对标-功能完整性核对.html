@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LibTV 对标 · 功能完整性核对 · 2026-10-12</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#172033; --sub:#5a6478; --line:#e4e8ee;
+    --blue:#2f7bff; --green:#0f9d58; --orange:#f97316; --red:#e5484d; --violet:#6366f1;
+    --code:#f2f4f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.65;font-size:14.5px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 26px 80px}
+  h1{font-size:29px;margin:0 0 6px;letter-spacing:-.5px}
+  h2{font-size:20px;margin:42px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+  h3{font-size:16px;margin:24px 0 8px}
+  .meta{color:var(--sub);font-size:13.5px;margin-bottom:20px}
+  .lede{background:linear-gradient(135deg,#eef3ff,#fdf6f0);border:1px solid #dde4f5;
+    border-radius:12px;padding:18px 20px;margin:18px 0 24px}
+  .lede b{color:var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;background:var(--card);
+    border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(23,32,51,.06);font-size:13.4px}
+  th{background:#eef1f6;text-align:left;padding:9px 11px;font-weight:600;color:#28324a}
+  td{padding:8px 11px;border-top:1px solid var(--line);vertical-align:top}
+  tr:hover td{background:#fafbfd}
+  code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:12.3px;
+    font-family:"SF Mono",Consolas,monospace;color:#334}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .ok{background:#e6f7ee;color:#0b7a45}
+  .pt{background:#fff2e3;color:#b45309}
+  .no{background:#fdecec;color:#c0343a}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}
+  .kpi .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+    box-shadow:0 1px 3px rgba(23,32,51,.06)}
+  .kpi .n{font-size:30px;font-weight:800;line-height:1.1}
+  .kpi .l{font-size:12.6px;color:var(--sub);margin-top:4px}
+  .bar{height:12px;border-radius:8px;background:#eceff4;overflow:hidden;display:flex;margin:6px 0 2px}
+  .bar i{display:block;height:100%}
+  .b1{background:#2fb56b}.b2{background:#f0a437}.b3{background:#e5686c}
+  .note{background:#fffbe9;border-left:4px solid #f5c518;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.5px}
+  .warn{background:#fdf0f0;border-left:4px solid var(--red);padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.5px}
+  ul{margin:6px 0 6px 2px;padding-left:20px}li{margin:3px 0}
+  .sect{font-size:13px;color:var(--sub);font-weight:600;margin-top:16px}
+  footer{margin-top:46px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>LibTV 对标 · 功能完整性核对</h1>
+<div class="meta">
+  对照对象：LibTV（<code>www.liblib.tv</code>）逆向清单 · 核对对象：拾光剪影（本仓代码）<br>
+  日期：2026-10-12 · 方法：3 路静态代码检索 + 反向复核缺席判定 · 全部结论带 <code>文件:行</code> 证据
+</div>
+
+<div class="lede">
+  <b>直接回答：「并非都完整。」</b>共核对 <b>93</b> 条 LibTV 能力，我方
+  <b>完整 23 条（25%）</b>、<b>部分 44 条（47%）</b>、<b>缺失 26 条（28%）</b>。<br>
+  其中「部分」不等于没有——多数是<b>引擎/后端已就绪，只差前端接线或 Agent 入口</b>（见第四节，这是投入产出比最高的一批）。
+</div>
+
+<div class="kpi">
+  <div class="card"><div class="n" style="color:#0b7a45">23</div><div class="l">✅ 完整 · 可运行且已接线</div></div>
+  <div class="card"><div class="n" style="color:#b45309">44</div><div class="l">🟠 部分 · 有零件缺关键环节</div></div>
+  <div class="card"><div class="n" style="color:#c0343a">26</div><div class="l">❌ 缺失 · 代码中未找到</div></div>
+  <div class="card"><div class="n" style="color:#2f7bff">25%</div><div class="l">完整率（23 / 93）</div></div>
+</div>
+
+<h2>一、按领域看完整性</h2>
+<table>
+<tr><th style="width:15%">领域</th><th style="width:9%">条数</th><th style="width:24%">分布</th><th>一句话结论</th></tr>
+<tr><td><b>剧本域</b></td><td>12</td><td><span class="tag no">缺失 9</span> <span class="tag pt">部分 3</span></td><td>🔴 <b>最弱</b>。除 ScriptNode 纯文本框外，浓缩/结构/设定器/快照/伏笔影响面全无</td></tr>
+<tr><td><b>分镜域</b></td><td>6</td><td><span class="tag ok">完整 3</span> <span class="tag pt">部分 2</span> <span class="tag no">缺失 1</span></td><td>🟢 <b>最完整</b>。拆解/宫格单元格/逐镜提示词已闭环</td></tr>
+<tr><td><b>导演域</b></td><td>7</td><td><span class="tag ok">完整 2</span> <span class="tag pt">部分 3</span> <span class="tag no">缺失 2</span></td><td>🟠 有分身 Skill，但结果不落时间线；无「导入模板生成分身」</td></tr>
+<tr><td><b>造型域</b></td><td>7</td><td><span class="tag pt">部分 5</span> <span class="tag no">缺失 2</span></td><td>🔴 只有 3D 人偶预设，无 2D「捏脸式」造型室；无音色关联</td></tr>
+<tr><td><b>资产域</b></td><td>9</td><td><span class="tag ok">完整 2</span> <span class="tag pt">部分 4</span> <span class="tag no">缺失 3</span></td><td>🟠 角色库/素材库完整；<b>场景库·道具库·角色组确认缺失</b></td></tr>
+<tr><td><b>视频域</b></td><td>9</td><td><span class="tag ok">完整 3</span> <span class="tag pt">部分 5</span> <span class="tag no">缺失 1</span></td><td>🟠 首尾帧完整；重拍/深度/拉片引擎就绪但前端未接</td></tr>
+<tr><td><b>图像域</b></td><td>7</td><td><span class="tag ok">完整 1</span> <span class="tag pt">部分 4</span> <span class="tag no">缺失 2</span></td><td>🔴 无图层分离/情绪九宫格；放大与抠像只有弱版本接线</td></tr>
+<tr><td><b>剪辑域</b></td><td>10</td><td><span class="tag ok">完整 4</span> <span class="tag pt">部分 5</span> <span class="tag no">缺失 1</span></td><td>🟢 转场/特效/画中画/时间线完整；缺 B-Roll 与去字幕</td></tr>
+<tr><td><b>3D 域</b></td><td>7</td><td><span class="tag ok">完整 3</span> <span class="tag pt">部分 3</span> <span class="tag no">缺失 1</span></td><td>🟠 白模录制/姿态重定向完整；缺「自然语言搭景」「手绘轨迹」</td></tr>
+<tr><td><b>机位域</b></td><td>8</td><td><span class="tag ok">完整 3</span> <span class="tag pt">部分 4</span> <span class="tag no">缺失 1</span></td><td>🟠 切换/视角/退出完整；无独立「机位轨」时间轴</td></tr>
+<tr><td><b>引用与工作流</b></td><td>4</td><td><span class="tag pt">部分 3</span> <span class="tag no">缺失 1</span></td><td>🟠 AutoLink 只插文本，未做实时检索引用</td></tr>
+<tr><td><b>外部集成</b></td><td>3</td><td><span class="tag ok">完整 1</span> <span class="tag pt">部分 2</span></td><td>ComfyUI 完整；Blender 是「我方驱动」非「对方插件」；无 SAM</td></tr>
+<tr><td><b>双入口</b></td><td>4</td><td><span class="tag ok">完整 1</span> <span class="tag pt">部分 1</span> <span class="tag no">缺失 2</span></td><td>🔴 <b>无对外 Agent 开放 API</b>，无社区广场</td></tr>
+</table>
+
+<h2>二、逐条核对明细</h2>
+<p class="sect">图例：<span class="tag ok">完整</span> 可运行且已接线　<span class="tag pt">部分</span> 有零件缺关键环节　<span class="tag no">缺失</span> 代码中未找到</p>
+
+<h3>2.1 剧本域（12 条 · 缺失 9）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>剧本创编</td><td>ScriptNode 内联文本框</td><td><span class="tag pt">部分</span></td><td><code>nodes.tsx:345-354</code></td><td>纯文本框，无生成/设定/结构化入口</td></tr>
+<tr><td>剧本浓缩</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无摘要化实现</td></tr>
+<tr><td>剧本结构</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（<code>script_structure.py</code> 不存在）</td><td>结构骨架仅在规划文档</td></tr>
+<tr><td>剧本设定器</td><td>—</td><td><span class="tag no">缺失</span></td><td><code>CHANGELOG.md:5298</code>（因冻结区受阻）</td><td>P1-1 至今未实现</td></tr>
+<tr><td>文本生剧本</td><td>DirectorSkill 生成脚本</td><td><span class="tag pt">部分</span></td><td><code>director_skill.py:91</code>；<code>ai_video_generation_pipeline.py:238-276</code></td><td>后端有 LLM，未接画布 ScriptNode</td></tr>
+<tr><td>视频生剧本</td><td>最近似=视频→分镜表</td><td><span class="tag no">缺失</span></td><td><code>canvas_aigc.py:2791</code>（产出分镜表非剧本）</td><td>无视频反推剧本</td></tr>
+<tr><td>角色生剧本</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无「人设反推剧本」通路</td></tr>
+<tr><td>上传剧本</td><td>通用素材上传</td><td><span class="tag no">缺失</span></td><td><code>canvas_bridge.py:617</code></td><td>有素材上传，无剧本文本导入</td></tr>
+<tr><td>分集剧本</td><td>模板 + 管线生成</td><td><span class="tag pt">部分</span></td><td><code>prompt_templates.py:225-234</code>；<code>ai_video_generation_pipeline.py:259</code></td><td>只在生成管线内，无独立 UI</td></tr>
+<tr><td>剧本文本快照</td><td>快照只存时间线</td><td><span class="tag no">缺失</span></td><td><code>canvas_server.py:1289</code></td><td>快照不含剧本文本</td></tr>
+<tr><td>原创剧本（题材+人设+背景）</td><td>仅 creative_outline 模板</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无三要素输入与原创产出</td></tr>
+<tr><td>局部改写+「大纲·钩子·伏笔」影响提示</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（<code>story_bible.py</code> 不存在）</td><td>无伏笔账本/影响面提示</td></tr>
+</table>
+
+<h3>2.2 分镜域（6 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>智能/生成分镜</td><td>storyboard_breakdown + 路由 + 导演卡</td><td><span class="tag ok">完整</span></td><td><code>canvas_aigc.py:2487</code>；<code>canvas_routes_post.py:1236</code></td><td>—</td></tr>
+<tr><td>分镜组（合并/转组）</td><td>通用编组/删除/复制</td><td><span class="tag pt">部分</span></td><td><code>store.ts:2191,1205,1242</code></td><td>无「合并、转组」语义</td></tr>
+<tr><td>分镜单元格</td><td>StoryboardCell + 宫格渲染</td><td><span class="tag ok">完整</span></td><td><code>node-factory.ts:373</code>；<code>storyNodes.tsx:435</code></td><td>—</td></tr>
+<tr><td>分镜总时长</td><td>时长临时合计</td><td><span class="tag pt">部分</span></td><td><code>storyNodes.tsx:108-201</code></td><td>无常驻显示</td></tr>
+<tr><td>分镜提示词</td><td>ShotData.prompt 逐镜可编辑</td><td><span class="tag ok">完整</span></td><td><code>nodes.tsx:339</code>；<code>storyNodes.tsx:236</code></td><td>—</td></tr>
+<tr><td>分镜叙事</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无该字段/面板</td></tr>
+</table>
+
+<h3>2.3 导演域（7 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>3D 导演台 / 导演台节点</td><td>director 节点 + Stage3D</td><td><span class="tag ok">完整</span></td><td><code>registerBuiltinNodes.ts:54,80</code>；<code>Stage3D.tsx</code></td><td>—</td></tr>
+<tr><td>导演控制台</td><td>Stage3D「导演视角」</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:1594</code></td><td>无独立命名控制台</td></tr>
+<tr><td>导演风格</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无风格选择/库</td></tr>
+<tr><td>导演角色（分身）</td><td>DirectorSkill（skill_id=director）</td><td><span class="tag pt">部分</span></td><td><code>director_skill.py:32</code>；<code>agent_capability_catalog.py:247</code></td><td>固定单 Skill，结果不落时间线</td></tr>
+<tr><td>导演级提示词</td><td>directorGuidance 招式库</td><td><span class="tag pt">部分</span></td><td><code>directorGuidance.ts:43</code>；<code>DirectorPanel.tsx:106</code></td><td>规则驱动，非提示词体系</td></tr>
+<tr><td>插入当前导演台</td><td>StageImportModal</td><td><span class="tag ok">完整</span></td><td><code>StageImportModal.tsx:136</code></td><td>—</td></tr>
+<tr><td>导入模板生成「导演分身」</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无「创作方法+模板→分身」入口</td></tr>
+</table>
+
+<h3>2.4 造型域（7 条 · 无完整项）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>角色造型室</td><td>仅 3D 端发型/五官预设</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:4065</code>；<code>riggedHumanoid.ts:1389</code></td><td>无 2D 造型室</td></tr>
+<tr><td>可视化调五官/发型/服装</td><td>3D 发型预设 + 服装变体轴</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:4065</code>；<code>store.ts:1170</code></td><td>无「捏脸式」细调</td></tr>
+<tr><td>细化痣·雀斑·疤痕</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无面部瑕疵微调</td></tr>
+<tr><td>关联音色</td><td>语音模块与角色库未打通</td><td><span class="tag no">缺失</span></td><td><code>character_management_module.py:55-80</code>（schema 无音色）</td><td>角色卡无音色字段</td></tr>
+<tr><td>角色卡保存复用</td><td>CharacterStore 增删改/导入导出</td><td><span class="tag pt">部分</span></td><td><code>character_management_module.py:107-239</code></td><td>20 字段文本卡，不含形象图</td></tr>
+<tr><td>上传造型参考图</td><td>ingest_local_file + avatar_url</td><td><span class="tag pt">部分</span></td><td><code>canvas_bridge.py:617</code>；<code>canvas_routes_get.py:117</code></td><td>不进 schema、不作生图参考</td></tr>
+<tr><td>人设定制造型</td><td>build_character_prompt</td><td><span class="tag pt">部分</span></td><td><code>canvas_bridge.py:283</code></td><td>无专门造型生成入口</td></tr>
+</table>
+
+<h3>2.5 资产域（9 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>角色库</td><td>CharacterStore 20 字段 + 画布绑定</td><td><span class="tag ok">完整</span></td><td><code>character_management_module.py:55,107</code>；<code>CanvasShell.tsx:1889</code></td><td>—</td></tr>
+<tr><td>角色组</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）</td><td>无角色分组</td></tr>
+<tr><td>场景库</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）</td><td>无场景资产</td></tr>
+<tr><td>道具库</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）</td><td>无道具资产</td></tr>
+<tr><td>风格库 / 风格广场</td><td>提示词分类库</td><td><span class="tag pt">部分</span></td><td><code>promptTaxonomy.ts:205</code>；<code>prompt_library_store.py</code></td><td>只有提示词级分类</td></tr>
+<tr><td>素材库</td><td>localLibrary + 「我的资产」页</td><td><span class="tag ok">完整</span></td><td><code>localLibrary.ts:14,224</code>；<code>StudioPages.tsx:222</code></td><td>—</td></tr>
+<tr><td>一致性资产</td><td>character_anchor 锚定卡</td><td><span class="tag pt">部分</span></td><td><code>character_anchor.py:79</code>；<code>capability_handlers.py:1466</code></td><td>仅文本层，无视觉相似度</td></tr>
+<tr><td>资产图锚定</td><td>build_anchor(reference_image=)</td><td><span class="tag pt">部分</span></td><td><code>character_anchor.py:79-114</code></td><td>有字段但只做文本层</td></tr>
+<tr><td>角色形象图持久化</td><td>_append_character_asset</td><td><span class="tag pt">部分</span></td><td><code>canvas_bridge.py:699-721</code>；<code>canvas_routes_get.py:116-117</code></td><td>schema 无形象图字段</td></tr>
+</table>
+
+<h3>2.6 视频域（9 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>首帧生视频</td><td>first_frame 字段 + 生成链</td><td><span class="tag ok">完整</span></td><td><code>canvas_aigc.py:1337,1577</code>；<code>CanvasShell.tsx:2265</code></td><td>—</td></tr>
+<tr><td>尾帧生视频</td><td>last_frame 传入</td><td><span class="tag ok">完整</span></td><td><code>canvas_aigc.py:1338,1580</code>；<code>CanvasShell.tsx:2271</code></td><td>—</td></tr>
+<tr><td>首尾帧提取</td><td>仅从 3D 机位路径导出</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:2488,2513,4488</code></td><td>无「从已有视频抽首尾帧」</td></tr>
+<tr><td>视频智能续写</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无任意时间点续写</td></tr>
+<tr><td>片段重拍</td><td>segment_retake 引擎 + 路由</td><td><span class="tag pt">部分</span></td><td><code>segment_retake.py:93,167</code>；<code>canvas_routes_post.py:1692</code></td><td>⚠️ 前端与 Agent action <b>无调用者</b></td></tr>
+<tr><td>深度动作捕捉</td><td>Depth-Anything-V2 ONNX + 路由</td><td><span class="tag pt">部分</span></td><td><code>video_depth.py:154,177</code>；<code>canvas_routes_post.py:1740</code></td><td>⚠️ 前端未接；动作与深度未合成一体入口</td></tr>
+<tr><td>逐帧拉片</td><td>切分+色调/景别启发式；L1/L2 模块</td><td><span class="tag pt">部分</span></td><td><code>canvas_aigc.py:2791</code>；<code>reference_breakdown.py:1,233,269</code></td><td>⚠️ L1/L2 无前端调用者；缺叙事/动作/音频维</td></tr>
+<tr><td>运镜轨迹</td><td>相机轨迹录制 + 深度推断运镜</td><td><span class="tag pt">部分</span></td><td><code>cameraRecorder.ts:2</code>；<code>reference_breakdown.py:269</code></td><td>无「视频→轨迹直传生成」闭环</td></tr>
+<tr><td>视频参考图</td><td>reference_image 传入生成链</td><td><span class="tag ok">完整</span></td><td><code>canvas_aigc.py:1335</code>；<code>App.tsx:751,753</code></td><td>—</td></tr>
+</table>
+
+<h3>2.7 图像域（7 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>九宫格切分（拖分割线）</td><td>splitGrid + 均匀 N×N</td><td><span class="tag pt">部分</span></td><td><code>imageTools.ts:38,56</code>；<code>storyNodes.tsx:465</code></td><td>仅均匀网格，<b>不可拖动分割线</b></td></tr>
+<tr><td>情绪九宫格</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）</td><td>无</td></tr>
+<tr><td>多机位九宫格 4K</td><td>多机位 + 通用宫格</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:2,215</code>；<code>canvas_routes_post.py:806</code></td><td>无专用产物</td></tr>
+<tr><td>高清放大</td><td>本地双线性（已接）+ AI 超分（未接）</td><td><span class="tag pt">部分</span></td><td><code>imageTools.ts:78</code>；<code>canvas_enhance.py:157</code>；<code>canvas_routes_get.py:709</code></td><td>⚠️ 前端只用双线性，未调超分</td></tr>
+<tr><td>智能抠像</td><td>色度键（已接）+ MODNet/U2Net（未接）</td><td><span class="tag pt">部分</span></td><td><code>editor_effects_mixin.py:594</code>；<code>canvas_enhance.py:181</code>；<code>neural/background_replace.py:7</code></td><td>⚠️ 现网只绿幕键，AI 抠图未接前端</td></tr>
+<tr><td>图层分离</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）</td><td>画布节点仅 z-order，非图像图层分离</td></tr>
+<tr><td>裁剪</td><td>居中裁剪 + 编辑器四边裁剪</td><td><span class="tag ok">完整</span></td><td><code>imageTools.ts:17</code>；<code>editor_compositing.py:103</code></td><td>—</td></tr>
+</table>
+
+<h3>2.8 剪辑域（10 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>智能剪辑（口播/广告/混剪/解说）</td><td>引擎 + 短剧预设</td><td><span class="tag pt">部分</span></td><td><code>smart_editing_engine.py:1-9</code>；<code>drama_mlt.py:58</code>；<code>LibTvChrome.tsx:381</code></td><td>无「一键端到端成品」</td></tr>
+<tr><td>素材粗剪（去口水词·停顿·重复）</td><td>填充词/长静音检测 + 一键去水词</td><td><span class="tag pt">部分</span></td><td><code>filler_silence_detect.py:2,69,182</code>；<code>editor_subtitle_panel.py:143</code></td><td>「重复」检测未见；缺写 _clips 入口</td></tr>
+<tr><td>多轨智能编排（动效/卡点/布局）</td><td>自动卡点 + 情绪转场</td><td><span class="tag pt">部分</span></td><td><code>smart_editing_engine.py:560,6</code>；<code>audio_processor.py</code></td><td>无自动布局+动效匹配一键产物</td></tr>
+<tr><td>B-Roll 匹配</td><td>仅 UI 占位条目</td><td><span class="tag no">缺失</span></td><td><code>extensions_module.py:1713</code>（明写「占位」）</td><td>无匹配实现</td></tr>
+<tr><td>画中画</td><td>FFmpeg overlay</td><td><span class="tag ok">完整</span></td><td><code>editor_effects_mixin.py:524</code>；<code>editor_props_panel.py:107</code></td><td>—</td></tr>
+<tr><td>字幕（添加/识别/去字幕）</td><td>添加/识别完整；去字幕缺失</td><td><span class="tag pt">部分</span></td><td><code>subtitle_manager.py</code>；<code>builtin_blocks.py:328</code></td><td>「智能/框选去字幕」未找到</td></tr>
+<tr><td>转场库</td><td>50+ 转场 / 10 大类</td><td><span class="tag ok">完整</span></td><td><code>transitions.py:3-9,20</code>；<code>transition_plugin_registry.py</code></td><td>—</td></tr>
+<tr><td>特效库</td><td>EffectManager + 编辑器特效</td><td><span class="tag ok">完整</span></td><td><code>effect_manager.py:11,52</code></td><td>—</td></tr>
+<tr><td>轨道（视频/音频/字幕/文本/运镜）</td><td>仅视频/音频/字幕轨</td><td><span class="tag pt">部分</span></td><td><code>timeline_widget.py:354,461</code>；<code>base_block.py:31-35</code></td><td>缺<b>文本轨</b>与<b>运镜轨</b></td></tr>
+<tr><td>时间线</td><td>时间线组件 + 手感工具</td><td><span class="tag ok">完整</span></td><td><code>timeline_widget.py</code>；<code>editor_timeline_tools.py</code></td><td>—</td></tr>
+</table>
+
+<h3>2.9 3D 域（7 条）· 2.10 机位域（8 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>3D-BOX（自然语言搭景）</td><td>Stage3D 手动搭景/摆姿/机位</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:2140,3671,4466</code>；<code>canvas_routes_post.py:1254</code></td><td>无「Agent 用自然语言生成物件搭景」入口</td></tr>
+<tr><td>手绘轨迹预演运镜</td><td>录制相机拖拽轨迹（≠手绘）</td><td><span class="tag no">缺失</span></td><td>近似 <code>cameraRecorder.ts:34</code></td><td>无「屏幕手绘轨迹→相机跟随」</td></tr>
+<tr><td>3D 场景</td><td>Stage3D 场景状态 + 快照序列化</td><td><span class="tag ok">完整</span></td><td><code>stage3dScene.ts:54</code>；<code>ports.ts:132,304</code></td><td>—</td></tr>
+<tr><td>3D 视图</td><td>导演/机位视角 + 三视图导出</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:3823,2734</code></td><td>无「可保存复用」的视图资产</td></tr>
+<tr><td>3D 资产</td><td>内置素模 + 几何体；外部 GLB 仅登记</td><td><span class="tag pt">部分</span></td><td><code>riggedHumanoid.ts:175</code>；<code>Stage3D.tsx:4385,3021</code></td><td>无 3D 资产库，外部模型不进场景</td></tr>
+<tr><td>白模视频录制</td><td>逐帧渲染→FFmpeg 合成</td><td><span class="tag ok">完整</span></td><td><code>stage3dPoseVideo.ts:173</code>；<code>canvas_routes_post.py:558</code></td><td>—</td></tr>
+<tr><td>人偶姿态重定向</td><td>BlazePose→JointPose→GLB</td><td><span class="tag ok">完整</span></td><td><code>stage3dPoseRetarget.ts:154</code>；<code>pose_worker.py</code></td><td>—</td></tr>
+<tr><td>多机位九宫格</td><td>机位截图 + 叠卡</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:4479</code>；<code>App.tsx:974</code></td><td>「九宫格」是分镜格，非多机位并排</td></tr>
+<tr><td>机位轨</td><td>路径点 + 姿势关键帧轨</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:4506,2808</code></td><td>无独立「机位轨」时间轴控件</td></tr>
+<tr><td>机位关键帧</td><td>相机路径点（含时间码）</td><td><span class="tag pt">部分</span></td><td><code>cameraRecorder.ts:69</code>；<code>stage3dScene.ts:36</code></td><td>机位关键帧不能逐帧增删改</td></tr>
+<tr><td>切换机位</td><td>点已存机位→进入相机视角</td><td><span class="tag ok">完整</span></td><td><code>Stage3D.tsx:4407,2332</code></td><td>—</td></tr>
+<tr><td>定位机位</td><td>随切换触发</td><td><span class="tag pt">部分</span></td><td><code>Stage3D.tsx:1593-1632</code></td><td>无独立「精确定位」动作</td></tr>
+<tr><td>机位视角 / 退出机位</td><td>相机视角 viewMode + FOV</td><td><span class="tag ok">完整</span></td><td><code>Stage3D.tsx:710,4421,3823</code></td><td>—</td></tr>
+<tr><td>空间与机位</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无该组合面板/概念</td></tr>
+</table>
+
+<h3>2.11 引用与工作流（4 条）· 2.12 外部集成（3 条）· 2.13 双入口（4 条）</h3>
+<table>
+<tr><th style="width:16%">LibTV 能力</th><th style="width:22%">我方实现</th><th style="width:8%">状态</th><th style="width:30%">证据</th><th>缺口</th></tr>
+<tr><td>智能引用 AutoLink</td><td>连线上游引用 + @角色/@素材文本按钮</td><td><span class="tag pt">部分</span></td><td><code>upstreamRefs.ts:60</code>；<code>LibTvChrome.tsx:312</code></td><td>@按钮只插文本，未按提示词实时检索引用</td></tr>
+<tr><td>@引用工作流·节点·资源</td><td>—</td><td><span class="tag no">缺失</span></td><td>未找到</td><td>无 @工作流/@节点 语法与解析</td></tr>
+<tr><td>脚本工作流规划</td><td>脚本→分镜→执行规划器</td><td><span class="tag pt">部分</span></td><td><code>agent_capability_catalog.py:202,247</code>；<code>canvasRun.ts</code></td><td>无「脚本工作流」一等节点/模板</td></tr>
+<tr><td>成片工作流</td><td>一键全链路 + 拼接 + 批量入轨</td><td><span class="tag pt">部分</span></td><td><code>agent_capability_catalog.py:204,206</code>；<code>canvas_routes_post.py:976,1036</code></td><td>无可视化工作流模板</td></tr>
+<tr><td>Blender 插件</td><td>我方 MCP 驱动 Blender 渲染</td><td><span class="tag pt">部分</span></td><td><code>mcp_client.py:564</code>；<code>director_skill.py:388</code></td><td>是「我方驱动 Blender」，非「Blender 端插件录白模一键发平台」</td></tr>
+<tr><td>ComfyUI 工作流</td><td>内置引擎 + 落箱 + 粘贴落节点 + ControlNet</td><td><span class="tag ok">完整</span></td><td><code>comfy_provider.py</code>；<code>comfyToCanvas.ts:4</code>；<code>stage3dControlNet.ts:344</code></td><td>—</td></tr>
+<tr><td>SAM 分割抠像</td><td>MODNet/U2Net + 色度键</td><td><span class="tag pt">部分</span></td><td><code>neural/background_replace.py:20</code>；<code>canvas_enhance.py:60</code></td><td>无 SAM 分割模型</td></tr>
+<tr><td>人类 UI（无限画布）</td><td>React Flow 画布 + 双模式</td><td><span class="tag ok">完整</span></td><td><code>CanvasShell.tsx</code>；<code>stores/node-factory.ts</code></td><td>—</td></tr>
+<tr><td>AI Agent 开放 API（对外）</td><td>—（只有反向的 MCP 客户端）</td><td><span class="tag no">缺失</span></td><td>未找到（已复核）；<code>canvas_agent_runtime.py:137</code> 是「我们去连外部」</td><td><b>无对外会话式生成 API</b></td></tr>
+<tr><td>工作流/特效/风格广场</td><td>—（提示词有社区库）</td><td><span class="tag no">缺失</span></td><td>近似 <code>PromptLibraryPanel.tsx:100</code></td><td>无社区共享广场</td></tr>
+<tr><td>分享「agent 对话 + 一致性资产」</td><td>分享节点 JSON + Skill 包 + 角色库</td><td><span class="tag pt">部分</span></td><td><code>LibTvChrome.tsx:258</code>；<code>workflowSkill.ts:16</code></td><td>无 agent 对话分享；角色资产无形象图</td></tr>
+</table>
+
+<h2>三、最值钱的发现：引擎就绪、只差「最后一公里」</h2>
+<div class="note">
+  下列能力<b>后端与 HTTP 路由都已实现并经测试</b>，只是<b>前端或 Agent 没有调用者</b>——补一条接线就能从「部分」变「完整」，
+  投入产出比远高于从零开发。
+</div>
+<table>
+<tr><th style="width:20%">能力</th><th style="width:34%">现成零件</th><th>缺的唯一一环</th></tr>
+<tr><td><b>片段重拍</b></td><td><code>segment_retake.py</code> + <code>/host/segment-retake</code> + 测试</td><td>前端节点/按钮、<code>agent_action_registry</code> 登记</td></tr>
+<tr><td><b>深度动作捕捉</b></td><td><code>video_depth.py</code>（Depth-Anything-V2） + <code>/host/video-depth</code></td><td>前端调用者（现无任何调用）</td></tr>
+<tr><td><b>逐帧拉片 L1/L2</b></td><td><code>reference_breakdown.py</code> + 两条路由</td><td>前端调用者；补「叙事/动作/音频」维度</td></tr>
+<tr><td><b>AI 超分放大</b></td><td><code>canvas_enhance.py</code>（ESPCN/RealESRGAN） + 路由</td><td>前端改调 <code>/host/canvas-enhance</code>（现用双线性）</td></tr>
+<tr><td><b>AI 人像抠像</b></td><td><code>neural/background_replace.py</code>（MODNet/U2Net）</td><td>前端接线（现网只色差键）</td></tr>
+<tr><td><b>文本生剧本</b></td><td><code>director_skill._generate_script</code>（LLM）</td><td>接画布 ScriptNode 的 UI 入口</td></tr>
+<tr><td><b>导演结果落时间线</b></td><td><code>pipeline.director_breakdown</code> / 能力目录</td><td>补 <code>source_dir</code> 落轨</td></tr>
+</table>
+
+<h2>四、真缺口（需要新开发的）</h2>
+<div class="warn">
+  按「一条链」的角度，真正需要从零做的集中在三处，与既有判断一致：
+</div>
+<table>
+<tr><th style="width:22%">缺口</th><th>说明</th></tr>
+<tr><td><b>剧本生产端</b></td><td>剧本域 12 条里缺失 9 条：浓缩/结构/设定器/快照/原创三要素/伏笔影响面 —— 剧本节点目前只是纯文本框</td></tr>
+<tr><td><b>资产母版层</b></td><td>场景库、道具库、角色组<b>确认不存在</b>；角色卡存不了形象图、无音色关联 ⇒ 无法沉淀可复用视觉资产</td></tr>
+<tr><td><b>对外 Agent 入口</b></td><td>无会话式 OpenAPI（LibTV 的「第二扇门」）；目前只有反向的 MCP 客户端</td></tr>
+</table>
+<p class="kicker" style="color:#5a6478;font-size:13.2px">另有若干单点缺失：图层分离、情绪九宫格、B-Roll 匹配、智能/框选去字幕、手绘轨迹运镜、工作流·特效·风格广场、SAM 分割、@引用工作流·节点。</p>
+
+<h2>五、核对方法与可信度</h2>
+<ul>
+  <li>三路独立静态检索（能力目录 / 画布节点注册表 / CHANGELOG 对标记录交叉印证），共核对 93 条。</li>
+  <li>所有「缺失」判定做了<b>反向复核 grep</b>：场景库/道具库/角色组、图层分离、对外 OpenAPI、情绪九宫格 —— 全部确认代码中不存在（非漏搜）。</li>
+  <li>所有「完整/部分」判定均附 <code>文件:行</code> 证据，可直接核对。</li>
+  <li>本核对为<b>静态代码级</b>结论；「部分」项的实际可用度仍以真机运行表现为准。</li>
+</ul>
+
+<footer>
+  生成时间：2026-10-12 · 配套文档：<code>docs/_reports/2026-10-12-LibTV网页功能逆向报告.html</code>（LibTV 侧）+ 本文件（我方侧）<br>
+  统计口径：完整 23 · 部分 44 · 缺失 26（合计 93）
+</footer>
+
+</div>
+</body>
+</html>

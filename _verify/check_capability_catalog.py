@@ -48,7 +48,8 @@ def check(cond, msg):
 
 # ── 静态取「真实注册」集合（避免拉起 dispatcher 链）──
 with open(HANDLERS, encoding="utf-8") as f:
-    registered = set(re.findall(r'dispatcher\.register\(\s*"([\w.]+)"', f.read()))
+    _handlers_src = f.read()
+    registered = set(re.findall(r'dispatcher\.register\(\s*"([\w.]+)"', _handlers_src))
 
 # 画布节点级 capability（canvas_tools 后端化）经 register_builtin_handlers 里的
 # 循环注册（for _c in canvas_node_capabilities()），静态 regex 抓不到字面量；
@@ -56,6 +57,12 @@ with open(HANDLERS, encoding="utf-8") as f:
 from app.core.agent_action_registry import canvas_node_capabilities  # noqa: E402
 
 registered |= {c["capability_id"] for c in canvas_node_capabilities()}
+
+# 剪辑 Skill 扩容（2026-10-14）走 for 循环 dispatcher.register(_cap_id, ...)，
+# capability id 在循环元组里而非 register() 实参字面量，静态 regex 同样漏抓；
+# 补一层元组解析（("editor.xxx", "method_name", "desc")），与运行时注册对齐。
+for _m in re.findall(r'\("(editor\.[\w.]+)",\s*"[\w]+",\s*"[^"]*"\)', _handlers_src):
+    registered.add(_m)
 
 print("[A] 目录 ↔ 注册 双向一致")
 problems = cat.verify_catalog_consistency(registered)

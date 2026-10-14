@@ -363,22 +363,17 @@ class EditorAgentRuntimeMixin:
 
     # 抽取自 editor_module.py L7554-7571
     def _list_local_ollama_models(self) -> List[str]:
-        """读取本地 Ollama 模型列表；失败时返回空列表并保留自动模式。"""
+        """读取本地 Ollama 模型列表；失败时返回空列表并保留自动模式。
+
+        走 model_config.discover_local_models()（300s TTL 缓存）而不是直连
+        `client.list_models()`：本机 `/api/tags` 实测约 4s，旧写法每次刷新模型
+        列表都会同步打一次 HTTP，是「首次打开 Agent 面板卡顿」的根因之一。
+        """
         try:
-            from app.core.ai_engine import ai_engine
-            client = getattr(ai_engine, "_ollama_client", None)
-            if not client:
-                return []
-            models = client.list_models()
-            result = []
-            for item in models:
-                if isinstance(item, dict):
-                    result.append(item.get("name") or item.get("model") or "")
-                else:
-                    result.append(getattr(item, "name", getattr(item, "model", str(item))))
-            return [m for m in result if m]
+            from app.modules.lego.model_config import discover_local_models
+            return list(discover_local_models() or [])
         except Exception as e:
-            logger.error(f'读取 Ollama 模型失败: {e}')
+            logger.debug("[Agent] 读取本地 Ollama 模型失败: %s", e)
             return []
 
     # Agent 全链路 6+ 主阶段映射（用于进度条）

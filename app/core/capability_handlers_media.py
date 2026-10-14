@@ -147,6 +147,42 @@ class MediaCapabilityHandlers:
             error=None if ok else (res.get("message") or "拉片失败"),
         )
 
+    def reference_breakdown_l2(self, req: CapabilityRequest) -> CapabilityResult:
+        """逐帧拉片 **L2 运动级**：复用 /host/reference-breakdown-l2 的 build_shot_table(with_depth=True)。
+
+        在 L1 基础上取每段首/尾帧深度图推断运镜（推/拉/摇，中文词），
+        置信度低于门槛的推断只留详情不进表格（camera_move_trusted=False）。
+        可选开景别/描述 enrich：``use_vision=True`` 时调**云端视觉模型**
+        （素材出域，需调用方显式开启；失败如实留空并标注，不编造）。
+        params：video_path / out_dir(可选) / threshold(默认0.30) /
+        use_vision(默认False) / vision_model(可选)。
+        """
+        try:
+            from app.core import reference_breakdown as rb
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"拉片模块不可用: {e}")
+        p = req.params or {}
+        video = str(p.get("video_path") or "")
+        if not video:
+            return CapabilityResult(req.request_id, False, error="缺少 video_path")
+        try:
+            res = rb.build_shot_table(
+                video,
+                out_dir=str(p.get("out_dir") or ".workbuddy/tmp/breakdown_l2"),
+                threshold=float(p.get("threshold") or 0.30),
+                with_depth=True,
+                use_vision=bool(p.get("use_vision")),
+                vision_model=str(p.get("vision_model") or ""),
+            )
+        except Exception as e:
+            logger.debug("[media] 拉片 L2 异常", exc_info=True)
+            return CapabilityResult(req.request_id, False, error=f"拉片 L2 失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "拉片 L2 失败"),
+        )
+
     def segment_retake(self, req: CapabilityRequest) -> CapabilityResult:
         """片段重拍：复用 /host/segment-retake 的 splice_retake。
         只替换视频指定时间段（保音轨/时长对齐），接缝风险如实报告。

@@ -45,7 +45,12 @@ import {
   type VideoModelOption,
   type AudioModelOption,
   type MusicModelOption,
+  type BatchStatusResult,
 } from "./bridge";
+// Wave 0 #13：入轨编排抽到独立文件（App.tsx 已1999/2000 顶格，只减不增）
+// + 批量快通道：后端 /host/batch-to-timeline 已完整实现但前端零调用。
+import { ingestNodes, nodeImageUrl } from "./editorIngress";
+import { pickDoneIndices } from "./hostBatchOps";
 import {
   generateVideoUnified,
   listLocalVideoModels,
@@ -243,6 +248,11 @@ export default function App() {
   const { clipCount: editorClipCount } = useEditorCanvasLink();
 
   const [prefs, setPrefs] = useState<BridgePrefs>({});
+  /** Wave 0 #13：最近一次批量作业的 job_id / 分段清单。「全部入轨」据此走后端快通道。 */
+  const [lastBatchJobId, setLastBatchJobId] = useState<string | null>(null);
+  const [lastBatchSegments, setLastBatchSegments] = useState<
+    BatchStatusResult["segments"] | undefined
+  >(undefined);
   const [imageModels, setImageModels] = useState<ImageModelOption[]>([]);
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([]);
   const [audioModels, setAudioModels] = useState<AudioModelOption[]>([]);
@@ -1307,16 +1317,6 @@ export default function App() {
     }
   };
 
-  const nodeImageUrl = (data: NodeData) => {
-    if (data.kind === "shot" || data.kind === "image" || data.kind === "director" || data.kind === "panorama" || data.kind === "digitalHuman") {
-      return data.imageUrl || "";
-    }
-    if (data.kind === "animation") return data.sheetUrl || "";
-    if (data.kind === "source") return data.imageUrl || "";
-    if (data.kind === "video") return data.posterUrl || data.firstFrameUrl || "";
-    return "";
-  };
-
   const onSendToEditor = async () => {
     if (!selected || !selectedData) {
       setStatus("请先选中带图/视频的节点");
@@ -1408,62 +1408,15 @@ export default function App() {
     }
   };
 
+  /**
+   * 全部入轨 = 编排委托给 `editorIngress.ingestNodes`（Wave 0 #13 抽模块）。
+   * 本函数只负责「拿到批量 job_id 就走后端快通道」，不新增按钮、不新增通道。
+   * `lastBatchJobId` 由批量提交处写入，批量作业结束后仍在有效期内的才走后端。
+   */
   const onSendAllToEditor = async () => {
-    const list = nodes.filter((n) => {
-      const d = n.data as NodeData;
-      if (d.kind === "video" && d.videoUrl) return true;
-      if (d.kind === "digitalHuman") return Boolean(d.videoUrl || d.audioUrl || d.imageUrl);
-      if ((d.kind === "audio" || d.kind === "music") && d.audioUrl) return true;
-      return Boolean(nodeImageUrl(d));
-    });
-    if (!list.length) {
-      setStatus("没有带图/视频的节点可入轨");
-      return;
-    }
-    setGenerating(true);
-    let ok = 0;
-    for (let i = 0; i < list.length; i++) {
-      const n = list[i];
-      const d = n.data as NodeData;
-      setStatus(`入轨 ${i + 1}/${list.length}…`);
-      try {
-        const title = ("title" in d ? d.title : "") || `${d.kind}_${n.id}`;
-        const prefix = String(i + 1).padStart(2, "0");
-        const link = { node_id: n.id, kind: d.kind };
-        if (d.kind === "video" && d.videoUrl) {
-          const resp = await fetch(d.videoUrl);
-          const blob = await resp.blob();
-          await sendBlobToEditor(blob, `${prefix}_${title}.mp4`, prefs, {
-            title,
-            duration_sec: Number(d.duration) || 0,
-            ...link,
-          });
-        } else if (d.kind === "digitalHuman" && d.audioUrl) {
-          const resp = await fetch(d.audioUrl);
-          const blob = await resp.blob();
-          const ext = blob.type.includes("mpeg") || blob.type.includes("mp3") ? "mp3" : "wav";
-          await sendBlobToEditor(blob, `${prefix}_${title}.${ext}`, prefs, { title: `${title}·配音`, ...link });
-          if (d.imageUrl) {
-            const imgBlob = await dataUrlToBlob(d.imageUrl);
-            await sendBlobToEditor(imgBlob, `${prefix}_${title}.png`, prefs, { title: `${title}·形象`, ...link });
-          }
-        } else {
-          const imageUrl = nodeImageUrl(d);
-          const blob = await dataUrlToBlob(imageUrl);
-          const dur = d.kind === "shot" ? Number(d.duration) || 0 : 0;
-          await sendBlobToEditor(blob, `${prefix}_${title}.png`, prefs, {
-            title,
-            duration_sec: dur,
-            ...link,
-          });
-        }
-        ok += 1;
-      } catch {
-        /* continue */
-      }
-    }
-    setStatus(`全部入轨完成：${ok}/${list.length}`);
-    setGenerating(false);
+    const batchOk = pickDoneIndices(lastBatchSegments).length > 0;
+    await ingestNodes({ nodes, setStatus, setGenerating, prefs }, batchOk ? lastBatchJobId : null,
+      batchOk ? lastBatchSegments : undefined);
   };
 
   const onSyncModels = async () => {
@@ -1929,6 +1882,10 @@ export default function App() {
                 }
                 const jobId = res.job_id;
                 setStatus(`✅ 已提交批量任务 ${jobId}（${segments.length} 段），等待生成…`);
+                // Wave 0 #13：记下 job_id 与分段清单，「全部入轨」按钮据此走后端快通道
+                // （逐段直接 emit_canvas_to_editor，不经前端 fetch blob 中转）。
+                setLastBatchJobId(jobId);
+                setLastBatchSegments(undefined);
                 // 轮询进度
                 const poll = async () => {
                   for (let i = 0; i < 200; i++) {
@@ -1940,6 +1897,8 @@ export default function App() {
                     const total = st.total || segments.length;
                     setStatus(`🎬 批量进度 ${done + failed}/${total}（成功 ${done}，失败 ${failed}）${failed > 0 ? " ⚠️" : ""}`);
                     if (st.status === "done" || st.status === "failed") {
+                      // Wave 0 #13：留存分段清单供「全部入轨」走快通道
+                      setLastBatchSegments(st.segments);
                       // 成功后自动拼接
                       if (done >= 2) {
                         setStatus(`🧩 开始 FFmpeg 拼接 ${done} 个成功分段…`);

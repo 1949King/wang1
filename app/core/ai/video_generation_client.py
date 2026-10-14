@@ -329,6 +329,7 @@ class VideoGenerationClient:
             logger.debug("[VideoGenerationClient] 额度池不可用，健康信息缺省", exc_info=True)
         rows: List[Dict[str, Any]] = []
         for pid, name in (
+            ("kling", "可灵 Kling（快手开放平台）"),
             ("dashscope", "阿里云百炼 万相（Wan）"),
             ("seedance", "火山引擎 Seedance"),
             ("cogvideo", "智谱 CogVideo"),
@@ -539,6 +540,8 @@ class VideoGenerationClient:
                 handler = self._load_cogvideo()
             elif name == "dashscope":
                 handler = self._load_dashscope()
+            elif name == "kling":
+                handler = self._load_kling()
         except Exception as e:
             logger.debug(f"[VideoGenerationClient] 加载 {name} 失败: {e}")
         self._providers[name] = handler
@@ -591,6 +594,47 @@ class VideoGenerationClient:
             return _wan
         except Exception as e:
             logger.debug(f"[VideoGenClient] 加载 DashScope 万相失败: {e}")
+            return None
+
+    def _load_kling(self) -> Optional[Callable]:
+        """加载可灵 Kling 客户端（2026-10-14 起为 auto 默认首选渠道）。
+
+        复用画布 AIGC 既有 host 链路（``canvas_aigc.generate_video_via_host``），
+        kling 分支在 L1857 附近按 base_url/model 识别后走 submit + poll。
+        key 未配置（模型广场无可用 AIGC 渠道）时返回 None，路由自动顺延
+        dashscope → seedance → cogvideo → local，绝不假成功。
+        """
+        try:
+            from app.core.canvas_aigc import (
+                _resolve_aigc_channel,
+                generate_video_via_host,
+            )
+            ch, default_model, _patch = _resolve_aigc_channel(capability="video")
+            if ch is None:
+                logger.info("[VideoGenClient] 模型广场无可用 AIGC 渠道，跳过 kling")
+                return None
+            channel_id = str(ch.get("id") or "")
+
+            def _kling(prompt, duration, count, width, height):
+                # generate() 期望「路径列表」；host 链路返回 dict，
+                # 失败必须**抛异常**（不能返回空列表假装成功）才能让路由顺延下一渠道。
+                res = generate_video_via_host(
+                    prompt=prompt,
+                    model=default_model,
+                    channel_id=channel_id,
+                    duration=duration,
+                    size=f"{int(width)}x{int(height)}" if width and height else "",
+                )
+                if not isinstance(res, dict) or not res.get("ok"):
+                    msg = (res or {}).get("message", "未知错误") if isinstance(res, dict) else str(res)
+                    raise RuntimeError(f"Kling 生成失败: {msg}")
+                path = str(res.get("video_path") or "")
+                if not path:
+                    raise RuntimeError("Kling 返回成功但无 video_path")
+                return [path]
+            return _kling
+        except Exception as e:
+            logger.debug(f"[VideoGenClient] 加载 Kling 客户端失败: {e}")
             return None
 
     def _record_prior(self, name: str, ok: bool) -> None:

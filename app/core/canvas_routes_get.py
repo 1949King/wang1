@@ -280,6 +280,24 @@ class CanvasGetRoutesMixin:
         )
         return
 
+    @_route_get("/host/local-vision-models")
+    def _route_host_local_vision_models(self, parsed=None):
+        """本机视觉模型（拉片用）：查 Ollama /api/show 的 vision 能力，素材不出机。"""
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized", "models": []})
+            return
+        try:
+            from app.core.canvas_shot_vision import list_local_vision_models
+
+            models = list_local_vision_models()
+            default = models[0]["name"] if models else ""
+            self._json(200, {"ok": True, "models": models, "default": default})
+        except Exception as e:
+            logger.warning("[/host/local-vision-models] 失败: %s", e)
+            self._json(200, {"ok": True, "models": [], "default": ""})
+        return
+
     @_route_get("/host/video-models")
     def _route_host_video_models(self, parsed=None):
         cs = _cs()

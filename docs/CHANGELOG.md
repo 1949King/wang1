@@ -1,5 +1,69 @@
 # 拾光剪影 — 变更日志
 
+## 收口 · Wave 0：并行工作区归零 + 孤儿端点第 1 条接线（2026-10-15，主程序 V4.43.22 / 画布 0.3.30）
+
+落实 `docs/画布可借鉴清单落地规划_2026-10-15.md` 的 Wave 0 两项。**上一轮提交用了 `--no-verify`，
+本轮起恢复全绿。**
+
+### #14 并行工作区收口（上一轮 `--no-verify` 的根因）
+
+| 项 | 处置 |
+|---|---|
+| `app/test_video_editing_e2e.py`（29 项print-statement） | **移出 product 树** → `_verify/e2e/video_editing_e2e.py`。它是 e2e 脚本（`__main__` 入口、全路径 import、自己处理 sys.path），print 是 stdout 汇报而非日志。**未扩 `SKIP_DIRS`** —— 往门禁塞具体文件名会把豁免变成常规操作，违背该门禁「只对 product 代码说话」的初衷。门禁机制本身零改动。 |
+| `canvas_shot_vision.py`（3 处 swallow-except） | 补 `logger.debug(..., exc_info=True)` + 原因注释。其中 `os.remove` 失败会残留无人知晓的帧文件，必须留痕；两处 JSON 兜底解析是正常路径（模型常在 JSON 前后带话），留痕便于排查。 |
+| `capability_handlers_editor_skills.py`（1 处） | 同上（取 toast 失败走 fallback 文案，属降级不静默） |
+| `reference_breakdown.py`（1 处） | 同上 |
+| `storyNodes.tsx` tsc 错误 | **序列化字段不对称**：后端 `app/core/ai/storyboard_memory.py:162` 的 `warnings` 是 `List[str]`（docstring 亦标`"warnings": [str]`），但 `bridgeStoryboard.ts:254` 误声明为 `string`。改声明为 `string[]`，**只修类型不动运行时**。 |
+| `infinite-compat.tsx` tsc 错误 | **签名写错**：兜底实现写成单参 `(opts: {...})`，把 opts 当成第一个位置参数 `prompt`。`PluginRuntimeAI`（`types.ts:34`）是 `(prompt, opts?)`。改回双参、opts 全可选。 |
+
+**结果**：`stability_gate` 34 → **0 新增违规**（存量 250 项未动，**未跑 `--update` 洗基线**）；
+tsc **39 → 37**（回到基线，37 全在 `riggedHumanoid.ts` 21 + `Stage3D.tsx` 16 两个 three.js 文件）。
+
+### #13 孤儿端点第 1 条：`/host/batch-to-timeline`（抽卡闭环最后一环）
+
+**缺口（差集实测）**：后端 `canvas_routes_post.py:1036` 已完整实现「按 `job_id` 把已完成分段
+**逐条** `emit_canvas_to_editor` 入时间线，支持 `indices` 精确指定序号、失败分段单独收集」，
+但前端**零调用**。后果（读 `App.tsx:1943` 确认）：批量任务跑完只走 `concatVideos`
+**拼成一个不可拆的整片** ⇒ 逐段二次编辑 / 重拍的能力后端全有，前端拿不到。
+
+**修法（不新增按钮、不新增通道）**：
+- **新文件 `src/hostBatchOps.ts`**：`pushBatchToTimeline` 桥函数 + `summarizeBatchPush` /
+  `pickDoneIndices` 纯函数。`bridge.ts` 已 1868/2046 顶格 ⇒ 新桥函数一律另开文件（样板 `storeIdempotent.ts`）。
+- **新文件 `src/editorIngress.ts`**：把 `App.tsx` 里的入轨编排（`onSendAllToEditor` 60 行 +
+  本地私有 `nodeImageUrl` 11 行）整体搬出。`App.tsx` 已 1999/2000 顶格 ⇒ 按纪律
+  「超容差必须拆模块，**不得放宽基线**」，`App.tsx` **净减 41 行（1999 → 1958）**。
+  `nodeImageUrl` **只保留新文件一份**（不留在 App.tsx 侧，否则又是「同一语义两条链路」）。
+- **单通道**：批量走后端快通道（`batch-to-timeline` 逐段 `emit_canvas_to_editor`，
+  **不经前端 fetch blob 中转**），普通节点走 `sendBlobToEditor`，二者由
+  `ingestNodes` 内部按 `batchJobId` 自动分流，**共用同一个「全部入轨」按钮**。
+- **不自动入轨**：入轨会改用户时间线（真相源 `EditorModule._clips`），
+  必须用户显式点击（遵守「生成/写时间线动作需显式批准」纪律，与 `repair-image` 局部重绘一致）。
+- **顺手修两个真 bug**（搬移时读码发现，不是重构洁癖）：
+  ① 旧代码单条入轨 `catch { /*continue */ }` **静默吞异常**，用户只看到「完成 ok/N」不知哪条失败
+  ⇒ 改为逐条`setStatus` 报出；
+  ② 旧代码音频扩展名**一律 mp3**，但部分音频是 wav，落错扩展名会让剪辑侧解码异常
+  ⇒ 改为按真实 MIME 判定。
+- **不自动入轨的原因写进注释**，防止后来者「顺手加个自动」。
+
+**测试**：新增 `hostBatchOps.test.ts`（8 例）覆盖 `summarizeBatchPush`（全成功/部分失败/
+零成功/端点失败/无 message 兜底）与 `pickDoneIndices`（done 无产物要排除、空输入不抛）。
+**写测试时真发现一处自己写错的期望值**（把「done 但无产物」误当合格），核对后端判据后修正用例。
+
+### 验证（全部自己实跑）
+- `precommit_gates.sh` **14 道全部通过**（本轮起**不再需要 `--no-verify`**）· `run_all_checks.py` **78 项全通过**
+- tsc **37** = 基线 37（`App.tsx` 1958 < 2000 · `bridge.ts` 1868 未动 · 新文件 0 错）
+- vitest **31 文件 / 471 测试**全绿（原 30/463，+1 文件 +8 例）
+- `vite build`✓ · `check_canvas_dual_repo` 一致 **167**（原 164）/ 分叉 1（`bridge.ts` 基线内，自然收敛）/ 缺失 10（基线内）
+- 副库同步 5 文件，同步前备份 `.workbuddy/tmp/dual_backup_wave0/`
+
+### 剩余孤儿端点（11 条，下一轮）
+`/host/compliance-check`（GET 侧返 405，POST 在 post 文件）、`/host/diarize-speakers`、
+`/host/reference-breakdown`、`/host/segment-retake`、`/host/video-depth`、
+`/host/redub-preflight` + `/host/redub-execute`、`/host/enhance-intents`、`/host/providers`、
+`/host/local-image-generate`、`/host/tauri-closing`（疑已废弃，待判）。
+**`/host/generate-video` 与 `/host/video-generate` 刻意跳过** —— 疑似与已接线的
+`local-video-generate` 语义重叠，先核清再动（保守）。
+
 ## 修复 · 画布三修：角色节点接线 + Agent 桌宠跨画布 + React #185 崩溃根因（2026-10-14，主程序 V4.43.22 / 画布 0.3.30）
 
 用户实测画布后提三缺陷，第 3 条（渲染崩溃）定为**重点对象**。本轮全部按代码证据定位，未用猜测性改动。

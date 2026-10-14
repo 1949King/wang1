@@ -289,8 +289,10 @@ def canvas_tools_prompt_block(mode: Optional[str] = None) -> str:
         '{"canvas_tools":[{"action":"addNode","params":{"kind":"shot","title":"镜头"}}]}。'
         "允许 action：queryNodes,selectNode,addNode,updateNode,connectNodes,deleteNode,"
         "duplicateNode,groupNodes,runGenerate,undo,redo,setNodeImage,importImage,"
-        "breakdown,fillStoryboardCell。"
+        "breakdown,fillStoryboardCell,stage3dTextPlan。"
         "收到剧本文本并需要拆解为分镜时，必须用 breakdown 并携带剧本："
         '{"action":"breakdown","params":{"script":"完整剧本文本"}}。'
+        "要把一段自然语言/文字变成 3D 导演台机位（粗模摆位）时用 stage3dTextPlan，携带文本："
+        '{"action":"stage3dTextPlan","params":{"text":"要摆成几个镜头的那段文字"}}。'
         "不要编造未列出的 action。\n"
     )

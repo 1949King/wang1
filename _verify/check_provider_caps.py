@@ -55,9 +55,13 @@ def main() -> int:
     order = pc.resolve_order("auto", spec={"first_last_frame": True})
     check("首尾帧请求 → cogvideo 不在候选", "cogvideo" not in order)
     check("首尾帧请求 → seedance 在候选", "seedance" in order)
+    check("首尾帧请求 → kling 不在候选（首尾帧未接线）", "kling" not in order)
     check("local 永远兜底", order[-1] == "local")
-    check("无 spec → 默认顺序全保留",
-          pc.resolve_order("auto") == ["dashscope", "seedance", "cogvideo", "local"])
+    # 2026-10-14：默认后端切为 kling（auto 置首），顺序由声明表推导
+    check("无 spec → 默认顺序 kling 置首",
+          pc.resolve_order("auto") == ["kling", "dashscope", "seedance", "cogvideo", "local"])
+    check("DEFAULT_REAL_ORDER 以 kling 打头",
+          pc.DEFAULT_REAL_ORDER[0] == "kling")
 
     # ── 2. 时长筛选（验收②）──
     order = pc.resolve_order("auto", spec={"duration": 12.0})

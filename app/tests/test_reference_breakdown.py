@@ -279,3 +279,54 @@ def test_camera_move_trusted_handles_bad_confidence():
 
 def test_min_confidence_constant_documented():
     assert 0.0 < rb.CAMERA_MOVE_MIN_CONFIDENCE < 1.0
+
+
+# ─────────────────── 运镜词表映射（2026-10-14：CV 术语 → 中文影视词）───────────────────
+
+def test_camera_move_zh_maps_all_real_moves():
+    """五个有效运动都要有中文词（表里写英文用户看不懂）。"""
+    assert rb.camera_move_zh("dolly_in") == "推"
+    assert rb.camera_move_zh("dolly_out") == "拉"
+    assert rb.camera_move_zh("pan_left") == "摇"
+    assert rb.camera_move_zh("pan_right") == "摇"
+    assert rb.camera_move_zh("tilt_up") == "摇"
+    assert rb.camera_move_zh("tilt_down") == "摇"
+
+
+def test_camera_move_zh_conservative_on_non_moves():
+    """★ 诚实边界：static/unknown/空/未收录词**不许**映射成任何词（固定不是运镜结论）。"""
+    for mv in ("", "static", "unknown", "dolly_sideways", "dolly_in_out", " Dolly_In_x"):
+        assert rb.camera_move_zh(mv) == "", f"{mv!r} 不该映射出中文词"
+
+
+def test_camera_move_zh_normalizes_case_and_space():
+    """大小写/空格归一化：`"DOLLY_IN "` 是同一个词的脏写法，应命中而非误报空。"""
+    assert rb.camera_move_zh("DOLLY_IN ") == "推"
+
+
+# ─────────────────── 景别 enrich 边界（2026-10-14：云端视觉，默认关闭）───────────────────
+
+def test_use_vision_default_off_no_vision_keys():
+    """默认（use_vision=False）不调云端视觉：结果里**不得**出现 vision_* 键。"""
+    import inspect
+    sig = inspect.signature(rb.build_shot_table)
+    assert sig.parameters["use_vision"].default is False
+    assert sig.parameters["with_depth"].default is False
+
+
+def test_apply_vision_enrich_honest_when_no_provider():
+    """云端视觉不可用 → 如实回 message，shots **不动**（景别保持留空，不编）。"""
+    shots = [{"index": 1, "start": 0.0, "end": 1.0, "景别": "", "运镜": ""}]
+    info = rb._apply_vision_enrich(shots, video="", model="")
+    assert info.get("vision_used") is False
+    assert info.get("vision_message")
+    assert shots[0]["景别"] == "", "无模型时景别必须保持留空（不许填默认值）"
+    assert "vision" not in shots[0], "解析失败不该打 vision 标记"
+
+
+def test_norm_choice_hits_wordlist_or_empty():
+    """词表命中返回标准词；未命中返回空（**不返回默认词**，避免冒充视觉结论）。"""
+    assert rb._norm_choice("近景（人物胸部以上）", rb._SHOT_SIZES) == "近景"
+    assert rb._norm_choice("航拍大全景", rb._SHOT_SIZES) == "全景"
+    assert rb._norm_choice("不知道", rb._SHOT_SIZES) == ""
+    assert rb._norm_choice("", rb._SHOT_SIZES) == ""

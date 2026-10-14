@@ -81,8 +81,12 @@ function useNodeContext(
       emit: rt.emit,
       on: rt.on,
       ai: rt.ai || {
-        generateImage: async (opts: { prompt: string; model: string; size: string; channel_id: string; reference_image: string; quality: string }) => [],
-        generateVideo: async (opts: { prompt: string; model: string; duration: number; quality: string }) => "",
+        // 兜底实现（宿主AI 未注入时）。签名须与 `PluginRuntimeAI`（types.ts:34）逐字对齐：
+        //   generateImage(prompt, opts?) / generateVideo(prompt, opts?)
+        // ⚠️ 此前误写成单参 `(opts: {...})`，把 opts 当成了第一个位置参数 prompt ——
+        //   类型不匹配（TS2322）且真被调用时会拿不到 prompt。opts 全部可选。
+        generateImage: async () => [],
+        generateVideo: async () => "",
         generateText: async () => "",
         listModels: () => [],
         defaultModel: () => "",

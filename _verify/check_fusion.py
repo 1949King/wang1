@@ -160,10 +160,12 @@ def main() -> int:
     def _fake_cloud(**_kw):
         return [cloud_file]
 
-    # 路由收益排序的第一名随先验/λ 浮动——三个真实渠道**都**注入假实现，
-    # 不管谁排第一双路都能拿到「云端」
+    # 路由收益排序的第一名随先验/λ 浮动——真实渠道**都**注入假实现，
+    # 不管谁排第一双路都能拿到「云端」。注意含 kling：2026-10-14 起 kling 是
+    # auto 默认链第一位，不注入则 _load_kling 无 AIGC 渠道返回 None，
+    # 云端路直接空 → D 退化成 C→L，D2-D5 全挂。
     saved = {}
-    for name in ("dashscope", "seedance", "cogvideo"):
+    for name in ("kling", "dashscope", "seedance", "cogvideo"):
         saved[name] = client._providers.get(name, "missing")
         client._providers[name] = _fake_cloud
     client._tls.last_fusion = None
@@ -193,7 +195,8 @@ def main() -> int:
     def _boom(**_kw):
         raise RuntimeError("模拟云端 503")
 
-    for name in ("dashscope", "seedance", "cogvideo"):
+    # E 段：云端全挂（含 kling）→ 必须诚实退化为本地单路 C→L
+    for name in ("kling", "dashscope", "seedance", "cogvideo"):
         client._providers[name] = _boom
     try:
         out2 = client.generate(prompt="D 退化端到端", duration=1.0, count=1,

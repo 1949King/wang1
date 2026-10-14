@@ -609,6 +609,17 @@ class EditorAgentPanelMixin:
         self._edit_agent_input.returnPressed.connect(self._send_edit_agent_message)
         input_row.addWidget(self._edit_agent_input, 1)
 
+        # 🧠 本地思考开关：仅影响本地 Ollama 推理模型（qwen3 等）的隐藏思考。
+        # 关闭（默认）= 直接作答，实测首字约 16s → 2s；开启=先推理再作答，更严谨但慢很多。
+        self._edit_agent_think_btn = QToolButton()
+        self._edit_agent_think_btn.setText("🧠")
+        self._edit_agent_think_btn.setCheckable(True)
+        self._edit_agent_think_btn.setChecked(self._agent_local_think_enabled())
+        self._edit_agent_think_btn.setStyleSheet(S["btn"])
+        self._edit_agent_think_btn.toggled.connect(self._on_agent_local_think_toggled)
+        self._refresh_local_think_tooltip()
+        input_row.addWidget(self._edit_agent_think_btn)
+
         self._edit_agent_send_btn = QPushButton("发送")
         self._edit_agent_send_btn.setStyleSheet(S["btn_primary"])
         self._edit_agent_send_btn.clicked.connect(self._send_edit_agent_message)
@@ -665,7 +676,10 @@ class EditorAgentPanelMixin:
         self._edit_agent_worker = None
         self._edit_agent_stream_buffer = ""
         self._edit_agent_inbox = []
-        self._refresh_edit_agent_models()
+        # 首次打开：先占位填充下拉，本地模型探测放后台（避免 UI 线程同步等 ~4s），
+        # 探完经 _on_local_models_probe_poll 再刷新一次下拉。
+        self._seed_edit_agent_models_placeholder()
+        self._warm_local_models_async()
         self._greet_agent_secretary()
 
         # 空闲关怀：完整档时，长时间无交互主动问候一句（每分钟检查一次）
@@ -1065,7 +1079,9 @@ class EditorAgentPanelMixin:
         self._edit_agent_last_user_text = user_text
         # 局部 import 避免循环导入（editor_module 反向 import 本 Mixin）
         from .editor_module import EditingAgentWorker
-        worker = EditingAgentWorker(provider, model, messages, self)
+        # 本地思考开关：仅本地 Ollama 生效；关闭（默认）= 直接作答，最快。
+        think_flag = self._agent_local_think_enabled() if provider == "ollama" else None
+        worker = EditingAgentWorker(provider, model, messages, self, think=think_flag)
         worker.chunk_ready.connect(self._on_edit_agent_chunk)
         worker.result_ready.connect(lambda raw, text=user_text: self._on_edit_agent_result(text, raw))
         worker.error_ready.connect(self._on_edit_agent_error)
@@ -1962,7 +1978,13 @@ class EditorAgentPanelMixin:
             return ""
 
         # 按 clip_order 顺序收集存在的片段路径和时长
+        # clip_order 引用生成线 clip_id；时间线 id 为新生成的 clip_{ts}，
+        # 故同时按 source_clip_id 别名建索引（2026-10-14 demo 断链修复）
         clip_map = {c.get("id"): c for c in getattr(self, "_clips", []) if c.get("id")}
+        for c in getattr(self, "_clips", []):
+            alias = c.get("source_clip_id")
+            if alias and alias not in clip_map:
+                clip_map[alias] = c
         paths_and_durations = []
         for cid in clip_order:
             clip = clip_map.get(cid)

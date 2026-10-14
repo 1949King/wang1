@@ -1049,6 +1049,8 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
 
         接受 { path }（本地绝对路径）或 { url }（/inbox_file/ 或 http inbox URL）。
         后端检测镜头边界 + 抽代表帧 + 算色调/亮度 + 推断景别，返回 shots 数组。
+        若 body.use_llm 为真，再走本机视觉模型逐镜解析景别/运镜/画面描述
+        （canvas_shot_vision.enrich_shot_table，素材不出机；失败诚实降级）。
         """
         if not _check_host_token(self):
             self._json(401, {"ok": False, "message": "unauthorized", "shots": []})
@@ -1076,11 +1078,32 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
         try:
             res = video_storyboard_breakdown(
                 local_path,
-                use_llm=bool(body.get("use_llm")),
+                use_llm=False,
                 max_shots=int(body.get("max_shots") or 30),
                 frames_dir=canvas_inbox_dir(),
                 frame_url_prefix=f"http://127.0.0.1:{int(port)}/inbox_file",
             )
+            # I1 本地拉片：① 补齐画面列（base 抽帧走 %TEMP%，本机 AV 锁 %TEMP% 时会全空）
+            # ② 若请求 use_llm，再走本机视觉模型逐镜解析景别/运镜/描述（素材不出机）。
+            if res.get("ok"):
+                try:
+                    from app.core.canvas_shot_vision import (
+                        enrich_shot_table,
+                        ensure_shot_frames,
+                    )
+                except ImportError:
+                    from core.canvas_shot_vision import (  # type: ignore
+                        enrich_shot_table,
+                        ensure_shot_frames,
+                    )
+                ensure_shot_frames(
+                    res,
+                    local_path,
+                    frames_dir=canvas_inbox_dir(),
+                    frame_url_prefix=f"http://127.0.0.1:{int(port)}/inbox_file",
+                )
+                if body.get("use_llm"):
+                    enrich_shot_table(res, local_path, model=str(body.get("vision_model") or ""))
         except Exception as e:
             logger.exception("[/host/video-storyboard] 失败")
             self._json(500, {"ok": False, "message": str(e), "shots": []})

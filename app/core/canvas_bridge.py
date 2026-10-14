@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import colorsys
 import json
 import logging
 import os
@@ -280,6 +281,169 @@ def _remove_canvas_plugin(plugin_id: str) -> bool:
     return True
 
 
+# ── 捏脸参数（faceParams）→ 生图文字描述 ────────────────────────────────
+# 结构 / 枚举 id / 色板的**唯一真相源**在画布侧 src/faceParams.ts（与 FaceCard.tsx 同源）。
+# 本表只是「枚举 id → 中文」的镜像，改动需同步 faceParams.ts 与 FaceCard.tsx。
+_FACE_BROW_LABELS = {
+    "flat": "平眉", "arch": "挑眉", "angry": "剑眉",
+    "sad": "八字眉", "thin": "细眉", "thick": "粗眉",
+}
+_FACE_EYE_LABELS = {
+    "round": "圆眼", "almond": "杏眼", "narrow": "细长眼",
+    "upturned": "上挑眼", "droopy": "下垂眼", "big": "大眼",
+}
+_FACE_EYE_COLOR_LABELS = {
+    "black": "黑色", "brown": "棕色", "amber": "琥珀色", "hazel": "榛色",
+    "blue": "蓝色", "green": "绿色", "violet": "紫色", "red": "红色", "gold": "金色",
+}
+_FACE_LIP_LABELS = {
+    "thin": "薄唇", "plump": "饱满唇", "wide": "宽唇",
+    "small": "小口", "cupid": "丘比特唇", "neutral": "自然唇",
+}
+_FACE_ACCESSORY_LABELS = {
+    "hairpin": "单簪", "hairpin_dual": "双簪", "ribbon": "发带",
+    "ribbon_tail": "长飘带", "tiara": "冠冕", "flower": "花钿",
+    "earring": "耳饰", "forehead_mark": "额饰", "veil": "头纱", "horns": "角",
+}
+# 与 faceParams.SKIN_PALETTE 同源（8 档）
+_FACE_SKIN_LABELS = {
+    "#fdece4": "冷白", "#f8d9c9": "白皙", "#f0c3a8": "自然", "#e0a882": "小麦",
+    "#c88a63": "蜜色", "#a86a45": "古铜", "#7d4c2e": "深棕", "#54321d": "黝黑",
+}
+
+
+def _face_num(v: Any) -> float:
+    """容错取数值（脏值/缺字段一律 0.0 = 中性）。"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _face_hex_hue_name(hex_color: Any) -> str:
+    """#rrggbb → 中文色系（只作跨镜一致的视觉锚点，不追求精确命名）。"""
+    h = str(hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return ""
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return ""
+    if max(r, g, b) - min(r, g, b) < 24:      # 低饱和 ⇒ 黑白灰
+        if max(r, g, b) < 60:
+            return "黑"
+        return "白" if max(r, g, b) > 200 else "灰"
+    hue = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)[0] * 360.0
+    if hue < 15 or hue >= 345:
+        return "红"
+    if hue < 45:
+        return "橙"
+    if hue < 70:
+        return "黄"
+    if hue < 160:
+        return "绿"
+    if hue < 200:
+        return "青"
+    if hue < 260:
+        return "蓝"
+    if hue < 290:
+        return "紫"
+    return "品红"
+
+
+def _face_params_to_text(raw: Any) -> str:
+    """把捏脸卡片的 faceParams（JSON 串或 dict）转成一句可进生图提示词的外貌描述。
+
+    设计（与 faceParams.ts 的分工一致）：
+      - 只描述**静态身份特征**（头型 / 五官形状 / 瞳色 / 肤色 / 发饰 / 妆容）；
+        表情是「每镜可变」的表演参数，写进跨镜一致性提示词会与分镜冲突，故刻意不取。
+      - 坏 JSON / 空串 / 非 dict 一律返回 ""（缺省即合法，绝不抛给调用方）。
+    """
+    if isinstance(raw, dict):
+        p: Dict[str, Any] = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return ""
+        if not isinstance(parsed, dict):
+            return ""
+        p = parsed
+    else:
+        return ""
+
+    parts: List[str] = []
+
+    # 头型（Ruth2 式 shape sliders；阈值 0.15 以下视为「默认不明显」，不写进提示词）
+    shape: List[str] = []
+    hw, hh = _face_num(p.get("headWidth")), _face_num(p.get("headHeight"))
+    jw, cb, ch = _face_num(p.get("jawWidth")), _face_num(p.get("cheekbone")), _face_num(p.get("chin"))
+    if hw > 0.15:
+        shape.append("脸型偏宽")
+    elif hw < -0.15:
+        shape.append("脸型偏窄")
+    if hh > 0.15:
+        shape.append("脸型偏长")
+    elif hh < -0.15:
+        shape.append("脸型偏短")
+    if jw > 0.15:
+        shape.append("下颌偏宽")
+    elif jw < -0.15:
+        shape.append("下颌偏窄")
+    if cb > 0.15:
+        shape.append("颧骨明显")
+    elif cb < -0.15:
+        shape.append("颧骨平缓")
+    if ch > 0.15:
+        shape.append("下巴偏长")
+    elif ch < -0.15:
+        shape.append("下巴偏短")
+    if shape:
+        parts.append("、".join(shape[:3]))     # 限 3 项防止描述过长
+
+    # 五官形状与瞳色
+    brow = _FACE_BROW_LABELS.get(str(p.get("browStyle") or ""), "")
+    if brow:
+        parts.append(brow)
+    eye = _FACE_EYE_LABELS.get(str(p.get("eyeStyle") or ""), "")
+    iris = _FACE_EYE_COLOR_LABELS.get(str(p.get("eyeColor") or ""), "")
+    if eye and iris:
+        parts.append(f"{iris}{eye}")
+    elif eye:
+        parts.append(eye)
+    elif iris:
+        parts.append(f"{iris}瞳孔")
+    right_iris = _FACE_EYE_COLOR_LABELS.get(str(p.get("eyeColorRight") or ""), "")
+    if right_iris:
+        parts.append(f"右眼{right_iris}（异色瞳）")
+    lip = _FACE_LIP_LABELS.get(str(p.get("lipStyle") or ""), "")
+    if lip:
+        parts.append(lip)
+
+    # 肤色
+    skin = _FACE_SKIN_LABELS.get(str(p.get("skinTone") or "").lower(), "")
+    if skin:
+        parts.append(f"肤色{skin}")
+
+    # 发饰（含主色，是跨镜可辨识的视觉符号）
+    acc = _FACE_ACCESSORY_LABELS.get(str(p.get("hairAccessory") or ""), "")
+    if acc:
+        acc_hue = _face_hex_hue_name(p.get("accessoryColor"))
+        parts.append(f"发饰{acc}" + (f"（{acc_hue}色）" if acc_hue else ""))
+
+    # 妆容（只报「有没有」，颜色交给美术自由发挥，避免提示词过载）
+    makeup = [
+        label for key, label in (
+            ("blush", "腮红"), ("eyeshadow", "眼影"), ("lipColor", "唇彩"),
+            ("eyeliner", "眼线"), ("faceMark", "面纹"),
+        ) if p.get(key)
+    ]
+    if makeup:
+        parts.append("妆容:" + "、".join(makeup))
+
+    return "，".join(parts)
+
+
 def build_character_prompt(char: Optional[Dict[str, Any]]) -> str:
     """把角色库字段压成生图一致性提示片段。"""
     if not char:
@@ -302,6 +466,10 @@ def build_character_prompt(char: Optional[Dict[str, Any]]) -> str:
     appearance = str(char.get("appearance") or "").strip()
     if appearance:
         parts.append("外貌:" + appearance[:240])
+    # 捏脸卡片写回的 faceParams → 文字描述（静态身份特征，跨镜一致的脸）
+    face_desc = _face_params_to_text(char.get("face_params"))
+    if face_desc:
+        parts.append("捏脸:" + face_desc[:200])
     temperament = str(char.get("temperament") or "").strip()
     if temperament:
         parts.append("气质倾向:" + temperament[:80])

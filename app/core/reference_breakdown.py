@@ -29,6 +29,11 @@ import re
 import subprocess
 from typing import Any, Dict, List, Optional
 
+try:  # 云端视觉 enrich 要 base64 图片；本机无此依赖时不至于整体导入失败
+    import base64
+except ImportError:  # pragma: no cover（base64 是标准库，正常不会缺）
+    base64 = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SCENE_THRESHOLD = 0.30
@@ -246,6 +251,30 @@ MOVES = ("static", "dolly_in", "dolly_out", "pan_left", "pan_right", "tilt_up", 
 CAMERA_MOVE_MIN_CONFIDENCE = 0.4
 _ZOOM_CANDIDATES = (0.90, 0.94, 0.97, 1.0, 1.03, 1.06, 1.11)
 
+# ── 运镜词表映射（L2 深度术语 → 镜头表「运镜」列中文词）───────────────
+#
+# 为什么需要：`infer_camera_move` 返回的是 CV 术语（dolly_in/pan_left…），
+# 而镜头表「运镜」列用中文影视词（推/拉/摇/移…）—— 同一语义两套词，
+# 直接写进去用户看不懂。映射是**保守多对一**：CV 术语没有对应中文词的
+# （如 static/unknown）一律映射回空串，交由调用方决定是否留空（不硬凑）。
+CAMERA_MOVE_ZH: Dict[str, str] = {
+    "dolly_in": "推",
+    "dolly_out": "拉",
+    "pan_left": "摇",
+    "pan_right": "摇",
+    "tilt_up": "摇",
+    "tilt_down": "摇",
+}
+
+
+def camera_move_zh(move: str) -> str:
+    """**纯函数**：把 L2 运镜 CV 术语映射成镜头表「运镜」列中文词。
+
+    没有对应中文词（static/unknown/空）返回空串 —— 调用方据此留空，
+    **绝不把「固定」当结论写进去**（固定机位是"没有运动"，不是一种运镜结论）。
+    """
+    return CAMERA_MOVE_ZH.get(str(move or "").strip().lower(), "")
+
 
 def read_bgr(path: str):
     """读彩色图（estimate_depth_bgr 要 BGR）。
@@ -447,7 +476,9 @@ def _l2_camera_move(video: str, shot: Dict[str, Any], duration: float) -> Dict[s
         #   而不是"算法猜了个但不自信"。实测：构造的明确平移/缩放可达 0.94~1.0，
         #   而生成图案（非真实场景）只有 0.13 ⇒ 用 0.4 分界能干净区分。
         trustworthy = camera_move_trusted(move, conf)
-        return {"运镜": (move if trustworthy else ""),
+        # 运镜列写**中文影视词**（推/拉/摇），CV 术语只留在 camera_move 详情里
+        # （2026-10-14：加词表映射前这里直接写 dolly_in 等英文，用户看不懂）
+        return {"运镜": (camera_move_zh(move) if trustworthy else ""),
                 "camera_move": mv,
                 "camera_move_trusted": trustworthy}
     finally:
@@ -458,10 +489,186 @@ def _l2_camera_move(video: str, shot: Dict[str, Any], duration: float) -> Dict[s
                 pass
 
 
+# ── 景别/画面描述 enrich：云端视觉模型（2026-10-14）───────────────────
+#
+# 为什么放在本模块（而不是复用 canvas_shot_vision）：
+#   canvas_shot_vision 服务的是**另一条线**（/host/video-storyboard 的
+#   前端分镜表，字段是 shot/camera/description 英文键），且只走本机 Ollama；
+#   本模块是**镜头表 owner**（景别/运镜两列的中文键），且按用户要求走
+#   **云端视觉模型**（素材出域，需显式开启）。两线的词表与渠道都不同，
+#   强行合并只会两边都别扭 —— 这里只复用它的抽帧 helper（同一套安全路径）。
+#
+# 诚实降级（红线）：
+#   · 云端 provider 未配置 / 不可用 / 单镜解析失败 → 该镜景别**留空**，
+#     绝不回填默认值（"中景/固定"这类默认值会让用户以为算法真看出来了）；
+#   · 视觉模型的「运镜」结论优先写进「运镜」列（人眼判断比相位相关可靠），
+#     深度推断的结果继续留在 camera_move 详情里，两者不互相覆盖丢失。
+
+# 景别/运镜词表（与前端分镜表列候选一致）
+_SHOT_SIZES = ("特写", "近景", "中景", "全景", "远景")
+_CAMERAS = ("固定", "推", "拉", "摇", "移", "跟", "升", "降", "手持", "环绕")
+
+_VISION_PROMPT = (
+    "你是影视分镜助理。给你同一镜头的起始帧与结束帧（也可能只有 1 帧）。"
+    "只输出一个 JSON 对象，不要任何多余文字，字段如下：\n"
+    '{"shot_size":"特写|近景|中景|全景|远景",'
+    '"camera":"固定|推|拉|摇|移|跟|升|降|手持|环绕",'
+    '"description":"不超过30字，概括画面内容与镜头语言"}\n'
+    "若画面无明显位移或缩放、无法判断运镜，camera 填「固定」。"
+)
+
+# 云端视觉模型候选（provider, model）：按「便宜能用」排序，第一个可用者胜出。
+# qwen-vl 系列走阿里云 DashScope 的 OpenAI 兼容端点（ai_engine 已有 qwen provider），
+# doubao 是火山方舟（同 ai_engine 既有 provider）—— **不新增任何渠道**。
+_CLOUD_VISION_CANDIDATES = (
+    ("qwen", "qwen-vl-max-latest"),
+    ("qwen", "qwen-vl-plus-latest"),
+    ("doubao", "doubao-vision-pro-32k"),
+)
+
+
+def _norm_choice(value: Any, allowed: tuple, default: str = "") -> str:
+    """把模型输出规整到词表内：含关键词即命中，否则回退 default（诚实降级）。"""
+    text = str(value or "").strip()
+    for a in allowed:
+        if a and a in text:
+            return a
+    return default
+
+
+def _resolve_cloud_vision(model: str = "") -> tuple:
+    """选一个可用的云端视觉模型，返回 (provider, model)；都不可用返回 ("", "")。
+
+    显式传了 `vision_model` 时优先尝试它（provider 由候选表推断；推断不出
+    则按 qwen 渠道试一次 —— 失败也只是这一镜解析失败，不影响别的镜头）。
+    """
+    if model:
+        for prov, m in _CLOUD_VISION_CANDIDATES:
+            if m == model:
+                return prov, m
+        return "qwen", model
+    for prov, m in _CLOUD_VISION_CANDIDATES:
+        try:
+            from app.core.ai_engine import ai_engine
+
+            ai_engine._ensure_clients()
+            if ai_engine.is_provider_available(prov):
+                return prov, m
+        except Exception as e:
+            logger.debug("[reference_breakdown] 视觉 provider 探测失败 %s: %s", prov, e)
+    return "", ""
+
+
+def _ask_cloud_vision(provider: str, model: str, frames: List[bytes]) -> Optional[Dict[str, Any]]:
+    """把帧发给云端视觉模型（OpenAI 兼容多模态消息），返回解析后的 dict。"""
+    if not frames or base64 is None:
+        return None
+    images = ["data:image/jpeg;base64," + base64.b64encode(b).decode("ascii") for b in frames]
+    content: List[Dict[str, Any]] = [{"type": "text", "text": _VISION_PROMPT}]
+    for img in images:
+        content.append({"type": "image_url", "image_url": {"url": img}})
+    messages = [{"role": "user", "content": content}]
+    try:
+        from app.core.ai_engine import ai_engine
+
+        parts = list(ai_engine.chat(provider, messages, model=model,
+                                    stream=False, use_cache=False))
+        text = "".join(parts).strip()
+    except Exception as e:
+        logger.warning("[reference_breakdown] 云端视觉解析调用失败: %s", e)
+        return None
+    if not text or text.startswith("错误") or text.startswith("API 错误"):
+        logger.debug("[reference_breakdown] 云端视觉返回异常: %s", text[:120])
+        return None
+    return _parse_json_obj_loose(text)
+
+
+def _parse_json_obj_loose(text: str) -> Optional[Dict[str, Any]]:
+    """容错解析模型输出：先直取 JSON，再退而截取首个 {...} 片段。"""
+    import json as _json
+
+    try:
+        data = _json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        # 直取失败属正常路径（模型常在 JSON 前后带话）——走片段兜底，但留痕便于排查。
+        logger.debug("参考素材拆解：模型输出非直取 JSON，转片段兜底", exc_info=True)
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            data = _json.loads(m.group(0))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            return None
+    return None
+
+
+def _apply_vision_enrich(shots: List[Dict[str, Any]], video: str, *,
+                         model: str = "") -> Dict[str, Any]:
+    """逐镜调云端视觉模型补「景别/运镜/描述」（就地回填 shots）。
+
+    返回 enrich 结果摘要（vision_used / vision_model / vision_message），
+    由 build_shot_table 合并进返回值 —— 失败也如实写 message，不静默。
+    """
+    out: Dict[str, Any] = {"vision_used": False, "vision_model": "",
+                           "vision_message": ""}
+    if not shots:
+        out["vision_message"] = "无可解析的镜头"
+        return out
+    provider, resolved = _resolve_cloud_vision(model)
+    if not provider:
+        out["vision_message"] = "没有可用的云端视觉模型（请在模型管理配置 Key）"
+        return out
+    out["vision_model"] = f"{provider}/{resolved}"
+
+    # 抽帧 helper 复用 canvas_shot_vision（同一套 .workbuddy/tmp 安全路径）
+    try:
+        from app.core.canvas_shot_vision import _extract_vision_frames
+    except ImportError:
+        from core.canvas_shot_vision import _extract_vision_frames  # type: ignore
+
+    enriched = 0
+    for item in shots:
+        try:
+            frames = _extract_vision_frames(video, float(item.get("start") or 0.0),
+                                            float(item.get("end") or 0.0))
+        except Exception as e:
+            logger.debug("[reference_breakdown] 镜%d 抽帧失败: %s", item.get("index"), e)
+            frames = []
+        parsed = _ask_cloud_vision(provider, resolved, frames)
+        if not parsed:
+            continue
+        size = _norm_choice(parsed.get("shot_size"), _SHOT_SIZES)
+        if size:
+            item["景别"] = size
+        camera = _norm_choice(parsed.get("camera"), _CAMERAS)
+        if camera and camera != "固定":
+            # 视觉运镜优先于深度推断（人眼判断更可靠）；深度结果仍在详情里
+            item["运镜"] = camera
+        desc = str(parsed.get("description") or "").strip()
+        if desc:
+            item["描述"] = desc[:60]
+        item["vision"] = True
+        enriched += 1
+
+    out["vision_used"] = enriched > 0
+    if enriched == 0:
+        out["vision_message"] = "云端视觉模型未返回可用结果，景别/运镜保持留空"
+    elif enriched < len(shots):
+        out["vision_message"] = f"视觉解析 {enriched}/{len(shots)} 镜，其余留空"
+    else:
+        out["vision_message"] = f"视觉解析完成：{enriched} 镜（{out['vision_model']}）"
+    return out
+
+
 def build_shot_table(video: str, *, out_dir: str,
                      threshold: float = DEFAULT_SCENE_THRESHOLD,
                      keyframes: bool = True,
-                     with_depth: bool = False) -> Dict[str, Any]:
+                     with_depth: bool = False,
+                     use_vision: bool = False,
+                     vision_model: str = "") -> Dict[str, Any]:
     """L1 主入口：参考片 → **结构化镜头表**（含关键帧与可测指标）。
 
     产物：
@@ -469,14 +676,18 @@ def build_shot_table(video: str, *, out_dir: str,
       · `table_markdown`：可直接贴进文档或作为分镜参考的表格
     当 ``with_depth=True`` 时额外跑 **L2 运动级**：取每段首/尾帧的深度图，
     用 ``infer_camera_move``（相位相关 + 缩放搜索）推断**运镜**（推拉摇移/固定）。
+    当 ``use_vision=True`` 时再跑 **景别/画面描述 enrich**（云端视觉模型，
+    素材会出域，需用户显式开启；失败/未配置时诚实留空并标注）。
 
-    ⚠️ 诚实边界（三条）：
-      1. **景别、光线基调仍不推断**（留空）；
+    ⚠️ 诚实边界（四条）：
+      1. 默认**景别、光线基调不推断**（留空）；``use_vision=True`` 才调云端视觉模型；
       2. 运镜只在**置信度 ≥ CAMERA_MOVE_MIN_CONFIDENCE** 时才写进「运镜」字段 ——
          低置信度的推断只留在 `camera_move` 详情里（`camera_move_trusted=False`）；
       3. **固有局限**：本方法比较的是「整幅深度结构的变化」，因此**无法区分
          「镜头在动」与「画面内大物体在动」**。拍摄场景相对静态时结论可靠；
-         画面内有大幅物体运动时可能混淆 —— 置信度会下降，但不保证。
+         画面内有大幅物体运动时可能混淆 —— 置信度会下降，但不保证；
+      4. ``use_vision`` 的视觉结论**优先于**深度运镜结论写进「运镜」列
+         （人眼判断比相位相关更可靠），深度结果退守 `camera_move` 详情不丢失。
     """
     det = detect_scenes(video, threshold=threshold)
     if not det.get("ok"):
@@ -524,13 +735,21 @@ def build_shot_table(video: str, *, out_dir: str,
             item.update(_l2_camera_move(video, s, det.get("duration") or 0.0))
         shots.append(item)
 
-    return {"ok": True, "video": video, "duration": det["duration"],
-            "count": len(shots), "threshold": det["threshold"],
-            "shots": shots, "table_markdown": shots_to_markdown(shots),
-            "note": ("L1 结构级：切点/时长/关键帧/可测指标均为真实计算结果；"
-                     "景别**未推断**（诚实留空）"
-                     + ("；L2 运动级已启用（运镜由深度图推断，带 confidence）"
-                        if with_depth else "；运镜未跑（with_depth=False）"))}
+    # ── 景别/画面描述 enrich（2026-10-14）：云端视觉模型（素材出域，显式开启）──
+    vision_info: Dict[str, Any] = {}
+    if use_vision:
+        vision_info = _apply_vision_enrich(shots, video, model=vision_model)
+
+    result: Dict[str, Any] = {"ok": True, "video": video, "duration": det["duration"],
+                              "count": len(shots), "threshold": det["threshold"],
+                              "shots": shots, "table_markdown": shots_to_markdown(shots),
+                              "note": ("L1 结构级：切点/时长/关键帧/可测指标均为真实计算结果"
+                                       + ("；景别/运镜已由云端视觉模型 enrich" if use_vision else "；景别**未推断**（诚实留空）")
+                                       + ("；L2 运动级已启用（运镜由深度图推断，带 confidence）"
+                                          if with_depth else "；运镜未跑（with_depth=False）"))}
+    if vision_info:
+        result.update(vision_info)
+    return result
 
 
 def shots_to_markdown(shots: List[Dict[str, Any]]) -> str:

@@ -571,8 +571,11 @@ class AIEngine:
 
                 # ═══ 实际调用 ═══
                 if provider == "ollama":
+                    # 思考开关由上层显式传入（think=False 关闭本地推理模型的隐藏思考）；
+                    # 未传则交给 Ollama 默认。仅对 ollama 消费，避免污染云端 kwargs。
                     gen = self._ollama_client.chat(
-                        model, messages, stream=stream, **kwargs
+                        model, messages, stream=stream,
+                        think=kwargs.pop("think", None), **kwargs
                     )
                 else:
                     gen = self._cloud_api.chat(

@@ -251,7 +251,14 @@ export async function planStoryboardMemory(input: {
   rows: MemoryPlanRow[];
   totalCurrent?: number;
   totalSuggested?: number;
-  warnings?: string;
+  /**
+   * 后端 `app/core/ai/storyboard_memory.py` 的 `warnings` 是 `List[str]`
+   * （:162 初始化为 list、:208 原样返回），docstring 亦标`"warnings": [str]`。
+   * ⚠️ 此前此处误声明为 `string`，导致前端 `setMemoryWarnings(warnings || [])`
+   * 拿到 `string | never[]` 而报 TS2345（序列化字段不对称，tsc 基线 +1）。
+   * 改成 string[] 与后端实际形状对齐 —— 只修类型声明，不改运行时行为。
+   */
+  warnings?: string[];
   message?: string;
 }> {
   const token = bridgeToken();

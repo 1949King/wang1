@@ -1652,6 +1652,9 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     # LibTV 对标补强（2026-10-12）：引擎就绪但此前 Agent 调不到；独立模块防本文件破 2000 行
     from app.core.capability_handlers_media import MediaCapabilityHandlers
     media_handlers = MediaCapabilityHandlers()
+    # 剪辑 Skill 扩容（LibTV 对标第二刀）：把 EditorModule 既有能力接进能力目录
+    from app.core.capability_handlers_editor_skills import EditorSkillHandlers
+    editor_skill_handlers = EditorSkillHandlers(editor_module_ref)
     dispatcher.register("canvas.ai_upscale", CapabilityCategory.CANVAS,
                         media_handlers.ai_upscale, "AI 超分放大（ESPCN/RealESRGAN，如实回报引擎）")
     dispatcher.register("canvas.ai_matte", CapabilityCategory.CANVAS,
@@ -1660,6 +1663,10 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         media_handlers.video_depth, "深度视频提取（模型缺失时诚实失败）")
     dispatcher.register("canvas.reference_breakdown", CapabilityCategory.CANVAS,
                         media_handlers.reference_breakdown, "逐帧拉片 L1（参考片→结构化镜头表）")
+    # 拉片 L2（2026-10-14 补缺）：深度运镜推断 + 可选云端视觉景别 enrich（素材出域显式开启）
+    dispatcher.register("canvas.reference_breakdown_l2", CapabilityCategory.CANVAS,
+                        media_handlers.reference_breakdown_l2,
+                        "逐帧拉片 L2（运镜深度推断+景别视觉 enrich，置信度门槛如实标注）")
     dispatcher.register("canvas.segment_retake", CapabilityCategory.CANVAS,
                         media_handlers.segment_retake, "片段重拍（保音轨/时长对齐）")
     # LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线
@@ -1715,6 +1722,41 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         editor_handlers.suggest_canvas_roundtrip, "建议哪些片送到画布做变体")
     dispatcher.register("editor.reanchor_clips", CapabilityCategory.EDITOR,
                         editor_handlers.reanchor_clips, "按新台词重锚片段（默认只出计划）")
+
+    # 剪辑 Skill 扩容（LibTV 对标第二刀，2026-10-14）：
+    # 全部为 EditorModule 既有能力的薄接线（删除/复制/音量/变速/静音/批量转场/
+    # 卡点/场景切点/静音整理/字幕烧录/播放头/撤销重做/片段清单），零新算法。
+    # 第三/四刀（字幕 6 项 + 序列 2 项）：复用 SubtitleManager 与 _ripple_delete_gaps。
+    # 第五刀（关键帧 2 项）：复用 get_keyframes_for_clip / add_keyframe_at_playhead。
+    for _cap_id, _method_name, _desc in (
+        ("editor.delete_clip", "delete_clip", "删除片段（默认波纹，可撤销）"),
+        ("editor.duplicate_clip", "duplicate_clip", "复制片段到新时间点"),
+        ("editor.set_clip_volume", "set_clip_volume", "设置片段音量（0–200%）"),
+        ("editor.set_clip_speed", "set_clip_speed", "设置片段速度（0.1–10x）"),
+        ("editor.mute_clip", "mute_clip", "静音/取消静音片段"),
+        ("editor.set_transition_all", "set_transition_all", "批量给相邻片段加转场"),
+        ("editor.suggest_beat_cut", "suggest_beat_cut", "卡点切镜建议（确认后才切）"),
+        ("editor.suggest_scene_cut", "suggest_scene_cut", "场景切换切点建议（确认后才切）"),
+        ("editor.suggest_silence_trim", "suggest_silence_trim", "长静音整理建议（确认后才删）"),
+        ("editor.burn_subtitles", "burn_subtitles", "字幕烧录（导出时自动烧）"),
+        ("editor.get_playhead", "get_playhead", "读取播放头位置与选中片段"),
+        ("editor.seek_playhead", "seek_playhead", "定位播放头到指定秒"),
+        ("editor.undo_last", "undo_last", "撤销上一步"),
+        ("editor.redo_last", "redo_last", "重做"),
+        ("editor.list_timeline_clips", "list_timeline_clips", "列出时间线片段摘要"),
+        ("editor.list_subtitles", "list_subtitles", "列出字幕条目（Agent 自省）"),
+        ("editor.split_subtitle", "split_subtitle", "在指定时间点拆分字幕"),
+        ("editor.merge_subtitles", "merge_subtitles", "合并两条字幕"),
+        ("editor.set_subtitle_visible", "set_subtitle_visible", "显隐单条字幕"),
+        ("editor.import_subtitles", "import_subtitles", "导入 SRT/VTT 字幕文件"),
+        ("editor.export_subtitles", "export_subtitles", "导出字幕为 SRT"),
+        ("editor.close_track_gaps", "close_track_gaps", "磁吸合缝：同轨片段贴齐（可撤销）"),
+        ("editor.mark_sequence_in_out", "mark_sequence_in_out", "标记序列入点/出点/清除"),
+        ("editor.get_keyframes", "get_keyframes", "读取片段关键帧列表"),
+        ("editor.add_keyframe_at_playhead", "add_keyframe_at_playhead", "播放头处加关键帧"),
+    ):
+        dispatcher.register(_cap_id, CapabilityCategory.EDITOR,
+                            getattr(editor_skill_handlers, _method_name), _desc)
 
     # 多任务调度
     dispatcher.register("workflow.submit_batch", CapabilityCategory.WORKFLOW,

@@ -128,21 +128,23 @@ def main() -> int:
     # ════════════ D. 收益函数选路 ════════════
     check("λ_c 常量存在", abs(pc._LAMBDA_PRICE - 0.2) < 1e-9)
     # D1：无 priors → 旧行为（tier 降序 + 声明顺序）
+    #     2026-10-14：kling（tier=2）置首后是默认链第一位
     order = pc.resolve_order("auto")
-    check("无 priors 向后兼容（dashscope 首位）", order[0] == "dashscope")
+    check("无 priors 向后兼容（kling 首位）", order[0] == "kling")
     # D2：priors 覆盖 tier/声明顺序
+    #     utility: seedance=0.9-0.2*1.0=0.7；cogvideo=0.5-0.2*0.8=0.34；
+    #     dashscope=0.1-0.2*1.5≈-0.2；kling=0.5-0.2*3.5≈-0.2（tier 降序做平局 tiebreak）
     order = pc.resolve_order("auto", priors={"seedance": 0.9, "dashscope": 0.1})
-    # utility: seedance=0.9-0.2*1.0=0.7；dashscope=0.1-0.2*1.5=-0.2；cogvideo=0.5-0.2*0.8=0.34
-    check("priors 排序：seedance 反超 dashscope", order[0] == "seedance")
+    check("priors 排序：seedance 反超默认链", order[0] == "seedance")
     check("priors 排序：缺先验的 cogvideo 用中性 0.5 居中",
-          order == ["seedance", "cogvideo", "dashscope", "local"])
+          order == ["seedance", "cogvideo", "dashscope", "kling", "local"])
     check("local 仍永远兜底", order[-1] == "local")
     # D3：显式 provider 路径不受 priors 影响
     order = pc.resolve_order("seedance", priors={"dashscope": 1.0})
     check("显式 provider 不受 priors 影响", order == ["seedance", "local"])
     # D4：quote() 不传 priors → 行为不变
     q = pc.quote("auto", count=1)
-    check("quote 不传 priors → 仍报 dashscope", q["provider"] == "dashscope")
+    check("quote 不传 priors → 仍报 kling", q["provider"] == "kling")
 
     # ════════════ E. 端到端：假 provider 成败 → 先验回写 ════════════
     vgc = _load("video_generation_client.py")

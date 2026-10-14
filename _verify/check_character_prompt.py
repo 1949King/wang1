@@ -24,24 +24,47 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE = os.path.join(ROOT, "app", "core", "canvas_bridge.py")
 
 
+# build_character_prompt 调用了同模块的 _face_params_to_text（及其依赖的
+# _face_num / _face_hex_hue_name / _FACE_*_LABELS），单抽目标函数会 NameError；
+# 按「目标函数 + 下划线助手闭包」一并抽取，仍不 import 整个模块（无副作用）。
+_FACE_HELPERS = ("_face_params_to_text", "_face_num", "_face_hex_hue_name")
+
+
+def _face_label_tables(tree: ast.AST) -> tuple:
+    """抽出 _FACE_*_LABELS 之类的模块级常量表（build_character_prompt 的间接依赖）。"""
+    return tuple(
+        n.targets[0].id for n in tree.body
+        if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+        and n.targets[0].id.startswith("_FACE_")
+    )
+
+
 def load_target_function():
-    """静态抽取目标函数，避免 import 整个模块带来的副作用。"""
+    """静态抽取目标函数 + 其私有依赖，避免 import 整个模块带来的副作用。"""
     with open(BRIDGE, "r", encoding="utf-8") as f:
         tree = ast.parse(f.read())
-    target = None
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "build_character_prompt":
-            target = node
-            break
-    if target is None:
+    wanted = {"build_character_prompt", *_FACE_HELPERS, *_face_label_tables(tree)}
+    picked = [n for n in tree.body
+              if (isinstance(n, ast.FunctionDef) and n.name in wanted)
+              or (isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+                  and n.targets[0].id in wanted)]
+    names = set()
+    for n in picked:
+        if isinstance(n, ast.FunctionDef):
+            names.add(n.name)
+        else:
+            names.add(n.targets[0].id)
+    if "build_character_prompt" not in names:
         raise SystemExit("未在 canvas_bridge.py 找到 build_character_prompt")
-    module = ast.Module(body=[target], type_ignores=[])
+    module = ast.Module(body=picked, type_ignores=[])
     ast.fix_missing_locations(module)
     namespace = {
         "Dict": typing.Dict,
         "Any": typing.Any,
         "List": typing.List,
         "Optional": typing.Optional,
+        "colorsys": __import__("colorsys"),
+        "json": __import__("json"),
     }
     exec(compile(module, BRIDGE, "exec"), namespace)  # noqa: S102
     return namespace["build_character_prompt"]
