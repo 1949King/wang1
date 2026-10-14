@@ -16,6 +16,7 @@ import {
 } from "./store";
 import { cropGridCell } from "./imageTools";
 import { planStoryboardMemory, uploadAssetToHost, videoStoryboard, type MemoryPlanRow } from "./bridge";
+import { pullDepthBreakdown } from "./hostBreakdownL2";
 import { getVisionModel } from "./visionModel";
 import type { MemoryType } from "./stores/node-factory";
 
@@ -128,11 +129,28 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
   const [tHours, setTHours] = useState<number>(24);
   const [planning, setPlanning] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [l2Pulling, setL2Pulling] = useState(false);
   const pullRef = useRef<HTMLInputElement>(null);
+  /** 拉片模式：llm=既有「📹 拉片」（videoStoryboard，LLM 猜景别/运镜）；
+   *  l2 = Wave 0 #13 新增「🧊 深度拉片」（referenceBreakdownL2，深度实测+置信度门槛）。
+   *  两条线**并行不替换** —— 证据等级不同（LLM 推断 vs 深度实测），让用户自己选。 */
+  const [pullMode, setPullMode] = useState<"llm" | "l2">("llm");
+  /** 深度拉片是否启用云端视觉 enrich（**素材出域**，故默认 false，须显式勾选）。 */
+  const [l2UseVision, setL2UseVision] = useState(false);
 
-  /** 一键拉片：上传参考视频 → 后端检测镜头边界 + 抽帧 + 色调/景别 → 填分镜表 */
+  /** 一键拉片：上传参考视频 → 后端检测镜头边界 + 抽帧 + 色调/景别 → 填分镜表。
+   *  按 `pullMode` 分两条线（Wave 0 #13 新增 l2 分支）：
+   *   - llm：videoStoryboard，景别/运镜靠 LLM 推断（既有行为，逐键不变）；
+   *   - l2：referenceBreakdownL2，景别/运镜靠深度图实测 + 置信度门槛。
+   *  ⚠️ l2 分支**不用本机视觉模型**（那是 llm 线的），且景别/运镜留空时**保持留空**
+   *  （见hostBreakdownL2.ts 诚实边界说明）。 */
   const onPickReferenceVideo = async (file: File | null) => {
     if (!file) return;
+    if (pullMode === "l2") {
+      await runDepthBreakdown(file);
+      if (pullRef.current) pullRef.current.value = "";
+      return;
+    }
     setPulling(true);
     try {
       const up = await uploadAssetToHost(file);
@@ -165,7 +183,7 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
       setStatus?.(
         `拉片完成：${next.length} 镜（${res.scene_source || "自动"}检测）${vmsg ? ` · ${vmsg}` : ""}`,
       );
-    } catch (e) {
+} catch (e) {
       setStatus?.(`拉片失败：${e}`);
     } finally {
       setPulling(false);
@@ -173,7 +191,51 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
     }
   };
 
-  /** 拉一次记忆规划，并把建议时长写回分镜表（总时长守恒） */
+  /** 深度拉片（Wave 0 #13 第 4 条，2026-10-15）：上传参考片 → `/host/reference-breakdown-l2`
+   *  → 深度图实测运镜（带置信度门槛）+ 运动量/亮度/对比度实测值 → 填分镜表。
+   *
+   *  与上面 `videoStoryboard` 那条线的区别是**证据等级**：
+   * 那边景别/运镜是LLM 推断，这边是 CV 实测；两条线并存，用户自己选。
+   *
+   *  ⚠️ `use_vision` **默认 false**：开它会让素材出域到云端视觉模型，
+   *  必须用户在按钮上显式勾选（沿用后端 reference_breakdown 的同一纪律）。
+   *  ⚠️ 覆盖现有分镜表前**必须显式确认**（会改用户数据，与 repair-image 同纪律）。
+   *  ⚠️ 拉片成功也不给每行填默认景别/运镜 —— 后端留空就是留空，如实呈现。 */
+  const runDepthBreakdown = async (file: File) => {
+    setL2Pulling(true);
+    try {
+      const up = await uploadAssetToHost(file);
+      if (!up.ok || !up.path) throw new Error(up.message || "上传失败");
+      const res = await pullDepthBreakdown({
+        videoPath: up.path,
+        useVision: l2UseVision,
+        visionModel: getVisionModel(),
+      });
+      if (!res.ok || !res.rows.length) {
+        setStatus?.(`深度拉片失败：${res.message || "无镜头"}`);
+        return;
+      }
+      // ⚠️ 覆盖现有行是不可逆的数据改动 ⇒ 有旧数据时先问一次。
+      // 用 `window.confirm` 而非项目的 `ConfirmDialog`：后者需在组件里挂载 fixed 定位
+      // 模态，而本组件是 xyflow 节点（在带 transform 的 viewport 内）⇒ 会踩
+      // 「viewport 内渲染固定定位模态」的已知陷阱。项目内 DirectorPanel / Stage3D /
+      // WorkspaceCanvasMenus 同样直接用 window.confirm，此处与之保持一致。
+      if (rows.length && !window.confirm(`深度拉片将用 ${res.rows.length} 镜覆盖当前 ${rows.length} 行分镜表，继续？`)) {
+        setStatus?.("深度拉片已取消（分镜表未改动）");
+        return;
+      }
+      setRows(res.rows);
+      // 一行结论由 hostBreakdownL2.summarizeL2Pull 生成：留空就说留空，不含糊
+      setStatus?.(
+        res.message ||
+          `深度拉片完成：${res.rows.length} 镜${res.duration ? ` · ${res.duration.toFixed(1)}s` : ""}`,
+      );
+    } catch (e) {
+      setStatus?.(`深度拉片失败：${e}`);
+    } finally {
+      setL2Pulling(false);
+    }
+  };
   const runMemoryPlan = async () => {
     if (!rows.length) return;
     setPlanning(true);
@@ -270,12 +332,37 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
           <button
             type="button"
             className="sg-node-mini-btn"
-            onClick={() => pullRef.current?.click()}
-            disabled={pulling}
-            title="上传参考片 → 自动检测镜头边界 + 抽代表帧 + 判色调/景别，生成可编辑分镜表"
+            onClick={() => {
+              setPullMode("llm");
+              pullRef.current?.click();
+            }}
+            disabled={pulling || l2Pulling}
+            title="上传参考片 → 自动检测镜头边界 + 抽代表帧 + 判色调/景别（景别/运镜由 LLM 推断）"
           >
-            {pulling ? "拉片中…" : "📹 拉片"}
+            {pulling && pullMode === "llm" ? "拉片中…" : "📹 拉片"}
           </button>
+          <button
+            type="button"
+            className="sg-node-mini-btn"
+            onClick={() => {
+              setPullMode("l2");
+              pullRef.current?.click();
+            }}
+            disabled={pulling || l2Pulling}
+            title="上传参考片 → 深度图实测运镜（带置信度门槛）+ 实测运动量/亮度/对比度。景别/运镜测不出时留空，不猜"
+          >
+            {l2Pulling ? "深度拉片中…" : "🧊 深度拉片"}
+          </button>
+          {pullMode === "l2" ? (
+            <label className="sg-node-mini-check" title="勾选后素材会送到云端视觉模型做景别/画面描述解析（素材出域），留空则只跑本机深度">
+              <input
+                type="checkbox"
+                checked={l2UseVision}
+                onChange={(e) => setL2UseVision(e.target.checked)}
+              />
+              云端视觉（素材出域）
+            </label>
+          ) : null}
           <button
             type="button"
             className="sg-node-mini-btn"

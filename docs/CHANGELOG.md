@@ -1,5 +1,92 @@
 # 拾光剪影 — 变更日志
 
+## 收口 · Wave 0 #13 第 4/5 条：深度拉片 L2 + 时间线回滚栈接线（2026-10-15，画布 0.3.32）
+
+### 先核语义：8 条「看起来像孤儿」的端点，逐条判定
+
+孤儿端点差集法有个前提：**差集本身必须先自检**。本轮把上一步的 15 条逐一读代码核实，
+其中 **8 条根本不是孤儿 / 不该接**，只有 2 条是真缺口：
+
+| 端点 | 判定 | 证据 |
+|---|---|---|
+| `/host/tauri-closing` | **不是孤儿** | 副库 `vendor/AI-Canvas-tauri/src-tauri/src/lib.rs:1047` 在调⇒ **副库 Rust 源码是第四个扫描面**（上轮方法学漏了，已补进 MEMORY.md） |
+| `/host/plugins` | **不是孤儿** | `canvas_server.py:1695` 注入 JS 字面量（Qt → React 插件状态同步轮询） |
+| `/host/plugins/install\|toggle\|uninstall` | **不是孤儿** | `extensions_module.py:1256` urllib 直调 |
+| `/host/providers` | **不接** | `canvas_routes_get.py:218-219` 两个装饰器指向**同一 handler**（是 `ai-config-patch` 的别名），前端已调后者 ⇒ 接它= 造第二条通道 |
+| `/host/generate-video` | **不接** | `canvas_server.py:894` 自述`_build_gen_callable` 是「老端点的保真搬运」，前端已全量走 `/host/generation/submit`（`generationQueue.ts:92`）⇒ 历史端点 |
+| `/host/video-generate` | **不接** | 同上 |
+| `/host/reference-breakdown`（L1） | **不接** | 与 L2 都调 `rb.build_shot_table`，区别只是 `with_depth=True/False` ⇒ **L2 是 L1 的超集**，接 L1 = 造一条更弱的平行线 |
+| `/host/reference-breakdown-l2` | **接**（本轮第4 条） | 桥函数 `bridgeStoryboard.ts:137` 早就在、类型/re-export 都齐，但**零 UI 调用者** ⇒ **半成品缺口**（前端比后端多走一步、停在半路） |
+| `/host/project-snapshot/history` + `/restore` | **接**（本轮第5 条） | 两端点前端零调用，而 `project-snapshot/import` 会 `write_clips` **整体覆盖**时间线 |
+
+⇒ 真孤儿 15 → 本轮消掉 2 组（3 个端点），剩 **11 条**。
+
+### 第 4 条：`/host/reference-breakdown-l2` —— 接 L2 不接 L1
+
+**「并行不替换」的理由**：既有「📹 拉片」（LLM 推断景别/运镜）与深度拉片
+（**深度图实测 + 置信度门槛**）**证据等级不同**，不能相互取代 ⇒ 两个按钮并列，用户自己选。
+
+🔴 **诚实边界（本条最重要的一行）**：`景别`/`运镜` 测不出时后端给**空串**
+（`reference_breakdown.py:702` 初始化即 `""`；`:274` 明写「绝不把固定当运镜结论」）
+⇒ `hostBreakdownL2.mapL2ShotsToRows` **原样保留空串，绝不填「中景」「固定」**——
+填了就是把「没测出来」说成「测出来了」。结论行必须明说「景别 x/y · 运镜 x/y，其余留空未猜」。
+
+其余四条纪律：
+- `use_vision` **默认 false** —— 开它素材**出域**到云端视觉模型，须用户在按钮旁显式勾选
+  （新增 `.sg-node-mini-check` 样式，走 CSS 不内联）。
+- `keyframe` 是磁盘绝对路径 ⇒ **不塞进 `frameUrl`**（画布是 WebView，加载不了 `D:/`）。
+- 非法 `duration`（0/负/NaN）⇒ 落 0，**不猜 3 秒**；行 `id` 由 index 派生（禁随机）。
+- 覆盖现有分镜表前**必须确认**（改用户数据，与 `repair-image` 同纪律）。
+
+### 第 5 条：`/host/project-snapshot/history` + `/restore` —— 回滚栈
+
+**缺口是真的**：`projectZip.ts:300pushTimelineToEditor` 调 `write_clips` **整体覆盖**剪辑器时间线，
+后端自己在 import 里压了一条「导入前自动快照」（`canvas_server.py:1353`），
+**但前端没有任何回滚入口** —— 导错了就只能重新打开工程包。
+
+🔴 **三条不可绕过的限制**（读代码 + 全库 grep 得出，不是推测）：
+1. 后端 `SnapshotStore` docstring（`project_snapshot.py:130-131`）说「每次导出自动 push」，
+   但**实测 export 端点没调 push** —— 全库 `get_snapshot_store()` 只有 3 处调用，
+   全在 history/restore/import ⇒ **实际只有 import 会长栈，空栈是真实状态**。
+   UI 必须如实说「当前没有快照」并告诉用户怎么产生，**不能假装有**。
+2. `SnapshotStore.list()` 白名单裁剪，**没有 clips**。
+3. 🔴 **`restore` 端点自己不 push、前端也无 push 端点** ⇒ **回滚不可再回滚**，
+   回滚前的状态找不回来，**唯一兜底是先导出工程包** ⇒ 二次确认必须写明这一点。
+
+**编排整块外置**：`editorRollback.ts`（`App.tsx` 已 1975/2000 顶格 ⇒ 只留两行薄调用）。
+交互：拉栈 → 空则如实说 → `window.prompt` 选编号 → `snapshotRestoreBlocker` 红线自检
+（空栈/未选/id 不在栈/**0 片段会清空时间线**）→ `window.confirm` 二次确认 → `restoreSnapshot`。
+
+**为什么用 `window.confirm` 而不是 `ConfirmDialog`**：后者需在组件里挂 fixed 定位模态，
+而节点组件在 xyflow viewport 内（有 `transform`）⇒ 踩已知陷阱。
+项目内 `DirectorPanel.tsx:91` / `Stage3D.tsx:2098` / `WorkspaceCanvasMenus.tsx:121` 同样直接用 confirm。
+
+### 文件与验证
+
+- 新建：`hostBreakdownL2.ts` · `hostBreakdownL2.test.ts`（22 例）· `hostSnapshots.ts` ·
+  `hostSnapshots.test.ts`（21 例）· `editorRollback.ts`
+- 改：`storyNodes.tsx`（+94/-7，拉片按钮 + `pullMode` 分流 + `l2UseVision`）·
+  `App.tsx`（+39/-22，抽 `doExportZip` 避免 TDZ + `if (pushed) await offerRollback()`）·
+  `styles.css`（**仅追加** `.sg-node-mini-check`，未改任何既有规则）
+- 冻结区：zone8 files 37→**40**、invariants 37→**38**，重锁后 **99 locks**；
+  四处同步（`frozen_zones.json` / `现行技术文档.md` / `.cursor/rules/frozen-zones.mdc` / 哈希基线）。
+  ⚠️ `frozen_zones.json` 的 files **禁止 `sorted()`** —— 一排序 35 项顺序全变，
+  diff 从「纯增量」变成 24/21。正解 = **取 HEAD 原顺序 + 尾部追加**（本轮 7/3 纯增量）。
+- 双库：`check_canvas_dual_repo` OK（无新增漂移；`App.tsx` 已同步，
+  同步前核实副库与主库 HEAD 一致 ⇒ 分叉确由本轮引起）；备份 `.workbuddy/tmp/dual_backup_wave0c/`
+- 画布版本 0.3.31 → **0.3.32**（三件套 + 副库）；主程序 `app/version.py` **不动**（纯画布接线）
+- 验证：`tsc --noEmit` **37 = 基线 37**（全在 `riggedHumanoid.ts` 21 + `Stage3D.tsx` 16，新文件零错误）·
+  `vitest` **35 文件 / 542 测试**全绿（vs 上轮 33/499，+2 文件 +43 例）· `vite build` ✓ ·
+  `check_file_size` 通过（`App.tsx` 1975 < 2000，**未放宽任何基线**）
+
+### 并行线的工作区改动：不动
+
+工作区有 3 个**本轮不是我改的** app 侧文件（ruff 清理）：
+`capability_handlers_editor_skills.py`（删未用 `List` import）、
+`reference_breakdown.py`（`startswith` 合元组）、
+`editor_agent_dock_mixin.py`（删冗余 `# noqa: BLE001`）。
+`ruff_gate` 通过（零新增）⇒ **不动它们**（归属不是本轮，且门禁绿）。
+
 ## 收口 · Wave 0 #13 第 2/3 条：剧本合规检查 + 增强意图目录接线（2026-10-15，画布 0.3.31）
 
 ### 先修正差集方法本身（上一步的方法有 bug，结论不可信）

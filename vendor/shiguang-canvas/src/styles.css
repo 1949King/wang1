@@ -2123,6 +2123,25 @@ html[data-theme='light'] .ic-shortcut-btn:hover {
 .sg-node-mini-btn:hover { border-color: #64748b; }
 .sg-node-mini-btn.primary { background: #0f766e; border-color: #14b8a6; }
 .sg-node-mini-btn.danger { color: #fca5a5; }
+
+/* 节点头部动作区里的迷你勾选（Wave 0 #13 深度拉片的「云端视觉·素材出域」开关，2026-10-15）。
+   走 CSS 而非内联 style —— 项目不变量「内联样式 = 主题盲区」。
+   字号/配色沿用同族 .sg-node-mini-btn，不引入新色板。 */
+.sg-node-mini-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 2px 4px;
+  border: 1px dashed #475569;
+  border-radius: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.sg-node-mini-check:hover { color: #cbd5e1; border-color: #64748b; }
+.sg-node-mini-check input { margin: 0; cursor: pointer; accent-color: #0f766e; }
 .sg-md-editor, .sg-md-preview {
   width: 100%;
   min-height: 140px;

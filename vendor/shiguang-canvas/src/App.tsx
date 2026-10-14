@@ -1419,6 +1419,38 @@ export default function App() {
       batchOk ? lastBatchSegments : undefined);
   };
 
+  /** 时间线回滚（Wave 0 #13 第 5 条）：交互编排在 `editorRollback`（App.tsx 已顶格），
+   *  这里只注入依赖。唯一入口是「导入工程包直导时间线之后」那一刻 —— 用户最可能反悔时。 */
+  const offerRollback = async () => {
+    const { offerTimelineRollback } = await import("./editorRollback");
+    await offerTimelineRollback({ setStatus, onExportZip: doExportZip });
+  };
+
+  /** 导出工程包（Wave 0 #13 抽成具名函数）：既作`onExportZip` prop，
+   *  也供回滚编排当「先导出再回滚」的兜底建议。**定义在offerRollback 之前**避免 TDZ。 */
+  const doExportZip = async () => {
+    const { exportProjectZip, downloadBlob, fetchProjectTimeline } = await import("./projectZip");
+    const b = getProjectBundle();
+    // P1-4：导出时并入剪辑器完整时间线（可回滚/diff/直导）
+    const timeline = await fetchProjectTimeline();
+    const blob = await exportProjectZip({
+      version: 1,
+      dramaTitle: b.dramaTitle,
+      episode: b.episode,
+      nodes: b.nodes,
+      edges: b.edges,
+      stage3d: b.stage3d,
+      timeline: timeline ?? undefined,
+      savedAt: new Date().toISOString(),
+    });
+    downloadBlob(blob, `shiguang-canvas-${Date.now()}.zip`);
+    setStatus(
+      timeline
+        ? `已导出工程 ZIP（含时间线 ${timeline.clip_count ?? timeline.clips.length} 片段）`
+        : "已导出工程 ZIP（未取到时间线）",
+    );
+  };
+
   const onSyncModels = async () => {
     setStatus("同步模型池…");
     const msg = await syncModelPool();
@@ -1682,34 +1714,14 @@ export default function App() {
       onInpaint={onInpaint}
       onSetPrimaryImage={setPrimaryImage}
       onGroupSelected={groupSelected}
-      onExportZip={async () => {
-        const { exportProjectZip, downloadBlob, fetchProjectTimeline } = await import("./projectZip");
-        const b = getProjectBundle();
-        // P1-4：导出时并入剪辑器完整时间线（可回滚/diff/直导）
-        const timeline = await fetchProjectTimeline();
-        const blob = await exportProjectZip({
-          version: 1,
-          dramaTitle: b.dramaTitle,
-          episode: b.episode,
-          nodes: b.nodes,
-          edges: b.edges,
-          stage3d: b.stage3d,
-          timeline: timeline ?? undefined,
-          savedAt: new Date().toISOString(),
-        });
-        downloadBlob(blob, `shiguang-canvas-${Date.now()}.zip`);
-        setStatus(
-          timeline
-            ? `已导出工程 ZIP（含时间线 ${timeline.clip_count ?? timeline.clips.length} 片段）`
-            : "已导出工程 ZIP（未取到时间线）",
-        );
-      }}
+      onExportZip={doExportZip}
       onImportZip={async (file) => {
         try {
           const { importProjectZip, pushTimelineToEditor } = await import("./projectZip");
           const bundle = await importProjectZip(file);
           loadProjectBundle(bundle);
           // P1-4：导入时若快照带时间线，提供直导剪辑器
+          let pushed = false;
           if (bundle.timeline && Array.isArray(bundle.timeline.clips) && bundle.timeline.clips.length) {
             const push = window.confirm(
               `该工程快照包含 ${bundle.timeline.clips.length} 个时间线片段，是否一并直导剪辑器？`,
@@ -1717,8 +1729,13 @@ export default function App() {
             if (push) {
               const r = await pushTimelineToEditor(bundle.timeline.clips as Record<string, unknown>[]);
               setStatus(r.ok ? `时间线已直导剪辑器：${r.message}` : `直导失败：${r.message}`);
+              pushed = r.ok;
             }
           }
+          // Wave 0 #13 第 5 条（2026-10-15）：直导是**破坏性**的（write_clips 整体覆盖
+          // 剪辑器时间线），后端在 import 里自动压了一条「导入前自动快照」，
+          // 但前端原本没有回滚入口 ⇒ 这里在**用户最可能想反悔的时刻**给出。
+          if (pushed) await offerRollback();
         } catch (e) {
           setStatus(`导入 ZIP 失败: ${e}`);
         }
