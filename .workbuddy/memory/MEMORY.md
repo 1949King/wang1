@@ -27,7 +27,9 @@
 - **体积守卫余量见底**（2026-10-12）：`bridge.ts` 2043/2046（**禁改**）；`store.ts` 2502/2513；`Stage3D.tsx` 4604/4653；`riggedHumanoid.ts` 3159/3189；`CanvasShell.tsx` 3113/3229 ⇒ **新逻辑另开文件，拆模块不抬基线**。
 - **静默失效坑**：① `HUMAN_PRESETS[].heightScale` 在导演台被 `Stage3D.tsx:1489` 的 `actor.scale` 覆盖 ⇒ 体型缩放用 `VARIANT_SCALE`；② 角色库动态表单只认 `text/string`，enum 字段须 `_ENUM_SOURCES` + `_enum_combos` 五处同步。均已由 `check_character_schema.py` ⑦⑧ 锁住（反例 5/5 报红）。
 - **两条单通道（禁止造第二套）**：① 3D 产物入轨 = `stage3dArtifacts.ts::sendArtifactToTimeline()` → `POST /ingest_path`（data URL 先 `/host/upload-asset` 落盘）；② 角色库→导演台 = store `requestStage3dCast` → `stage3dCastSeq` 递增 → `useStage3dCast()` 消费。全链路零随机（id 哈希配色）。
-- **孤儿端点缺口**：「后端齐全、前端无调用者」⇒ 接线性价比远高于造新；查缺口先全库 grep 端点名。
+- **孤儿端点缺口**：「后端齐全、前端无调用者」⇒ 接线性价比远高于造新。⚠️ **差集法本身必须先自检**（2026-10-15 两轮结论都不可信）：三个扫描面（画布 `src` 非注释非测试行 / `canvas_server.py` 的 JS 字面量 / `app/**/*.py` 的 URL 拼接），`plugins/*` 由 Qt 侧 urllib 直调不算孤儿。当前基线：**85 端点 = 已接线 70 + 真孤儿 15**。
+- 🔴 **同名不同义的常量 = 本项目高频坑**（踩过 3 次：`bridge.ts` 的 `warnings` 字段不对称、`/host/enhance-intents` 的 `quality_tiers`=fast/standard/high vs 前端 `QUALITY_TIERS`=draft/standard/fine/cinema）。**接线时凡带 `quality/tier/mode/level` 的后端字段，先核前端同名常量是不是同一语义**，不确定就别暴露那个字段 + 写测试反锁。
+- **端点接线三条硬纪律**：① 判定逻辑一律留后端，前端只展示（结论文案**逐字用后端 `summary`**，不自造）；② **不渲染「点了必然失败」的死按钮**（`heal` 缺遮罩入口、`style` 无风格选择器会静默套默认 cyberpunk ⇒ 白名单只留 `face/cutout/sharpen`，用 `excludedIntents()` 如实说明）；③ 后端同函数已 SSE 推的事件（如 `compliance.report`）**不新增第二条 HTTP 推送通道**。
 - **YuE 全曲**：本机跑不动 ⇒ 只能远程 `SHIGUANG_YUE_ENDPOINT` / 本地 `SHIGUANG_YUE_HOME`；执行端不可用必须诚实失败，绝不假音频/静默降级。
 - **沙箱 tempfile 回退 cwd** ⇒ 三入口钉 `.workbuddy/tmp`：根 `conftest.py`、`run_all_checks.py`、直接单跑的 `_verify` 脚本。
 - `.venv312` 依赖更全；系统 Py3.14 出误导告警；「未检测到 GPU」是假的（nvidia-smi 探测）。
@@ -45,6 +47,9 @@
 - **哈希 ≠ 不变量**：冻结区新不变量必须 AST 断言 + 反例验证，否则守卫可能是永远绿的摆设。
 - **行尾纪律**：Edit 保留 CRLF；画布 `src/*.ts(x)`、`现行技术文档.md`、`frozen_zones.json`、`.workbuddy/memory/*` = LF；`version.py`、`CHANGELOG.md`、`.cursor/rules/*.mdc` = CRLF。重写 CRLF = Write 临时文件 → Python 换行 → 写回；`version.py` 用整体 Write。
 - **提交**：必须原生 bash 发起（生成 `.sh` + `git commit -F 消息文件`，别用 Python 派生 git）；**永不裸 `git commit`**；版本号提交前最后一步写，被覆盖**换号不抢回**；`--no-verify` 是最后手段须双份登记（CHANGELOG + 提交消息）+ 归属与零交集判定。
+- 🔴 **禁 `git add -A`**（2026-10-15 复发两次，D8C低那轮夹带 46+ 文件）：它本身就是绕过「暂存范围确认」的手法，不只是「忘了确认」。⇒ 一律**精确 pathspec**；`.cursor/` 被 gitignore 但已跟踪 ⇒ 需 `git add -f`。
+- 🔴 **`frozen_zones.json` 改 files 列表禁止 `sorted()`**（2026-10-15 又踩）：一排序 35 项顺序全变，diff 从 8/5 纯增量变成 24/21。正解 = **取 HEAD 原顺序 + 尾部追加**（`subprocess` 读 `git show HEAD:` 再拼）。
+- **Markdown 工具噪音**：Prettier 类编辑器会自动重排表格对齐 + 加尾随空格（`docs/画布可借鉴清单落地规划_2026-10-15.md` 被改）⇒ 提交前 `git status` 逐项核，非本轮改动一律 `git checkout --` 回退。
 - **ruff 门禁 = 逐文件存量棘轮**（`scripts/ruff_gate.py`）；`.venv312` 无 ruff，用 `C:/Python314/python.exe -m ruff`。
 - **回归**：`_verify/run_all_checks.py` 优先 `.venv312`；失败定性顺序 ① 跑错解释器 ② 撞并发会话 ③ 才当真回归。`check_canvas_bridge_e2e.py` 真起服务最有价值。
 - **Node22**：`node_modules/.bin` shim 挂 ⇒ 直调真实二进制（tsc / vitest.mjs / vite.js）。node 路径 `.../22.22.2-6/node.exe`（勿写 -3，错路径 + 管道 = tsc 假绿）。
