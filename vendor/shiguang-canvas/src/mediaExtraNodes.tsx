@@ -13,6 +13,7 @@ import {
   type PanoramaData,
   type NoteData,
   type SourceData,
+  type CharacterData,
   ANIMATION_ACTION_LABELS,
   animationGrid,
 } from "./store";
@@ -810,6 +811,84 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
           hidden
           onChange={(e) => void onFile(e.target.files?.[0] || null)}
         />
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+}, nodePropsEqual);
+
+/**
+ * 角色节点：把角色库条目放到画布上，并给出「捏脸」入口。
+ * 捏脸卡片是固定定位模态，必须渲染在 React Flow viewport 之外，
+ * 故本节点只派发 `sg-open-face-card` 窗口事件，由 CanvasShell 统一承载 FaceCard。
+ */
+export const CharacterNode = memo(function CharacterNode({ id, data, selected }: NodeProps) {
+  const d = data as CharacterData;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const refreshCharacters = useCanvasStore((s) => s.refreshCharacters);
+  const characters = useCanvasStore((s) => s.characters);
+  const bound = useMemo(
+    () => characters.find((c) => c.id === d.characterId),
+    [characters, d.characterId],
+  );
+
+  const openFaceCard = () => {
+    if (!d.characterId) return;
+    window.dispatchEvent(
+      new CustomEvent("sg-open-face-card", { detail: { characterId: d.characterId, nodeId: id } }),
+    );
+  };
+
+  return (
+    <div className={`sg-node character${selected ? " selected" : ""}`} onMouseDown={stop}>
+      <NodeResizer minWidth={200} minHeight={180} isVisible={!!selected} />
+      <Handle type="target" position={Position.Left} />
+      <div className="head">
+        <span>🧑‍🎨 {d.title || "角色"}</span>
+        <button
+          type="button"
+          className="sg-node-mini-btn"
+          onClick={() => void refreshCharacters()}
+          title="从角色库刷新"
+        >
+          ↻
+        </button>
+      </div>
+      <div className="body nodrag">
+        <select
+          value={d.characterId || ""}
+          onChange={(e) => {
+            const cid = e.target.value;
+            const c = characters.find((x) => x.id === cid);
+            updateNodeData(id, { characterId: cid, characterName: c?.name || "" });
+          }}
+        >
+          <option value="">— 选择角色 —</option>
+          {characters.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.role_type ? `（${c.role_type}）` : ""}
+            </option>
+          ))}
+        </select>
+        {bound?.avatar_url ? (
+          <div className="img-wrap">
+            <img src={bound.avatar_url} alt={bound.name} />
+          </div>
+        ) : (
+          <div className="sg-director-empty">
+            {bound ? "尚未捏脸：点下方「捏脸」生成参考脸" : "角色库暂无头像 · 先选角色再捏脸"}
+          </div>
+        )}
+        <button
+          type="button"
+          className="sg-node-mini-btn primary"
+          disabled={!d.characterId}
+          onClick={openFaceCard}
+          title="打开独立捏脸卡片；参数随角色库保存，并进生图提示词保持跨镜一致"
+        >
+          🎨 捏脸
+        </button>
       </div>
       <Handle type="source" position={Position.Right} />
     </div>

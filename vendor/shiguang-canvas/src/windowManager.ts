@@ -163,10 +163,16 @@ export const useWindowManager = create<WindowManagerState>((set, get) => ({
     })),
   syncOpen: (name, open) => {
     if (open) return; // 打开由面板挂载 focus 入列，这里不管
-    set((s) => ({
-      minimized: { ...s.minimized, [name]: false },
-      order: s.order.filter((n) => n !== name),
-    }));
+    set((s) => {
+      // 幂等守卫：未最小化且不在层叠序 ⇒ 已是「关闭」态，返回原 state 不 set。
+      // 否则每次 xOpen 翻转都会无谓地新建 minimized/order 对象、通知全 store 订阅者
+      // （与 setBondedSides 同类问题：空转写入 → 订阅者无谓重渲染）。
+      if (!s.minimized[name] && !s.order.includes(name)) return s;
+      return {
+        minimized: { ...s.minimized, [name]: false },
+        order: s.order.filter((n) => n !== name),
+      };
+    });
   },
 }));
 

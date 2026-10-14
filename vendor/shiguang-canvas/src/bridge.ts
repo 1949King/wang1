@@ -61,12 +61,44 @@ export async function ensureTauriBridgeCredentials(): Promise<void> {
 }
 
 export function bridgeToken(): string {
+  // 优先级（2026-10-14 修正）：window（inject.js 每页现注入）→ URL ?token=（宿主
+  // 加载页面时现注入）→ localStorage（**跨会话残留**，仅作最后兜底）。
+  // 旧顺序把 localStorage 排在 URL 之前：一旦页面没跑到 inject.js，就会一直用
+  // 上一会话的旧 token ⇒ 所有 /host/*（含 SSE）401 ⇒ EventSource 无限重连刷屏。
   return (
     (window as any).__SHIGUANG_BRIDGE_TOKEN ||
-    localStorage.getItem("__shiguang_bridge_token") ||
     tokenFromQuery() ||
+    localStorage.getItem("__shiguang_bridge_token") ||
     ""
   );
+}
+
+/**
+ * 凭据自愈：从宿主 /inject.js 重新拉取**当前会话** token。
+ *
+ * 背景（2026-10-14 实测事故）：后端 `_SESSION_TOKEN` 每次启动随机重建，而 localStorage
+ * 里的旧 token 会跨会话残留。页面若没跑到 inject.js，就会拿旧 token 打所有 /host/*
+ * （含 SSE）⇒ 401 ⇒ EventSource 无限自动重连刷屏。inject.js 始终携带当前 token，
+ * 故用它做自愈源头。成功后同步刷新 window 与 localStorage，返回 token（失败返回 ""）。
+ */
+export async function refreshBridgeTokenFromInject(): Promise<string> {
+  try {
+    const res = await fetch(`${BRIDGE}/inject.js?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return "";
+    const text = await res.text();
+    const matched = text.match(/var\s+TOKEN\s*=\s*"([0-9a-fA-F]{16,})"/);
+    const token = matched ? matched[1] : "";
+    if (!token) return "";
+    (window as any).__SHIGUANG_BRIDGE_TOKEN = token;
+    try {
+      localStorage.setItem("__shiguang_bridge_token", token);
+    } catch {
+      /* localStorage 不可用时仅保留 window 值 */
+    }
+    return token;
+  } catch {
+    return "";
+  }
 }
 
 export function authHeaders(json = false): HeadersInit {
@@ -1416,180 +1448,23 @@ export function collectUpstreamContext(
   return parts.join("；");
 }
 
-export type StoryboardShot = {
-  id?: number;
-  duration?: number;
-  shot?: string;
-  description?: string;
-  dialogue?: string;
-};
-
-/** 一键拉片：剧本 → 分镜表（宿主 LLM，失败用启发式） */
-export async function breakdownStoryboard(script: string): Promise<{
-  ok: boolean;
-  shots: StoryboardShot[];
-  fallback?: boolean;
-  message?: string;
-}> {
-  const token = bridgeToken();
-  const res = await fetch(
-    `${BRIDGE}/host/storyboard-breakdown?token=${encodeURIComponent(token)}`,
-    {
-      method: "POST",
-      headers: authHeaders(true),
-      body: JSON.stringify({ script }),
-    },
-  );
-  try {
-    return await res.json();
-  } catch {
-    return { ok: false, shots: [], message: `HTTP ${res.status}` };
-  }
-}
-
-/** 相机路径规划结果：镜像后端 StageCamera 结构 + 运镜 pathPoints */
-export type CameraPlanShot = {
-  id: string;
-  name: string;
-  position: [number, number, number];
-  lookAt: [number, number, number];
-  fov: number;
-  shotSize?: string;
-  movement?: string;
-  pathPoints?: { pos: [number, number, number]; look: [number, number, number] }[];
-  pathDuration?: number;
-};
-
-/** 一键拉片（视频）单镜：镜像后端 /host/video-storyboard 的 shots 行 */
-export type VideoStoryboardShot = {
-  id?: number;
-  start?: number;
-  end?: number;
-  duration?: number;
-  shot?: string;
-  camera?: string;
-  description?: string;
-  dialogue?: string;
-  tone?: string;
-  brightness?: number;
-  frame?: string | null;
-};
-
-/** 一键拉片：参考视频 → 可编辑分镜表（后端检测镜头边界 + 抽帧 + 色调/景别） */
-export async function videoStoryboard(input: {
-  path?: string;
-  url?: string;
-  max_shots?: number;
-}): Promise<{
-  ok: boolean;
-  shots: VideoStoryboardShot[];
-  fallback?: boolean;
-  scene_source?: string;
-  duration?: number;
-  message?: string;
-}> {
-  const token = bridgeToken();
-  try {
-    const res = await fetch(
-      `${BRIDGE}/host/video-storyboard?token=${encodeURIComponent(token)}`,
-      {
-        method: "POST",
-        headers: authHeaders(true),
-        body: JSON.stringify({
-          path: input.path || "",
-          url: input.url || "",
-          max_shots: input.max_shots || 30,
-        }),
-      },
-    );
-    return await res.json();
-  } catch {
-    return { ok: false, shots: [], message: "网络异常" };
-  }
-}
-
-/** WS4#2 AI 分镜自动摆机位：分镜表 / 剧本 → 相机路径规划（经画布桥） */
-export async function planStoryboardCameras(input: {
-  shots?: StoryboardShot[];
-  script?: string;
-  use_llm?: boolean;
-}): Promise<{
-  ok: boolean;
-  cameras: CameraPlanShot[];
-  count?: number;
-  message?: string;
-}> {
-  const token = bridgeToken();
-  try {
-    const res = await fetch(
-      `${BRIDGE}/host/storyboard-camera-plan?token=${encodeURIComponent(token)}`,
-      {
-        method: "POST",
-        headers: authHeaders(true),
-        body: JSON.stringify({
-          shots: input.shots,
-          script: input.script || "",
-          use_llm: input.use_llm || false,
-        }),
-      },
-    );
-    return await res.json();
-  } catch {
-    return { ok: false, cameras: [], message: "网络异常" };
-  }
-}
-
-/** 记忆规划单行：镜像后端 app/core/ai/storyboard_memory.plan 的返回 */
-export type MemoryPlanRow = {
-  id: string;
-  memoryType: "detail" | "meaning" | "emotion";
-  label: string;
-  /** t 小时后的基线保留率 0~1（后端按 memory_model 的 λ 算，前端不要自己算） */
-  retention: number;
-  currentDuration: number;
-  suggestedDuration: number;
-  delta: number;
-};
-
-/**
- * 分镜记忆规划：给定每镜的「观众记忆类型」，换算保留率与建议时长。
- *
- * 总时长守恒、按保留率加权再分配 —— 细节让位、情绪拿时长。
- * 理论依据：24h 基线保留率 细节 11.5% / 意义 61.9% / 情绪 82.5%。
- *
- * ⚠️ 保留率与分配一律由后端算（λ 的唯一真相源在 Python 侧），
- *    前端只负责选类型 + 展示回传的真值，避免两份 λ 漂移。
- */
-export async function planStoryboardMemory(input: {
-  rows: { id: string; memoryType?: string; duration?: number }[];
-  t_hours?: number;
-}): Promise<{
-  ok: boolean;
-  t_hours?: number;
-  rows: MemoryPlanRow[];
-  totalCurrent?: number;
-  totalSuggested?: number;
-  warnings?: string[];
-  message?: string;
-}> {
-  const token = bridgeToken();
-  try {
-    const res = await fetch(
-      `${BRIDGE}/host/storyboard-memory-plan?token=${encodeURIComponent(token)}`,
-      {
-        method: "POST",
-        headers: authHeaders(true),
-        body: JSON.stringify({
-          rows: input.rows,
-          ...(input.t_hours ? { t_hours: input.t_hours } : {}),
-        }),
-      },
-    );
-    return await res.json();
-  } catch {
-    return { ok: false, rows: [], message: "网络异常" };
-  }
-}
+// ── 分镜/拉片族（2026-10-14 拆至 bridgeStoryboard.ts，防本文件顶破规模守卫）──
+// 既有 import 路径不变（./bridge 仍可用）；新代码可直接从 ./bridgeStoryboard 导入。
+// ⚠️ re-export 而非删除：storyNodes/AgentPages/mediaExtraNodes/novice 等
+//    多处 `import { ... } from "./bridge"` 依赖这些符号。
+export {
+  breakdownStoryboard,
+  videoStoryboard,
+  referenceBreakdownL2,
+  listLocalVisionModels,
+  planStoryboardCameras,
+  planStoryboardMemory,
+  type StoryboardShot,
+  type CameraPlanShot,
+  type VideoStoryboardShot,
+  type ReferenceBreakdownL2Shot,
+  type MemoryPlanRow,
+} from "./bridgeStoryboard";
 
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1625,6 +1500,24 @@ export async function uploadAssetToHost(file: File): Promise<{
     return await res.json();
   } catch (e) {
     return { ok: false, message: `上传失败: ${e}` };
+  }
+}
+
+/** 画布捏脸卡片 → 角色库写回（唯一写回通道 POST /host/character-update）。
+ *  后端只接受 CHARACTER_FIELD_SCHEMA 白名单字段 + avatar_url，传其它键会被静默忽略。 */
+export async function updateCharacterViaHost(
+  id: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: boolean; message?: string }> {
+  try {
+    const res = await fetch(`${BRIDGE}/host/character-update`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({ id, data }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `写回角色库失败: ${e}` };
   }
 }
 
@@ -1926,77 +1819,9 @@ export function placeholderImageDataUrl(prompt: string, w = 512, h = 288): strin
 // Agent ↔ Canvas 双向通信（SSE 接收 + POST 回执）
 // ────────────────────────────────────────────────────────────────────
 
-export type AgentEventEnvelope = {
-  id: string;
-  ts: number;
-  from: string;
-  to: string;
-  type: string;
-  correlation_id: string;
-  payload: any;
-  ack_required: boolean;
-};
-
-type SubscribeOpts = {
-  onEvent: (evt: AgentEventEnvelope) => void;
-  onError?: (err: string) => void;
-  sinceId?: string;
-};
-
-/**
- * 订阅剪辑 Agent 推过来的 SSE 事件（/host/agent/events）。
- * 浏览器 EventSource 自带断线自动重连。
- * 返回一个取消订阅函数（调 es.close()）。
- */
-export function subscribeAgentEvents(opts: SubscribeOpts): () => void {
-  const token = bridgeToken();
-  const params = new URLSearchParams({ token });
-  if (opts.sinceId) params.set("since_id", opts.sinceId);
-  const url = `${BRIDGE}/host/agent/events?${params.toString()}`;
-
-  let es: EventSource | null = null;
-  try {
-    es = new EventSource(url);
-  } catch (e: any) {
-    opts.onError?.(`SSE 创建失败: ${e?.message || e}`);
-    return () => {};
-  }
-
-  let lastId = opts.sinceId || "";
-  es.addEventListener("agent", (ev) => {
-    const msg = ev as MessageEvent;
-    try {
-      const data = JSON.parse(String(msg.data || "{}"));
-      const env: AgentEventEnvelope = {
-        id: String(data.id || ""),
-        ts: Number(data.ts || 0),
-        from: String(data.from || ""),
-        to: String(data.to || ""),
-        type: String(data.type || ""),
-        correlation_id: String(data.correlation_id || ""),
-        payload: data.payload,
-        ack_required: Boolean(data.ack_required),
-      };
-      if (env.id) lastId = env.id;
-      opts.onEvent(env);
-    } catch (e: any) {
-      opts.onError?.(`SSE 消息解析失败: ${e?.message || e}`);
-    }
-  });
-
-  es.onerror = () => {
-    // EventSource 会自动重连，这里只做日志
-    opts.onError?.("SSE 连接异常（正在自动重连）");
-  };
-
-  return () => {
-    try {
-      es?.close();
-    } catch {
-      /* ignore */
-    }
-  };
-}
+// SSE 订阅已按模块规模守卫（2026-10-14）拆到 agentEvents.ts；此处保留再导出，
+// 调用方（AgentPanel 等）仍从 "./bridge" 取用，无需改导入路径。
+export { subscribeAgentEvents, type AgentEventEnvelope } from "./agentEvents";
 
 /**
  * 画布侧主动给剪辑侧发一条事件（对 task.create 的回执 / canvas.query / canvas.node_added 等）。

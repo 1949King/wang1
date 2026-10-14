@@ -101,7 +101,9 @@ export function useEditorCanvasLink(): { clipCount: number } {
       if (cancelled) return;
       setClipCount(Number(snap.clip_count) || (snap.clips || []).length);
       const nodes = useCanvasStore.getState().nodes;
+      const liveIds = new Set<string>();
       for (const clip of snap.clips || []) {
+        if (clip.id) liveIds.add(String(clip.id));
         const nid = String(clip.canvas_node_id || "");
         if (!nid) continue;
         const hit = nodes.find((n) => n.id === nid);
@@ -112,6 +114,18 @@ export function useEditorCanvasLink(): { clipCount: number } {
           editorStatus: "in_timeline",
           editorRange: `${start.toFixed(1)}s–${end.toFixed(1)}s`,
           editorClipId: clip.id,
+        });
+      }
+      // 清除回标：曾入轨但对应片段已不在时间线（删片 / 撤销入轨）→ 收回徽标
+      for (const node of nodes) {
+        const d = node.data as { editorStatus?: string; editorClipId?: unknown };
+        if (d.editorStatus !== "in_timeline") continue;
+        const cid = String(d.editorClipId ?? "");
+        if (!cid || liveIds.has(cid)) continue;
+        updateNodeData(node.id, {
+          editorStatus: undefined,
+          editorRange: undefined,
+          editorClipId: undefined,
         });
       }
     };

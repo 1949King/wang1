@@ -67,3 +67,46 @@ export class AppErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+/**
+ * 局部错误边界：包住单个面板 / 属性面板等子树。
+ *
+ * 为什么要有：顶层 AppErrorBoundary 一崩就是**整块画布**白屏（降级粒度太粗）。
+ * 用本组件把「属性面板」「浮动面板」等子树各自包一层，单点渲染异常只把
+ * **这一棵子树**降级成占位提示，画布其余部分照常可用；顶层边界退居最后兜底。
+ * 样式用内联，避免改动冻结的 styles.css。
+ */
+export class SectionErrorBoundary extends Component<Props & { label?: string }, State> {
+  state: State = { error: null, componentStack: null };
+
+  static getDerivedStateFromError(error: Error): State {
+    return { error, componentStack: null };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn(`[canvas] section render crash (${this.props.label || "unknown"})`, error, info.componentStack);
+    this.setState({ componentStack: info.componentStack || null });
+  }
+
+  private handleRetry = () => {
+    this.setState({ error: null, componentStack: null });
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 12, fontSize: 12, color: "#f87171", lineHeight: 1.6 }}>
+          ⚠️「{this.props.label || "该区域"}」渲染出错，已就地隔离，画布其余部分不受影响。
+          <button
+            type="button"
+            onClick={this.handleRetry}
+            style={{ marginLeft: 8, fontSize: 12, cursor: "pointer" }}
+          >
+            重试
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}

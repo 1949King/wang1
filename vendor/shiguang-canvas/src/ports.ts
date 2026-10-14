@@ -137,6 +137,7 @@ export const NODE_PORTS: Record<NodeData["kind"], NodePorts> = {
   panorama: { accepts: { text: 1 }, produces: { image: 1 } },
   generator: { accepts: { text: 3, image: 2, video: 1, audio: 1 }, produces: { text: 1, image: 1, video: 1, audio: 1 } },
   source: { accepts: {}, produces: { image: 1, video: 1, audio: 1 } },
+  character: { accepts: {}, produces: { image: 1 } },
   group: { accepts: { any: UNBOUNDED }, produces: { any: 1 } },
 };
 

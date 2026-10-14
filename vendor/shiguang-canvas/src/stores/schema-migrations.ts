@@ -13,6 +13,10 @@
 /** 当前 schema 版本号 — 任何 writeProjectBundle 都会写这个值 */
 export const CURRENT_SCHEMA_VERSION = 3 as const;
 
+/** V1 → V2：最老版本可能缺失的字段 */
+type _V1Edge = { source: string; target: string; data?: unknown };
+type _V2Edge = { source: string; target: string; data?: { type?: string; [k: string]: unknown } };
+
 /** 简化的连线类型，用于 V2→V3 迁移 */
 export type MigrateEdge = {
   id?: string;
@@ -66,10 +70,12 @@ function _getKind(nodes: MigrateNode[], id: string | undefined): string | undefi
 }
 
 /**
- * 根据两端节点 kind 推断连线 data.type（prompt/image/video/audio/data）
+//更新连接类型推断注释，添加音乐节点类型说明
+/**
+ * 根据两端节点 kind 推断连线 data.type（prompt/image/video/audio/music/data）
  * — 完全对齐 store.ts 里的 inferEdgeType 逻辑
  */
-function _inferEdgeType(srcKind: string | undefined, tgtKind: string | undefined): "prompt" | "image" | "video" | "audio" | "data" {
+function _inferEdgeType(srcKind: string | undefined, tgtKind: string | undefined): "prompt" | "image" | "video" | "audio" | "music" | "data" {
   const setKind = (s: string | undefined) => {
     if (!s) return "";
     return s;
@@ -78,10 +84,12 @@ function _inferEdgeType(srcKind: string | undefined, tgtKind: string | undefined
   const tk = setKind(tgtKind);
   const promptKinds = ["script", "prompt"];
   const imageKinds = ["shot", "image"];
+  const musicKinds = ["music"];
   const videoKinds = ["video"];
   const audioKinds = ["audio"];
   if (promptKinds.includes(sk) && (tk === "shot" || tk === "image" || tk === "generator")) return "prompt";
   if (imageKinds.includes(sk) && (tk === "shot" || tk === "image" || tk === "generator")) return "image";
+  if (musicKinds.includes(sk) && (tk === "music" || tk === "generator")) return "music";
   if (videoKinds.includes(sk) && (tk === "shot" || tk === "generator")) return "video";
   if (audioKinds.includes(sk) && tk === "generator") return "audio";
   return "data";

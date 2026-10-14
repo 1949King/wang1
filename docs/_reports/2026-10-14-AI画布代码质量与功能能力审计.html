@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 画布代码质量 · 功能能力 · 未来路线审计 · 2026-10-14</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#172033; --sub:#5a6478; --line:#e4e8ee;
+    --blue:#2f7bff; --violet:#6366f1; --green:#0f9d58; --orange:#f97316; --red:#e5484d;
+    --code:#f2f4f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    line-height:1.7;font-size:15px;}
+  .wrap{max-width:1120px;margin:0 auto;padding:40px 28px 80px;}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.5px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+  h3{font-size:16.5px;margin:26px 0 10px;color:var(--ink)}
+  h4{font-size:14.5px;margin:0 0 8px;color:var(--blue)}
+  .meta{color:var(--sub);font-size:13.5px;margin-bottom:22px}
+  .lede{background:linear-gradient(135deg,#eef3ff,#f7f4ff);border:1px solid #dde4f5;
+    border-radius:12px;padding:18px 20px;margin:18px 0 26px}
+  .lede b{color:var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--card);
+    border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(23,32,51,.06);font-size:14px}
+  th{background:#eef1f6;text-align:left;padding:10px 12px;font-weight:600;color:#28324a}
+  td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top}
+  tr:hover td{background:#fafbfd}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.8px;
+    font-family:"SF Mono",Consolas,monospace;color:#334}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:12px;font-weight:600}
+  .t-blue{background:#e8f0ff;color:#1f5fd6}
+  .t-green{background:#e6f7ee;color:#0b7a45}
+  .t-orange{background:#fff1e5;color:#c2570c}
+  .t-red{background:#fdecec;color:#c0343a}
+  .t-violet{background:#eeecfe;color:#4b4bc4}
+  .t-gray{background:#eceff3;color:#5a6478}
+  ul{margin:8px 0 8px 2px;padding-left:20px}
+  li{margin:3px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    box-shadow:0 1px 2px rgba(23,32,51,.05)}
+  .card p{margin:6px 0 0;font-size:13.6px;color:#3d475c}
+  .k{color:var(--sub);font-size:12.5px}
+  .note{background:#fffbe9;border-left:4px solid #f5c518;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.8px}
+  .danger{background:#fdf0f0;border-left:4px solid var(--red);padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.8px}
+  .ok{background:#eaf7f0;border-left:4px solid var(--green);padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.8px}
+  pre{background:#1b2333;color:#dfe6f2;padding:14px 16px;border-radius:10px;overflow-x:auto;
+    font-family:"SF Mono",Consolas,monospace;font-size:12.6px;line-height:1.65;margin:12px 0}
+  pre .c{color:#7d8aa3}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 20px;margin:18px 0}
+  .toc ol{margin:6px 0;padding-left:22px}
+  .toc a{color:var(--blue);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .bar{height:7px;background:#e8ecf2;border-radius:4px;overflow:hidden;margin-top:5px}
+  .bar i{display:block;height:100%;background:var(--blue);border-radius:4px}
+  .bar i.r{background:var(--red)} .bar i.o{background:var(--orange)} .bar i.g{background:var(--green)}
+  .src{font-size:12.3px;color:var(--sub)}
+  .foot{margin-top:50px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>AI 画布：代码质量 · 功能能力 · 未来路线审计</h1>
+<div class="meta">
+  2026-10-14 ｜ 主程序 V4.43.22 · 画布 0.3.30 ｜ 范围：<code>vendor/shiguang-canvas/src/</code>（175 文件 / 54,946 行）
+  ｜ 方法：读码实测 + 门禁实跑 + 联网竞品调研
+</div>
+
+<div class="lede">
+<b>先看结论。</b>本轮三件事：① 用户报的三个缺陷<b>全部已定位根因并修完</b>（捏脸节点缺失、Agent 桌宠跨画布失效、React #185崩溃）；
+其中 <b>#185 找到的是第二类根因</b>——上一轮修的是「selector 返回新引用」，这轮发现真正的闭环在
+<code>setBondedSides</code> / <code>updateNodeData</code> <b>缺幂等守卫</b>，已断环并加纯函数回归锁；
+② 代码质量盘点：<b>10 个文件超800 行</b>、<b>14 个后端孤儿端点</b>（后端齐全、前端零调用）、tsc 存量 39 错全部集中在两个3D 文件；
+③ 竞品对照：<b>画布已是行业公认形态</b>（2026 收敛），我们的磁吸意图系统属差异化优势，
+但<b>「审美治理层」和「资产母版层」仍是真空</b>——竞品在这两处已有成品机制。
+下一刀建议：<b>P0 补资产母版层（角色/场景母版卡）</b>，它是编剧端与抽卡闭环的共同前置。
+</div>
+
+<div class="toc">
+<b>目录</b>
+<ol>
+  <li><a href="#fix">本轮三修（含 #185 根因全链）</a></li>
+  <li><a href="#quality">代码质量体检（含存量债务清单）</a></li>
+  <li><a href="#ability">功能能力矩阵（已有 / 半成品 / 缺失）</a></li>
+  <li><a href="#market">竞品版图（2026 收敛趋势 + 来源）</a></li>
+  <li><a href="#road">未来功能路线图（P0/P1/P2 + 借鉴清单）</a></li>
+</ol>
+</div>
+
+<h2 id="fix">1. 本轮三修 — 全部按代码证据定位</h2>
+
+<h3>1.1 缺陷 1：新建画布找不到捏脸卡片/节点 ✅</h3>
+<p><b>根因</b>：<code>FaceCard</code> 此前只作为 <code>CanvasShell</code> 的模态弹窗存在，<b>不在 <code>NodeRegistry</code> / <code>NodePalette</code> / <code>node-factory</code> 任何一环</b> ⇒ 新建空画布根本没有入口。不是「入口藏得深」，是「入口不存在」。</p>
+<table>
+<tr><th>层</th><th>落地</th></tr>
+<tr><td>数据契约</td><td><code>node-factory.ts</code> 新增 <code>CharacterData</code>（<code>kind:"character"</code>）+ <code>NodeData</code> 联合成员 + <code>makeNode</code> base/style（260×240）+ <code>BUILTIN_NODE_KINDS</code></td></tr>
+<tr><td>注册</td><td><code>registerBuiltinNodes.ts</code> 登记 <code>CharacterNode</code> + 元数据（🧑‍🎨）</td></tr>
+<tr><td>视图</td><td><code>mediaExtraNodes.tsx</code> 新 <code>CharacterNode</code>：角色库下拉 + 头像 + <code>🎨 捏脸</code> 按钮</td></tr>
+<tr><td>入口</td><td><code>NodePalette.tsx</code> 加「角色」项（关键词含「捏脸/脸/角色库」）· <code>CanvasContextMenu.tsx</code> 加右键项 · <code>NoviceCard.tsx</code> 加捏脸菜单项</td></tr>
+<tr><td>宿主</td><td>节点只派发 <code>sg-open-face-card</code> 事件，<code>CanvasShell</code> 承载<b>唯一</b> FaceCard host</td></tr>
+</table>
+<div class="note"><b>为什么不让节点自己渲染 FaceCard：</b>FaceCard 是 <code>position:fixed</code> 模态，而 React Flow viewport 带 <code>transform</code>。把fixed 模态塞进 viewport 内⇒ 弹窗跟着画布平移缩放、层级被节点遮挡。这条是硬约束，不是偷懒。</div>
+
+<h3>1.2 缺陷 2：桌宠 ⇄ Agent 在画布 1/画布 2 都失效 ✅</h3>
+<p><b>根因两条，都是设计缺陷不是笔误：</b></p>
+<table>
+<tr><th>#</th><th>根因</th><th>后果</th></tr>
+<tr><td>①</td><td><code>CanvasOverlays.openAgent</code> 靠 <code>document.querySelector(".libtv-agent-btn")</code> 猜按钮，而 <code>CanvasShell</code> 顶栏「🚀 生成」与「💬 Agent」<b>共用同一个 class</b></td><td>永远命中第一个「生成」⇒ 点桌宠打开了错误面板；且桌宠只会「打开」没有「回桌宠」入口</td></tr>
+<tr><td>②</td><td>Agent 开合态存<b>全局单键</b> <code>shiguang-canvas:agent-dock:open</code></td><td>某画布开过 Agent ⇒ 之后<b>每个</b>画布都默认开 → 桌宠全被隐藏，看起来「点不了」</td></tr>
+</table>
+<p><b>修法</b>：改<b>类型化事件通道</b>，彻底删掉 DOM 嗅探与 MutationObserver——</p>
+<pre><span class="c">// 桌宠只发意图，不自己改状态（真相源在 CanvasShell）</span>
+window.dispatchEvent(new CustomEvent(<span class="c">"sg-toggle-agent"</span>));
+<span class="c">// CanvasShell 统一翻转 agentPanelOpen，再回播给桌宠</span>
+window.dispatchEvent(new CustomEvent(<span class="c">"sg-agent-state"</span>, { detail:{open} }));
+<span class="c">// 桌宠挂载时主动取一次首帧态（解决"刷新后 Agent 已开着"）</span>
+window.dispatchEvent(new CustomEvent(<span class="c">"sg-agent-state-request"</span>));
+<span class="c">// 状态按画布隔离记忆</span>
+`shiguang-canvas:agent-dock:open:${canvasId || "memory"}`</pre>
+
+<h3>1.3 缺陷 3（重点）：渲染崩溃 React #185 ✅</h3>
+<div class="ok"><b>#185 = <code>Maximum update depth exceeded</code></b>（无限重渲染）。这是本轮重点对象，结论是：<b>上一轮（V4.43.21）修的只是这一类问题的一部分</b>。</div>
+
+<h4>为什么上一轮没修好</h4>
+<p>上一轮的判定是「zustand selector 每次返回新对象/新数组 ⇒ <code>useSyncExternalStore</code> 判定快照恒变」，并上了静态守卫 <code>_verify/check_canvas_selectors.py</code>。该守卫现在实测 <b>0 违规</b>——说明这一类确实清干净了，但<b>用户仍崩</b>⇒ 存在第二类根因，静态守卫覆盖不到。</p>
+
+<h4>本轮定位的完整闭环（逐行核实）</h4>
+<pre>CanvasShell.tsx:585  bondedSides = useMemo(() => bondedSidesMap(nodes), [magneticActive, nodes])
+CanvasShell.tsx:589  useEffect(() => setBondedSides(bondedSides), [bondedSides])
+      │
+      ↓ magnetic/bonds.ts:216  bondedSidesMap() 每轮 const map = {} 新建对象
+      ↓   ⇒ bondedSides 引用必变 ⇒ effect 必跑（这是设计意图，不算 bug）
+      ↓
+store.ts:662  setBondedSides: (map) => set({ bondedSides: map })     ← ❶ 无幂等守卫
+      │        裸 set，无条件通知全 store，哪怕内容一模一样
+      ↓ 订阅 bondedSides 的 NoviceCard(:175) 全部重渲染
+      ↓ xyflow 重渲染后抛 dimensions change
+store.ts:665  onNodesChange: 无条件 applyNodeChanges(...)            ← ❷ 放大器
+      │        即使 changes 为空也产出全新 nodes 数组
+      ↓
+      └──── nodes 变 ⇒ 回到 useMemo第一步 ⇒ <b>成环</b> ⇒ #185</pre>
+
+<h4>修法：幂等守卫范式（与项目既有守卫同构）</h4>
+<table>
+<tr><th>位置</th><th>守卫内容</th><th>纯函数</th></tr>
+<tr><td><code>store.ts</code> <code>setBondedSides</code></td><td>key 数 + 每项 <code>join(',')</code> 相同 ⇒ 整体不 <code>set</code>，<code>bondedSides</code> 引用不变</td><td><code>bondedSidesEqual</code></td></tr>
+<tr><td><code>store.ts</code> <code>updateNodeData</code></td><td>patch 逐键 <code>Object.is</code> 相同 ⇒ 整个 <code>set</code> 不执行（<code>nodes</code> 引用与 <code>dirtyVersion</code> 均不变）</td><td><code>nodeDataPatchIsNoop</code></td></tr>
+<tr><td><code>windowManager.ts</code> <code>syncOpen</code></td><td>已是最小化态 ⇒ 返回原 <code>state</code> 不 <code>set</code>（当前被 <code>open</code> 守卫挡住、非当次根因，防将来成环）</td><td>内联</td></tr>
+<tr><td><code>CanvasOverlays.tsx</code> 预览 <code>tick()</code></td><td><code>step &gt;= order.length</code> 时只收尾，不再 dispatch <code>sg-preview-focus</code>（修相机抖动）</td><td>内联</td></tr>
+</table>
+
+<div class="note"><b>为什么 <code>updateNodeData</code> 的守卫安全：</b>已逐个核查全部调用方（<code>upstreamRefs.ts</code> / <code>useEditorCanvasLink</code> / <code>AgentPanel</code> / <code>GeneratePanel</code> / <code>NoviceCard</code> / <code>CanvasShell.pickNodeByType</code> 等），<b>无一依赖「空转也+1 dirtyVersion」</b>。唯一语义变化是「重复写入同值不再触发自动保存」——这正是期望行为（无实质变更不该落盘）。</div>
+
+<div class="note"><b><code>nodeDataPatchIsNoop</code> 的两条语义红线</b>（必须与被它替代的 <code>{...n.data, ...patch}</code> 逐字等价，否则就是引入行为差异）：<br>
+① 判等用 <code>Object.is</code> 而非 <code>===</code>（NaN 会被 <code>===</code> 误判成「有变化」）；<br>
+② <b>「值为 undefined」≠「键缺失」</b>：<code>{...data, k: undefined}</code> 会<b>显式新增</b>自有键 <code>k</code>，结果与「原本没有 k」不是同一个对象。所以用 <code>hasOwnProperty</code> 而非 <code>in</code>（展开只复制自有可枚举键，用 <code>in</code> 会把「实际会新增键」误判成空转 = 丢更新）。<br>
+整体取保守侧：<b>误判「有变化」只是多写一次（无害），误判「空转」会丢更新（是 bug）</b>。</div>
+
+<h4>已排除项（存档，防将来重复排查）</h4>
+<table>
+<tr><th>怀疑对象</th><th>排除理由（代码级证据）</th></tr>
+<tr><td>zustand selector 新引用</td><td><code>check_canvas_selectors.py</code> 实跑 0 违规（覆盖 <code>.filter/.map/.slice/展开/字面量</code> 五类形态）</td></tr>
+<tr><td><code>upstreamRefs.ts</code> <code>useUpstreamRefsSync</code></td><td><code>planUpstreamRefs</code> <b>确实幂等</b>（<code>upstreamRefs.ts:97</code> 收敛短路）且<b>默认关闭</b>（<code>isUpstreamRefsEnabled()</code> 要求 localStorage =="1"）</td></tr>
+<tr><td><code>useWindowPanel</code> <code>zIndexOf</code></td><td>返回 <code>number</code>（primitive），无新引用问题</td></tr>
+<tr><td><code>usePetStatus</code> / <code>useMagneticDrag</code></td><td>各带状态引用比较 / <code>changed</code> 守卫（代码里甚至专门写了注释解释）</td></tr>
+<tr><td><code>Stage3D</code> 等 seq消费范式</td><td>依赖 <code>[seq]</code>（自增整数 primitive），且「先消费再应用」</td></tr>
+<tr><td><code>App.tsx</code> 5 处 effect</td><td><code>setPluginRuntimeAI</code> 只赋值模块级单例不 setState；轮询 effect 有 cleanup；<code>subscribe</code> 回调只写 localStorage</td></tr>
+</table>
+<p class="k">全库 <b>65 处 <code>useEffect</code> / 2 处 <code>.subscribe</code></b> 已逐个过筛，不是抽样。</p>
+
+<h4>配套加固：局部错误边界</h4>
+<p><code>AppErrorBoundary.tsx</code> 拆出 <code>SectionErrorBoundary</code>，浮动面板（<code>CanvasOverlays</code>）与属性面板（<code>CanvasShell</code> inspector）各自隔离。<span class="tag t-orange">降级隔离</span> <b>不等于根因修复</b>——它的价值是：万一将来再出现未预料的渲染异常，只降级那一个面板，而不是整块画布白屏。</p>
+
+<h3>1.4 验证（全部我自己实跑，非转述）</h3>
+<table>
+<tr><th>门禁</th><th>结果</th></tr>
+<tr><td><code>vitest run</code></td><td>✅ <b>30 文件 / 463 测试</b>全绿（新增 <code>storeIdempotent.test.ts</code>）</td></tr>
+<tr><td><code>tsc --noEmit</code></td><td>✅ <b>39</b> = 基线 39，<b>零新增</b>（<code>riggedHumanoid.ts</code> 21 / <code>Stage3D.tsx</code> 16 / <code>storyNodes.tsx</code> 1 / <code>plugins/infinite-compat.tsx</code> 1）</td></tr>
+<tr><td><code>vite build</code></td><td>✅ 通过（须带 <code>--emptyOutDir=false</code>，见 §2.5）</td></tr>
+<tr><td><code>run_all_checks.py</code></td><td>✅ <b>78 项全部通过</b></td></tr>
+<tr><td><code>frozen_zone_guard</code></td><td>✅ <b>94 locks intact</b>（zone8 登记 34→35 文件，解冻记录同步 4 处：<code>frozen_zones.json</code> reason + <code>现行技术文档.md</code> §2f.5 + <code>.cursor/rules/frozen-zones.mdc</code> + 重锁）</td></tr>
+<tr><td><code>check_canvas_dual_repo</code></td><td>✅ 一致 <b>163</b>（原158）/ 分叉 <b>2</b>（基线内）/ 缺失 <b>10</b>（基线内）——本轮人工同步了 7 个文件，<b>没偷懒用<code>--update</code> 洗基线</b></td></tr>
+</table>
+
+<h2 id="quality">2. 代码质量体检</h2>
+
+<h3>2.1 规模总览</h3>
+<div class="grid">
+  <div class="card"><h4>175 文件 / 54,946 行</h4><p class="k">画布前端全部 TS/TSX</p></div>
+  <div class="card"><h4>10 个文件超 800 行</h4><p class="k">其中 5 个超 1900 行</p></div>
+  <div class="card"><h4>tsc 存量 39 错</h4><p class="k">全部集中在 2 个 3D 文件，占 95%</p></div>
+  <div class="card"><h4>14 个孤儿端点</h4><p class="k">后端齐全、前端零调用</p></div>
+</div>
+
+<h3>2.2 大文件排行（体积棘轮余量已见底）</h3>
+<table>
+<tr><th>行数</th><th>文件</th><th>性质</th><th>处置</th></tr>
+<tr><td>4,623</td><td><code>Stage3D.tsx</code></td><td>3D 导演台主组件（frozen zone7）</td><td><span class="tag t-red">禁改</span>基线 4653，余量 30 行</td></tr>
+<tr><td>3,251</td><td><code>CanvasShell.tsx</code></td><td>画布壳（frozen zone8）</td><td><span class="tag t-red">禁改</span>基线 3229，<b>已超 22 行</b>（本轮解冻后重锁）</td></tr>
+<tr><td>3,165</td><td><code>riggedHumanoid.ts</code></td><td>人偶骨骼绑定</td><td><span class="tag t-red">禁改</span>基线 3189，余量 24 行</td></tr>
+<tr><td>2,526</td><td><code>store.ts</code></td><td>zustand 主 store（frozen zone8）</td><td><span class="tag t-red">禁改</span>基线 2513，<b>已超 13 行</b>（本轮+守卫）</td></tr>
+<tr><td>1,999</td><td><code>App.tsx</code></td><td>应用根</td><td><span class="tag t-orange">新逻辑另开文件</span></td></tr>
+<tr><td>1,868</td><td><code>bridge.ts</code></td><td>宿主桥接</td><td><span class="tag t-red">禁改</span>基线 2046，余量 178 行</td></tr>
+<tr><td>1,614</td><td><code>AgentPanel.tsx</code></td><td>Agent 对话面板</td><td><span class="tag t-orange">接近红线</span></td></tr>
+<tr><td>1,484</td><td><code>novice/NoviceInspector.tsx</code></td><td>小白模式属性面板</td><td><span class="tag t-orange">偏大</span></td></tr>
+</table>
+<div class="note"><b>结论：体积闸门已实质顶到天花板。</b><code>CanvasShell.tsx</code> 与 <code>store.ts</code> 在本轮解冻改动后<b>已超原基线</b>，靠重锁把基线抬到新值。这是纪律的正常结果，但意味着<b>下一个功能刀必须另开文件</b>，不能再往这两个文件里塞逻辑。本轮 <code>storeIdempotent.ts</code> 就是这个模式的样板。</div>
+
+<h3>2.3 tsc 存量错误分布（39 个，零新增）</h3>
+<table>
+<tr><th>文件</th><th>错误数</th><th>性质</th><th>处置建议</th></tr>
+<tr><td><code>riggedHumanoid.ts</code></td><td>21</td><td>three.js 类型（<code>Object3D | null</code>、<code>TransformControls</code> 不继承 <code>Object3D</code>）</td><td>three.js 版本升级带来的类型错，<b>修它没有产品价值</b>，建议登记为已知债务不再碰</td></tr>
+<tr><td><code>Stage3D.tsx</code></td><td>16</td><td>同上 + <code>Uint32Array&lt;ArrayBuffer&gt;</code> vs <code>number[]</code></td><td>同上</td></tr>
+<tr><td><code>storyNodes.tsx</code></td><td>1</td><td><code>string</code> vs <code>SetStateAction&lt;string[]&gt;</code></td><td><b>建议顺手修</b>，1 行的事</td></tr>
+<tr><td><code>plugins/infinite-compat.tsx</code></td><td>1</td><td><code>PluginRuntimeAI</code> 接口不匹配</td><td><b>建议顺手修</b></td></tr>
+</table>
+<p class="k">已核查：这39 个错误<b>与本轮改动无关</b>，是three.js 升级后的存量债。棘轮机制（不许新增）工作正常。</p>
+
+<h3>2.4 孤儿端点：14 个后端齐全、前端零调用（性价比最高的缺口）</h3>
+<div class="danger"><b>这是全项目最便宜的能力增量。</b>后端已经把活干完了，前端一个调用者都没有 —— 接线的边际成本远低于造新功能。</div>
+<table>
+<tr><th>#</th><th>端点</th><th>推测能力</th><th>接线成本</th></tr>
+<tr><td>1</td><td><code>/host/batch-to-timeline</code></td><td>批量入时间线</td><td><span class="tag t-green">低</span>抽卡闭环直接受益</td></tr>
+<tr><td>2</td><td><code>/host/compliance-check</code></td><td>合规审查（漫剧内容合规是刚需）</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>3</td><td><code>/host/segment-retaka</code>（<code>segment-retake</code>）</td><td>片段重拍</td><td><span class="tag t-blue">中</span>记忆里说V4.43.19 已接线，可能路径写法不同需核</td></tr>
+<tr><td>4</td><td><code>/host/reference-breakdown</code></td><td>参考素材拆解</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>5</td><td><code>/host/video-depth</code></td><td>视频深度图</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>6</td><td><code>/host/diarize-speakers</code></td><td>说话人分离（多人配音刚需）</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>7</td><td><code>/host/redub-preflight</code> / <code>/host/redub-execute</code></td><td>重配音预检 + 执行</td><td><span class="tag t-blue">中</span>配音配乐层缺口的一部分</td></tr>
+<tr><td>8</td><td><code>/host/enhance-intents</code></td><td>意图增强</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>9</td><td><code>/host/providers</code></td><td>供应商列表</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>10</td><td><code>/host/local-image-generate</code> / <code>/host/video-generate</code> / <code>/host/generate-video</code></td><td>本地生图/生视频</td><td><span class="tag t-red">需核</span>三个疑似重复，可能与已接线的 <code>/host/local-video-generate</code> 语义重叠</td></tr>
+<tr><td>11</td><td><code>/host/tauri-closing</code></td><td>关闭通知</td><td><span class="tag t-gray">可能已废弃</span></td></tr>
+</table>
+<div class="note"><b>方法论固化：</b>查缺口先<b>全库 grep 端点名做差集</b>（后端集合 − 前端引用集合），不要凭印象判断「有没有做」。本报告的孤儿清单就是这么算出来的，脚本逻辑见 §2.6。</div>
+
+<h3>2.5 一个环境坑（非代码问题，但会误导判断）</h3>
+<div class="danger"><code>vite build</code> 在本机会被 WorkBuddy 安全删除 shim 拦下：<code>SAFE_DELETE_BULK_CONFIRM_REQUIRED count:52 threshold:50 scope:turn targets:dist/prompts</code>。<br>
+<b>这不是构建失败，是 shim 拦住了「清空 dist」这一步</b>。加 <code>--emptyOutDir=false</code> 即可绕过，构建本身 4.5 秒通过。<br>
+<b>不要因为这个报错去改代码。</b></div>
+
+<h3>2.6 复用价值：两个可复用的排查脚本</h3>
+<ul>
+<li><b>孤儿端点差集</b>：正则抽 <code>canvas_routes_*.py</code> 的 <code>"/host/xxx"</code> 作集合 A，遍历 <code>shiguang-canvas/src</code> 抽 <code>/host/xxx</code> 作集合 B，输出 <code>A−B</code>。本轮即用此法定位 14 个孤儿。</li>
+<li><b>自激闭环筛法</b>：<code>grep -n "useEffect("</code> 全量列出→ 对每个提取「依赖数组」+「effect 体是否写 store」→ 对写 store 的判<b>写回值是否幂等</b>。全库 65 处 <code>useEffect</code> + 2 处 <code>subscribe</code> 用这个方法在20 分钟内筛出闭环。</li>
+</ul>
+
+<h2 id="ability">3. 功能能力矩阵</h2>
+
+<h3>3.1 已具备（有代码证据）</h3>
+<table>
+<tr><th>能力</th><th>实现位置</th><th>成熟度</th></tr>
+<tr><td>磁吸意图系统（四向贴合 / 咬合 / 让位 / 三段阻力）</td><td><code>magnetic/*</code>（frozen zone8，13 文件）</td><td><span class="tag t-green">高</span>有专项回归测试（reflow 15 例等）</td></tr>
+<tr><td>L1/L2/L3 参数分级 + 导演卡自动拆解</td><td><code>NoviceInspector</code> / <code>breakdownDirectorCard</code></td><td><span class="tag t-green">高</span></td></tr>
+<tr><td>3D 导演台（GLB 骨骼 / 材质 / 灯位 / 产物入轨）</td><td><code>Stage3D.tsx</code> + <code>stage3d*.ts</code>（zone7，14 文件）</td><td><span class="tag t-blue">中高</span>灯位双套体系仍待打通</td></tr>
+<tr><td>捏脸卡（参数化 / 预设 / 导入导出 / 快照）</td><td><code>FaceCard.tsx</code> + <code>faceParams.ts</code> + <code>facePresets.ts</code></td><td><span class="tag t-green">高</span>本轮接入 character 节点</td></tr>
+<tr><td>抽卡闭环（seed 透传 / 账本 / 代理评分器选优）</td><td><code>draw_book</code> + <code>gen_critic</code></td><td><span class="tag t-blue">中高</span>闭环产物已回写节点并展示</td></tr>
+<tr><td>Agent 能力目录 + 派生化 + 主动建议</td><td><code>agent_capability_catalog.py</code> / <code>agent_brain.py</code></td><td><span class="tag t-blue">中高</span>门禁双向守卫已锁</td></tr>
+<tr><td>LibTV 对标 7 项接线</td><td>超分/抠像/深度/拉片/片段重拍/文本生剧本/导演落时间线</td><td><span class="tag t-blue">中高</span>V4.43.19 完成</td></tr>
+<tr><td>画布稳定性治理（selector 守卫 + 局部错误边界 + 幂等守卫）</td><td><code>check_canvas_selectors.py</code> / <code>AppErrorBoundary.tsx</code> / <code>storeIdempotent.ts</code></td><td><span class="tag t-green">高</span>本轮闭环</td></tr>
+</table>
+
+<h3>3.2 半成品 / 有壳无核</h3>
+<table>
+<tr><th>项</th><th>现状（读码实测）</th><th>缺什么</th></tr>
+<tr><td>Yue 全曲生成</td><td>音乐节点已有 <code>engine/abc/cot/yueMode/seed</code> 字段</td><td><b>本机跑不动</b> ⇒ 只能远程 <code>SHIGUANG_YUE_ENDPOINT</code>；执行端不可用必须诚实失败（已守纪律）</td></tr>
+<tr><td>3D 灯光双套体系</td><td><code>LIGHT_PRESETS</code>（4 档，Stage3D 内）<b>vs</b> <code>lightingPresets.ts</code>（24 位，仅面板消费）</td><td>视觉映射未打通——与 #185 同类的「同一语义两条链路」反模式</td></tr>
+<tr><td>本地视频生成</td><td>已接 <code>/host/local-video-generate</code>，须 <code>--no-sandbox</code> 白屏坑已记</td><td>另有 3 个疑似重复端点未核（见 §2.4）</td></tr>
+<tr><td>质检 / 审美治理</td><td><code>five_dimension_scorer.py</code> 存在，但<b>承认有 <code>estimated_dims</code> 机制</b></td><td>量化了但不是真正审美判断；<b>无跨链路管辖层</b></td></tr>
+</table>
+
+<h3>3.3 明确缺失（对照产品链定位）</h3>
+<table>
+<tr><th>缺口</th><th>现状</th><th>影响</th></tr>
+<tr><td><b>编剧生产端</b></td><td>剧本模块<b>全是消费类能力</b>（读剧本、拉片），无「从零写剧本」生产端</td><td>管线最上游缺入口，导演层一直在等下锅</td></tr>
+<tr><td><b>资产母版层</b></td><td>角色库 / 场景 / 道具 / 风格<b>没有统一母版卡结构</b>；FaceCard 是单点能力不是母版</td><td>一致性只能靠单点提示词，没有跨镜锚点</td></tr>
+<tr><td><b>审美治理层</b></td><td>配音配乐 / 合成 / QC <b>零件散落、各环节无管辖</b></td><td>成片没有统一风格裁决者</td></tr>
+<tr><td><b>Agent 在画布内的写操作</b></td><td>Agent 面板能对话，但<b>不能直接改画布</b>（改参数 / 重排节点 / 批量决策）</td><td>与竞品差距最大的一项（见 §4.3）</td></tr>
+</table>
+
+<h2 id="market">4. 竞品版图（联网调研，附来源）</h2>
+
+<h3>4.1 结论先行：画布已是行业公认形态，且2026 在收敛</h3>
+<div class="ok"><b>「节点 / 无限画布」不是我们的差异化，是 2026 的行业标准。</b>多个独立来源指出画布正从「界面功能」升级为「产品品类」——ComfyUI 事实上定义了节点画布，Krea / Flora / Wireflow / Figma Weave / Freepik Spaces / Runway / Invoke 全部跟进。<br>
+来源：<span class="src">flora.ai「Node-Based AI Tools: How AI Node Generation Works (2026)」；basedlabs.ai「Node Based Image Generation: How Canvas Pipelines Replaced the Prompt Box」；starverse-ai「AI 内容生产进入画布时代」</span></div>
+
+<h4>形态谱系</h4>
+<table>
+<tr><th>产品</th><th>范式</th><th>强项</th><th>弱项（来源原文要点）</th></tr>
+<tr><td><b>ComfyUI</b></td><td>节点图 · 自托管</td><td>节点库最深，自定义节点生态覆盖几乎所有已发表技术</td><td>模型/依赖/GPU 全要自己管，学习曲线真实存在</td></tr>
+<tr><td><b>Krea</b></td><td>实时画布 · 云</td><td>拖动即渲染，改变了探索的「手感」</td><td>节点图比 ComfyUI 浅，不适合长确定性链</td></tr>
+<tr><td><b>Flora</b></td><td>无限画布 · 协作</td><td>图像/视频/文本节点<b>平权</b>；50+ 模型；版本分支；实时协作；已铺开3000 节点画布仍流畅（WebGL 重建）</td><td>单节点扩散参数控制较粗；API 层较新、文档仍在演进</td></tr>
+<tr><td><b>Runway</b></td><td>单镜精修 + 局部编辑</td><td>Aleph 直接改已生成片段；Director Mode 多镜叙事</td><td>原生片段 16 秒，Extend 会降一致性；无原生音频</td></tr>
+<tr><td><b>InvokeAI</b></td><td>绘画/重绘 + 节点后端</td><td>把真正的画布绘制面接到节点后端，插画师不必全程想图</td><td>模型覆盖比开放生态窄</td></tr>
+</table>
+<p class="src">来源：basedlabs.ai（上述三家的对照表）、flora.ai 官方博客、higgsfield.ai/blog、blocklords.com/en/blog/canvas-ai-agent</p>
+
+<div class="note"><b>对我们的直接含义：</b>「无限画布 + 节点」本身不构成壁垒。我们的<b>磁吸意图系统</b>（Windows 磁贴式四向贴合 + 导演卡自动拆解 + L1/L2/L3 参数分级 + 跟手浮起手感）<b>是真正的差异化</b>——竞品的画布普遍还在解决「图会不会太乱」，我们已经在解决「卡片怎么摆、多镜头意图怎么拆、参数怎么分级」。<b>这条要继续加深，不要转去做通用节点图。</b></div>
+
+<h3>4.2 一致性治理：竞品已经跑完，我们还在单点</h3>
+<table>
+<tr><th>手段</th><th>竞品做法（实测口径）</th><th>来源</th></tr>
+<tr><td>参考图锚点</td><td>Runway Gen-4.5 单张人像作身份锚点（无需训练）；Seedance 2.0 最多 <b>12</b> 个参考输入；Nano Banana 2 最多 <b>14</b> 张</td><td>higgsfield.ai / creatortribune.com</td></tr>
+<tr><td>训练身份</td><td>Higgsfield <b>Soul ID</b>：20+ 张多角度照片训练，几分钟；ComfyUI LoRA：15–30 张</td><td>higgsfield.ai / bottlerocketcontent.com</td></tr>
+<tr><td>固定身份块</td><td>每条 prompt 顶部贴<b>同一个</b>身份描述<b>逐字不改</b>（同义词分词结果不同）</td><td>pixmind.io 中文指南</td></tr>
+<tr><td>批量一致性</td><td>专业做法是<b>4 阶段</b>：锚定参考图集 → 按镜头类型选 2–3 个工具 → <b>每批 8 条</b>带 style lock → 末尾统一 harmonization（DaVinci color match / CapCut 预设同步）</td><td>creatortribune.com</td></tr>
+<tr><td>已知天花板</td><td>多人同框交互的身份融合<b>全行业未解</b>；30 秒以上一致性普遍衰减</td><td>higgsfield.ai/blog（官方自陈）</td></tr>
+</table>
+<div class="note"><b>可立刻抄的一条（成本低、收益大）：</b>「<b>每批 8 条 + 每批之间查一致性悬崖 + 末尾统一调色</b>」。我们的抽卡闭环现在有 <code>draw_book</code> 账本和 <code>gen_critic</code> 代理评分器，但<b>没有「批次」概念</b>。加一层批次 + 批间一致性检查，比继续打磨单张评分器更接近生产现场。另可抄：<b>图像嵌入相似度自动过滤角色漂移</b>（余弦相似度低于阈值标记人工复审，行业数据称可减少 60%+ 人工复审量）——来源 tahou.com 引述实操。</div>
+
+<h3>4.3 Agent 化：竞品已经「真 Agent 化」，这是最大差距</h3>
+<div class="danger"><b>这是审计里最该记的一条。</b>竞品的 Agent 已经不是聊天侧助手，而是<b>能在画布上改图、改序、批量决策的执行体</b>。</div>
+<table>
+<tr><th>产品</th><th>Agent 在画布上做什么</th><th>来源</th></tr>
+<tr><td><b>Factory Agent</b><br><span class="k">ii.inc</span></td><td>① <b>画布是 Agent 唯一接口</b>（不是叠在上面的可视化层）；② 工具调用即图变更（<code>factory_create_nodes</code> / <code>factory_create_edges</code> 批量落点/连线/参数）；③ <b>确定性布局引擎</b>按阶段列排布（上传素材→种子→分镜→参考→视频段→音频→合成→审→成片），所以 Agent 建的项目「从左往右读就是一条生产线」；④ <b>执行范围可控</b>：单节点 / 到目标节点的依赖流 / 整个项目；⑤ 节点状态实时上画布（draft/executing/success/failed），<b>失败节点可就地诊断修复</b>；⑥ <b>幂等签名</b>防「批准的动作被跑两次、扣两次钱」；⑦ Supervisor 模式下确认门禁</td><td>ii.inc/blog/post/factory-agent</td></tr>
+<tr><td><b>Scenario Node Agent</b></td><td>一句话建整张工作流；<b>用自然语言编辑既有工作流</b>（换模型 / 插 upscale / 重连一段 / 插 If-Else 分支）；<b>参考图按角色自动接线</b>（角色参考 / 风格参考 / 条件图）；读你的工作区习惯；<b>跑之前先出一份纯文本报告</b>说明每个节点用什么模型、什么分辨率、数据怎么流</td><td>scenario.com/features/node-agent</td></tr>
+<tr><td><b>BLOCKLORE</b></td><td>制片人角色：接brief → 拆镜 → 每镜一个节点（含提示词/关键帧/视频）→ 用自然语言要求改（加过渡镜、让某光线效果贯穿全场）→ <b>翻译成新的生成节点并入流水线</b> → <b>清理自己的垃圾</b>（审计整张画布、删掉不在活跃流水线里的节点、重连剩余元素，并汇报删了什么、连了什么）</td><td>blocklords.com/en/blog/canvas-ai-agent</td></tr>
+<tr><td><b>OiiOii 2.0</b><span class="k">字节系</span></td><td><b>7 位 AI Agent 员工</b>（角色总监/分镜总监/音乐总监…）同画布协作；<b>无限并发</b>——多个 Agent 同时独立工作、上下文完全独立</td><td>roll.sohu.com（产品访谈）</td></tr>
+</table>
+<div class="note"><b>可直接抄的三条（按成本排序）：</b><br>
+① <b>确定性布局引擎</b>（Factory）——我们的导演卡拆解已经产出「按阶段列」的天然结构，但落位靠算法随手放。给它一个「阶段列」概念，Agent 建的项目就能读。<br>
+② <b>执行范围三档</b>（单节点 / 依赖流 / 全项目）——我们的 <code>canvasRun.ts</code> 已有「运行到此处」，补上「单节点」和「全项目」就是完整三档。<br>
+③ <b>幂等签名</b>（Factory）——<b>这条对我们是硬需求</b>：我们已有 <code>stage3dApplySeq</code> / <code>stage3dCastSeq</code> 这类 seq 消费范式，本质就是幂等签名的雏形，但<b>生成类动作（生图/生视频/3D 渲染）还没有这层保护</b>，重复批准可能重复扣额度。</div>
+
+<h3>4.4 资产母版层：竞品最扎实的两块</h3>
+<table>
+<tr><th>产品</th><th>母版机制</th><th>关键字段</th></tr>
+<tr><td><b>LTX Studio</b></td><td><b>Elements</b>：角色/物体/地点抽成可复用元素，任何后续镜头引用它们时<b>不再重新生成</b>；自动场景切分</td><td>element 类型 / 引用关系</td></tr>
+<tr><td><b>Invideo agent</b></td><td><b>Persistent Context Engine</b>：持有项目的<b>cast / locations / look / rules</b>，<b>每次新生成前先与既定上下文比对</b>——脸错、细节破、光照不match 都<b>触发重生成</b>，直到该镜成立</td><td>cast / locations / look / rules 四张表</td></tr>
+</table>
+<p class="src">来源：mycreativefx.com 对比长文（引 LTX Studio、Invideo、Katalist 官方说明）</p>
+<div class="note"><b>Invideo 这套就是我们「资产母版层」的标准答案，而且结构简单得惊人：四张表（角色表 / 地点表 / 视觉调性表 / 规则表）。</b>我们的角色库已经有 <code>face_params</code> / <code>avatar_url</code>，缺的只是把<b>场景、风格、规则</b>补齐成同构的四张表，并加一道「生成前比对、不match 就重生成」的闸门。<b>这是我认为下一刀最该做的。</b></div>
+
+<h3>4.5 审美治理层：竞品多数也没做，但有替代路径</h3>
+<p><b>诚实结论：没有找到把「审美统一 / 成片 QC」做成独立横跨层的成熟产品。</b>主流做法仍是散在各环节（invideo 的 storyboard 连续性检查、creatortribune 的末尾 harmonization、tahou 的光流一致性检测）。</p>
+<table>
+<tr><th>可抄的替代路径</th><th>做法</th><th>成本</th></tr>
+<tr><td>分镜阶段连续性通读</td><td>invideo 的做法：<b>角色漂移时改源角色卡而不是重抽该panel</b>，改完存回上下文，后续 panel 自动继承修复</td><td><span class="tag t-green">低</span>我们的角色卡是结构化数据，比它们更好做</td></tr>
+<tr><td>光流一致性检测</td><td>首尾帧光流场剧烈不连续跳变 = 模型中途放弃；OpenCV 逐帧光流方差设阈值可滤掉大部分崩坏片段</td><td><span class="tag t-blue">中</span>需引入 OpenCV</td></tr>
+<tr><td>三层管道论</td><td>domer.io 的框架：<b>生成 / 分析 / 编排</b>三层才可重复；<b>大多数人热情搭第一层、忽视第二层、用电子表格糊第三层</b></td><td><span class="tag t-green">低</span>是判断框架不是功能</td></tr>
+</table>
+
+<h2 id="road">5. 未来功能路线图</h2>
+
+<h3>5.1 主线锚定（沿用既定补齐顺序）</h3>
+<p>既定顺序 <b>④抽卡 → ①编剧 → ②导演·节奏 → ③美术·母版</b>。审计后我认为这条顺序<b>需要一处修正</b>：<b>③资产母版层应该提前到 ①编剧 之前</b>。</p>
+<div class="danger"><b>顺序修正理由（这是本报告唯一的路线建议）：</b>编剧生产端产出的剧本会定义角色与场景，母版层是它的<b>下游但强前置</b>——剧本里的角色描述如果当场不落成母版卡，等抽卡做完再回头补，角色已经漂了。<br>更硬的证据：竞品 <b>LTX Studio 的 Elements</b> 和 <b>Invideo 的 Context Engine</b> 都是<b>在剧本阶段就建立</b>角色/地点元素，不是等到生成阶段。⇒ 新顺序：<b>④抽卡 → ③母版 → ①编剧 → ②导演·节奏</b>。</div>
+
+<h3>5.2 P0（建议下一刀）：资产母版层 = 四张表</h3>
+<p>直接抄 Invideo 的结构（<code>cast / locations / look / rules</code>），我们已有角色库只缺后三张：</p>
+<table>
+<tr><th>表</th><th>关键字段</th><th>我们现状</th></tr>
+<tr><td><code>cast</code> 角色表</td><td>id / 名称 / <code>face_params</code> / <code>avatar_url</code> / 身高体型 / 声音 / 固定身份描述块（<b>逐字不改</b>，抄 pixmind 铁律）</td><td><span class="tag t-blue">已有 80%</span>角色库 + FaceCard 已通</td></tr>
+<tr><td><code>locations</code> 场景表</td><td>id / 名称 / 参考图集（3–5 张，抄「锚定参考图集」）/ 光照方向 / 色温 / 空间尺度</td><td><span class="tag t-red">缺</span></td></tr>
+<tr><td><code>look</code> 视觉调性表</td><td>调色板 / 镜头语言 / 颗粒感 / 光照方向约定（<b>风格圣经要短到人两分钟能读完</b>，长文档会被忽略）</td><td><span class="tag t-orange">有零散</span><code>aestheticPresets</code> / lightingPresets 但未成表</td></tr>
+<tr><td><code>rules</code> 规则表</td><td>禁生成清单（字幕/商标/法务声明标为「图形」不走视频模型）/ 负面清单 / 命名规范</td><td><span class="tag t-red">缺</span></td></tr>
+</table>
+<p><b>配套闸门（Invideo 的核心机制）：</b>生成前拿候选与四张表<b>比对</b>，不 match 就标记重生成。<b>先做最便宜的一版</b>：图像嵌入余弦相似度对<code>cast</code> 参考图集，低于阈值标「需复审」——行业数据称可减 60%+ 人工复审量。</p>
+
+<h3>5.3 P1（三条，按性价比）</h3>
+<table>
+<tr><th>优先</th><th>动作</th><th>来源 / 理由</th></tr>
+<tr><td>P1-1</td><td><b>接线 14 个孤儿端点</b>，优先 <code>/host/batch-to-timeline</code>（批量入时间线，直接喂抽卡闭环）、<code>/host/compliance-check</code>（漫剧合规刚需）、<code>/host/diarize-speakers</code>（多人配音）</td><td>后端已完工，边际成本最低</td></tr>
+<tr><td>P1-2</td><td><b>生成动作幂等签名</b>：生图/生视频/3D 渲染批准前带签名，防重复扣额度</td><td>抄 Factory Agent；我们已有 seq 消费范式可扩展</td></tr>
+<tr><td>P1-3</td><td><b>抽卡加「批次」概念</b>：每批 8 条 + 批间一致性悬崖检查 + 末尾统一调色</td><td>抄 creatortribune 4 阶段实战流程；比继续打磨单张评分器更贴生产现场</td></tr>
+</table>
+
+<h3>5.4 P2（结构性，等母版层落地后再做）</h3>
+<ul>
+<li><b>Agent 画布写操作</b>：把 <code>canvasRun.ts</code> 的执行范围补成三档（单节点 / 依赖流 / 全项目），再让 Agent 能「加过渡镜」「把这批的 style lock 统一」这类<b>批量决策</b>（抄 BLOCKLORE「翻译成新节点并入流水线」）。</li>
+<li><b>确定性阶段列布局</b>：新建画布时节点按「素材→种子→分镜→参考→视频段→音频→合成→审→成片」自动分列，Agent 建的项目从左往右读就是一条生产线（抄 Factory）。</li>
+<li><b>Agent 自我清理</b>：审计画布、删掉不在活跃流水线的节点、重连剩余并汇报（抄 BLOCKLORE）——这条同时治我们自己的「测试节点堆积」问题。</li>
+<li><b>审美治理层</b>：光流一致性检测（成本中，需 OpenCV）+ 分镜阶段连续性通读（成本低）。<span class="tag t-orange">建议先不做</span>——等母版层四张表到位后再建管辖层，否则是给空气加制度。</li>
+<li><b>对外 Agent OpenAPI</b>：记忆里 C 线「做不做待拍板」，本轮不展开。</li>
+</ul>
+
+<h3>5.5 一页速查：可借鉴清单</h3>
+<table>
+<tr><th>机制</th><th>竞品怎么做</th><th>我们差距</th><th>成本</th></tr>
+<tr><td>四张表上下文引擎</td><td>Invideo：cast/locations/look/rules，生成前比对不 match 就重生成</td><td>只有角色表，缺场景/风格/规则</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>可复用元素 Elements</td><td>LTX Studio：角色/物体/地点抽成元素，后续镜头引用不重新生成</td><td>无元素抽象</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>确定性阶段列布局</td><td>Factory Agent：9 个阶段列，Agent 建的项目从左往右读即生产线</td><td>落位靠算法随手放</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>执行范围三档</td><td>Factory Agent：单节点 / 依赖流 / 全项目</td><td>只有「运行到此处」</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>生成幂等签名</td><td>Factory Agent：防批准的动作跑两次扣两次钱</td><td>生成类动作无此保护</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>批次 + 一致性悬崖</td><td>creatortribune：每批 8 条 + 批间查漂移 + 末尾统一调色</td><td>无批次概念</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>固定身份块（逐字不改）</td><td>pixmind：每条 prompt 顶部贴同一身份描述，改写就漂</td><td>无「固定块」约束</td><td><span class="tag t-green">低</span></td></tr>
+<tr><td>漂移时改源卡不重抽</td><td>invideo：角色漂移修角色卡，后续 panel 自动继承</td><td>我们是单点抽卡，无源卡概念</td><td><span class="tag t-blue">中</span>依赖母版层</td></tr>
+<tr><td>图像嵌入相似度过滤</td><td>对参考图集算余弦相似度，低于阈值标人工复审（减 60%+ 量）</td><td>无</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>Agent 自我清理</td><td>BLOCKLORE：审计画布、删废节点、重连并汇报</td><td>无</td><td><span class="tag t-blue">中</span></td></tr>
+<tr><td>光流一致性检测</td><td>首尾帧光流方差阈值，滤崩坏片段</td><td>无</td><td><span class="tag t-red">高</span>需 OpenCV</td></tr>
+<tr><td>多 Agent 同画布并发</td><td>OiiOii：7 位 Agent 并发、上下文独立</td><td>单 Agent 面板</td><td><span class="tag t-red">高</span>架构级</td></tr>
+</table>
+
+<h3>5.6 需要拍板的两件事</h3>
+<ol>
+<li><b>路线顺序是否调整</b>：把 ③资产母版层 提到 ①编剧 之前（理由见 §5.1）。我的判断：应该调，因为竞品都是在剧本阶段建元素。</li>
+<li><b>风格圣经谁定稿</b>：<code>look</code> 表需要一套「什么样的画面算拾光剪影的审美」。这是产品判断不是技术判断，需要你定调，或者明确「先做结构，审美值后填」。</li>
+</ol>
+
+<div class="foot">
+<b>方法与可信度声明：</b>① 本地结论全部来自读码实测与门禁实跑，标注了<code>文件:行号</code>；
+② 竞品结论来自联网检索，均附来源 URL；未能证实的写法已标注而非推测（例：行业对 2026 AI 视频一致性<b>没有 Tier-1 公开 benchmark</b>，相关排名均为从业者共识）；
+③ 「审美治理层无成熟横跨层产品」是基于本轮检索的<b>未找到</b>，不等于确定不存在；
+④ 路线顺序建议与 P0/P1/P2 优先级是我的判断，不是用户已确认的决策。
+</div>
+
+</div>
+</body>
+</html>

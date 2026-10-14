@@ -16,6 +16,7 @@ import {
 } from "./store";
 import { cropGridCell } from "./imageTools";
 import { planStoryboardMemory, uploadAssetToHost, videoStoryboard, type MemoryPlanRow } from "./bridge";
+import { getVisionModel } from "./visionModel";
 import type { MemoryType } from "./stores/node-factory";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
@@ -136,7 +137,8 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
     try {
       const up = await uploadAssetToHost(file);
       if (!up.ok || !up.path) throw new Error(up.message || "上传失败");
-      const res = await videoStoryboard({ path: up.path });
+      // I1：走本机视觉模型逐镜解析（素材不出机）；未装视觉模型时后端诚实降级
+      const res = await videoStoryboard({ path: up.path, use_llm: true, vision_model: getVisionModel() });
       if (!res.ok || !res.shots?.length) {
         setStatus?.(`拉片失败：${res.message || "无镜头"}`);
         return;
@@ -159,7 +161,10 @@ export const ShotlistNode = memo(function ShotlistNode({ id, data, selected }: N
         frameKind: "image",
       }));
       setRows(next);
-      setStatus?.(`拉片完成：${next.length} 镜（${res.scene_source || "自动"}检测）`);
+      const vmsg = (res as { vision_message?: string }).vision_message;
+      setStatus?.(
+        `拉片完成：${next.length} 镜（${res.scene_source || "自动"}检测）${vmsg ? ` · ${vmsg}` : ""}`,
+      );
     } catch (e) {
       setStatus?.(`拉片失败：${e}`);
     } finally {

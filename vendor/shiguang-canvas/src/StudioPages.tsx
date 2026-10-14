@@ -5,8 +5,10 @@ import {
   getAgentStatus,
   listImageModels,
   listVideoModels,
+  listLocalVisionModels,
   startCanvasAgent,
 } from "./bridge";
+import { getVisionModel, setVisionModel } from "./visionModel";
 import {
   ASSET_SEMANTIC_LABEL,
   ASSET_TYPE_LABEL,
@@ -22,6 +24,7 @@ import {
   type LocalPrompt,
 } from "./localLibrary";
 import PromptLibraryPanel from "./PromptLibraryPanel";
+import AestheticPresetPanel from "./AestheticPresetPanel";
 import type { PromptItem } from "./promptLibrary";
 import { useCanvasStore } from "./store";
 import { readProjectsIndex } from "./stores/project-storage";
@@ -64,7 +67,7 @@ export default function StudioPage({
   const [q, setQ] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftText, setDraftText] = useState("");
-  const [promptTab, setPromptTab] = useState<"community" | "mine">("community");
+  const [promptTab, setPromptTab] = useState<"community" | "mine" | "aesthetic">("community");
   const [promptStatus, setPromptStatus] = useState("");
   /** 资产分类导航：null = 顶层类型文件夹；{kind, semantic:null} = 语义层；{kind, semantic} = 资产列表 */
   const [assetNav, setAssetNav] = useState<{
@@ -81,12 +84,16 @@ export default function StudioPage({
   const [agentInfo, setAgentInfo] = useState({ listening: false, url: "", message: "" });
   const [agentBusy, setAgentBusy] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
+  /** 拉片 · 本机视觉模型（I1）：可选列表 + 当前选择（空 = 自动） */
+  const [visionModels, setVisionModels] = useState<{ name: string; size?: string }[]>([]);
+  const [visionModel, setVisionModelState] = useState(getVisionModel());
 
   const refreshHostStatus = async () => {
-    const [img, vid, ag] = await Promise.all([
+    const [img, vid, ag, vis] = await Promise.all([
       listImageModels(),
       listVideoModels(),
       getAgentStatus(),
+      listLocalVisionModels(),
     ]);
     setModelInfo({
       image: img.models.length,
@@ -99,6 +106,8 @@ export default function StudioPage({
       url: ag.url || "",
       message: ag.message || "",
     });
+    setVisionModels(vis);
+    setVisionModelState(getVisionModel());
   };
 
   useEffect(() => {
@@ -143,6 +152,13 @@ export default function StudioPage({
             >
               我的本地（{prompts.length}）
             </button>
+            <button
+              type="button"
+              className={`btn${promptTab === "aesthetic" ? " primary" : ""}`}
+              onClick={() => setPromptTab("aesthetic")}
+            >
+              美学预设
+            </button>
           </div>
           {promptTab === "mine" ? (
             <>
@@ -172,6 +188,10 @@ export default function StudioPage({
                 保存提示词
               </button>
             </>
+          ) : promptTab === "aesthetic" ? (
+            <p className="muted">
+              右侧沉淀「风格词 + 镜头语言 + 色调·LUT + 节奏·音乐」四维度预设，一键套到全部/选中分镜，也可导出 JSON 复用。
+            </p>
           ) : (
             <p className="muted">右侧浏览社区库。点「同步源」可拉取数千条；离线精选包无需联网。</p>
           )}
@@ -181,7 +201,9 @@ export default function StudioPage({
           {promptStatus ? <p className="muted">{promptStatus}</p> : null}
         </aside>
         <section className="studio-results">
-          {promptTab === "community" ? (
+          {promptTab === "aesthetic" ? (
+            <AestheticPresetPanel onStatus={(msg) => setPromptStatus(msg)} />
+          ) : promptTab === "community" ? (
             <PromptLibraryPanel
               variant="page"
               onApply={applyCommunity}
@@ -407,6 +429,34 @@ export default function StudioPage({
           <p className="ic-studio-status">{agentInfo.message || "Agent 未启动"}</p>
         )}
         <p className="ic-studio-status">{localStatus || status}</p>
+
+        <div style={{ marginTop: 12, marginBottom: 12 }}>
+          <label htmlFor="vision-model-select" style={{ fontWeight: 600 }}>
+            拉片 · 本地视觉模型
+          </label>
+          <p className="muted" style={{ margin: "4px 0 8px" }}>
+            一键拉片用本机视觉模型解析景别 / 运镜 / 画面描述；素材只在本机处理，不出机。
+            {visionModels.length === 0
+              ? "（未检测到视觉模型，可在 Ollama 安装如 qwen3.5:4b）"
+              : ""}
+          </p>
+          <select
+            id="vision-model-select"
+            value={visionModel}
+            onChange={(e) => {
+              setVisionModel(e.target.value);
+              setVisionModelState(e.target.value);
+            }}
+            style={{ maxWidth: 320 }}
+          >
+            <option value="">自动（优先视觉模型）</option>
+            {visionModels.map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="ic-cta-row">
           <button

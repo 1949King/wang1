@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BRIDGE,
+  bridgeToken,
+  refreshBridgeTokenFromInject,
   getAgentStatus,
   startCanvasAgent,
   listChatModels,
@@ -17,6 +19,7 @@ import {
   sendAgentReply,
   controlAgentSession,
   breakdownStoryboard,
+  planStoryboardCameras,
   fetchTimelineSnapshot,
   type AgentEventEnvelope,
   type ChatModelProvider,
@@ -589,6 +592,26 @@ export default function AgentPanel({
           }
           break;
         }
+        case "stage3dTextPlan": {
+          // 文本 → 3D 粗模（仅机位档）：复用后端既有「文本/剧本 → 分镜 → 机位」通道，
+          // 再走现成 applyStage3dCameraPlan 把机位投到 3D 导演台。不新增任何 3D 通道、不动冻结区。
+          let text = String(params.text || params.script || params.content || "").trim();
+          if (!text) {
+            const firstScript = nodes.find((n) => (n.data as NodeData).kind === "script");
+            if (firstScript) {
+              text = String((firstScript.data as Extract<NodeData, { kind: "script" }>).content || "").trim();
+            }
+          }
+          if (!text) throw new Error("stage3dTextPlan 缺少文本（params.text / script 节点均为空）");
+          push("system", `🎥 收到文本→3D 机位请求（${text.length} 字），正在解析…`);
+          const plan = await planStoryboardCameras({ script: text, use_llm: true });
+          if (!plan.ok || !(plan.cameras && plan.cameras.length)) {
+            throw new Error(plan.message || "机位规划失败（未产出可用机位）");
+          }
+          useCanvasStore.getState().applyStage3dCameraPlan(plan.cameras);
+          push("system", `✅ 已生成 ${plan.cameras.length} 个机位并应用到 3D 导演台（可在 3D 台内微调/录制白模参考视频）`);
+          break;
+        }
         default:
           throw new Error(`未知 action: ${action}`);
       }
@@ -602,12 +625,42 @@ export default function AgentPanel({
     }
   };
 
+  // ── SSE 断线治理（2026-10-14）──────────────────────────────
+  // 后端 session token 每次启动重建，旧 token 会让 /host/*（含 SSE）全 401；
+  // 而 EventSource 自带无限自动重连 ⇒ 旧实现把每条失败都 push 成一条消息，
+  // 刷满整屏「SSE 连接异常」。现改为：每轮断线最多 2 条提示；连续失败到第 3 次
+  // 触发一次凭据自愈（重拉 inject.js）；自愈后凭据确有变化才重订阅（bridgeEpoch），
+  // 连接恢复（onOpen）时重置计数并给一条恢复提示。
+  const [bridgeEpoch, setBridgeEpoch] = useState(0);
+  const sseFailRef = useRef(0);
+  const sseHealedRef = useRef(false);
+
   useEffect(() => {
     if (!open) return undefined;
     const unsub = subscribeAgentEvents({
+      onOpen: () => {
+        const hadErr = sseFailRef.current > 0;
+        sseFailRef.current = 0;
+        sseHealedRef.current = false;
+        if (hadErr) push("system", "✅ 已恢复与画布后端的连接");
+      },
       onEvent: handleEditorEvent,
       onError: (err) => {
-        push("system", `ℹ️ ${err}`);
+        sseFailRef.current += 1;
+        const n = sseFailRef.current;
+        if (n === 1) {
+          push("system", `ℹ️ ${err}`);
+        } else if (n === 3 && !sseHealedRef.current) {
+          // 退避到第 3 次失败再自愈一次，避免无谓抖动；其余失败不再逐条刷屏。
+          sseHealedRef.current = true;
+          const before = bridgeToken();
+          void refreshBridgeTokenFromInject().then((token) => {
+            if (token && token !== before) {
+              push("system", "🔑 连接凭据已失效，已刷新凭据，正在重新连接…");
+              setBridgeEpoch((e) => e + 1);
+            }
+          });
+        }
       },
     });
     return () => {
@@ -618,7 +671,7 @@ export default function AgentPanel({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, bridgeEpoch]);
 
   const refreshMcp = async () => {
     const ag = await getAgentStatus();

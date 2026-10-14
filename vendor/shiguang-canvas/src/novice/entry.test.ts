@@ -22,15 +22,15 @@ import {
   NODE_PALETTE,
 } from "../NodePalette";
 
-/** 与 store 的 21 种内置 kind 同源清单（isBuiltinNodeKind 的字面量） */
+/** 与 store 的 22 种内置 kind 同源清单（isBuiltinNodeKind 的字面量） */
 const ALL_BUILTIN_KINDS = [
   "shot", "script", "image", "video", "prompt", "text", "config", "generator", "group", "audio",
   "markdown", "shotlist", "storyboard", "director", "directorCard", "digitalHuman", "animation",
-  "panorama", "note", "source", "music",
+  "panorama", "note", "source", "music", "character",
 ];
 
 describe("P0 小白模式意图入口（2026-10-11）", () => {
-  it("NOVICE_ENTRY 全量覆盖 21 种内置 kind（一个不少）", () => {
+  it("NOVICE_ENTRY 全量覆盖 22 种内置 kind（一个不少）", () => {
     for (const k of ALL_BUILTIN_KINDS) {
       const e = NOVICE_ENTRY[k];
       expect(e, `kind=${k} 缺少小白入口`).toBeTruthy();
@@ -56,7 +56,7 @@ describe("P0 小白模式意图入口（2026-10-11）", () => {
     expect(noviceEntryFor("__nope__")).toBeNull();
   });
 
-  it("buildNoviceAddNodeGroups：21 种全部入组 + 入口用小白名", () => {
+  it("buildNoviceAddNodeGroups：22 种全部入组 + 入口用小白名", () => {
     const groups = buildNoviceAddNodeGroups();
     const items = groups.flatMap((g) => g.items);
     expect(items.length).toBe(ALL_BUILTIN_KINDS.length);

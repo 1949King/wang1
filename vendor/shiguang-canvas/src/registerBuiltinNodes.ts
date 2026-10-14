@@ -31,6 +31,7 @@ import {
   PanoramaNode,
   NoteNode,
   SourceNode,
+  CharacterNode,
 } from "./mediaExtraNodes";
 import { registerNodeDefinitions, type CanvasNodeDefinition } from "./plugins/node-registry";
 
@@ -57,6 +58,7 @@ export const BUILTIN_NODE_META: Record<string, { title: string; icon: ReactNode;
   panorama:  { title: "全景",     icon: "🌐", desc: "AI-Canvas 对齐 · 等距柱状环视", defaultSize: { width: 360, height: 260 } },
   note:      { title: "画布笔记", icon: "📌", desc: "AI-Canvas 对齐 · 文字/形状标注", defaultSize: { width: 240, height: 160 } },
   source:    { title: "源文件",   icon: "📂", desc: "AI-Canvas 对齐 · 本地素材入口", defaultSize: { width: 300, height: 220 } },
+  character: { title: "角色",     icon: "🧑‍🎨", desc: "角色库条目 · 点卡片打开捏脸", defaultSize: { width: 260, height: 240 } },
 };
 
 type BuiltinNode = { type: string; Component: ComponentType<NodeProps<Node>> };
@@ -83,6 +85,7 @@ const BUILTIN_NODES: BuiltinNode[] = [
   { type: "panorama",  Component: PanoramaNode },
   { type: "note",      Component: NoteNode },
   { type: "source",    Component: SourceNode },
+  { type: "character", Component: CharacterNode },
 ];
 
 /** 应用启动时一次性注册所有内置节点 */

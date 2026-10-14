@@ -59,6 +59,7 @@ import CanvasOverlays from "./CanvasOverlays";
 import { isTypingTarget } from "./CommandPalette";
 import { type GenJob } from "./generationQueue";
 import { buildCameraPromptBlock, multiAngleBatch, type AnglePreset } from "./shotCamera";
+import { applyActiveAestheticToPrompt } from "./aestheticPresets";
 import type { PromptItem } from "./promptLibrary";
 import { buildWorkflowSkill, downloadWorkflowSkill, readWorkflowSkillFile, skillToProjectBundle } from "./workflowSkill";
 
@@ -468,7 +469,7 @@ export default function App() {
       data.kind === "shot" && !cameraBlock ? `景别:${data.shotSize}` : "",
       upstream,
       ...frameHints,
-      prompt,
+      (data.kind === "shot" || data.kind === "image" || data.kind === "video") ? applyActiveAestheticToPrompt(prompt || "") : prompt,
     ]
       .filter(Boolean)
       .join("；");
@@ -1545,6 +1546,11 @@ export default function App() {
         setStatus(`拉片完成（启发式兜底）${res.shots?.length || 0} 镜 — ${res.message || ""}`);
       }
       setViewMode("canvas");
+      setBreaking(false);
+      // I2 补强：拉片铺完分镜后自动接「运行到此处」（runGraphWithConfirm 出 dry_run 计划并弹确认后再执行）。
+      if (Array.isArray(res.shots) && res.shots.length > 0) {
+        await runToHere();
+      }
     } catch (e) {
       setStatus(`拉片异常: ${e}`);
     } finally {

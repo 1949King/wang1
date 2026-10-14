@@ -4,7 +4,7 @@
  * 四种模式：pane（空白）/ node / edge / connect（连线松手接到新节点）
  * 特性：屏幕边界自动修正、子菜单展开、快捷键提示、从自研 useCanvasStore 直取方法
  */
-import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useCanvasStore, type NodeData } from "../../store";
 import { importComfyWorkflowText } from "../../bridge";
 import { calcFixedPosition, calcSubmenuPosition } from "../../utils/popupPosition";
@@ -37,6 +37,7 @@ const ADD_NODE_ITEMS: AddNodeItem[] = [
   { label: "配置", kind: "config", group: "content", shortcut: "4" },
   { label: "生成器", kind: "generator", group: "content", shortcut: "5" },
   { label: "文本", kind: "text", group: "content", shortcut: "6" },
+  { label: "角色", kind: "character", group: "content" },
   { label: "Markdown", kind: "markdown", group: "content", shortcut: "7" },
   { label: "图像", kind: "image", group: "source", shortcut: IS_MAC ? "⌥ 1" : "Alt 1" },
   { label: "视频", kind: "video", group: "source", shortcut: IS_MAC ? "⌥ 2" : "Alt 2" },
@@ -94,7 +95,12 @@ export default function CanvasContextMenu({ menu, onClose, onOpenStage3d, onBrea
   const [subPos, setSubPos] = useState<{ left: number; top: number } | null>(null);
 
   // —— 从 store 直取所有操作 ——
-  const selectedNodes = useCanvasStore((s) => s.nodes.filter((n) => n.selected));
+  // ⚠️ 不能写成 useCanvasStore((s) => s.nodes.filter(...))：selector 每次调用都返回**新数组**，
+  // React 19 + zustand 5 的 useSyncExternalStore 会判定「快照一直在变」→ 无限重渲染 → React
+  // error #185（画布一打开右键菜单就整页「画布遇到渲染错误」的根因）。改为订阅引用稳定的
+  // nodes，再用 useMemo 派生已选节点。
+  const nodes = useCanvasStore((s) => s.nodes);
+  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
   const selectedId = useCanvasStore((s) => s.selectedId);
   const addNode = useCanvasStore((s) => s.addNode);
   const onConnect = useCanvasStore((s) => s.onConnect);

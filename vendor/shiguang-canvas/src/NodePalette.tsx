@@ -35,6 +35,7 @@ export const NODE_PALETTE: PaletteItem[] = [
   { type: "storyboard", label: "宫格分镜", keywords: "storyboard 宫格 九宫格", hint: "AI-Canvas 对齐 · 交互裁格", category: "create" },
   { type: "prompt", label: "提示词", keywords: "prompt 提示词 style", hint: "可复用提示词", category: "create" },
   { type: "text", label: "文本", keywords: "text 文本 infinite", hint: "infinite 对齐 · 说明/提示", category: "create" },
+  { type: "character", label: "角色", keywords: "character 角色 捏脸 形象 脸 角色库", hint: "角色库条目 · 点卡片打开捏脸", category: "create" },
   // ── 媒体 ─────────────────────────────────────────────
   { type: "image", label: "图片", keywords: "image 图片 图", hint: "图片资产节点", category: "media" },
   { type: "video", label: "视频", keywords: "video 视频 运镜 参考", hint: "视频生成 / 可上传参考片段", category: "media" },
@@ -255,6 +256,7 @@ export function isBuiltinNodeKind(type: string): type is NodeData["kind"] {
   const kinds: NodeData["kind"][] = [
     "shot", "script", "image", "video", "prompt", "text", "config", "generator", "group", "audio",
     "markdown", "shotlist", "storyboard", "director", "directorCard", "digitalHuman", "animation", "panorama", "note", "source", "music",
+    "character",
   ];
   return kinds.includes(type as NodeData["kind"]);
 }

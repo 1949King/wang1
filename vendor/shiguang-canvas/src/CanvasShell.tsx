@@ -28,7 +28,12 @@ import {
   type ComfyEngineStatus,
   listProjectTools,
   type ProjectTool,
+  updateCharacterViaHost,
+  persistMediaUrl,
 } from "./bridge";
+// 2026-10-14 用户授权：属性面板（inspector）是历史最高频崩溃面，用局部错误边界把它单独隔离，
+// 单点渲染异常只降级该面板，不再整块画布白屏（SectionErrorBoundary 无包裹 DOM，不影响布局）。
+import { SectionErrorBoundary } from "./AppErrorBoundary";
 import { nodeCommandItems, agentToolCommandItems, useAgentCmdTools } from "./canvasCommandsExtra";
 import AddNodeGroups from "./AddNodeGroups";
 import AppNav, { type AppRoute } from "./AppNav";
@@ -42,7 +47,7 @@ import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
 import ShortcutSettings from "./components/settings/ShortcutSettings";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
 import { LibTvBottomDock } from "./LibTvChrome";
-import { type NodeData, type ViewMode, type CanvasLayoutMode, type CanvasTheme, type ShotData, useCanvasStore } from "./store";
+import { type NodeData, type ViewMode, type CanvasLayoutMode, type CanvasTheme, type ShotData, type CharacterEntry, useCanvasStore } from "./store";
 import { useMagneticDrag } from "./magnetic/useMagneticDrag";
 import { MagneticLines } from "./magnetic/MagneticLines";
 import { SlotGhost } from "./magnetic/SlotGhost";
@@ -82,6 +87,20 @@ const VideoStudio = lazy(() => import("./VideoStudio"));
 const PluginManagerPanel = lazy(() => import("./PluginManagerPanel"));
 const MaskEditDialog = lazy(() => import("./MaskEditDialog"));
 const AgentPanel = lazy(() => import("./AgentPanel"));
+// 独立捏脸卡片（内含 three.js 预览）：按需加载，未打开时不进主包体积
+const FaceCard = lazy(() => import("./FaceCard"));
+
+/**
+ * Agent 面板开合态的 localStorage 键 —— **按画布隔离**（2026-10-14 用户授权）。
+ *
+ * 旧实现是全局单键 `shiguang-canvas:agent-dock:open`，而 `agentPanelOpen` 属 `CanvasShell`
+ * 唯一实例的 state、切画布不重置；于是「某个画布开过 Agent → 之后每个画布都默认开 →
+ * 桌宠全被隐藏、看起来在所有画布都点不了」。
+ * 改为按 `activeCanvasId` 分键，各画布独立记忆；未记忆时默认收起（避免挡四卡）。
+ * 空画布沿用 store `listCanvases()` 的 "memory" 标识，保证与画布 tab 身份一致。
+ */
+const agentDockStorageKey = (canvasId: string | null | undefined) =>
+  `shiguang-canvas:agent-dock:open:${canvasId || "memory"}`;
 
 function PanelFallback({ label }: { label: string }) {
   return (
@@ -449,13 +468,16 @@ export default function CanvasShell(props: CanvasShellProps) {
   const toggleGenerate = useToolboxStore((s) => s.toggleGenerate);
   const [agentPanelOpen, setAgentPanelOpen] = useState(() => {
     try {
-      const v = localStorage.getItem("shiguang-canvas:agent-dock:open");
-      // LibTV 空画布默认收起 Agent，避免挡四卡
+      // 2026-10-14 用户授权：按画布隔离记忆；未记忆时默认收起 Agent（LibTV 空画布避免挡四卡）
+      const cid = useCanvasStore.getState().activeCanvasId;
+      const v = localStorage.getItem(agentDockStorageKey(cid));
       return v === null ? false : v === "1";
     } catch {
       return false;
     }
   });
+  /** 供「状态请求」事件回播当前开合态用（避免闭包捕获旧值） */
+  const agentPanelOpenRef = useRef(agentPanelOpen);
   const setStatus = useCanvasStore((s) => s.setStatus);
   const applyComfyWorkflow = useCanvasStore((s) => s.applyComfyWorkflow);
   const selectedId = useCanvasStore((s) => s.selectedId);
@@ -467,6 +489,57 @@ export default function CanvasShell(props: CanvasShellProps) {
   const bindCharacterToShot = useCanvasStore((s) => s.bindCharacterToShot);
   const unbindCharacterFromShot = useCanvasStore((s) => s.unbindCharacterFromShot);
   const syncCharacterToShot = useCanvasStore((s) => s.syncCharacterToShot);
+
+  // 独立捏脸卡片（与 3D 导演台分开）：当前打开的角色（null = 未打开）
+  const [faceCardTarget, setFaceCardTarget] = useState<CharacterEntry | null>(null);
+
+  /**
+   * 捏脸卡片「应用」：两条通道同时汇合回角色库（用户 2026-10-13 裁定「两者都要」）
+   *  ① 文字通道 —— face_params(JSON) 落库，Python build_character_prompt 转成文字进生图提示词；
+   *  ② 参考图通道 —— 3D 头快照上传宿主 inbox，存为该角色的 avatar_url。
+   * 落库后刷新角色库；若当前节点正绑定该角色，顺带重刷节点里的角色设定块（新脸立刻生效）。
+   */
+  const onFaceConfirm = useCallback(
+    async (serialized: string, _params: unknown, snapshot?: string) => {
+      const target = faceCardTarget;
+      if (!target) return;
+      const data: Record<string, unknown> = { face_params: serialized };
+      if (snapshot) {
+        // 画布是 WebView，加载不了 D:\ 本地路径，只认 /inbox_file/<name>
+        const url = await persistMediaUrl(snapshot);
+        if (url && url.startsWith("/inbox_file/")) data.avatar_url = url;
+      }
+      const res = await updateCharacterViaHost(target.id, data);
+      setFaceCardTarget(null);
+      await refreshCharacters();
+      if (!res.ok) {
+        setStatus("捏脸参数写回角色库失败，请确认后端是否在运行");
+        return;
+      }
+      // NodeData 联合类型不直接暴露 characterId（仅 ShotData 有），按项目既有写法做窄化
+      const boundId = (selectedData as { characterId?: string } | null)?.characterId;
+      if (selectedId && boundId === target.id) {
+        syncCharacterToShot(selectedId);
+      }
+      setStatus(`已保存「${target.name}」的捏脸参数（文字 + 参考图），跨镜生成保持一致`);
+    },
+    [faceCardTarget, refreshCharacters, selectedId, selectedData, syncCharacterToShot, setStatus],
+  );
+
+  // 2026-10-14 用户授权：角色节点/小白卡没有捏脸入口。
+  // 捏脸卡片是固定定位模态（须在 React Flow viewport 之外），故节点侧只派发
+  // sg-open-face-card（detail={characterId}），这里按 characterId 打开唯一的 FaceCard host。
+  useEffect(() => {
+    const onOpenFaceCard = (e: Event) => {
+      const detail = (e as CustomEvent<{ characterId?: string }>).detail || {};
+      const c = characters.find((x) => x.id === detail.characterId);
+      if (c) setFaceCardTarget(c);
+      else setStatus("请先在角色节点上选择一个角色，再点「捏脸」");
+    };
+    window.addEventListener("sg-open-face-card", onOpenFaceCard as EventListener);
+    return () => window.removeEventListener("sg-open-face-card", onOpenFaceCard as EventListener);
+  }, [characters, setStatus]);
+
   const setNodeImage = useCanvasStore((s) => s.setNodeImage);
   const canvasLayoutMode = useCanvasStore((s) => s.canvasLayoutMode);
   const setCanvasLayoutMode = useCanvasStore((s) => s.setCanvasLayoutMode);
@@ -572,13 +645,50 @@ export default function CanvasShell(props: CanvasShellProps) {
     [nodes],
   );
 
+  // 2026-10-14 用户授权：开合态**按画布隔离**记忆（上面 agentDockStorageKey）。
+  // ① 保持 activeCanvasId 的 ref 最新，供持久化 effect 写入「当前画布」的正确分键；ref 先于后面
+  //    两个 effect 声明，保证「切画布 → 载入 → 回写」时序里写的都是新画布的键。
+  const activeCanvasIdRef = useRef(activeCanvasId);
+  useEffect(() => {
+    activeCanvasIdRef.current = activeCanvasId;
+  }, [activeCanvasId]);
+
+  // ② 切到新画布时载入该画布记忆的开合态，不把上一画布的状态带过去。
   useEffect(() => {
     try {
-      localStorage.setItem("shiguang-canvas:agent-dock:open", agentPanelOpen ? "1" : "0");
+      const v = localStorage.getItem(agentDockStorageKey(activeCanvasId));
+      setAgentPanelOpen(v === "1");
     } catch {
       /* ignore */
     }
+  }, [activeCanvasId]);
+
+  // ③ 开合态变化时：写入「当前画布」分键 + 广播类型化事件给桌宠。
+  useEffect(() => {
+    agentPanelOpenRef.current = agentPanelOpen;
+    try {
+      localStorage.setItem(agentDockStorageKey(activeCanvasIdRef.current), agentPanelOpen ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+    // 桌宠 ⇄ Agent 改走**类型化事件通道**：广播面板开合状态，桌宠据此隐藏/回归——
+    // 不再由桌宠 MutationObserver 嗅 `.workspace.agent-open`，多画布 / 多实例 / DOM 重挂都不会失准。
+    window.dispatchEvent(new CustomEvent("sg-agent-state", { detail: { open: agentPanelOpen } }));
   }, [agentPanelOpen]);
+
+  // 2026-10-14 用户授权：桌宠点击 → 类型化 toggle（取代「嗅 DOM 找 Agent 按钮再强点」的脆弱链路）；
+  // 并支持首帧「状态请求」回播（桌宠挂载晚于本组件，重播一次避免初始状态丢失）。
+  useEffect(() => {
+    const onToggle = () => setAgentPanelOpen((v) => !v);
+    const onRequest = () =>
+      window.dispatchEvent(new CustomEvent("sg-agent-state", { detail: { open: agentPanelOpenRef.current } }));
+    window.addEventListener("sg-toggle-agent", onToggle);
+    window.addEventListener("sg-agent-state-request", onRequest);
+    return () => {
+      window.removeEventListener("sg-toggle-agent", onToggle);
+      window.removeEventListener("sg-agent-state-request", onRequest);
+    };
+  }, []);
 
   const refreshAgentStatus = async () => {
     const ag = await getAgentStatus();
@@ -1754,6 +1864,7 @@ export default function CanvasShell(props: CanvasShellProps) {
 
           {!agentPanelOpen ? (
           <aside className={`inspector${rightCollapsed ? " collapsed" : ""}`}>
+            <SectionErrorBoundary label="属性面板">
             {rightCollapsed ? null : isNovice ? (
               <NoviceInspector />
             ) : (
@@ -1935,6 +2046,19 @@ export default function CanvasShell(props: CanvasShellProps) {
                           title="把该角色投到 3D 导演台（体型/发型/配色取自角色字段，不随机）"
                         >
                           🎭
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "4px 8px" }}
+                          disabled={!selectedData.characterId}
+                          onClick={() => {
+                            const c = characters.find((x) => x.id === selectedData.characterId);
+                            if (c) setFaceCardTarget(c);
+                          }}
+                          title="打开独立捏脸卡片（与 3D 导演台分开；参数随角色库保存，并进生图提示词保持跨镜一致）"
+                        >
+                          🎨
                         </button>
                       </div>
                       {selectedData.characterId && (
@@ -3068,6 +3192,7 @@ export default function CanvasShell(props: CanvasShellProps) {
             )}
             </>
             )}
+            </SectionErrorBoundary>
           </aside>
           ) : null}
           {agentPanelOpen ? (
@@ -3108,6 +3233,19 @@ export default function CanvasShell(props: CanvasShellProps) {
       {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：
           顶栏 [?] 按钮 + Ctrl+Shift+K 触发；Esc/点遮罩关闭；自包含 Modal 不影响画布。 */}
       <ShortcutSettings open={shortcutOpen} onClose={() => setShortcutOpen(false)} />
+
+      {/* 独立捏脸卡片（与 3D 导演台分开的独立入口）：懒加载，未打开时零开销。
+          initial = 角色库存的 face_params（重新打开可续调）；应用后两条通道写回角色库。 */}
+      {faceCardTarget && (
+        <Suspense fallback={null}>
+          <FaceCard
+            initial={faceCardTarget.face_params}
+            characterId={faceCardTarget.id}
+            onConfirm={onFaceConfirm}
+            onClose={() => setFaceCardTarget(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

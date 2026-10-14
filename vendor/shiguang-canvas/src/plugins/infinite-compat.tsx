@@ -81,8 +81,8 @@ function useNodeContext(
       emit: rt.emit,
       on: rt.on,
       ai: rt.ai || {
-        generateImage: async () => [],
-        generateVideo: async () => "",
+        generateImage: async (opts: { prompt: string; model: string; size: string; channel_id: string; reference_image: string; quality: string }) => [],
+        generateVideo: async (opts: { prompt: string; model: string; duration: number; quality: string }) => "",
         generateText: async () => "",
         listModels: () => [],
         defaultModel: () => "",

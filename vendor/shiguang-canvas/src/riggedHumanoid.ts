@@ -2805,7 +2805,12 @@ function loadProcessedGLBTemplate(url: string): Promise<THREE.Object3D> {
       });
       prepareBodyFigureMeshes(scene);
 
-      const TARGET_HEIGHT = 1.815;
+      // 归一化基准 = GLB 素体实测原生身高（bodykun/bodychan 均为 1.7000m，
+      // 测量脚本 .workbuddy/tmp/glb_total_height.py）。
+      // 2026-10-13 用户授权解冻修复：旧值 1.815 比原生身高高 6.8%，
+      // 导致所有体型统一被放大（用户反馈「全部偏大」）；回落到原生 1.70。
+      // 注意：ACTOR_PRESETS / VARIANT_SCALE 是相对倍率，随基准等比生效，无需联动改。
+      const TARGET_HEIGHT = 1.70;
       const fitBox = new THREE.Box3().setFromObject(scene);
       const fitSize = new THREE.Vector3();
       fitBox.getSize(fitSize);

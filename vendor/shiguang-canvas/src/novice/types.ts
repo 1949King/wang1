@@ -159,6 +159,7 @@ export const KIND_STYLE: Record<string, { color: string; icon: string; label: st
   markdown: { color: "#a3a3a3", icon: "M↓", label: "文档" },
   animation: { color: "#fb7185", icon: "🎞", label: "动画" },
   panorama: { color: "#34d399", icon: "🌐", label: "全景" },
+  character: { color: "#e879f9", icon: "🧑‍🎨", label: "角色" },
 };
 
 /** 取节点对应的卡面样式（未知类型给中性灰） */
@@ -239,6 +240,8 @@ export function noviceHint(kind: string): string {
       return "动画节点：写角色和动作 → 生成逐帧精灵图，可预览循环播放";
     case "panorama":
       return "全景节点：生成 360° 全景图，点中可旋转查看";
+    case "character":
+      return "角色节点：选一个角色库人物 → 点「捏脸」生成参考脸，跨镜保持一致";
     default:
       return "拖到别的卡片旁边就会自动吸附成关系，拉开即解除";
   }
@@ -343,6 +346,7 @@ export const NOVICE_ENTRY: Record<string, NoviceEntry> = {
   // ── 摆位与实拍 ──
   director: { name: "摆个人物", desc: "3D 摆姿势和机位", stage: "stage" },
   source: { name: "放素材", desc: "本地图 / 视频 / 音频", stage: "stage" },
+  character: { name: "捏个角色", desc: "角色库人物 · 点卡片捏脸", stage: "stage" },
   // ── 批量与设定 ──
   generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch" },
   config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch" },

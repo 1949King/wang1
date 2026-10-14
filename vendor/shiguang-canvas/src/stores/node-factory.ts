@@ -39,6 +39,9 @@ export type CharacterEntry = {
   /** 标志性符号：跨集可辨识的固定视觉锚点 */
   memory_anchors?: string;
   personality?: string;
+  /** 捏脸卡片（FaceCard.tsx）写回的 faceParams JSON 串。
+   *  由 Python build_character_prompt 转成文字描述进生图提示词 ⇒ 跨镜保持一致的脸。 */
+  face_params?: string;
   // 内在人格（剧本一致性；不进提示词）
   values?: string;
   core_desire?: string;
@@ -480,6 +483,18 @@ export type SourceData = {
   editorRange?: string;
 };
 
+/** 角色节点：把角色库条目直观放到画布上，提供「捏脸」入口（对接 CharacterStore）。 */
+export type CharacterData = {
+  kind: "character";
+  title: string;
+  /** 绑定的角色库 ID（空=未绑定，节点上可下拉选择） */
+  characterId?: string;
+  /** 角色名（绑定后自动同步显示） */
+  characterName?: string;
+  status?: NodeStatus;
+  errorMessage?: string;
+};
+
 export type NodeData =
   | ShotData
   | ScriptData
@@ -501,7 +516,8 @@ export type NodeData =
   | AnimationData
   | PanoramaData
   | NoteData
-  | SourceData;
+  | SourceData
+  | CharacterData;
 
 export const ANIMATION_ACTION_LABELS: Record<AnimationAction, string> = {
   idle: "待机",
@@ -776,6 +792,12 @@ export function makeNode(
       prompt: "",
       ...extra,
     } as SourceData,
+    character: {
+      kind: "character",
+      title: "角色",
+      characterName: "",
+      ...extra,
+    } as CharacterData,
   };
   const node: Node = {
     id,
@@ -816,6 +838,9 @@ export function makeNode(
   if (type === "source") {
     node.style = { width: 300, height: 220 };
   }
+  if (type === "character") {
+    node.style = { width: 260, height: 240 };
+  }
   return node;
 }
 
@@ -841,6 +866,7 @@ export const BUILTIN_NODE_KINDS = new Set<NodeData["kind"]>([
   "panorama",
   "note",
   "source",
+  "character",
 ]);
 
 /** ========== Stack 工具 ========== */

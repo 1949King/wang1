@@ -207,6 +207,22 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
     setMenuOpen(false);
   };
 
+  /** 捏脸：仅角色卡片可用，派发窗口事件交给 CanvasShell 承载 FaceCard（模态须在 viewport 之外） */
+  const openFaceCard = () => {
+    const st = useCanvasStore.getState();
+    const cid = (
+      st.nodes.find((n) => n.id === id)?.data as { characterId?: string } | undefined
+    )?.characterId;
+    if (cid) {
+      window.dispatchEvent(
+        new CustomEvent("sg-open-face-card", { detail: { characterId: cid, nodeId: id } }),
+      );
+    } else {
+      st.setStatus("请先在角色卡片上选择角色");
+    }
+    setMenuOpen(false);
+  };
+
   /** 删除卡片及其连线 */
   const remove = () => {
     const st = useCanvasStore.getState();
@@ -323,6 +339,11 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
             {kind === "director" ? (
               <button type="button" onClick={openStage}>
                 打开舞台
+              </button>
+            ) : null}
+            {kind === "character" ? (
+              <button type="button" onClick={openFaceCard}>
+                捏脸
               </button>
             ) : null}
             <button type="button" onClick={pushVersion}>

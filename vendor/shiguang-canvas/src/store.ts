@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import {
   type Edge,
   type Node,
@@ -49,6 +49,8 @@ import {
 import type { GraphSnap, ClipboardPayload } from "./stores/history-store";
 import { stackReducer, ensureStack } from "./magnetic/CardStack";
 import type { CardStackData, CardStatus } from "./magnetic/types";
+// 幂等守卫的判定逻辑独立成文件（store.ts 是冻结区，只引不入，见 storeIdempotent.ts 头注）
+import { bondedSidesEqual, nodeDataPatchIsNoop } from "./storeIdempotent";
 import {
   type EdgeType,
   type NodeStatus,
@@ -82,6 +84,7 @@ import {
   type PanoramaData,
   type NoteData,
   type SourceData,
+  type CharacterData,
   type NodeData,
   inferEdgeType,
   buildEdgeOptions,
@@ -108,7 +111,7 @@ export type {
   ConfigData, GeneratorData, GroupData, AudioData, MusicData, NodeData,
   MarkdownData, ShotlistData, ShotlistRow, StoryboardData, StoryboardCell,
   DirectorData, DigitalHumanData, AnimationData, AnimationAction, PanoramaData, NoteData, SourceData,
-  DirectorCardData,
+  DirectorCardData, CharacterData,
   CharacterEntry,
 };
 export {
@@ -629,11 +632,11 @@ function applyCharBlock(prompt: string | undefined, block: string): string {
 }
 
 export const useCanvasStore = create<Store>((set, get) => ({
-  nodes: [
-    makeNode("script", { x: 80, y: 120 }),
-    makeNode("shot", { x: 400, y: 80 }, { title: "镜 01" } as Partial<ShotData>),
-    makeNode("shot", { x: 400, y: 280 }, { title: "镜 02" } as Partial<ShotData>),
-  ],
+  // 2026-10-14：初始画布改为空白 —— 进入 AI 画布模块先显示「拾光导演台」空状态
+  // 引导卡（CanvasEmptyState 仅在 nodes.length===0 时渲染），由用户从引导卡 /
+  // 双击空白处 / 「/」自行添加节点，不再预置演示用 script×1 + shot×2。
+  // 解冻记录：canvas-magnetic-intent（用户授权解冻 2026-10-14）。
+  nodes: [],
   edges: [],
   selectedId: null,
   status: "拾光导演台就绪 — 可添加分镜节点",
@@ -658,7 +661,12 @@ export const useCanvasStore = create<Store>((set, get) => ({
   dirtyVersion: 0,
   proEditNonce: 0,
   bondedSides: {},
-  setBondedSides: (map) => set({ bondedSides: map }),
+  // 幂等守卫（React #185 根因）：内容与当前表相同则整体不 set，bondedSides 引用不变，
+  // 订阅它的 NoviceCard 不再全量重渲染 → 不再抛 dimensions change → 不断链。
+  setBondedSides: (map) => {
+    if (bondedSidesEqual(get().bondedSides, map)) return;
+    set({ bondedSides: map });
+  },
   showGrid: true,
   smoothLine: true,
   onNodesChange: (changes) =>
@@ -746,6 +754,11 @@ export const useCanvasStore = create<Store>((set, get) => ({
   /** 小白模式双击信号：双击卡片 = 打开右侧精细编辑（Inspector 展开进阶设置）。自增 nonce 触发订阅 */
   requestProEdit: () => set((s) => ({ proEditNonce: s.proEditNonce + 1 })),
   updateNodeData: (id, patch) => {
+    // 幂等守卫（React #185 放大器）：patch 逐键与现值相同 ⇒ 空转，
+    // 整个 set 都不执行（nodes 引用不变、dirtyVersion 不自增）。
+    // 已核查全部调用方，无一依赖「空转也 +1 dirtyVersion」。
+    const target = get().nodes.find((n) => n.id === id);
+    if (target && nodeDataPatchIsNoop(target.data as Record<string, unknown>, patch)) return;
     set((state) => ({
       nodes: state.nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
