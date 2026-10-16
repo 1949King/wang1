@@ -44,6 +44,9 @@ SERVER_FILES = [
     SERVER,
     os.path.join("app", "core", "canvas_routes_get.py"),
     os.path.join("app", "core", "canvas_routes_post.py"),
+    # 2026-10-15：多角色配音编排端点（/host/dub-plan|dub-execute|dub-to-timeline）拆到
+    # canvas_routes_dub.py（canvas_routes_post.py 已 1932 行逼近 2000 阈值）。
+    os.path.join("app", "core", "canvas_routes_dub.py"),
 ]
 CLIENTS = [
     os.path.join("vendor", "shiguang-canvas", "src", "bridge.ts"),
@@ -62,6 +65,9 @@ CLIENTS = [
     # 2026-10-05（刀 A4）：canvasRun.ts 承载 /host/canvas-run（「运行到此处」的后端规划）。
     # 不登记它，新端点对契约检查就是隐身的（与 generationQueue 同一条约定）。
     os.path.join("vendor", "shiguang-canvas", "src", "canvasRun.ts"),
+    # 2026-10-15：dubOrchestration.ts 承载 /host/dub-plan|dub-execute|dub-to-timeline
+    # （多角色配音编排；bridge.ts 已近规模阈值 ⇒ 照 hostCompliance 先例另开文件）。
+    os.path.join("vendor", "shiguang-canvas", "src", "dubOrchestration.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'

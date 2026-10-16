@@ -56,9 +56,10 @@ cap_ids = {c["capability_id"] for c in caps}
 print("[A] 派生与注册")
 # canonical 节点操作：queryNodes/queryTimeline/selectNode(3 read)
 # + addNode/updateNode/connectNodes/deleteNode/setNodeImage/setNodeVideo/importImage
-# + duplicateNode/groupNodes/bindShotlistFrame/undo/redo/breakdown/applyStoryboard/fillStoryboardCell(15 write)
-check(len(caps) == 18, f"派生 18 个 canonical 节点 capability（实际 {len(caps)}）")
-check(len(cap_ids) == 18, "capability_id 无重复")
+# + duplicateNode/groupNodes/bindShotlistFrame/undo/redo/breakdown/applyStoryboard/fillStoryboardCell
+# + stage3dTextPlan（文本→3D 机位）+ dubOrchestrate（多角色配音编排，2026-10-15）(17 write)
+check(len(caps) == 20, f"派生 20 个 canonical 节点 capability（实际 {len(caps)}）")
+check(len(cap_ids) == 20, "capability_id 无重复")
 
 register_builtin_handlers(capability_dispatcher)
 registered = {e["capability_id"] for e in capability_dispatcher.list_capabilities()}

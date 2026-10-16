@@ -299,6 +299,10 @@ class CanvasPostRoutesMixin:
             duration_sec=float(data.get("duration_sec") or 0),
             canvas_node_id=str(data.get("canvas_node_id") or data.get("node_id") or ""),
             canvas_kind=str(data.get("canvas_kind") or data.get("kind") or ""),
+            # 生成参数血缘块：JSON 体直传（非 dict / 空 ⇒ None，零行为变化）
+            generation=(data.get("generation")
+                        if isinstance(data.get("generation"), dict) and data.get("generation")
+                        else None),
         )
         self._json(200 if res.get("success") else 400, res)
         return
@@ -1863,6 +1867,47 @@ class CanvasPostRoutesMixin:
                                   with_depth=True,
                                   use_vision=bool(data.get("use_vision")),
                                   vision_model=str(data.get("vision_model") or ""))
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
+    @_route_post("/host/video-edit")
+    def _p_host_video_edit(self, parsed, raw: bytes, ctype: str) -> None:
+        """指令式视频编辑：本地片段+指令 → Seedance(Base64 直传)/Kling(需公网 URL) 双渠道。
+
+        失败保原镜（original_kept=True）；SHIGUANG_NO_EGRESS=1 时诚实拒绝。
+        """
+        if not _cs()._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.ai.video_edit_client import edit_video
+        res = edit_video(
+            str(data.get("clip_path") or ""),
+            str(data.get("instruction") or ""),
+            channel=str(data.get("channel") or "auto"),
+            video_url=str(data.get("video_url") or ""),
+            model=str(data.get("model") or ""),
+            out_dir=str(data.get("out_dir") or ""),
+        )
+        # 显示缺口补位（步骤 4 前端接线时发现）：结果片段落在 temp/video_edit，
+        # 而画布 WebView 只认 /inbox_file/ ⇒ 成功时**复制**进 inbox 并回可播放 url
+        # （原文件留在原地不删；复制失败如实记进 errors，不冒充可播放）。
+        if res.get("ok") and res.get("clip_path"):
+            cs = _cs()
+            try:
+                import shutil
+                name = cs._safe_filename(os.path.basename(str(res["clip_path"])))
+                shutil.copyfile(str(res["clip_path"]),
+                                os.path.join(cs.canvas_inbox_dir(), name))
+                res["url"] = f"/inbox_file/{name}"
+            except Exception as e:
+                res["url"] = ""
+                res.setdefault("errors", []).append(f"结果复制 inbox 失败: {e}")
         code = 200 if res.get("ok") else 400
         self._json(code, res)
         return

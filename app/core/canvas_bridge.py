@@ -794,8 +794,13 @@ def ingest_local_file(
     duration_sec: float = 0.0,
     canvas_node_id: str = "",
     canvas_kind: str = "",
+    generation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """复制本地文件到 inbox，可选入轨 / 挂角色资产。"""
+    """复制本地文件到 inbox，可选入轨 / 挂角色资产。
+
+    ``generation``：画布节点生成参数血缘块（可选，缺省零行为变化）；
+    随 MATERIAL_TO_TIMELINE 载荷透传，由剪辑侧盖章进 clip["generation"]。
+    """
     inbox = os.path.abspath(canvas_inbox_dir())
     path = os.path.abspath(src_path)
     if not os.path.isfile(path):
@@ -855,6 +860,7 @@ def ingest_local_file(
             duration_sec=float(duration_sec) if duration_sec else 0.0,
             canvas_node_id=canvas_node_id,
             canvas_kind=canvas_kind or asset["kind"],
+            generation=generation,
         )
         result["editor"] = send_res
         if not send_res.get("success"):
@@ -948,8 +954,13 @@ def emit_canvas_to_editor(
     duration_sec: float = 0.0,
     canvas_node_id: str = "",
     canvas_kind: str = "",
+    generation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """推送到剪辑模块。"""
+    """推送到剪辑模块。
+
+    ``generation``：生成参数血缘块（可选，缺省零行为变化）；非空才进载荷，
+    剪辑侧 ``extra_from_material_payload`` 白名单清洗后盖章进 clip。
+    """
     path = os.path.abspath(file_path)
     if not os.path.isfile(path):
         return {"success": False, "message": f"文件不存在: {path}"}
@@ -1007,6 +1018,9 @@ def emit_canvas_to_editor(
         payload["node_id"] = str(canvas_node_id)
     if canvas_kind:
         payload["canvas_kind"] = str(canvas_kind)
+    if generation:
+        # 生成参数血缘块：非空才进载荷（缺省零行为变化），剪辑侧白名单清洗
+        payload["generation"] = dict(generation)
     bus.emit(
         EventType.MATERIAL_TO_TIMELINE,
         payload,

@@ -30,6 +30,7 @@ from .schema import (
     LANE_CLIP,
     canonical_key,
     make_provenance,
+    normalize_generation,
 )
 
 
@@ -181,6 +182,11 @@ def canvas_payload_to_glue(
         v = _as_float(payload.get(key))
         if v is not None:
             out[key] = v
+    # 生成参数血缘块：与 editor_canvas_link.extra_from_material_payload 同语义
+    # （白名单清洗、空块不输出）。
+    gen = normalize_generation(payload.get("generation"))
+    if gen:
+        out["generation"] = gen
     out[ENVELOPE_FIELD] = make_provenance(
         origin=origin, lane=lane, degraded=degraded, note=note
     ).as_dict()
@@ -190,15 +196,20 @@ def canvas_payload_to_glue(
 # ---------------------------------------------------------------------------
 # ④ 契约层 → 可盖章字段（画布/生成 → 剪辑）
 # ---------------------------------------------------------------------------
-def glue_to_clip_patch(glue: Mapping[str, Any]) -> Dict[str, str]:
-    """抽出可盖到 clip 上的关联字段（只含 ``LINK_KEYS``）。空值不输出。"""
+def glue_to_clip_patch(glue: Mapping[str, Any]) -> Dict[str, Any]:
+    """抽出可盖到 clip 上的关联字段（只含 ``LINK_KEYS``）。空值不输出。
+
+    ``generation`` 是嵌套 dict：原样透传（浅拷贝），不做 ``str()`` 压扁 ——
+    与 ``editor_canvas_link.extra_from_material_payload`` 逐字段等价。
+    """
     if not isinstance(glue, Mapping):
         return {}
-    patch: Dict[str, str] = {}
+    patch: Dict[str, Any] = {}
     for key in LINK_KEYS:
         val = glue.get(key)
-        if val:
-            patch[key] = str(val)
+        if not val:
+            continue
+        patch[key] = dict(val) if key == "generation" else str(val)
     return patch
 
 

@@ -88,6 +88,29 @@ function resolveArtifact(d: NodeData):
 }
 
 /**
+ * 从节点数据提取「生成参数血缘块」（智能时间线 P1）。
+ * 只带真实存在的白名单键（prompt/model/seed/character_id）——缺什么不发什么，
+ * 后端 `normalize_generation` 再做最终清洗。
+ */
+export function generationFromNode(d: NodeData): Record<string, string | number> | undefined {
+  const g: Record<string, string | number> = {};
+  if ("prompt" in d && d.prompt) g.prompt = String(d.prompt);
+  if ("model" in d && d.model) g.model = String(d.model);
+  if ("seed" in d && d.seed !== undefined && d.seed !== null) g.seed = Number(d.seed);
+  if ("characterId" in d && d.characterId) g.character_id = String(d.characterId);
+  return Object.keys(g).length ? g : undefined;
+}
+
+/** 入轨链路身份的唯一构造点：node_id/kind + 可选 generation 血缘块。 */
+export function nodeLink(
+  id: string,
+  d: NodeData,
+): { node_id: string; kind: string; generation?: Record<string, string | number> } {
+  const generation = generationFromNode(d);
+  return generation ? { node_id: id, kind: d.kind, generation } : { node_id: id, kind: d.kind };
+}
+
+/**
  * 节点集合 → 剪辑时间线。
  *
  * @param deps 注入的外部依赖（nodes / setStatus / setGenerating / prefs）
@@ -139,7 +162,7 @@ export async function ingestNodes(
     try {
       const title = ("title" in d ? d.title : "") || `${d.kind}_${n.id}`;
       const prefix = String(i + 1).padStart(2, "0");
-      const link = { node_id: n.id, kind: d.kind };
+      const link = nodeLink(n.id, d);
       if (art.kind === "video" || art.kind === "audio") {
         const resp = await fetch(art.url);
         const blob = await resp.blob();

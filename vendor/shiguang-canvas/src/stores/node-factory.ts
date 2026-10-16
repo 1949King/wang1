@@ -476,6 +476,8 @@ export type SourceData = {
   imageUrl?: string;
   videoUrl?: string;
   audioUrl?: string;
+  /** 上传到宿主后回传的本地磁盘路径（指令式编辑的 clip_path 来源；小文件走 dataURL 内联时为空） */
+  hostPath?: string;
   content?: string;
   prompt?: string;
   editorClipId?: string;

@@ -110,6 +110,8 @@ CHECKS = [
     ("PROPCAPS", "_verify/check_provider_caps.py", "能力声明 + 自动路由"),
     ("PROVIDERPOOL", "_verify/check_provider_pool.py", "额度池调度"),
     ("SCOREBOOK", "_verify/check_score_book.py", "评分回写闭环"),
+    ("VIDEOEDIT", "_verify/check_video_edit_client.py",
+     "指令式视频编辑：能力位/诚实拒绝/渠道顺序/失败保原镜"),
     # ── 报价 + 健康（V4.36.0 P1-1/P1-2）──
     ("QUOTEHEALTH", "_verify/check_quote_health.py", "生成前报价 + 渠道健康"),
     ("PIPEJOBS", "_verify/check_pipeline_jobs.py", "管线异步任务（submit/status/cancel）"),
@@ -189,6 +191,9 @@ CHECKS = [
     ("POWERON", "_verify/check_poweron_e2e.py",
      "通电验证：换词重配五件套 / 拉片 / 重拍端点真可达（起真服务打 HTTP）"),
     ("EGRESS", "_verify/check_provider_egress.py", "素材不出域（SHIGUANG_NO_EGRESS 硬开关）"),
+    # ── 配音听写回环验证（配音一致性方案 P1，2026-10-15）──
+    ("DUBVERIFY", "_verify/check_dub_verify.py",
+     "配音验证闭环（听写回环/字幕=音频/诚实降级 + 编排纯函数）"),
 ]
 
 _py = _python()

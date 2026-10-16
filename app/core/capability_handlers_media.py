@@ -183,6 +183,42 @@ class MediaCapabilityHandlers:
             error=None if ok else (res.get("message") or "拉片 L2 失败"),
         )
 
+    def video_edit(self, req: CapabilityRequest) -> CapabilityResult:
+        """指令式视频编辑：复用 /host/video-edit 的 edit_video（Seedance/Kling 双渠道）。
+
+        与 segment_retake 的边界：**重拍=重新生成，编辑=改原片**。
+        失败保原镜（original_kept=True，绝不产半成品冒充）；
+        Kling 渠道需显式公网 video_url（素材出域要知情）；
+        SHIGUANG_NO_EGRESS=1 时整个请求诚实拒绝。
+        params：clip_path / instruction / channel(auto|seedance|kling 可选) /
+        video_url(Kling 必需) / model(可选) / out_dir(可选)。
+        """
+        try:
+            from app.core.ai.video_edit_client import edit_video
+        except Exception as e:
+            return CapabilityResult(req.request_id, False, error=f"编辑模块不可用: {e}")
+        p = req.params or {}
+        instruction = str(p.get("instruction") or "")
+        if not instruction:
+            return CapabilityResult(req.request_id, False, error="缺少编辑指令（instruction）")
+        try:
+            res = edit_video(
+                str(p.get("clip_path") or ""),
+                instruction,
+                channel=str(p.get("channel") or "auto"),
+                video_url=str(p.get("video_url") or ""),
+                model=str(p.get("model") or ""),
+                out_dir=str(p.get("out_dir") or ""),
+            )
+        except Exception as e:
+            logger.debug("[media] 视频编辑异常", exc_info=True)
+            return CapabilityResult(req.request_id, False, error=f"视频编辑失败: {e}")
+        ok = bool(res.get("ok"))
+        return CapabilityResult(
+            req.request_id, ok, output=res,
+            error=None if ok else (res.get("message") or "视频编辑失败（原片段已保留）"),
+        )
+
     def segment_retake(self, req: CapabilityRequest) -> CapabilityResult:
         """片段重拍：复用 /host/segment-retake 的 splice_retake。
         只替换视频指定时间段（保音轨/时长对齐），接缝风险如实报告。

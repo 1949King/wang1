@@ -6,16 +6,27 @@ AI 只出建议，确认后才 ``push_editor_to_canvas``。
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, MutableMapping, Sequence
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
 
-LINK_KEYS = ("canvas_node_id", "canvas_kind", "canvas_title")
+try:  # 运行时走包内相对导入；守卫脚本以顶层模块导入（无包上下文）时回退
+    from .glue.schema import normalize_generation
+except ImportError:  # pragma: no cover
+    from glue.schema import normalize_generation  # type: ignore
+
+# "generation" 为嵌套 dict（生成参数血缘块）：载荷携带且非空 ⇒ 整块替换；
+# 缺省 / 空块 ⇒ 不覆盖已有（与字符串键同一条 `if val` 纪律，语义见 schema.py）。
+LINK_KEYS = ("canvas_node_id", "canvas_kind", "canvas_title", "generation")
 
 
-def extra_from_material_payload(data: Any) -> Dict[str, str]:
-    """从 MATERIAL_TO_TIMELINE / ingest 载荷抽出可盖到 clip 上的字段。"""
+def extra_from_material_payload(data: Any) -> Dict[str, Any]:
+    """从 MATERIAL_TO_TIMELINE / ingest 载荷抽出可盖到 clip 上的字段。
+
+    含 ``generation`` 血缘块（经 ``normalize_generation`` 白名单清洗，
+    空块不输出 —— 缺什么不发什么，绝不猜默认值）。
+    """
     if not isinstance(data, Mapping):
         return {}
-    extra: Dict[str, str] = {}
+    extra: Dict[str, Any] = {}
     nid = data.get("canvas_node_id") or data.get("node_id")
     if nid:
         extra["canvas_node_id"] = str(nid)
@@ -25,17 +36,24 @@ def extra_from_material_payload(data: Any) -> Dict[str, str]:
     title = data.get("title")
     if title:
         extra["canvas_title"] = str(title)
+    gen = normalize_generation(data.get("generation"))
+    if gen:
+        extra["generation"] = gen
     return extra
 
 
 def stamp_clip(clip: MutableMapping[str, Any], extra: Mapping[str, Any]) -> None:
-    """就地盖 round-trip 字段；空值不覆盖已有。"""
+    """就地盖 round-trip 字段；空值不覆盖已有。
+
+    ``generation`` 例外语义：载荷携带且非空 ⇒ **整块替换**旧血缘
+    （重拍 / 改参数后旧 prompt/seed 不得残留）；空块 ⇒ 不动已有。
+    """
     if not extra:
         return
     for key in LINK_KEYS:
         val = extra.get(key)
         if val:
-            clip[key] = val
+            clip[key] = dict(val) if key == "generation" else val
     title = extra.get("canvas_title")
     if title and not clip.get("name"):
         clip["name"] = title
@@ -88,6 +106,58 @@ def public_clip_row(clip: Mapping[str, Any], index: int) -> Dict[str, Any]:
         "canvas_node_id": clip.get("canvas_node_id") or "",
         "canvas_kind": clip.get("canvas_kind") or "",
     }
+
+
+def lineage_from_clip(clip: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """clip → 画布节点的正式血缘记录；无关联 ⇒ None（诚实：不造空记录）。
+
+    「有关联」判据：有 ``canvas_node_id`` 或有非空 ``generation`` 血缘块。
+    数值字段宽松清洗（不可转换即丢弃），绝不抛异常。
+    """
+    if not isinstance(clip, Mapping):
+        return None
+    nid = str(clip.get("canvas_node_id") or "")
+    gen = clip.get("generation")
+    has_gen = isinstance(gen, Mapping) and bool(gen)
+    if not nid and not has_gen:
+        return None
+    rec: Dict[str, Any] = {
+        "clip_id": str(clip.get("id") or ""),
+        "canvas_node_id": nid,
+        "canvas_kind": str(clip.get("canvas_kind") or ""),
+        "path": str(clip.get("path") or clip.get("file_path") or ""),
+        "generation": dict(gen) if has_gen else {},
+    }
+    for key in ("duration", "in_point", "out_point"):
+        val = clip.get(key)
+        if val is None:
+            continue
+        try:
+            rec[key] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return rec
+
+
+def lineage_index(clips: Sequence[Any]) -> Dict[str, Any]:
+    """按需从 ``_clips`` 快照构建双向血缘索引（不落第二份真相源）。
+
+    返回 ``{"by_clip_id": {clip_id: rec}, "by_node_id": {node_id: [rec, …]}}``；
+    同一节点可多次入轨 ⇒ node 方向为列表。
+    """
+    by_clip_id: Dict[str, Dict[str, Any]] = {}
+    by_node_id: Dict[str, List[Dict[str, Any]]] = {}
+    for c in clips or []:
+        rec = lineage_from_clip(c)
+        if not rec:
+            continue
+        cid = rec["clip_id"]
+        if cid:
+            by_clip_id[cid] = rec
+        nid = rec["canvas_node_id"]
+        if nid:
+            by_node_id.setdefault(nid, []).append(rec)
+    return {"by_clip_id": by_clip_id, "by_node_id": by_node_id}
 
 
 def suggest_canvas_roundtrip(ctx: Mapping[str, Any]) -> List[Dict[str, Any]]:

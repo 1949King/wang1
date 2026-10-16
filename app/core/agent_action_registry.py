@@ -113,6 +113,11 @@ _CANVAS_ACTION_ROWS: Tuple[Tuple[str, str, str, str], ...] = (
     # 文本 → 3D 粗模（仅机位档）：自然语言/剧本 → 机位+运镜计划 → 应用到 3D 导演台。
     # 复用既有「文本→分镜→机位」后端通道与既有 applyStage3dCameraPlan 消费端，不新增 3D 通道。
     ("stage3dTextPlan", "safe", "canvas_write", "文本 → 3D 机位：自然语言/剧本 → 机位+运镜计划并应用到 3D 导演台"),
+    # 多角色配音编排（2026-10-15）：剧本 → 逐句角色路由 TTS → 配音时长反推镜头时长 →
+    # 配音轨落时间线。复用既有 voice_generator 引擎链与唯一入轨通道，不新建第二条链路；
+    # 查不到角色音色时诚实降级（degraded）用默认声线，不伪造。
+    ("dubOrchestrate", "safe", "canvas_write",
+     "剧本 → 多角色配音+配音时长反推镜头时长+配音轨落时间线"),
     ("fillStoryboardCell", "safe", "canvas_write", "填充分镜单元格"),
     ("canvas_fill_storyboard_cell", "safe", "canvas_write", "fillStoryboardCell 别名"),
     # ── 媒体生成（付费） ──

@@ -156,6 +156,15 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "left", "拉片运动分析",
      ["拉片", "运镜", "镜头运动", "景别", "特写", "中景", "推拉摇移",
       "breakdown_l2", "参考片分析", "运镜分析"]),
+    # ── 指令式视频编辑（2026-10-15）────────────────────────────────────
+    # 与 segment_retake 边界：重拍=重新生成，编辑=改原片。Seedance 走 Base64 直传；
+    # Kling 需显式公网 video_url（素材出域要知情）。失败保原镜，绝不产半成品冒充成品。
+    ("canvas.video_edit", "canvas", "media_write", True,
+     "指令式视频编辑：本地片段+指令（如「把外套改成红色，其余保持不变」）→ "
+     "Seedance/Kling 双渠道执行；失败原片段保留并如实标注",
+     "left", "指令式视频编辑",
+     ["编辑视频", "指令式编辑", "video edit", "改颜色", "改服装", "局部修改",
+      "保持不变", "omni", "base_video"]),
     ("canvas.segment_retake", "canvas", "media_write", False,
      "片段重拍：只替换视频指定时间段（保音轨/时长对齐，接缝风险如实报告）",
      "left", "片段重拍",

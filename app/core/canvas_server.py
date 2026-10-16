@@ -110,6 +110,7 @@ from app.core.canvas_route_registry import (
     _route_post,
     dispatch_table as _dispatch_table_impl,
 )
+from app.core.canvas_routes_dub import CanvasDubRoutesMixin
 from app.core.canvas_routes_get import CanvasGetRoutesMixin
 from app.core.canvas_routes_post import CanvasPostRoutesMixin
 
@@ -336,7 +337,7 @@ def _read_local_prompt_json(source_id: str) -> Any:
 # 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
@@ -589,6 +590,16 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
             duration_sec = 0.0
         node_id = (qs.get("node_id") or qs.get("canvas_node_id") or [""])[0]
         canvas_kind = (qs.get("kind") or qs.get("canvas_kind") or [""])[0]
+        # 生成参数血缘块（可选）：前端 JSON 串经 query 透传，非法/缺省 ⇒ None（零行为变化）
+        generation: Optional[Dict[str, Any]] = None
+        gen_raw = (qs.get("generation_json") or [""])[0]
+        if gen_raw:
+            try:
+                _gen = json.loads(gen_raw)
+                if isinstance(_gen, dict) and _gen:
+                    generation = _gen
+            except (ValueError, TypeError):
+                generation = None
 
         if "multipart/form-data" in ctype:
             # 极简 multipart：找 filename= 与空行后的二进制（够用；复杂表单走 /ingest_path）
@@ -644,6 +655,7 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
                     duration_sec=duration_sec,
                     canvas_node_id=node_id,
                     canvas_kind=canvas_kind,
+                    generation=generation,
                 )
                 self._json(200 if res.get("success") else 400, res)
                 return
@@ -672,6 +684,7 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, BaseHTTPReques
             duration_sec=duration_sec,
             canvas_node_id=node_id,
             canvas_kind=canvas_kind,
+            generation=generation,
         )
         self._json(200 if res.get("success") else 400, res)
         return

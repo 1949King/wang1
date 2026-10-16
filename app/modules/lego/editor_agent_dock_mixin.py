@@ -280,7 +280,7 @@ class EditorAgentDockMixin:
             from PyQt6.QtCore import QSettings
             QSettings("ShiguangEditor", "AgentPanel").setValue(
                 "local_think_enabled", bool(checked))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug(f"[Agent] 保存本地思考偏好失败: {e}")
         self._refresh_local_think_tooltip()
 
@@ -317,7 +317,7 @@ class EditorAgentDockMixin:
             try:
                 from app.modules.lego.model_config import discover_local_models
                 discover_local_models(force=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.debug(f"[Agent] 后台探测本地模型失败: {e}")
             finally:
                 self._agent_models_probe_done = True
@@ -344,5 +344,5 @@ class EditorAgentDockMixin:
         self._agent_models_warming = False
         try:
             self._refresh_edit_agent_models()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug(f"[Agent] 探测完成后刷新模型下拉失败: {e}")

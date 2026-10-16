@@ -34,6 +34,15 @@ import {
   saveAgentMode,
   type AgentMode,
 } from "./agentPolicy";
+import {
+  dubPlan,
+  dubExecute,
+  dubToTimeline,
+  collectShotRefs,
+  buildShotDurationPatches,
+  formatDubPlanForConfirm,
+  summarizeDubExecute,
+} from "./dubOrchestration";
 
 type Attach = {
   id: string;
@@ -610,6 +619,54 @@ export default function AgentPanel({
           }
           useCanvasStore.getState().applyStage3dCameraPlan(plan.cameras);
           push("system", `✅ 已生成 ${plan.cameras.length} 个机位并应用到 3D 导演台（可在 3D 台内微调/录制白模参考视频）`);
+          break;
+        }
+        case "dubOrchestrate": {
+          // 剧本 → 多角色配音（逐句路由角色音色）→ 配音时长反推镜头时长 → 配音轨落时间线。
+          // 这是"写效果"，协作模式下 decideCanvasTool 已在上方弹过确认，这里不重复确认。
+          let script = String(params.script || params.content || "").trim();
+          if (!script) {
+            const firstScript = nodes.find((n) => (n.data as NodeData).kind === "script");
+            if (firstScript) {
+              script = String((firstScript.data as Extract<NodeData, { kind: "script" }>).content || "").trim();
+            }
+          }
+          if (!script) throw new Error("dubOrchestrate 缺少剧本（params.script / script 节点均为空）");
+          const characters = Array.isArray(params.characters) ? params.characters : undefined;
+          const shotRefs = collectShotRefs(nodes as any);
+
+          push("system", `🔊 收到配音编排请求（${script.length} 字 · ${shotRefs.length} 个镜头），先出计划…`);
+          const plan = await dubPlan(script, characters);
+          if (!plan.ok) throw new Error(plan.message || "配音计划生成失败");
+          push("system", formatDubPlanForConfirm(plan));
+
+          push("system", "🎙️ 正在逐句合成配音（本地 TTS）…");
+          const exec = await dubExecute(script, {
+            characters,
+            shots: shotRefs.length ? shotRefs : undefined,
+            // 听写校验 / 音→字字幕为可选（会加载 Whisper，较慢）：用户显式要求时才开
+            verify: params.verify === true,
+            subtitles: params.subtitles === true,
+          });
+          push("system", summarizeDubExecute(exec));
+          if (exec.red_flags && exec.red_flags > 0) {
+            push("system", `⚠️ ${exec.red_flags} 句发音相似度偏低（红标），建议复核后再用`);
+          }
+
+          // 用配音真实时长反推镜头时长（只有拿到音频的镜头才改；无证据保持估算）
+          for (const { id, patch } of buildShotDurationPatches(exec.shots, shotRefs)) {
+            updateNodeData(id, patch);
+          }
+
+          const segments = exec.track?.segments || [];
+          if (segments.length) {
+            const tl = await dubToTimeline(segments);
+            if (tl.ok) {
+              push("system", `✅ 配音轨已落时间线音轨（${tl.pushed || 0} 段）`);
+            } else {
+              push("system", `⚠️ 配音已生成，但落轨失败：${tl.message || `${tl.failed || 0} 段未入轨`}`);
+            }
+          }
           break;
         }
         default:

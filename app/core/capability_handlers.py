@@ -1667,6 +1667,10 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("canvas.reference_breakdown_l2", CapabilityCategory.CANVAS,
                         media_handlers.reference_breakdown_l2,
                         "逐帧拉片 L2（运镜深度推断+景别视觉 enrich，置信度门槛如实标注）")
+    # 指令式视频编辑（2026-10-15）：Seedance Base64 / Kling 公网 URL 双渠道，失败保原镜
+    dispatcher.register("canvas.video_edit", CapabilityCategory.CANVAS,
+                        media_handlers.video_edit,
+                        "指令式视频编辑（改原片不重生成；失败保原镜，诚实标注）")
     dispatcher.register("canvas.segment_retake", CapabilityCategory.CANVAS,
                         media_handlers.segment_retake, "片段重拍（保音轨/时长对齐）")
     # LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线

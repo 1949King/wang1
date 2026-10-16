@@ -1,7 +1,7 @@
 /**
  * AI-Canvas 对齐补缺：3D 导演台 / 数字人 / 逐帧动画 / 全景 / 画布笔记 / 源文件
  */
-import React, { memo, useMemo, useRef } from "react";
+import React, { memo, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeResizer, type NodeProps } from "@xyflow/react";
 import {
   useCanvasStore,
@@ -18,6 +18,7 @@ import {
   animationGrid,
 } from "./store";
 import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard, planStoryboardCameras } from "./bridge";
+import { runVideoEdit, type VideoEditChannel } from "./hostVideoEdit";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -716,6 +717,15 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const setStatus = useCanvasStore((s) => s.setStatus);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** ✂️ 指令式编辑卡状态（P1-2 步骤 4，2026-10-15）：
+   *  指令/渠道/公网 URL/出域勾选/执行中 —— 全部组件本地态，成功结果才写回节点数据。 */
+  const [editIns, setEditIns] = useState("");
+  const [editChannel, setEditChannel] = useState<VideoEditChannel>("auto");
+  const [editPublicUrl, setEditPublicUrl] = useState("");
+  /** 素材出域显式同意：两个渠道都是云端，默认关，未勾不放行（项目既有纪律）。 */
+  const [editEgress, setEditEgress] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const editFileRef = useRef<HTMLInputElement>(null);
 
   const accept =
     d.mediaType === "video"
@@ -739,7 +749,7 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
         const up = await uploadAssetToHost(file);
         if (!up.ok || !up.url) throw new Error(up.message || "上传失败");
         if (d.mediaType === "image") updateNodeData(id, { imageUrl: up.url, fileName: file.name, title: file.name });
-        if (d.mediaType === "video") updateNodeData(id, { videoUrl: up.url, fileName: file.name, title: file.name });
+        if (d.mediaType === "video") updateNodeData(id, { videoUrl: up.url, hostPath: up.path, fileName: file.name, title: file.name });
         if (d.mediaType === "audio") updateNodeData(id, { audioUrl: up.url, fileName: file.name, title: file.name });
       } else {
         const url = await readFileAsDataUrl(file);
@@ -750,6 +760,65 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
       setStatus(`源文件已载入：${file.name}`);
     } catch (e) {
       setStatus(`源文件失败：${e}`);
+    }
+  };
+
+  /** 编辑卡补上传：小文件走 dataURL 内联时没有磁盘路径（clip_path 拿不到），
+   *  这里强制经宿主上传拿 up.path，节点素材同步换成上传后的可播放 URL。 */
+  const onEditUpload = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const up = await uploadAssetToHost(file);
+      if (!up.ok || !up.path) throw new Error(up.message || "上传失败");
+      updateNodeData(id, {
+        hostPath: up.path,
+        videoUrl: up.url || d.videoUrl,
+        fileName: file.name,
+        title: file.name,
+      });
+      setStatus(`片段已上传，本地路径就绪：${file.name}`);
+    } catch (e) {
+      setStatus(`片段上传失败：${e}`);
+    } finally {
+      if (editFileRef.current) editFileRef.current.value = "";
+    }
+  };
+
+  /** ✂️ 执行指令式编辑（hostVideoEdit.runVideoEdit 负责全部预检与诚实映射）：
+   *  成功 → 节点指向新片段（磁盘路径 + inbox 可播放 URL，原文件后端不删）；
+   *  失败 → 原镜保持不动，message/errors 逐字回报，不美化。 */
+  const onRunEdit = async () => {
+    if (!d.hostPath) {
+      setStatus("指令式编辑：先点「上传片段拿本地路径」");
+      return;
+    }
+    setEditing(true);
+    try {
+      const res = await runVideoEdit({
+        clipPath: d.hostPath,
+        instruction: editIns,
+        channel: editChannel,
+        videoUrl: editPublicUrl.trim(),
+        egressAck: editEgress,
+      });
+      if (res.ok) {
+        updateNodeData(id, {
+          hostPath: res.clipPath || d.hostPath,
+          ...(res.url ? { videoUrl: res.url } : {}),
+        });
+        setStatus(
+          `指令式编辑完成（${res.channelUsed || "auto"}）：${res.url ? "新片段已就位" : `新片段在 ${res.clipPath}`}` +
+            `${res.costNote ? ` · ${res.costNote}` : ""}` +
+            `${res.errors.length ? ` · 顺延失败：${res.errors.join("；")}` : ""}`,
+        );
+      } else {
+        setStatus(
+          `指令式编辑失败（原片段保留）：${res.message}` +
+            `${res.errors.length ? ` · ${res.errors.join("；")}` : ""}`,
+        );
+      }
+    } finally {
+      setEditing(false);
     }
   };
 
@@ -780,6 +849,72 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
         {d.mediaType === "video" && d.videoUrl ? (
           <div className="img-wrap">
             <video src={d.videoUrl} muted playsInline controls />
+          </div>
+        ) : null}
+        {d.mediaType === "video" ? (
+          <div className="sg-source-edit">
+            <textarea
+              className="sg-node-inline-ta"
+              value={editIns}
+              placeholder="✂️ 编辑指令（如「去掉背景里走动的人」）…"
+              onChange={(e) => setEditIns(e.target.value)}
+            />
+            {editChannel !== "seedance" ? (
+              <input
+                className="sg-node-inline-ta"
+                value={editPublicUrl}
+                placeholder="公网视频 URL（Kling 必填；auto 选填用于顺延）"
+                onChange={(e) => setEditPublicUrl(e.target.value)}
+              />
+            ) : null}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={editChannel}
+                onChange={(e) => setEditChannel(e.target.value as VideoEditChannel)}
+              >
+                <option value="auto">auto（Seedance 先）</option>
+                <option value="seedance">Seedance</option>
+                <option value="kling">Kling</option>
+              </select>
+              <label style={{ fontSize: 10, color: "#94a3b8" }} title="两个渠道都在云端处理片段，勾选才会发送">
+                <input
+                  type="checkbox"
+                  checked={editEgress}
+                  onChange={(e) => setEditEgress(e.target.checked)}
+                />
+                允许发送到云端
+              </label>
+              <button
+                type="button"
+                className="sg-node-mini-btn primary"
+                disabled={editing || !editEgress}
+                onClick={() => void onRunEdit()}
+              >
+                {editing ? "编辑中…" : "✂️ 执行编辑"}
+              </button>
+            </div>
+            {d.hostPath ? (
+              <div className="meta">本地片段路径就绪：{d.fileName || ""}</div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="sg-node-mini-btn"
+                  disabled={editing}
+                  onClick={() => editFileRef.current?.click()}
+                >
+                  上传片段拿本地路径
+                </button>
+                <div className="meta">小文件走 dataURL 内联，编辑需先上传拿磁盘路径</div>
+              </>
+            )}
+            <input
+              ref={editFileRef}
+              type="file"
+              accept="video/*"
+              hidden
+              onChange={(e) => void onEditUpload(e.target.files?.[0] || null)}
+            />
           </div>
         ) : null}
         {d.mediaType === "audio" && d.audioUrl ? <audio src={d.audioUrl} controls /> : null}

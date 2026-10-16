@@ -536,6 +536,35 @@ class CanvasGetRoutesMixin:
         self._json(200, snap)
         return
 
+    # ── 只读血缘查询：clip ↔ 画布节点 + 生成参数（智能时间线 P1）──
+    # 数据源 = project_snapshot.get_full_clips()（_clips 快照，含 generation 块），
+    # 按需构建索引、不落第二份真相源。无命中 records: []，不报错不猜。
+    @_route_get("/host/clip-lineage")
+    def _route_host_clip_lineage(self, parsed=None):
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized", "records": []})
+            return
+        qs = parse_qs(parsed.query) if hasattr(parsed, "query") else {}
+        clip_id = (qs.get("clip_id") or [""])[0]
+        node_id = (qs.get("node_id") or [""])[0]
+        try:
+            from app.core.editor_canvas_link import lineage_index
+            from app.core.project_snapshot import get_full_clips
+        except ImportError:
+            from core.editor_canvas_link import lineage_index  # type: ignore
+            from core.project_snapshot import get_full_clips  # type: ignore
+        idx = lineage_index(get_full_clips() or [])
+        records = []
+        if clip_id:
+            rec = idx["by_clip_id"].get(clip_id)
+            if rec:
+                records = [rec]
+        elif node_id:
+            records = list(idx["by_node_id"].get(node_id) or [])
+        self._json(200, {"ok": True, "records": records})
+        return
+
     @_route_get("/host/plugins")
     def _route_host_plugins(self, parsed=None):
         """画布节点插件列表（从 Qt 端 plugin-store 读取）"""

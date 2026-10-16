@@ -4346,7 +4346,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
         兼容两种载荷：
         - 单文件: {"file_path": "...", "source": "...", "title": "..."}
-        - 批量: {"clips": [{"path"/"file_path": "...", ...}, ...], "source": "..."}（PreviewValidationLoop）
+        - 批量: {"clips": [{"path"/"file_path": "...", ...}], "source": "..."}（PreviewValidationLoop）
+
+        另：单文件中若 kind=="audio"（或路径为音频扩展名），走
+        `_add_audio_clip_to_timeline()` **纯音轨**入轨，不产生视频片段
+        （配音轨自动落位，2026-10-15 解冻 playback-av）。
         """
         data = event.data if hasattr(event, 'data') else event
         src = data.get("source", "") if isinstance(data, dict) else ""
@@ -4378,7 +4382,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
         file_path = data.get("file_path", "") if isinstance(data, dict) else str(data)
         if file_path and os.path.exists(file_path):
-            self._add_clip_to_timeline(file_path)
+            # 配音轨自动落位（2026-10-15 解冻 playback-av）：kind=="audio" 或音频扩展名
+            # ⇒ 纯音轨入轨；旧 _add_clip_to_timeline 只认视频、会把 wav 当视频片段塞进视频轨。
+            _m_kind = str(data.get("kind") or "").lower() if isinstance(data, dict) else ""
+            _m_ext = os.path.splitext(file_path)[1].lower()
+            _m_is_audio = _m_kind == "audio" or (
+                not _m_kind and _m_ext in (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
+            )
+            if _m_is_audio:
+                self._add_audio_clip_to_timeline(
+                    file_path,
+                    title=(data.get("title", "") if isinstance(data, dict) else "") or "",
+                    duration_hint=(data.get("duration_hint", 0) if isinstance(data, dict) else 0) or 0,
+                )
+            else:
+                self._add_clip_to_timeline(file_path)
             if isinstance(data, dict):
                 try:
                     from app.core.editor_canvas_link import extra_from_material_payload, stamp_clip
@@ -9146,6 +9164,82 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             logger.exception("添加片段到时间线失败")
             QMessageBox.warning(self, "添加失败", f"添加片段到时间线失败: {e}")
             logger.error(f'添加片段到时间线失败: {e}')
+
+    def _add_audio_clip_to_timeline(self, file_path: str, title: str = "", duration_hint: float = 0.0):
+        """把**纯音频**素材加入时间线音轨（配音轨自动落位，2026-10-15 解冻 playback-av）。
+
+        与 `_add_clip_to_timeline` 的区别：只在 audio 轨创建 clip，**不产生
+        「wav 当视频片段」的脏数据**（旧方法对任何素材都先建 video 片段再配联动音轨，
+        纯音频会被错误地当成视频）。时长优先用 `duration_hint`（配音音频的真实时长），
+        否则 ffprobe 探测；最终统一由 `_sync_kernel_timeline()` 写进内核音轨。
+
+        参数：
+            file_path: 音频文件路径（.wav/.mp3/...）
+            title: 片段显示名（缺省用文件名）
+            duration_hint: 已知时长（配音链传递，避免 ffprobe 低估）
+        """
+        import os as _os
+        import time as _time
+
+        if not file_path or not _os.path.exists(file_path):
+            QMessageBox.warning(self, "添加失败", "音频文件不存在")
+            return
+        try:
+            try:
+                from app.core.timeline_manager import timeline_manager as real_timeline_manager
+            except ImportError:
+                from core.timeline_manager import timeline_manager as real_timeline_manager  # type: ignore
+            if not self._current_timeline:
+                self._current_timeline = real_timeline_manager.create_timeline("默认时间线")
+            # 时长真相源：配音链给的 duration_hint 优先（= 音频真实时长），否则探测
+            duration = float(duration_hint) if duration_hint and float(duration_hint) > 0 else 0.0
+            if duration <= 0.05:
+                duration = float(self._resolve_media_duration(file_path) or 0.0)
+            if duration <= 0.05:
+                duration = 3.0
+            audio_clip = {
+                "id": f"audio_{int(_time.time() * 1000)}",
+                "name": (title or _os.path.basename(file_path)),
+                "path": file_path,
+                "start_time": self._next_clip_start_time(),
+                "duration": duration,
+                "in_point": 0.0,
+                "out_point": duration,
+                "track": 1,
+                "type": "audio",
+                "effects": {},
+                "transitions": [],
+            }
+            if hasattr(self, "_timeline_widget") and self._timeline_widget is not None:
+                tw = self._timeline_widget
+                audio_track_i = (
+                    tw.find_track_index_by_type("audio", default=1)
+                    if hasattr(tw, "find_track_index_by_type")
+                    else 1
+                )
+                audio_clip["track"] = audio_track_i
+                widget = tw.add_clip(audio_clip, audio_track_i)
+                if widget is not None:
+                    self._clip_widgets.append(widget)
+                    self._clip_id_to_widget[audio_clip["id"]] = widget
+            self._clips.append(audio_clip)
+            self._sync_kernel_timeline()
+            self._touch_project_dirty()
+            try:
+                self._notify_edit(f"已加入音轨: {audio_clip['name']}")
+            except Exception:
+                logger.warning("编辑通知发送失败", exc_info=True)
+            logger.info(f"✅ 配音音频已加入音轨: {audio_clip['name']} ({duration:.2f}s)")
+            try:
+                self._record_action({"type": "add_clip", "clip": None, "audio_clip": audio_clip})
+            except Exception:
+                logger.debug("音频入轨撤销记录失败", exc_info=True)
+        except Exception as e:
+            logger.exception("音频入轨失败")
+            try:
+                QMessageBox.warning(self, "添加失败", f"音频入轨失败: {e}")
+            except Exception:
+                logger.warning("音频入轨失败提示框弹出异常", exc_info=True)
 
     def _probe_video_duration(self, file_path: str) -> float:
         """读取视频时长，失败时返回 0 让调用方回退默认值。"""

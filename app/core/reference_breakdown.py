@@ -577,7 +577,7 @@ def _ask_cloud_vision(provider: str, model: str, frames: List[bytes]) -> Optiona
     except Exception as e:
         logger.warning("[reference_breakdown] 云端视觉解析调用失败: %s", e)
         return None
-    if not text or text.startswith("错误") or text.startswith("API 错误"):
+    if not text or text.startswith(("错误", "API 错误")):
         logger.debug("[reference_breakdown] 云端视觉返回异常: %s", text[:120])
         return None
     return _parse_json_obj_loose(text)

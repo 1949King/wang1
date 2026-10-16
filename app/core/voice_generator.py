@@ -167,6 +167,14 @@ class VoiceGenerationResult:
     # 注意：按 serialization-field-symmetry 纪律，新增字段必须同步 to_dict()，
     # 否则写日志/落盘时它会静默丢失。
     is_placeholder: bool = False
+    # 2026-10-15 新增（配音一致性方案 P1②）：听写回环验证相似度。
+    # None = **未做验证**（ASR 未启用或调用方未请求）——不伪造默认值，如实标注。
+    # 由 dub_verify.verify_dubbing() 回填；低于阈值时调用方应红标。
+    verified_similarity: Optional[float] = None
+    # 字幕来源标记（P1②）："asr" = 时间轴来自**音频听写**（真相）；
+    # "estimated" = 剧本文本估算。严禁在 TTS 路径用剧本回填字幕——
+    # 剧本只是"意图"，音频才是"真相"。
+    subtitle_source: str = "estimated"
 
     def to_dict(self) -> Dict:
         return {
@@ -179,6 +187,8 @@ class VoiceGenerationResult:
             "generation_time": self.generation_time,
             "created_at": self.created_at,
             "is_placeholder": self.is_placeholder,
+            "verified_similarity": self.verified_similarity,
+            "subtitle_source": self.subtitle_source,
         }
 
 

@@ -49,7 +49,7 @@ import {
 } from "./bridge";
 // Wave 0 #13：入轨编排抽到独立文件（App.tsx 已1999/2000 顶格，只减不增）
 // + 批量快通道：后端 /host/batch-to-timeline 已完整实现但前端零调用。
-import { ingestNodes, nodeImageUrl } from "./editorIngress";
+import { ingestNodes, nodeImageUrl, nodeLink } from "./editorIngress";
 import { pickDoneIndices } from "./hostBatchOps";
 import {
   generateVideoUnified,
@@ -1327,7 +1327,7 @@ export default function App() {
       const title =
         ("title" in selectedData ? selectedData.title : "") ||
         `${selectedData.kind}_${selected.id}`;
-      const link = { node_id: selected.id, kind: selectedData.kind };
+      const link = nodeLink(selected.id, selectedData);
 
       if (selectedData.kind === "video" && selectedData.videoUrl) {
         const resp = await fetch(selectedData.videoUrl);

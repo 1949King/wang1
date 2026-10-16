@@ -1704,7 +1704,14 @@ export async function sendBlobToEditor(
   blob: Blob,
   filename: string,
   prefs: BridgePrefs,
-  opts?: { duration_sec?: number; title?: string; node_id?: string; kind?: string },
+  opts?: {
+    duration_sec?: number;
+    title?: string;
+    node_id?: string;
+    kind?: string;
+    /** 生成参数血缘块（prompt/model/seed/character_id…缺键不发） */
+    generation?: Record<string, string | number>;
+  },
 ): Promise<string> {
   const q = new URLSearchParams({
     filename,
@@ -1719,6 +1726,10 @@ export async function sendBlobToEditor(
   }
   if (opts?.node_id) q.set("node_id", opts.node_id);
   if (opts?.kind) q.set("kind", opts.kind);
+  // 血缘块非空才发；后端 _handle_ingest 解析 generation_json 透传入轨载荷
+  if (opts?.generation && Object.keys(opts.generation).length) {
+    q.set("generation_json", JSON.stringify(opts.generation));
+  }
   const res = await fetch(`${BRIDGE}/ingest?${q}`, {
     method: "POST",
     body: blob,

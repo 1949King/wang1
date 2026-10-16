@@ -31,6 +31,8 @@ SERVER = os.path.join(ROOT, "app", "core", "canvas_server.py")
 MIXINS = [
     os.path.join(ROOT, "app", "core", "canvas_routes_get.py"),
     os.path.join(ROOT, "app", "core", "canvas_routes_post.py"),
+    # 2026-10-15：配音编排端点迁至 canvas_routes_dub.py（同样用 cs.xxx 延迟取用）。
+    os.path.join(ROOT, "app", "core", "canvas_routes_dub.py"),
 ]
 
 

@@ -17,14 +17,49 @@ from typing import Any, Dict, Mapping, Optional
 # ---------------------------------------------------------------------------
 # 每次「跨线字段集合」发生增删（不是每次改代码）就 +1。
 # 守卫 _verify/check_glue_contract.py 会核对本常量与文档登记值一致。
-GLUE_SCHEMA_VERSION = 1
+# 2026-10-17：LINK_KEYS 增「generation」生成参数血缘块 ⇒ 1 → 2。
+GLUE_SCHEMA_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # 2. 跨线字段集合（单一来源）
 # ---------------------------------------------------------------------------
 # ① 剪辑线 → 画布线：盖在 clip 上的关联字段
 #    （此前散落在 editor_canvas_link.LINK_KEYS 与 canvas_server.py 各处的字面量）
-LINK_KEYS = ("canvas_node_id", "canvas_kind", "canvas_title")
+#    "generation" 为嵌套 dict（生成参数血缘块），语义与字符串键不同：
+#    载荷携带且非空 ⇒ 整块替换；缺省 / 空块 ⇒ 不覆盖已有（见 normalize_generation）。
+LINK_KEYS = ("canvas_node_id", "canvas_kind", "canvas_title", "generation")
+
+# ①-b 生成参数血缘块的白名单键（画布节点 data → clip["generation"]）。
+#     缺键不写、非白名单键丢弃、非标量值丢弃 —— 绝不猜默认值。
+GENERATION_KEYS = ("prompt", "seed", "model", "channel", "character_id", "reference")
+
+
+def normalize_generation(raw: Any) -> Dict[str, Any]:
+    """把任意来源的生成参数归一成血缘块：只收 GENERATION_KEYS、逐键清洗。
+
+    · seed → int（不可转换即丢弃）；其余键 → 非空字符串（bool/数值转 str）。
+    · 非 Mapping 一律返回 {}（诚实：不造记录）。
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    out: Dict[str, Any] = {}
+    for key in GENERATION_KEYS:
+        if key not in raw:
+            continue
+        val = raw[key]
+        if val is None or val == "":
+            continue
+        if key == "seed":
+            try:
+                out[key] = int(val)
+            except (TypeError, ValueError):
+                continue
+            continue
+        if isinstance(val, (str, int, float, bool)):
+            text = val if isinstance(val, str) else str(val)
+            if text:
+                out[key] = text
+    return out
 
 # ② 剪辑线 → 画布 outbox：把 clip 身份告诉画布，供其自动落源节点
 EDITOR_TO_CANVAS_KEYS = (

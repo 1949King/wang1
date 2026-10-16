@@ -175,6 +175,55 @@ export async function referenceBreakdownL2(input: {
   }
 }
 
+/** 指令式视频编辑：本地片段 + 指令 → Seedance/Kling 云端编辑（镜像后端 POST /host/video-edit）
+ *
+ * 边界（P1-2 步骤 4，2026-10-15）：
+ *  - 两个渠道都是云端 ⇒ 素材必然出域，UI 必须让用户显式勾选同意后才调用；
+ *  - 失败保原镜：后端回 original_kept=true 且 clip_path=原片段，前端不得当成新结果；
+ *  - url 是后端把结果**复制**进 inbox 后的可播放 /inbox_file/ 路径（复制失败为空串，
+ *    clip_path 仍是磁盘路径），空 url 时只展示路径文本、不拼假地址。
+ */
+export async function videoEdit(input: {
+  clip_path: string;
+  instruction: string;
+  channel?: "auto" | "seedance" | "kling";
+  video_url?: string;
+  model?: string;
+  out_dir?: string;
+}): Promise<{
+  ok: boolean;
+  clip_path?: string;
+  url?: string;
+  original_kept?: boolean;
+  channel_used?: string;
+  cost_note?: string;
+  errors?: string[];
+  message?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/video-edit?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          clip_path: input.clip_path || "",
+          instruction: input.instruction || "",
+          channel: input.channel || "auto",
+          video_url: input.video_url || "",
+          model: input.model || "",
+          out_dir: input.out_dir || "",
+        }),
+      },
+    );
+    return await res.json();
+  } catch {
+    // 网络层失败同样保原镜语义：ok=false + original_kept=true，不静默
+    return { ok: false, original_kept: true, message: "网络异常（编辑请求未发出或中断）" };
+  }
+}
+
 /** 本机可用视觉模型（拉片用，素材不出机）：GET /host/local-vision-models */
 export async function listLocalVisionModels(): Promise<{ name: string; size?: string }[]> {
   const token = bridgeToken();

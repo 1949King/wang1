@@ -45,7 +45,8 @@ _TRUTHY = {"1", "true", "yes", "on"}
 # ═══════════════════════════════════════════════════════════
 #
 # 字段说明：
-#   text_to_video / image_to_video / first_last_frame / lip_sync : 布尔能力位
+#   text_to_video / image_to_video / first_last_frame / lip_sync / edit_video : 布尔能力位
+#   （edit_video=指令式视频编辑，2026-10-15 新增；未接线渠道一律 False，不声明没接的东西）
 #   max_duration  : 单段最大时长（秒），超过则不接单
 #   resolutions   : 支持的分辨率档位；["*"] 表示任意
 #   quality_tier  : 0=免费/占位 1=低价 2=高价（越大越贵越稳；auto 排序用）
@@ -55,6 +56,7 @@ _TRUTHY = {"1", "true", "yes", "on"}
 PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
     "dashscope": {
         "name": "阿里云百炼 万相（Wan）",
+        "edit_video": False,
         "text_to_video": True,
         "image_to_video": False,   # wan2.2-i2v-flash 系列存在，后续接线后改 True
         "first_last_frame": False,  # wan2.2-kf2v-flash 系列存在，后续接线后改 True
@@ -66,6 +68,8 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
     },
     "seedance": {
         "name": "火山引擎 Seedance",
+        # 指令式编辑：官方「编辑视频」任务；video_url 支持 Base64（本地素材直传）
+        "edit_video": True,
         "text_to_video": True,
         "image_to_video": True,
         "first_last_frame": True,   # Seedance 支持首帧/尾帧图输入
@@ -77,6 +81,7 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
     },
     "cogvideo": {
         "name": "智谱 CogVideo",
+        "edit_video": False,
         "text_to_video": True,
         "image_to_video": True,
         "first_last_frame": False,  # 只支持首帧驱动，不支持首尾帧对插
@@ -93,6 +98,9 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
         # duration 未随请求下发（服务端按 model_name 定长），故 max_duration
         # 记 10.0 保守值，避免被 spec 的 duration 误筛。
         "name": "可灵 Kling（快手开放平台）",
+        # 指令式编辑：3.0 Omni base_video 模式；⚠️ 素材必须公网 URL（出域），
+        # 调用方未显式给 video_url 时客户端会诚实拒绝该渠道
+        "edit_video": True,
         "text_to_video": True,
         "image_to_video": True,
         "first_last_frame": False,   # 当前接线只下发首帧图，尾帧未接
@@ -104,6 +112,7 @@ PROVIDER_CAPS: Dict[str, Dict[str, Any]] = {
     },
     "local": {
         "name": "本地占位生成（FFmpeg 色块）",
+        "edit_video": False,   # 编辑无本地占位路径：不出域就诚实拒绝，不拿色块冒充
         "text_to_video": True,
         "image_to_video": True,     # 占位生成不区分输入形态
         "first_last_frame": True,
@@ -132,6 +141,7 @@ _CAP_LABELS = {
     "image_to_video": "图生视频",
     "first_last_frame": "首尾帧",
     "lip_sync": "口型同步",
+    "edit_video": "指令式编辑",
 }
 
 
@@ -190,7 +200,8 @@ def normalize_spec(spec: Optional[Dict[str, Any]] = None, *,
     """
     s = dict(spec) if isinstance(spec, dict) else {}
     out: Dict[str, Any] = {}
-    for k in ("text_to_video", "image_to_video", "first_last_frame", "lip_sync"):
+    for k in ("text_to_video", "image_to_video", "first_last_frame", "lip_sync",
+              "edit_video"):
         if k in s and s[k] is not None:
             out[k] = bool(s[k])
     if duration or (s.get("duration") not in (None, 0, 0.0)):

@@ -56,6 +56,9 @@ CLIPS = [
     {"type": "audio", "path": "D:/v/e.mp3"},                # 无 id
     {"id": "c6", "name": "浮点字符串", "path": "D:/v/f.mp4",
      "start_time": "2.5", "duration": "3", "in_point": "0.5"},  # 字符串数值
+    # 2026-10-17 带 generation 血缘块的片：outbox / 快照行两侧都不得泄漏该键
+    {"id": "c7", "name": "血缘片", "path": "D:/v/g.mp4", "canvas_node_id": "n7",
+     "generation": {"prompt": "p", "seed": 1}},
 ]
 
 PAYLOADS = [
@@ -65,6 +68,11 @@ PAYLOADS = [
     {"canvas_node_id": "n3", "path": "D:/x.png", "type": "image",
      "in_point": 0.5, "out_point": 4.0, "duration": 3.5},
     {},                                                       # 空载荷
+    # 2026-10-17 generation 血缘块：两侧必须逐字段等价（白名单清洗、非 dict 丢弃）
+    {"node_id": "n7", "kind": "video", "generation":
+     {"prompt": "雨夜街头", "seed": "42", "model": "sdxl", "bogus": 1, "extra": {"a": 1}}},
+    {"node_id": "n8", "kind": "video", "generation": "not-a-dict"},   # 非 Mapping ⇒ 整块丢弃
+    {"node_id": "n9", "kind": "video", "generation": {}},             # 空块 ⇒ 不输出
 ]
 
 print("=" * 74)
