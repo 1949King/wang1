@@ -57,7 +57,7 @@
     "file:vendor/shiguang-canvas/src/stage3dLighting.test.ts": "57e5672dc9ecb9cc",
     "file:vendor/shiguang-canvas/src/stage3dGlUtils.ts": "2444d299d378559e",
     "file:vendor/shiguang-canvas/src/stage3dControlNet.ts": "016494545f3963b8",
-    "file:app/core/canvas_bridge.py": "f8c125201ce1f9b6",
+    "file:app/core/canvas_bridge.py": "c3aa7923012b31fd",
     "file:app/core/canvas_runtime.py": "b95d7d6d52de2f4a",
     "file:app/modules/lego/character_management_module.py": "67f7b843ff155b6e",
     "file:scripts/export_vinchau_glb.py": "8935e0bfc63ba9bf",
