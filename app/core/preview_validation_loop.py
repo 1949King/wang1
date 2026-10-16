@@ -238,6 +238,27 @@ class PreviewValidationLoop:
                 "regen_count": regen_count,
                 "duration": duration,
             }
+            # §6.9-P2 时长匹配约束：探测产物实际时长并与原 clip 时长比对 ——
+            # 不符只如实标记（不硬剪、不改时间线排布），是否调整交给用户/Agent 决策。
+            try:
+                from app.core.segment_retake import probe_duration
+                actual = float(probe_duration(new_path) or 0.0)
+            except Exception as e:
+                logger.debug(f"[PreviewValidationLoop] 重生成产物测时长失败: {e}")
+                actual = 0.0
+            if actual > 0:
+                new_clip["actual_duration"] = round(actual, 3)
+                mismatch = abs(actual - duration) > 0.05
+                new_clip["duration_mismatch"] = mismatch
+                if mismatch:
+                    new_clip["duration_note"] = (
+                        f"重生成产物实际 {actual:.2f}s ≠ 原片 {duration:.2f}s；"
+                        "未硬剪，时间线仍按原时长占位——请确认是否调整")
+                    logger.info(f"[PreviewValidationLoop] 片段 {clip_id} 时长不符："
+                                f"请求 {duration:.2f}s 实际 {actual:.2f}s（如实标记，不硬剪）")
+            else:
+                new_clip["duration_mismatch"] = None
+                new_clip["duration_note"] = "未能探测重生成产物时长，时长一致性未经校验"
             with self._lock_rw:
                 if clip_id in self._registry:
                     self._registry[clip_id]["clip"] = new_clip

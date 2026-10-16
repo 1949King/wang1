@@ -739,3 +739,40 @@ class EditorSkillHandlers:
             output={"clip_id": clip.get("id"), "prop": prop, "value": value,
                     "playhead_position": float(getattr(editor, "_playhead_position", 0) or 0)},
         )
+
+    # ── 血缘查询（智能时间线 P1 · Agent 接线，2026-10-17）────────
+    # 与 GET /host/clip-lineage 同一实现（lineage_index + get_full_clips），
+    # 从 _clips 快照按需建索引、不落第二真相源；无命中诚实空返回，不猜。
+
+    def get_clip_lineage(self, req: CapabilityRequest) -> CapabilityResult:
+        """片段血缘查询：按 clip_id / node_id 查片段↔画布节点关联+生成参数（只读）。"""
+        clip_id = str(req.params.get("clip_id") or req.params.get("id") or "")
+        node_id = str(req.params.get("node_id") or "")
+        try:
+            from app.core.editor_canvas_link import lineage_index
+            from app.core.project_snapshot import get_full_clips
+        except ImportError:
+            from core.editor_canvas_link import lineage_index  # type: ignore
+            from core.project_snapshot import get_full_clips  # type: ignore
+        clips = get_full_clips()
+        if clips is None:
+            # 快照回调未注册时回落到 editor._clips 直读（时间线真相源，仍不落第二份）
+            editor = self._editor(req)
+            if editor is None:
+                return self._fail(req, "剪辑模块未就绪（时间线快照不可用）")
+            clips = list(getattr(editor, "_clips", []) or [])
+        idx = lineage_index(clips)
+        if clip_id:
+            rec = idx["by_clip_id"].get(clip_id)
+            records = [rec] if rec else []
+        elif node_id:
+            records = list(idx["by_node_id"].get(node_id) or [])
+        else:
+            records = list(idx["by_clip_id"].values())
+        return CapabilityResult(
+            req.request_id, True,
+            output={"clip_id": clip_id or None, "node_id": node_id or None,
+                    "record_count": len(records), "records": records,
+                    "message": (f"命中 {len(records)} 条血缘记录" if records
+                                else "无血缘记录（片段未关联画布节点，或查询参数不匹配）")},
+        )

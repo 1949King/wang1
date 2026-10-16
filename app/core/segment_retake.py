@@ -172,8 +172,10 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
 
     · **对齐**：新段被缩放到原片分辨率/帧率；`conform=True` 时**对齐到原段时长**
       （长了裁、短了补最后一帧），保证整条片子**总时长不变**、时间轴不错位。
+    · `conform=False`（§6.9-P2 时长匹配约束）：**不硬剪**——新段保留原样，
+      时长不符时 `conformed="mismatch"` 并如实回报成片总时长偏差。
     · **音轨**：默认保留原音轨（只替换段的音频用新段的；新段没音频则该段静音）。
-    · 返回 `conformed`（`trimmed`/`padded`/`exact`）与 `seams` —— **如实报告**做了什么。
+    · 返回 `conformed`（`trimmed`/`padded`/`exact`/`mismatch`）与 `seams` —— **如实报告**做了什么。
     """
     ff = _ffmpeg()
     if not ff:
@@ -203,6 +205,9 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
             conformed = "trimmed"
         elif rep_dur < target - 0.05:
             conformed = "padded"
+    elif abs(rep_dur - target) > 0.05:
+        # 不硬剪（conform=False）：新段原样保留，时长差如实标记
+        conformed = "mismatch"
 
     # 三段拼接：原[0,s) + 新段(对齐到 target) + 原[e,EOF)
     # 用 filter_complex 统一规格后再 concat（不同分辨率/帧率直接 concat 会失败）
@@ -233,12 +238,15 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
             f"[0:v]trim=start={e:.3f},setpts=PTS-STARTPTS,setsar=1[v2]",
         ]
         if keep_audio:
+            # 新段音轨长度口径：conform=True 对齐 target；conform=False 随视频实际时长
+            # （rep_dur），否则音视频总长不齐会在接缝后持续漂同步。
+            a_new = target if conform else rep_dur
             parts += [
                 # ⚠️ atrim 的第二个参数必须是具名的 `end=` —— 写成 `atrim=start=0:0.5` 是非法滤镜
                 #   （实测踩过：拼接整条失败）。修复后真机通过。
                 "[0:a]atrim=start=0:end={s:.3f},asetpts=PTS-STARTPTS,aresample=48000[a0]".format(s=s),
-                f"[1:a]atrim=start=0:end={target:.3f},asetpts=PTS-STARTPTS,aresample=48000,"
-                f"apad,atrim=duration={target:.3f}[a1]",
+                f"[1:a]atrim=start=0:end={a_new:.3f},asetpts=PTS-STARTPTS,aresample=48000,"
+                f"apad,atrim=duration={a_new:.3f}[a1]",
                 "[0:a]atrim=start={e:.3f},asetpts=PTS-STARTPTS,aresample=48000[a2]".format(e=e),
                 "[a0][a1][a2]concat=n=3:v=0:a=1[aout]",
             ]
@@ -260,14 +268,22 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
             return {"ok": False, "reason": f"拼接失败: {(r.stderr or '')[-600:]}"}
 
         out_dur = probe_duration(out_path)
+        if conformed == "exact":
+            dur_note = "（时长恰好一致）"
+        elif conformed == "trimmed":
+            dur_note = f"（新段 {rep_dur:.2f}s 已裁到 {target:.2f}s 以对齐时间轴）"
+        elif conformed == "padded":
+            dur_note = f"（新段 {rep_dur:.2f}s 已补到 {target:.2f}s 以对齐时间轴）"
+        else:  # mismatch：conform=False 不硬剪，如实回报总时长偏差
+            dur_note = (f"（新段 {rep_dur:.2f}s ≠ 原段 {target:.2f}s，未硬剪；"
+                        f"成片总时长变化 {out_dur - dur:+.2f}s）")
         return {"ok": True, "out": out_path, "plan": plan, "conformed": conformed,
                 "replacement_duration": round(rep_dur, 3), "target_duration": round(target, 3),
                 "out_duration": round(out_dur, 3),
+                "duration_mismatch": conformed == "mismatch",
                 "kept_audio": bool(keep_audio),
                 "seams": plan["seams"], "seam_risk": plan["seam_risk"],
-                "note": f"已用新段替换 {s:.2f}-{e:.2f}s"
-                        + (f"（新段 {rep_dur:.2f}s 已{'裁到' if conformed == 'trimmed' else '补到'}"
-                           f" {target:.2f}s 以对齐时间轴）" if conformed != "exact" else "（时长恰好一致）")
+                "note": f"已用新段替换 {s:.2f}-{e:.2f}s" + dur_note
                         + f"；接缝风险 {plan['seam_risk']}"}
     except Exception as e:
         logger.exception("[segment_retake] splice_retake 失败")

@@ -146,6 +146,9 @@ CHECKS = [
     # ── clip↔画布生成参数血缘（智能时间线 P1，2026-10-17）──
     ("LINEAGE", "_verify/check_clip_lineage.py",
      "血缘契约：generation 抽取/盖章/索引 + 传输链与双库多处同步"),
+    # ── 问题路由规则表（智能时间线 P1 / §6.9，2026-10-17）──
+    ("ROUTER", "_verify/check_problem_routing.py",
+     "问题路由判据：五维标记→segment_retake/video-edit/时间线内（纯函数+混合序列）"),
     # ── 退出链路不变量（exit-media 冻结区的**语义**守卫，2026-10-11）──
     #    为什么需要：frozen_zone_guard 只比对哈希，能报「代码被改」却报不出
     #    「不变量被破」；实测有一次会话保存被插到 _stop_all_media_on_exit 之前，

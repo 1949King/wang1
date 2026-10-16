@@ -1746,6 +1746,8 @@ class CanvasBridgeServer:
     def start(self) -> bool:
         if self._thread and self._thread.is_alive():
             return True
+        # §12-P2 启动打点：bridge 就绪分段计时（bind → 会话检查点恢复 → 总耗时）
+        _t0 = time.monotonic()
         try:
             self._httpd = ThreadingHTTPServer((self.host, self.port), _BridgeHandler)
             self._httpd.bridge_port = self.port  # type: ignore[attr-defined]
@@ -1754,7 +1756,8 @@ class CanvasBridgeServer:
                 target=self._httpd.serve_forever, name="CanvasBridge", daemon=True
             )
             self._thread.start()
-            logger.info("canvas bridge listening on %s", self.base_url)
+            logger.info("canvas bridge listening on %s (bind %.3fs)",
+                        self.base_url, time.monotonic() - _t0)
             try:
                 from app.core.agent_session import agent_sessions
 
@@ -1768,6 +1771,7 @@ class CanvasBridgeServer:
                 agent_sessions.mark_restart_paused()
             except Exception:
                 logger.debug("agent checkpoint / mark_restart_paused failed", exc_info=True)
+            logger.info("canvas bridge boot done (total %.3fs)", time.monotonic() - _t0)
             return True
         except OSError as e:
             # 端口占用：假定已有桥在跑

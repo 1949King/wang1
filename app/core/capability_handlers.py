@@ -1059,6 +1059,40 @@ class PipelineCapabilityHandlers:
         )
         return CapabilityResult(req.request_id, True, output=result.to_dict())
 
+    def route_problem(self, req: CapabilityRequest) -> CapabilityResult:
+        """问题路由（§6.9-P1 ROUTER 消费接线）：评分/标记 → 修复通道建议（只读、不执行）。
+
+        参数：
+            review: 五维评分 dict（ScoreResult.to_dict() 或 {"dimensions": {...}}），必填
+            marks: 审核标记列表（如 ["subtitle_error"]），可选
+            has_canvas_lineage: 片段是否有画布血缘，可选
+            clip_id: 时间线片段 id；未显式给血缘时按片段自动推断
+            features: 与 problem_router 口径一致的合并 dict，可选
+        """
+        from app.core.problem_router import route_problem
+        review = req.params.get("review") or req.params.get("score")
+        if not isinstance(review, dict):
+            return CapabilityResult(
+                req.request_id, False,
+                error="需要 review（五维评分 dict：ScoreResult.to_dict() 或 dimensions 子 dict）")
+        feats = dict(req.params.get("features") or {})
+        if req.params.get("marks") is not None:
+            feats["marks"] = req.params.get("marks")
+        if req.params.get("has_canvas_lineage") is not None:
+            feats["has_canvas_lineage"] = bool(req.params.get("has_canvas_lineage"))
+        elif "has_canvas_lineage" not in feats:
+            # 未显式给血缘 ⇒ 按时间线真相源自动推断（canvas_node_id 或非空 generation 块）
+            clip_id = str(req.params.get("clip_id") or "")
+            if clip_id:
+                editor = self._get_editor()
+                for c in (list(getattr(editor, "_clips", []) or []) if editor else []):
+                    if c.get("id") == clip_id or c.get("clip_id") == clip_id:
+                        feats["has_canvas_lineage"] = bool(
+                            c.get("canvas_node_id") or c.get("generation"))
+                        break
+        result = route_problem(review, feats)
+        return CapabilityResult(req.request_id, True, output=result)
+
     def generate(self, req: CapabilityRequest) -> CapabilityResult:
         """AI 视频生成业务线：创意拆解→生成→初检→回溯闭环
 
@@ -1758,6 +1792,8 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
         ("editor.mark_sequence_in_out", "mark_sequence_in_out", "标记序列入点/出点/清除"),
         ("editor.get_keyframes", "get_keyframes", "读取片段关键帧列表"),
         ("editor.add_keyframe_at_playhead", "add_keyframe_at_playhead", "播放头处加关键帧"),
+        # 血缘查询（智能时间线 P1 · Agent 接线，2026-10-17）：与 /host/clip-lineage 同一实现
+        ("editor.get_clip_lineage", "get_clip_lineage", "片段血缘查询（clip↔画布节点+生成参数，只读）"),
     ):
         dispatcher.register(_cap_id, CapabilityCategory.EDITOR,
                             getattr(editor_skill_handlers, _method_name), _desc)
@@ -1769,6 +1805,10 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     # Agent 全链路闭环
     dispatcher.register("pipeline.route", CapabilityCategory.PIPELINE,
                         pipeline_handlers.route, "业务分流：AI生成/素材剪辑")
+    # 问题路由消费接线（§6.9-P1 ROUTER 后续刀，2026-10-17）：委托 route_problem 纯函数
+    dispatcher.register("pipeline.route_problem", CapabilityCategory.PIPELINE,
+                        pipeline_handlers.route_problem,
+                        "问题路由：五维评分/标记→修复通道建议（只读不执行）")
     dispatcher.register("pipeline.generate", CapabilityCategory.PIPELINE,
                         pipeline_handlers.generate, "AI视频生成业务线")
     dispatcher.register("pipeline.quote", CapabilityCategory.PIPELINE,

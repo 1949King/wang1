@@ -214,6 +214,25 @@ class MediaCapabilityHandlers:
             logger.debug("[media] 视频编辑异常", exc_info=True)
             return CapabilityResult(req.request_id, False, error=f"视频编辑失败: {e}")
         ok = bool(res.get("ok"))
+        # §6.9-P2 时长匹配约束：编辑产物与原片时长比对 —— 不符如实标记，不硬剪
+        if ok:
+            try:
+                from app.core.segment_retake import probe_duration
+                d_old = float(probe_duration(str(p.get("clip_path") or "")) or 0.0)
+                d_new = float(probe_duration(str(res.get("clip_path") or "")) or 0.0)
+                if d_old > 0 and d_new > 0:
+                    res["original_duration"] = round(d_old, 3)
+                    res["edited_duration"] = round(d_new, 3)
+                    if abs(d_new - d_old) > 0.05:
+                        res["duration_mismatch"] = True
+                        res["duration_note"] = (
+                            f"编辑产物 {d_new:.2f}s ≠ 原片 {d_old:.2f}s；"
+                            "未硬剪，请确认是否调整时间线")
+                else:
+                    res["duration_mismatch"] = None
+                    res["duration_note"] = "未能探测编辑产物时长，时长一致性未经校验"
+            except Exception as e:
+                logger.debug("[media] 时长一致性校验忽略: %s", e)
         return CapabilityResult(
             req.request_id, ok, output=res,
             error=None if ok else (res.get("message") or "视频编辑失败（原片段已保留）"),
@@ -222,7 +241,8 @@ class MediaCapabilityHandlers:
     def segment_retake(self, req: CapabilityRequest) -> CapabilityResult:
         """片段重拍：复用 /host/segment-retake 的 splice_retake。
         只替换视频指定时间段（保音轨/时长对齐），接缝风险如实报告。
-        params：original / replacement / out_path / start / end / cuts(可选)。
+        params：original / replacement / out_path / start / end / cuts(可选) /
+        conform(可选，默认 True；False=不硬剪，时长不符如实标记 mismatch)。
         """
         try:
             from app.core import segment_retake as sr
@@ -243,6 +263,8 @@ class MediaCapabilityHandlers:
                 original, replacement, out_path,
                 start=start, end=end,
                 cuts=p.get("cuts") or [],
+                # §6.9-P2 时长匹配约束：默认仍对齐原段时长；显式 conform=False 不硬剪
+                conform=bool(p.get("conform", True)),
             )
         except Exception as e:
             logger.debug("[media] 片段重拍异常", exc_info=True)

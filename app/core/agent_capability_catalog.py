@@ -310,6 +310,14 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "播放头处加关键帧（prop/value，同 prop 近点覆盖）", "left", "加关键帧",
      ["加关键帧", "打关键帧", "add_keyframe", "在这一秒加", "记录当前值"]),
 
+    # ── 血缘查询（智能时间线 P1 · Agent 接线，2026-10-17）──
+    # 与 GET /host/clip-lineage 同一实现：从 _clips 快照按需建索引、不落第二真相源；
+    # effect=read 只读血缘记录（clip ↔ 画布节点 + 生成参数），无命中诚实空返回。
+    ("editor.get_clip_lineage", "editor", "read", False,
+     "片段血缘查询：按 clip_id/node_id 查片段↔画布节点关联+生成参数（只读，无命中诚实空）",
+     "left", "片段血缘",
+     ["血缘", "来源", "哪来的", "怎么生成的", "生成参数", "lineage", "画布节点关联"]),
+
     # ── 多任务调度 ──
     ("workflow.submit_batch", "workflow", "file_write", False,
      "提交批量任务", "left", "批量任务", ["批量", "任务", "batch"]),
@@ -317,6 +325,12 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     # ── Agent 全链路闭环 ──
     ("pipeline.route", "pipeline", "read", False,
      "业务分流：AI生成/素材剪辑", "cc", "业务分流", ["分流", "路由", "判断"]),
+    # ── 问题路由消费接线（智能时间线 P1 · ROUTER 后续刀，2026-10-17）──
+    # 委托 problem_router.route_problem 纯函数规则表：只出修复通道建议，不执行任何通道。
+    ("pipeline.route_problem", "pipeline", "read", False,
+     "问题路由：五维评分/审核标记 → 修复通道建议（时间线内/指令编辑/重拍；只读不执行）",
+     "left", "问题路由",
+     ["问题路由", "返工", "怎么修", "重拍还是剪辑", "修复通道", "route_problem"]),
     ("pipeline.generate", "pipeline", "media_write", True,
      "AI视频生成业务线", "right", "AI 视频生成", ["生成", "视频", "抽卡", "画面"]),
     ("pipeline.quote", "pipeline", "read", False,
