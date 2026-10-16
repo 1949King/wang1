@@ -55,7 +55,7 @@ BASELINE: dict = {
     "app/core/canvas_aigc.py": 2905,
     "app/modules/lego/settings_module.py": 2823,
     "app/modules/lego/video_processor.py": 2732,
-    "app/modules/lego/editor_agent_panel_mixin.py": 2330,
+    "app/modules/lego/editor_agent_panel_mixin.py": 2270,  # 2026-10-17 收敛下调（2330→2270，棘轮正反馈）
     "app/modules/lego/extensions_module.py": 2198,
     "app/modules/lego/drama_understanding_engine.py": 2160,
     # vendor/shiguang-canvas/src（4 个）

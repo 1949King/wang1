@@ -481,7 +481,11 @@ class CanvasRuntime:
                 except Exception:
                     pass
 
+        # §12-P2 启动打点：boot 分段计时起点（进程起 → 静态服务/vite → 就绪）
+        _t_boot = time.monotonic()
         if self.is_ready():
+            logger.info("canvas boot timing: already running (%.2fs)",
+                        time.monotonic() - _t_boot)
             return True, f"画布已在运行: {self.url}"
 
         eng = active_canvas_engine()
@@ -515,6 +519,8 @@ class CanvasRuntime:
         progress(f"正在秒开画布（引擎={eng}）…")
         ok, msg = self._start_static_server()
         if ok and self.is_ready():
+            logger.info("canvas boot timing: static ready %.2fs",
+                        time.monotonic() - _t_boot)
             return True, msg
 
         # 2) 无 dist：提示并拉 vite（可随后后台 build）
@@ -534,6 +540,8 @@ class CanvasRuntime:
         while time.time() < deadline:
             if self.is_ready():
                 # 后台异步 build，下次走静态秒开
+                logger.info("canvas boot timing: vite ready %.2fs",
+                            time.monotonic() - _t_boot)
                 self._kick_background_build()
                 return True, f"画布已启动: {self.url}"
             if self._proc and self._proc.poll() is not None:

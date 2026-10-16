@@ -646,6 +646,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._modules: Dict[str, ModuleInfo] = {}
         self._event_bus = EventBus.get_instance()
+        # 与导航栏 _nav_bar._current_module 同步的本地副本；供 closeEvent 会话恢复读取。
+        # 不放进 closeEvent（属 exit-media 冻结区，未解冻不可改），此处同步即可让原逻辑生效。
+        self._current_module: Optional[str] = None
         
         self._lazy_loaded_modules: Dict[str, bool] = {}
         self._module_loading_queue: List[str] = []
@@ -1057,6 +1060,8 @@ class MainWindow(QMainWindow):
         """模块选中事件"""
         if module_id not in self._modules:
             return
+        # 同步当前模块给 closeEvent 会话恢复使用（避免 MainWindow 无该属性导致保存失败）。
+        self._current_module = module_id
 
         info = self._modules[module_id]
 
@@ -1748,6 +1753,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     logger.warning(f"清理模块 {module_name} 失败: {e}")
         
+        
         try:
             from modules.lego.async_track_renderer import shutdown_async_track_renderer
             shutdown_async_track_renderer()
@@ -1756,7 +1762,6 @@ class MainWindow(QMainWindow):
             logger.debug("异步轨道渲染模块未启用: %s", e)
         except Exception as e:
             logger.debug(f"关闭异步渲染系统: {e}")
-        
         logger.info("应用关闭完成")
         for child in self.findChildren(QWidget):
             try:
