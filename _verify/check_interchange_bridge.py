@@ -176,7 +176,8 @@ def check_ui_wiring() -> None:
     panel = os.path.join(ROOT, "app", "modules", "lego", "editor_export_panel.py")
     with open(panel, "r", encoding="utf-8") as f:
         src = f.read()
-    for token in ("clips_to_timeline", "timeline_export_filters",
+    # 刀3（2026-10-18）：消费端改读 store.to_timeline() canonical 视图（桥接由 store 内部消费）
+    for token in ("_timeline_store.to_timeline(", "timeline_export_filters",
                   "is_timeline_extension"):
         if token not in src:
             _fail(f"④ 导出 UI 断线：editor_export_panel 不再消费 {token}")

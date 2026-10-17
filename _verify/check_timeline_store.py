@@ -141,6 +141,13 @@ def check_wiring() -> None:
             _fail(f"④ 刀2收敛漂移：editor_module 残留裸结构写入 {token!r}")
     if "self._timeline_store.snapshot()" not in src:
         _fail("④ 持久化 canonical 出口漂移：_clips_snapshot 未委托 store.snapshot()")
+    panel = os.path.join(ROOT, "app", "modules", "lego", "editor_export_panel.py")
+    with open(panel, "r", encoding="utf-8") as f:
+        psrc = f.read()
+    if "self._timeline_store.to_timeline(" not in psrc:
+        _fail("④ 刀3消费端漂移：导出面板不再读 store.to_timeline() canonical 视图")
+    if "clips_to_timeline(" in psrc:
+        _fail("④ 刀3消费端漂移：导出面板残留绕过 canonical 直调桥接")
     store_path = os.path.join(ROOT, "app", "core", "timeline_store.py")
     with open(store_path, "r", encoding="utf-8") as f:
         ssrc = f.read()

@@ -155,10 +155,7 @@ class EditorExportPanelMixin:
         * EDL(CMX3600) 天生只支持单条视频轨，多轨时会自动取主力视频轨（并告知）。
         """
         from app.core.interchange import otio_adapter
-        from app.core.interchange.editor_timeline_bridge import (
-            adapter_for_path,
-            clips_to_timeline,
-        )
+        from app.core.interchange.editor_timeline_bridge import adapter_for_path
 
         if not otio_adapter.is_available():
             QMessageBox.warning(
@@ -180,16 +177,15 @@ class EditorExportPanelMixin:
         if fps_val <= 0:
             fps_val = 30.0
 
-        clips = list(getattr(self, "_clips", None) or [])
-        if not clips:
+        if not self._clips:
             QMessageBox.warning(self, "导出失败", "时间线为空，没有可导出的片段")
             return False
 
         project_name = os.path.splitext(os.path.basename(save_path))[0]
         try:
             self._notify_edit("导出时间线（OTIO / EDL / FCPXML）…")
-            timeline = clips_to_timeline(
-                clips,
+            # 刀3（2026-10-18）：消费端改读真相源 canonical 视图（store 锁内快照+桥接构建）
+            timeline = self._timeline_store.to_timeline(
                 name=project_name or "拾光剪影时间线",
                 fps=fps_val,
                 width=width,
