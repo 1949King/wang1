@@ -17,6 +17,7 @@ import types
 import pytest
 
 EM = pytest.importorskip("app.modules.lego.editor_module")
+from app.core.timeline_store import TimelineStore  # noqa: E402  刀2：真实 _apply_action_locked 走 store API
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = (ROOT / "app" / "modules" / "lego" / "editor_module.py").read_text(encoding="utf-8")
 
@@ -33,6 +34,9 @@ class _FakeEditor:
 
     def __init__(self, clips=None, stickers=None):
         self._clips = clips if clips is not None else []
+        # 刀2：真实 _apply_action_locked 的结构写入走 TimelineStore，
+        # adopt **同一 list 对象**（与宿主 EditorModule.__init__ 的接线一致）。
+        self._timeline_store = TimelineStore(self._clips)
         self._current_clip = None
         self._active_stickers = stickers if stickers is not None else []
         self._action_history = []

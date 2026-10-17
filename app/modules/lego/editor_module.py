@@ -3550,8 +3550,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             clip = action["clip"]
             shifts = action.get("ripple_shifts") or []
             if is_delete:
-                # 刀1·同一性保护：切片赋值不换列表对象（store 与读点永远同一）；刀2 收敛到 store
-                self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
+                # 刀2：结构写入收敛 TimelineStore（原地突变保同一性，RLock 可重入）
+                self._timeline_store.remove_by_id(clip.get("id"))
                 self._timeline_remove_clip_widget(clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                     self._current_clip = None
@@ -3561,7 +3561,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                             c["start_time"] = float(sh.get("new", c.get("start_time", 0)))
             else:
                 if clip not in self._clips:
-                    self._clips.append(clip)
+                    self._timeline_store.add(clip)
                 self._timeline_add_clip_widget(clip)
                 self._current_clip = clip
                 for sh in shifts:
@@ -3575,7 +3575,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 for item in items:
                     clip = item["clip"]
                     shifts = item.get("ripple_shifts") or []
-                    self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
+                    self._timeline_store.remove_by_id(clip.get("id"))
                     self._timeline_remove_clip_widget(clip.get("id"))
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
@@ -3588,7 +3588,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     clip = item["clip"]
                     shifts = item.get("ripple_shifts") or []
                     if clip not in self._clips:
-                        self._clips.append(clip)
+                        self._timeline_store.add(clip)
                     self._timeline_add_clip_widget(clip)
                     self._current_clip = clip
                     for sh in shifts:
@@ -3607,13 +3607,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 original["duration"] = left_dur
                 original["out_point"] = float(original.get("in_point", 0)) + left_dur
                 if new_clip not in self._clips:
-                    self._clips.append(new_clip)
+                    self._timeline_store.add(new_clip)
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
             else:
                 original["duration"] = action["original_duration"]
                 original["out_point"] = action["original_out_point"]
-                self._clips[:] = [c for c in self._clips if c.get("id") != new_clip.get("id")]
+                self._timeline_store.remove_by_id(new_clip.get("id"))
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 self._current_clip = original
 
@@ -3622,11 +3622,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             new_clip = action["new_clip"]
             if is_paste:
                 if new_clip not in self._clips:
-                    self._clips.append(new_clip)
+                    self._timeline_store.add(new_clip)
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
             else:
-                self._clips[:] = [c for c in self._clips if c.get("id") != new_clip.get("id")]
+                self._timeline_store.remove_by_id(new_clip.get("id"))
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == new_clip.get("id"):
                     self._current_clip = None
@@ -3638,22 +3638,22 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if mode == 'undo':
                 # 撤销添加：移除视频片段 + 联动音频片段
                 if audio_clip:
-                    self._clips[:] = [c for c in self._clips if c.get("id") != audio_clip.get("id")]
+                    self._timeline_store.remove_by_id(audio_clip.get("id"))
                     self._timeline_remove_clip_widget(audio_clip.get("id"))
                 if clip:
-                    self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
+                    self._timeline_store.remove_by_id(clip.get("id"))
                     self._timeline_remove_clip_widget(clip.get("id"))
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
             else:
                 # 重做添加：重新加入视频片段 + 联动音频片段
                 if clip and clip not in self._clips:
-                    self._clips.append(clip)
+                    self._timeline_store.add(clip)
                 if clip:
                     self._timeline_add_clip_widget(clip)
                     self._current_clip = clip
                 if audio_clip and audio_clip not in self._clips:
-                    self._clips.append(audio_clip)
+                    self._timeline_store.add(audio_clip)
                     self._timeline_add_clip_widget(audio_clip)
 
         elif atype == "edit_clip":
@@ -7954,12 +7954,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         因为剪辑数据靠 id 定位、不做深拷贝才符合现有契约）。
 
         用法：跨线程 / 序列化 / 需要遍历过程中修改集合的场景一律用它。
+        （刀2·2026-10-18：canonical 出口收敛到 TimelineStore.snapshot，锁语义不变。）
         """
-        lock = getattr(self, "_clips_lock", None)
-        if lock is None:
-            return list(self._clips or [])
-        with lock:
-            return list(self._clips or [])
+        return self._timeline_store.snapshot()
 
     def agent_get_timeline_context(self) -> Dict[str, Any]:
         """Agent 公开接口：获取当前时间线上下文（时间线数据、选中片段、播放头位置）。"""

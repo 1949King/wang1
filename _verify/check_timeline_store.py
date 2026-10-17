@@ -134,6 +134,13 @@ def check_wiring() -> None:
         src = f.read()
     if "TimelineStore(self._clips, lock=self._clips_lock)" not in src:
         _fail("④ editor_module 未在册 adopt store（或换了锁实例——必须复用 _clips_lock）")
+    # 刀2（2026-10-18）：撤销区结构写入必须全部收敛 store API，宿主不得残留裸写
+    for token in ("self._clips.append(", "self._clips[:]", "self._clips.remove(",
+                  "self._clips.insert(", "self._clips.pop(", "self._clips.clear("):
+        if token in src:
+            _fail(f"④ 刀2收敛漂移：editor_module 残留裸结构写入 {token!r}")
+    if "self._timeline_store.snapshot()" not in src:
+        _fail("④ 持久化 canonical 出口漂移：_clips_snapshot 未委托 store.snapshot()")
     store_path = os.path.join(ROOT, "app", "core", "timeline_store.py")
     with open(store_path, "r", encoding="utf-8") as f:
         ssrc = f.read()

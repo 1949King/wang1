@@ -58,6 +58,12 @@ class TimelineStore:
         with self._lock:
             return len(self._rows)
 
+    def snapshot(self) -> List[Dict[str, Any]]:
+        """锁内**浅拷贝**快照（元素仍是同一批 dict 引用——工程契约按 id 定位、
+        不做深拷贝；序列化/跨线程遍历一律用它，绝不把 live 列表交出去）。"""
+        with self._lock:
+            return list(self._rows)
+
     def find_by_id(self, clip_id: Any) -> Optional[Dict[str, Any]]:
         """按 id 查片段（返回 live dict 引用，字段级更新仍由调用方原地改）。"""
         with self._lock:
