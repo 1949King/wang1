@@ -384,7 +384,8 @@ class RoughCutChain:
         steps.extend(gap_res.steps)
 
         undo_action = {"type": "compound", "steps": steps, "label": "rough_cut_apply"}
-        live[:] = working
+        # 刀4：结构写走 TimelineStore.replace_all（原地切片、保列表同一性、内部持锁）
+        editor._timeline_store.replace_all(working)
         recorder = getattr(editor, "_record_action", None)
         if callable(recorder):
             recorder(undo_action)

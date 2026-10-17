@@ -182,6 +182,9 @@ CHECKS = [
     # ── 时间线真相源切换（OTIO 全量迁移·刀1，2026-10-18 用户授权解冻）──
     ("STORE", "_verify/check_timeline_store.py",
      "真相源store：同一性不变量/serialize往返/to_timeline≡桥接/接线在册/重绑定收敛"),
+    # ── 时间线字段写入面（OTIO 全量迁移·刀4，2026-10-18）──
+    ("WRITESURF", "_verify/check_timeline_write_surface.py",
+     "字段写棘轮：set_fields/update_where唯一写API/基线只减不增/glue在册/store无Qt红线"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",

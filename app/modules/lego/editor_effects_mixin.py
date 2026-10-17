@@ -691,12 +691,13 @@ class EditorEffectsMixin:
         def _done(ok: bool, path: str, err: str = "", *, speed=None, ramp_dict=None):
             if ok and path and os.path.exists(path):
                 if ramp_dict is not None:
-                    clip["speed_ramp"] = ramp_dict
+                    # 刀4：字段写走 store API
+                    self._timeline_store.set_fields(clip.get("id"), speed_ramp=ramp_dict)
                 if speed is not None:
                     try:
                         self.set_clip_speed(clip.get("id"), float(speed))
                     except Exception:
-                        clip["speed"] = float(speed)
+                        self._timeline_store.set_fields(clip.get("id"), speed=float(speed))
                 self._add_to_clips(path, 'video')
                 QMessageBox.information(self, "完成", f"变速成片已加入时间线:\n{path}")
             else:

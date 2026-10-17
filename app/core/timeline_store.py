@@ -101,6 +101,46 @@ class TimelineStore:
         with self._lock:
             self._rows.clear()
 
+    # ── 字段写入（唯一合法入口，OTIO 迁移·刀4） ──────────────────────
+    # 语义：锁内按 id 定位 live dict 后原地 update —— 读点拿到的仍是同一对象，
+    # 与结构写 API 共享同一把 _clips_lock（RLock 可重入）。transform 系字段
+    # （transform/pip_*/scale/rotation/anchor/position 等）仍必须走
+    # clip_transform.normalize/apply_normalized 冻结入口，本 API 不实现第二套
+    # 变换写入（方案 §3 刀4 风险②）。撤销记账（_record_action）由调用方负责。
+
+    def set_fields(self, clip_id: Any, **fields: Any) -> bool:
+        """按 id 更新片段字段（原地突变）。返回是否命中片段。"""
+        if not fields:
+            return False
+        with self._lock:
+            for c in self._rows:
+                if c.get("id") == clip_id:
+                    c.update(fields)
+                    return True
+        return False
+
+    def update_where(self, predicate, **fields: Any) -> int:
+        """按谓词批量更新字段（锁内遍历 live dict 原地 update）。返回命中条数。
+
+        Args:
+            predicate: 单参数可调用对象，接收 clip dict，返回 bool。
+            fields: 要写入的键值对。
+        """
+        if not callable(predicate) or not fields:
+            return 0
+        hit = 0
+        with self._lock:
+            for c in self._rows:
+                try:
+                    matched = bool(predicate(c))
+                except Exception:
+                    logger.debug("update_where 谓词异常，跳过该片段", exc_info=True)
+                    continue
+                if matched:
+                    c.update(fields)
+                    hit += 1
+        return hit
+
     # ── canonical 出口：类型化视图 / 序列化 ──────────────────────────
 
     def to_timeline(

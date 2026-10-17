@@ -113,7 +113,9 @@ class EditorSkillHandlers:
             vol = max(0.0, min(2.0, float(raw) / 100.0))
         except (TypeError, ValueError):
             return self._fail(req, f"音量参数无效：{raw!r}（应传 0–200 的百分数）")
-        clip["volume"] = vol
+        # 刀4：真相源字段写走 store API；片段脱离真相源（_current_clip 兜底）时写引用
+        if not editor._timeline_store.set_fields(clip.get("id"), volume=vol):
+            clip["volume"] = vol  # ratchet-exempt: 未入轨兜底引用
         # 复用既有音量同步入口，让改动立即作用到预览音频
         try:
             editor._sync_volume_slider_from_clip(clip)
@@ -162,8 +164,11 @@ class EditorSkillHandlers:
         muted = bool(req.params.get("muted", True))
         # 记住原音量，取消静音时恢复（默认 100%）
         prev = clip.get("volume")
-        clip["volume"] = 0.0 if muted else (prev if isinstance(prev, (int, float)) and prev > 0 else 1.0)
-        clip["muted"] = muted
+        new_vol = 0.0 if muted else (prev if isinstance(prev, (int, float)) and prev > 0 else 1.0)
+        # 刀4：真相源字段写走 store API；兜底引用同 set_clip_volume
+        if not editor._timeline_store.set_fields(clip.get("id"), volume=new_vol, muted=muted):
+            clip["volume"] = new_vol  # ratchet-exempt: 未入轨兜底引用
+            clip["muted"] = muted     # ratchet-exempt: 未入轨兜底引用
         try:
             editor._sync_volume_slider_from_clip(clip)
         except Exception as e:

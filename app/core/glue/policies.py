@@ -138,6 +138,11 @@ TIMELINE_WRITE_ENTRYPOINTS = (
     ("app/core/timeline_store.py", "remove_by_id"),
     ("app/core/timeline_store.py", "replace_all"),
     ("app/core/timeline_store.py", "clear"),
+    # 字段级写入唯一合法入口（2026-10-18 OTIO 迁移·刀4）：
+    # 存量散落的 clip["k"]= 直写逐步改走这两个 API（棘轮守卫
+    # _verify/check_timeline_write_surface.py 只减不增）
+    ("app/core/timeline_store.py", "set_fields"),
+    ("app/core/timeline_store.py", "update_where"),
 )
 
 # 允许出现 ``self._clips = ...`` 整段赋值的文件（其余的整段赋值即视为绕过入口）

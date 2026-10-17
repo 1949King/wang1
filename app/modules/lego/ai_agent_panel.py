@@ -637,7 +637,8 @@ class AiAgentPanelMixin:
                     return {"action": action, "success": False, "message": "设置速度失败（片段可能不在时间线）"}
                 applied["speed"] = speed
             if "reverse" in params:
-                clip["reverse"] = bool(params["reverse"])
+                # 刀4：真相源字段写走 store API
+                self._timeline_store.set_fields(clip.get("id"), reverse=bool(params["reverse"]))
                 self._sync_kernel_timeline()
                 self._refresh_preview_with_effects()
                 applied["reverse"] = bool(params["reverse"])

@@ -796,7 +796,8 @@ class EditorCapabilityHandlers:
                 return CapabilityResult(req.request_id, False, error=f"变速参数无效: {e}")
         # 倒放：写片段 dict，同步内核时间线并刷新预览
         if "reverse" in req.params:
-            clip["reverse"] = bool(req.params["reverse"])
+            # 刀4：真相源字段写走 TimelineStore.set_fields（唯一字段写入口）
+            editor._timeline_store.set_fields(clip_id, reverse=bool(req.params["reverse"]))
             applied["reverse"] = bool(req.params["reverse"])
             editor._sync_kernel_timeline()
             editor._refresh_preview_with_effects()

@@ -1,0 +1,296 @@
+# -*- coding: utf-8 -*-
+"""时间线字段写入面棘轮守卫（OTIO 全量迁移·刀4，CANONICAL）
+
+背景：``EditorModule._clips`` 的**字段级**直写（``clip["k"] = v`` / ``clip.update(...)``）
+历史上散落在 UI 回调、撤销重放、Agent 能力层等数十处。刀4 在 ``TimelineStore``
+增补 ``set_fields`` / ``update_where`` 唯一字段写 API，并把存量直写逐个改走 API。
+
+本守卫用 **AST 污点分析** 扫描 app/ 下「由 ``_clips`` 派生的 dict 变量」上的
+原地写操作（下标赋值 / ``+=`` / ``.update(``），按文件计数并与基线 JSON 对比：
+
+  * 棘轮**只减不增**：任一文件计数超过基线 → FAIL；基线外文件出现新直写 → FAIL；
+  * 收拢达标后用 ``--update`` 重写基线留痕（同 frozen_zone_guard 纪律）。
+
+豁免（不进扫描）：
+  * app/core/timeline_store.py —— API 自身实现（锁内原地 update 是合法本体）；
+  * app/modules/lego/clip_transform.py —— 冻结区 transform 唯一写入入口
+    （normalize/apply_normalized，方案 §1.2；store API 只转发不另实现）；
+  * app/modules/lego/timeline_widget.py —— 控件私有列表副本（刀1 守卫同律豁免）；
+  * app/tests/** —— 测试替身自管数据。
+
+用法（项目根执行）：
+  .venv312\\Scripts\\python.exe _verify/check_timeline_write_surface.py           # 校验
+  .venv312\\Scripts\\python.exe _verify/check_timeline_write_surface.py --update  # 重写基线
+退出码 0 = 达标；1 = 棘轮回涨或接线漂移。
+"""
+from __future__ import annotations
+
+import ast
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)  # 校验模式需 import app.core.glue（同 check_timeline_store.py）
+BASELINE = os.path.join(ROOT, "_verify", "timeline_write_surface_baseline.json")
+
+SKIP_REL = {
+    os.path.join("app", "core", "timeline_store.py"),
+    os.path.join("app", "modules", "lego", "clip_transform.py"),
+    os.path.join("app", "modules", "lego", "timeline_widget.py"),
+}
+TESTS_PREFIX = os.path.join("app", "tests") + os.sep
+# 行尾标记 `# ratchet-exempt`：理论兜底/不可达路径的豁免行（须注释说明理由）
+EXEMPT_MARK = "# ratchet-exempt"
+# 词边界匹配 _clips（避免 _clips_snapshot 等派生名误染）
+_CLIPS_RE = re.compile(r"(?<!\w)_clips(?!\w)")
+
+problems = []
+
+
+def _fail(msg: str) -> None:
+    problems.append(msg)
+
+
+def _refs_clips(node: ast.AST) -> bool:
+    """表达式源码是否引用 ``_clips``（真相源列表派生的粗略判据）。"""
+    try:
+        return bool(_CLIPS_RE.search(ast.unparse(node)))
+    except Exception:
+        return False
+
+
+def _classify_value(node: ast.AST, clips: set, colls: set) -> str:
+    """赋值右值分类：''（无关）/ 'clip'（片段 dict）/ 'coll'（片段容器）。"""
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+                         ast.List, ast.Set, ast.Dict)):
+        return "coll" if _refs_clips(node) else ""
+    if isinstance(node, ast.Call):
+        # next(...) / find_by_id 等返回单个 dict；list(...) 等返回容器
+        fname = node.func.id if isinstance(node.func, ast.Name) else (
+            node.func.attr if isinstance(node.func, ast.Attribute) else "")
+        kind = "coll" if fname in ("list", "sorted", "tuple", "filter", "map") else "clip"
+        return kind if _refs_clips(node) else ""
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        while isinstance(base, ast.Subscript):
+            base = base.value
+        if _refs_clips(node):
+            return "clip"          # self._clips[i]
+        if isinstance(base, ast.Name) and base.id in colls:
+            return "clip"          # video_clips[0]
+        return ""
+    if isinstance(node, ast.Name):
+        if node.id in clips:
+            return "clip"
+        if node.id in colls:
+            return "coll"
+        return ""
+    if isinstance(node, ast.IfExp):
+        kinds = {_classify_value(node.body, clips, colls),
+                 _classify_value(node.orelse, clips, colls)}
+        if "clip" in kinds:
+            return "clip"
+        return "coll" if "coll" in kinds else ""
+    return ""
+
+
+class _ScopeVisitor(ast.NodeVisitor):
+    """单作用域（模块顶层或一个函数体）顺序污点扫描。
+
+    近似数据流：赋值即重绑定（右值非 _clips 派生则清除污染）；
+    ``for x in <引用 _clips 的表达式>`` 在循环体内令 x 成为 clip 污染；
+    clip 变量的下标写 / ``.update()``、clip 容器的二级下标写 记为直写；
+    容器自身的一级下标写（如 id→clip 索引表）属容器突变，不计。
+    行尾带 ``# ratchet-exempt`` 的行豁免（须注释理由）。
+    嵌套函数/Lambda 作用域由 _walk_scopes 单独扫描，避免重复计数。
+    """
+
+    def __init__(self, lines: list):
+        self.clips: set = set()
+        self.colls: set = set()
+        self.lines = lines
+        self.hits: list = []
+
+    def visit_FunctionDef(self, node):
+        return  # 嵌套作用域跳过（_walk_scopes 另行处理）
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_Lambda = visit_FunctionDef
+
+    def _exempt(self, lineno: int) -> bool:
+        if 1 <= lineno <= len(self.lines):
+            return EXEMPT_MARK in self.lines[lineno - 1]
+        return False
+
+    def _record(self, tgt: ast.AST, lineno: int, kind: str) -> None:
+        if self._exempt(lineno):
+            return
+        depth = 0
+        base = tgt
+        while isinstance(base, ast.Subscript):
+            depth += 1
+            base = base.value
+        if isinstance(base, ast.Attribute) and base.attr == "_clips":
+            # self._clips[i]["k"] = v —— 直接下标写真相源
+            self.hits.append((lineno, kind))
+            return
+        if not isinstance(base, ast.Name):
+            return
+        if base.id in self.clips:
+            # clip 变量：任意深度下标写都是字段写
+            self.hits.append((lineno, kind))
+        elif base.id in self.colls and depth >= 2:
+            # 容器元素的字段写：coll[i]["k"] = v
+            self.hits.append((lineno, kind))
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Subscript):
+                self._record(tgt, node.lineno, "subscript=")
+                continue
+            if isinstance(tgt, ast.Attribute):
+                # 属性写（如 widget.clip_data = clip / self._current_clip = next(...)）
+                # 不构成宿主名字的再绑定，否则 self/widget 会被误染成 clip
+                continue
+            names = [n.id for n in ast.walk(tgt) if isinstance(n, ast.Name)]
+            kind = _classify_value(node.value, self.clips, self.colls)
+            self.clips.difference_update(names)
+            self.colls.difference_update(names)
+            if kind == "clip":
+                self.clips.update(names)
+            elif kind == "coll":
+                self.colls.update(names)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if isinstance(node.target, ast.Subscript):
+            self._record(node.target, node.lineno, "aug=")
+        self.generic_visit(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        names = [n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)]
+        loop_clip = _refs_clips(node.iter)
+        saved_c = {n: (n in self.clips) for n in names}
+        saved_k = {n: (n in self.colls) for n in names}
+        self.clips.difference_update(names)
+        self.colls.difference_update(names)
+        if loop_clip:
+            self.clips.update(names)
+        for st in node.body + node.orelse:
+            self.visit(st)
+        self.clips.difference_update(names)
+        self.colls.difference_update(names)
+        for n, was in saved_c.items():
+            if was:
+                self.clips.add(n)
+        for n, was in saved_k.items():
+            if was:
+                self.colls.add(n)
+        # 不调 generic_visit：循环体已手动处理，避免重复计数
+
+    def visit_Expr(self, node: ast.Expr) -> None:
+        call = node.value
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) \
+                and call.func.attr == "update":
+            recv = call.func.value
+            if isinstance(recv, ast.Name) and recv.id in self.clips \
+                    and not self._exempt(node.lineno):
+                self.hits.append((node.lineno, "update()"))
+        self.generic_visit(node)
+
+
+def _scan_scope(body: list, lines: list) -> list:
+    v = _ScopeVisitor(lines)
+    for st in body:
+        v.visit(st)
+    return v.hits
+
+
+def _walk_scopes(tree: ast.AST, lines: list) -> list:
+    """模块级与每个函数体分别做污点扫描（作用域隔离，避免同名误染）。"""
+    hits = list(_scan_scope(tree.body, lines))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            hits.extend(_scan_scope(node.body, lines))
+    return hits
+
+
+def scan_file(path: str, rel: str) -> int:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        tree = ast.parse(text, filename=rel)
+    except SyntaxError:
+        return 0
+    return len(_walk_scopes(tree, text.splitlines()))
+
+
+def collect_counts() -> dict:
+    counts = {}
+    app_dir = os.path.join(ROOT, "app")
+    for dirpath, dirnames, filenames in os.walk(app_dir):
+        dirnames[:] = [d for d in dirnames if d not in ("__pycache__",)]
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, ROOT)
+            if rel in SKIP_REL or rel.startswith(TESTS_PREFIX):
+                continue
+            n = scan_file(full, rel)
+            if n:
+                counts[rel.replace("\\", "/")] = n
+    return counts
+
+
+# ── 接线在册（静态） ────────────────────────────────────────────────
+
+def check_wiring() -> None:
+    store_path = os.path.join(ROOT, "app", "core", "timeline_store.py")
+    with open(store_path, "r", encoding="utf-8") as f:
+        src = f.read()
+    if "def set_fields(" not in src or "def update_where(" not in src:
+        _fail("② 刀4 API 漂移：TimelineStore 缺少 set_fields/update_where")
+    import re as _re
+    if _re.search(r"^(import PyQt6|from PyQt6)", src, _re.M):
+        _fail("② timeline_store 顶层 import Qt（子进程红线）")
+    from app.core.glue import policies
+    for sym in ("set_fields", "update_where"):
+        if not policies.is_declared_timeline_writer("app/core/timeline_store.py", sym):
+            _fail(f"② glue 策略未登记字段写 API：{sym}")
+
+
+def main() -> int:
+    update = "--update" in sys.argv
+    counts = collect_counts()
+    if update:
+        with open(BASELINE, "w", encoding="utf-8") as f:
+            json.dump(counts, f, ensure_ascii=False, indent=2, sort_keys=True)
+        total = sum(counts.values())
+        print(f"OK  棘轮基线已重写：{len(counts)} 文件 / {total} 处直写")
+        return 0
+    if not os.path.exists(BASELINE):
+        _fail(f"① 基线缺失：{os.path.relpath(BASELINE, ROOT)}（先 --update 立项）")
+    else:
+        with open(BASELINE, "r", encoding="utf-8") as f:
+            base = json.load(f)
+        for rel, n in sorted(counts.items()):
+            b = int(base.get(rel, 0))
+            if n > b:
+                _fail(f"① 棘轮回涨：{rel} 直写 {b} → {n}（字段写必须走 TimelineStore.set_fields/update_where）")
+            elif n < b:
+                print(f"INFO  已收敛：{rel} {b} → {n}（记得 --update 固化基线）")
+    check_wiring()
+    if problems:
+        for p in problems:
+            print(f"FAIL  {p}")
+        return 1
+    total = sum(counts.values())
+    print(f"PASS  时间线字段写入面棘轮达标：残留 {total} 处（基线内，刀8 继续收敛 UI 投影层）")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -684,11 +684,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         # 写真相源：先写目标 dict，再兜底同步 _clips 里同 id 片段
         for k, v in after.items():
             target[k] = v
-        for c in self._clips:
-            if c.get("id") == target.get("id") and c is not target:
-                for k, v in after.items():
-                    c[k] = v
-                break
+        # 刀4：真相源兜底同步改走 store API（set_fields 命中 live 同 id 行，原地 update）
+        self._timeline_store.set_fields(target.get("id"), **after)
 
         self._record_action({
             "type": "compound",
@@ -1687,11 +1684,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             effects["opacity"] = op
             clip["opacity"] = op
             clip["effects"] = effects
-            for c in getattr(self, "_clips", []) or []:
-                if c.get("id") == clip.get("id"):
-                    c["opacity"] = op
-                    c["effects"] = effects
-                    break
+            # 刀4：真相源字段写收敛 TimelineStore.set_fields（选区副本同步语义保留）
+            self._timeline_store.set_fields(clip.get("id"), opacity=op, effects=effects)
         self._schedule_preview_refresh()
 
     def _on_clip_blend_mode_changed(self, mode_text: str):
@@ -1702,10 +1696,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         mode = str(mode_text or "正常")
         for clip in targets:
             clip["blend_mode"] = mode
-            for c in getattr(self, "_clips", []) or []:
-                if c.get("id") == clip.get("id"):
-                    c["blend_mode"] = mode
-                    break
+            # 刀4：字段写走 store API（live dict 原地 update，保读点同一性）
+            self._timeline_store.set_fields(clip.get("id"), blend_mode=mode)
         self._schedule_preview_refresh()
 
     def _on_clip_crop_live(self, *_args):
@@ -1721,10 +1713,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         }
         for clip in targets:
             clip["crop"] = dict(crop)
-            for c in getattr(self, "_clips", []) or []:
-                if c.get("id") == clip.get("id"):
-                    c["crop"] = dict(crop)
-                    break
+            # 刀4：字段写走 store API
+            self._timeline_store.set_fields(clip.get("id"), crop=dict(crop))
         self._schedule_preview_refresh()
 
     def _apply_sequence_format_to_preview(self):
@@ -2441,10 +2431,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         for clip in targets:
             clip["volume"] = vol
             cid = clip.get("id")
-            for c in getattr(self, "_clips", []) or []:
-                if c.get("id") == cid:
-                    c["volume"] = vol
-                    break
+            # 刀4：真相源字段写走 store API
+            self._timeline_store.set_fields(cid, volume=vol)
         clip = targets[0]
         master = float(getattr(self, "_master_volume", 1.0) or 1.0)
         track_vol = self._track_volume_for_clip(clip)
@@ -2470,10 +2458,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             cid = clip.get("id")
             before_vol = float(before_map.get(cid, clip.get("volume", 1.0)) or 1.0)
             clip["volume"] = vol
-            for c in getattr(self, "_clips", []) or []:
-                if c.get("id") == cid:
-                    c["volume"] = vol
-                    break
+            # 刀4：真相源字段写走 store API
+            self._timeline_store.set_fields(cid, volume=vol)
             if abs(before_vol - vol) >= 0.005:
                 steps.append({
                     "type": "edit_clip",
@@ -2707,14 +2693,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             widget.set_keyframes(merged)
             merged = widget.get_keyframes()
         if clip is not None:
-            clip["keyframes"] = merged
+            # 刀4：真相源字段写走 store API（clip 即 live dict，原地 update 等价）
+            self._timeline_store.set_fields(clip_id, keyframes=merged)
         elif widget is not None and hasattr(widget, "clip_data"):
             widget.clip_data["keyframes"] = merged
-            # 尝试写回 _clips
-            for c in self._clips:
-                if c.get("id") == clip_id:
-                    c["keyframes"] = merged
-                    break
+            # 刀4：写回真相源改走 store API（原 for c in self._clips 手工同步已收敛）
+            self._timeline_store.set_fields(clip_id, keyframes=merged)
         self._touch_project_dirty()
         self._record_action({
             "type": "edit_clip",
@@ -2919,7 +2903,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if clip.get("id") != clip_id:
                 continue
             before = {"speed": float(clip.get("speed", 1.0) or 1.0)}
-            clip["speed"] = speed
+            # 刀4：字段写走 store API（live dict 原地 update，后续读 clip 仍同一对象）
+            self._timeline_store.set_fields(clip_id, speed=speed)
             self._record_action({
                 "type": "edit_clip",
                 "clip_id": clip_id,
@@ -3019,7 +3004,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 "in_point": float(clip.get("in_point", 0) or 0),
                 "out_point": float(clip.get("out_point", 0) or 0),
             }
-            clip["start_time"] = max(0.0, float(new_start_time))
+            # 刀4：字段写走 store API
+            self._timeline_store.set_fields(clip_id, start_time=max(0.0, float(new_start_time)))
             link_steps = self._linked_av_edit_steps(clip, before=before)
             self._sync_linked_av_timing(clip, before=before)
             after = {
@@ -3063,8 +3049,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             }
             dur = max(0.05, float(new_duration))
             in_p = float(clip.get("in_point", 0) or 0)
-            clip["duration"] = dur
-            clip["out_point"] = in_p + dur
+            # 刀4：字段写走 store API
+            self._timeline_store.set_fields(clip_id, duration=dur, out_point=in_p + dur)
             link_steps = self._linked_av_edit_steps(clip, before=before)
             self._sync_linked_av_timing(clip, before=before)
             after = {
@@ -3150,9 +3136,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if new_out <= new_in:
                 return {"action": "trim_clip", "success": False, "message": "出点必须大于入点"}
 
-            clip["in_point"] = new_in
-            clip["out_point"] = new_out
-            clip["duration"] = max(0.05, (new_out - new_in) / speed)
+            # 刀4：字段写走 store API
+            self._timeline_store.set_fields(
+                clip_id,
+                in_point=new_in,
+                out_point=new_out,
+                duration=max(0.05, (new_out - new_in) / speed),
+            )
             after = {
                 "start_time": float(clip.get("start_time", 0) or 0),
                 "track": int(clip.get("track", 0) or 0),
@@ -3556,18 +3546,21 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                     self._current_clip = None
                 for sh in shifts:
-                    for c in self._clips:
-                        if c.get("id") == sh.get("id"):
-                            c["start_time"] = float(sh.get("new", c.get("start_time", 0)))
+                    # 刀4：波纹位移字段写走 store API（保留「缺键则维持现值」语义）
+                    _c = self._timeline_store.find_by_id(sh.get("id"))
+                    if _c is not None:
+                        self._timeline_store.set_fields(
+                            sh.get("id"), start_time=float(sh.get("new", _c.get("start_time", 0))))
             else:
                 if clip not in self._clips:
                     self._timeline_store.add(clip)
                 self._timeline_add_clip_widget(clip)
                 self._current_clip = clip
                 for sh in shifts:
-                    for c in self._clips:
-                        if c.get("id") == sh.get("id"):
-                            c["start_time"] = float(sh.get("old", c.get("start_time", 0)))
+                    _c = self._timeline_store.find_by_id(sh.get("id"))
+                    if _c is not None:
+                        self._timeline_store.set_fields(
+                            sh.get("id"), start_time=float(sh.get("old", _c.get("start_time", 0))))
 
         elif atype == "batch_delete":
             items = action.get("items") or []
@@ -3580,9 +3573,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
                     for sh in shifts:
-                        for c in self._clips:
-                            if c.get("id") == sh.get("id"):
-                                c["start_time"] = float(sh.get("new", c.get("start_time", 0)))
+                        # 刀4：波纹位移字段写走 store API
+                        _c = self._timeline_store.find_by_id(sh.get("id"))
+                        if _c is not None:
+                            self._timeline_store.set_fields(
+                                sh.get("id"), start_time=float(sh.get("new", _c.get("start_time", 0))))
             else:
                 for item in reversed(items):
                     clip = item["clip"]
@@ -3592,9 +3587,10 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._timeline_add_clip_widget(clip)
                     self._current_clip = clip
                     for sh in shifts:
-                        for c in self._clips:
-                            if c.get("id") == sh.get("id"):
-                                c["start_time"] = float(sh.get("old", c.get("start_time", 0)))
+                        _c = self._timeline_store.find_by_id(sh.get("id"))
+                        if _c is not None:
+                            self._timeline_store.set_fields(
+                                sh.get("id"), start_time=float(sh.get("old", _c.get("start_time", 0))))
 
         elif atype in ("split", "redo_split"):
             is_split = (mode == 'do')
@@ -3771,7 +3767,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             effects = {}
         effects.update(params)
         effects[effect_name] = params
-        target_clip['effects'] = effects
+        # 刀4：字段写走 store API（live dict 原地 update，语义等价）
+        self._timeline_store.set_fields(clip_id, effects=effects)
         self._current_clip = target_clip
         self._touch_project_dirty()
         self._refresh_preview_with_effects()
@@ -3817,8 +3814,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             'duration': duration,
             'time': self._playhead_position
         })
-        target_clip['transitions'] = transitions
-        target_clip['transition'] = transitions[-1]
+        # 刀4：转场元数据字段写走 store API
+        self._timeline_store.set_fields(
+            target_clip.get("id"), transitions=transitions, transition=transitions[-1])
         self._notify_edit(f"转场 {transition_name} {duration}s")
 
     def _schedule_preview_refresh(self):
@@ -4414,7 +4412,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                         if (c.get("path") or "") == file_path:
                             stamp_clip(c, extra)
                             if extra.get("canvas_title"):
-                                c["name"] = extra["canvas_title"]
+                                # 刀4：字段写走 store API
+                                self._timeline_store.set_fields(c.get("id"), name=extra["canvas_title"])
                             break
             title = data.get("title", "") if isinstance(data, dict) else ""
             tip = title or os.path.basename(file_path)
@@ -4740,16 +4739,16 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     clip = next((c for c in self._clips if c.get("id") == cid), None)
                 if clip is None or not before or not after:
                     continue
-                # 合并到真相源
-                for i, c in enumerate(self._clips):
-                    if c.get("id") == cid:
-                        c.update({
-                            k: after[k] for k in ("start_time", "track", "duration", "in_point", "out_point")
-                            if k in after
-                        })
-                        clip = c
-                        self._clips[i] = c
-                        break
+                # 刀4：合并到真相源改走 store API（原 for i,c in enumerate 手工 merge 已收敛）
+                patch = {
+                    k: after[k] for k in ("start_time", "track", "duration", "in_point", "out_point")
+                    if k in after
+                }
+                if patch:
+                    self._timeline_store.set_fields(cid, **patch)
+                live = self._timeline_store.find_by_id(cid)
+                if live is not None:
+                    clip = live
                 steps.append({
                     "type": "edit_clip",
                     "clip_id": cid,
@@ -4783,13 +4782,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         if isinstance(clip_data, dict) and "_edit_before" in clip_data:
             before = clip_data.pop("_edit_before", None)
         cid = clip_data.get("id")
-        for i, c in enumerate(self._clips):
-            if c.get("id") == cid:
-                # 合并字段到已有 dict，保持引用
-                c.update({k: v for k, v in clip_data.items() if k != "_edit_before"})
-                clip_data = c
-                self._clips[i] = c
-                break
+        # 刀4：字段合并走 store API（保持 live dict 同一对象，widget/撤销读点不漂）
+        live = self._timeline_store.find_by_id(cid)
+        if live is not None:
+            self._timeline_store.set_fields(
+                cid, **{k: v for k, v in clip_data.items() if k != "_edit_before"})
+            clip_data = live
         else:
             self._timeline_store.add(clip_data)
         self._current_clip = clip_data
@@ -7546,8 +7544,10 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 cst = float(c.get("start_time", 0) or 0)
                 if cst >= end - 1e-4:
                     old = cst
-                    c["start_time"] = max(0.0, cst - dur)
-                    ripple_shifts.append({"id": c.get("id"), "old": old, "new": c["start_time"]})
+                    new_st = max(0.0, cst - dur)
+                    # 刀4：波纹位移字段写走 store API
+                    self._timeline_store.set_fields(c.get("id"), start_time=new_st)
+                    ripple_shifts.append({"id": c.get("id"), "old": old, "new": new_st})
 
         if hasattr(self, '_timeline_widget'):
             self._timeline_widget._clips = [
@@ -8675,8 +8675,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         new_clip["out_point"] = new_clip["in_point"] + new_clip["duration"]
 
         original_out = float(live.get("in_point", 0) or 0) + duration
-        live["duration"] = local_time
-        live["out_point"] = float(live.get("in_point", 0) or 0) + local_time
+        new_out_point = float(live.get("in_point", 0) or 0) + local_time
+        # 刀4：真相源字段写走 store API；live 不在真相源时兜底写传入引用（理论不可达）
+        if not self._timeline_store.set_fields(cid, duration=local_time, out_point=new_out_point):
+            live["duration"] = local_time          # ratchet-exempt: 片段已脱离真相源的兜底
+            live["out_point"] = new_out_point      # ratchet-exempt: 保持旧路径行为不变
         self._timeline_store.add(new_clip)
         if hasattr(self, "_timeline_widget") and self._timeline_widget:
             widget = self._timeline_widget.add_clip(new_clip, int(new_clip.get("track", 0)))
@@ -9015,8 +9018,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             new_dur = max(0.05, min(a_dur, max(0.05, file_dur - in_p)))
             if new_dur <= v_dur + 0.05:
                 continue
-            clip["duration"] = new_dur
-            clip["out_point"] = in_p + new_dur
+            # 刀4：字段写走 store API
+            self._timeline_store.set_fields(clip.get("id"), duration=new_dur, out_point=in_p + new_dur)
             if tw is not None and hasattr(tw, "all_clip_widgets"):
                 for w in tw.all_clip_widgets():
                     if w.clip_data.get("id") == clip.get("id"):

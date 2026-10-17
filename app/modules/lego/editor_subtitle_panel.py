@@ -621,7 +621,8 @@ def apply_ripple_delete_range(
             if clip_id:
                 editor._timeline_remove_clip_widget(clip_id)
 
-    editor._clips[:] = result.clips
+    # 刀4：结构写走 TimelineStore.replace_all（原地切片、保列表同一性）
+    editor._timeline_store.replace_all(result.clips)
 
     if record and result.steps:
         editor._record_action(result.undo_action)
@@ -846,7 +847,8 @@ def execute_cleanup_selection(editor: _SubtitlePanelHost, plan, selected) -> boo
             if clip_id:
                 editor._timeline_remove_clip_widget(clip_id)
 
-    editor._clips[:] = result.clips
+    # 刀4：结构写走 TimelineStore.replace_all（原地切片、保列表同一性）
+    editor._timeline_store.replace_all(result.clips)
     if result.steps:
         editor._record_action(result.undo_action)
         editor._project_dirty = True

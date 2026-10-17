@@ -1,7 +1,9 @@
 # OTIO 真相源迁移方案（立项 · 2026-10-18）
 
-> 状态：**已立项，待分刀实施**。决策依据：§1.4 于 2026-10-18 用户拍板推翻「不重写时间线架构」，
-> OTIO 全量迁移已确认；刀1-3（TimelineStore 收拢）已提交（4633686 / abfc97e / 01130c5）。
+> 状态：**分刀实施中**。决策依据：§1.4 于 2026-10-18 用户拍板推翻「不重写时间线架构」，
+> OTIO 全量迁移已确认；刀1-3（TimelineStore 收拢）已提交（4633686 / abfc97e / 01130c5）；
+> **刀4（字段级写入收拢）已完成**：`set_fields`/`update_where` 唯一字段写 API 上线，核心层直写清零，
+> WRITESURF 棘轮守卫入册（基线仅余 widget 层 5 处，刀8 收口）。
 > 本方案是刀4+ 的执行蓝图。**迁移完成前 `EditorModule._clips` 仍是唯一真相源**（§3.2 不变）。
 
 ## 1. 硬约束（不可商量的三条）
@@ -20,7 +22,7 @@
 | 层 | 现状 | 证据 |
 |---|---|---|
 | 结构写入 | ✅ 已收敛 `TimelineStore`（add/remove_by_id/replace_all/clear，adopt 同一 list、原地突变保同一性） | app/core/timeline_store.py:32-102 |
-| 字段级写入 | ❌ 仍散落原地改 dict（属性/调色/裁剪等 UI 回调） | editor_module.py:1667-1725 等 |
+| 字段级写入 | ✅ 刀4 收拢 `store.set_fields`/`update_where`（锁内改 live dict 保同一性）；widget 层私有副本 5 处入棘轮基线留刀8 | timeline_store.py set_fields/update_where；_verify/check_timeline_write_surface.py |
 | 序列化 | 快照 provider 交 `_clips_snapshot()` 浅拷贝，落盘仍是裸 dict 列表 | editor_module.py:442-449；project_snapshot.py:196-202 |
 | 类型化视图 | ✅ `store.to_timeline()` canonical 出口（锁内快照 → `clips_to_timeline` 确定性构建 DSL） | timeline_store.py:106-129 |
 | DSL↔OTIO | ✅ `otio_adapter` 双向映射（metadata 保留、source_range 还原），子进程 worker | otio_adapter.py:175-215/325-404；_otio_worker.py:37-64 |
@@ -32,11 +34,19 @@
 
 ## 3. 分刀计划（每刀独立可回退、独立门禁）
 
-### 刀4 · 字段级写入收拢（P0，不触冻结区）
+### 刀4 · 字段级写入收拢（P0，不触冻结区）✅ 2026-10-18 完成
 - `TimelineStore` 增 `set_fields(clip_id, **kv)` / `update_where()` 唯一字段写 API（锁内改 live dict，保持读点同一性）；
 - 存量散落直写点逐个改走 API，新增守卫 **CANONICAL**（`_verify/check_timeline_write_surface.py`）：
   扫描 `_clips` 的 `["key"] = ` 直写模式，棘轮只减不增，新代码零直写；
 - 成功标准：守卫棘轮达标 + 89 项绿 + 手工冒烟（调色/裁剪/属性面板改值可撤销）。
+- **实施记录**：
+  - 收拢面：editor_module.py（opacity/blend/crop/volume/keyframes/speed/move/trim/波纹位移/特效/转场/误裁/切分兜底
+    等约 20 处）、editor_effects_mixin.py、ai_agent_panel.py、capability_handlers*.py、
+    editor_subtitle_panel.py 与 rough_cut_chain.py 的 3 处结构切片写漏网（改 `replace_all`）；
+  - 守卫：AST 污点分析（clip 污染 vs 容器污染区分、`# ratchet-exempt` 行豁免、作用域隔离），
+    登记为 run_all_checks **WRITESURF**；glue `TIMELINE_WRITE_ENTRYPOINTS` 已登记两 API；
+  - 基线残留：clip_widget.py 4 处 + editor_timeline_tools.py 1 处（widget 私有副本层，刀8 收口）；
+  - 冻结区未触：transform 系字段仍走 normalize/apply_normalized 唯一入口（clip_transform.py 守卫豁免）。
 
 ### 刀5 · 持久化走 DSL canonical（P0，不触冻结区）
 - 工程保存改存 `store.to_timeline()` 的 DSL JSON（带 `schema_version` + `format: "timeline-dsl"`），

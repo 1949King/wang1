@@ -31,6 +31,7 @@ from app.core.rough_cut_chain import (  # noqa: E402
     rough_cut_job_runner,
 )
 from app.core.filler_silence_detect import CleanupConfig  # noqa: E402
+from app.core.timeline_store import TimelineStore  # noqa: E402
 
 PASS = []
 FAIL = []
@@ -42,10 +43,12 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 class FakeEditor:
-    """鸭子类型剪辑器：只提供 _clips 真相源 / _record_action / 精剪出片入口。"""
+    """鸭子类型剪辑器：只提供 _clips 真相源 / store 写入口 / _record_action / 精剪出片入口。"""
 
     def __init__(self, clips):
         self._clips = clips
+        # 刀4：写回改走 store.replace_all —— 与真实宿主同律（adopt 同一 list，原地突变保同一性）
+        self._timeline_store = TimelineStore(clips)
         self.actions = []
         self.export_calls = []
 
