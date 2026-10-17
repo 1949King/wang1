@@ -52,8 +52,9 @@ SERVER_FILES = [
     os.path.join("app", "core", "canvas_routes_roughcut.py"),
 ]
 CLIENTS = [
+    # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除，两宿主共用真源包，
+    # 画布前端调用面只需扫 packages/libtv 一处。
     os.path.join("vendor", "packages", "libtv", "src", "bridge.ts"),
-    os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv", "bridge.ts"),
     # ── 新增的前端编排模块也必须登记，否则它调用的端点对契约检查「隐身」 ──
     # 2026-09-14：generationQueue.ts 承载 /host/generation/submit|status|list|cancel
     # 四个异步生成端点（任务制），只扫 bridge.ts 会漏掉它们。

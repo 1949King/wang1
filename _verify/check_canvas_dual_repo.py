@@ -81,9 +81,14 @@ def main() -> int:
 
     main_root = os.path.join(ROOT, MAIN_REL)
     sub_root = os.path.join(ROOT, SUB_REL)
-    if not os.path.isdir(main_root) or not os.path.isdir(sub_root):
-        print(f"✗ 找不到画布目录：{MAIN_REL} / {SUB_REL}")
+    if not os.path.isdir(main_root):
+        print(f"✗ 找不到画布真源目录：{MAIN_REL}")
         return 1
+    # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除（改依赖 @shiguang/libtv），
+    # 双库漂移比对对象不复存在 ⇒ 本守卫退役放行；Phase 3 将重写为「禁宿主副本」守卫。
+    if not os.path.isdir(sub_root):
+        print("OK 副库 libtv 副本已删除（P0-1 Phase 2 抽包接线），双库漂移守护退役")
+        return 0
 
     mains = _walk(main_root)
     subs = _walk(sub_root)

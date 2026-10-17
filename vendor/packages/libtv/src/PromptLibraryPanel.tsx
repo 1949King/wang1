@@ -92,7 +92,10 @@ export default function PromptLibraryPanel({
   useEffect(() => {
     let cancelled = false;
     let idleId = 0;
-    let timer = 0;
+    // P0-1 Phase 2（2026-10-18）：包内 tsc 程序经 src 测试文件 → vitest → vite 类型链
+    // 会带入 @types/node 全局（setTimeout 返回 Timeout 而非 DOM 的 number），用
+    // ReturnType<typeof setTimeout> 同时兼容 DOM/node 两种声明，避免棘轮新增错误。
+    let timer: ReturnType<typeof setTimeout> | 0 = 0;
     void loadPage({ network: false }).then(() => {
       if (cancelled) return;
       const runBg = () => {
@@ -118,7 +121,7 @@ export default function PromptLibraryPanel({
     return () => {
       cancelled = true;
       if (idleId && "cancelIdleCallback" in window) window.cancelIdleCallback(idleId);
-      if (timer) window.clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [loadPage, onStatus]);
 

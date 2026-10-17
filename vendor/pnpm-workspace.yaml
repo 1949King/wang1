@@ -1,6 +1,7 @@
-# P0-1 双库抽包 Phase 1（2026-10-18）：导演台画布单一事实源 workspace。
-# packages/libtv = @shiguang/libtv（真源）；shiguang-canvas = Qt WebEngine 宿主壳。
-# AI-Canvas-tauri 于 Phase 2 接线时再加入 members（本阶段保持其 npm 独立构建）。
+# P0-1 双库抽包（2026-10-18）：导演台画布单一事实源 workspace。
+# packages/libtv = @shiguang/libtv（真源）；shiguang-canvas = Qt WebEngine 宿主壳；
+# AI-Canvas-tauri = Tauri 桌面宿主壳（Phase 2 接线：改依赖引用，src/libtv 副本已删除）。
 packages:
   - "packages/libtv"
   - "shiguang-canvas"
+  - "AI-Canvas-tauri"

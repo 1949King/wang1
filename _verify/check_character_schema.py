@@ -49,14 +49,13 @@ BRIDGE = os.path.join(ROOT, "app", "core", "canvas_bridge.py")
 # canvas_routes_get.py —— 两文件都扫，任一命中即算派生到位（防再次迁移造成盲区）。
 SERVER = os.path.join(ROOT, "app", "core", "canvas_server.py")
 SERVER_ROUTES = os.path.join(ROOT, "app", "core", "canvas_routes_get.py")
+# P0-1 Phase 2（2026-10-18）：tauri 侧 libtv 副本已删除，两宿主共用真源包，只扫一处。
 FRONTENDS = [
     os.path.join(ROOT, "vendor", "packages", "libtv", "src", "stores", "node-factory.ts"),
-    os.path.join(ROOT, "vendor", "AI-Canvas-tauri", "src", "libtv", "stores", "node-factory.ts"),
 ]
-# ⑥ 画布提示词拼装（主库 + 副库）
+# ⑥ 画布提示词拼装（真源包，web/tauri 双宿主共用）
 STORES = [
     os.path.join(ROOT, "vendor", "packages", "libtv", "src", "store.ts"),
-    os.path.join(ROOT, "vendor", "AI-Canvas-tauri", "src", "libtv", "store.ts"),
 ]
 
 problems: list[str] = []

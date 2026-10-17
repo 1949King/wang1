@@ -15,9 +15,9 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+// P0-1 Phase 2（2026-10-18）：tauri 侧 libtv 副本已删除，两宿主共用真源包，只扫一处。
 const FILES = [
   "vendor/packages/libtv/src/store.ts",
-  "vendor/AI-Canvas-tauri/src/libtv/store.ts",
 ];
 
 let fail = 0;

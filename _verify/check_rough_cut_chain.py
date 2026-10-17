@@ -239,8 +239,8 @@ check("路由契约守卫登记：SERVER_FILES 含 canvas_routes_roughcut.py",
 check("路由契约守卫登记：CLIENTS 含 hostRoughCut.ts",
       "hostRoughCut.ts" in routes_guard)
 
-for repo in (os.path.join("vendor", "packages", "libtv", "src"),
-             os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv")):
+# P0-1 Phase 2（2026-10-18）：tauri 侧 libtv 副本已删除，两宿主共用真源包，只扫一处。
+for repo in (os.path.join("vendor", "packages", "libtv", "src"),):
     hr_src = _src(os.path.join(repo, "hostRoughCut.ts"))
     check(f"前端在册（{repo.split(os.sep)[1]}）：hostRoughCut 订阅判读 + 两端点",
           'rough_cut.review' in hr_src
