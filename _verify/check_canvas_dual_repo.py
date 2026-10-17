@@ -1,19 +1,30 @@
 # -*- coding: utf-8 -*-
-"""回归：画布双库漂移 —— 主库 shiguang-canvas ↔ 副库 AI-Canvas-tauri/src/libtv
+"""回归：画布单一真源防漂卡点（P0-1 Phase 3，2026-10-18 重写）。
 
 背景：
-  两个画布包目前靠**手工同步**（外加 5 个数据契约文件的 Windows 硬链接）维持一致。
-  2026-09-13 实测：84 vs 77 文件 / 62 一致 / **15 分叉** / **7 缺失**（含整个 novice/ 小白模式）。
-  抽包成 `@shiguang/libtv` 的大改造（P0-1）还没开始，但**漂移必须立刻止血**。
+  旧版守卫比对「主库 shiguang-canvas ↔ 副库 AI-Canvas-tauri/src/libtv 副本」的
+  MD5 漂移。P0-1 抽包后画布真源唯一存在于 vendor/packages/libtv（@shiguang/libtv），
+  两宿主以 workspace 依赖引用、副本已删除 ⇒ 比对对象不复存在，守卫升级为
+  「防止副本以任何形式复活」+「接线在册」+「全量构建门禁」。
 
-策略（基线制，避免存量问题淹没新信号）：
-  - 5 个数据契约文件**必须字节一致**（硬链接断了就算 FAIL）
-  - 基线之外的**新分叉 / 新缺失** → FAIL（这才是要抓的东西）
-  - 基线内的文件**恢复一致** → 报「已收敛」，提示从基线移除（不失败，鼓励收敛）
+检查三组：
+  [1] 禁宿主 libtv 源码副本：
+      - 宿主 src/libtv/ 目录不得存在；
+      - 宿主 src 下任何 .ts/.tsx 与包内 src 文件**字节一致**（散落的复制粘贴）⇒ FAIL
+        （vite-env.d.ts 属宿主壳标配，白名单放行）。
+  [2] 接线在册：
+      - 两宿主 package.json 必须依赖 "@shiguang/libtv": "workspace:*"；
+      - 宿主源码不得再出现 './libtv/ 或 '../libtv/ 相对导入；
+      - pnpm-workspace.yaml members 必须含 packages/libtv + shiguang-canvas + AI-Canvas-tauri。
+  [3] 全量构建门禁（默认跑，--no-build 跳过）：
+      - web 宿主 pnpm --filter shiguang-canvas run build；
+      - tauri 宿主 pnpm --filter AI-Canvas-tauri exec vite build
+        （绕开其 build 脚本里的 tsc -b 存量 4 错=§2c.5 基线，非本项职责）；
+      - node/pnpm/node_modules 缺失时显式跳过并说明（与 precommit ⑦ 的 CI 跳过同纪律）。
 
 用法：
-    python _verify/check_canvas_dual_repo.py
-    python _verify/check_canvas_dual_repo.py --update   # 把当前状态写回基线（谨慎！）
+    python _verify/check_canvas_dual_repo.py            # 静态 + 构建
+    python _verify/check_canvas_dual_repo.py --no-build  # 仅静态（precommit 用，快）
 """
 from __future__ import annotations
 
@@ -21,43 +32,27 @@ import argparse
 import hashlib
 import io
 import os
+import re
+import shutil
+import subprocess
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-MAIN_REL = os.path.join("vendor", "packages", "libtv", "src")
-SUB_REL = os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv")
-
-# 5 个数据契约文件：靠 Windows 硬链接共享 inode，必须字节一致
-MUST_SYNC = [
-    "stores/templates.ts",
-    "stores/schema-migrations.ts",
-    "stores/history-store.ts",
-    "stores/project-storage.ts",
-    "stores/migrations.ts",
-]
-
-# ── 基线（2026-09-13 实测，勿凭印象改）──
-BASELINE_DIVERGED = {
-    "bridge.ts",
+PKG_SRC_REL = os.path.join("vendor", "packages", "libtv", "src")
+HOSTS = {
+    "shiguang-canvas": os.path.join("vendor", "shiguang-canvas"),
+    "AI-Canvas-tauri": os.path.join("vendor", "AI-Canvas-tauri"),
 }
-# 副库尚未同步（主库独有）：咬合缝/槽位高亮 + 整个小白模式
-BASELINE_MISSING = {
-    "comfyToCanvas.test.ts",
-    "magnetic/MagneticEngine.test.ts",
-    "magnetic/bonds.test.ts",
-    "magnetic/reflow.test.ts",
-    "mascot/mascotMotion.test.ts",
-    "mascot/petActivity.test.ts",
-    "ports.test.ts",
-    "stage3dCamGizmo.test.ts",
-    "stage3dScene.test.ts",
-    "tauri-api-shim.d.ts",
-}
+# 宿主壳标配文件：与包内容撞车不算「副本复活」
+FINGERPRINT_ALLOW = {"vite-env.d.ts"}
+# 相对导入 libtv 副本路径（真源只允许经 @shiguang/libtv 包名引用）
+REL_LIBTV_IMPORT_RE = re.compile(r"""from\s+["']\.\.?/[^"']*libtv/""")
 
 
-def _walk(root: str) -> dict:
+def _walk_ts(root: str) -> dict:
+    """relpath(以 / 分隔) -> 绝对路径，只收 .ts/.tsx，跳过 node_modules/dist。"""
     out = {}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in ("node_modules", "dist")]
@@ -73,107 +68,134 @@ def _md5(path: str) -> str:
         return hashlib.md5(fh.read()).hexdigest()
 
 
+def _check_no_copies(failures: list) -> None:
+    pkg_src = os.path.join(ROOT, PKG_SRC_REL)
+    if not os.path.isdir(pkg_src):
+        failures.append(f"画布真源包目录不存在：{PKG_SRC_REL}")
+        print(f"  ✗ {PKG_SRC_REL} 不存在")
+        return
+    pkg_hashes = {}
+    for rel, p in _walk_ts(pkg_src).items():
+        pkg_hashes.setdefault(_md5(p), rel)
+    print(f"  · 包真源 {len(pkg_hashes)} 个内容指纹")
+
+    for host, host_rel in HOSTS.items():
+        # 目录级：src/libtv 不得复活
+        sub_libtv = os.path.join(ROOT, host_rel, "src", "libtv")
+        if os.path.isdir(sub_libtv):
+            failures.append(f"{host}: src/libtv/ 副本目录复活（P0-1 已抽包，禁止宿主持有副本）")
+            print(f"  ✗ {host}: src/libtv/ 目录存在")
+            continue
+        # 内容级：散落的逐字节复制
+        src_dir = os.path.join(ROOT, host_rel, "src")
+        if not os.path.isdir(src_dir):
+            continue
+        for rel, p in sorted(_walk_ts(src_dir).items()):
+            if os.path.basename(p) in FINGERPRINT_ALLOW:
+                continue
+            hit = pkg_hashes.get(_md5(p))
+            if hit:
+                failures.append(f"{host}: {rel} 与包内 {hit} 字节一致（源码副本复活）")
+                print(f"  ✗ {host}: {rel} == 包内 {hit}")
+    if not failures:
+        print("  ✓ 两宿主无 libtv 源码副本（目录级 + 内容级）")
+
+
+def _check_wiring(failures: list) -> None:
+    import json
+
+    for host, host_rel in HOSTS.items():
+        pj = os.path.join(ROOT, host_rel, "package.json")
+        if not os.path.isfile(pj):
+            failures.append(f"{host}: package.json 缺失")
+            continue
+        deps = json.load(open(pj, encoding="utf-8")).get("dependencies", {})
+        if deps.get("@shiguang/libtv") != "workspace:*":
+            failures.append(f'{host}: 未依赖 "@shiguang/libtv": "workspace:*"（实到 {deps.get("@shiguang/libtv")}）')
+            print(f"  ✗ {host}: 包依赖接线缺失")
+        else:
+            print(f"  ✓ {host}: @shiguang/libtv workspace:* 在册")
+
+    for host, host_rel in HOSTS.items():
+        src_dir = os.path.join(ROOT, host_rel, "src")
+        if not os.path.isdir(src_dir):
+            continue
+        for rel, p in sorted(_walk_ts(src_dir).items()):
+            body = open(p, encoding="utf-8", errors="replace").read()
+            if REL_LIBTV_IMPORT_RE.search(body):
+                failures.append(f"{host}: {rel} 仍用相对路径导入 libtv 副本（应改 @shiguang/libtv/*）")
+                print(f"  ✗ {host}: {rel} 相对导入 libtv/")
+
+    ws = os.path.join(ROOT, "vendor", "pnpm-workspace.yaml")
+    if not os.path.isfile(ws):
+        failures.append("vendor/pnpm-workspace.yaml 不存在")
+    else:
+        body = open(ws, encoding="utf-8").read()
+        for member in ("packages/libtv", "shiguang-canvas", "AI-Canvas-tauri"):
+            if member not in body:
+                failures.append(f"pnpm-workspace.yaml members 缺 {member}")
+            else:
+                print(f"  ✓ workspace members 含 {member}")
+
+
+def _check_builds(failures: list) -> None:
+    node = shutil.which("node")
+    pnpm = shutil.which("pnpm")
+    if not node or not pnpm:
+        print("  ⚠️ 未找到 node/pnpm，跳过构建门禁（不阻断；CI 由 frontend job 覆盖）")
+        return
+    if not os.path.isdir(os.path.join(ROOT, "vendor", "node_modules", ".pnpm")):
+        print("  ⚠️ vendor/node_modules 未安装，跳过构建门禁（先 pnpm install）")
+        return
+    env = os.environ.copy()
+    env["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+    vendor_dir = os.path.join(ROOT, "vendor")
+    cmds = [
+        ("web 宿主 vite build", "pnpm --filter shiguang-canvas run build"),
+        # tauri 的 build 脚本含 tsc -b（存量 4 错=§2c.5 基线），构建门禁只验打包链路
+        ("tauri 宿主 vite build", "pnpm --filter AI-Canvas-tauri exec vite build"),
+    ]
+    for label, cmd in cmds:
+        r = subprocess.run(cmd, cwd=vendor_dir, env=env, shell=True,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=600)
+        if r.returncode != 0:
+            tail = (r.stdout or "") + (r.stderr or "")
+            print(f"  ✗ {label} 失败（尾部）：")
+            print("\n".join(tail.strip().splitlines()[-8:]))
+            failures.append(f"构建门禁失败：{label}")
+        else:
+            print(f"  ✓ {label}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--update", action="store_true",
-                    help="把当前实测状态写回本脚本的基线（仅在确认漂移是有意的时候用）")
+    ap.add_argument("--no-build", action="store_true",
+                    help="跳过 [3] 全量构建门禁（precommit 增量模式用）")
     args = ap.parse_args()
 
-    main_root = os.path.join(ROOT, MAIN_REL)
-    sub_root = os.path.join(ROOT, SUB_REL)
-    if not os.path.isdir(main_root):
-        print(f"✗ 找不到画布真源目录：{MAIN_REL}")
-        return 1
-    # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除（改依赖 @shiguang/libtv），
-    # 双库漂移比对对象不复存在 ⇒ 本守卫退役放行；Phase 3 将重写为「禁宿主副本」守卫。
-    if not os.path.isdir(sub_root):
-        print("OK 副库 libtv 副本已删除（P0-1 Phase 2 抽包接线），双库漂移守护退役")
-        return 0
+    failures: list = []
 
-    mains = _walk(main_root)
-    subs = _walk(sub_root)
+    print("[1] 禁宿主 libtv 源码副本（目录级 + 内容指纹级）")
+    _check_no_copies(failures)
 
-    same, diverged, missing = [], [], []
-    for rel in sorted(mains):
-        sub_path = os.path.join(sub_root, rel.replace("/", os.sep))
-        if not os.path.exists(sub_path):
-            missing.append(rel)
-        elif _md5(mains[rel]) == _md5(sub_path):
-            same.append(rel)
-        else:
-            diverged.append(rel)
-    only_sub = sorted(set(subs) - set(mains))
+    print("\n[2] 接线在册（workspace 依赖 / 无相对副本导入 / members）")
+    _check_wiring(failures)
 
-    print(f"主库 {len(mains)} 文件 · 副库 {len(subs)} 文件")
-    print(f"一致 {len(same)} · 分叉 {len(diverged)} · 副库缺失 {len(missing)}")
-
-    if args.update:
-        _write_baseline(diverged, missing)
-        print("✓ 基线已更新（--update）")
-        return 0
-
-    failures = []
-
-    print("\n[1] 数据契约文件必须字节一致（硬链接是否还在）")
-    for rel in MUST_SYNC:
-        sub_path = os.path.join(sub_root, rel.replace("/", os.sep))
-        ok = os.path.exists(sub_path) and _md5(mains[rel]) == _md5(sub_path)
-        print(f"  {'✓' if ok else '✗'} {rel}")
-        if not ok:
-            failures.append(f"数据契约文件分叉（硬链接可能断了）: {rel}")
-
-    print("\n[2] 新分叉（基线之外）")
-    new_diverged = [r for r in diverged if r not in BASELINE_DIVERGED]
-    if new_diverged:
-        for r in new_diverged:
-            print(f"  ✗ 新分叉: {r}")
-            failures.append(f"新分叉: {r}")
+    print("\n[3] 全量构建门禁（两宿主 vite build）")
+    if args.no_build:
+        print("  · --no-build 跳过（全量门禁 run_all_checks 默认执行）")
     else:
-        print(f"  ✓ 无新分叉（基线内 {len(diverged)} 个已知分叉保持观察）")
-
-    print("\n[3] 新缺失（基线之外）")
-    new_missing = [r for r in missing if r not in BASELINE_MISSING]
-    if new_missing:
-        for r in new_missing:
-            print(f"  ✗ 副库新增缺失: {r}")
-            failures.append(f"副库新增缺失: {r}")
-    else:
-        print(f"  ✓ 无新缺失（基线内 {len(missing)} 个已知缺失保持观察）")
-
-    print("\n[4] 收敛提示")
-    converged = [r for r in BASELINE_DIVERGED if r in same]
-    if converged:
-        for r in converged:
-            print(f"  · 已收敛（可从 BASELINE_DIVERGED 移除）: {r}")
-    else:
-        print("  · 暂无")
-
-    if only_sub:
-        print("\n[5] 副库独有文件（主库没有）")
-        for r in only_sub:
-            print(f"  · {r}")
+        _check_builds(failures)
 
     print()
     if failures:
-        print(f"✗ 失败 {len(failures)} 项：")
+        print(f"✗ 画布单一真源防漂失败 {len(failures)} 项：")
         for f in failures:
             print("   -", f)
-        print("  提示：确认是有意同步后再跑 `--update` 刷新基线，别拿它当消警告按钮。")
         return 1
-    print("OK 双库无新增漂移")
+    print("OK 画布单一真源防漂卡点全部通过")
     return 0
-
-
-def _write_baseline(diverged, missing) -> None:
-    path = os.path.abspath(__file__)
-    src = open(path, encoding="utf-8").read()
-    new_div = "BASELINE_DIVERGED = {\n" + "".join(f'    "{r}",\n' for r in sorted(diverged)) + "}"
-    new_mis = "BASELINE_MISSING = {\n" + "".join(f'    "{r}",\n' for r in sorted(missing)) + "}"
-    import re
-    src = re.sub(r"BASELINE_DIVERGED = \{[^}]*\}", new_div, src, count=1)
-    src = re.sub(r"BASELINE_MISSING = \{[^}]*\}", new_mis, src, count=1)
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(src)
 
 
 if __name__ == "__main__":

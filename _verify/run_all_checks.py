@@ -90,7 +90,7 @@ CHECKS = [
     ("STORYAPPLY", "_verify/check_storyboard_apply.py", "分镜记忆回灌（apply 落回 _clips）"),
     ("CANVASROUTES", "_verify/check_canvas_routes.py", "画布端点契约 + 不可达路由"),
     ("CANVASE2E", "_verify/check_canvas_bridge_e2e.py", "画布端点端到端（起真服务）"),
-    ("CANVASDUAL", "_verify/check_canvas_dual_repo.py", "画布双库漂移"),
+    ("CANVASDUAL", "_verify/check_canvas_dual_repo.py", "画布单一真源防漂（禁宿主副本+构建门禁）"),
     ("COMFYIMP", "_verify/check_comfy_workflow_importer.py", "ComfyUI workflow 导入器（UI→graph 透传）"),
     ("AESPACK", "_verify/check_aesthetic_pack.py", "美学预设包（落盘/套用/写真相源）"),
     ("PROACTIVE", "_verify/check_proactive_suggestions.py", "Agent 主动建议引擎"),

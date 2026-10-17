@@ -112,8 +112,11 @@ echo "── ⑤ 粘合层契约（跨线字段等价性）"
 echo "── ⑥a 架构守护（分层纪律）"
 "$PY" scripts/arch_guard.py --scan app || fail=1
 
-echo "── ⑥b 双库一致性（防复漂，基线 分叉0/缺失7）"
-"$PY" _verify/check_canvas_dual_repo.py || fail=1
+echo "── ⑥b 画布单一真源防漂（P0-1 Phase 3：禁宿主副本 + 接线在册；构建门禁见全量）"
+# 2026-10-18 重写：抽包后真源唯一在 vendor/packages/libtv，本卡点改为
+# 「副本不得复活（目录+内容指纹）+ workspace 接线在册」。增量模式跳过 vite
+# 构建（慢），全量构建门禁由 _verify/run_all_checks.py（CANVASDUAL）默认执行。
+"$PY" _verify/check_canvas_dual_repo.py --no-build || fail=1
 
 echo "── ⑦ 前端三卡点（tsc 类型棘轮 + vitest 单测 + 质量棘轮）"
 # 整改方案 P1-② 接线：_run_tsc.cjs / _run_vitest.cjs 已有但未挂载，
