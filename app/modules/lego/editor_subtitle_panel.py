@@ -621,7 +621,7 @@ def apply_ripple_delete_range(
             if clip_id:
                 editor._timeline_remove_clip_widget(clip_id)
 
-    editor._clips = result.clips
+    editor._clips[:] = result.clips
 
     if record and result.steps:
         editor._record_action(result.undo_action)
@@ -846,7 +846,7 @@ def execute_cleanup_selection(editor: _SubtitlePanelHost, plan, selected) -> boo
             if clip_id:
                 editor._timeline_remove_clip_widget(clip_id)
 
-    editor._clips = result.clips
+    editor._clips[:] = result.clips
     if result.steps:
         editor._record_action(result.undo_action)
         editor._project_dirty = True

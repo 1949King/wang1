@@ -179,6 +179,9 @@ CHECKS = [
     # ── 时间线互操作桥接（OTIO/EDL/FCPXML · §6.8.7 时间线交换，2026-10-18）──
     ("INTEROP", "_verify/check_interchange_bridge.py",
      "互操作桥接：字段映射契约/OTIO端到端往返/Qt段错误红线/导出UI接线/依赖在册"),
+    # ── 时间线真相源切换（OTIO 全量迁移·刀1，2026-10-18 用户授权解冻）──
+    ("STORE", "_verify/check_timeline_store.py",
+     "真相源store：同一性不变量/serialize往返/to_timeline≡桥接/接线在册/重绑定收敛"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",

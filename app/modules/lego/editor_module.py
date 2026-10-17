@@ -329,6 +329,11 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         # "list changed size during iteration" 写出损坏工程文件。
         self._clips_lock = threading.RLock()
         self._clips = []  # 存储视频片段
+        # 时间线真相源（2026-10-18 解冻切换·刀1）：store adopt _clips 的**同一 list 对象**，
+        # 结构写入收敛到 self._timeline_store；_clips 读点不受影响（同一性保留）。
+        # 懒加载纪律：本模块重型导入均在函数内完成，timeline_store 为纯数据层、无 Qt。
+        from app.core.timeline_store import TimelineStore
+        self._timeline_store = TimelineStore(self._clips, lock=self._clips_lock)
         self._current_clip = None  # 当前选中的片段
         self._last_beat_times = []
         self._clip_widgets = []  # 存储片段控件
@@ -3545,7 +3550,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             clip = action["clip"]
             shifts = action.get("ripple_shifts") or []
             if is_delete:
-                self._clips = [c for c in self._clips if c.get("id") != clip.get("id")]
+                # 刀1·同一性保护：切片赋值不换列表对象（store 与读点永远同一）；刀2 收敛到 store
+                self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
                 self._timeline_remove_clip_widget(clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                     self._current_clip = None
@@ -3569,7 +3575,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 for item in items:
                     clip = item["clip"]
                     shifts = item.get("ripple_shifts") or []
-                    self._clips = [c for c in self._clips if c.get("id") != clip.get("id")]
+                    self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
                     self._timeline_remove_clip_widget(clip.get("id"))
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
@@ -3607,7 +3613,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             else:
                 original["duration"] = action["original_duration"]
                 original["out_point"] = action["original_out_point"]
-                self._clips = [c for c in self._clips if c.get("id") != new_clip.get("id")]
+                self._clips[:] = [c for c in self._clips if c.get("id") != new_clip.get("id")]
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 self._current_clip = original
 
@@ -3620,7 +3626,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
             else:
-                self._clips = [c for c in self._clips if c.get("id") != new_clip.get("id")]
+                self._clips[:] = [c for c in self._clips if c.get("id") != new_clip.get("id")]
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 if self._current_clip and self._current_clip.get("id") == new_clip.get("id"):
                     self._current_clip = None
@@ -3632,10 +3638,10 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if mode == 'undo':
                 # 撤销添加：移除视频片段 + 联动音频片段
                 if audio_clip:
-                    self._clips = [c for c in self._clips if c.get("id") != audio_clip.get("id")]
+                    self._clips[:] = [c for c in self._clips if c.get("id") != audio_clip.get("id")]
                     self._timeline_remove_clip_widget(audio_clip.get("id"))
                 if clip:
-                    self._clips = [c for c in self._clips if c.get("id") != clip.get("id")]
+                    self._clips[:] = [c for c in self._clips if c.get("id") != clip.get("id")]
                     self._timeline_remove_clip_widget(clip.get("id"))
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
@@ -4677,7 +4683,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         from . import session_state as ss
         path = ss.new_project_path(name)
         with self._clips_lock:
-            self._clips.clear()
+            self._timeline_store.clear()
         self._project_path, self._project_dirty = path, False
         self.export_project(path, show_message=False)
         return path
@@ -4785,7 +4791,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 self._clips[i] = c
                 break
         else:
-            self._clips.append(clip_data)
+            self._timeline_store.add(clip_data)
         self._current_clip = clip_data
         if before:
             after = {
@@ -4884,7 +4890,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             lock = threading.RLock()
             self._clips_lock = lock
         with lock:
-            self._clips = []
+            self._timeline_store.clear()
             self._clip_widgets = []
             self._clip_id_to_widget = {}
             self._current_clip = None
@@ -4910,7 +4916,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             for clip in clips:
                 if not isinstance(clip, dict):
                     continue
-                self._clips.append(clip)
+                self._timeline_store.add(clip)
                 if hasattr(self, '_timeline_widget') and self._timeline_widget:
                     widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
                     if widget is not None:
@@ -7172,7 +7178,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         if not result.ok:
             self._notify_edit(result.message)
             return
-        self._clips = result.clips
+        self._timeline_store.replace_all(result.clips)
         self._record_action(result.undo_action)
         self._touch_project_dirty()
         self._sync_timeline_widget_state()
@@ -7434,7 +7440,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             'added': datetime.now().strftime('%H:%M'),
         }
         if not any(c.get('path') == path and c.get('type') == clip_kind for c in self._clips):
-            self._clips.append(clip)
+            self._timeline_store.add(clip)
 
         tw = getattr(self, '_timeline_widget', None)
         if tw is not None and hasattr(tw, 'add_clip'):
@@ -7528,7 +7534,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         dur = float(deleted_clip.get("duration", 0) or 0)
         end = st + dur
         ripple_shifts = []
-        self._clips = [clip for clip in self._clips if clip.get("id") != clip_id]
+        self._timeline_store.remove_by_id(clip_id)
         self._clip_id_to_widget.pop(clip_id, None)
         if self._current_clip and self._current_clip.get("id") == clip_id:
             self._current_clip = None
@@ -7981,7 +7987,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 lock = threading.RLock()
                 self._clips_lock = lock
             with lock:
-                self._clips = []
+                self._timeline_store.clear()
                 self._clip_widgets = []
                 self._clip_id_to_widget = {}
                 self._current_clip = None
@@ -8007,7 +8013,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 for clip in clips:
                     if not isinstance(clip, dict):
                         continue
-                    self._clips.append(clip)
+                    self._timeline_store.add(clip)
                     if hasattr(self, "_timeline_widget") and self._timeline_widget:
                         widget = self._timeline_widget.add_clip(clip, int(clip.get("track", 0)))
                         if widget is not None:
@@ -8674,7 +8680,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         original_out = float(live.get("in_point", 0) or 0) + duration
         live["duration"] = local_time
         live["out_point"] = float(live.get("in_point", 0) or 0) + local_time
-        self._clips.append(new_clip)
+        self._timeline_store.add(new_clip)
         if hasattr(self, "_timeline_widget") and self._timeline_widget:
             widget = self._timeline_widget.add_clip(new_clip, int(new_clip.get("track", 0)))
             if widget is not None:
@@ -8831,7 +8837,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         new_clip = dict(clip)
         new_clip["id"] = f"{clip.get('id', 'clip')}_copy_{int(time.time() * 1000)}"
         new_clip["start_time"] = float(clip.get("start_time", 0)) + float(offset or 1.0)
-        self._clips.append(new_clip)
+        self._timeline_store.add(new_clip)
         if hasattr(self, '_timeline_widget'):
             widget = self._timeline_widget.add_clip(new_clip, int(new_clip.get("track", 0)))
             if widget is not None:
@@ -8914,7 +8920,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             if widget is not None:
                 self._clip_widgets.append(widget)
                 self._clip_id_to_widget[audio_clip["id"]] = widget
-                self._clips.append(audio_clip)
+                self._timeline_store.add(audio_clip)
                 existing.append(audio_clip)
                 added.append(audio_clip)
         if added:
@@ -9097,7 +9103,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             # 保留生成线 clip_id 别名（demo/pipeline 链路精剪查表用，见方法 docstring）
             if source_clip_id:
                 clip["source_clip_id"] = str(source_clip_id)
-            self._clips.append(clip)
+            self._timeline_store.add(clip)
             audio_clip = None  # 联动音频片段（有 timeline_widget 时才创建）
             if hasattr(self, '_timeline_widget'):
                 video_track_i = 0
@@ -9129,7 +9135,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if audio_widget is not None:
                     self._clip_widgets.append(audio_widget)
                     self._clip_id_to_widget[audio_clip["id"]] = audio_widget
-                    self._clips.append(audio_clip)
+                    self._timeline_store.add(audio_clip)
             
             self._current_clip = clip
             self._video_source = file_path
@@ -9222,7 +9228,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 if widget is not None:
                     self._clip_widgets.append(widget)
                     self._clip_id_to_widget[audio_clip["id"]] = widget
-            self._clips.append(audio_clip)
+            self._timeline_store.add(audio_clip)
             self._sync_kernel_timeline()
             self._touch_project_dirty()
             try:

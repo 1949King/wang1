@@ -132,6 +132,12 @@ TIMELINE_WRITE_ENTRYPOINTS = (
     ("app/modules/lego/editor_module.py", "_delete_clip"),
     # 桥接层写入器（由 EditorModule 注册，见 :594）
     ("app/core/canvas_bridge.py", "set_clips_writer"),
+    # 时间线真相源 store 的结构写入 API（2026-10-18 解冻切换·刀1）：
+    # EditorModule._timeline_store 收拢后，结构变更唯一合法入口
+    ("app/core/timeline_store.py", "add"),
+    ("app/core/timeline_store.py", "remove_by_id"),
+    ("app/core/timeline_store.py", "replace_all"),
+    ("app/core/timeline_store.py", "clear"),
 )
 
 # 允许出现 ``self._clips = ...`` 整段赋值的文件（其余的整段赋值即视为绕过入口）

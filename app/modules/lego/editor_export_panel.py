@@ -302,7 +302,7 @@ class EditorExportPanelMixin:
             existing_ids.add(cid)
             if clip.get("path") and not os.path.exists(str(clip["path"])):
                 missing += 1
-            self._clips.append(clip)
+            self._timeline_store.add(clip)
             self._timeline_add_clip_widget(clip)
             steps.append({"type": "add_clip", "clip": clip, "audio_clip": None})
 
