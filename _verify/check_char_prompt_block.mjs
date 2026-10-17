@@ -16,7 +16,7 @@ import { dirname } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILES = [
-  "vendor/shiguang-canvas/src/store.ts",
+  "vendor/packages/libtv/src/store.ts",
   "vendor/AI-Canvas-tauri/src/libtv/store.ts",
 ];
 

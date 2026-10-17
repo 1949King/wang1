@@ -24,7 +24,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_REL = os.path.join("vendor", "shiguang-canvas", "src")
+SRC_REL = os.path.join("vendor", "packages", "libtv", "src")
 
 # 会「制造新引用」的数组方法（出现在 selector 体内即为反模式）
 FRESH_REF_CALLS = (

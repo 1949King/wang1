@@ -60,8 +60,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 VERSION_PY = ROOT / "app" / "version.py"
-CANVAS_VERSION_TS = ROOT / "vendor" / "shiguang-canvas" / "src" / "canvasVersion.ts"
-CANVAS_PKG_JSON = ROOT / "vendor" / "shiguang-canvas" / "package.json"
+# P0-1 抽包 Phase 1（2026-10-18）：画布真源迁入 @shiguang/libtv 包，版本三角随真源走
+CANVAS_VERSION_TS = ROOT / "vendor" / "packages" / "libtv" / "src" / "canvasVersion.ts"
+CANVAS_PKG_JSON = ROOT / "vendor" / "packages" / "libtv" / "package.json"
 FROZEN_ZONES = ROOT / "docs" / "knowledge" / "frozen_zones.json"
 CURRENT_DOC = ROOT / "docs" / "现行技术文档.md"
 CHANGELOG = ROOT / "docs" / "CHANGELOG.md"

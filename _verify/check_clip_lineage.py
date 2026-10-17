@@ -139,9 +139,9 @@ SYNC_FILES = [
     "app/core/canvas_bridge.py",
     "app/core/canvas_server.py",
     "app/core/canvas_routes_post.py",
-    "vendor/shiguang-canvas/src/bridge.ts",
+    "vendor/packages/libtv/src/bridge.ts",
     "vendor/AI-Canvas-tauri/src/libtv/bridge.ts",
-    "vendor/shiguang-canvas/src/editorIngress.ts",
+    "vendor/packages/libtv/src/editorIngress.ts",
     "vendor/AI-Canvas-tauri/src/libtv/editorIngress.ts",
 ]
 missing = [rel for rel in SYNC_FILES if "generation" not in _read(rel)]
@@ -149,7 +149,7 @@ check('"generation" 同步出现于 %d 处' % len(SYNC_FILES), not missing, str(
 
 # 传输契约两端：query 键名必须逐字一致（改一端忘另一端即红）
 missing2 = [rel for rel in
-            ["vendor/shiguang-canvas/src/bridge.ts",
+            ["vendor/packages/libtv/src/bridge.ts",
              "vendor/AI-Canvas-tauri/src/libtv/bridge.ts",
              "app/core/canvas_server.py"]
             if "generation_json" not in _read(rel)]
@@ -157,11 +157,11 @@ check("传输键 generation_json 两端一致", not missing2, str(missing2))
 
 # 入轨身份唯一构造点：nodeLink 双库定义 + 双库 App.tsx 使用
 missing3 = [rel for rel in
-            ["vendor/shiguang-canvas/src/editorIngress.ts",
+            ["vendor/packages/libtv/src/editorIngress.ts",
              "vendor/AI-Canvas-tauri/src/libtv/editorIngress.ts"]
             if "export function nodeLink" not in _read(rel)]
 missing3 += [rel for rel in
-             ["vendor/shiguang-canvas/src/App.tsx",
+             ["vendor/packages/libtv/src/App.tsx",
               "vendor/AI-Canvas-tauri/src/libtv/App.tsx"]
              if "nodeLink(" not in _read(rel)]
 check("nodeLink 唯一构造点双库齐备", not missing3, str(missing3))

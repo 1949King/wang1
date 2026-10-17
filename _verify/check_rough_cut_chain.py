@@ -239,7 +239,7 @@ check("路由契约守卫登记：SERVER_FILES 含 canvas_routes_roughcut.py",
 check("路由契约守卫登记：CLIENTS 含 hostRoughCut.ts",
       "hostRoughCut.ts" in routes_guard)
 
-for repo in (os.path.join("vendor", "shiguang-canvas", "src"),
+for repo in (os.path.join("vendor", "packages", "libtv", "src"),
              os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv")):
     hr_src = _src(os.path.join(repo, "hostRoughCut.ts"))
     check(f"前端在册（{repo.split(os.sep)[1]}）：hostRoughCut 订阅判读 + 两端点",
@@ -252,7 +252,7 @@ for repo in (os.path.join("vendor", "shiguang-canvas", "src"),
           "confirmed:" not in hr_src
           and '"confirmed"' not in hr_src
           and "'confirmed'" not in hr_src)
-shell_src = _src(os.path.join("vendor", "shiguang-canvas", "src", "CanvasShell.tsx"))
+shell_src = _src(os.path.join("vendor", "packages", "libtv", "src", "CanvasShell.tsx"))
 check("CanvasShell 挂载 RoughCutReviewDock（壳层常驻订阅）",
       "import RoughCutReviewDock" in shell_src and "<RoughCutReviewDock />" in shell_src)
 

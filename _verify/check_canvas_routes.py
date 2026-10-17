@@ -52,28 +52,28 @@ SERVER_FILES = [
     os.path.join("app", "core", "canvas_routes_roughcut.py"),
 ]
 CLIENTS = [
-    os.path.join("vendor", "shiguang-canvas", "src", "bridge.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "bridge.ts"),
     os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv", "bridge.ts"),
     # ── 新增的前端编排模块也必须登记，否则它调用的端点对契约检查「隐身」 ──
     # 2026-09-14：generationQueue.ts 承载 /host/generation/submit|status|list|cancel
     # 四个异步生成端点（任务制），只扫 bridge.ts 会漏掉它们。
     # ⚠️ 约定：以后新建「直接 fetch /host/*」的前端模块，请一并加进这个列表。
-    os.path.join("vendor", "shiguang-canvas", "src", "generationQueue.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "generationQueue.ts"),
     # 2026-09-14：projectZip.ts 承载 /host/project-snapshot/export|import 两个工程快照端点
-    os.path.join("vendor", "shiguang-canvas", "src", "projectZip.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "projectZip.ts"),
     # 2026-09-14：stage3dScene.ts（暂未直接调 /host/*，但归属画布域）
-    os.path.join("vendor", "shiguang-canvas", "src", "stage3dScene.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "stage3dScene.ts"),
     # 2026-09-14：poseThumbCache.ts（同上）
-    os.path.join("vendor", "shiguang-canvas", "src", "magnetic", "poseThumbCache.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "magnetic", "poseThumbCache.ts"),
     # 2026-10-05（刀 A4）：canvasRun.ts 承载 /host/canvas-run（「运行到此处」的后端规划）。
     # 不登记它，新端点对契约检查就是隐身的（与 generationQueue 同一条约定）。
-    os.path.join("vendor", "shiguang-canvas", "src", "canvasRun.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "canvasRun.ts"),
     # 2026-10-15：dubOrchestration.ts 承载 /host/dub-plan|dub-execute|dub-to-timeline
     # （多角色配音编排；bridge.ts 已近规模阈值 ⇒ 照 hostCompliance 先例另开文件）。
-    os.path.join("vendor", "shiguang-canvas", "src", "dubOrchestration.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "dubOrchestration.ts"),
     # 2026-10-17：hostRoughCut.ts 承载 /host/rough-cut/apply|export（画布粗剪审核卡；
     # 同 dubOrchestration 约定 —— 直接 fetch /host/* 的前端模块必须登记）。
-    os.path.join("vendor", "shiguang-canvas", "src", "hostRoughCut.ts"),
+    os.path.join("vendor", "packages", "libtv", "src", "hostRoughCut.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'

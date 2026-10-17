@@ -249,6 +249,11 @@ vendor/shiguang-canvas/vitest.config.ts.timestamp-*.mjs
 
 # 源文件的本地备份
 vendor/shiguang-canvas/src/*.bak
+vendor/packages/libtv/src/*.bak
+
+# P0-1 抽包 Phase 1（2026-10-18）：pnpm workspace 依赖目录不入库（防 git add -A 事故）
+vendor/node_modules/
+vendor/packages/*/node_modules/
 
 # 抽卡原图输出（本机素材，不入库；已定稿的形象素材在 assets/mascot、assets/avatar）
 /generated-images/

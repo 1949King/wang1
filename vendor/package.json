@@ -1,0 +1,10 @@
+{
+  "name": "shiguang-canvas-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.15.0",
+  "description": "拾光导演台画布 workspace（P0-1 抽包：@shiguang/libtv 单一事实源 + web/tauri 双宿主）",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

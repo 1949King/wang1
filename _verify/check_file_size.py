@@ -39,7 +39,7 @@ _SKIP_DIRS = {"__pycache__", "node_modules", "dist", ".git", "build",
 
 _TARGETS = [
     ("app", (".py",)),
-    ("vendor/shiguang-canvas/src", (".ts", ".tsx")),
+    ("vendor/packages/libtv/src", (".ts", ".tsx")),
 ]
 
 # ── 基线（2026-09-25 实测）──────────────────────────────────────────
@@ -58,18 +58,18 @@ BASELINE: dict = {
     "app/modules/lego/editor_agent_panel_mixin.py": 2270,  # 2026-10-17 收敛下调（2330→2270，棘轮正反馈）
     "app/modules/lego/extensions_module.py": 2198,
     "app/modules/lego/drama_understanding_engine.py": 2160,
-    # vendor/shiguang-canvas/src（4 个）
+    # vendor/packages/libtv/src（4 个）
     # 2026-10-07：机位几何/标签/状态抽出 stage3dCamGizmo.ts 后 4660 → 4623（基线下调）
-    "vendor/shiguang-canvas/src/Stage3D.tsx": 4623,
+    "vendor/packages/libtv/src/Stage3D.tsx": 4623,
     # 2026-10-05：姿势数据抽到 stage3dPoseLibrary.ts 后由 3707 下调到 3159
-    "vendor/shiguang-canvas/src/riggedHumanoid.ts": 3159,
+    "vendor/packages/libtv/src/riggedHumanoid.ts": 3159,
     # 2026-10-14：CanvasShell.tsx / store.ts 属**冻结区** canvas-magnetic-intent，
     # 未获用户「解冻」无法拆模块下调；+52 / +31 系前序轮次已批准工作
     # （细分 ErrorBoundary、React #185 崩溃四件套等）的累积增长。经用户裁决
     # 「保持冻结、如实标注」⇒ 一次性上调基线至实测值，记为「已批准存量·待拆分」。
     # ⚠️ 仅此一次：后续仍**只减不增**；日后解冻拆分须立即下调这两项基线。
-    "vendor/shiguang-canvas/src/CanvasShell.tsx": 3251,
-    "vendor/shiguang-canvas/src/store.ts": 2514,
+    "vendor/packages/libtv/src/CanvasShell.tsx": 3251,
+    "vendor/packages/libtv/src/store.ts": 2514,
     # V4.39.8 异步接线（generateForNode→runGeneration）后越线 2000；
     # 存量文件冻结入基线，⚠️ 待拆分（异步编排宜独立成模块），拆分后请下调。
     # 2026-10-14：拉片 L2 接线时拆出 bridgeStoryboard.ts（分镜/拉片族 re-export），

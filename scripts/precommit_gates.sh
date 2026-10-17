@@ -126,21 +126,22 @@ if [ "$ALL_MODE" = "1" ]; then
     HAVE_CANVAS=1
 else
     STAGED_CANVAS=$(git diff --cached --name-only --diff-filter=ACM -- \
-        'vendor/shiguang-canvas/' 'vendor/AI-Canvas-tauri/src/libtv/' || true)
+        'vendor/shiguang-canvas/' 'vendor/packages/libtv/' 'vendor/AI-Canvas-tauri/src/libtv/' || true)
     [ -n "$STAGED_CANVAS" ] && HAVE_CANVAS=1 || HAVE_CANVAS=0
 fi
 if [ "$HAVE_CANVAS" = "0" ]; then
     echo "   （无暂存的画布文件，跳过）"
 elif ! command -v node >/dev/null 2>&1; then
     echo "   ⚠️ 未找到 node，跳过前端卡点（不阻断，请尽快恢复 node 环境）"
-elif [ ! -f vendor/shiguang-canvas/node_modules/vitest/vitest.mjs ]; then
+elif [ ! -f vendor/packages/libtv/node_modules/vitest/vitest.mjs ]; then
     # CI 的 guards job 未装 npm 依赖；画布三卡点由 frontend-tests job 覆盖。
     # 这里显式跳过并说明，避免把「环境缺失」误报成「门禁失败」。
     echo "   ⚠️ 画布 node_modules 未安装，跳过前端三卡点"
     echo "      （CI 上由 frontend-tests job 覆盖 tsc + vitest + 质量棘轮）"
 else
     # ⑦a tsc 类型检查（棘轮：错误数 ≤ 37 只减不增）
-    TSC_OUT=$(cd vendor/shiguang-canvas && node node_modules/typescript/bin/tsc \
+    # P0-1 抽包 Phase 1（2026-10-18）：tsc/vitest 随真源改在 @shiguang/libtv 包目录跑
+    TSC_OUT=$(cd vendor/packages/libtv && node node_modules/typescript/bin/tsc \
         --noEmit --pretty false 2>&1)
     TSC_N=$(printf '%s\n' "$TSC_OUT" | grep -c "error TS" || true)
     TSC_BASELINE=37
@@ -155,7 +156,7 @@ else
     # --pool=threads：默认 forks pool 会把 SSR 编译结果写临时目录供 worker
     # 读取，被 WorkBuddy fs-shim 拦截（EPERM）造成假失败；threads 走内存
     # 通道不写盘，沙箱安全（2026-09-26 实测定位）。
-    VT_OUT=$(cd vendor/shiguang-canvas && node node_modules/vitest/vitest.mjs \
+    VT_OUT=$(cd vendor/packages/libtv && node node_modules/vitest/vitest.mjs \
         run --reporter=dot --pool=threads 2>&1)
     VT_RC=$?
     if [ "$VT_RC" -ne 0 ]; then

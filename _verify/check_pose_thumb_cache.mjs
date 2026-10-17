@@ -1,5 +1,5 @@
 // 数字人节点 · 姿势元数据 + 缩略图缓存自检
-// 源：vendor/shiguang-canvas/src/poseThumbCache.ts
+// 源：vendor/packages/libtv/src/poseThumbCache.ts
 //
 // ⚠️ 本文件是 poseThumbCache.ts 的**纯函数副本**。改源时务必同步。
 // 关键不变量：
@@ -139,7 +139,7 @@ check("clear 后 size=0", cache3.size() === 0);
 
 // ── 源硬值校验（防副本漂移） ──
 const { readFileSync } = await import("node:fs");
-const SRC = readFileSync("vendor/shiguang-canvas/src/magnetic/poseThumbCache.ts", "utf-8");
+const SRC = readFileSync("vendor/packages/libtv/src/magnetic/poseThumbCache.ts", "utf-8");
 check("源有 POSE_META", /const POSE_META/.test(SRC), "POSE_META 不在源里");
 check("源有 PoseThumbnailCache class", /class PoseThumbnailCache/.test(SRC), "PoseThumbnailCache 不在源里");
 check("源默认容量 64", /maxEntries:\s*number\s*=\s*_DEFAULT_MAX|_DEFAULT_MAX\s*=\s*64/.test(SRC), "默认容量改了");

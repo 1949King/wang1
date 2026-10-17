@@ -26,7 +26,7 @@ import sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-MAIN_REL = os.path.join("vendor", "shiguang-canvas", "src")
+MAIN_REL = os.path.join("vendor", "packages", "libtv", "src")
 SUB_REL = os.path.join("vendor", "AI-Canvas-tauri", "src", "libtv")
 
 # 5 个数据契约文件：靠 Windows 硬链接共享 inode，必须字节一致

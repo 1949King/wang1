@@ -1,7 +1,7 @@
-﻿import json, hashlib
+import json, hashlib
 from pathlib import Path
 root = Path(r"D:\拾光剪影")
-rel = "vendor/shiguang-canvas/src/styles.css"
+rel = "vendor/packages/libtv/src/styles.css"
 def sha(t):
     return hashlib.sha256((t.replace("\r\n","\n").strip()+"\n").encode()).hexdigest()[:16]
 cur = sha((root/rel).read_text(encoding="utf-8"))

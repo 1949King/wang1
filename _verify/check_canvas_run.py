@@ -24,8 +24,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POST_PY = os.path.join("app", "core", "canvas_routes_post.py")
 RUNNER_PY = os.path.join("app", "core", "canvas_workflow_runner.py")
-RUN_TS = os.path.join("vendor", "shiguang-canvas", "src", "canvasRun.ts")
-APP_TSX = os.path.join("vendor", "shiguang-canvas", "src", "App.tsx")
+RUN_TS = os.path.join("vendor", "packages", "libtv", "src", "canvasRun.ts")
+APP_TSX = os.path.join("vendor", "packages", "libtv", "src", "App.tsx")
 ROUTES_GUARD = os.path.join("_verify", "check_canvas_routes.py")
 DEAD_PLANNER = os.path.join("app", "core", "ai", "canvas_run_planner.py")
 

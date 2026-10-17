@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""画布端口模型（后端镜像） —— 与前端 `vendor/shiguang-canvas/src/ports.ts` 同源
+"""画布端口模型（后端镜像） —— 与前端 `vendor/packages/libtv/src/ports.ts` 同源
 
 设计决策：**不做第二份表，而是直接解析前端的 TS 表**
 -----------------------------------------------------
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 UNBOUNDED = 99
 
 # 主库真源路径（副库是副本，不读它——避免两份真源）
-_TS_REL = os.path.join("vendor", "shiguang-canvas", "src", "ports.ts")
+_TS_REL = os.path.join("vendor", "packages", "libtv", "src", "ports.ts")
 
 # 宽松兜底：解析不出来时一切放行（不误拦用户）
 _PERMISSIVE: Dict[str, Dict[str, Dict[str, int]]] = {}

@@ -17,9 +17,9 @@ import { fileURLToPath } from "node:url";
 import * as THREE from "../vendor/shiguang-canvas/node_modules/three/build/three.module.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = pathResolve(HERE, "../vendor/shiguang-canvas/src/stage3dLighting.ts");
-const SRC_PRESETS = pathResolve(HERE, "../vendor/shiguang-canvas/src/lightingPresets.ts");
-const SRC_STAGE = pathResolve(HERE, "../vendor/shiguang-canvas/src/Stage3D.tsx");
+const SRC = pathResolve(HERE, "../vendor/packages/libtv/src/stage3dLighting.ts");
+const SRC_PRESETS = pathResolve(HERE, "../vendor/packages/libtv/src/lightingPresets.ts");
+const SRC_STAGE = pathResolve(HERE, "../vendor/packages/libtv/src/Stage3D.tsx");
 const DUMP = process.argv.includes("--dump");
 
 let pass = 0, fail = 0;

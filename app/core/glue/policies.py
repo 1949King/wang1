@@ -239,6 +239,7 @@ LANE_BY_MODULE: Dict[str, str] = {
     "app/core/preview_manager.py": "N",
     "app/core/canvas": "P",
     "vendor/shiguang-canvas": "P",
+    "vendor/packages/libtv": "P",  # P0-1 抽包 Phase 1：画布真源 @shiguang/libtv
     "app/modules/lego/character": "P",
     "app/core/agent": "A",
     "app/core/capability": "A",
