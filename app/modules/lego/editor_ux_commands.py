@@ -16,6 +16,7 @@ logger = logging.getLogger("AI短剧编辑器.editor_ux_commands")
 # 允许的动作名（工具栏 + 快捷键共用）
 KNOWN_ACTIONS = (
     "import",
+    "import_timeline",   # 时间线互操作导入（OTIO/EDL/FCPXML，2026-10-18）
     "open_project",
     "save_project",
     "export",
@@ -46,6 +47,8 @@ def dispatch_editor_action(editor: Any, action: str, **kwargs) -> Dict[str, Any]
     try:
         if name == "import":
             editor._import_video()
+        elif name == "import_timeline":
+            editor._import_timeline_document()
         elif name == "open_project":
             editor._open_project()
         elif name == "save_project":

@@ -219,6 +219,116 @@ class EditorExportPanelMixin:
         )
         return True
 
+    # ────────────── 时间线互操作导入（OTIO / EDL / FCPXML）──────────────
+
+    def _import_timeline_document(self) -> bool:
+        """导入 OTIO / EDL / FCPXML 为时间线片段（**追加模式**，整包可撤销）。
+
+        * OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PyQt6 之后段错误）；
+        * 未安装 ``opentimelineio`` 时明确失败，绝不产假数据；
+        * 当前时间线非空时经确认**追加**在既有片段之后（不覆盖用户成果）；
+        * 轨道落位：音频片段→音频轨、其余→视频轨（``timeline_widget.add_clip``
+          强制对齐 track/type，多轨文档合并到主轨）；
+        * 素材路径按文档原样；缺失文件如实提示（片段仍入轨，需重新链接素材）。
+        """
+        from PyQt6.QtWidgets import QFileDialog
+
+        from app.core.interchange import otio_adapter
+        from app.core.interchange.editor_timeline_bridge import (
+            import_timeline_to_clips,
+            timeline_export_filters,
+        )
+
+        if not otio_adapter.is_available():
+            QMessageBox.warning(
+                self, "导入失败",
+                "未安装 opentimelineio，无法导入 OTIO / EDL / FCPXML。\n"
+                "请执行：pip install opentimelineio\n"
+                "（EDL / FCPXML 另需：pip install otio-cmx3600-adapter otio-fcp-adapter）",
+            )
+            return False
+
+        open_path, _ = QFileDialog.getOpenFileName(
+            self, "导入时间线（OTIO / EDL / FCPXML）",
+            getattr(self, "_last_timeline_doc_dir", ""),
+            timeline_export_filters())
+        if not open_path:
+            return False
+        self._last_timeline_doc_dir = os.path.dirname(open_path)
+
+        try:
+            self._notify_edit("导入时间线…")
+            imported = import_timeline_to_clips(open_path)
+        except Exception as e:
+            logger.error("时间线导入失败: %s", e)
+            QMessageBox.warning(self, "导入失败", f"时间线导入失败：\n{e}")
+            return False
+        if not imported:
+            QMessageBox.warning(self, "导入失败", "文档里没有可导入的片段")
+            return False
+
+        clips = list(getattr(self, "_clips", None) or [])
+        if clips:
+            reply = QMessageBox.question(
+                self, "确认导入",
+                f"当前时间线已有 {len(clips)} 个片段。\n"
+                "导入将**追加**在现有片段之后（不覆盖）。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                self._notify_edit("已取消导入")
+                return False
+
+        tw = getattr(self, "_timeline_widget", None)
+        video_ti, audio_ti = 0, 1
+        if tw is not None and hasattr(tw, "find_track_index_by_type"):
+            video_ti = tw.find_track_index_by_type("video", default=0)
+            audio_ti = tw.find_track_index_by_type("audio", default=1)
+        base = self._timeline_total_duration() if clips else 0.0
+        existing_ids = {c.get("id") for c in clips}
+        import time as _time
+        missing = 0
+        seq = 0
+        steps: list = []
+        for item in imported:
+            clip = dict(item)
+            clip["track"] = audio_ti if str(clip.get("type", "")).lower() == "audio" else video_ti
+            clip["start_time"] = float(clip.get("start_time", 0.0) or 0.0) + base
+            cid = str(clip.get("id") or "")
+            if not cid or cid in existing_ids:
+                seq += 1
+                cid = f"clip_import_{int(_time.time() * 1000)}_{seq}"
+                clip["id"] = cid
+            existing_ids.add(cid)
+            if clip.get("path") and not os.path.exists(str(clip["path"])):
+                missing += 1
+            self._clips.append(clip)
+            self._timeline_add_clip_widget(clip)
+            steps.append({"type": "add_clip", "clip": clip, "audio_clip": None})
+
+        # 一条 compound 撤销：Ctrl+Z 一次回滚整包导入（复用 add_clip 既有语义）
+        try:
+            self._record_action({"type": "compound", "steps": steps, "label": "import_timeline"})
+        except Exception:
+            logger.debug("import_timeline 撤销记录失败", exc_info=True)
+        try:
+            self._sync_kernel_timeline()
+        except Exception:
+            logger.debug("导入后同步内核时间线失败", exc_info=True)
+        try:
+            total = self._timeline_total_duration()
+            if tw is not None and hasattr(tw, "set_total_duration") and total > 0:
+                tw.set_total_duration(max(total + 2.0, total * 1.02))
+        except Exception:
+            logger.debug("导入后同步时间线总时长失败", exc_info=True)
+        self._preview_seg_key = None  # 重置预览缓存
+        self._notify_edit("时间线导入完成")
+        tip = f"已导入 {len(steps)} 个片段（{os.path.basename(open_path)}）。"
+        if missing:
+            tip += f"\n注意：{missing} 个素材文件路径无效（片段已入轨，请重新链接素材）。"
+        QMessageBox.information(self, "导入成功", tip)
+        return True
+
     # ────────────── 主导出流程 ──────────────
 
     def _export_video(self):

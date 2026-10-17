@@ -180,6 +180,21 @@ def check_ui_wiring() -> None:
                   "is_timeline_extension"):
         if token not in src:
             _fail(f"④ 导出 UI 断线：editor_export_panel 不再消费 {token}")
+    # 导入接线（2026-10-18 e8b）：UI 入口 + 动作调度 + 桥消费三层都在册
+    if "_import_timeline_document" not in src or "import_timeline_to_clips" not in src:
+        _fail("④ 导入 UI 断线：editor_export_panel 不再实现 _import_timeline_document"
+              "/消费 import_timeline_to_clips")
+    ux = os.path.join(ROOT, "app", "modules", "lego", "editor_ux_commands.py")
+    with open(ux, "r", encoding="utf-8") as f:
+        src = f.read()
+    if '"import_timeline"' not in src or "_import_timeline_document" not in src:
+        _fail("④ 导入动作断线：editor_ux_commands 不再在册 import_timeline → "
+              "_import_timeline_document")
+    builder = os.path.join(ROOT, "app", "modules", "lego", "editor_ui_builder_mixin.py")
+    with open(builder, "r", encoding="utf-8") as f:
+        src = f.read()
+    if 'bind_action(self, "import_timeline")' not in src:
+        _fail("④ 导入按钮断线：编辑器工具栏不再绑定 import_timeline 动作")
 
 
 # ── ⑤ 依赖在册 ───────────────────────────────────────────────────────

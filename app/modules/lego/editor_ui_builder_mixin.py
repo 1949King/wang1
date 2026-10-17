@@ -70,6 +70,7 @@ class EditorUiBuilderMixin:
         from app.modules.lego.editor_ux_commands import bind_action
         actions = [
             ("📁 导入", bind_action(self, "import")),
+            ("📥 导入时间线", bind_action(self, "import_timeline")),
             ("📂 打开", bind_action(self, "open_project")),
             ("💾 保存", bind_action(self, "save_project")),
             ("✂️ 剪切", bind_action(self, "cut")),
