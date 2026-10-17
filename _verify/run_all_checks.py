@@ -173,6 +173,9 @@ CHECKS = [
     # ── Media Engine 统一感知门面（§6.9 感知收拢，2026-10-18）──
     ("MEDIAPERCEP", "_verify/check_media_perception.py",
      "感知门面：能力诚实二值/perceive结构完整/quality分发/感知落账AssetNode/上游在册"),
+    # ── MCP 工具清单导出（Agent 编排演进 · 工具化第一步，2026-10-18）──
+    ("MCPMANI", "_verify/check_mcp_manifest.py",
+     "MCP 工具清单：spec形状/能力目录完整性/注解诚实映射/导出往返"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",
