@@ -167,6 +167,9 @@ CHECKS = [
     ("ROUTEATTR", "_verify/check_canvas_route_attrs.py", "路由 mixin 的 cs.* 可解析"),
     # ── 抽卡账本（生成抽卡闭环 P3，2026-09-27）──
     ("GENLEDGER", "_verify/check_gen_ledger.py", "抽卡账本：往返/指纹/新鲜度/桶位隔离"),
+    # ── 生成任务账本（§6.9-P1 正式化：GenerationTask+AssetNode+幂等查重，2026-10-18）──
+    ("GENTASK", "_verify/check_gen_task_registry.py",
+     "生成任务账本：幂等键跨进程/查重与 force/收尾/持久化自愈/资产血缘/接线在册"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",

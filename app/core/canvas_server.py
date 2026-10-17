@@ -59,6 +59,7 @@ from app.core.ai.yue_music import (  # noqa: F401
     transcribe_reference as yue_transcribe_reference,
 )
 from app.core import canvas_gen_jobs as _gen_jobs
+from app.core import gen_task_registry as _gen_task_reg  # 生成任务账本：submit 查重/收尾 + 只读端点
 from app.core import project_snapshot as _proj_snap
 from app.core.ai import storyboard_memory as _storyboard_memory
 from app.core.canvas_bridge import (  # noqa: F401 - 同上方说明：多名字供路由 mixin 经 cs. 访问，勿删
@@ -1256,19 +1257,61 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
         label = str(body.get("label") or "").strip()
         if not label:
             label = (str(kwargs.get("prompt") or "") or "生成任务")[:24]
+        # ── 生成任务账本（§6.9-P1 正式化，2026-10-18）──────────────────
+        # 幂等查重：同「介质+prompt+model+尺寸+种子+时长+渠道」已有活跃任务
+        # ⇒ 直接回既有 job，防重复计费；前端刻意重抽传 body.force=true 绕过。
+        # 账本是优化项：registry 内部吞一切记录异常，绝不拖垮生成主链路。
+        _store = _gen_task_reg.get_store()
+        _rec, _deduped = _store.begin(kind, {
+            "prompt": str(kwargs.get("prompt") or ""),
+            "model": str(kwargs.get("model") or ""),
+            "size": str(kwargs.get("size") or ""),
+            "seed": kwargs.get("seed"),
+            "duration": kwargs.get("duration"),
+            "channel_id": str(kwargs.get("channel_id") or ""),
+        }, force=bool(body.get("force")))
+        _task_id = str(_rec.get("task_id") or "")
+        if _deduped:
+            _existing = _gen_jobs.get_job(str(_rec.get("job_id") or ""))
+            if _existing and _existing.get("status") not in _gen_task_reg.TERMINAL_STATUSES:
+                self._json(200, {"ok": True, "job": _existing,
+                                 "deduped": True, "task_id": _task_id})
+                return
+        _base_fn = self._build_gen_callable(kind, kwargs)
+
+        def _fn_with_ledger(report):
+            """任务体包装：收尾把终态写回账本（重试时后写覆盖前写，finish 幂等）。"""
+            try:
+                res = _base_fn(report)
+            except _gen_jobs.GenCancelled as exc:
+                _store.finish(_task_id, "cancelled", error=str(exc)[:300])
+                raise
+            except Exception as exc:
+                _store.finish(_task_id, "failed", error=str(exc)[:300])
+                raise
+            if isinstance(res, dict) and res.get("ok"):
+                _store.finish(_task_id, "done",
+                              result_paths=_gen_task_reg.extract_result_paths(res))
+            else:
+                _msg = str((res or {}).get("message") if isinstance(res, dict) else res)[:300]
+                _store.finish(_task_id, "failed", error=_msg or "生成失败")
+            return res
+
         job = _gen_jobs.submit(
             kind,
-            self._build_gen_callable(kind, kwargs),
+            _fn_with_ledger,
             label=label,
             meta={
                 "model": str(kwargs.get("model") or ""),
                 "channel_id": str(kwargs.get("channel_id") or ""),
                 "size": str(kwargs.get("size") or ""),
                 "duration": kwargs.get("duration"),
+                "task_id": _task_id,
             },
             max_attempts=max_attempts,
         )
-        self._json(200, {"ok": True, "job": job})
+        _store.set_job_id(_task_id, str(job.get("job_id") or ""))
+        self._json(200, {"ok": True, "job": job, "task_id": _task_id})
 
     @_route_get("/host/generation/status")
     def _h_generation_status(self, parsed) -> None:
@@ -1318,6 +1361,43 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             return
         res = _gen_jobs.cancel(job_id, str((body or {}).get("reason") or "用户取消"))
         self._json(200 if res.get("ok") else 404, res)
+
+    # ── 生成任务账本只读端点（§6.9-P1 正式化，照 /host/clip-lineage 先例）──
+    # 供前端/Agent 跨进程查任务血缘：canvas_gen_jobs 是内存态，进程退了
+    # 账本（data/gen_tasks.json）仍记得 prompt/seed/产物/节点。
+
+    @_route_get("/host/gen-task")
+    def _h_gen_task(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        qs = parse_qs(parsed.query)
+        task_id = str((qs.get("task_id") or [""])[0]).strip()
+        key = str((qs.get("key") or [""])[0]).strip()
+        store = _gen_task_reg.get_store()
+        rec = store.get_task(task_id) if task_id else None
+        if rec is None and key:
+            rec = store.latest_by_key(key)
+        if rec is None:
+            self._json(404, {"ok": False, "message": "任务记录不存在"})
+            return
+        self._json(200, {"ok": True, "task": rec})
+
+    @_route_get("/host/asset-node")
+    def _h_asset_node(self, parsed) -> None:
+        if not _check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        qs = parse_qs(parsed.query)
+        asset_id = str((qs.get("asset_id") or [""])[0]).strip()
+        if not asset_id:
+            self._json(400, {"ok": False, "message": "asset_id required"})
+            return
+        rec = _gen_task_reg.get_store().get_asset(asset_id)
+        if rec is None:
+            self._json(404, {"ok": False, "message": "资产记录不存在"})
+            return
+        self._json(200, {"ok": True, "asset": rec})
 
     # ── 工程级快照（P1-4）────────────────────────────────────────────
     # 把剪辑器时间线（完整 _clips，非摘要）与画布 bundle 一起打包成工程快照，
