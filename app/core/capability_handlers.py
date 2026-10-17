@@ -1297,6 +1297,13 @@ class PipelineCapabilityHandlers:
             for c in clips
         ]
         results = five_dimension_scorer.score_batch(features_list)
+        # §6.9-P3 语义轨道：打分盖章进 clip 语义元数据（B4 形态；失败静默不影响返回）
+        try:
+            from app.core.clip_semantic import stamp_scored_results
+            _cl = getattr(self._get_editor(), "_clips", None) or clips
+            stamp_scored_results(_cl, [r.to_dict() for r in results])
+        except Exception:
+            logger.debug("[pipeline.score] 语义盖章失败（非关键）", exc_info=True)
         return CapabilityResult(req.request_id, True,
                                 output={"results": [r.to_dict() for r in results]})
 
@@ -1794,6 +1801,13 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
         ("editor.add_keyframe_at_playhead", "add_keyframe_at_playhead", "播放头处加关键帧"),
         # 血缘查询（智能时间线 P1 · Agent 接线，2026-10-17）：与 /host/clip-lineage 同一实现
         ("editor.get_clip_lineage", "get_clip_lineage", "片段血缘查询（clip↔画布节点+生成参数，只读）"),
+        # 小白闭环自动粗剪合链（§6.9-P2 方案 1，2026-10-17）：委托 rough_cut_chain 单例
+        ("editor.rough_cut_plan", "rough_cut_plan", "粗剪提案：排轨+水词/静音检测（只算不改）"),
+        ("editor.rough_cut_apply", "rough_cut_apply", "粗剪写回：确认后波纹删除+合缝（可撤销）"),
+        ("editor.rough_cut_export", "rough_cut_export", "粗剪导出成片（委托既有精剪出片入口）"),
+        # 语义轨道原型（§6.9-P3 · 质量分/高光落 clip 元数据，2026-10-17）
+        ("editor.get_clip_semantic", "get_clip_semantic", "查询片段语义元数据（质量分/高光，只读）"),
+        ("editor.mark_clip_highlight", "mark_clip_highlight", "显式标记片段高光（覆盖自动判定）"),
     ):
         dispatcher.register(_cap_id, CapabilityCategory.EDITOR,
                             getattr(editor_skill_handlers, _method_name), _desc)
@@ -1809,6 +1823,10 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("pipeline.route_problem", CapabilityCategory.PIPELINE,
                         pipeline_handlers.route_problem,
                         "问题路由：五维评分/标记→修复通道建议（只读不执行）")
+    # 粗剪合链异步入口（§6.9-P2）：队列跑「入库→排轨→检测→审核卡」，确认后 apply+export
+    dispatcher.register("pipeline.rough_cut_chain", CapabilityCategory.PIPELINE,
+                        editor_skill_handlers.rough_cut_chain_submit,
+                        "小白闭环粗剪合链：入库→排轨→水词检测→审核卡（异步队列）")
     dispatcher.register("pipeline.generate", CapabilityCategory.PIPELINE,
                         pipeline_handlers.generate, "AI视频生成业务线")
     dispatcher.register("pipeline.quote", CapabilityCategory.PIPELINE,

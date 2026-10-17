@@ -47,6 +47,9 @@ SERVER_FILES = [
     # 2026-10-15：多角色配音编排端点（/host/dub-plan|dub-execute|dub-to-timeline）拆到
     # canvas_routes_dub.py（canvas_routes_post.py 已 1932 行逼近 2000 阈值）。
     os.path.join("app", "core", "canvas_routes_dub.py"),
+    # 2026-10-17：粗剪审核卡端点（/host/rough-cut/apply|export）拆到
+    # canvas_routes_roughcut.py（canvas_routes_post.py 已 1936 行，同 dub 先例）。
+    os.path.join("app", "core", "canvas_routes_roughcut.py"),
 ]
 CLIENTS = [
     os.path.join("vendor", "shiguang-canvas", "src", "bridge.ts"),
@@ -68,6 +71,9 @@ CLIENTS = [
     # 2026-10-15：dubOrchestration.ts 承载 /host/dub-plan|dub-execute|dub-to-timeline
     # （多角色配音编排；bridge.ts 已近规模阈值 ⇒ 照 hostCompliance 先例另开文件）。
     os.path.join("vendor", "shiguang-canvas", "src", "dubOrchestration.ts"),
+    # 2026-10-17：hostRoughCut.ts 承载 /host/rough-cut/apply|export（画布粗剪审核卡；
+    # 同 dubOrchestration 约定 —— 直接 fetch /host/* 的前端模块必须登记）。
+    os.path.join("vendor", "shiguang-canvas", "src", "hostRoughCut.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'

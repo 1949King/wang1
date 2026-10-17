@@ -79,8 +79,8 @@
     "file:vendor/shiguang-canvas/src/magnetic/useMagneticDrag.ts": "f1adc733ecd58ad5",
     "file:vendor/shiguang-canvas/src/magnetic/bonds.ts": "d48e167e545568d2",
     "file:vendor/shiguang-canvas/src/magnetic/SnapSeam.tsx": "29e1c37b1d7852d4",
-    "file:vendor/shiguang-canvas/src/CanvasShell.tsx": "73055b2f3f12952d",
-    "file:vendor/shiguang-canvas/src/styles.css": "5138f566090566dc",
+    "file:vendor/shiguang-canvas/src/CanvasShell.tsx": "f0f84b4f226a7ec3",
+    "file:vendor/shiguang-canvas/src/styles.css": "fc3d688360fc421d",
     "file:vendor/shiguang-canvas/src/nodes.tsx": "97bb4894d208d7b7",
     "file:vendor/shiguang-canvas/src/store.ts": "48838aeacb2ecbd7",
     "file:vendor/shiguang-canvas/src/stores/node-factory.ts": "0fa108a33cb6f7c0",
@@ -100,6 +100,8 @@
     "file:vendor/shiguang-canvas/src/hostEnhanceIntents.ts": "65add1ef611f8505",
     "file:vendor/shiguang-canvas/src/hostBreakdownL2.ts": "f4e0277d14b1e07c",
     "file:vendor/shiguang-canvas/src/hostSnapshots.ts": "c846bf8031731273",
-    "file:vendor/shiguang-canvas/src/editorRollback.ts": "9458c044ede2a653"
+    "file:vendor/shiguang-canvas/src/editorRollback.ts": "9458c044ede2a653",
+    "file:vendor/shiguang-canvas/src/hostRoughCut.ts": "8c7b0d18090ad027",
+    "file:vendor/shiguang-canvas/src/RoughCutReviewDock.tsx": "b958f526551a73db"
   }
 }

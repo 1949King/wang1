@@ -317,6 +317,32 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "片段血缘查询：按 clip_id/node_id 查片段↔画布节点关联+生成参数（只读，无命中诚实空）",
      "left", "片段血缘",
      ["血缘", "来源", "哪来的", "怎么生成的", "生成参数", "lineage", "画布节点关联"]),
+    # ── 小白闭环自动粗剪合链（§6.9-P2 · 方案 1 纯 core 侧，2026-10-17）──
+    # 三段式对齐「确认后执行」纪律：plan 只算不改（read）→ apply 写回可撤销（canvas_write）
+    # → export 委托既有精剪出片入口（media_write）；全部复用 B1/B2，不动冻结区。
+    ("editor.rough_cut_plan", "editor", "read", False,
+     "粗剪提案：规则排轨 + B2 水词/静音检测 → 审核卡提案（只算不改数据，无 ASR/字幕片段如实跳过）",
+     "left", "粗剪提案",
+     ["粗剪", "排轨", "水词", "静音", "去口癖", "提案", "rough cut"]),
+    ("editor.rough_cut_apply", "editor", "canvas_write", False,
+     "粗剪写回：确认后排轨落时间线 + 波纹删除 + 磁吸合缝（一条 compound 撤销；未确认拒绝执行）",
+     "left", "粗剪写回",
+     ["粗剪", "写回", "应用", "波纹删除", "合缝", "rough_cut_apply"]),
+    ("editor.rough_cut_export", "editor", "media_write", False,
+     "粗剪导出成片：写回后委托既有精剪出片入口（零新渲染路径；未写回拒绝导出）",
+     "cc", "粗剪导出",
+     ["粗剪", "导出", "成片", "出片", "rough_cut_export"]),
+    # ── 语义轨道原型（§6.9-P3 · 质量分/高光落 clip 元数据，2026-10-17）──
+    # B4 形态：语义信号挂 clip["semantic"] 块（工程全量 dump 自动持久化），不动时间线架构；
+    # 打分盖章由 pipeline.score 自动完成，本能力对只读查询/人工高光标记。
+    ("editor.get_clip_semantic", "editor", "read", False,
+     "查询片段语义元数据：五维质量分+高光标记（只读，无语义块如实空返回）",
+     "left", "片段语义",
+     ["语义", "质量分", "高光", "评分", "semantic", "分级"]),
+    ("editor.mark_clip_highlight", "editor", "canvas_write", False,
+     "显式标记片段高光：人工/Agent 标记覆盖自动判定，后续打分盖章不回改",
+     "left", "标记高光",
+     ["高光", "标记", "人工", "highlight", "mark_clip_highlight"]),
 
     # ── 多任务调度 ──
     ("workflow.submit_batch", "workflow", "file_write", False,
@@ -331,6 +357,12 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "问题路由：五维评分/审核标记 → 修复通道建议（时间线内/指令编辑/重拍；只读不执行）",
      "left", "问题路由",
      ["问题路由", "返工", "怎么修", "重拍还是剪辑", "修复通道", "route_problem"]),
+    # 粗剪合链异步入口（§6.9-P2）：一条队列跑「入库→排轨→检测→审核卡」，
+    # 任务体在 waiting_for_review 正常暂停（paused 非失败），确认后走 apply/export 收尾。
+    ("pipeline.rough_cut_chain", "pipeline", "media_write", False,
+     "小白闭环粗剪合链：素材入库→规则排轨→水词/静音检测→审核卡（异步队列，确认后 apply+export）",
+     "cc", "粗剪合链",
+     ["粗剪", "闭环", "合链", "自动粗剪", "一键粗剪", "rough_cut_chain"]),
     ("pipeline.generate", "pipeline", "media_write", True,
      "AI视频生成业务线", "right", "AI 视频生成", ["生成", "视频", "抽卡", "画面"]),
     ("pipeline.quote", "pipeline", "read", False,

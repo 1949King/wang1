@@ -41,7 +41,6 @@ MUST_SYNC = [
 # ── 基线（2026-09-13 实测，勿凭印象改）──
 BASELINE_DIVERGED = {
     "bridge.ts",
-    "bridgeStoryboard.ts",
 }
 # 副库尚未同步（主库独有）：咬合缝/槽位高亮 + 整个小白模式
 BASELINE_MISSING = {

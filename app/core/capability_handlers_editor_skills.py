@@ -776,3 +776,127 @@ class EditorSkillHandlers:
                     "message": (f"命中 {len(records)} 条血缘记录" if records
                                 else "无血缘记录（片段未关联画布节点，或查询参数不匹配）")},
         )
+
+    # ── 小白闭环自动粗剪合链（§6.9-P2 · 方案 1，2026-10-17）──────
+    # 全部薄委托 app/core/rough_cut_chain.py（B1/B2 复用 + 确认后执行纪律），
+    # 本层只做参数归一化与结果诚实化；队列提交复用 pipeline_jobs 底座。
+
+    def rough_cut_plan(self, req: CapabilityRequest) -> CapabilityResult:
+        """粗剪提案：规则排轨 + 水词/静音检测 → 审核卡（只算不改数据）。"""
+        from app.core.rough_cut_chain import rough_cut_chain
+        clips = req.params.get("clips")
+        mode = str(req.params.get("mode") or "")
+        if not clips:
+            editor = self._editor(req)
+            if editor is None:
+                return self._fail(req, "EditorModule 未就绪（或显式传入 clips）")
+            clips = list(getattr(editor, "_clips", []) or [])
+            mode = mode or "timeline"
+        mode = mode or "timeline"
+        if not clips:
+            return self._fail(req, "时间线为空：没有可粗剪的片段")
+        res = rough_cut_chain.plan(
+            clips, mode=mode,
+            asr_by_clip=req.params.get("asr_by_clip") or {},
+            subtitles=req.params.get("subtitles") or [],
+            label=str(req.params.get("label") or ""),
+            request_id=req.request_id,
+        )
+        if not res.get("ok"):
+            return self._fail(req, str(res.get("error") or "粗剪提案失败"))
+        p = res["proposal"]
+        return CapabilityResult(req.request_id, True, output={
+            "plan_id": p["plan_id"],
+            "needs_confirmation": True,
+            "clip_count": len(p["clip_ids"]),
+            "interval_count": len(p["intervals"]),
+            "intervals": p["intervals"],
+            "original_duration": p["original_duration"],
+            "predicted_duration": p["predicted_duration"],
+            "deleted_duration": p["deleted_duration"],
+            "warnings": p["warnings"],
+        })
+
+    def rough_cut_apply(self, req: CapabilityRequest) -> CapabilityResult:
+        """粗剪写回：确认后落时间线（排轨+波纹删除+合缝，一条 compound 撤销）。"""
+        from app.core.rough_cut_chain import rough_cut_chain
+        editor = self._editor(req)
+        if editor is None:
+            return self._fail(req, "EditorModule 未就绪")
+        res = rough_cut_chain.apply(
+            editor, str(req.params.get("plan_id") or ""),
+            confirmed=bool(req.params.get("confirmed", False)),
+        )
+        if not res.get("ok"):
+            return self._fail(req, str(res.get("error") or "粗剪写回失败"))
+        return CapabilityResult(req.request_id, True, output=res)
+
+    def rough_cut_export(self, req: CapabilityRequest) -> CapabilityResult:
+        """粗剪导出成片：委托既有精剪出片入口（未写回的提案拒绝导出）。"""
+        from app.core.rough_cut_chain import rough_cut_chain
+        editor = self._editor(req)
+        if editor is None:
+            return self._fail(req, "EditorModule 未就绪")
+        res = rough_cut_chain.export(
+            editor, str(req.params.get("plan_id") or ""),
+            session_id=str(req.params.get("session_id") or ""),
+        )
+        if not res.get("ok"):
+            return self._fail(req, str(res.get("error") or "粗剪导出失败"))
+        return CapabilityResult(req.request_id, True, output=res)
+
+    def rough_cut_chain_submit(self, req: CapabilityRequest) -> CapabilityResult:
+        """粗剪合链异步提交：一条队列跑「入库→排轨→检测→审核卡」，立即返回任务号。"""
+        from app.core.ai.pipeline_jobs import submit_full_pipeline
+        from app.core.rough_cut_chain import rough_cut_job_runner
+        params = {
+            "materials": req.params.get("materials", []),
+            "asr_by_clip": req.params.get("asr_by_clip") or {},
+            "subtitles": req.params.get("subtitles") or [],
+            "label": str(req.params.get("label") or ""),
+            "request_id": req.request_id,
+        }
+        n = len(params["materials"])
+        if not n:
+            return self._fail(req, "materials 为空：没有可入库的素材")
+        job = submit_full_pipeline(params, label=f"粗剪合链：{n} 个素材",
+                                   runner=rough_cut_job_runner)
+        return CapabilityResult(req.request_id, bool(job.get("job_id")), output=job,
+                                error=None if job.get("job_id") else "任务提交失败")
+
+    # ── 语义轨道原型（§6.9-P3 · 质量分/高光落 clip 元数据，2026-10-17）──
+    # 薄委托 app/core/clip_semantic.py（纯 clip dict 操作，B4 形态不落第二真相源）；
+    # 打分盖章已由 pipeline.score 就地完成，本层只补「查询 + 人工高光标记」两个入口。
+
+    def get_clip_semantic(self, req: CapabilityRequest) -> CapabilityResult:
+        """查询片段语义元数据（五维质量分/高光标记）；无语义块如实返回空。"""
+        from app.core.clip_semantic import read_semantic
+        editor = self._editor(req)
+        if editor is None:
+            return self._fail(req, "EditorModule 未就绪")
+        clips = list(getattr(editor, "_clips", []) or [])
+        items = read_semantic(clips, str(req.params.get("clip_id") or ""))
+        return CapabilityResult(req.request_id, True, output={
+            "count": len(items), "items": items,
+            "message": (f"命中 {len(items)} 条语义记录" if items
+                        else "无语义元数据（片段未打分或未被标记）")})
+
+    def mark_clip_highlight(self, req: CapabilityRequest) -> CapabilityResult:
+        """人工/Agent 显式标记高光：覆盖自动判定，后续打分盖章不回改。"""
+        from app.core.clip_semantic import mark_highlight
+        editor = self._editor(req)
+        if editor is None:
+            return self._fail(req, "EditorModule 未就绪")
+        clip_id = str(req.params.get("clip_id") or "")
+        if not clip_id:
+            return self._fail(req, "缺少 clip_id")
+        ok = mark_highlight(getattr(editor, "_clips", []) or [], clip_id,
+                            bool(req.params.get("value", True)),
+                            marked_by=str(req.params.get("marked_by") or "manual"),
+                            note=str(req.params.get("note") or ""))
+        if not ok:
+            return self._fail(req, f"未找到片段 {clip_id}（请核对 clip_id）")
+        if hasattr(editor, "_touch_project_dirty"):
+            editor._touch_project_dirty()  # 语义变更需持久化：标脏工程
+        return CapabilityResult(req.request_id, True,
+                                output={"clip_id": clip_id, "marked": True})

@@ -45,6 +45,9 @@ import NodePalette, { buildAddNodeItems, buildNoviceAddNodeGroups, groupPaletteB
 import CommandPalette, { type CommandItem } from "./CommandPalette";
 import WorkspaceCanvasMenus from "./WorkspaceCanvasMenus";
 import ShortcutSettings from "./components/settings/ShortcutSettings";
+// 2026-10-17 画布粗剪审核卡（用户授权解冻 canvas-magnetic-intent）：
+// 壳层常驻订阅 rough_cut.review SSE，剪辑侧粗剪提案生成即弹卡（§6.9-P2）。
+import RoughCutReviewDock from "./RoughCutReviewDock";
 import { showcaseFromLibrary, type LocalAsset, type LocalPrompt } from "./localLibrary";
 import { LibTvBottomDock } from "./LibTvChrome";
 import { type NodeData, type ViewMode, type CanvasLayoutMode, type CanvasTheme, type ShotData, type CharacterEntry, useCanvasStore } from "./store";
@@ -3246,6 +3249,9 @@ export default function CanvasShell(props: CanvasShellProps) {
           />
         </Suspense>
       )}
+
+      {/* 粗剪审核卡（§6.9-P2）：无提案时渲染 null，零开销常驻订阅。 */}
+      <RoughCutReviewDock />
     </div>
   );
 }

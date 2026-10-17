@@ -3726,3 +3726,201 @@ body.theme-light .node-cat-count {
     transition: none;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   粗剪审核卡（§6.9-P2 画布消费接线，2026-10-17）
+   RoughCutReviewDock 专用；停靠左下角，避开右侧 .sg-agent-panel。
+   暗色默认 + body.theme-light 双写（同全文件纪律）。
+   ════════════════════════════════════════════════════════════════ */
+.sg-rc-dock {
+  position: fixed;
+  left: 16px;
+  bottom: 56px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: min(480px, 66vh);
+  overflow-y: auto;
+  z-index: 70;
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: #e6edf3;
+}
+.sg-rc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sg-rc-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.sg-rc-phase {
+  margin-left: auto;
+  font-size: 11px;
+  color: #8b949e;
+}
+.sg-rc-phase-applied,
+.sg-rc-phase-done {
+  color: #3fb950;
+}
+.sg-rc-phase-error {
+  color: #f85149;
+}
+.sg-rc-close {
+  border: none;
+  background: transparent;
+  color: #8b949e;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.sg-rc-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sg-rc-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: #c9d1d9;
+}
+.sg-rc-summary b {
+  color: #e6edf3;
+}
+.sg-rc-warnings {
+  margin: 0;
+  padding-left: 16px;
+  color: #d29922;
+  list-style: disc;
+}
+.sg-rc-intervals {
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(177, 186, 196, 0.05);
+}
+.sg-rc-intervals > summary {
+  cursor: pointer;
+  color: #8b949e;
+  font-size: 11px;
+  list-style: none;
+}
+.sg-rc-intervals > summary::-webkit-details-marker {
+  display: none;
+}
+.sg-rc-intervals ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.sg-rc-intervals li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+}
+.sg-rc-kind {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  font-size: 10px;
+}
+.sg-rc-range {
+  flex: 0 0 auto;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+}
+.sg-rc-text {
+  color: #8b949e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sg-rc-notice {
+  color: #c9d1d9;
+}
+.sg-rc-notice-err {
+  color: #f85149;
+}
+.sg-rc-path {
+  color: #8b949e;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+.sg-rc-actions {
+  display: flex;
+  gap: 8px;
+}
+.sg-rc-btn {
+  padding: 7px 14px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #21262d;
+  color: #e6edf3;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sg-rc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sg-rc-btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 浅色主题双写 */
+body.theme-light .sg-rc-dock {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #1f2328;
+  box-shadow: 0 12px 40px rgba(31, 35, 40, 0.18);
+}
+body.theme-light .sg-rc-summary {
+  color: #57606a;
+}
+body.theme-light .sg-rc-summary b {
+  color: #1f2328;
+}
+body.theme-light .sg-rc-intervals {
+  border-color: #d0d7de;
+  background: rgba(246, 248, 250, 0.6);
+}
+body.theme-light .sg-rc-intervals > summary,
+body.theme-light .sg-rc-range,
+body.theme-light .sg-rc-text,
+body.theme-light .sg-rc-path,
+body.theme-light .sg-rc-phase {
+  color: #6e7781;
+}
+body.theme-light .sg-rc-close {
+  color: #6e7781;
+}
+body.theme-light .sg-rc-btn {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+  color: #1f2328;
+}
+body.theme-light .sg-rc-notice {
+  color: #57606a;
+}
