@@ -176,6 +176,9 @@ CHECKS = [
     # ── MCP 工具清单导出（Agent 编排演进 · 工具化第一步，2026-10-18）──
     ("MCPMANI", "_verify/check_mcp_manifest.py",
      "MCP 工具清单：spec形状/能力目录完整性/注解诚实映射/导出往返"),
+    # ── 时间线互操作桥接（OTIO/EDL/FCPXML · §6.8.7 时间线交换，2026-10-18）──
+    ("INTEROP", "_verify/check_interchange_bridge.py",
+     "互操作桥接：字段映射契约/OTIO端到端往返/Qt段错误红线/导出UI接线/依赖在册"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",
