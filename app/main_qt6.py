@@ -43,11 +43,16 @@ del _webengine_flags
 
 import sys
 import json
+import time
 import importlib.util
 import traceback
 import logging
 from pathlib import Path
 from typing import Any
+
+# §13.3 波次1-1（N5）启动打点基准：入口模块顶层 import 就绪时刻。
+# run() 内各阶段耗时以此为起点，日志前缀统一「startup timing:」，供启动链前后对比。
+_T_BOOT = time.perf_counter()
 
 APP_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = APP_DIR.parent
@@ -961,6 +966,17 @@ class Application:
 
     def run(self) -> int:
         """运行应用"""
+        # §13.3 波次1-1（N5）启动链打点：逐阶段记录耗时（相对上一阶段 + 相对入口就绪），
+        # 零行为变化；日志前缀「startup timing:」与 canvas boot timing 风格对齐。
+        _t_prev = _T_BOOT
+
+        def _tick(stage: str) -> None:
+            nonlocal _t_prev
+            _now = time.perf_counter()
+            logger.info("startup timing: %s +%.2fs (boot %.2fs)",
+                        stage, _now - _t_prev, _now - _T_BOOT)
+            _t_prev = _now
+
         self._safe_print("\n" + "=" * 60)
         self._safe_print(f"AI短剧编辑器 v{__version__} - Qt6版")
         self._safe_print("   乐高积木式插件系统 + Skill 执行引擎")
@@ -968,17 +984,26 @@ class Application:
         
         if not self._check_environment():
             return 1
+        _tick("env check")
         
         try:
             self._init_paths()
+            _tick("paths")
             self._init_core()
+            _tick("core (lego import)")
             self._init_blocks()
+            _tick("blocks")
             self._init_skills()
+            _tick("skills")
             self._init_qt()
+            _tick("qt app")
             if not self._acquire_single_instance():
                 return 0
+            _tick("single instance")
             self._init_modules()
+            _tick("modules (MainWindow)")
             self._setup_event_handlers()
+            _tick("event handlers")
             
             mw = self._main_window
             if mw is None:
@@ -993,6 +1018,7 @@ class Application:
             mw.show()  # type: ignore[reportAttributeAccessIssue]
             mw.raise_()  # type: ignore[reportAttributeAccessIssue]
             mw.activateWindow()  # type: ignore[reportAttributeAccessIssue]
+            _tick("window shown")
 
             # 启动后环境自检（延迟执行，避免阻塞启动；仅在缺失关键依赖时提示）
             self._schedule_startup_check(mw)

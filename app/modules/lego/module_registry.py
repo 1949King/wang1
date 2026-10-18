@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
@@ -282,11 +283,16 @@ class ModuleRegistry:
         """
         if self._initialized:
             return
+        # §13.3 波次1-1（N5）启动打点：注册表加载耗时（QSettings + JSON 兜底），
+        # 前缀与 main_qt6 的 startup timing 链路对齐，零行为变化。
+        _t0 = time.monotonic()
         # 深拷贝模块定义列表，防止外部修改原始数据
         self._definitions = list(_MODULE_DEFINITIONS)
         # 从 QSettings + JSON 备份恢复用户之前的开关选择
         self._load_overrides()
         self._initialized = True
+        logger.info("startup timing: module registry +%.3fs",
+                    time.monotonic() - _t0)
 
     # ─── 持久化（双保险）────────────────────────────────────
 
