@@ -190,6 +190,9 @@ CHECKS = [
      "持久化DSL：无损往返/DSL合法/畸形拒绝/桥接回退/双读单写在册"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
+    # ── 撤销栈 diff-v1（OTIO 真相源迁移·刀6，2026-10-19）──
+    ("UNDO", "_verify/check_undo_diff_format.py",
+     "撤销diff-v1：schema盖章/构造点深拷/split双格式并存/find_by_id成员判据/冻结区零压栈"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",
      "LUT 导出烘焙真机验证（真跑 ffmpeg；ffmpeg 缺失时优雅跳过）"),
     ("PRELOAD", "_verify/check_preview_preload.py",

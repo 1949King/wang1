@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
 import os
 import json
+import copy
 import random
 import logging
 import importlib as _importlib
@@ -2686,7 +2687,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         if clip is None and clip_id not in getattr(self, "_clip_id_to_widget", {}):
             logger.error(f'[P1#8] add_keyframes_to_clip 失败: 找不到 clip_id={clip_id}')
             return False
-        before = list((clip or {}).get("keyframes") or [])
+        before = copy.deepcopy((clip or {}).get("keyframes") or [])  # 刀6 深拷：浅拷共享帧 dict 会串改快照
         merged = [dict(k) for k in (keyframes or []) if isinstance(k, dict)]
         widget = self._clip_id_to_widget.get(clip_id)
         if widget is not None:
@@ -2704,7 +2705,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             "type": "edit_clip",
             "clip_id": clip_id,
             "before": {"keyframes": before},
-            "after": {"keyframes": list(merged)},
+            "after": {"keyframes": copy.deepcopy(merged)},
         })
         self._refresh_preview_with_effects()
         return True
@@ -3448,6 +3449,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             action.setdefault("origin", "agent" if is_agent_origin() else "user")
         except Exception:
             action.setdefault("origin", "user")
+        action.setdefault("schema", "diff-v1")  # 刀6 中央盖章：本文件 action 快照均为深拷 diff 格式（不覆盖显式声明）
         with self._get_history_lock():
             self._action_history.append(action)
             self._redo_history.clear()
@@ -3552,7 +3554,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                         self._timeline_store.set_fields(
                             sh.get("id"), start_time=float(sh.get("new", _c.get("start_time", 0))))
             else:
-                if clip not in self._clips:
+                if self._timeline_store.find_by_id(clip.get("id")) is None:  # 刀6：深拷快照下成员判据按 id（dict 全等比较既慢又错）
                     self._timeline_store.add(clip)
                 self._timeline_add_clip_widget(clip)
                 self._current_clip = clip
@@ -3582,7 +3584,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 for item in reversed(items):
                     clip = item["clip"]
                     shifts = item.get("ripple_shifts") or []
-                    if clip not in self._clips:
+                    if self._timeline_store.find_by_id(clip.get("id")) is None:  # 刀6：成员判据按 id（同上）
                         self._timeline_store.add(clip)
                     self._timeline_add_clip_widget(clip)
                     self._current_clip = clip
@@ -3596,19 +3598,27 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             is_split = (mode == 'do')
             original = action["original_clip"]
             new_clip = action["new_clip"]
+            orig_id = action.get("original_clip_id")  # 刀6 split 双格式并存：新格式按 id 走 store 还原；旧格式（edit_commands/粗剪仍产出）原路径永久保留，勿清理
             if is_split:
                 left_dur = float(action["original_duration"]) - float(new_clip.get("duration", 0))
                 if left_dur <= 0.05:
                     left_dur = float(action["original_duration"]) * 0.5
-                original["duration"] = left_dur
-                original["out_point"] = float(original.get("in_point", 0)) + left_dur
-                if new_clip not in self._clips:
+                left_out = float(original.get("in_point", 0)) + left_dur
+                if orig_id is not None:
+                    self._timeline_store.set_fields(orig_id, duration=left_dur, out_point=left_out)
+                else:
+                    original["duration"] = left_dur
+                    original["out_point"] = left_out
+                if self._timeline_store.find_by_id(new_clip.get("id")) is None:
                     self._timeline_store.add(new_clip)
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
             else:
-                original["duration"] = action["original_duration"]
-                original["out_point"] = action["original_out_point"]
+                if orig_id is not None:
+                    self._timeline_store.set_fields(orig_id, duration=action["original_duration"], out_point=action["original_out_point"])
+                else:
+                    original["duration"] = action["original_duration"]
+                    original["out_point"] = action["original_out_point"]
                 self._timeline_store.remove_by_id(new_clip.get("id"))
                 self._timeline_remove_clip_widget(new_clip.get("id"))
                 self._current_clip = original
@@ -3617,7 +3627,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             is_paste = (mode == 'do')
             new_clip = action["new_clip"]
             if is_paste:
-                if new_clip not in self._clips:
+                if self._timeline_store.find_by_id(new_clip.get("id")) is None:  # 刀6：成员判据按 id（同上）
                     self._timeline_store.add(new_clip)
                 self._timeline_add_clip_widget(new_clip)
                 self._current_clip = new_clip
@@ -3642,13 +3652,13 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     if self._current_clip and self._current_clip.get("id") == clip.get("id"):
                         self._current_clip = None
             else:
-                # 重做添加：重新加入视频片段 + 联动音频片段
-                if clip and clip not in self._clips:
+                # 重做添加：重新加入视频片段 + 联动音频片段（刀6：成员判据按 id，同上）
+                if clip and self._timeline_store.find_by_id(clip.get("id")) is None:
                     self._timeline_store.add(clip)
                 if clip:
                     self._timeline_add_clip_widget(clip)
                     self._current_clip = clip
-                if audio_clip and audio_clip not in self._clips:
+                if audio_clip and self._timeline_store.find_by_id(audio_clip.get("id")) is None:
                     self._timeline_store.add(audio_clip)
                     self._timeline_add_clip_widget(audio_clip)
 
@@ -3665,7 +3675,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             # ★ A3（2026-10-05）：贴纸整表快照回滚（贴纸挂在引擎上、不是 clip 字段，
             #   故不能走 edit_clip；整表替换是最简单且不会漏项的还原方式）。
             snap = action.get("after") if mode == "do" else action.get("before")
-            self._active_stickers = [dict(s) for s in (snap or [])]
+            self._active_stickers = copy.deepcopy(snap or [])  # 刀6 深拷还原：浅拷会让活体与快照共享嵌套参数
             self._refresh_sticker_list_ui()
 
         elif atype == "compound":
@@ -7600,7 +7610,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     real_timeline_manager.delete_clip(current["id"], track["id"], clip_id)
         except Exception as e:
             logger.error(f'删除内核时间线片段失败: {e}')
-        payload = {"clip": deleted_clip, "ripple_shifts": ripple_shifts}
+        payload = {"clip": copy.deepcopy(deleted_clip), "ripple_shifts": ripple_shifts}  # 刀6 快照深拷：与活体解耦，undo 回灌独立副本
         if record:
             self._record_action({"type": "delete", **payload})
         if sync:
@@ -7855,8 +7865,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         self._notify_edit("已清除贴纸")
 
     def _snapshot_stickers(self) -> list:
-        """贴纸列表的深拷贝快照（撤销/重做用；贴纸是 dict，浅拷贝会串改）。"""
-        return [dict(s) for s in (getattr(self, "_active_stickers", None) or [])]
+        """贴纸列表的深拷贝快照（撤销/重做用；贴纸是 dict，浅拷贝会串改）。刀6：dict(s) 浅拷改真 deepcopy。"""
+        return copy.deepcopy(getattr(self, "_active_stickers", None) or [])
 
     def _burn_stickers_if_any(self, video_path: str) -> str:
         """导出后把贴纸烧进成片（实现见 editor_burn）。"""
@@ -8688,7 +8698,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         if local_time <= 1e-4 or local_time >= duration - 1e-4:
             return None
 
-        new_clip = dict(live)
+        new_clip = copy.deepcopy(live)  # 刀6 深拷切出右半段：浅拷会让两片共享嵌套 effects/keyframes 互相串改
         new_clip["id"] = f"{live.get('id', 'clip')}_split_{int(time.time() * 1000)}"
         new_clip["start_time"] = start + local_time
         new_clip["duration"] = duration - local_time
@@ -8710,6 +8720,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         self._current_clip = new_clip
         return {
             "type": "split",
+            "original_clip_id": cid,  # 刀6 diff-v1 还原锚点（original_clip 键保留兼容旧读路径）
             "original_clip": live,
             "new_clip": new_clip,
             "original_duration": duration,
@@ -8855,7 +8866,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _copy_clip_data_to_timeline(self, clip: Dict[str, Any], offset: float = 1.0):
         """复制片段数据并添加到时间线。"""
-        new_clip = dict(clip)
+        new_clip = copy.deepcopy(clip)  # 刀6 深拷：浅拷会让副本与源片共享嵌套 effects/keyframes
         new_clip["id"] = f"{clip.get('id', 'clip')}_copy_{int(time.time() * 1000)}"
         new_clip["start_time"] = float(clip.get("start_time", 0)) + float(offset or 1.0)
         self._timeline_store.add(new_clip)
@@ -9304,8 +9315,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         intens = max(0.0, min(1.0, float(intensity)))
         steps = []
         for c in targets:
-            before = {"effects": dict(c.get("effects") or {}) if isinstance(c.get("effects"), dict) else {}}
-            effects = dict(before["effects"])
+            before = {"effects": copy.deepcopy(c.get("effects")) if isinstance(c.get("effects"), dict) else {}}  # 刀6 深拷：浅拷共享嵌套参数会串改快照
+            effects = copy.deepcopy(before["effects"])
             effects["filter"] = filter_name
             effects["filter_intensity"] = intens
             c["effects"] = effects
@@ -9315,7 +9326,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 "type": "edit_clip",
                 "clip_id": c.get("id"),
                 "before": before,
-                "after": {"effects": effects, "filter": filter_name, "filter_intensity": intens},
+                "after": {"effects": copy.deepcopy(effects), "filter": filter_name, "filter_intensity": intens},  # 刀6 after 深拷与活体解耦
             })
         self._active_filter_key = filter_name
         if len(steps) == 1:
@@ -9470,9 +9481,10 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         #   复用既有 `edit_clip` 型 action：撤销走 _apply_action 的通用字段回写路径，
         #   **零新分支**。before 里显式记「原本有没有这两个键」，撤到无转场时写回 None/[]，
         #   `clip.get("transition")` 仍为假值 ⇒ 下游「有无转场」判定不受影响。
+        # 刀6：before/after 深拷（transition 系嵌套 dict，浅拷会被活体追加/改参串改快照）
         _before = {
-            "transition": clip.get("transition"),
-            "transitions": list(clip.get("transitions") or []),
+            "transition": copy.deepcopy(clip.get("transition")),
+            "transitions": copy.deepcopy(list(clip.get("transitions") or [])),
         }
         if not plugin_id:
             try:
@@ -9497,7 +9509,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             "type": "edit_clip",
             "clip_id": clip.get("id"),
             "before": _before,
-            "after": {"transition": transition, "transitions": list(transitions)},
+            "after": {"transition": copy.deepcopy(transition), "transitions": copy.deepcopy(transitions)},
             "label": f"转场 {transition_type}",
         })
         self._sync_timeline_widget_state()
