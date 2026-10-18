@@ -184,6 +184,16 @@ export function LibTvBottomDock({
         <button type="button" className="ltd-btn ltd-btn--primary" onClick={onAdd} title="添加节点（双击画布亦可）">
           <span className="ltd-plus">＋</span>添加
         </button>
+        {/*
+          2026-10-19（用户反馈「画布→剪辑要无缝」）：「发送到剪辑」原来藏在
+          「⚡工具 → 节点」二级菜单里，属于本项目最重要的一条产出通路却最难找。
+          提到 dock 一级，和「添加」并列。未选中节点时 CanvasShell 的 onSend
+          会提示「请先选中至少一个节点再发送」，不会静默失败。
+          props 签名未动（调用方在冻结区）。
+        */}
+        <button type="button" className="ltd-btn" onClick={onSend} title="把选中节点发送到剪辑时间线">
+          <span className="ltd-ico">✈</span>送剪辑
+        </button>
         <button type="button" className="ltd-btn" onClick={onZoomFit} title="聚焦全部（缩放复位）">
           <span className="ltd-ico">⊙</span>
           <span className="ltd-zoom">{zoomPct}%</span>

@@ -1,54 +1,33 @@
-__version__ = "4.43.22"
+__version__ = "4.43.23"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 43,
-    "patch": 22,
-    "codename": "画布三修：角色节点接线 + Agent 桌宠跨画布 + #185 崩溃根因",
-    "release_date": "2026-10-14",
+    "patch": 23,
+    "codename": "3D 群像巨物根因修复 + 配方卡（Agent 自动铺卡）+ 画布 UI 收嘈",
+    "release_date": "2026-10-19",
     "description": (
-        "V4.43.20：修复「电影级灯位面板与 3D 导演台零数据流」的孤儿缺口"
-        "（用户授权解冻 stage3d-core + canvas-magnetic-intent）。\n"
-        "\n【问题（读码实测，非猜测）】\n"
-        "· lightingPresets.ts（24 主光位 + 9 轮廓光）在 Stage3D.tsx **0 引用**；\n"
-        "· 它的消费者只有 LightingPanel.tsx / lighting.test.ts，而面板 apply() 只写提示词；\n"
-        "· Stage3D.tsx 自己另有一套 LIGHT_PRESETS（4 档死预设），物理上只有 hemi + dir 两盏灯。\n"
-        "⇒ 用户在面板选 24 个方位之一，3D 预览纹丝不动、只能盲选。\n"
-        "  这正是 zone8 不变量点名的反模式：同一语义被两条链路各写一遍。\n"
-        "\n【做法：接一条单通道（照抄 stage3dApplySeq / stage3dCastSeq 正统模式）】\n"
-        "· 新增 stage3dLighting.ts（326 行）作为**唯一映射通道**：\n"
-        "  lightPosition 球坐标→笛卡尔（0°=镜头=世界 +Z、顺时针；度→弧度）/ kelvinToRgb\n"
-        "  （Tanner Helland 近似，纯算术可测）/ lightStateFor 快照 / applyLightingToApi 副作用 /\n"
-        "  useStage3dLighting 消费端（先 consume 再 apply）。\n"
-        "· 映射：主光 → dir（位置/颜色/强度）、环境 → hemi、轮廓光 → 新增 lamp。\n"
-        "· 轮廓灯由 WeakMap<Scene, DirectionalLight[]> 惰性持有（≤2 盏、castShadow=false）\n"
-        "  ⇒ apiRef 类型零改动。\n"
-        "· 「双侧轮廓」真给 2 盏（120° + 240°，用户拍板不取巧）。\n"
-        "\n【优先级（核心：两个 effect 绝不打架）】\n"
-        "· Stage3D.tsx 的 lightPreset effect 加守卫 `stage3dLightingSeq === 0`：\n"
-        "  未介入（seq=0）时 preset 完全生效（现状不变）；介入后（seq>0）preset 让位，\n"
-        "  只保留 bg/fog/地面。⇒ 两 effect 顺序无关、幂等（逻辑互斥，非侥幸）。\n"
-        "· 「移除灯位」投递 null ⇒ 恢复 lightPreset，不留残灯、不撒谎。\n"
-        "\n【冻结区纪律（stage3d-core 12 → 14 文件 / 全库 91 → 93 锁点）】\n"
-        "· 备份（主库 6 + 副库 4）→ 写新文件 → 接线（store ≤5 行 / Stage3D ≤12 行）\n"
-        "  → frozen_zones.json 字符串手术（禁 json.dump，zone7 reason 5425 字符）\n"
-        "  → --update 重锁 → 复跑 OK frozen zones intact (93 locks)。\n"
-        "· 顺手修正 .cursor/rules/frozen-zones.mdc 既有的 90 vs 91 漂移（现统一 93）。\n"
-        "· 未动：端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、\n"
-        "  材质渲染、画布预热时机、角色库 schema、磁吸任何阈值。\n"
+        "V4.43.23：① 修复「3D 群像第三个角色一只脚占满屏幕」——根因是"
+        "SkeletonUtils.clone() 后 matrixWorld 未结算，Box3 量出 1/33 假尺寸 ⇒ 归一化"
+        "算出 33× 补偿把 1.7m 模型放大成 56.5m（用户授权解冻 stage3d-core，7 轮定位，"
+        "03:50 日志实证；applyBoneDelta 的 NaN 守卫保留为纵深防御）；② 新增配方卡"
+        "（Recipe）：recipePure.ts 纯函数 LCS 中文匹配 + recipe.ts 存取应用 + "
+        "RecipePanel.tsx 左栏面板 + recipeBridge.ts Agent 事件桥，后端 canvas.apply_recipe "
+        "能力只广播 SSE、前端执行铺卡——Agent 从「只能给建议」升级为「能自动铺卡片」"
+        "（用户授权解冻 canvas-magnetic-intent，42→48 文件 / 101→107 锁）；③ 画布 UI "
+        "收嘈：导航改左侧 64px 竖排、形态切换归位画布顶栏（用户两次当面纠正）、Agent "
+        "面板去噪、「送剪辑」提到 dock 一级。\n"
         "\n【验证】\n"
-        "· tsc 主库 38 → 38 逐文件一致（21 riggedHumanoid + 16 Stage3D + 1 infinite-compat）；\n"
-        "  新文件 0 错误；副库 tsc -p tsconfig.app.json 同为 38（防 project references 假绿）。\n"
-        "· vitest 26 → 27 文件 / 361 → 406 例全绿（新增 stage3dLighting.test.ts 45 例）。\n"
-        "· vite build rc=0 且产物实测含 stage3d-rim-light 字面量（不是只看返回码）。\n"
-        "· 新增 _verify/check_stage3d_lighting.mjs（真 three 场景端到端 43 项全过，已登记进\n"
-        "  run_all_checks 的 LIGHT3D）—— 补 vitest node 环境测不到的 useEffect 部分。\n"
-        "· **7 条反例逐条喂坏版本**确认守卫真会红（sin/cos 对调 / 删守卫 / consume 挪后 /\n"
-        "  hook 提前 / 删轮廓 azimuth / kelvin 恒白 / 忘初始化 store）—— 守卫不是摆设。\n"
-        "\n【已知未做】\n"
-        "· 「头部捏脸」卡片（表情/发饰/妆容）是独立一刀，本次不碰。\n"
-        "· 3D 场景灯位实体可视化（把 24 个灯画成场景里的可见体块）另立刀。\n"
-        "\n【上一版 V4.43.19『LibTV 对标补强刀3：画布前端接线』见 docs/CHANGELOG.md。】"
+        "· vitest 37 文件 / 568 例全绿（recipePure 18 例新增）；tsc 存量 37 零新增；\n"
+        "· 后端自检：canvas.apply_recipe 注册 + 目录双向对齐 0 问题；\n"
+        "· frozen_zone_guard OK 107 locks；doc_consistency_gate 0 阻断；\n"
+        "· run_all_checks 46 项过（CANVASDUAL 失败定性为沙箱 safe-delete turn 级计数\n"
+        "  超阈的环境误报：web 主构建 ✓ 6.24s / tauri 完整构建退出码 0，产物已 mv 暂存）。\n"
+        "\n【顺带修了一个「永远空跑」的门禁摆设】\n"
+        "· check_canvas_dual_repo.py 的 tauri filter 大写 AI-Canvas-tauri 与实际包名\n"
+        "  小写 ai-canvas-tauri 不匹配 ⇒ pnpm「No projects matched」但退出码 0 ⇒\n"
+        "  该项长期假绿、从没真验证过 tauri 打包链路。已修。\n"
+        "\n【上一版 V4.43.22『画布三修』见 docs/CHANGELOG.md。】"
     ),
 }

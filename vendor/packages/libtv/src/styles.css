@@ -48,12 +48,20 @@ html[data-theme='light'] {
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; width: 100%; overflow: hidden; }
 
-/* —— Shell：顶栏 + 内容 —— */
+/* —— Shell：左侧竖排导航 + 内容（2026-10-19 用户授权解冻 canvas-magnetic-intent） ——
+ *
+ * 改造动机（用户实测反馈）：「横置的导航太长、打开画布直接进画布、顶上全是功能」。
+ * 做法：导航从顶部横条改为**左侧固定竖排栏**（64px），内容区整体右移。
+ * 为什么用 fixed + padding 而不是改 flex 方向：CanvasShell 里 stage3d 分支是
+ * header + content 的 fragment 结构，改 shell 为 row 会把 subbar 挤成侧边一列；
+ * fixed 方案 DOM 结构零改动、所有子页面自动右移，风险最低。
+ */
 .shell {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 100%;
+  padding-left: 64px;
   background: var(--bg);
 }
 .topbar {
@@ -903,14 +911,24 @@ kbd {
   border-bottom: 1px solid #1f1f1f;
 }
 
+/* V4.43.23 竖排导航（2026-10-19 用户授权解冻 canvas-magnetic-intent）
+ *
+ * 顶栏 52px → 左侧 64px 竖排：品牌（只留图标）/ 6 个导航项（图标 + 10px 标签）/
+ * 底部工具（快捷键 · 主题 · 模式 · 版本）。内容区靠 `.shell` 的 padding-left 让位。
+ * 「小白/专业」分段控件竖排放不下 ⇒ 改单按钮循环切换（语义不变，同一份数据）。
+ */
 .ic-nav {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 64px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  height: 52px;
-  padding: 0 16px;
-  flex-shrink: 0;
-  border-bottom: 1px solid #1c1c1c;
+  gap: 4px;
+  padding: 10px 0 12px;
+  border-right: 1px solid #1c1c1c;
   background: rgba(12, 12, 12, 0.94);
   backdrop-filter: blur(10px);
   z-index: 30;
@@ -918,56 +936,79 @@ kbd {
 .ic-nav-brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   border: 0;
   background: transparent;
-  color: #fff;
-  font-weight: 650;
-  font-size: 14px;
   cursor: pointer;
-  padding: 6px 8px;
+  padding: 4px;
   border-radius: 8px;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 .ic-nav-brand:hover { background: #1a1a1a; }
 .ic-nav-mark {
   display: inline-grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: #1f1f1f;
-  color: #f5a623;
-  font-size: 11px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
 }
 .ic-nav-links {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 2px;
   flex: 1;
-  min-width: 0;
-  overflow-x: auto;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: none;
 }
 .ic-nav-links::-webkit-scrollbar { display: none; }
 .ic-nav-link {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  gap: 3px;
   border: 0;
   background: transparent;
   color: #9a9a9a;
   font-size: 12px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  width: 54px;
+  padding: 8px 2px;
+  border-radius: 9px;
   cursor: pointer;
   white-space: nowrap;
 }
 .ic-nav-link:hover { color: #e8e8e8; background: #171717; }
 .ic-nav-link.on { color: #fff; background: #1e1e1e; }
-.ic-nav-ico { font-size: 11px; opacity: 0.85; }
-.ic-nav-right { display: flex; align-items: center; gap: 8px; }
-.ic-nav-ver { color: #666; font-size: 11px; }
+.ic-nav-ico { font-size: 15px; opacity: 0.9; line-height: 1; }
+.ic-nav-label { font-size: 10px; line-height: 1.1; letter-spacing: -0.2px; }
+.ic-nav-right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  flex-shrink: 0;
+}
+.ic-nav-ver { color: #666; font-size: 9px; line-height: 1; }
+
+/* 竖排导航浅色主题（不改则整栏在浅色画布上是一条黑边） */
+html[data-theme='light'] .ic-nav {
+  background: rgba(248, 250, 252, 0.96);
+  border-right-color: var(--line2, #cdd5e3);
+}
+html[data-theme='light'] .ic-nav-brand:hover { background: #e8edf6; }
+html[data-theme='light'] .ic-nav-link { color: #64748b; }
+html[data-theme='light'] .ic-nav-link:hover { color: #0f172a; background: #e8edf6; }
+html[data-theme='light'] .ic-nav-link.on { color: #0f172a; background: #dde6f3; }
+html[data-theme='light'] .ic-nav-ver { color: #94a3b8; }
 
 /* V4.41.22 主题切换按钮（用户授权解冻 canvas-magnetic-intent） */
 .ic-theme-btn {
@@ -1648,8 +1689,8 @@ html[data-theme='light'] .ic-shortcut-btn:hover {
 }
 .sg-agent-tabs {
   display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 4px;
+  margin-bottom: 6px;
   flex-shrink: 0;
 }
 .sg-agent-tabs .btn {
@@ -1657,6 +1698,9 @@ html[data-theme='light'] .ic-shortcut-btn:hover {
   flex: 1;
   margin: 0;
   text-align: center;
+  /* 2026-10-19（Agent UI 精简）：四个页签是导航不是主操作，压到 11px/4px */
+  font-size: 11px;
+  padding: 4px 6px;
 }
 .sg-agent-chat {
   flex: 1;
@@ -2370,6 +2414,40 @@ html[data-theme='light'] .ic-shortcut-btn:hover {
 .libtv-engine-dot-core.installed { background: #fbbf24; }
 .libtv-engine-dot-core.missing { background: #f87171; }
 .libtv-engine-dot-core.unknown { background: #6b7280; }
+
+/* V4.43.24 状态胶囊（2026-10-19 用户授权解冻 canvas-magnetic-intent）
+ * 引擎状态 + 剪辑片数 + 当前模型 三块合并成一个小胶囊，细节进 tooltip。
+ * 视觉：比原两块更矮更窄（11px/3px 内边距），避免和「生成 / Agent」抢注意力。 */
+.libtv-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #2a2a2a;
+  background: #141414;
+  white-space: nowrap;
+  transition: color .12s, border-color .12s;
+  max-width: 260px;
+  overflow: hidden;
+}
+.libtv-status-pill:hover { color: #e5e7eb; border-color: #3a3a3a; }
+.libtv-status-clip { flex-shrink: 0; }
+.libtv-status-sep { color: #4b5563; flex-shrink: 0; }
+.libtv-status-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+html[data-theme='light'] .libtv-status-pill {
+  border-color: var(--line2, #cdd5e3);
+  background: #f6f8fc;
+  color: #64748b;
+}
+html[data-theme='light'] .libtv-status-pill:hover { color: #0f172a; border-color: #94a3b8; }
 .libtv-dd-group { display: flex; align-items: center; gap: 2px; }
 .libtv-dd-wrap { position: relative; }
 .libtv-dd {

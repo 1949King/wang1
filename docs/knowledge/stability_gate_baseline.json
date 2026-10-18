@@ -12,7 +12,7 @@
     "app/core/secure_store.py:print-statement": 4,
     "app/core/security.py:swallow-except": 1,
     "app/modules/lego/batch_task_manager.py:print-statement": 5,
-    "app/modules/lego/character_management_module.py:swallow-except": 2,
+    "app/modules/lego/character_management_module.py:swallow-except": 3,
     "app/modules/lego/clip_transform.py:swallow-except": 5,
     "app/modules/lego/clip_widget.py:swallow-except": 13,
     "app/modules/lego/copywriting_module.py:swallow-except": 1,

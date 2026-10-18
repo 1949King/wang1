@@ -80,6 +80,9 @@ import { getGraphPast, getGraphFuture } from "./stores/history-store";
 // V4.41.20：顶栏 🚀 生成按钮 → toggle generateOpen
 import { useToolboxStore } from "./toolboxStore";
 import { buildNoviceNodeTypes, NoviceInspector, NOVICE_ENTRY } from "./novice";
+import { RecipePanel } from "./RecipePanel";
+import { installRecipeAgentBridge } from "./recipeBridge";
+import CanvasTierSeg from "./canvasTierSeg";
 import type { CanvasTier } from "./store";
 
 /** 重面板按需分包：缩短首屏 JS，打开对应模式/侧栏再拉 chunk */
@@ -433,7 +436,9 @@ export default function CanvasShell(props: CanvasShellProps) {
   const lastPointerRef = useRef({ clientX: 200, clientY: 200 });
   const [spacePan, setSpacePan] = useState(false);
   const [snapGrid, setSnapGrid] = useState(true);
-  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("shiguang-canvas:left-collapsed") === "1");
+  // 2026-10-19（用户要求「尽量把少用的东西藏起来」）：左侧节点列表**默认折叠**，
+  // 把宽度让给画布；用户手动展开一次后记住（"0" = 展开，"1"/缺省 = 折叠）。
+  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("shiguang-canvas:left-collapsed") !== "0");
   const [rightCollapsed, setRightCollapsed] = useState(() => localStorage.getItem("shiguang-canvas:right-collapsed") === "1");
   // 持久化折叠偏好：用户手动折叠/展开后记住
   useEffect(() => { localStorage.setItem("shiguang-canvas:left-collapsed", leftCollapsed ? "1" : "0"); }, [leftCollapsed]);
@@ -484,6 +489,9 @@ export default function CanvasShell(props: CanvasShellProps) {
   const setStatus = useCanvasStore((s) => s.setStatus);
   const applyComfyWorkflow = useCanvasStore((s) => s.applyComfyWorkflow);
   const selectedId = useCanvasStore((s) => s.selectedId);
+  // 2026-10-19：配方 Agent 桥 —— 后端把 canvas.apply_recipe 的结果以 recipe.apply 事件推下来，
+  // 这里收到就铺开（此前 Agent 只能给建议，这是第一个真正能改画布的执行端）。
+  useEffect(() => installRecipeAgentBridge(setStatus), [setStatus]);
   // 角色库（Step A）— 从 store 读取
   const characters = useCanvasStore((s) => s.characters);
   const refreshCharacters = useCanvasStore((s) => s.refreshCharacters);
@@ -1097,11 +1105,11 @@ export default function CanvasShell(props: CanvasShellProps) {
             3D 导演台
           </button>
         </div>
-        {isNovice ? (
-          <div className="chip" title="小白模式：拖卡片靠近就吸附成关系，拉开即解除">
-            小白模式 · 磁吸意图画布
-          </div>
-        ) : (
+        {/* 2026-10-19（用户纠正定位）：形态切换（小白 / 专业）是**视图级**操作，
+            必须和「画布 / 3D 导演台」并排 —— 不放宿主顶栏「挂到角色」那边。
+            组件单独成文件（canvasTierSeg.tsx）以避开本文件的体积守卫上限。 */}
+        <CanvasTierSeg tier={editorTier} onChange={setEditorTier} />
+        {isNovice ? null : (
           <div className="seg canvas-layout-seg" title="视图模式">
             {(["flow", "simple", "storyboard"] as CanvasLayoutMode[]).map((m) => (
               <button
@@ -1120,22 +1128,28 @@ export default function CanvasShell(props: CanvasShellProps) {
         )}
         <div className="spacer" />
         <div className="libtv-top-right">
+          {/* 2026-10-19（用户要求「把少用的藏起来」）：原先是两块常驻 ——
+              「引擎未安装/引擎在线」+「剪辑 0 片 · Ollama 本地」，占掉右半条顶栏。
+              现在合并成**一个状态胶囊**：彩点表引擎状态（颜色即语义）、剪辑数与
+              当前模型压成一行小字，完整文案进 tooltip。点击仍刷新引擎状态。 */}
           <span
-            className="libtv-engine-dot"
-            title={
-              comfyEngineStatus
-                ? comfyEngineStatus.diagnose.suggestion || comfyEngineStatus.diagnose.error || "内置 ComfyUI 引擎"
-                : "正在检测内置 ComfyUI 引擎状态…"
-            }
+            className="libtv-status-pill"
             role="button"
+            title={
+              `内置 ComfyUI 引擎：${comfyEngineLabel[comfyEngineState]}\n` +
+              `剪辑时间线快照：${editorClipCount} 片\n` +
+              `当前模型：${prefs.active_provider_label || prefs.active_provider || "未同步"}\n` +
+              `（点击重新检测引擎）`
+            }
             onClick={() => void refreshComfyEngineStatus()}
           >
             <i className={`libtv-engine-dot-core ${comfyEngineState}`} />
-            {comfyEngineLabel[comfyEngineState]}
+            <span className="libtv-status-clip">剪辑 {editorClipCount}</span>
+            <span className="libtv-status-sep">·</span>
+            <span className="libtv-status-model">
+              {prefs.active_provider_label || prefs.active_provider || "未同步"}
+            </span>
           </span>
-          <div className="chip" title="来自剪辑时间线快照">
-            剪辑 {editorClipCount} 片 · {prefs.active_provider_label || prefs.active_provider || "未同步"}
-          </div>
           {/* V4.41.20：「生成/入轨」高频面板浮动化，顶栏一键直达（侧栏深处不再卡人） */}
           <button
             type="button"
@@ -1261,6 +1275,12 @@ export default function CanvasShell(props: CanvasShellProps) {
                     </button>
                   );
                 })}
+              </div>
+            </details>
+            <details className="panel" open>
+              <summary>配方</summary>
+              <div className="panel-body">
+                <RecipePanel onStatus={setStatus} />
               </div>
             </details>
             <details className="panel" open>

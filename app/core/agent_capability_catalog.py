@@ -90,6 +90,10 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     # ── 画布 ──
     ("canvas.open", "canvas", "read", False,
      "打开 AI 画布模块", "cc", "打开画布", ["画布", "打开"]),
+    # 2026-10-19：配方 —— Agent 第一次能真正改画布（铺卡片），而不只是给建议
+    ("canvas.apply_recipe", "canvas", "canvas_write", False,
+     "按配方铺开卡片（一句话 → 前端匹配并建节点）", "cc", "配方铺开",
+     ["配方", "recipe", "铺开", "工作流"]),
     ("canvas.sync_models", "canvas", "read", False,
      "同步模型管理渠道到画布", "cc", "同步模型池", ["同步", "模型池"]),
     ("canvas.list_actions", "canvas", "read", False,

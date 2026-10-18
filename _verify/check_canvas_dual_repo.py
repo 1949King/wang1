@@ -153,7 +153,10 @@ def _check_builds(failures: list) -> None:
     cmds = [
         ("web 宿主 vite build", "pnpm --filter shiguang-canvas run build"),
         # tauri 的 build 脚本含 tsc -b（存量 4 错=§2c.5 基线），构建门禁只验打包链路
-        ("tauri 宿主 vite build", "pnpm --filter AI-Canvas-tauri exec vite build"),
+        # 2026-10-19 修：filter 曾写成大写 AI-Canvas-tauri，而包名是小写 ai-canvas-tauri
+        # ⇒ pnpm「No projects matched」但退出码 0 ⇒ 本项长期空跑假绿（门禁摆设）。
+        # 修后首次真跑即暴露 safe-delete 环境问题（见 CHANGELOG 2026-10-19 条目）。
+        ("tauri 宿主 vite build", "pnpm --filter ai-canvas-tauri exec vite build"),
     ]
     for label, cmd in cmds:
         r = subprocess.run(cmd, cwd=vendor_dir, env=env, shell=True,

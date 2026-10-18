@@ -57,13 +57,26 @@ export default function AppNav({
   onThemeChange,
   onOpenShortcuts,
 }: Props) {
+  // 形态切换（小白 / 专业）**刻意不在导航里** —— 2026-10-19 用户纠正：
+  // 它属于「视图级」操作，和「画布 / 3D 导演台」并排放在画布顶栏
+  // （CanvasShell 的第二个 `.seg`）。props 仍保留以维持调用方签名。
+  void tier;
+  void onTierChange;
+
   return (
     <nav className="ic-nav" aria-label="主导航">
-      <button type="button" className="ic-nav-brand" onClick={() => onNavigate("home")}>
+      {/* 2026-10-19（用户授权解冻 canvas-magnetic-intent）：顶栏 → 左侧竖排栏。
+          品牌只留图标（文字进 title），给竖排腾宽度；点击回落地页。 */}
+      <button
+        type="button"
+        className="ic-nav-brand"
+        onClick={() => onNavigate("home")}
+        title="无限画布 · 首页"
+        aria-label="无限画布 · 首页"
+      >
         <span className="ic-nav-mark" aria-hidden>
           ↗
         </span>
-        无限画布
       </button>
       <div className="ic-nav-links">
         {NAV_ITEMS.map((item) => (
@@ -72,16 +85,17 @@ export default function AppNav({
             type="button"
             className={`ic-nav-link${active === item.id ? " on" : ""}`}
             onClick={() => onNavigate(item.id)}
+            title={item.label}
           >
             <span className="ic-nav-ico" aria-hidden>
               {item.icon}
             </span>
-            {item.label}
+            <span className="ic-nav-label">{item.label}</span>
           </button>
         ))}
       </div>
       <div className="ic-nav-right">
-        {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：顶栏按钮 + Ctrl+Shift+K */}
+        {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：图标 + Ctrl+Shift+K */}
         {onOpenShortcuts && (
           <button
             type="button"
@@ -103,23 +117,9 @@ export default function AppNav({
         >
           <span aria-hidden>{theme === "dark" ? "☀" : "☾"}</span>
         </button>
-        <div
-          className="ic-tier-seg"
-          role="group"
-          aria-label="画布模式"
-          title="小白模式 = 磁吸意图画布；专业模式 = 节点画布（同一份数据，随时互切）"
-        >
-          {(["novice", "pro"] as CanvasTier[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={tier === t ? "on" : ""}
-              onClick={() => onTierChange(t)}
-            >
-              {t === "novice" ? "小白模式" : "专业模式"}
-            </button>
-          ))}
-        </div>
+        {/* 形态切换（小白 / 专业）不在导航里 —— 唯一入口是画布顶栏
+            「画布 | 3D 导演台」并排的 CanvasTierSeg（CanvasShell.tsx）。
+            这里刻意不渲染任何形态切换控件，避免出现两个入口。 */}
         <span className="ic-nav-ver" title={versionTitle}>
           {version}
         </span>

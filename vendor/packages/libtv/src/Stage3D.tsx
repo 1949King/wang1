@@ -507,6 +507,12 @@ function defaultActors(): StageActor[] {
 }
 
 const CROWD_COLORS = ["#3b82f6", "#ef4444", "#eab308", "#22c55e", "#a855f7"];
+/** 2026-10-19：高亮色**复用实例**，禁止在遍历里 new Color（替换 material.emissive 引用会让材质版本变化
+ *  ⇒ shader 重编译；用户实测「鼠标划过模型时闪出巨大脚残影」，GPU 合成降级环境下极易错乱）。 */
+const HL_SEL = new THREE.Color("#f59e0b");
+const HL_HOVER = new THREE.Color("#fbbf24");
+const HL_ACTIVE = new THREE.Color("#1d4ed8");
+const HL_NONE = new THREE.Color("#000000");
 
 function makeCrowdActors(count: number, formation: FormationId): StageActor[] {
   const slots = formationPositions(count, formation);
@@ -820,6 +826,8 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
   /** EffectComposer（Bloom 后处理） */
   const composerRef = useRef<EffectComposer | null>(null);
   const undoRef = useRef<StageActor[] | null>(null);
+  /** 2026-10-19（解冻 stage3d-core）：角色渲染尺寸自检的节流时间戳（避免每帧遍历 GLB 树） */
+  const actorAuditAtRef = useRef(0);
   /** 每个 actor 当前正在播放的 MotionPreset 列表（tick 闭包用 ref 避免 state 陈旧） */
   const activeMotionsRef = useRef<Map<string, MotionPreset[]>>(new Map());
   /** 每个 actor 的 motion 播放起点时间（用于 elapsed 计算） */
@@ -1225,6 +1233,27 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
       }
       const apiNow = apiRef.current;
       if (apiNow) {
+        // 2026-10-19（解冻 stage3d-core）：角色尺寸自检必须放在**渲染循环**里。
+        // 之前挂在 actors 同步 effect，而 GLB 是异步挂载的 —— 加载完 actors 数组没变 ⇒ effect
+        // 不再执行 ⇒ 自检从未跑过（用户实测：群像第三个角色整体放大十几倍，另外两个正常）。
+        // 每秒一次 precise 包围盒（含蒙皮），>4m 即回正姿势并归一到 1.7m，实测高度报到状态条。
+        if (nowFps - actorAuditAtRef.current > 1000) {
+          actorAuditAtRef.current = nowFps;
+          for (const a of actorsRef.current) {
+            const o = a.kind === "actor" ? apiNow.objects.get(a.id) : undefined;
+            if (!o) continue;
+            const wb = new THREE.Box3().setFromObject(o, true);
+            const wh = new THREE.Vector3();
+            if (!wb.isEmpty()) wb.getSize(wh);
+            if (wh.y > 4) {
+              applyPose(o, actorPose(a));
+              o.scale.multiplyScalar(1.7 / wh.y);
+              const msg = `角色「${a.name}」渲染异常（实测 ${wh.y.toFixed(1)}m），已回正并归一`;
+              console.warn("[Stage3D] " + msg, a.id);
+              onStatus(msg);
+            }
+          }
+        }
         // —— 掌镜 WASD：自由走镜头 ——
         if (wasdActiveRef.current && wasdRef.current.size) {
           const spd = 0.06;
@@ -1538,16 +1567,16 @@ export default function Stage3D({ onCapture, onCaptureActorViews, onExportFirstL
               (hoverChain.includes(bone || "") || Boolean(region && hoverRegions.has(region)));
             const canGlow = !tint || tint === "clothes" || tint === "skin" || tint === "face";
             if (isBone) {
-              ch.material.emissive = new THREE.Color("#f59e0b");
+              ch.material.emissive.copy(HL_SEL);
               ch.material.emissiveIntensity = 0.62;
             } else if (isHover) {
-              ch.material.emissive = new THREE.Color("#fbbf24");
+              ch.material.emissive.copy(HL_HOVER);
               ch.material.emissiveIntensity = 0.4;
             } else if (isSel && canGlow) {
-              ch.material.emissive = new THREE.Color("#1d4ed8");
+              ch.material.emissive.copy(HL_ACTIVE);
               ch.material.emissiveIntensity = 0.16;
             } else {
-              ch.material.emissive = new THREE.Color("#000000");
+              ch.material.emissive.copy(HL_NONE);
               ch.material.emissiveIntensity = 0;
             }
           });

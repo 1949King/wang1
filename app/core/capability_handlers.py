@@ -1669,6 +1669,11 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     # 画布
     dispatcher.register("canvas.open", CapabilityCategory.CANVAS,
                         canvas_handlers.open, "打开 AI 画布模块")
+    # 2026-10-19：配方（Agent 第一次能真正改画布，而不只是给建议）
+    from app.core.capability_handlers_recipe import RecipeCapabilityHandlers
+    _recipe_handlers = RecipeCapabilityHandlers()
+    dispatcher.register("canvas.apply_recipe", CapabilityCategory.CANVAS,
+                        _recipe_handlers.apply_recipe, "按配方铺开卡片（一句话 → 前端匹配并建节点）")
     dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
     dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,

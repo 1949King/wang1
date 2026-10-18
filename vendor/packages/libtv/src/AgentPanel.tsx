@@ -104,6 +104,9 @@ export default function AgentPanel({
   const [mcpOn, setMcpOn] = useState(false);
   const [mcpUrl, setMcpUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  // 2026-10-19（用户反馈「Agent UI 过于繁杂」）：只有「暂停过」才显示「继续」。
+  // 旧实现空闲时就常驻一个「继续」按钮，用户点它没有任何效果，纯噪音。
+  const [paused, setPaused] = useState(false);
   const [thinkSec, setThinkSec] = useState(0);
   // V4.40.52：快捷提示词默认收起（对话区当主角，省 ≈50px）
   const [chipsOpen, setChipsOpen] = useState(false);
@@ -1107,6 +1110,7 @@ export default function AgentPanel({
                 void controlAgentSession({ session_id: sid, action: "pause" });
                 busyRef.current = false;
                 setBusy(false);
+                setPaused(true);
                 push("system", "已暂停。点「继续」后再发送。");
               }}
             >
@@ -1121,37 +1125,44 @@ export default function AgentPanel({
                 inboxRef.current = [];
                 busyRef.current = false;
                 setBusy(false);
+                setPaused(false);
                 push("system", "已停止跟踪（供应商若不支持远端取消，生成可能仍在跑）。");
               }}
             >
               停止
             </button>
           </>
-        ) : (
+        ) : paused ? (
           <button
             type="button"
             className="btn"
             title="继续任务 / 处理排队中的消息"
             onClick={() => {
               void controlAgentSession({ session_id: sid, action: "resume" });
+              setPaused(false);
               push("system", "已继续。");
             }}
           >
             继续
           </button>
-        )}
+        ) : null}
         <button type="button" className="btn" onClick={onClose} title="收起侧栏">
           收起
         </button>
       </div>
 
       <div className="sg-agent-tabs">
+        {/*
+          2026-10-19（用户反馈「Agent UI 过于繁杂」）：页签去掉彩色 emoji，只留
+          两字标签 —— 四个 emoji 颜色各异，在窄侧栏里比文字本身更抢眼。
+          功能一个没删（对话/模型/工具/预算四页签全在）。
+        */}
         {(
           [
-            ["chat", "💬 对话"],
-            ["models", "🧠 模型"],
-            ["tools", "🛠 工具"],
-            ["budget", "💰 预算"],
+            ["chat", "对话"],
+            ["models", "模型"],
+            ["tools", "工具"],
+            ["budget", "预算"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -1167,8 +1178,10 @@ export default function AgentPanel({
 
       {tab === "chat" ? (
         <div className="sg-agent-chat">
-          {/* V4.41.19 AI 画布重组：模型选择包进可折叠块（默认展开，可折省空间） */}
-          <details className="sg-chat-section" open>
+          {/* V4.41.19 AI 画布重组：模型选择包进可折叠块。
+              2026-10-19：默认**收起** —— 模型是一次性配置，每次打开都展开等于
+              把「设置项」当主界面内容（用户反馈「过于繁杂」）。 */}
+          <details className="sg-chat-section">
             <summary>⚙️ 对话模型</summary>
             <div className="sg-chat-section-body">
               <select value={modelKey} onChange={(e) => setModelKey(e.target.value)}>

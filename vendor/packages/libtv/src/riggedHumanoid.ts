@@ -2669,10 +2669,18 @@ function applyBoneDelta(
   const rest = identity[key];
   if (rest) bone.quaternion.copy(rest);
   else bone.quaternion.identity();
-  if (xDeg === 0 && yDeg === 0 && zDeg === 0) return;
+  // 2026-10-19（用户解冻 stage3d-core）：
+  // 旧写法只判 `xDeg === 0 && ...`，传入 undefined/NaN 时该判断为 false ⇒
+  // deg(undefined)=NaN ⇒ Euler/quaternion 全 NaN ⇒ 骨骼矩阵退化 ⇒
+  // 蒙皮顶点被拉到视口边界（表现为「某个角色炸成占满屏幕的巨大几何」）。
+  // 兜底按 0 处理 = 等价 rest 姿态；**合法输入的既有行为完全不变**。
+  const xd = Number.isFinite(xDeg) ? xDeg : 0;
+  const yd = Number.isFinite(yDeg) ? yDeg : 0;
+  const zd = Number.isFinite(zDeg) ? zDeg : 0;
+  if (xd === 0 && yd === 0 && zd === 0) return;
   bone.quaternion.multiply(
     new THREE.Quaternion().setFromEuler(
-      new THREE.Euler(deg(xDeg), deg(yDeg), deg(zDeg), order),
+      new THREE.Euler(deg(xd), deg(yd), deg(zd), order),
     ),
   );
 }
@@ -2793,6 +2801,9 @@ function loadProcessedGLBTemplate(url: string): Promise<THREE.Object3D> {
   const task = loadRawGLBScene(url)
     .then((rawScene) => {
       const scene = cloneSkinned(rawScene);
+      // 2026-10-19 ★根因★：clone 后 matrixWorld 脏 ⇒ Box3 量出 1/33 假尺寸（bodychan 0.0512m），
+      // 归一化因此算出 33× 补偿，把本来 1.7m 的模型放大成 56.5m（用户实测「一只脚占满屏幕」）。
+      scene.updateMatrixWorld(true);
       scene.name = "glb_tpl_" + (url.split("/").pop()?.replace(/\.glb$/i, "") ?? "");
       scene.traverse((obj) => {
         const m = obj as THREE.Mesh;
@@ -2805,13 +2816,10 @@ function loadProcessedGLBTemplate(url: string): Promise<THREE.Object3D> {
       });
       prepareBodyFigureMeshes(scene);
 
-      // 归一化基准 = GLB 素体实测原生身高（bodykun/bodychan 均为 1.7000m，
-      // 测量脚本 .workbuddy/tmp/glb_total_height.py）。
-      // 2026-10-13 用户授权解冻修复：旧值 1.815 比原生身高高 6.8%，
-      // 导致所有体型统一被放大（用户反馈「全部偏大」）；回落到原生 1.70。
-      // 注意：ACTOR_PRESETS / VARIANT_SCALE 是相对倍率，随基准等比生效，无需联动改。
+      // 1.70 = GLB 原生身高（2026-10-13 由 1.815 回落；VARIANT_SCALE 是相对倍率，随基准等比生效）。
       const TARGET_HEIGHT = 1.70;
-      const fitBox = new THREE.Box3().setFromObject(scene);
+      // 2026-10-19 必须 precise：普通 Box3 对 SkinnedMesh 不含骨骼/rig 缩放，bodychan 会算错 ⇒ 33× 放大。
+      const fitBox = new THREE.Box3().setFromObject(scene, true);
       const fitSize = new THREE.Vector3();
       fitBox.getSize(fitSize);
       if (fitSize.y > 1e-6) {
@@ -2852,6 +2860,7 @@ export function loadGLBRiggedHumanoid(
 ): Promise<THREE.Group> {
   return loadProcessedGLBTemplate(url).then((template) => {
     const scene = cloneSkinned(template);
+    scene.updateMatrixWorld(true); // 2026-10-19：第二次 clone 同样脏矩阵，不结算则量出 0.05m（真值 1.7）
     scene.name = "glb_scene_" + (url.split("/").pop()?.replace(/\.glb$/i, "") ?? "");
     const extraScale = options?.scale ?? 1.0;
     if (extraScale !== 1.0) {
@@ -2906,6 +2915,21 @@ export function attachGLBToHumanoid(
         if (ch !== glbScene) ch.visible = false;
       });
       root.add(glbScene);
+      root.updateMatrixWorld(true); // 2026-10-19：测量前结算 root 矩阵，否则 rs/sz 均不可信
+      // 2026-10-19 兜底复核：除以 root 体型缩放 rs 才能区分「模型异常」与「女性/儿童本来就小」。
+      {
+        const bb = new THREE.Box3().setFromObject(glbScene, true);
+        const sz = new THREE.Vector3();
+        if (!bb.isEmpty()) bb.getSize(sz);
+        const rs = root.scale.y || 1;
+        const k = sz.y > 1e-6 ? 1.7 / (sz.y / rs) : 1;
+        if (k < 0.95 || k > 1.05) {
+          glbScene.scale.multiplyScalar(k);
+          glbScene.updateMatrixWorld(true);
+          glbScene.position.y -= new THREE.Box3().setFromObject(glbScene).min.y;
+          console.warn("[RiggedHumanoid] 挂载后归一:", url, sz.y.toFixed(2), "m rs=", rs.toFixed(2), "k=", k.toFixed(4));
+        }
+      }
       root.userData.glBones = glbRoot.userData.glBones;
       root.userData.glBonesIdentity = glbRoot.userData.glBonesIdentity;
       root.userData.glbLoaded = true;

@@ -13,6 +13,7 @@
 
 import json
 import os
+import re
 import time
 import datetime
 import logging
@@ -29,9 +30,38 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QComboBox, QFileDialog, QMessageBox,
     QFrame, QGroupBox, QScrollArea, QInputDialog, QColorDialog,
     QTabWidget, QProgressBar, QSizePolicy, QCheckBox,
+    QToolButton, QMenu,
 )
 
 from .base_module import BaseModule
+
+
+# ---------------------------------------------------------------------------
+# 状态栏文案清洗（2026-10-19 · 用户授权解冻 stage3d-core）
+# ---------------------------------------------------------------------------
+#
+# 动机（用户实测截图反馈）：「打开 AI 画布，顶上总是有一条网页链接，很烦。」
+#
+# 根因：canvas-agent 启动成功时，后端 `ensure_started()` 返回的消息里带
+# `http://127.0.0.1:17371?token=…`，`_set_status()` 原样 setText，于是地址常驻
+# 顶栏。地址本身是**给 Codex/MCP 用的调试信息**，不是给用户看的产品文案。
+#
+# 纪律：状态栏只放人类可读文案；URL / token 一律剥掉（需要时走「⋯ → 复制
+# Agent 地址」显式取）。空文案直接隐藏状态条，不占位。
+_URL_RE = re.compile(r"https?://[^\s\u4e00-\u9fff（）()<>\"'，。；：、]+")
+_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])token=[A-Za-z0-9._\-]+")
+
+
+def _strip_urls(text: str) -> str:
+    """剥掉文案里的 URL / token，并压缩多余空白。"""
+    if not text:
+        return ""
+    cleaned = _URL_RE.sub("", text)
+    cleaned = _TOKEN_RE.sub("", cleaned)
+    # URL 剥掉后常留下「：」或括号尾巴，压缩一下空白更自然
+    cleaned = re.sub(r"[（(]\s*[）)]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ：:，,、")
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -648,7 +678,15 @@ class CharacterManagementModule(BaseModule):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
 
-        # 顶栏
+        # 顶栏（2026-10-19 · 用户授权解冻 stage3d-core）
+        #
+        # 改造动机（用户实测截图反馈）：「打开 AI 画布，顶上一排功能 + 一条网页链接，
+        # 很烦；参考项目的顶栏只有 3 个元素。」
+        #
+        # 原则：**日常入口留一级，一次性系统动作收进「⋯ 更多」二级菜单**。
+        #  一级保留：模块标题 / 挂到角色 / 补帧开关 / 更多
+        #  二级收纳：启动画布 / 连接 Agent / 同步模型池 / 刷新 / 发送文件 / 角色库
+        # 未动：bridge、WebEngine、端口、canvas-agent 运行时、GLB/骨骼逻辑。
         header = QHBoxLayout()
         title = QLabel(f"{self.module_icon} {self.module_name}")
         # V4.43.8（用户授权解冻 stage3d-core）：去掉内联 color:#fff —— 浅色主题下白字白底
@@ -657,11 +695,16 @@ class CharacterManagementModule(BaseModule):
         title.setStyleSheet("font-size:18px;font-weight:bold;")
         header.addWidget(title)
 
-        hint = QLabel("无限画布生图/生视频 → 发送到剪辑 · 角色库挂资产")
+        hint = QLabel("生成 → 发送到剪辑 · 角色库挂资产")
         hint.setObjectName("hintLabel")
         hint.setStyleSheet("font-size:11px;margin-left:8px;")
         header.addWidget(hint)
         header.addStretch()
+
+        # 形态切换（小白 / 专业）**刻意不在这里**：
+        # 2026-10-19 用户纠正 —— 它属于「视图级」操作，必须和画布内的
+        # 「画布 / 3D 导演台」并排（见 CanvasShell 的第二个 `.seg`），
+        # 不放宿主顶栏「挂到角色」这边。真源是 store 的 editorTier，宿主不参与。
 
         self._char_combo = QComboBox()
         self._char_combo.setMinimumWidth(140)
@@ -673,52 +716,60 @@ class CharacterManagementModule(BaseModule):
         header.addWidget(QLabel("挂到角色:"))
         header.addWidget(self._char_combo)
 
-        self._interp_check = QCheckBox("入轨后线性补帧")
+        self._interp_check = QCheckBox("补帧")
         # V4.43.8：去掉内联 color:#ccc，交给全局 QCheckBox[theme] 样式
-        self._interp_check.setToolTip("非神经网络：帧差 + 线性混合（ai_interpolation）")
+        self._interp_check.setToolTip("入轨后线性补帧（帧差 + 线性混合，非神经网络）")
         header.addWidget(self._interp_check)
 
-        start_btn = QPushButton("启动画布")
-        start_btn.setStyleSheet(self._btn_style("#1e6bde"))
-        start_btn.clicked.connect(self._on_start_canvas)
-        header.addWidget(start_btn)
+        # ── 「⋯ 更多」：收纳一次性系统动作（不常驻顶栏） ──
+        more_btn = QToolButton()
+        more_btn.setText("⋯")
+        more_btn.setToolTip("更多：启动画布 / 连接 Agent / 同步模型池 / 刷新 / 发送文件 / 角色库")
+        more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(more_btn)
 
-        agent_btn = QPushButton("连接 Agent")
-        agent_btn.setStyleSheet(self._btn_style("#7c3aed"))
-        agent_btn.setToolTip(
+        self._act_start = menu.addAction("启动画布")
+        self._act_start.triggered.connect(lambda _=False: self._on_start_canvas())
+
+        self._act_agent = menu.addAction("连接 Agent（Codex/MCP 工具通道）")
+        self._act_agent.setToolTip(
             "启动本机 canvas-agent（:17371），供 Codex/MCP 调画布。"
-            "这是工具通道，不会在 3D 导演台出现人物。"
+            "这是工具通道，与画布内嵌助手无关，也不影响 3D 导演台。"
         )
-        agent_btn.clicked.connect(self._on_connect_agent)
-        self._agent_btn = agent_btn
-        header.addWidget(agent_btn)
+        self._act_agent.triggered.connect(lambda _=False: self._on_connect_agent())
 
-        sync_btn = QPushButton("同步模型池")
-        sync_btn.setStyleSheet(self._btn_style("#0d9488"))
-        sync_btn.setToolTip("把模型广场 Provider/Key 合并进画布 channels（shiguang-*）")
-        sync_btn.clicked.connect(self._on_sync_models)
-        header.addWidget(sync_btn)
+        menu.addSeparator()
+        self._act_sync = menu.addAction("同步模型池")
+        self._act_sync.triggered.connect(lambda _=False: self._on_sync_models())
+        self._act_reload = menu.addAction("刷新画布")
+        self._act_reload.triggered.connect(lambda _=False: self._on_reload())
+        self._act_send = menu.addAction("发送文件到剪辑")
+        self._act_send.triggered.connect(lambda _=False: self._on_send_file())
 
-        reload_btn = QPushButton("刷新")
-        reload_btn.setStyleSheet(self._btn_style("#2a2a2a"))
-        reload_btn.clicked.connect(self._on_reload)
-        header.addWidget(reload_btn)
+        menu.addSeparator()
+        self._act_copy_agent = menu.addAction("复制 Agent 地址")
+        self._act_copy_agent.setToolTip(
+            "调试用：把 canvas-agent 的地址复制到剪贴板；地址不常驻界面"
+        )
+        self._act_copy_agent.triggered.connect(lambda _=False: self._copy_agent_url())
 
-        send_btn = QPushButton("发送文件到剪辑")
-        send_btn.setStyleSheet(self._btn_style("#0d9488"))
-        send_btn.clicked.connect(self._on_send_file)
-        header.addWidget(send_btn)
+        self._act_lib = menu.addAction("角色库")
+        self._act_lib.setCheckable(True)
+        self._act_lib.toggled.connect(self._toggle_library)
 
-        lib_btn = QPushButton("角色库")
-        lib_btn.setStyleSheet(self._btn_style("#2a2a2a"))
-        lib_btn.setCheckable(True)
-        lib_btn.toggled.connect(self._toggle_library)
-        header.addWidget(lib_btn)
+        more_btn.setMenu(menu)
+        header.addWidget(more_btn)
+
+        # 兼容旧引用：`self._agent_btn` 现在指向 QAction（只用于文案/禁用，
+        # 不再有 setStyleSheet —— 见 `_apply_agent_btn_state` 的适配）。
+        self._agent_btn = self._act_agent
 
         root.addLayout(header)
 
-        self._status_label = QLabel("准备中…")
+        # 状态条：**无消息时不占位**（2026-10-19 顶栏瘦身，用户授权解冻 stage3d-core）
+        self._status_label = QLabel("")
         self._status_label.setStyleSheet("color:#79c0ff;font-size:11px;padding:2px 4px;")
+        self._status_label.setVisible(False)
         root.addWidget(self._status_label)
 
         body = QHBoxLayout()
@@ -787,16 +838,13 @@ class CharacterManagementModule(BaseModule):
         body.addWidget(canvas_wrap, 1)
         root.addLayout(body, 1)
 
-        tip = QLabel(
-            "「连接 Agent」拉起本机 :17371 工具通道（Codex/MCP），不会在 3D 场景出现人物；"
-            "不再进模块自动预热 Agent，避免卡住。"
-            "模型 Key 来自模型广场。插帧为线性补帧，非 RIFE。"
-            "可选 Codex: codex mcp add canvas-agent -- npx -y @basketikun/canvas-agent mcp"
-        )
-        tip.setStyleSheet("color:#666;font-size:11px;")
-        tip.setWordWrap(True)
-        root.addWidget(tip)
-
+        # 2026-10-19（用户授权解冻 stage3d-core）：删掉常驻底部的开发者长提示。
+        #
+        # 原实现是一条 `tip` QLabel：「「连接 Agent」拉起本机 :17371 工具通道
+        # （Codex/MCP）… 可选 Codex: codex mcp add canvas-agent -- npx -y …」
+        # —— 这是**给集成开发者的说明书**，不是给用户的状态。用户实测截图反馈
+        # 「底下那条又长又技术的东西很烦」。同样的信息已收进「⋯ → 连接 Agent」
+        # 的 tooltip 与「复制 Agent 地址」，不该在画布上常驻一整行。
         self._char_combo.currentIndexChanged.connect(lambda *_: self._sync_bridge_prefs())
         self._interp_check.toggled.connect(lambda *_: self._sync_bridge_prefs())
 
@@ -871,25 +919,27 @@ class CharacterManagementModule(BaseModule):
             logger.debug("runJavaScript failed: %s", e)
 
     def _apply_agent_btn_state(self, connected: bool, url: str = ""):
-        """顶栏按钮反映 Agent 是否已监听（工具通道，非 3D 角色）。"""
+        """「⋯ 更多 → 连接 Agent」菜单项反映是否已监听（工具通道，非 3D 角色）。
+
+        2026-10-19（用户授权解冻 stage3d-core）：按钮已收进二级菜单，控件类型从
+        QPushButton 改为 QAction —— **QAction 没有 setStyleSheet**，且地址不再写进
+        文案（只保留一句可读状态）；完整 URL 只由「复制 Agent 地址」显式提供。
+        """
         self._agent_connected = bool(connected)
-        btn = self._agent_btn
-        if btn is None:
+        act = self._agent_btn
+        if act is None:
             return
         if connected:
-            short = (url or ":17371").replace("http://", "").replace("https://", "")
-            btn.setText(f"Agent 已连接")
-            btn.setStyleSheet(self._btn_style("#0d9488"))
-            btn.setToolTip(
-                f"画布 Agent 已就绪：{url or short}\n"
-                "供 Codex/MCP 调用；不会在 3D 导演台出现人物。"
+            act.setText("Agent 已连接（工具通道）")
+            act.setToolTip(
+                "canvas-agent 已就绪，供 Codex/MCP 调用画布。\n"
+                "需要地址时用「复制 Agent 地址」。"
             )
         else:
-            btn.setText("连接 Agent")
-            btn.setStyleSheet(self._btn_style("#7c3aed"))
-            btn.setToolTip(
+            act.setText("连接 Agent（Codex/MCP 工具通道）")
+            act.setToolTip(
                 "启动本机 canvas-agent（:17371），供 Codex/MCP 调画布。"
-                "这是工具通道，不会在 3D 导演台出现人物。"
+                "这是工具通道，与画布内嵌助手无关，也不影响 3D 导演台。"
             )
 
     def _poll_agent_btn_state(self):
@@ -998,6 +1048,40 @@ class CharacterManagementModule(BaseModule):
             return False
         t0 = time.perf_counter()
         self._web = QWebEngineView()
+        # 2026-10-19（解冻 stage3d-core）：把 WebView 的 JS console 镜像到 Python 日志。
+        # 背景：3D 侧异常（GLB 归一化、骨骼矩阵、渲染尺寸）只体现在前端 console，
+        # 宿主侧完全看不见，之前排查只能靠用户截图猜。这里只镜像 Warning/Error 级
+        # 与带 Stage3D / RiggedHumanoid 前缀的消息，避免普通 log 刷屏；失败静默降级
+        # （日志能力不得影响画布加载本身）。
+        try:
+            from PyQt6.QtWebEngineCore import QWebEnginePage as _QEP
+
+            class _ConsoleMirrorPage(_QEP):
+                def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
+                    try:
+                        m = str(message or "")[:600]
+                        if not m:
+                            return
+                        # 注意：不要对 level 做 int() —— PyQt6 的 Qt 枚举可能抛 TypeError，
+                        # 一抛就被本函数的 except 吞掉，导致「镜像装了但一条日志都没有」
+                        # （2026-10-19 实测踩过）。改用字符串判断，任何版本都安全。
+                        lv = str(level)
+                        if (
+                            "Warn" in lv
+                            or "Error" in lv
+                            or "Stage3D" in m
+                            or "RiggedHumanoid" in m
+                        ):
+                            logger.info(
+                                "[webview] %s:%s %s",
+                                str(source).rsplit("/", 1)[-1], line, m,
+                            )
+                    except Exception:
+                        pass
+
+            self._web.setPage(_ConsoleMirrorPage(self._web))
+        except Exception as e:
+            logger.debug("console mirror page 安装失败: %s", e)
         self._install_inject_script()
         try:
             self._web.loadStarted.connect(self._on_web_load_started)
@@ -1245,8 +1329,45 @@ class CharacterManagementModule(BaseModule):
         self._web.load(QUrl(url))
 
     def _set_status(self, text: str):
-        if self._status_label is not None:
-            self._status_label.setText(text)
+        """状态栏文案（面向用户，**绝不显示 URL / token**）。
+
+        2026-10-19（用户授权解冻 stage3d-core）：canvas-agent 启动成功时后端返回的
+        消息带 `http://127.0.0.1:17371?token=…`，原样 setText 会让地址常驻顶栏
+        （用户实测「顶上总有一条网页链接，很烦」）。这里统一清洗；空文案直接隐藏
+        状态条，不占位。需要地址时走「⋯ → 复制 Agent 地址」显式取。
+        """
+        if self._status_label is None:
+            return
+        cleaned = _strip_urls(text or "")
+        if cleaned:
+            self._status_label.setText(cleaned)
+            self._status_label.setVisible(True)
+        else:
+            self._status_label.clear()
+            self._status_label.setVisible(False)
+
+    def _copy_agent_url(self):
+        """把 canvas-agent 地址复制到剪贴板（调试用，不常驻界面）。"""
+        try:
+            from app.core.canvas_agent_runtime import get_canvas_agent_runtime
+        except ImportError:
+            from core.canvas_agent_runtime import get_canvas_agent_runtime  # type: ignore
+        try:
+            rt = get_canvas_agent_runtime()
+            url = (rt.url or "").strip()
+        except Exception as e:
+            logger.debug("读取 canvas-agent 地址失败: %s", e)
+            url = ""
+        if not url:
+            self._set_status("Agent 未连接，没有可复制的地址")
+            return
+        try:
+            from PyQt6.QtWidgets import QApplication
+            QApplication.clipboard().setText(url)
+            self._set_status("Agent 地址已复制到剪贴板")
+        except Exception as e:
+            logger.warning("复制 Agent 地址失败: %s", e)
+            self._set_status("复制 Agent 地址失败")
 
     def _on_start_canvas(self):
         self._ensure_bridge()
