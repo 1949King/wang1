@@ -4616,21 +4616,32 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     styles = dict(raw)
         except Exception:
             styles = {}
+        # 刀5（2026-10-18）·持久化走 DSL canonical：真相源唯一写格式为 timeline-dsl 文档
+        # （类型化视图 + metadata.editor 整行备份，往返无损；旧裸 "clips" 列表停写，
+        # import_project 保留旧格式读取 = 双读单写）。to_dsl_document 锁内取快照，
+        # 等价于原「必须拷贝」注释的防竞态语义。
+        from app.core.timeline_store import (
+            TIMELINE_DSL_FORMAT,
+            TIMELINE_DSL_SCHEMA_VERSION,
+        )
+        seq = (
+            self._sequence_format
+            if getattr(self, "_sequence_format", None) is not None
+            else SequenceFormat.default()
+        )
         project_data = {
-            "version": "1.2",
-            # 必须拷贝：json.dump 遍历期间若画布桥线程 append/清空 _clips，
-            # 会抛 RuntimeError 或被写出「半截列表」的损坏工程文件。
-            "clips": self._clips_snapshot(),
+            "version": "1.3",
+            "format": TIMELINE_DSL_FORMAT,
+            "schema_version": TIMELINE_DSL_SCHEMA_VERSION,
+            "timeline": self._timeline_store.to_dsl_document(
+                width=int(seq.width), height=int(seq.height),
+            ),
             "timeline_zoom": self._timeline_zoom,
             "subtitles": subs,
             "subtitle_styles": styles,
             "stickers": list(getattr(self, "_active_stickers", None) or []),
             "master_volume": float(getattr(self, "_master_volume", 1.0) or 1.0),
-            "sequence": (
-                self._sequence_format.to_dict()
-                if getattr(self, "_sequence_format", None) is not None
-                else SequenceFormat.default().to_dict()
-            ),
+            "sequence": seq.to_dict(),
             "export_time": datetime.now().isoformat()
         }
         
@@ -4839,7 +4850,17 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             import json
             project_data = json.load(f)
         
-        clips = project_data.get("clips", [])
+        # 刀5 双读：timeline-dsl 文档（metadata.editor 整行备份）无损回灌真相源；
+        # 旧版裸 "clips" 列表工程保持原路径可读（fallback）。
+        from app.core.timeline_store import TIMELINE_DSL_FORMAT, rows_from_dsl_document
+        if project_data.get("format") == TIMELINE_DSL_FORMAT:
+            try:
+                clips = rows_from_dsl_document(project_data.get("timeline") or {})
+            except ValueError as exc:
+                QMessageBox.warning(self, "导入失败", f"时间线数据畸形：{exc}")
+                return
+        else:
+            clips = project_data.get("clips", [])
         self._timeline_zoom = project_data.get("timeline_zoom", 100)
         self._master_volume = float(project_data.get("master_volume", 1.0) or 1.0)
         # 工程画幅 SSOT（缺省仍漫剧竖屏；无任何线索时等 clips 加载后推断）

@@ -18,15 +18,24 @@ Qt 红线：本模块**不得 import PyQt6**（桥接层为纯数据，可被子
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import threading
 from typing import Any, Dict, List, Optional
 
-from app.core.interchange.editor_timeline_bridge import clips_to_timeline
+from app.core.interchange.editor_timeline_bridge import (
+    clips_to_timeline,
+    timeline_to_clips,
+)
 from app.core.timeline_dsl import Timeline
 
 logger = logging.getLogger("AI短剧编辑器.timeline_store")
+
+#: 工程文件持久化的 canonical 格式标记（OTIO 迁移·刀5，双读单写的「单写」格式）。
+TIMELINE_DSL_FORMAT = "timeline-dsl"
+#: DSL 文档结构版本（后续字段级演进时递增，加载侧按版本兼容）。
+TIMELINE_DSL_SCHEMA_VERSION = 1
 
 
 class TimelineStore:
@@ -168,6 +177,55 @@ class TimelineStore:
             duration=duration,
         )
 
+    def to_dsl_document(
+        self,
+        *,
+        name: str = "",
+        fps: float = 30.0,
+        width: int = 1920,
+        height: int = 1080,
+        sample_rate: int = 44100,
+        track_types: Optional[Dict[int, str]] = None,
+        duration: float = 0.0,
+    ) -> Dict[str, Any]:
+        """产出**无损**持久化 DSL 文档（dict，JSON 可序列化；OTIO 迁移·刀5 单写格式）。
+
+        桥接的类型化视图是**有损**的（effects dict→list 丢值、transform 子键丢、
+        track 跳号归一、合成原不存在的键），工程文件不能靠桥接往返。本方法在
+        类型化文档之上，为每个 clip 附**整行备份** ``metadata["editor"]``
+        （含原始行序 ``metadata["editor_index"]``）：
+          * 外部消费者仍读类型化字段（source/range/transform/metadata.editor extras）；
+          * ``rows_from_dsl_document`` 据备份无损回灌真相源。
+        锁内取快照后构建，与 live 列表解耦（json 遍历期间画布桥突变不影响本快照）。
+        """
+        with self._lock:
+            snapshot = list(self._rows)
+        tl = clips_to_timeline(
+            snapshot,
+            name=name,
+            fps=fps,
+            width=width,
+            height=height,
+            sample_rate=sample_rate,
+            track_types=track_types,
+            duration=duration,
+        )
+        doc = tl.to_dict()
+        # 桥接内 clip id 统一为 str(c["id"])，按同一口径匹配整行备份。
+        by_id = {str(c.get("id")): (c, i) for i, c in enumerate(snapshot)}
+        for track in doc.get("tracks", []):
+            for clip in track.get("clips", []) or []:
+                hit = by_id.pop(str(clip.get("id")), None)
+                if hit is None:
+                    # 防御：桥接合成的 id（无 id 片段 → clip_xxx）没有备份可挂，
+                    # 加载侧会因缺 editor 备份整体走桥接回退（有损但可用）。
+                    continue
+                row, index = hit
+                meta = clip.setdefault("metadata", {})
+                meta["editor"] = copy.deepcopy(row)
+                meta["editor_index"] = index
+        return doc
+
     def serialize(self) -> str:
         """canonical 序列化（行列表 JSON 文本）。刀2 持久化统一走这里。"""
         with self._lock:
@@ -180,3 +238,36 @@ class TimelineStore:
             raise ValueError("序列化文本不是 clip 数组")
         self.replace_all(rows)
         return len(self._rows)
+
+
+# ── DSL 文档回灌（OTIO 迁移·刀5 双读；模块函数，不依赖 store 实例） ────
+
+def rows_from_dsl_document(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """从 ``to_dsl_document`` 文档回灌真相源行列表（**无损**路径）。
+
+    回灌策略：
+      * 全部 clip 均带 ``metadata["editor"]`` 整行备份 → deepcopy 按
+        ``editor_index`` 原序回 rows（本软件写出的工程文件必走此路径）；
+      * 任一 clip 缺备份（外部手写 DSL 文档）→ 整体回退桥接
+        ``timeline_to_clips``（有损但可用），记 warning；
+      * doc 非 dict 或缺 tracks → ValueError（调用方给用户清晰提示）。
+    """
+    if not isinstance(doc, dict) or not isinstance(doc.get("tracks"), list):
+        raise ValueError("DSL 文档畸形：缺 tracks 字段")
+    clips: List[Dict[str, Any]] = []
+    for track in doc["tracks"]:
+        if isinstance(track, dict):
+            clips.extend(c for c in (track.get("clips") or []) if isinstance(c, dict))
+    backed: List[Any] = []
+    for pos, clip in enumerate(clips):
+        meta = clip.get("metadata")
+        editor = meta.get("editor") if isinstance(meta, dict) else None
+        if not isinstance(editor, dict):
+            logger.warning(
+                "DSL 文档缺 editor 整行备份，按桥接回灌（有损路径，仅外部手写文档）"
+            )
+            return timeline_to_clips(Timeline.from_json(doc))
+        idx = meta.get("editor_index")
+        backed.append((idx if isinstance(idx, int) else pos, copy.deepcopy(editor)))
+    backed.sort(key=lambda pair: pair[0])
+    return [row for _, row in backed]

@@ -185,6 +185,9 @@ CHECKS = [
     # ── 时间线字段写入面（OTIO 全量迁移·刀4，2026-10-18）──
     ("WRITESURF", "_verify/check_timeline_write_surface.py",
      "字段写棘轮：set_fields/update_where唯一写API/基线只减不增/glue在册/store无Qt红线"),
+    # ── 持久化 DSL canonical（OTIO 全量迁移·刀5，2026-10-18）──
+    ("DSLPERSIST", "_verify/check_timeline_dsl_persistence.py",
+     "持久化DSL：无损往返/DSL合法/畸形拒绝/桥接回退/双读单写在册"),
     ("EDITUNDO", "_verify/check_editor_undo.py",
      "撤销覆盖（转场/贴纸）+ _apply_action 持锁 + 撤销栈互斥 + 孤儿已清"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",

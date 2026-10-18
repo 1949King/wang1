@@ -4,6 +4,8 @@
 > OTIO 全量迁移已确认；刀1-3（TimelineStore 收拢）已提交（4633686 / abfc97e / 01130c5）；
 > **刀4（字段级写入收拢）已完成**：`set_fields`/`update_where` 唯一字段写 API 上线，核心层直写清零，
 > WRITESURF 棘轮守卫入册（基线仅余 widget 层 5 处，刀8 收口）。
+> **刀5（持久化走 DSL canonical）已完成**：工程文件单写 `timeline-dsl` 文档（整行备份无损往返），
+> 旧裸 clips 列表双读 fallback，DSLPERSIST 守卫入册。
 > 本方案是刀4+ 的执行蓝图。**迁移完成前 `EditorModule._clips` 仍是唯一真相源**（§3.2 不变）。
 
 ## 1. 硬约束（不可商量的三条）
@@ -23,7 +25,7 @@
 |---|---|---|
 | 结构写入 | ✅ 已收敛 `TimelineStore`（add/remove_by_id/replace_all/clear，adopt 同一 list、原地突变保同一性） | app/core/timeline_store.py:32-102 |
 | 字段级写入 | ✅ 刀4 收拢 `store.set_fields`/`update_where`（锁内改 live dict 保同一性）；widget 层私有副本 5 处入棘轮基线留刀8 | timeline_store.py set_fields/update_where；_verify/check_timeline_write_surface.py |
-| 序列化 | 快照 provider 交 `_clips_snapshot()` 浅拷贝，落盘仍是裸 dict 列表 | editor_module.py:442-449；project_snapshot.py:196-202 |
+| 序列化 | ✅ 刀5 工程文件单写 `timeline-dsl` 文档（`store.to_dsl_document` 类型化视图 + metadata.editor 整行备份，无损往返）；快照 provider 仍交 `_clips_snapshot()`（内存态） | timeline_store.py to_dsl_document/rows_from_dsl_document；_verify/check_timeline_dsl_persistence.py |
 | 类型化视图 | ✅ `store.to_timeline()` canonical 出口（锁内快照 → `clips_to_timeline` 确定性构建 DSL） | timeline_store.py:106-129 |
 | DSL↔OTIO | ✅ `otio_adapter` 双向映射（metadata 保留、source_range 还原），子进程 worker | otio_adapter.py:175-215/325-404；_otio_worker.py:37-64 |
 | 消费端 | 🟡 刀3 部分改读 `store.to_timeline()`；导出面（editor_export.py:49-125）仍直读 `_clips` | — |
@@ -48,11 +50,22 @@
   - 基线残留：clip_widget.py 4 处 + editor_timeline_tools.py 1 处（widget 私有副本层，刀8 收口）；
   - 冻结区未触：transform 系字段仍走 normalize/apply_normalized 唯一入口（clip_transform.py 守卫豁免）。
 
-### 刀5 · 持久化走 DSL canonical（P0，不触冻结区）
+### 刀5 · 持久化走 DSL canonical（P0，不触冻结区）✅ 2026-10-18 完成
 - 工程保存改存 `store.to_timeline()` 的 DSL JSON（带 `schema_version` + `format: "timeline-dsl"`），
   字段级扩展键经 DSL `metadata` 保留（不丢 transform/volume/keyframe/semantic 等）；
 - 加载：新格式 → `deserialize` 回 rows；旧格式裸 dict → 原路径 fallback（双读单写）；
 - 成功标准：新旧工程文件双向可开（回归用例：旧档保存→新码加载→再保存→字段 diff=0）+ INTEROP 绿。
+- **实施记录**：
+  - 勘察修正：桥接类型化视图实测**有损**（effects dict→list 丢值、transform 子键丢、
+    transitions 丢、track 跳号归一 2→1、合成原不存在的键），**不能**靠 `to_timeline` 往返做持久化；
+    改为 `store.to_dsl_document()`：类型化文档之上为每 clip 附 `metadata["editor"]` **整行备份**
+    + `editor_index` 原序，`rows_from_dsl_document()` 据备份 deepcopy 回灌 → 字段 diff=0；
+  - 双读：`import_project` 按 `format=="timeline-dsl"` 走新回灌（畸形文档 QMessageBox 提示、不静默），
+    否则旧裸 clips 路径；外部手写 DSL（无备份）整体回退桥接 `timeline_to_clips`（有损但可用，记 warning）；
+  - 单写：`export_project` 停写裸 `"clips"` 键（version 1.2→1.3），`.timeline` 唯一消费点即 import_project，
+    首页最近项目/project_manager/autosave_recovery 均不读该键（勘察实证）；
+  - 守卫：run_all_checks **DSLPERSIST**（无损往返/validate_timeline 合法/畸形 ValueError/桥接回退/双读单写在册）；
+  - 冻结区未触：仅新增 store 只读出口 + editor_module 读写两点，transform 写路径不动。
 
 ### 刀6 · 撤销栈走 DSL diff（P1）
 - `_record_action` 的 clip 快照改存 DSL 段 diff（体积降、语义稳）；保留旧 action 格式兼容读取；
