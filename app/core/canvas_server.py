@@ -1827,10 +1827,13 @@ class CanvasBridgeServer:
         return f"http://{self.host}:{self.port}"
 
     def start(self) -> bool:
-        if self._thread and self._thread.is_alive():
-            return True
-        # §12-P2 启动打点：bridge 就绪分段计时（bind → 会话检查点恢复 → 总耗时）
+        # §12-P2 启动打点：bridge 就绪三段计时（already running → bind → total），
+        # 对齐 canvas_runtime 的三段先例；零行为变化，仅补短路段日志。
         _t0 = time.monotonic()
+        if self._thread and self._thread.is_alive():
+            logger.info("canvas bridge boot timing: already running (%.3fs)",
+                        time.monotonic() - _t0)
+            return True
         try:
             self._httpd = ThreadingHTTPServer((self.host, self.port), _BridgeHandler)
             self._httpd.bridge_port = self.port  # type: ignore[attr-defined]
