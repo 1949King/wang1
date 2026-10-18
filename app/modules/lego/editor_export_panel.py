@@ -16,7 +16,7 @@ EditorExportPanelMixin：从 editor_module.py 抽出的视频导出相关方法�
 4. _collect_export_overlay_clips：收集叠层视频轨（thin wrapper → editor_export）
 5. _prebake_overlay_clips_for_export：叠层片段预烘焙（thin wrapper → editor_export）
 6. _finalize_multitrack_export：多轨收尾混音（thin wrapper → editor_export）
-7. _build_edited_video：依据 _clips 裁剪/拼接主轨成片（thin wrapper → editor_export）
+7. _build_edited_video：依据 store 快照裁剪/拼接主轨成片（thin wrapper → editor_export）
 8. _export_video：主导出流程（参数收集 → 时间线拼接 → 统一内核导出 → 字幕/贴纸烧录）
 
 使用方式：
@@ -49,7 +49,7 @@ logger = logging.getLogger("AI短剧编辑器.editor")
 
 # 注意：show_clear_messagebox 不在顶部 import，因为 .modules 模块会反向导入
 # .editor_module，而 .editor_module 又导入本 Mixin，形成循环导入。
-# 改为在 _export_video 方法内延迟导入（仅 self._clips 为空时才执行），规避循环依赖。
+# 改为在 _export_video 方法内延迟导入（仅时间线为空时才执行），规避循环依赖。
 
 
 class EditorExportPanelMixin:
@@ -68,7 +68,9 @@ class EditorExportPanelMixin:
 
     def _has_timeline_edits(self) -> bool:
         """判断是否存在需走剪辑拼接/多轨导出的真实编辑。"""
-        clips = getattr(self, "_clips", []) or []
+        # 刀7（2026-10-19）：导出消费出口统一改读真相源 store 快照
+        # （锁内浅拷 list、元素仍是 live dict 引用，与旧直读字段级等价）
+        clips = self._timeline_store.snapshot()
         if not clips:
             return False
         if len(clips) > 1:
@@ -139,7 +141,7 @@ class EditorExportPanelMixin:
         return finalize_multitrack_export(self, video_path, ffmpeg_path)
 
     def _build_edited_video(self, output_path: str) -> bool:
-        """依据 _clips 裁剪/烘焙/拼接主轨成片（实现见 editor_export）。"""
+        """依据 store 快照裁剪/烘焙/拼接主轨成片（实现见 editor_export）。"""
         from app.modules.lego.editor_export import build_edited_video
         return build_edited_video(self, output_path)
 
@@ -177,7 +179,7 @@ class EditorExportPanelMixin:
         if fps_val <= 0:
             fps_val = 30.0
 
-        if not self._clips:
+        if not self._timeline_store.snapshot():
             QMessageBox.warning(self, "导出失败", "时间线为空，没有可导出的片段")
             return False
 
@@ -263,7 +265,7 @@ class EditorExportPanelMixin:
             QMessageBox.warning(self, "导入失败", "文档里没有可导入的片段")
             return False
 
-        clips = list(getattr(self, "_clips", None) or [])
+        clips = self._timeline_store.snapshot()  # 刀7：导入追加分支改读 store 快照
         if clips:
             reply = QMessageBox.question(
                 self, "确认导入",
@@ -329,7 +331,7 @@ class EditorExportPanelMixin:
 
     def _export_video(self):
         """ """
-        if self._clips:
+        if self._timeline_store.snapshot():  # 刀7：主导出入口判空改读 store 快照
             self._refresh_export_project_info()
 
             def _ct(attr, default=""):
@@ -403,13 +405,16 @@ class EditorExportPanelMixin:
             # —— 关键修复：让工具栏的剪切/删除/复制粘贴真正作用到导出视频 ——
             # 若存在时间线编辑(多段/裁剪区间)，先按 in/out 裁剪拼接出已剪辑中间产物，
             # 再交给统一内核套用分辨率/平台等设置；否则走原始单文件逻辑。
+            # 刀7：单次取 store 快照供 video_srcs/source_clip_path 共用
+            # （锁内浅拷 list、元素仍是 live dict 引用，与旧直读字段级等价）
+            export_clips = self._timeline_store.snapshot()
             video_srcs = [
-                c for c in self._clips
+                c for c in export_clips
                 if c.get("path") and os.path.exists(c.get("path"))
                 and not self._is_export_audio_clip(c)
             ]
             source_clip_path = (video_srcs[0]["path"] if video_srcs
-                                else self._clips[0].get("path", ""))
+                                else export_clips[0].get("path", ""))
             if not source_clip_path:
                 QMessageBox.warning(self, "导出失败", "没有可导出的视频片段")
                 return
@@ -465,7 +470,7 @@ class EditorExportPanelMixin:
             try:
                 from app.core.transition_plugin_registry import collect_transition_export_notes
                 _tr_list = []
-                for _c in (getattr(self, "_clips", None) or []):
+                for _c in self._timeline_store.snapshot():  # 刀7：转场提示收集改读 store 快照
                     if not isinstance(_c, dict):
                         continue
                     _t = _c.get("transition")
@@ -638,7 +643,8 @@ class EditorExportPanelMixin:
                 "audio_bitrate": audio_bitrate,
                 "audio_channels": audio_channels,
                 "hardware_accel": hardware_accel,
-                "clips": self._clips
+                # 刀7：交 EventBus 的改为快照 list（锁内浅拷），消灭活体列表直交并发遍历隐患
+                "clips": self._timeline_store.snapshot()
             }
 
             self._event_bus.emit(EventType.MODULE_ACTIVATED, {

@@ -193,6 +193,9 @@ CHECKS = [
     # ── 撤销栈 diff-v1（OTIO 真相源迁移·刀6，2026-10-19）──
     ("UNDO", "_verify/check_undo_diff_format.py",
      "撤销diff-v1：schema盖章/构造点深拷/split双格式并存/find_by_id成员判据/冻结区零压栈"),
+    # ── 导出消费出口 store 快照（OTIO 真相源迁移·刀7，2026-10-19）──
+    ("EXPORTSRC", "_verify/check_export_store_consumption.py",
+     "导出消费：_clips属性读硬零/Protocol切_timeline_store/snapshot()接线在册/无Qt红线"),
     ("LUTBAKE", "_verify/check_lut_export_bake_e2e.py",
      "LUT 导出烘焙真机验证（真跑 ffmpeg；ffmpeg 缺失时优雅跳过）"),
     ("PRELOAD", "_verify/check_preview_preload.py",

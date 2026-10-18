@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class _EditorExportHost(Protocol):
-    _clips: list
+    # 刀7（2026-10-19）：导出消费出口改读真相源 store 快照，Protocol 声明随之切换
+    _timeline_store: Any
     _timeline_widget: Any
     _master_volume: float
     _pip_x: Any
@@ -49,7 +50,8 @@ def is_export_audio_clip(editor: _EditorExportHost, c: Optional[dict]) -> bool:
 def collect_export_audio_clips(editor: _EditorExportHost) -> list:
     """独立音频轨（跳过与视频联动的内嵌音）。"""
     out = []
-    for c in getattr(editor, "_clips", []) or []:
+    # 刀7：store.snapshot() 锁内浅拷 list，元素仍是 live dict 引用（与旧直读字段级等价）
+    for c in editor._timeline_store.snapshot():
         if not is_export_audio_clip(editor, c):
             continue
         if editor._is_linked_video_audio_clip(c):
@@ -94,7 +96,8 @@ def collect_export_overlay_clips(editor: _EditorExportHost, base_track: int) -> 
 
     defaults = {"x": def_x, "y": def_y, "scale": def_s, "opacity": 1.0}
     out = []
-    for c in getattr(editor, "_clips", []) or []:
+    # 刀7：消费出口统一走 store.snapshot()（见 collect_export_audio_clips 同款说明）
+    for c in editor._timeline_store.snapshot():
         if is_export_audio_clip(editor, c):
             continue
         if not c.get("path") or not os.path.exists(c.get("path")):
@@ -230,8 +233,9 @@ def finalize_multitrack_export(
     notify: Callable[[str], None] = getattr(editor, "_notify_edit", lambda _m: None)
 
     base_track = 0
+    # 刀7：base_track 计算改读 store.snapshot()，行数据出口收拢到真相源
     video_clips = [
-        c for c in (getattr(editor, "_clips", []) or [])
+        c for c in editor._timeline_store.snapshot()
         if c.get("path") and os.path.exists(c.get("path")) and not is_export_audio_clip(editor, c)
     ]
     if video_clips:
@@ -351,13 +355,15 @@ def finalize_multitrack_export(
 
 
 def build_edited_video(editor, output_path: str) -> bool:
-    """依据 self._clips 的 in/out 点，从源视频裁剪各段、烘焙滤镜/转场，再按时间顺序拼接成成品。
+    """依据时间线真相源快照（store.snapshot()）的 in/out 点，从源视频裁剪各段、烘焙滤镜/转场，再按时间顺序拼接成成品。
 
     工具栏的剪切(成段)/删除(缺段)/复制粘贴(多段) 以及 滤镜/转场 现在都会真实反映在导出的视频里
     （此前滤镜/转场仅在预览里显示，不进成品）。
     返回是否成功。
     """
-    clips = [c for c in getattr(editor, "_clips", [])
+    # 刀7：行数据改从 store.snapshot() 取；元素仍是 live dict，
+    # 下方「代理→原片」clip["path"] = alt 原地回写是既有行为，保持不变。
+    clips = [c for c in editor._timeline_store.snapshot()
              if c.get("path") and os.path.exists(c.get("path"))]
     # 导出主故事线：视频轨；音频/上层轨在 _finalize_multitrack_export 处理
     clips = [c for c in clips if not is_export_audio_clip(editor, c)]
