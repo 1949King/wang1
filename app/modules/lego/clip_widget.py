@@ -431,6 +431,16 @@ class ClipWidget(QFrame):
             w = w.parent()
         return None
 
+    def _write_fields(self, **kv) -> None:
+        """clip_data 字段写统一入口：经 timeline 引用取 store 走唯一写缝（刀8 形态A）；
+        独立场景（无 timeline 祖先）直写活 dict 保持行为不变。"""
+        timeline = self._find_timeline_widget()
+        if timeline is not None:
+            timeline._write_clip_fields(self.clip_data, **kv)
+        else:
+            for k, v in kv.items():
+                self.clip_data[k] = v
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
             timeline = self._find_timeline_widget()
@@ -579,8 +589,7 @@ class ClipWidget(QFrame):
                 new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(new_dur * pps)))
                 self.setFixedWidth(new_width)
                 in_p = float(self.clip_data.get("in_point", snap.get("in_point", 0)) or 0)
-                self.clip_data["duration"] = new_dur
-                self.clip_data["out_point"] = in_p + new_dur
+                self._write_fields(duration=new_dur, out_point=in_p + new_dur)
                 self.resized.emit(self.clip_data)
             elif self._resize_direction == 'left':
                 new_width = max(_TIMELINE_MIN_CLIP_PX, int(round(w0 - dx)))
@@ -599,10 +608,9 @@ class ClipWidget(QFrame):
                 self.setFixedWidth(new_width)
                 self.move(new_x, 0)
                 dt = float(snap.get("duration", 0) or 0) - new_dur
-                self.clip_data["start_time"] = st
-                self.clip_data["duration"] = new_dur
-                self.clip_data["in_point"] = max(0.0, float(snap.get("in_point", 0) or 0) + dt)
-                self.clip_data["out_point"] = float(self.clip_data["in_point"]) + new_dur
+                in_new = max(0.0, float(snap.get("in_point", 0) or 0) + dt)
+                self._write_fields(start_time=st, duration=new_dur,
+                                   in_point=in_new, out_point=in_new + new_dur)
                 self.resized.emit(self.clip_data)
         elif self._drag_start_pos and self._drag_offset:
             # 误触保护：短距离移动视为点击，不挪片
@@ -662,7 +670,7 @@ class ClipWidget(QFrame):
                         timeline.reparent_clip_to_track(w, drop_ti)
                         for c in timeline._clips:
                             if c.get("id") == cid:
-                                c["track"] = drop_ti
+                                timeline._write_clip_fields(c, track=drop_ti)
                                 break
                 self.moved.emit(self.clip_data)
                 return
@@ -674,7 +682,7 @@ class ClipWidget(QFrame):
                     track = timeline._tracks[drop_ti]
                     if parent is not track.get("clip_container"):
                         self.setParent(track["clip_container"])
-                        self.clip_data["track"] = drop_ti
+                        self._write_fields(track=drop_ti)
                         parent = track["clip_container"]
                         self.show()
                 # 不兼容轨：不 reparent，仍可横向拖；吸附用当前轨
@@ -687,7 +695,7 @@ class ClipWidget(QFrame):
                     exclude_id=self.clip_data.get("id"),
                     track_i=snap_ti,
                 )
-                self.clip_data["start_time"] = st
+                self._write_fields(start_time=st)
                 timeline.position_clip_widget(self)
                 self.moved.emit(self.clip_data)
             else:
@@ -713,13 +721,13 @@ class ClipWidget(QFrame):
                         if clip is None:
                             continue
                         st = _quantize_time(float(clip.get("start_time", 0) or 0), fd)
-                        clip["start_time"] = st
+                        timeline._write_clip_fields(clip, start_time=st)
                         w = next(
                             (cw for cw in timeline.all_clip_widgets() if cw.clip_data.get("id") == cid),
                             None,
                         )
                         if w is not None:
-                            w.clip_data["start_time"] = st
+                            w._write_fields(start_time=st)
                             timeline.position_clip_widget(w)
                         before = {
                             "id": cid,
@@ -764,13 +772,12 @@ class ClipWidget(QFrame):
                 # 帧量化，避免亚帧碎口
                 if timeline is not None:
                     st0 = float(self.clip_data.get("start_time", 0) or 0)
-                    self.clip_data["start_time"] = _quantize_time(st0, fd)
+                    self._write_fields(start_time=_quantize_time(st0, fd))
                     dur = max(fd, _quantize_time(dur, fd))
                 snap = self._resize_snapshot
                 if snap and snap.get("direction") == "right":
                     in_p = float(self.clip_data.get("in_point", snap.get("in_point", 0)) or 0)
-                    self.clip_data["duration"] = dur
-                    self.clip_data["out_point"] = in_p + dur
+                    self._write_fields(duration=dur, out_point=in_p + dur)
                     # 片尾吸附
                     if timeline is not None:
                         st = float(self.clip_data.get("start_time", 0) or 0)
@@ -780,16 +787,14 @@ class ClipWidget(QFrame):
                             track_i=int(self.clip_data.get("track", 0) or 0),
                         )
                         new_dur = max(fd, end - st)
-                        self.clip_data["duration"] = new_dur
-                        self.clip_data["out_point"] = in_p + new_dur
+                        self._write_fields(duration=new_dur, out_point=in_p + new_dur)
                         timeline.position_clip_widget(self)
                 elif snap and snap.get("direction") == "left":
                     end = float(snap["start_time"]) + float(snap["duration"])
-                    self.clip_data["duration"] = dur
-                    self.clip_data["start_time"] = max(0.0, end - dur)
                     dt = float(snap["duration"]) - dur
-                    self.clip_data["in_point"] = max(0.0, float(snap["in_point"]) + dt)
-                    self.clip_data["out_point"] = float(self.clip_data["in_point"]) + dur
+                    in_new = max(0.0, float(snap["in_point"]) + dt)
+                    self._write_fields(duration=dur, start_time=max(0.0, end - dur),
+                                       in_point=in_new, out_point=in_new + dur)
                     # 片头吸附
                     if timeline is not None:
                         st = timeline.snap_time(
@@ -798,10 +803,9 @@ class ClipWidget(QFrame):
                             track_i=int(self.clip_data.get("track", 0) or 0),
                         )
                         new_dur = max(fd, end - st)
-                        self.clip_data["start_time"] = st
-                        self.clip_data["duration"] = new_dur
-                        self.clip_data["in_point"] = max(0.0, float(snap["in_point"]) + (float(snap["duration"]) - new_dur))
-                        self.clip_data["out_point"] = float(self.clip_data["in_point"]) + new_dur
+                        in_new = max(0.0, float(snap["in_point"]) + (float(snap["duration"]) - new_dur))
+                        self._write_fields(start_time=st, duration=new_dur,
+                                           in_point=in_new, out_point=in_new + new_dur)
                         timeline.position_clip_widget(self)
                 else:
                     # 纯平移：吸附播放头 / 邻片
@@ -809,7 +813,7 @@ class ClipWidget(QFrame):
                     if timeline is not None:
                         st = timeline.snap_start_time(
                             self.clip_data, st, exclude_id=self.clip_data.get("id"))
-                        self.clip_data["start_time"] = st
+                        self._write_fields(start_time=st)
                         timeline.position_clip_widget(self)
                 # 附带 before 供撤销
                 payload = self.clip_data
@@ -871,23 +875,22 @@ class ClipWidget(QFrame):
                         None,
                     )
                     if clip is not None:
-                        clip["start_time"] = float(st0)
                         ti0 = int(tracks0.get(cid, clip.get("track", 0)) or 0)
-                        clip["track"] = ti0
+                        timeline._write_clip_fields(clip, start_time=float(st0), track=ti0)
                     if w is not None:
-                        w.clip_data["start_time"] = float(st0)
+                        w._write_fields(start_time=float(st0))
                         ti0 = int(tracks0.get(cid, w.clip_data.get("track", 0)) or 0)
                         if int(w.clip_data.get("track", -1) or -1) != ti0:
                             timeline.reparent_clip_to_track(w, ti0)
                         else:
-                            w.clip_data["track"] = ti0
+                            w._write_fields(track=ti0)
                         timeline.position_clip_widget(w)
             elif before and isinstance(before, dict):
-                for k in ("start_time", "duration", "in_point", "out_point"):
-                    if k in before:
-                        self.clip_data[k] = before[k]
+                restore = {k: before[k] for k in
+                           ("start_time", "duration", "in_point", "out_point") if k in before}
+                self._write_fields(**restore)
                 ti0 = int(before.get("track", self.clip_data.get("track", 0)) or 0)
-                self.clip_data["track"] = ti0
+                self._write_fields(track=ti0)
                 if timeline is not None:
                     if int(self.clip_data.get("track", -1) or -1) != ti0:
                         timeline.reparent_clip_to_track(self, ti0)

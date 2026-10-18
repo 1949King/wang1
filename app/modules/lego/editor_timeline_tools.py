@@ -509,11 +509,11 @@ def apply_batch_start_delta(
         new_st = max(0.0, float(base) + delta)
         for c in getattr(timeline, "_clips", []) or []:
             if c.get("id") == cid:
-                c["start_time"] = new_st
+                timeline._write_clip_fields(c, start_time=new_st)  # 刀8：字段写走 store 唯一写缝
                 break
         w = widgets.get(cid)
         if w is not None:
-            w.clip_data["start_time"] = new_st
+            w._write_fields(start_time=new_st)
             timeline.position_clip_widget(w)
     return float(st)
 

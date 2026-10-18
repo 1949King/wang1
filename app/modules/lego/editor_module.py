@@ -933,6 +933,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         main_splitter.addWidget(top_splitter)
         
         timeline_panel = self._create_timeline_panel()
+        self._timeline_widget.set_store(self._timeline_store)  # 刀8 形态A：真相源注入 widget 写缝
         main_splitter.addWidget(timeline_panel)
         t_timeline = time.perf_counter()
         
@@ -3494,8 +3495,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         if not clip or not fields:
             return
         old_track = int(clip.get("track", 0) or 0)
-        for k, v in fields.items():
-            clip[k] = v
+        # 刀8：字段写走 store 唯一写缝（原地 update 保同一性；clip 恒为 self._clips 行本体）
+        self._timeline_store.set_fields(clip.get("id"), **fields)
         # track 变化时同步 UI 换轨
         if "track" in fields:
             new_track = int(fields.get("track", old_track) or 0)
@@ -4940,7 +4941,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                             if w is not None and hasattr(w, "clip_data"):
                                 layout.removeWidget(w)
                                 w.deleteLater()
-                self._timeline_widget._clips = []
+                self._timeline_widget.reset_clips_projection()
 
             for clip in clips:
                 if not isinstance(clip, dict):
@@ -7581,10 +7582,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     ripple_shifts.append({"id": c.get("id"), "old": old, "new": new_st})
 
         if hasattr(self, '_timeline_widget'):
-            self._timeline_widget._clips = [
-                clip for clip in getattr(self._timeline_widget, '_clips', [])
-                if clip.get("id") != clip_id
-            ]
+            self._timeline_widget.sync_clips_projection(  # 刀8：镜像维护 API 化（原外部直绑）
+                [c for c in getattr(self._timeline_widget, '_clips', []) if c.get("id") != clip_id]
+            )
             if hasattr(self._timeline_widget, "remove_clip_widget_by_id"):
                 self._timeline_widget.remove_clip_widget_by_id(clip_id)
             else:
@@ -8036,7 +8036,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                                 if w is not None and hasattr(w, "clip_data"):
                                     layout.removeWidget(w)
                                     w.deleteLater()
-                    self._timeline_widget._clips = []
+                    self._timeline_widget.reset_clips_projection()
 
                 for clip in clips:
                     if not isinstance(clip, dict):

@@ -83,6 +83,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
         super().__init__(parent)
         self._tracks = []
         self._clips = []
+        self._timeline_store = None  # 刀8 形态A：set_store 注入的真相源；缺省 None 直写 fallback（测试替身兼容）
         self._current_clip = None
         self._zoom = 100
         self._playhead_pos = 0
@@ -968,17 +969,44 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
                 return True
         return False
     
+    def set_store(self, store) -> None:
+        """注入 TimelineStore 真相源引用（刀8 形态A：widget 层字段写全部经 store 收口）。"""
+        self._timeline_store = store
+
+    def _write_clip_fields(self, clip, **kv) -> None:
+        """片段字段写统一入口：store 在册且 clip 即真相源行本体时按 id 走 set_fields，
+        否则直写 fallback（未注入 store 的测试替身、或与真相源不共对象的私有副本）。
+
+        本体校验是形态 A 的安全带：如复制轨等路径产生的同 id 副本，绝不允许经 store
+        误写回原行；行本体则原地 update，对象同一性与拖拽跟手/还原/撤销恢复语义不变。
+        """
+        store = getattr(self, "_timeline_store", None)
+        if store is not None and isinstance(clip, dict) and clip.get("id") is not None:
+            if store.find_by_id(clip.get("id")) is clip:
+                store.set_fields(clip.get("id"), **kv)
+                return
+        for k, v in kv.items():
+            clip[k] = v
+
+    def reset_clips_projection(self) -> None:
+        """清空片段行镜像（投影）：外部清镜像唯一入口（刀8 镜像维护 API 化，禁外部直绑）。"""
+        self._clips = []
+
+    def sync_clips_projection(self, rows) -> None:
+        """镜像重绑到真相源行列表并刷新活引用（吸收原外部 `tw._clips = list(...)` 直绑语义）。"""
+        self._clips = list(rows)
+
     def add_clip(self, clip_data, track_index=0):
         """按 start_time 绝对定位添加到指定轨道。"""
         if track_index < 0 or track_index >= len(self._tracks):
             track_index = 0
 
         # 在创建 ClipWidget 之前就设置 track 字段，这样 ClipWidget 构造时就能正确识别轨道类型
-        clip_data["track"] = track_index
+        self._write_clip_fields(clip_data, track=track_index)
         # 同步 type，便于 ClipWidget 不依赖写死的 track==1
         track_type = self._tracks[track_index].get("type", "video")
         if "type" not in clip_data or not clip_data.get("type"):
-            clip_data["type"] = track_type
+            self._write_clip_fields(clip_data, type=track_type)
 
         track = self._tracks[track_index]
         container = track["clip_container"]
@@ -1014,7 +1042,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
             return
         track = self._tracks[track_index]
         clip_widget.setParent(track["clip_container"])
-        clip_widget.clip_data["track"] = track_index
+        self._write_clip_fields(clip_widget.clip_data, track=track_index)
         self.position_clip_widget(clip_widget)
     
     def is_razor_mode(self) -> bool:

@@ -6,6 +6,8 @@
 > WRITESURF 棘轮守卫入册（基线仅余 widget 层 5 处，刀8 收口）。
 > **刀5（持久化走 DSL canonical）已完成**：工程文件单写 `timeline-dsl` 文档（整行备份无损往返），
 > 旧裸 clips 列表双读 fallback，DSLPERSIST 守卫入册。
+> 2026-10-19 用户授权刀8 连做（视同解冻 clip-transform / transform-bake / canvas-transform 三 zone）；
+> 勘察实证三 zone 锁定符号零触碰（timeline_widget.py 内无任何 FROZEN 标记块），playback-av / exit-media 维持冻结。
 > 本方案是刀4+ 的执行蓝图。**迁移完成前 `EditorModule._clips` 仍是唯一真相源**（§3.2 不变）。
 
 ## 1. 硬约束（不可商量的三条）

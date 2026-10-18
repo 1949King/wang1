@@ -241,8 +241,8 @@ class EditorEffectsMixin:
         if not hasattr(self, '_timeline_widget'):
             return
         tw = self._timeline_widget
-        # 合缝等路径会 deepcopy 替换 _clips；镜像到时间线并刷新活引用
-        tw._clips = list(self._clips)
+        # 合缝等路径会 deepcopy 替换 _clips；镜像到时间线并刷新活引用（刀8：镜像维护 API 化）
+        tw.sync_clips_projection(self._clips)
         try:
             if hasattr(tw, "refresh_load_spans"):
                 tw.refresh_load_spans(self._clips)

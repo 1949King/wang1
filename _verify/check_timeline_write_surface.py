@@ -15,8 +15,13 @@
   * app/core/timeline_store.py —— API 自身实现（锁内原地 update 是合法本体）；
   * app/modules/lego/clip_transform.py —— 冻结区 transform 唯一写入入口
     （normalize/apply_normalized，方案 §1.2；store API 只转发不另实现）；
-  * app/modules/lego/timeline_widget.py —— 控件私有列表副本（刀1 守卫同律豁免）；
   * app/tests/** —— 测试替身自管数据。
+
+刀8（2026-10-19 形态 A）：timeline_widget.py 整文件豁免**已摘除**——widget 层字段写
+全部收口经注入 store（set_store + _write_clip_fields 唯一写缝），基线清零固化。
+并新增 PROJECTION 断言：镜像维护 API 化后，跨文件重绑 `X._clips = ...`（X 非 self，
+如 `tw._clips =` / `timeline._clips =`）全 app 必须为 0，镜像维护只许 timeline_widget.py
+内部（`self._clips = ...`）经 reset_clips_projection / sync_clips_projection 进行。
 
 用法（项目根执行）：
   .venv312\\Scripts\\python.exe _verify/check_timeline_write_surface.py           # 校验
@@ -38,7 +43,6 @@ BASELINE = os.path.join(ROOT, "_verify", "timeline_write_surface_baseline.json")
 SKIP_REL = {
     os.path.join("app", "core", "timeline_store.py"),
     os.path.join("app", "modules", "lego", "clip_transform.py"),
-    os.path.join("app", "modules", "lego", "timeline_widget.py"),
 }
 TESTS_PREFIX = os.path.join("app", "tests") + os.sep
 # 行尾标记 `# ratchet-exempt`：理论兜底/不可达路径的豁免行（须注释说明理由）
@@ -262,6 +266,39 @@ def check_wiring() -> None:
             _fail(f"② glue 策略未登记字段写 API：{sym}")
 
 
+def check_projection() -> None:
+    """PROJECTION 断言（刀8 形态 A）：跨文件镜像重绑 `X._clips = ...`（X 非裸 self）硬零。
+
+    镜像（TimelineWidget._clips）维护只许 timeline_widget.py 内部经
+    reset_clips_projection / sync_clips_projection 进行；外部一律调 API，
+    杜绝 `tw._clips =` / `self._timeline_widget._clips =` 式直绑回潮。
+    """
+    app_dir = os.path.join(ROOT, "app")
+    for dirpath, dirnames, filenames in os.walk(app_dir):
+        dirnames[:] = [d for d in dirnames if d not in ("__pycache__",)]
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, ROOT)
+            if rel.startswith(TESTS_PREFIX):
+                continue
+            try:
+                with open(full, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=rel)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Attribute) and tgt.attr == "_clips" \
+                                and not (isinstance(tgt.value, ast.Name)
+                                         and tgt.value.id == "self"):
+                            _fail(f"③ PROJECTION 跨文件镜像重绑：{rel}:{node.lineno} "
+                                  f"（{ast.unparse(tgt)} = ...）——须改走 "
+                                  f"reset_clips_projection/sync_clips_projection")
+
+
 def main() -> int:
     update = "--update" in sys.argv
     counts = collect_counts()
@@ -283,12 +320,13 @@ def main() -> int:
             elif n < b:
                 print(f"INFO  已收敛：{rel} {b} → {n}（记得 --update 固化基线）")
     check_wiring()
+    check_projection()
     if problems:
         for p in problems:
             print(f"FAIL  {p}")
         return 1
     total = sum(counts.values())
-    print(f"PASS  时间线字段写入面棘轮达标：残留 {total} 处（基线内，刀8 继续收敛 UI 投影层）")
+    print(f"PASS  时间线字段写入面棘轮达标：残留 {total} 处（刀8 形态 A 清零，跨文件镜像重绑=0）")
     return 0
 
 
