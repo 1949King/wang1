@@ -182,9 +182,9 @@ CHECKS = [
     # ── 时间线真相源切换（OTIO 全量迁移·刀1，2026-10-18 用户授权解冻）──
     ("STORE", "_verify/check_timeline_store.py",
      "真相源store：同一性不变量/serialize往返/to_timeline≡桥接/接线在册/重绑定收敛"),
-    # ── 时间线字段写入面（OTIO 全量迁移·刀4，2026-10-18）──
+    # ── 时间线字段写入面（OTIO 全量迁移·刀4，2026-10-18；刀9 起棘轮升级 CANONICAL 硬断言）──
     ("WRITESURF", "_verify/check_timeline_write_surface.py",
-     "字段写棘轮：set_fields/update_where唯一写API/基线只减不增/glue在册/store无Qt红线"),
+     "CANONICAL硬断言：字段直写硬零/宿主重绑仅init/store外突变零/PROJECTION镜像/glue在册/store无Qt红线"),
     # ── 持久化 DSL canonical（OTIO 全量迁移·刀5，2026-10-18）──
     ("DSLPERSIST", "_verify/check_timeline_dsl_persistence.py",
      "持久化DSL：无损往返/DSL合法/畸形拒绝/桥接回退/双读单写在册"),

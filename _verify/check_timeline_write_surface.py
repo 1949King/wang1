@@ -23,6 +23,14 @@
 如 `tw._clips =` / `timeline._clips =`）全 app 必须为 0，镜像维护只许 timeline_widget.py
 内部（`self._clips = ...`）经 reset_clips_projection / sync_clips_projection 进行。
 
+刀9（2026-10-19 真相源宣告收口）：棘轮升级为 **CANONICAL 硬断言**（只减不增 → 永不可回潮）：
+  * ⑥ 字段直写**硬零**：基线 `{}` 固化后，任何文件出现计数即 FAIL（基线文件保留作清零留痕）；
+  * ④ REBIND：`self._clips = ` 重绑全 app 仅 editor_module.py init 建列表一处（计数==1，不钉行号）；
+    timeline_widget.py 为投影镜像自管（形态 A 允许）；其余文件出现即 FAIL；
+  * ⑤ MUTATION：`_clips` 列表原地突变（append/extend/insert/pop/remove/clear/sort/reverse、
+    `_clips[...] = `/`_clips[:] = ` 下标写）除 timeline_store 本体与 widget 镜像外全 app 硬零
+    ——结构写唯一入口 = TimelineStore.add/remove_by_id/replace_all/clear（真相源切换收口钉死）。
+
 用法（项目根执行）：
   .venv312\\Scripts\\python.exe _verify/check_timeline_write_surface.py           # 校验
   .venv312\\Scripts\\python.exe _verify/check_timeline_write_surface.py --update  # 重写基线
@@ -299,6 +307,76 @@ def check_projection() -> None:
                                   f"reset_clips_projection/sync_clips_projection")
 
 
+# ── CANONICAL 硬断言（刀9 真相源宣告收口） ──────────────────────────
+
+#: 宿主行缓存唯一合法重绑文件（init 建列表一处，计数==1）
+_EDITOR_REL = os.path.join("app", "modules", "lego", "editor_module.py")
+#: 投影镜像自管文件（刀8 形态 A：reset/sync_clips_projection 内部维护，允许重绑/突变）
+_WIDGET_REL = os.path.join("app", "modules", "lego", "timeline_widget.py")
+#: store 本体豁免（合法原地突变实现层；现行为 _rows 命名，天然零命中，防御性登记）
+_STORE_REL = os.path.join("app", "core", "timeline_store.py")
+#: `_clips` 列表上的原地突变方法名（读型方法 index/count/copy 不计）
+_MUT_METHODS = {"append", "extend", "insert", "pop", "remove", "clear", "sort", "reverse"}
+
+
+def scan_canonical(path: str, rel: str) -> tuple:
+    """单文件 AST 计数：``(self._clips = 重绑处数, _clips 原地突变处数)``。
+
+    词边界沿用 ``_CLIPS_RE``：``new_clips``/``video_clips`` 等局部名与
+    ``_clips_snapshot`` 等派生名均不误染；``getattr(x, "_clips", [])`` 读点
+    不在 MUT_METHODS/下标写形态中，不误计。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=rel)
+    except SyntaxError:
+        return (0, 0)
+    rebind = mutation = 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AugAssign)):
+            tgts = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for tgt in tgts:
+                if isinstance(tgt, ast.Attribute) and tgt.attr == "_clips" \
+                        and isinstance(tgt.value, ast.Name) and tgt.value.id == "self":
+                    rebind += 1
+                elif isinstance(tgt, ast.Subscript) and _refs_clips(tgt):
+                    mutation += 1
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            if isinstance(fn, ast.Attribute) and fn.attr in _MUT_METHODS \
+                    and _refs_clips(fn.value):
+                mutation += 1
+    return (rebind, mutation)
+
+
+def check_canonical() -> None:
+    """④⑤ 真相源收口钉死：宿主行缓存重绑仅 init 一处；store/镜像外原地突变全 app 硬零。"""
+    app_dir = os.path.join(ROOT, "app")
+    for dirpath, dirnames, filenames in os.walk(app_dir):
+        dirnames[:] = [d for d in dirnames if d not in ("__pycache__",)]
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, ROOT)
+            if rel.startswith(TESTS_PREFIX):
+                continue
+            rebind, mutation = scan_canonical(full, rel)
+            norm = rel.replace("\\", "/")
+            if rel == _EDITOR_REL:
+                if rebind != 1:
+                    _fail(f"④ REBIND：editor_module.py `self._clips =` 重绑 {rebind} 处"
+                          f"（真相源收口后仅 init 建列表一处允许，其余须走 store API）")
+            elif rel == _WIDGET_REL:
+                pass  # 投影镜像自管（形态 A 设计内）
+            elif rebind:
+                _fail(f"④ REBIND：{norm} 出现 `self._clips =` 重绑 {rebind} 处"
+                      f"（宿主行缓存只许 editor_module init 创建）")
+            if mutation and rel not in (_WIDGET_REL, _STORE_REL):
+                _fail(f"⑤ MUTATION：{norm} 对 `_clips` 原地突变 {mutation} 处"
+                      f"（结构写唯一入口 = TimelineStore.add/remove_by_id/replace_all/clear）")
+
+
 def main() -> int:
     update = "--update" in sys.argv
     counts = collect_counts()
@@ -309,24 +387,20 @@ def main() -> int:
         print(f"OK  棘轮基线已重写：{len(counts)} 文件 / {total} 处直写")
         return 0
     if not os.path.exists(BASELINE):
-        _fail(f"① 基线缺失：{os.path.relpath(BASELINE, ROOT)}（先 --update 立项）")
-    else:
-        with open(BASELINE, "r", encoding="utf-8") as f:
-            base = json.load(f)
-        for rel, n in sorted(counts.items()):
-            b = int(base.get(rel, 0))
-            if n > b:
-                _fail(f"① 棘轮回涨：{rel} 直写 {b} → {n}（字段写必须走 TimelineStore.set_fields/update_where）")
-            elif n < b:
-                print(f"INFO  已收敛：{rel} {b} → {n}（记得 --update 固化基线）")
+        _fail(f"① 基线缺失：{os.path.relpath(BASELINE, ROOT)}（刀8 清零留痕文件）")
+    # 刀9：棘轮比较升级为硬断言——基线 {} 固化后任何计数即 FAIL
+    if counts:
+        _fail(f"⑥ 字段直写硬零破防：{counts}（字段写必须走 "
+              f"TimelineStore.set_fields/update_where，transform 系走 normalize/apply_normalized）")
     check_wiring()
     check_projection()
+    check_canonical()
     if problems:
         for p in problems:
             print(f"FAIL  {p}")
         return 1
-    total = sum(counts.values())
-    print(f"PASS  时间线字段写入面棘轮达标：残留 {total} 处（刀8 形态 A 清零，跨文件镜像重绑=0）")
+    print("PASS  时间线写入面 CANONICAL 硬断言达标：字段直写=0 / 宿主重绑仅 init / "
+          "store 外突变=0 / 跨文件镜像重绑=0（刀9 真相源收口）")
     return 0
 
 
