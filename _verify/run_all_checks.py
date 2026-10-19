@@ -233,6 +233,11 @@ CHECKS = [
     # ── 配音听写回环验证（配音一致性方案 P1，2026-10-15）──
     ("DUBVERIFY", "_verify/check_dub_verify.py",
      "配音验证闭环（听写回环/字幕=音频/诚实降级 + 编排纯函数）"),
+    # ── 「代码 × 扩散」混合视频契约（V4.44，2026-10-19）──
+    #    为什么必须入册：新守卫不挂进 run_all_checks = 「看起来有守卫、实际没守卫」
+    #    （本项目反复出现；arch_guard 无参空转、check_canvas_frontend_quality 纯摆设均是同病）。
+    ("CODEVIDEO", "_verify/check_code_video.py",
+     "代码×扩散契约：零重依赖/三处注册一致/lineage六键同源/文字层铁律反例/行数棘轮"),
 ]
 
 _py = _python()

@@ -445,6 +445,14 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "left", "导演落时间线",
      ["落时间线", "入轨", "分镜入轨", "素材入轨", "director_apply", "落轨",
       "分镜落时间线"]),
+    # ── 「代码 × 扩散」混合视频（V4.44 契约刀，2026-10-19）──
+    # effect=read：只出 spec 草案（计划态），不渲染、不写盘。
+    # 渲染能力 code_video_render 在 V4.45 渲染引擎落地时同批注册
+    # （目录 ↔ 注册双向守卫，禁止空登记占位）。
+    ("pipeline.code_video_plan", "pipeline", "read", False,
+     "代码×扩散混合视频规划：分镜表→CodeVideoSpec 草案（契约编译，计划态）",
+     "left", "代码视频规划",
+     ["代码视频", "混合视频", "代码做视频", "html视频", "code_video", "程序视频"]),
 ] + _canvas_node_catalog_rows()
 
 # 策略层专属工具：只在 agent_policy 有 effect/paid，**没有** dispatcher handler，

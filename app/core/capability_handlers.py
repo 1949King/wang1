@@ -1674,6 +1674,12 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     _recipe_handlers = RecipeCapabilityHandlers()
     dispatcher.register("canvas.apply_recipe", CapabilityCategory.CANVAS,
                         _recipe_handlers.apply_recipe, "按配方铺开卡片（一句话 → 前端匹配并建节点）")
+    # 2026-10-19 V4.44：「代码 × 扩散」混合视频（计划态；渲染 V4.45）
+    from app.core.capability_handlers_code_video import CodeVideoCapabilityHandlers
+    _code_video_handlers = CodeVideoCapabilityHandlers()
+    dispatcher.register("pipeline.code_video_plan", CapabilityCategory.PIPELINE,
+                        _code_video_handlers.code_video_plan,
+                        "分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）")
     dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
     dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,

@@ -64,6 +64,9 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
     ("prop_consistency", "safe", "pipeline.prop_consistency", "手持道具守护（结构约束+握持描述，治武器结构畸形）"),
     ("guard_all", "safe", "pipeline.guard_all", "生成质量守护总入口（多守护一次跑+全量负面词）"),
     ("quote_cost", "safe", "pipeline.quote", "生成前报价（预计花费+可用渠道+配额健康，不生成）"),
+    # V4.44「代码 × 扩散」混合视频：计划态只读 ⇒ safe（渲染 V4.45 落地后再评估级别）
+    ("code_video_plan", "safe", "pipeline.code_video_plan",
+     "代码×扩散混合视频规划：分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）"),
     # P1-3 异步任务模型：提交会启动生成线（可能花钱）→ 危险动作走确认流；
     # 查询/取消只读/止盈止损 → safe。
     ("submit_pipeline", "dangerous", "pipeline.submit",
@@ -325,6 +328,11 @@ def build_agent_actions_help_block() -> str:
         "llm_health 参数: {}"
         "（查各 LLM 站点近24h降级率；高降级率=LLM 常不可用、在用关键词降级兜底，"
         "该查 Ollama/模型渠道了）。",
+        "code_video_plan 参数: {\"storyboard\":[{\"shot\":1,\"description\":\"镜头描述\",\"duration\":6.0},…],"
+        "\"width\":1080,\"height\":1920,\"fps\":30,\"spec_id\":\"可选\"}"
+        "（「代码 × 扩散」混合视频规划：分镜表 → CodeVideoSpec 草案，片头/字幕走 html:// 代码层、"
+        "镜头走 asset:// 扩散素材位；只出计划态不渲染；缺 duration 的镜头会进 warnings 不猜默认值；"
+        "确认后用 code_video_render 落地）。",
         "yue_plan 参数: {\"lyrics\":\"歌词\",\"style\":\"city pop, female vocal\",\"cot\":\"full|melody|off\","
         "\"seed\":42}（YuE 符号规划：只出**可编辑的旋律+和弦乐谱**，不出音频、不花钱；"
         "先用它把「你的意图」给用户看，确认后再 yue_render）。",

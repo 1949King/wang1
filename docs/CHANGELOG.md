@@ -1,5 +1,56 @@
 # 拾光剪影 — 变更日志
 
+## 新增 · 「代码 × 扩散」混合视频契约（CodeVideoSpec，2026-10-19，V4.44.0）
+
+> **定位**：把「大模型写代码做视频」（管文字/版式/动效/交互）与「视频生成大模型做视频」
+> （管画面/运动/质感）两条行业路线合为一条管线，汇合点是 **CodeVideoSpec** 渲染契约。
+> 本刀只落地**契约层 + 计划态能力**；渲染引擎（V4.45）与画布接线（V4.46）分期推进。
+
+### 契约（`app/core/code_video/spec.py`，678 行，零重依赖可独立 import）
+
+| 件 | 内容 |
+|---|---|
+| `CodeVideoSpec` | dataclass 族：CanvasSettings / SpecTrack / SpecClip / AssetEntry / QcSettings / SpecLineage / SpecLimits；`to_dict`/`from_dict` round-trip 恒等 |
+| `validate_spec` | 结构校验：version 只收 `"1.0"`、canvas 四键数值、track/clip id 唯一 |
+| `compile_spec` | 语义校验 + limits 硬钳 + 归一化 ⇒ Timeline DSL 兼容子集；errors 非空 ⇒ compiled=None（调用方必须如实报告，不得强行渲染） |
+| `from_storyboard` | 分镜表 → 草案：片头 `html://title.html` 3s + 每镜头 `asset://inbox/shot_N.mp4` + 全片字幕轨 `html://subtitle.html`；**缺 duration 的镜头不猜 3 秒**，进 errors |
+
+**铁律与红线（编译期强制）**：
+- **文字层铁律**：`kind ∈ {text, subtitle}` 的 clip.source 必须 `html://` —— 视频内文字不可靠是扩散模型公认短板，字幕/标题一律代码渲染；
+- **limits 硬钳**（8GB 硬件诚实边界）：总时长 ≤ 60s、clip 总数 ≤ 12、画布 ≤ 1080×1920、fps ∈ {24, 30}；
+- **目录逃逸防护**：`html://` 只允许 `[a-z0-9_-]{1,40}.html`；`asset://` 禁绝对路径/盘符/`..`/反斜杠；
+- **params 白名单**：只收标量与标量列表，禁嵌套对象；**丢弃项显式进 errors，不静默修正**；
+- **lineage 六键同源**：assets.lineage 经 `glue.schema.normalize_generation` 清洗（prompt/seed/model/channel/character_id/reference，与入轨血缘单一事实来源）。
+
+### 能力（计划态，V4.44）
+
+- `pipeline.code_video_plan`（read / 免费 / 左脑）：分镜表 → spec 草案 → 契约编译。
+  **诚实失败语义**：没给 storyboard ⇒ success=False；草案编译不过 ⇒ success=False（绝不把烂草案包装成「计划态」交付）；`from_storyboard` 的非致命 errors（个别镜头缺时长被跳过）原样进 `output.warnings`。
+- `code_video_render` **不在本刀注册** —— 渲染引擎落地时同批注册（目录 ↔ 注册双向守卫禁止空登记占位）。
+
+### 注册三处（单一事实来源纪律）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `app/core/agent_capability_catalog.py` | CAPABILITY_ROWS 表尾 +1 行（pipeline.code_video_plan） |
+| 2 | `app/core/capability_handlers.py` | register_builtin_handlers +5 行（import + register，1990/2000 行守卫内） |
+| 3 | `app/core/agent_action_registry.py` | `_AGENT_ACTION_ROWS` +2 行（code_video_plan 别名，safe 级）+ help_block 参数文案 |
+
+### 验证
+
+- pytest `app/tests/test_code_video_spec.py` **23 例全绿**（round-trip / 文字层铁律 / limits 钳制 / params 白名单 / source 逃逸防护 / from_storyboard 三条语义 / validate_spec / handler 成功+双失败路径）；
+- `_verify/check_code_video.py` **全绿**（契约域零 Qt 依赖 / 三处注册一致 / 六键同源镜像 / 契约行为冒烟 / 行数棘轮 678+96+290）；
+- check_capability_catalog OK（0 问题）；check_action_wiring **ALL PASS (7)**；
+- frozen_zone_guard OK **107 locks**（本轮零冻结区改动）；ruff 本轮文件全过；
+- CLI round-trip 实证：3 镜头分镜 → spec（1,788 B JSON）→ from_dict → compile OK；
+  混合 source：`html://title.html` + `asset://inbox/shot_{1,2,3}.mp4` + `html://subtitle.html`。
+
+### 明确不做（防 scope 蔓延）
+
+不起沙箱、不渲染、不碰画布节点、不接剪辑模块智能体 —— 按 V4.45（引擎刀：render_host/render_worker/security）→ V4.46（画布刀）分期。
+
+---
+
 ## 修复 · 3D 群像出现占满屏幕的巨型几何（2026-10-19，画布版本号未递增）
 
 > **【最终根因 · 2026-10-19 03:50 日志实证】**真正的原因**不是** NaN 角度（那是误判，守卫仍值得保留），
