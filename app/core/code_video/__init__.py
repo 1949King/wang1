@@ -5,9 +5,10 @@
     spec.py             CodeVideoSpec 渲染契约（V4.44 ✓）
     security.py         HTML 过闸 / 路径 jail / 限额（V4.45 ✓）
     page_builder.py     合成时间线页面（纯函数；postMessage 时钟）（V4.45 ✓）
-    render_host.py      渲染编排（V4.45）
-    render_worker.py    沙箱子进程（V4.45）
-    video_critic.py     视频域代理评分（V4.45）
+    render_worker.py    沙箱子进程（Chromium 逐帧）（V4.45 ✓）
+    render_host.py      渲染编排 + 编码 + 发布（V4.45 ✓）
+    audio_graph.py      音频 filter graph 纯函数（V4.45 ✓）
+    video_critic.py     双乱序/文字安全区/平色质检（V4.45 ✓）
     llm_html.py         LLM 生成镜头 HTML（V4.46）
 
 **延迟导出**：本文件只导出 spec（纯标准库零依赖），渲染面模块

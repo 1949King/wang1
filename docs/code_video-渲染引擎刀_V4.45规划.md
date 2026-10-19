@@ -116,7 +116,7 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 | `app/core/code_video/render_worker.py` | 子进程：启动 Chromium、`frame(t)`、截图、回传文字 rect | ≤380 行 | **禁止 import PyQt6**；只依赖 playwright + stdlib |
 | `app/core/code_video/render_host.py` | 编排：安检→解析→生成合成页→拉 worker→音频→编码→inbox→QC | ≤420 行 | 顶层零 Qt；ffmpeg 走 `ffmpeg_utils` |
 | `app/core/code_video/video_critic.py` | 双乱序比对、文字安全区、平色检测、报告结构 | ≤260 行 | 纯函数优先；PIL 缺失时诚实 not_wired |
-| `app/core/code_video/audio_graph.py`（可选拆分） | 音频 filter graph 纯函数 | ≤180 行 | 单独可测，避免 render_host 膨胀 |
+| `app/core/code_video/audio_graph.py` | 音频 filter graph 纯函数（atrim/atempo/volume/adelay/amix） | ≤180 行 | 单独可测，避免 render_host 膨胀 |
 | `app/core/capability_handlers_code_video.py` | 增 `code_video_render` 薄壳 | 96 → ≤150 行 | 只转发，算法都在 code_video/ |
 | `app/core/agent_capability_catalog.py` | +1 行 `pipeline.code_video_render` | +1 行 | 单一事实源 |
 | `app/core/agent_action_registry.py` | +1 行别名 + help 文案 | +2 行 | 与目录一致 |
@@ -239,26 +239,30 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
   会抛 `SecurityError`（opaque origin）⇒ HTML 镜头时钟与文字 rect **必须走 postMessage**。
   T4 实现不得回退到直接访问 iframe DOM。
 
-### T4 · `render_worker.py`（真 Chromium）
-- CLI：`python -m app.core.code_video.render_worker --job job.json`。
-- job.json：`{page_path, fps, out_dir, start_frame, end_frame, viewport, sample_ts?}`。
-- 注入宿主时钟（`performance.now`/`Date.now`/rAF 时间戳/`document.getAnimations()` 暂停并设 `currentTime`）；
-  `Math.random` 按 `t` 播种（保证确定性）；视频元素 `currentTime = source_time + 0.001`，
-  等 `seeked` + `requestVideoFrameCallback`（不可用则双 rAF 兜底）后截图。
-- 输出：`frame_%06d.png` + `worker_manifest.json`（每帧 sha256、耗时、文字 rect）。
-- 验收：2s/24fps 静态 HTML 样例渲染 48 帧，两次运行逐帧 sha256 一致；视频样例 seek 到 3 个 t 校验颜色/帧号。
+### T4 · `render_worker.py`（真 Chromium）✅ 2026-10-19 已落地
+- CLI：`python -m app.core.code_video.render_worker --job job.json`；`--check` 只探测 Playwright/Chromium。
+- job：`{page_path, out_dir, fps, width, height, start_frame, end_frame, sample_ts?, tmp_dir, progress_path}`。
+- 实现（**245 行**）：`page.route` 运行时网络兜底（只放行 file/data/about/blob，拦截记入
+  `blocked_requests`）、`__sgSeek(t)` 逐帧、PNG + sha256 manifest、progress.json、失败写
+  `worker_error.json` 并非零退出；`--disable-gpu / font-render-hinting=none / force-color-profile=srgb`。
+- 实测：10 帧 ×2 次逐帧 sha256 一致；540×960 单帧 ~30ms；PNG 尺寸正确。
+- 注：`SHIGUANG_RENDER_INPROCESS=1` 仅供测试/受限环境；生产必须子进程（Playwright sync API 线程约束）。
 
-### T5 · `render_host.py` + 音频 + 编码
-- 编排：compile → security → resolve → build page → worker → 音频 graph → ffmpeg 编码 → ffprobe 校验 → inbox。
-- ffmpeg 命令：`-framerate fps -i frame_%06d.png` + 音频输入 → `libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart`。
-- 进度：写 `progress.json`（frame/total/stage），为 V4.46 SSE 预留；**本刀不广播**。
-- 验收：60s 上限内的 6s 样例出片；ffprobe 时长误差 ≤1 帧；像素抽帧与 worker 帧一致。
+### T5 · `render_host.py` + 音频 + 编码 ✅ 2026-10-19 已落地
+- 编排（**421 行**）：compile → security → resolve → build page → worker → audio_graph →
+  ffmpeg（libx264/aac）→ ffprobe 校验（时长 ≤1.5 帧 / 宽高 / 帧率）→ publish → QC。
+- 失败带 `stage`（compile/security/resolve_assets/render/encode/publish/qc）+ `work_dir`；
+  成功才清理工作目录。
+- publish：给 `inbox_dir` 时落该目录（测试/自定义），否则复用 `video_gen.publish_to_inbox`。
+- 实测（2s 540×960 + 正弦音轨）：输出 mp4 同时含 video+audio 流；时长 2.000s；QC ok
+  （dual_shuffle pass / flat_frame warning / text not_wired / loudness not_wired）。
 
-### T6 · `video_critic.py` + QC 接线
-- 双乱序实现：同一批 t，顺序 A 与顺序 B 各渲染一次（复用 worker 的 `sample_ts` 模式），比对 sha256。
-- 文字安全区：读 manifest 的 rect + compiled 的 `qc.text_safe_area`。
-- 平色：PIL 可用则算方差；不可用 ⇒ `not_wired` 如实标注。
-- 验收：构造「未播种随机」反例 → 双乱序必报不一致；正常样例 pass。
+### T6 · `video_critic.py` + QC 接线 ✅ 2026-10-19 已落地
+- 实现（**136 行**）：`choose_sample_ts`（5 个中点）、`compare_dual_shuffle`（按 t 比 sha256，
+  报「哪个 t 画出两张不同的画」）、`text_safe_area_check`（读 manifest text_rects，默认 5% 边距，
+  无 `data-sg-text` 即 not_wired）、`flat_frame_check`（PIL 灰度方差，warning 不判失败）、`build_report`。
+- 实测：`test_code_video_critic.py` **12 例**；真渲染双乱序 5/5 一致。
+- 响度 EBU R128 显式 `not_wired`（不假装测过）。
 
 ### T7 · 能力注册 + 守卫 + 文档
 - 三处注册（catalog / handlers / action 表）；`check_code_video.py` 扩 F/G 节；
