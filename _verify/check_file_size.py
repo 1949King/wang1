@@ -39,7 +39,8 @@ _SKIP_DIRS = {"__pycache__", "node_modules", "dist", ".git", "build",
 
 _TARGETS = [
     ("app", (".py",)),
-    ("vendor/packages/libtv/src", (".ts", ".tsx")),
+    # 2026-10-20：CSS 也纳入体积守卫（styles.css 已 3,980 行且此前完全未受守护）
+    ("vendor/packages/libtv/src", (".ts", ".tsx", ".css")),
 ]
 
 # ── 基线（2026-09-25 实测）──────────────────────────────────────────
@@ -70,6 +71,9 @@ BASELINE: dict = {
     # ⚠️ 仅此一次：后续仍**只减不增**；日后解冻拆分须立即下调这两项基线。
     "vendor/packages/libtv/src/CanvasShell.tsx": 3251,
     "vendor/packages/libtv/src/store.ts": 2514,
+    # 2026-10-20：styles.css 此前不在扫描范围（CSS 未纳入 _TARGETS）⇒ 4,000 行量级零守护。
+    # 现纳入 .css 扫描并冻结在实测值；属冻结区 canvas-magnetic-intent，未解冻不得拆分。
+    "vendor/packages/libtv/src/styles.css": 3980,
     # V4.39.8 异步接线（generateForNode→runGeneration）后越线 2000；
     # 存量文件冻结入基线，⚠️ 待拆分（异步编排宜独立成模块），拆分后请下调。
     # 2026-10-14：拉片 L2 接线时拆出 bridgeStoryboard.ts（分镜/拉片族 re-export），

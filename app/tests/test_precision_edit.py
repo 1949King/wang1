@@ -93,3 +93,58 @@ def test_handler_reads_editor_and_fails_when_closed():
     failed = closed.precision_audit(req)
     assert failed.success is False
     assert "未就绪" in failed.error
+
+
+class _FakeEditor:
+    def __init__(self, clips):
+        self._clips = clips
+        self._timeline_widget = SimpleNamespace(_edit_fps=30)
+        self.actions = []
+        self.writes = []
+
+    def _apply_clip_fields(self, clip, fields):
+        clip.update(fields)
+        self.writes.append((clip["id"], dict(fields)))
+
+    def _record_action(self, action):
+        self.actions.append(action)
+
+    def _touch_project_dirty(self):
+        pass
+
+
+def test_handler_apply_writes_and_records_compound_undo():
+    clip = _clip("a", start=0.02, dur=1.02, in_point=0.0, out_point=2.0)
+    editor = _FakeEditor([clip])
+    handlers = PrecisionCapabilityHandlers(lambda: editor)
+    result = handlers.precision_align_apply(
+        CapabilityRequest(capability_id="editor.precision_align_apply")
+    )
+    assert result.success
+    assert result.output["applied"] == 1
+    assert abs(clip["start_time"] - 1 / 30) < 1e-5
+    assert abs(clip["duration"] - 31 / 30) < 1e-5
+    assert len(editor.actions) == 1
+    action = editor.actions[0]
+    assert action["type"] == "compound" and action["label"] == "precision_align"
+    assert action["steps"][0]["before"]["start_time"] == 0.02
+    assert action["steps"][0]["after"]["duration"] > 1.0
+
+
+def test_handler_apply_noop_and_missing_interfaces():
+    aligned = _clip("a", start=0.0, dur=1.0)
+    editor = _FakeEditor([aligned])
+    handlers = PrecisionCapabilityHandlers(lambda: editor)
+    result = handlers.precision_align_apply(
+        CapabilityRequest(capability_id="editor.precision_align_apply")
+    )
+    assert result.success and result.output["applied"] == 0
+    assert editor.actions == []
+
+    no_undo = SimpleNamespace(_clips=[_clip(start=0.02)],
+                              _timeline_widget=SimpleNamespace(_edit_fps=30))
+    failed = PrecisionCapabilityHandlers(lambda: no_undo).precision_align_apply(
+        CapabilityRequest(capability_id="editor.precision_align_apply")
+    )
+    assert failed.success is False
+    assert "撤销接口" in failed.error

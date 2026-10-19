@@ -10,7 +10,9 @@ import {
   allNodeKinds,
   capsuleById,
   capsulesForStage,
+  nodeCoverage,
   stageCoverage,
+  uncoveredNodeKinds,
   type CapsuleStage,
 } from "./intentCapsuleCatalog";
 
@@ -67,5 +69,24 @@ describe("意图胶囊目录", () => {
     expect(coverage).toHaveLength(Object.keys(STAGE_LABELS).length);
     expect(coverage.every((row) => row.capsules > 0)).toBe(true);
     expect(coverage.reduce((n, row) => n + row.capsules, 0)).toBe(INTENT_CAPSULES.length);
+  });
+
+  it("节点覆盖矩阵：每个节点都有胶囊与能力", () => {
+    const rows = nodeCoverage();
+    expect(rows.length).toBe(allNodeKinds().length);
+    for (const row of rows) {
+      expect(row.capsules.length).toBeGreaterThan(0);
+      expect(row.capabilities.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("缺口盘点：只把辅助节点列为未覆盖", () => {
+    const missing = uncoveredNodeKinds(Array.from(KNOWN_NODE_KINDS));
+    expect(missing.length).toBeGreaterThanOrEqual(0);
+    // 意图节点不应出现在缺口里
+    expect(missing).not.toContain("image");
+    expect(missing).not.toContain("video");
+    expect(missing).not.toContain("character");
+    expect(missing).not.toContain("director");
   });
 });

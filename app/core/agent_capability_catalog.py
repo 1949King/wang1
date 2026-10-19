@@ -466,6 +466,9 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("editor.precision_align_plan", "editor", "read", False,
      "帧对齐计划：吸附 start_time/duration 并同步 out_point（只出计划，不改时间线）",
      "left", "帧对齐计划", ["帧对齐", "吸附", "对齐计划", "微调", "精剪"]),
+    ("editor.precision_align_apply", "editor", "canvas_write", False,
+     "帧对齐写回：按计划改 store 并记一条 compound 撤销（重叠/大缝隙不自动修）",
+     "left", "帧对齐写回", ["帧对齐写回", "对齐落地", "精剪写回", "precision_align_apply"]),
     # ── 治理线（2026-10-20）：评分 → 闸门判定，只读 ──
     ("pipeline.aesthetic_gate", "pipeline", "read", False,
      "审美治理闸门：五维评分 → pass/review/block（估算维度默认复核，不假通过）",

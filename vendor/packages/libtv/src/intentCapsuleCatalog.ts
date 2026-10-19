@@ -222,3 +222,35 @@ export function stageCoverage(): Array<{
     };
   });
 }
+
+/** 节点覆盖矩阵：每个节点 kind 被哪些胶囊/能力覆盖（C6 缺口盘点的数据源）。 */
+export interface NodeCoverageRow {
+  kind: string;
+  capsules: string[];
+  capabilities: string[];
+}
+
+export function nodeCoverage(): NodeCoverageRow[] {
+  const map = new Map<string, { capsules: string[]; capabilities: Set<string> }>();
+  for (const capsule of INTENT_CAPSULES) {
+    for (const kind of capsule.nodeKinds) {
+      if (!map.has(kind)) map.set(kind, { capsules: [], capabilities: new Set() });
+      const row = map.get(kind)!;
+      if (!row.capsules.includes(capsule.id)) row.capsules.push(capsule.id);
+      capsule.capabilities.forEach((cap) => row.capabilities.add(cap));
+    }
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, row]) => ({
+      kind,
+      capsules: row.capsules,
+      capabilities: Array.from(row.capabilities).sort(),
+    }));
+}
+
+/** 缺口盘点：给定全部节点 kind，返回**未被任何意图胶囊引用**的辅助节点。 */
+export function uncoveredNodeKinds(allKinds: string[]): string[] {
+  const covered = new Set(allNodeKinds());
+  return allKinds.filter((kind) => !covered.has(kind)).sort();
+}

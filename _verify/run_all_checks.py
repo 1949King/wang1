@@ -244,6 +244,9 @@ CHECKS = [
     # ── 画布意图胶囊目录 + CodeVideoSpec 前端镜像（2026-10-20）──
     ("CANVASCAPS", "_verify/check_canvas_capsule_catalog.py",
      "胶囊目录：能力id在册/节点kind存在/契约常量同源/7阶段覆盖"),
+    # ── 文档数字一致性（2026-10-20）──
+    ("DOCNUM", "_verify/check_doc_numbers.py",
+     "文档数字：无过时数字/端点=实测/能力=目录/体检项数=CHECKS"),
 ]
 
 _py = _python()

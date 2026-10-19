@@ -84,6 +84,65 @@ class PrecisionCapabilityHandlers:
         return CapabilityResult(req.request_id, True, output=plan, error=None)
 
 
+    def precision_align_apply(self, req: CapabilityRequest) -> CapabilityResult:
+        """按帧对齐计划写回（store 唯一写缝 + 一条 compound 撤销）。
+
+        边界：只写 plan 里的 start_time/duration/out_point；不修重叠/大缝隙（需波纹语义）；
+        编辑主体不是 `_clips` 行本体时由 `_apply_clip_fields` 自行校验（刀8 安全带）。
+        """
+        editor, clips, failure = self._clips(req)
+        if failure is not None:
+            return failure
+        if not hasattr(editor, "_apply_clip_fields") or not hasattr(editor, "_record_action"):
+            return self._fail(req, "EditorModule 缺少字段写/撤销接口，拒绝无撤销写回")
+        params = req.params or {}
+        try:
+            max_changes = int(params.get("max_changes", 200) or 200)
+        except (TypeError, ValueError):
+            max_changes = 200
+        plan = plan_frame_align(
+            clips, self._fps(editor, params),
+            max_changes=max(1, min(max_changes, 2000)),
+        )
+        changes = plan.get("changes") or []
+        if not changes:
+            return CapabilityResult(
+                req.request_id, True,
+                output={"applied": 0, "plan": plan, "note": "无需对齐（已在帧网格）"},
+                error=None,
+            )
+        by_id = {str(c.get("id")): c for c in clips}
+        steps = []
+        for change in changes:
+            clip = by_id.get(str(change.get("clip_id")))
+            if clip is None:
+                continue
+            before = {k: v for k, v in (change.get("before") or {}).items() if v is not None}
+            after = {k: v for k, v in (change.get("after") or {}).items() if v is not None}
+            if not after or before == after:
+                continue
+            editor._apply_clip_fields(clip, after)
+            steps.append({
+                "type": "edit_clip", "clip_id": change.get("clip_id"),
+                "before": before, "after": after,
+            })
+        if steps:
+            editor._record_action({
+                "type": "compound", "label": "precision_align", "steps": steps,
+            })
+            if hasattr(editor, "_touch_project_dirty"):
+                editor._touch_project_dirty()
+        return CapabilityResult(
+            req.request_id, True,
+            output={
+                "applied": len(steps),
+                "skipped": plan.get("skipped") or [],
+                "note": "已写回并可一次撤销；重叠/大缝隙未自动修（需波纹语义）",
+            },
+            error=None,
+        )
+
+
 def register_precision_handlers(dispatcher, editor_module_ref) -> None:
     """注册到中央 dispatcher（把注册细节留在能力模块，中央文件不再逐条堆）。"""
     handlers = PrecisionCapabilityHandlers(editor_module_ref)
@@ -96,4 +155,9 @@ def register_precision_handlers(dispatcher, editor_module_ref) -> None:
         "editor.precision_align_plan", CapabilityCategory.EDITOR,
         handlers.precision_align_plan,
         "帧对齐计划：吸附 start_time/duration 并同步 out_point（只出计划，不改时间线）",
+    )
+    dispatcher.register(
+        "editor.precision_align_apply", CapabilityCategory.EDITOR,
+        handlers.precision_align_apply,
+        "帧对齐写回：按计划改 store 并记一条 compound 撤销",
     )
