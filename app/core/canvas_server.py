@@ -118,6 +118,7 @@ from app.core.canvas_routes_post import CanvasPostRoutesMixin
 # 2000 行规模阈值，照 dub 先例单开 mixin）。
 from app.core.canvas_routes_roughcut import CanvasRoughCutRoutesMixin
 from app.core.canvas_routes_code_video import CanvasCodeVideoRoutesMixin
+from app.core.canvas_http_file import serve_file as _serve_file
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
 
@@ -131,6 +132,46 @@ def _check_host_token(handler: BaseHTTPRequestHandler) -> bool:
     qs = parse_qs(parsed.query)
     qtok = (qs.get("token") or [""])[0]
     return bool(qtok) and qtok == _SESSION_TOKEN
+
+
+# V4.46.1 安全刀：CORS 只放行本机 Origin（详见 _BridgeHandler._cors 注释）。
+# 注意：urlparse().hostname 会剥掉 IPv6 的方括号（"[::1]" → "::1"），故集合存裸形。
+_LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1", "tauri.localhost"}
+
+
+def _is_local_bridge_origin(origin: str) -> bool:
+    """Origin 是否属于本机（Qt WebEngine 3010/3011、Tauri、直连 18765）。"""
+    try:
+        parsed = urlparse(origin.strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https", "tauri"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if host in _LOCAL_ORIGIN_HOSTS:
+        return True
+    # 127.0.0.x 全段视为本机（极少数 WebView 用 127.0.0.2 等）
+    if host.startswith("127."):
+        try:
+            return all(0 <= int(p) <= 255 for p in host.split("."))
+        except ValueError:
+            return False
+    return False
+
+
+def cors_allow_origin(origin: str) -> Optional[str]:
+    """返回应写入 Access-Control-Allow-Origin 的值；None = 不写该头（纯函数便于单测）。
+
+    - 无 Origin（curl / 原生请求 / WebView 主文档导航）→ "*"（保持既有行为）
+    - 本机 Origin → 回显自身
+    - 陌生 Origin → None（浏览器据此拦截跨站脚本读取）
+    """
+    origin = (origin or "").strip()
+    if not origin:
+        return "*"
+    if _is_local_bridge_origin(origin):
+        return origin
+    return None
 
 
 # 提示词库远程 JSON / 封面图代理（Qt WebView 直连外网 CDN 常失败）
@@ -357,7 +398,17 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             logger.debug("bridge broken pipe: %s", self.address_string())
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # V4.46.1 安全刀：不再 `Access-Control-Allow-Origin: *`。
+        # 本机桥暴露角色库/时间线/收件箱文件，`*` 意味着用户浏览器里任意网页（含恶意页）
+        # 都能带 fetch 读走这些数据。收紧为**只放行本机 Origin**（纯函数 cors_allow_origin）：
+        #   - http(s)://127.0.0.1|localhost|[::1](:任意端口)（Qt WebEngine 从 3010/3011 拉起）
+        #   - tauri.localhost / tauri://localhost（Tauri 宿主生产形态）
+        # 无 Origin（curl/原生请求）回 "*"；陌生 Origin **不写 ACAO** ⇒ 浏览器拦截跨站读取。
+        allow = cors_allow_origin(self.headers.get("Origin") or "")
+        if allow is not None:
+            self.send_header("Access-Control-Allow-Origin", allow)
+            if allow != "*":
+                self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
@@ -500,29 +551,8 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             if not os.path.isfile(fpath):
                 self._json(404, {"ok": False, "message": "file not found"})
                 return
-            try:
-                with open(fpath, "rb") as f:
-                    data = f.read()
-            except Exception as e:
-                self._json(500, {"ok": False, "message": str(e)})
-                return
-            ctype = "application/octet-stream"
-            ext = os.path.splitext(name)[1].lower()
-            if ext in (".png",):
-                ctype = "image/png"
-            elif ext in (".jpg", ".jpeg"):
-                ctype = "image/jpeg"
-            elif ext in (".webp",):
-                ctype = "image/webp"
-            elif ext in (".mp4",):
-                ctype = "video/mp4"
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Disposition", f'inline; filename="{name}"')
-            self._cors()
-            self.end_headers()
-            self.wfile.write(data)
+            # V4.46.1：流式 + Range（原整读内存 → 大视频 seek 卡顿/内存尖峰）
+            _serve_file(self, fpath)
             return
         if path.startswith("/inbox_file/"):
             name = _safe_filename(path.split("/inbox_file/", 1)[-1])
@@ -530,25 +560,7 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             if not os.path.isfile(fpath):
                 self._json(404, {"ok": False, "message": "file not found"})
                 return
-            try:
-                with open(fpath, "rb") as f:
-                    data = f.read()
-            except Exception as e:
-                self._json(500, {"ok": False, "message": str(e)})
-                return
-            ctype = "application/octet-stream"
-            ext = os.path.splitext(name)[1].lower()
-            if ext in (".mp4", ".webm", ".mov"):
-                ctype = "video/mp4" if ext == ".mp4" else f"video/{ext[1:]}"
-            elif ext in (".png", ".jpg", ".jpeg", ".webp"):
-                ctype = f"image/{'jpeg' if ext in ('.jpg', '.jpeg') else ext[1:]}"
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Disposition", f'inline; filename="{name}"')
-            self._cors()
-            self.end_headers()
-            self.wfile.write(data)
+            _serve_file(self, fpath)
             return
         self._json(404, {"ok": False, "message": "not found"})
 

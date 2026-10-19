@@ -50,12 +50,21 @@ class TestConfigManager:
 
 
 class TestSecureStorage:
-    """安全存储测试"""
-    
+    """安全存储测试
+
+    卫生：必须用 tmp_path 重定向存储文件——原实现直接写真·实
+    `%APPDATA%\\AI短剧编辑器\\secure\\secrets.enc`，把测试假 Key 写进用户真实密钥库，
+    还会把已存的真密钥覆盖掉（test_set_and_get / test_delete 各写盘一次）。
+    """
+
     @pytest.fixture(autouse=True)
-    def setup(self):
-        # 重置单例
+    def setup(self, tmp_path, monkeypatch):
+        # 重置单例 + 把存储文件钉到临时目录（绝不碰真实 AppData）
         SecureStorage._instance = None
+        monkeypatch.setattr(
+            SecureStorage, "_get_storage_path",
+            lambda self: tmp_path / "secrets.enc",
+        )
         self.storage = SecureStorage()
     
     def test_singleton(self):

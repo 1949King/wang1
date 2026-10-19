@@ -12,7 +12,7 @@ import secrets
 import platform
 from pathlib import Path
 from typing import Any, Dict, Optional, List
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime
 import threading
 import logging
@@ -102,8 +102,17 @@ class SecurityConfig:
 
 
 class SecureStorage:
-    """安全存储 - 加密敏感数据"""
-    
+    """安全存储 - 加密敏感数据
+
+    V4.46.1（2026-10-20 安全刀）：加密从自研 XOR 升级为 Fernet（AES-128-CBC+HMAC，
+    cryptography 库，requirements.txt 已声明）。文件带 `sgv2:` 前缀标记新格式；
+    旧 XOR 文件**透明迁移**（读出成功后重写为新格式）。解密失败不再静默置空：
+    损坏文件改名保留（.corrupt-<ts>）+ 明确 error 日志，提示重填密钥。
+    cryptography 缺失时回退旧 XOR（记录 warning，不假装更强）。
+    """
+
+    _ENC_MARKER = b"sgv2:"
+
     _instance: Optional['SecureStorage'] = None
     _lock = threading.Lock()
     
@@ -122,8 +131,28 @@ class SecureStorage:
         
         self._key = self._derive_key()
         self._storage_path = self._get_storage_path()
+        self._fernet_cached = False
+        self._fernet = None
         self._secrets: Dict[str, str] = {}
         self._load_secrets()
+
+    def _get_fernet(self):
+        """惰性取用户级 Fernet（与 secure_store 同一把钥匙）；不可用返回 None。"""
+        if not self._fernet_cached:
+            self._fernet_cached = True
+            try:
+                from app.core.secure_store import get_fernet
+            except ImportError:
+                try:
+                    from core.secure_store import get_fernet  # type: ignore
+                except ImportError:
+                    get_fernet = None  # type: ignore
+            if get_fernet is not None:
+                try:
+                    self._fernet = get_fernet()
+                except Exception as e:
+                    logger.warning(f"获取 Fernet 密钥失败: {e}")
+        return self._fernet
     
     def _get_storage_path(self) -> Path:
         if platform.system() == "Windows":
@@ -172,50 +201,94 @@ class SecureStorage:
         return hashlib.sha256('|'.join(components).encode()).hexdigest()[:32]
     
     def _encrypt(self, data: str) -> bytes:
+        f = self._get_fernet()
+        if f is not None:
+            token = f.encrypt(data.encode("utf-8"))
+            return self._ENC_MARKER + base64.b64encode(token)
+        # 回退：cryptography 缺失/密钥不可用 ⇒ 维持旧 XOR（不假装更强，如实 warning）
+        logger.warning("Fernet 不可用，密钥存储回退旧 XOR 加密（建议安装 cryptography）")
         nonce = secrets.token_bytes(16)
         key = self._key
-        
         cipher = bytearray()
         for i, byte in enumerate(data.encode()):
             cipher.append(byte ^ key[i % len(key)])
-        
         return base64.b64encode(nonce + bytes(cipher))
-    
+
     def _decrypt(self, data: bytes) -> str:
         try:
+            if data.startswith(self._ENC_MARKER):
+                f = self._get_fernet()
+                if f is None:
+                    logger.error("存储已是 Fernet 格式但密钥不可用：请检查 cryptography 安装与 secret.key")
+                    return ""
+                token = base64.b64decode(data[len(self._ENC_MARKER):])
+                return f.decrypt(token).decode("utf-8")
+            # 旧 XOR 格式（sgv2 之前）：机器码一致才能解开
             decoded = base64.b64decode(data)
-            nonce = decoded[:16]
-            cipher = decoded[16:]
+            cipher = decoded[16:]  # 前 16 字节为旧格式 nonce（XOR 模式未参与密钥流，忽略）
             key = self._key
-            
             plain = bytearray()
             for i, byte in enumerate(cipher):
                 plain.append(byte ^ key[i % len(key)])
-            
             return plain.decode()
         except Exception as e:
             logger.error(f"解密失败: {e}")
             return ""
-    
+
+    def _quarantine_corrupt(self) -> None:
+        """解密失败：损坏文件改名保留（可人工找回），不再静默吞掉。"""
+        try:
+            if self._storage_path.exists() and self._storage_path.stat().st_size > 0:
+                ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                bad = self._storage_path.with_name(
+                    f"{self._storage_path.stem}.corrupt-{ts}{self._storage_path.suffix}"
+                )
+                os.replace(self._storage_path, bad)
+                logger.error(
+                    "密钥存储无法解密，已隔离到 %s（本机指纹变化或文件损坏；"
+                    "请到模型管理重新填写各渠道 Key）",
+                    bad,
+                )
+        except OSError as e:
+            logger.error(f"隔离损坏密钥文件失败: {e}")
+
     def _load_secrets(self):
         if self._storage_path.exists():
             try:
-                with open(self._storage_path, 'rb') as f:
+                with open(self._storage_path, "rb") as f:
                     encrypted = f.read()
-                decrypted = self._decrypt(encrypted)
-                self._secrets = json.loads(decrypted) if decrypted else {}
-            except Exception as e:
-                logger.warning(f"加载密钥失败: {e}")
+            except OSError as e:
+                logger.error(f"读取密钥存储失败: {e}")
                 self._secrets = {}
-    
+                return
+            was_legacy = not encrypted.startswith(self._ENC_MARKER)
+            decrypted = self._decrypt(encrypted)
+            if not decrypted:
+                self._quarantine_corrupt()
+                self._secrets = {}
+                return
+            try:
+                self._secrets = json.loads(decrypted)
+            except Exception as e:
+                logger.error(f"密钥存储 JSON 解析失败: {e}（文件已隔离保留）")
+                self._quarantine_corrupt()
+                self._secrets = {}
+                return
+            # 透明迁移：旧 XOR 文件 + Fernet 可用 ⇒ 立即重写为 sgv2 新格式
+            if was_legacy and self._get_fernet() is not None:
+                self._save_secrets()
+
     def _save_secrets(self):
         try:
             encrypted = self._encrypt(json.dumps(self._secrets))
-            with open(self._storage_path, 'wb') as f:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._storage_path.with_name(self._storage_path.name + ".tmp")
+            with open(tmp, "wb") as f:
                 f.write(encrypted)
+            os.replace(tmp, self._storage_path)
         except Exception as e:
             logger.error(f"保存密钥失败: {e}")
-    
+
     def get(self, key: str, default: str = "") -> str:
         return self._secrets.get(key, default)
     

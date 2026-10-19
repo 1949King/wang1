@@ -29,7 +29,7 @@ import json
 import base64
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("AI短剧编辑器.secure_store")
 
@@ -61,7 +61,7 @@ def _get_or_create_fernet_key():
                     _FERNET_INSTANCE = Fernet(key)
                     logger.info(f"使用已存在密钥: {key_file}")
                     return _FERNET_INSTANCE
-        except Exception as e:
+        except Exception:
             continue
 
     # 生成新密钥,尝试多个路径直到成功
@@ -87,6 +87,15 @@ def _get_or_create_fernet_key():
 
 # 模块级单例 (避免每次都重新读密钥)
 _FERNET_INSTANCE = None
+
+
+def get_fernet():
+    """公共入口：获取（或惰性创建）用户级 Fernet 实例；不可用时返回 None。
+
+    供 config_manager.SecureStorage（V4.46.1 密钥加密升级）等复用同一把
+    用户级密钥，避免多处各存一份钥匙。
+    """
+    return _fernet()
 
 
 def _fernet():

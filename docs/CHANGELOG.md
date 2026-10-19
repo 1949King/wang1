@@ -1,5 +1,41 @@
 # 拾光剪影 — 变更日志
 
+## 安全 · 安全底座三刀（V4.46.1，2026-10-20）
+
+> 上一轮缺陷清单 P1 #4/#5/#6 的偿还。全在非冻结区，无需解冻授权。
+
+### ① 密钥存储：自研 XOR → Fernet（`config_manager.py`）
+
+- **问题**：旧实现逐字节 XOR 机器码派生密钥，`nonce` 生成了但**不参与密钥流**（等于没 nonce）；解密失败只 `logger.error` 后**静默返回空**——用户换机器/改主机名后 API Key「凭空消失」且无任何可见提示（本机实测：存量 `secrets.enc` 正是这种不可解残留，旧代码一直在吞）。
+- **修复**：Fernet（AES-128-CBC+HMAC），复用 `secure_store.py` 的**用户级 secret.key**（与既有 PII 加密同一把钥匙，不另立门户）；新文件带 `sgv2:` 标记；旧 XOR 文件读出成功后**透明迁移**为新格式；解密失败→损坏文件改名 `.corrupt-<ts>` 保留 + ERROR 级报错（可人工找回，不删数据）；cryptography 缺失→回退旧 XOR 并如实 warning（不假装更强）。
+
+### ② CORS 收紧（`canvas_server.py`）
+
+- **问题**：本机桥发 `Access-Control-Allow-Origin: *`，且 `/host/characters`、`/editor_outbox`、`/inbox_file/*` 等无 token ⇒ 用户浏览器里任意网页（含恶意页）可带 fetch 读走角色库/时间线/收件箱文件。
+- **修复**：只放行本机 Origin——`127.0.0.1|localhost|::1|tauri.localhost`（任意端口）+ `127.0.0/8` 全段；陌生 Origin **不写 ACAO** ⇒ 浏览器拦截跨站读取；无 Origin（curl/原生请求）照旧。判定下沉纯函数 `cors_allow_origin`（可单测，不留复刻假实现）。
+- **实测**：真桥打 HTTP：evil→无 ACAO / `127.0.0.1:3010`→回显+Vary / 无 Origin→`*`，全过。
+
+### ③ 文件流式化 + Range（新 `canvas_http_file.py`）
+
+- **问题**：`/inbox_file` 与 `/editor_file` 整文件读进内存——生成 mp4 常 50~500MB，一次预览吃满内存、`<video>` 无法 seek。
+- **修复**：`serve_file()` 1MB 分块拷贝 + 单段 Range（206/Content-Range/416）；多段 Range 不支持⇒降级整发（诚实，不假装）；客户端断开静默结束。真桥集成验证 200/206/后缀/416/多段降级全过。
+
+### 附带修复（测试卫生）
+
+`test_config.TestSecureStorage` 原实现把假 Key 直接写进**真实 %APPDATA% 密钥库**（污染 + 覆盖用户真密钥）——改 tmp_path 重定向。
+
+### 验证
+
+- `run_all_checks` **98 项全绿**；pytest **1,789 passed**（+15：迁移/隔离/Range/CORS/纯函数）；
+- ruff 改动文件零违规；**frozen_zone_guard 107 锁完整（本刀零冻结区）**。
+
+### 已知残留（不掩盖）
+
+- 本机 `%APPDATA%\AI短剧编辑器\secure\secrets.enc`（80B）为机器指纹变化后的不可解残留：旧代码同样返回空，新代码每次启动如实报 ERROR（沙箱内隔离改名被拒，生产环境用户启动时能正常隔离）。**用户需到模型管理重填各渠道 Key**（此后自动进 Fernet 新格式）。
+- `/host/characters`、`/editor_outbox`、`/inbox_file/*` 仍无 token（CORS 已挡住浏览器跨站，但本机进程仍可直读）；补 token 属下一刀（需前端配合传 header，动 bridge.ts）。
+
+---
+
 ## 新增 · 画布「代码成片」节点（V4.46.0，2026-10-20）
 
 > 用户一句「解冻 canvas-magnetic-intent」授权落地 V4.46：把 V4.45 的渲染引擎从「只有 Agent 能力」变成画布可点、可看进度、可入轨的节点。
