@@ -169,7 +169,7 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 ### 4.3 输出（失败）
 
 ```jsonc
-{"ok": false, "error": "asset://inbox/shot_2.mp4 不存在（clip clip_shot_2）", "stage": "resolve_assets"}
+{"ok": false, "error": "asset://shot_2.mp4 不存在（clip clip_shot_2；基准=canvas_inbox_dir 根）", "stage": "resolve_assets"}
 ```
 
 `stage` ∈ `compile | security | resolve_assets | render | encode | publish | qc`，便于 V4.46 前端如实展示进度/失败点。

@@ -28,7 +28,7 @@ VERSION_INFO = {
         "· check_capability_catalog OK；check_action_wiring ALL PASS (7)；\n"
         "· frozen_zone_guard OK 107 locks（本轮零冻结区改动）；ruff 本轮文件全过；\n"
         "· CLI round-trip：3 镜头分镜 → spec(1788B JSON) → from_dict → compile OK，\n"
-        "  混合 source 实证（html://title.html + asset://inbox/shot_*.mp4 + html://subtitle.html）。\n"
+        "  混合 source 实证（html://title.html + asset://shot_*.mp4 + html://subtitle.html）。\n"
         "\n【明确不做（防 scope 蔓延）】\n"
         "· 本刀不渲染、不起沙箱、不碰画布节点（V4.45 引擎刀 / V4.46 画布刀）；\n"
         "· 不注册 code_video_render 空壳（目录↔注册守卫禁止空登记占位）。\n"

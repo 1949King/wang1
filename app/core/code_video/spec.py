@@ -613,7 +613,9 @@ def from_storyboard(
             errors.append(f"shots[{i}] (shot={shot.get('shot', '?')}) 缺有效 duration（不猜默认值）")
             continue
         sid = str(shot.get("shot") or i + 1)
-        asset_path = f"inbox/shot_{sid}.mp4"
+        # 路径基准 = canvas_inbox_dir() 根（/inbox_file/<name> 直接服务该目录），
+        # 因此是 shot_N.mp4，不是 inbox/shot_N.mp4（后者会多套一层，V4.44 修正）。
+        asset_path = f"shot_{sid}.mp4"
         clip = SpecClip(
             id=f"clip_shot_{sid}",
             source=f"asset://{asset_path}",

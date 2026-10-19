@@ -13,7 +13,7 @@
 | `CodeVideoSpec` | dataclass 族：CanvasSettings / SpecTrack / SpecClip / AssetEntry / QcSettings / SpecLineage / SpecLimits；`to_dict`/`from_dict` round-trip 恒等 |
 | `validate_spec` | 结构校验：version 只收 `"1.0"`、canvas 四键数值、track/clip id 唯一 |
 | `compile_spec` | 语义校验 + limits 硬钳 + 归一化 ⇒ Timeline DSL 兼容子集；errors 非空 ⇒ compiled=None（调用方必须如实报告，不得强行渲染） |
-| `from_storyboard` | 分镜表 → 草案：片头 `html://title.html` 3s + 每镜头 `asset://inbox/shot_N.mp4` + 全片字幕轨 `html://subtitle.html`；**缺 duration 的镜头不猜 3 秒**，进 errors |
+| `from_storyboard` | 分镜表 → 草案：片头 `html://title.html` 3s + 每镜头 `asset://shot_N.mp4`（基准 = `canvas_inbox_dir()` 根，`/inbox_file/<name>` 直接服务该目录）+ 全片字幕轨 `html://subtitle.html`；**缺 duration 的镜头不猜 3 秒**，进 errors |
 
 **铁律与红线（编译期强制）**：
 - **文字层铁律**：`kind ∈ {text, subtitle}` 的 clip.source 必须 `html://` —— 视频内文字不可靠是扩散模型公认短板，字幕/标题一律代码渲染；
@@ -43,7 +43,7 @@
 - check_capability_catalog OK（0 问题）；check_action_wiring **ALL PASS (7)**；
 - frozen_zone_guard OK **107 locks**（本轮零冻结区改动）；ruff 本轮文件全过；
 - CLI round-trip 实证：3 镜头分镜 → spec（1,788 B JSON）→ from_dict → compile OK；
-  混合 source：`html://title.html` + `asset://inbox/shot_{1,2,3}.mp4` + `html://subtitle.html`。
+  混合 source：`html://title.html` + `asset://shot_{1,2,3}.mp4` + `html://subtitle.html`。
 
 ### 明确不做（防 scope 蔓延）
 

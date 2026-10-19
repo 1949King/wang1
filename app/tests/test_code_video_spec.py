@@ -44,7 +44,7 @@ def _video_spec(duration: float = 13.5, clips: int = 2) -> CodeVideoSpec:
         clips_list.append(
             SpecClip(
                 id=f"c{i}",
-                source=f"asset://inbox/shot_{i + 1}.mp4",
+                source=f"asset://shot_{i + 1}.mp4",
                 range=[start, start + 1.0],
                 kind="video",
             )
@@ -67,7 +67,7 @@ def _video_spec(duration: float = 13.5, clips: int = 2) -> CodeVideoSpec:
                 ],
             ),
         ],
-        assets={f"inbox/shot_{i + 1}.mp4": AssetEntry(duration=1.0) for i in range(clips)},
+        assets={f"shot_{i + 1}.mp4": AssetEntry(duration=1.0) for i in range(clips)},
         lineage=SpecLineage(route="hybrid", spec_id="t1", created_by="test"),
     )
 
@@ -115,7 +115,7 @@ def test_limits_clip_count_12():
     for i, c in enumerate(spec.tracks[0].clips):
         c.range = [3.0 + i, 4.0 + i]
     spec.tracks[1].clips[0].range = [0.0, 30.0]
-    spec.assets = {f"inbox/shot_{i + 1}.mp4": AssetEntry(duration=1.0) for i in range(13)}
+    spec.assets = {f"shot_{i + 1}.mp4": AssetEntry(duration=1.0) for i in range(13)}
     compiled, errors = compile_spec(spec)
     assert compiled is None
     assert any("clip 总数" in e for e in errors)
@@ -202,7 +202,7 @@ def test_from_storyboard_hybrid_sources():
     sources = [c.source for t in spec.tracks for c in t.clips]
     assert "html://title.html" in sources          # 片头（文字层 ⇒ html）
     assert "html://subtitle.html" in sources       # 字幕轨（文字层 ⇒ html）
-    assert "asset://inbox/shot_1.mp4" in sources   # 镜头（扩散产物位）
+    assert "asset://shot_1.mp4" in sources   # 镜头（扩散产物位；基准 = canvas_inbox_dir 根）
     assert spec.lineage.route == "hybrid"
     assert spec.lineage.created_by == "pipeline.code_video_plan"
     assert spec.total_clips() == 4
