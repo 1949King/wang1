@@ -392,6 +392,22 @@ export type StoryboardData = {
   prompt?: string;
 };
 
+/** 代码成片（V4.46）：分镜/契约 → Chromium+ffmpeg 成片 */
+export type CodeVideoData = {
+  kind: "codeVideo";
+  title: string;
+  storyboardText?: string;
+  outputName?: string;
+  qc?: boolean;
+  videoUrl?: string;
+  jobId?: string;
+  status?: NodeStatus | "queued" | "running" | "done" | "error";
+  stage?: string;
+  percent?: number;
+  error?: string;
+  lastIngest?: string;
+};
+
 /** 3D 导演台节点：打开内嵌 Stage3D，截图回写本节点 */
 export type DirectorData = {
   kind: "director";
@@ -519,7 +535,8 @@ export type NodeData =
   | PanoramaData
   | NoteData
   | SourceData
-  | CharacterData;
+  | CharacterData
+  | CodeVideoData;
 
 export const ANIMATION_ACTION_LABELS: Record<AnimationAction, string> = {
   idle: "待机",

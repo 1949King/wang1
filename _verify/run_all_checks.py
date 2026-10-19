@@ -241,6 +241,9 @@ CHECKS = [
     # ── 「代码 × 扩散」渲染引擎（V4.45，2026-10-19；Chromium 缺失显式 SKIP）──
     ("CODEVIDEORENDER", "_verify/check_code_video_render.py",
      "渲染引擎：安检规则/Chromium可用/真渲染+QC双乱序/ffprobe产物"),
+    # ── V4.46 codeVideo 画布节点/端点/SSE 接线（2026-10-20）──
+("CODEVIDEOCANVAS", "_verify/check_code_video_canvas.py",
+     "codeVideo 画布接线：节点/客户端/端点/异步任务/进度/能力"),
     # ── 画布意图胶囊目录 + CodeVideoSpec 前端镜像（2026-10-20）──
     ("CANVASCAPS", "_verify/check_canvas_capsule_catalog.py",
      "胶囊目录：能力id在册/节点kind存在/契约常量同源/7阶段覆盖"),

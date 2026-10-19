@@ -160,6 +160,7 @@ export const KIND_STYLE: Record<string, { color: string; icon: string; label: st
   animation: { color: "#fb7185", icon: "🎞", label: "动画" },
   panorama: { color: "#34d399", icon: "🌐", label: "全景" },
   character: { color: "#e879f9", icon: "🧑‍🎨", label: "角色" },
+  codeVideo: { color: "#22d3ee", icon: "🧩", label: "代码成片" },
 };
 
 /** 取节点对应的卡面样式（未知类型给中性灰） */
@@ -350,6 +351,7 @@ export const NOVICE_ENTRY: Record<string, NoviceEntry> = {
   // ── 批量与设定 ──
   generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch" },
   config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch" },
+  codeVideo: { name: "一键成片", desc: "分镜/契约 → 代码渲染成片", stage: "batch" },
   prompt: { name: "提示词", desc: "可复用的风格描述", stage: "batch" },
   text: { name: "文本块", desc: "说明 / 备注", stage: "batch" },
   // ── 素材与笔记 ──

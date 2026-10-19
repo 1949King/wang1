@@ -23,8 +23,8 @@ const N = (id: string, kind: string) => ({ id, type: kind, data: { kind } });
 const E = (source: string, target: string, id?: string) => ({ id, source, target });
 
 describe("端口表本身", () => {
-  it("覆盖全部 22 个节点 kind", () => {
-    expect(Object.keys(NODE_PORTS)).toHaveLength(22);
+  it("覆盖全部 23 个节点 kind", () => {
+    expect(Object.keys(NODE_PORTS)).toHaveLength(23);
   });
 
   it("每个 kind 都有 accepts/produces 结构", () => {

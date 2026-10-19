@@ -50,6 +50,8 @@ SERVER_FILES = [
     # 2026-10-17：粗剪审核卡端点（/host/rough-cut/apply|export）拆到
     # canvas_routes_roughcut.py（canvas_routes_post.py 已 1936 行，同 dub 先例）。
     os.path.join("app", "core", "canvas_routes_roughcut.py"),
+    # 2026-10-20：codeVideo 渲染端点（/host/code-video/render|status）独立 mixin。
+    os.path.join("app", "core", "canvas_routes_code_video.py"),
 ]
 CLIENTS = [
     # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除，两宿主共用真源包，
@@ -75,6 +77,8 @@ CLIENTS = [
     # 2026-10-17：hostRoughCut.ts 承载 /host/rough-cut/apply|export（画布粗剪审核卡；
     # 同 dubOrchestration 约定 —— 直接 fetch /host/* 的前端模块必须登记）。
     os.path.join("vendor", "packages", "libtv", "src", "hostRoughCut.ts"),
+    # 2026-10-20：codeVideoClient.ts 承载 /host/code-video/render|status（V4.46）。
+    os.path.join("vendor", "packages", "libtv", "src", "codeVideoClient.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'

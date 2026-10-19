@@ -2,7 +2,7 @@
 """画布端口模型守卫（2026-09-28 新增）。
 
 钉死三件事：
-  ① **前端真源 `ports.ts` 的 `NODE_PORTS` 能被后端解析**（22 个 kind 一个不少）
+  ① **前端真源 `ports.ts` 的 `NODE_PORTS` 能被后端解析**（23 个 kind 一个不少）
      —— 格式一改，后端就瞎，且**静默降级成宽松表**（不报错），故必须有守卫盯着。
   ② **类型系统关键判据成立**（音乐必须能接进视频的配乐位——靠 PORT_COMPAT）。
   ③ **编组必须是 associate 边**（不参与数据流、不做类型校验）——否则编组会被误判非法。
@@ -54,7 +54,7 @@ def main() -> int:
     decl = re.findall(
         r"^\s*(\w+):\s*\{\s*accepts:\s*\{[^}]*\}\s*,\s*produces:\s*\{[^}]*\}\s*\},?\s*$",
         ts_src, re.M)
-    check("ports.ts 含 NODE_PORTS 表（22 行）", len(decl) == 22,
+    check("ports.ts 含 NODE_PORTS 表（23 行）", len(decl) == 23,
           f"实际解析到 {len(decl)} 行")
     check("ports.ts 导出 isValidConnection 所需纯函数 canConnect",
           "export function canConnect" in ts_src)
@@ -68,7 +68,7 @@ def main() -> int:
     pm = _load_pm()
     st = pm.stats()
     check("后端解析成功（parse_ok）", st.get("parsed_ok") is True, str(st))
-    check("后端解析出 22 个 kind", st.get("kinds") == 22, str(st))
+    check("后端解析出 23 个 kind", st.get("kinds") == 23, str(st))
     check("后端读到 PORT_COMPAT 规则", st.get("compat_rules", 0) >= 1, str(st))
 
     # ③ 关键判据（与 ports.test.ts 同源，双端必须一致）

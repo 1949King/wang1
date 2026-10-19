@@ -46,6 +46,7 @@ export const NODE_PALETTE: PaletteItem[] = [
   { type: "config", label: "生成配置", keywords: "config 配置 generation", hint: "infinite 对齐 · 锁定生成参数", category: "generate" },
   { type: "digitalHuman", label: "数字人", keywords: "digital human 数字人 tts 配音 口型", hint: "形象 + 台词配音；口型后置", category: "generate" },
   { type: "animation", label: "逐帧动画", keywords: "animation sprite 逐帧 动作", hint: "Sprite Sheet / 占位 / AI", category: "generate" },
+  { type: "codeVideo", label: "代码成片", keywords: "codeVideo 代码 成片 html 字幕 渲染", hint: "分镜/契约 → Chromium+ffmpeg 成片（诚实失败）", category: "generate" },
   // ── 空间 ─────────────────────────────────────────────
   { type: "director", label: "3D 导演台", keywords: "director stage3d 导演台 3d", hint: "自研 Stage3D · 截图回写", category: "space" },
   { type: "panorama", label: "全景", keywords: "panorama 全景 360", hint: "等距柱状图环视", category: "space" },
@@ -256,7 +257,7 @@ export function isBuiltinNodeKind(type: string): type is NodeData["kind"] {
   const kinds: NodeData["kind"][] = [
     "shot", "script", "image", "video", "prompt", "text", "config", "generator", "group", "audio",
     "markdown", "shotlist", "storyboard", "director", "directorCard", "digitalHuman", "animation", "panorama", "note", "source", "music",
-    "character",
+    "character", "codeVideo",
   ];
   return kinds.includes(type as NodeData["kind"]);
 }

@@ -117,6 +117,7 @@ from app.core.canvas_routes_post import CanvasPostRoutesMixin
 # 2026-10-17 画布审核卡：粗剪 apply/export 端点（canvas_routes_post.py 已逼近
 # 2000 行规模阈值，照 dub 先例单开 mixin）。
 from app.core.canvas_routes_roughcut import CanvasRoughCutRoutesMixin
+from app.core.canvas_routes_code_video import CanvasCodeVideoRoutesMixin
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
 
@@ -341,7 +342,7 @@ def _read_local_prompt_json(source_id: str) -> Any:
 # 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:

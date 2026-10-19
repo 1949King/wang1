@@ -20,15 +20,15 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.core.code_video import security, video_critic
 from app.core.code_video.audio_graph import build_audio_graph, iter_audio_clips
 from app.core.code_video.page_builder import build_timeline_page
+from app.core.code_video.progress import emit_progress
 from app.core.code_video.spec import CodeVideoSpec, compile_spec
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
-
 
 # ============================================================
 # 工具
@@ -273,10 +273,12 @@ def render(
     qc: bool = True,
     timeout_s: float = 360.0,
     work_root: Optional[str] = None,
+    on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """渲染一份 compiled spec；返回统一结果字典（ok/stage/error 或产物信息）。"""
     work_dir = ""
     started = time.time()
+    emit_progress(on_progress, "compile", 3)
     try:
         # 1. 契约编译（若给的是 spec）
         if compiled is None:
@@ -297,6 +299,7 @@ def render(
         asset_paths, errors = security.resolve_assets(compiled, inbox)
         if errors:
             return _fail("resolve_assets", "; ".join(errors))
+        emit_progress(on_progress, "resolve_assets", 15)
 
         canvas = compiled.get("canvas") or {}
         width, height = int(canvas.get("width")), int(canvas.get("height"))
@@ -308,12 +311,14 @@ def render(
         page_path = os.path.join(work_dir, "timeline.html")
         with open(page_path, "w", encoding="utf-8") as fh:
             fh.write(build_timeline_page(compiled, html_contents, asset_paths))
+        emit_progress(on_progress, "page", 20)
 
         warnings: List[str] = []
         checks: List[Dict[str, str]] = []
 
         # 4. QC：同 t 双乱序（失败即不渲染整片，避免交付不可复现的片子）
         if qc:
+            emit_progress(on_progress, "qc", 25)
             ts = video_critic.choose_sample_ts(compiled, 5)
             if ts:
                 m_a = _run_worker(
@@ -338,8 +343,10 @@ def render(
                 ))
                 if checks[0]["status"] != "pass":
                     return _fail("qc", checks[0]["detail"], work_dir)
+            emit_progress(on_progress, "qc", 40)
 
         # 5. 整片帧序列
+        emit_progress(on_progress, "render", 40)
         frames_manifest = _run_worker(
             page_path, os.path.join(work_dir, "frames"),
             fps=fps, width=width, height=height,
@@ -356,6 +363,7 @@ def render(
                 + ", ".join(frames_manifest["blocked_requests"][:3]),
                 work_dir,
             )
+        emit_progress(on_progress, "render", 80)
 
         # 6. 音频 + 编码
         clips = iter_audio_clips(compiled)
@@ -387,6 +395,7 @@ def render(
         probe_errors = _validate_output(probe, compiled)
         if probe_errors:
             return _fail("encode", "; ".join(probe_errors), work_dir)
+        emit_progress(on_progress, "validate", 90)
 
         # 7. 发布到画布 inbox
         published = _publish(out_path, output_name, inbox)
@@ -415,7 +424,8 @@ def render(
         )
         warnings.extend(qc_warnings)
         if not qc_report.get("ok"):
-            return _fail("qc", "质检未通过", work_dir)
+            return _fail("qc", "质检未通过：" + "；".join(f"{c['name']}:{c['detail']}" for c in checks if c.get("status") == "fail"), work_dir)
+        emit_progress(on_progress, "done", 100)
 
         elapsed = round(time.time() - started, 2)
         result = {

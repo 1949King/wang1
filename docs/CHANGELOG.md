@@ -1,5 +1,32 @@
 # 拾光剪影 — 变更日志
 
+## 新增 · 画布「代码成片」节点（V4.46.0，2026-10-20）
+
+> 用户一句「解冻 canvas-magnetic-intent」授权落地 V4.46：把 V4.45 的渲染引擎从「只有 Agent 能力」变成画布可点、可看进度、可入轨的节点。
+
+### 交付
+
+- **节点** `vendor/packages/libtv/src/codeVideoNode.tsx`：分镜表 JSON / CodeVideoSpec JSON 二选一；渲染中 SSE 进度条（轮询兜底）；完成后节点内 `<video>` 播放 + 「→ 加入时间线」。
+- **客户端** `codeVideoClient.ts`：提交 / 状态 / SSE 事件过滤；`parseCodeVideoInput` 纯函数可单测。
+- **端点** `POST /host/code-video/render`、`GET /host/code-video/status`（`canvas_routes_code_video.py`）。
+- **任务层** `canvas_code_video_jobs.py`：一任务一线程；最近 20 个 / 1h；失败写 status=error + stage，不伪造 done。
+- **进度** `render_host.render(on_progress=...)`：compile 3 → security → resolve 15 → page 20 → qc 25/40 → render 40/80 → validate 90 → done 100；独立 `progress.py` 避免撑破 render_host 438 行基线。
+- **注册** 23 种内置节点：registerBuiltinNodes / NodePalette / ports.ts / novice 小白入口（`一键成片`）。
+- **守卫** `CODEVIDEOCANVAS`（98 项体检）；后端任务 4 例 + 前端客户端 4 例单测。
+
+### 验证
+
+- 真机 E2E：`html://` 0.5s 镜头 → mp4，QC `dual_shuffle/flat_frame/text_safe_area` 全 pass，成功 URL 回传；失败路径 `qc: 质检未通过：<check:detail>`。
+- `run_all_checks` **98 项**；vitest **591**；pytest **1,774 passed**；tsc 37=基线；冻结区 **107 锁**重锁。
+- 冻结区改动仅 4 个注册/类型文件：`registerBuiltinNodes.ts`、`NodePalette.tsx`、`novice/types.ts`、`stores/node-factory.ts`；磁吸/尺寸/gap/阻力/视觉零改动。
+
+### 取舍
+
+- 不做取消：底层 Chromium 子进程强杀会留半成品，V4.46 只提供状态查询（诚实边界）。
+- 节点输入先收 JSON 文本，不自动吃上游 shotlist 结构；后续 V4.47 可做「上游分镜表 → 节点自动填充」。
+
+---
+
 ## 性能 · 画布启动 / 功能调用提速（V4.45.1，2026-10-20）
 
 > 用户反馈：「点击其他功能启动时候有点卡」。实测定位到 4 个瓶颈，全部在**非冻结区**修复。
