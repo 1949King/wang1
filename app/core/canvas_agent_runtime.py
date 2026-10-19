@@ -66,13 +66,7 @@ def _kill_stale_agent_processes() -> int:
     所以残留进程必须清干净，否则新起的 canvas-agent 会因为锁文件 EPERM 崩。
     返回杀掉的进程数。
     """
-    import signal
-
     killed = 0
-    try:
-        from pathlib import Path as _P
-    except Exception:
-        return 0
     try:
         import psutil
     except Exception:
@@ -119,12 +113,17 @@ def _kill_stale_agent_processes() -> int:
     return killed
 
 
-def port_open(host: str = "127.0.0.1", port: int = DEFAULT_PORT, timeout: float = 0.35) -> bool:
+def port_open(host: str = "127.0.0.1", port: int = DEFAULT_PORT, timeout: float = 0.15) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
+
+
+# 2026-10-20：端口探活缓存（2s），避免画布首屏/重复点击反复付连接超时。
+_LISTEN_CACHE: dict = {"ts": 0.0, "value": False}
+_LISTEN_CACHE_LOCK = threading.Lock()
 
 
 def _which(cmd: str) -> Optional[str]:
@@ -176,7 +175,16 @@ class CanvasAgentRuntime:
             logger.warning("save agent session failed: %s", e)
 
     def is_listening(self) -> bool:
-        return port_open(port=self.port)
+        """端口探活（2s 缓存）：避免每次打开画布都付 0.35s 连接超时。"""
+        now = time.monotonic()
+        with _LISTEN_CACHE_LOCK:
+            if now - _LISTEN_CACHE["ts"] < 2.0:
+                return bool(_LISTEN_CACHE["value"])
+        value = port_open(port=self.port)
+        with _LISTEN_CACHE_LOCK:
+            _LISTEN_CACHE["ts"] = time.monotonic()
+            _LISTEN_CACHE["value"] = value
+        return value
 
     def _start_raw_process(self, progress: Callable[[str], None]) -> subprocess.Popen:
         """拉起 canvas-agent 子进程（底层）。"""

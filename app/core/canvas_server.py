@@ -1842,6 +1842,34 @@ class CanvasBridgeServer:
                 target=self._httpd.serve_forever, name="CanvasBridge", daemon=True
             )
             self._thread.start()
+            # 2026-10-20：后台预热渠道配置 / ComfyUI 状态 / Agent 端口探活，
+            # 避免用户第一次点开面板时这些端点冷启动卡 0.7~4s。
+            try:
+                def _warm_canvas_caches() -> None:
+                    try:
+                        build_host_ai_config_patch()
+                    except Exception:
+                        logger.debug("ai config warmup failed", exc_info=True)
+                    try:
+                        from app.core.canvas_routes_get import warm_comfy_status_cache
+
+                        warm_comfy_status_cache()
+                    except Exception:
+                        logger.debug("comfy status warmup failed", exc_info=True)
+                    try:
+                        from app.core.canvas_agent_runtime import get_canvas_agent_runtime
+
+                        get_canvas_agent_runtime().is_listening()
+                    except Exception:
+                        logger.debug("agent listen warmup failed", exc_info=True)
+
+                threading.Thread(
+                    target=_warm_canvas_caches,
+                    name="CanvasAiConfigWarmup",
+                    daemon=True,
+                ).start()
+            except Exception:
+                logger.debug("canvas cache warmup failed", exc_info=True)
             logger.info("canvas bridge listening on %s (bind %.3fs)",
                         self.base_url, time.monotonic() - _t0)
             try:

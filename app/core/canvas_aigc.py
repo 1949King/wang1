@@ -21,6 +21,8 @@ import shutil
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.core.canvas_ai_config_cache import cached_config, ollama_models_fast
+
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
 
 # 取消感知的 urlopen：任务线程内会把响应登记到取消令牌，取消即可中断在途请求。
@@ -311,7 +313,16 @@ def _json_request(
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
+# ── 2026-10-20 启动/调用提速：缓存逻辑独立成 canvas_ai_config_cache.py ──
 def build_host_ai_config_patch() -> Dict[str, Any]:
+    """从模型广场组装画布 channels（id 前缀 shiguang-），含 AIGC 生图/生视频。
+
+    2026-10-20：整份结果短 TTL 缓存（默认 2s），避免一次点击触发多次重复组装。
+    """
+    return cached_config(_build_host_ai_config_patch_uncached)
+
+
+def _build_host_ai_config_patch_uncached() -> Dict[str, Any]:
     """从模型广场组装画布 channels（id 前缀 shiguang-），含 AIGC 生图/生视频。"""
     channels: List[Dict[str, Any]] = []
     try:
@@ -353,34 +364,8 @@ def build_host_ai_config_patch() -> Dict[str, Any]:
             }
         return list(by_name.values())
 
-    # Ollama（默认渠道；模型列表尽力探测，失败不阻塞）
-    ollama_models: List[Dict[str, str]] = [{"name": "llama3.2", "capability": "text"}]
-    try:
-        import socket
-
-        with socket.create_connection(("127.0.0.1", 11434), timeout=0.4):
-            pass
-        try:
-            from app.modules.lego.ollama_client import ollama_client
-        except ImportError:
-            try:
-                from modules.lego.ollama_client import ollama_client  # type: ignore
-            except ImportError:
-                ollama_client = None  # type: ignore
-        if ollama_client is not None:
-            try:
-                listed = ollama_client.list_models() or []
-                names = []
-                for m in listed:
-                    name = getattr(m, "name", None) or str(m)
-                    if name:
-                        names.append({"name": name, "capability": guess_capability(name)})
-                if names:
-                    ollama_models = names
-            except Exception as e:
-                logger.debug("ollama list failed: %s", e)
-    except OSError:
-        logger.debug("ollama client init failed", exc_info=True)
+    # Ollama（默认渠道；模型列表**非阻塞**探测，首击不再等 requests 超时）
+    ollama_models: List[Dict[str, str]] = ollama_models_fast(guess_capability)
     channels.append(
         {
             "id": "shiguang-ollama",

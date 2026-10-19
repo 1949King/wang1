@@ -142,38 +142,11 @@ export default function App() {
     };
   }, []);
 
-  // 画布首屏后再空闲预热 3D 分包 + Body 图，切导演台时少等
-  useEffect(() => {
-    const w = window as Window & {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    const run = () => {
-      void import("./Stage3D");
-      void import("./riggedHumanoid")
-        .then((m) => {
-          try {
-            m.preloadBodyFigures();
-          } catch {
-            /* 预热失败不影响功能 */
-          }
-        })
-        .catch(() => {
-          /* ignore */
-        });
-    };
-    let idleId = 0;
-    let timer = 0;
-    if (typeof w.requestIdleCallback === "function") {
-      idleId = w.requestIdleCallback(run, { timeout: 2500 });
-    } else {
-      timer = window.setTimeout(run, 900);
-    }
-    return () => {
-      if (idleId && typeof w.cancelIdleCallback === "function") w.cancelIdleCallback(idleId);
-      if (timer) window.clearTimeout(timer);
-    };
-  }, []);
+  // 2026-10-20 启动提速：原逻辑在首屏后 Idle 预热 Stage3D 分包 + BodyKun/BodyChan GLB。
+  // 实测首屏因此额外拉取 ~610KB 3D 分包（Stage3D/OrbitControls+three）+ 2.8MB GLB，
+  // 与首屏资源争抢主线程/带宽 ⇒ 用户点其他功能时明显卡顿。
+  // 现改为**完全不预热**：Stage3D 仍由 React.lazy 在首次切导演台时按需加载；
+  // GLB 由 Stage3D 挂载时预热。首屏只付画布自身成本。
 
   // 启动引导：确保工作区存在并跳到画布视图
   useEffect(() => {

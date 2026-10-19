@@ -24,11 +24,32 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from urllib.parse import parse_qs
 
 from app.core.canvas_route_registry import _route_get, _route_post
 
 logger = logging.getLogger(__name__)
+
+# 2026-10-20 调用提速：ComfyUI 状态探测实测 2.0s/次（引擎目录在但端口未起时
+# requests 连接超时）。状态变化慢，缓存 5s；首击最多等一次短超时。
+_COMFY_STATUS_CACHE: dict = {"ts": 0.0, "data": None, "lock": threading.Lock()}
+_COMFY_STATUS_TTL = 5.0
+
+
+def warm_comfy_status_cache() -> None:
+    """后台预热 ComfyUI 状态缓存（启动时调用；首次点击不再等 1.2s 探测）。"""
+    try:
+        from app.core.ai.comfy_provider import comfy_provider
+
+        status = comfy_provider.engine_status()
+    except Exception as e:  # 预热失败不影响端点
+        logger.debug("comfy status warmup failed: %s", e)
+        return
+    with _COMFY_STATUS_CACHE["lock"]:
+        _COMFY_STATUS_CACHE["data"] = status
+        _COMFY_STATUS_CACHE["ts"] = time.time()
 
 
 def _cs():
@@ -232,10 +253,19 @@ class CanvasGetRoutesMixin:
         if not cs._check_host_token(self):
             self._json(401, {"ok": False, "message": "unauthorized"})
             return
+        now = time.time()
+        with _COMFY_STATUS_CACHE["lock"]:
+            cached = _COMFY_STATUS_CACHE["data"]
+            if cached is not None and now - float(_COMFY_STATUS_CACHE["ts"] or 0.0) < _COMFY_STATUS_TTL:
+                self._json(200, {"ok": True, "status": cached, "cached": True})
+                return
         try:
             from app.core.ai.comfy_provider import comfy_provider
 
             status = comfy_provider.engine_status()
+            with _COMFY_STATUS_CACHE["lock"]:
+                _COMFY_STATUS_CACHE["data"] = status
+                _COMFY_STATUS_CACHE["ts"] = time.time()
         except Exception as e:
             logger.exception("[/host/comfyui/status] 失败")
             self._json(500, {"ok": False, "message": str(e)})
@@ -474,14 +504,16 @@ class CanvasGetRoutesMixin:
         except ImportError:
             from core.canvas_agent_runtime import get_canvas_agent_runtime  # type: ignore
         rt = get_canvas_agent_runtime()
+        # 2026-10-20：只探测一次（原实现 is_listening() 调两次 ⇒ 端口未起时 2×0.35s）
+        listening = rt.is_listening()
         self._json(
             200,
             {
                 "ok": True,
                 "url": rt.url,
                 "token": rt.token,
-                "listening": rt.is_listening(),
-                "message": "已连接" if (rt.is_listening() and rt.token) else "画布 MCP（:17371）未启动，请点「连接画布MCP」",
+                "listening": listening,
+                "message": "已连接" if (listening and rt.token) else "画布 MCP（:17371）未启动，请点「连接画布MCP」",
                 "kind": "canvas_mcp",
             },
         )

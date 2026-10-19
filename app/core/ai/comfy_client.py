@@ -125,8 +125,12 @@ class ComfyClient:
         return self._available
 
     def diagnose(self) -> Dict[str, Any]:
-        """强制探测并返回结构化诊断报告（供 UI 或 provider 判读）。"""
-        ok = self.is_available(force_check=True)
+        """强制探测并返回结构化诊断报告（供 UI 或 provider 判读）。
+
+        2026-10-20：状态查询用 1.2s 短超时（原 8s）。本机引擎在/不在都应秒回；
+        引擎冷启动中的短暂误报由 provider 的「可自动拉起」语境兜底。
+        """
+        ok = self.is_available(force_check=True, timeout=1.2)
         return {
             "available": ok,
             "base_url": self._config.base_url,

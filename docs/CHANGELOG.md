@@ -1,5 +1,51 @@
 # 拾光剪影 — 变更日志
 
+## 性能 · 画布启动 / 功能调用提速（V4.45.1，2026-10-20）
+
+> 用户反馈：「点击其他功能启动时候有点卡」。实测定位到 4 个瓶颈，全部在**非冻结区**修复。
+
+### 实测瓶颈
+
+| 端点 / 路径 | 优化前实测 | 根因 |
+|---|---|---|
+| `/host/providers` | 冷调用 **4.56s**（avg 902ms / max 4506ms） | `build_host_ai_config_patch` 同步调 `ollama_client.list_models()`，Ollama 端口在但 `/api/tags` 不响应 ⇒ requests 连接超时 4.12s |
+| `/host/comfyui/status` | 每次 **2.08s** | 引擎目录在但 8188 未起 ⇒ `comfy_client.diagnose` 8s 超时（实际 connect timeout 2s） |
+| `/host/agent` | 每次 **0.72s** | `is_listening()` 在响应里被调用两次（2×0.35s） |
+| 画布首屏 | 传输 **5.34MB** / JS 1.77MB / JS 堆 20.5MB | App.tsx 在首屏 Idle 预取 Stage3D 分包 + bodykun/bodychan GLB（约 3.4MB） |
+
+### 修复
+
+- `canvas_aigc.py`：Ollama 模型列表改「立即返回缓存/默认 + 后台刷新」（TTL 300s，失败也写缓存防线程风暴）；整份渠道配置 2s TTL 缓存。
+- `canvas_server.py`：桥启动后后台预热「渠道配置 / ComfyUI 状态 / Agent 端口探活」。
+- `canvas_routes_get.py`：ComfyUI 状态 5s 缓存 + `warm_comfy_status_cache()`；`/host/agent` 只探活一次。
+- `comfy_client.diagnose` 超时 8s → **1.2s**；`canvas_agent_runtime` 探活 0.35s → **0.15s** + 2s 缓存。
+- `App.tsx`：移除首屏 Stage3D/GLB 预取；3D 仍由 React.lazy 在首次切导演台时按需加载（GLB 由 Stage3D 挂载时预热）。
+
+### 实测收益（同机、测试端口）
+
+| 指标 | 优化前 | 优化后 |
+|---|---|---|
+| `/host/providers` | 4.56s（冷） | **0.7ms**（预热后，首击 ≤19ms） |
+| `/host/comfyui/status` | 2.08s | **0.5ms**（预热后） |
+| `/host/agent` | 0.72s | **0.48ms** |
+| 首屏传输 | 5.34MB | **1.92MB（-64%）** |
+| 首屏 JS | 1.77MB | **1.16MB** |
+| JS 堆 | 20.5MB | **10MB** |
+| 静态启动 `ensure_started` | — | 813ms（二次 13ms，端口探活口径） |
+
+### 验证
+
+- 全量 `run_all_checks` **97 项全绿**；`check_canvas_routes` 98 条路由一致；
+- 画布 vitest **587 例**；tsc **37 错 = 既有基线**；ruff 改动文件零违规；
+- `frozen_zone_guard` **107 锁完整**（`canvas_bridge.py` / `canvas_runtime.py` / `CanvasShell.tsx` 未动）。
+
+### 取舍
+
+首次切 3D 导演台会多付一次 240KB 分包 + GLB 加载（原本在首屏预算里）；换来的是一次启动/点击不卡。
+若后续仍觉得 3D 首开慢，可改为「悬停 3D 按钮时预取分包」，但**不再首屏预取 GLB**。
+
+---
+
 ## 新增 · 「代码 × 扩散」渲染引擎（V4.45.0，2026-10-19）
 
 > **定位**：V4.44 契约刀的下一刀。把 `CodeVideoSpec` 真正变成成片：一条权威路径
