@@ -60,10 +60,15 @@ if _CAP_ID in cat_ids:
     check(row[2] == "read" and row[3] is False,
           f"effect=read / paid=False（计划态只读，收到 {row[2]}/{row[3]}）")
 
-with open(os.path.join(ROOT, "app", "core", "capability_handlers.py"), encoding="utf-8") as f:
-    _handlers_src = f.read()
+# 2026-10-20：注册已拆分到 capability_handlers_*.py，静态扫描同族模块（不 import dispatcher）
+_handler_files = sorted(
+    os.path.join(ROOT, "app", "core", f)
+    for f in os.listdir(os.path.join(ROOT, "app", "core"))
+    if f.startswith("capability_handlers") and f.endswith(".py")
+)
+_handlers_src = "\n".join(open(p, encoding="utf-8").read() for p in _handler_files)
 check(bool(re.search(rf'dispatcher\.register\(\s*"{re.escape(_CAP_ID)}"', _handlers_src)),
-      "capability_handlers.py 有 code_video_plan register 字面量")
+      "能力模块有 code_video_plan register 字面量")
 
 check(ACTION_TO_CAPABILITY.get("code_video_plan") == _CAP_ID,
       f"action 别名 code_video_plan → {ACTION_TO_CAPABILITY.get('code_video_plan')}")

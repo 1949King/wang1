@@ -459,6 +459,17 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "代码×扩散混合视频渲染：compiled spec → Chromium frame(t) → ffmpeg → inbox（诚实失败）",
      "left", "代码视频成片",
      ["代码视频成片", "混合视频渲染", "渲染代码视频", "code_video_render", "代码成片"]),
+    # ── 精剪线（2026-10-20）：帧级审计 / 对齐计划，只读 ──
+    ("editor.precision_audit", "editor", "read", False,
+     "帧级精剪审计：非帧网格/次帧缝隙/重叠/音画偏移（只读，不写时间线）",
+     "left", "精剪审计", ["精剪", "帧级", "帧网格", "次帧", "音画偏移", "审计"]),
+    ("editor.precision_align_plan", "editor", "read", False,
+     "帧对齐计划：吸附 start_time/duration 并同步 out_point（只出计划，不改时间线）",
+     "left", "帧对齐计划", ["帧对齐", "吸附", "对齐计划", "微调", "精剪"]),
+    # ── 治理线（2026-10-20）：评分 → 闸门判定，只读 ──
+    ("pipeline.aesthetic_gate", "pipeline", "read", False,
+     "审美治理闸门：五维评分 → pass/review/block（估算维度默认复核，不假通过）",
+     "cc", "审美闸门", ["闸门", "治理", "拦截", "评级", "评审", "aesthetic_gate"]),
 ] + _canvas_node_catalog_rows()
 
 # 策略层专属工具：只在 agent_policy 有 effect/paid，**没有** dispatcher handler，

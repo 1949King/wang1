@@ -53,3 +53,11 @@ class RecipeCapabilityHandlers:
             },
             error=None,
         )
+
+
+def register_recipe_handlers(dispatcher, category) -> None:
+    handlers = RecipeCapabilityHandlers()
+    dispatcher.register(
+        "canvas.apply_recipe", category, handlers.apply_recipe,
+        "按配方铺开卡片（一句话 → 前端匹配并建节点）",
+    )

@@ -12,7 +12,9 @@ from app.core import canvas_port_model as pm
 def test_parses_frontend_source():
     st = pm.stats()
     assert st["parsed_ok"] is True, f"ports.ts 解析失败: {st}"
-    assert st["kinds"] == 21, f"kind 数不对: {st}"
+    # 2026-10-20：ports.ts 现有 22 个 kind（新增 note/markdown/character 等），
+    # 原基线 21 是历史滞后；精确数仍保留（防解析静默丢 kind）。
+    assert st["kinds"] == 22, f"kind 数不对: {st}"
     assert st["compat_rules"] >= 1
 
 
@@ -20,7 +22,8 @@ def test_parses_all_node_kinds():
     ports = pm.node_ports()
     for k in ("script", "shot", "image", "video", "audio", "music",
               "digitalHuman", "director", "directorCard", "storyboard",
-              "shotlist", "animation", "panorama", "generator", "source", "group"):
+              "shotlist", "animation", "panorama", "generator", "source", "group",
+              "prompt", "text", "config", "note", "markdown", "character"):
         assert k in ports, f"缺 kind: {k}"
         assert "accepts" in ports[k] and "produces" in ports[k]
 

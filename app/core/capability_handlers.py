@@ -1670,19 +1670,17 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("canvas.open", CapabilityCategory.CANVAS,
                         canvas_handlers.open, "打开 AI 画布模块")
     # 2026-10-19：配方（Agent 第一次能真正改画布，而不只是给建议）
-    from app.core.capability_handlers_recipe import RecipeCapabilityHandlers
-    _recipe_handlers = RecipeCapabilityHandlers()
-    dispatcher.register("canvas.apply_recipe", CapabilityCategory.CANVAS,
-                        _recipe_handlers.apply_recipe, "按配方铺开卡片（一句话 → 前端匹配并建节点）")
-    # 2026-10-19 V4.44：「代码 × 扩散」混合视频（计划态；渲染 V4.45）
-    from app.core.capability_handlers_code_video import CodeVideoCapabilityHandlers
-    _code_video_handlers = CodeVideoCapabilityHandlers()
-    dispatcher.register("pipeline.code_video_plan", CapabilityCategory.PIPELINE,
-                        _code_video_handlers.code_video_plan,
-                        "分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）")
-    dispatcher.register("pipeline.code_video_render", CapabilityCategory.PIPELINE,
-                        _code_video_handlers.code_video_render,
-                        "CodeVideoSpec → Chromium 逐帧 + ffmpeg 编码（落画布 inbox；诚实失败）")
+    from app.core.capability_handlers_recipe import register_recipe_handlers
+    register_recipe_handlers(dispatcher, CapabilityCategory.CANVAS)
+    # V4.44/V4.45：代码×扩散（注册细节留能力模块；中央不再逐条堆，2026-10-20 拆分）
+    from app.core.capability_handlers_code_video import register_code_video_handlers
+    register_code_video_handlers(dispatcher, CapabilityCategory.PIPELINE)
+    # 2026-10-20 精剪线：帧级审计 / 对齐计划（只读）
+    from app.core.capability_handlers_precision import register_precision_handlers
+    register_precision_handlers(dispatcher, editor_module_ref)
+    # 2026-10-20 治理线：审美闸门（只读判定）
+    from app.core.capability_handlers_gate import register_gate_handlers
+    register_gate_handlers(dispatcher)
     dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
     dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,

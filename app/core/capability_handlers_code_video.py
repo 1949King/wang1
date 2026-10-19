@@ -186,3 +186,12 @@ class CodeVideoCapabilityHandlers:
         output["warnings"] = list(result.get("warnings") or []) + warnings
         output["note"] = "渲染完成：产物已落画布 inbox；这是本地产物，未经人工审核"
         return CapabilityResult(req.request_id, True, output=output, error=None)
+
+
+def register_code_video_handlers(dispatcher, category) -> None:
+    """注册代码×扩散能力（注册细节留本模块）。"""
+    h = CodeVideoCapabilityHandlers()
+    dispatcher.register("pipeline.code_video_plan", category, h.code_video_plan,
+                        "分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）")
+    dispatcher.register("pipeline.code_video_render", category, h.code_video_render,
+                        "CodeVideoSpec → Chromium 逐帧 + ffmpeg 编码（落 inbox；诚实失败）")

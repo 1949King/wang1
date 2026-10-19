@@ -70,6 +70,14 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
     # V4.45：渲染写盘 + 长耗时（≤6 分钟）⇒ dangerous（collaborative 需确认；写操作不自动重试）
     ("code_video_render", "dangerous", "pipeline.code_video_render",
      "代码×扩散混合视频渲染：Chromium 逐帧 + ffmpeg 编码，产物落画布 inbox（长耗时，需确认）"),
+    # 2026-10-20 精剪线：只读审计/计划 ⇒ safe
+    ("precision_audit", "safe", "editor.precision_audit",
+     "帧级精剪审计：非帧网格/次帧缝隙/重叠/音画偏移（只读）"),
+    ("precision_align_plan", "safe", "editor.precision_align_plan",
+     "帧对齐计划：吸附 start_time/duration 并同步 out_point（只出计划，不改时间线）"),
+    # 2026-10-20 治理线：只读判定 ⇒ safe
+    ("aesthetic_gate", "safe", "pipeline.aesthetic_gate",
+     "审美治理闸门：五维评分 → pass/review/block（估算维度默认复核）"),
     # P1-3 异步任务模型：提交会启动生成线（可能花钱）→ 危险动作走确认流；
     # 查询/取消只读/止盈止损 → safe。
     ("submit_pipeline", "dangerous", "pipeline.submit",
@@ -341,6 +349,12 @@ def build_agent_actions_help_block() -> str:
         "（「代码 × 扩散」混合视频渲染：Chromium 逐帧 + ffmpeg 编码，产物落画布 inbox；"
         "spec 与 storyboard 二选一；长耗时（≤6 分钟）且写盘，collaborative 模式需用户确认；"
         "失败带 stage（compile/security/resolve_assets/render/encode/publish/qc），不交付半成品）。",
+        "precision_audit 参数: {\"fps\":30,\"tolerance_frames\":0.5,\"include_av\":true}"
+        "（帧级精剪审计：非帧网格/次帧缝隙/重叠/音画偏移；只读，不改时间线）。",
+        "precision_align_plan 参数: {\"fps\":30,\"max_changes\":200}"
+        "（帧对齐计划：吸附 start_time/duration 并同步 out_point；只出 before/after 计划，不改时间线）。",
+        "aesthetic_gate 参数: {\"item\":{…五维评分…}} 或 {\"items\":[…],\"policy\":{…}}"
+        "（审美闸门：pass/review/block；估算维度默认 review；拦截带原因码，不静默丢）。",
         "yue_plan 参数: {\"lyrics\":\"歌词\",\"style\":\"city pop, female vocal\",\"cot\":\"full|melody|off\","
         "\"seed\":42}（YuE 符号规划：只出**可编辑的旋律+和弦乐谱**，不出音频、不花钱；"
         "先用它把「你的意图」给用户看，确认后再 yue_render）。",

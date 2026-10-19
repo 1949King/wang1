@@ -78,7 +78,14 @@ def literal(name: str):
 
 
 def main() -> int:
-    handlers_src = read(HANDLERS)
+    # 2026-10-20：注册已拆分到 capability_handlers_*.py（code_video/recipe/precision/gate），
+    # 只扫中央文件会误报「action 指向未注册能力」⇒ 扫描同族模块（仍不 import dispatcher）。
+    handler_files = sorted(
+        os.path.join(ROOT, "app", "core", f)
+        for f in os.listdir(os.path.join(ROOT, "app", "core"))
+        if f.startswith("capability_handlers") and f.endswith(".py")
+    )
+    handlers_src = "\n".join(read(path) for path in handler_files)
     registered = set(re.findall(r'dispatcher\.register\(\s*"([\w.]+)"', handlers_src))
 
     clip_rows = literal("_AGENT_ACTION_ROWS")

@@ -47,9 +47,19 @@ def check(cond, msg):
 
 
 # ── 静态取「真实注册」集合（避免拉起 dispatcher 链）──
+# 2026-10-20：注册已按域拆到 capability_handlers_*.py（code_video/recipe/precision/gate），
+# 只扫中央文件会漏抓 ⇒ 广播到同族模块；仍然只做静态字面量扫描，不 import dispatcher。
+_HANDLER_FILES = sorted(
+    os.path.join(ROOT, "app", "core", f)
+    for f in os.listdir(os.path.join(ROOT, "app", "core"))
+    if f.startswith("capability_handlers") and f.endswith(".py")
+)
 with open(HANDLERS, encoding="utf-8") as f:
     _handlers_src = f.read()
-    registered = set(re.findall(r'dispatcher\.register\(\s*"([\w.]+)"', _handlers_src))
+_registered_src = "\n".join(
+    open(path, encoding="utf-8").read() for path in _HANDLER_FILES
+)
+registered = set(re.findall(r'dispatcher\.register\(\s*"([\w.]+)"', _registered_src))
 
 # 画布节点级 capability（canvas_tools 后端化）经 register_builtin_handlers 里的
 # 循环注册（for _c in canvas_node_capabilities()），静态 regex 抓不到字面量；
