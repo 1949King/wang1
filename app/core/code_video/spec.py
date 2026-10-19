@@ -61,7 +61,8 @@ SPEC_VERSION = "1.0"
 SOURCE_PREFIXES = ("asset://", "html://")
 
 # html:// 镜头文件名白名单（小写字母数字下划线连字符 + .html）
-_HTML_NAME_RE = re.compile(r"^[a-z0-9_-]{1,40}\.html$")
+HTML_NAME_RE = re.compile(r"^[a-z0-9_-]{1,40}\.html$")
+_HTML_NAME_RE = HTML_NAME_RE  # 兼容内部旧名；security.py 直接用公开名（单一来源，不另写一套）
 # asset:// 相对路径：禁绝对路径、禁盘符、禁 ..、禁反斜杠、只允许安全字符集
 _ASSET_PATH_RE = re.compile(r"^[A-Za-z0-9._\-/]{1,200}$")
 

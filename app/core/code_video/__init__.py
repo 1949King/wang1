@@ -3,9 +3,10 @@
 
 域内模块（按刀次分批落地）：
     spec.py             CodeVideoSpec 渲染契约（V4.44 ✓）
+    security.py         HTML 过闸 / 路径 jail / 限额（V4.45 ✓）
+    page_builder.py     合成时间线页面（纯函数；postMessage 时钟）（V4.45 ✓）
     render_host.py      渲染编排（V4.45）
     render_worker.py    沙箱子进程（V4.45）
-    security.py         HTML 过闸（V4.45）
     video_critic.py     视频域代理评分（V4.45）
     llm_html.py         LLM 生成镜头 HTML（V4.46）
 

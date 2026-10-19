@@ -112,8 +112,9 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 | 文件 | 职责 | 预算 | 关键约束 |
 |---|---|---|---|
 | `app/core/code_video/security.py` | HTML 静态安检、路径 jail、资源限额、自包含判定 | ≤260 行 | 纯标准库；零 Qt；返回错误列表 |
-| `app/core/code_video/render_worker.py` | 子进程：启动 Chromium、注入时钟、`frame(t)`、截图、回传文字 rect | ≤380 行 | **禁止 import PyQt6**；只依赖 playwright + stdlib |
-| `app/core/code_video/render_host.py` | 编排：安检→解析→生成合成页→拉 worker→音频→编码→inbox→QC | ≤480 行 | 顶层零 Qt；ffmpeg 走 `ffmpeg_utils` |
+| `app/core/code_video/page_builder.py` | 合成时间线页面（纯函数）：叠层/fit/iframe srcdoc/确定性时钟/postMessage | ≤380 行 | 零 I/O；可字符串断言；iframe 用 postMessage（file:// 跨源实测） |
+| `app/core/code_video/render_worker.py` | 子进程：启动 Chromium、`frame(t)`、截图、回传文字 rect | ≤380 行 | **禁止 import PyQt6**；只依赖 playwright + stdlib |
+| `app/core/code_video/render_host.py` | 编排：安检→解析→生成合成页→拉 worker→音频→编码→inbox→QC | ≤420 行 | 顶层零 Qt；ffmpeg 走 `ffmpeg_utils` |
 | `app/core/code_video/video_critic.py` | 双乱序比对、文字安全区、平色检测、报告结构 | ≤260 行 | 纯函数优先；PIL 缺失时诚实 not_wired |
 | `app/core/code_video/audio_graph.py`（可选拆分） | 音频 filter graph 纯函数 | ≤180 行 | 单独可测，避免 render_host 膨胀 |
 | `app/core/capability_handlers_code_video.py` | 增 `code_video_render` 薄壳 | 96 → ≤150 行 | 只转发，算法都在 code_video/ |
@@ -219,17 +220,24 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 - **不提交**：`vendor/_tmp_*`、`docs/_reports/*.html`、`启动画布诊断.bat`、本规划文档（T1 后单独提交）。
 - 验收：`git diff --cached --name-only` 与上面清单逐项核对；门禁全绿。
 
-### T2 · `security.py` + 单测（无渲染）
-- 函数：`check_html_self_contained(name, text) -> list[str]`、`resolve_html(spec, root) -> (paths, errors)`、
-  `resolve_assets(spec) -> (map, errors)`、`limits_check(compiled) -> errors`。
-- 验收：新测试 ≥20 例（每条规则一个反例 + 合法样例）；`check_code_video.py` F 节断言规则表在册。
+### T2 · `security.py` + 单测（无渲染）✅ 2026-10-19 已落地
+- 函数：`check_html(name, text) -> list[str]`、`resolve_html(compiled, root) -> (文本, errors)`、
+  `resolve_assets(compiled, inbox_dir) -> (路径, errors)`、`check_limits(compiled) -> errors`；
+  规则表 `FORBIDDEN_RULES`（19 条：外联/脚本外链/协议相对/fetch/XHR/WS/SSE/beacon/动态 import/
+  eval/Function/window.open/跳转/parent 逃逸/base/meta refresh/storage）。
+- 实测：**240 行**；`test_code_video_security.py` **47 例（46 通过 + 1 软链跳过）**；
+  spec 公开 `HTML_NAME_RE` 供 security 复用（单一来源，不另写一套）。
+- 顺手修正：`asset://` 基准 = `canvas_inbox_dir()` 根（`shot_N.mp4`，不是 `inbox/shot_N.mp4`）。
 
-### T3 · 合成页生成器（纯函数）
-- `build_timeline_page(compiled) -> html_text`：把 tracks/clips 变成绝对定位图层；
-  视频/图片层 `<video>/<img>`，HTML 层 `<iframe srcdoc=... sandbox="allow-scripts">`；
-  文字层带 `data-sg-text`；按 track 顺序叠 z-index；`fit` 三模式映射 CSS。
-- 纯函数、无 I/O ⇒ 可在 pytest 里断言结构（不启动 Chromium）。
-- 验收：3 个样例（纯素材 / 含 HTML / 重叠轨）快照断言；非法 fit 已被 compile 拦下。
+### T3 · 合成页生成器（纯函数）✅ 2026-10-19 已落地
+- `page_builder.py`（**353 行**）：`build_timeline_page(compiled, html_contents, asset_paths)`；
+  轨道叠层 z-index、cover/contain/blur-fill、iframe srcdoc、确定性时钟（performance.now/Date.now/
+  rAF/CSS 动画冻结/Math.random 按 t 播种）、`__sgSeek(t)`、`__sgReady`、`__sgTextRects`。
+- 实测：`test_code_video_page.py` **8 例**；真 Chromium 冒烟（540×960）：
+  `__sgSeek(1.5)` → 文字层回传 `t=1.50`；`__sgSeek(0.5)` → `t=0.50`（确定性成立）。
+- 🔴 **关键发现（写进设计约束）**：`file://` 页面里父页面直接读 `iframe.contentWindow`
+  会抛 `SecurityError`（opaque origin）⇒ HTML 镜头时钟与文字 rect **必须走 postMessage**。
+  T4 实现不得回退到直接访问 iframe DOM。
 
 ### T4 · `render_worker.py`（真 Chromium）
 - CLI：`python -m app.core.code_video.render_worker --job job.json`。
@@ -287,7 +295,7 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 |---|---|---|---|
 | Chromium 逐帧截图比预期慢（>6 分钟） | 中 | 体验差 | T4 先做基准；超预算时先调并发/降采样 QC，**不降画质**；快速路径另立 V4.45.5 |
 | 字体/GPU 差异导致跨机帧哈希不同 | 高 | 质检误报 | 确定性定义限定「同机同运行」；固定 `--disable-gpu`、`--force-device-scale-factor=1`；跨机只比结构指标 |
-| `iframe srcdoc` 内脚本拿不到宿主时钟 | 中 | HTML 动画不确定 | 注入脚本置于 srcdoc 最前；`sandbox="allow-scripts"` 同源；worker 在 iframe load 后显式设置 `__t` |
+| `iframe srcdoc` 内脚本拿不到宿主时钟 | 中 | HTML 动画不确定 | ✅ 已解决（T3）：确定性时钟随 srcdoc 注入；父页面经 `postMessage` 驱动（`file://` 直接读 contentWindow 会 SecurityError，实测）；worker 在 iframe load 后 `__sgSeek` |
 | 视频 seek 精度不足（GOP 长） | 中 | 帧错位 | `currentTime+0.001` 补丁；必要时 V4.45.5 做「近无损关键帧副本缓存」（OpenFilm `seekable` 思路） |
 | 音频 `atempo` 与视频变速不同步 | 低 | 音画漂移 | 音频窗口按 `range 长` 而非源时长；抽帧校验总时长 |
 | 海量临时 PNG 占磁盘 | 中 | 磁盘满 | 单作业临时目录、编码后立即清理；失败保留路径但上限 2 个作业 |
