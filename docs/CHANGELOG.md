@@ -1,5 +1,63 @@
 # 拾光剪影 — 变更日志
 
+## 新增 · 「代码 × 扩散」渲染引擎（V4.45.0，2026-10-19）
+
+> **定位**：V4.44 契约刀的下一刀。把 `CodeVideoSpec` 真正变成成片：一条权威路径
+> `compile → security → resolve → page_builder → render_worker(Chromium) → audio_graph →
+> ffmpeg → ffprobe → publish_to_inbox → QC`。**先做对，再做快**：本刀不做第二条纯素材快速路径。
+
+### 新增模块（`app/core/code_video/`，全部零 Qt）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `security.py` | 260 | HTML 自包含 19 条禁用规则（外联/脚本外链/协议相对/fetch/XHR/WS/SSE/beacon/动态 import/eval/Function/window.open/跳转/parent 逃逸/base/meta refresh/storage）；html/asset 路径 jail（realpath 防 `..`/盘符/软链）；HTML 单文件 512KB、总数 12、总字节 6MB、帧数 1800 限额；渲染边界文字层铁律再确认 |
+| `page_builder.py` | 369 | compiled → 自包含时间线页；轨道叠层、cover/contain/blur-fill、iframe `srcdoc`、确定性时钟（`performance.now`/`Date.now`/rAF/CSS 动画冻结/`Math.random` 按 t 播种）、`__sgSeek(t)`/`__sgReady`/`__sgTextRects` |
+| `render_worker.py` | 263 | 无 Qt 子进程；`page.route` 运行时网络兜底（只放行 file/data/about/blob，拦截记 `blocked_requests`）；逐帧 PNG + sha256 manifest + `progress.json`；失败写 `worker_error.json` 并非零退出；`--check` 探测 Chromium |
+| `render_host.py` | 438 | 编排 + 音频 + 编码 + ffprobe 校验（时长 ≤1.5 帧 / 宽高 / 帧率）+ 发布 + QC；失败带 `stage`（compile/security/resolve_assets/render/encode/publish/qc）与 `work_dir`；成功才清理 |
+| `audio_graph.py` | 107 | 音频 filter graph 纯函数：`atrim`/`atempo` 链（0.25~4）/`volume`/`adelay`/`amix+apad` |
+| `video_critic.py` | 145 | 同 t 双乱序 sha256、文字安全区（`data-sg-text` rect）、平色 warning；响度 EBU R128 显式 `not_wired` |
+
+### 关键实测（写进设计约束）
+
+- 🔴 **`file://` 下父页面读 `iframe.contentWindow` 会抛 SecurityError**（opaque origin）⇒
+  HTML 镜头时钟与文字 rect **必须走 `postMessage`**；直接访问的写法已实测失败并回退。
+- 真渲染冒烟：360×640 / 24fps / 0.5s HTML 镜头 → mp4；QC 双乱序 pass、文字安全区 pass、
+  ffprobe 宽高/帧率/时长一致。
+- 10 帧 ×2 次逐帧 sha256 一致（同机确定性）；540×960 约 **30ms/帧**。
+- 2s 样例（正弦音轨）出片同时含 video+audio 流、时长 2.000s。
+
+### 能力注册（三处）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `agent_capability_catalog.py` | `pipeline.code_video_render`（file_write / paid=False / left / 「代码视频成片」） |
+| 2 | `capability_handlers.py` | `register("pipeline.code_video_render", ...)`（1,999 行，未破 2000 守卫） |
+| 3 | `agent_action_registry.py` | action `code_video_render` **dangerous**（长耗时写盘需确认）+ help 参数文案 |
+
+### 守卫
+
+- `_verify/check_code_video.py`：B 扩渲染能力注册/级别；E 扩至 code_video 七模块 + 能力薄壳
+  行数棘轮；新增 F 节（render_host/render_worker 顶层零 Qt/playwright、失败带 stage、
+  `worker_error.json`、主进程无 eval/exec）。
+- `_verify/check_code_video_render.py`（新）：安检规则表 / Chromium 可用（缺失显式 SKIP）/
+  真渲染 + QC 双乱序 + ffprobe 产物。
+- `run_all_checks` 94 → **95 项**（CODEVIDEO + CODEVIDEORENDER）。
+
+### 验证
+
+- pytest code_video 五件套 **111 例（110 passed / 1 skip）**：
+  契约 23 · 安检 47 · 页面 8 · 音频 7 · 质检 12 · 编排 13。
+- `check_code_video` / `check_code_video_render` 全绿；`stability_gate` 无新增；
+  `check_file_size` 通过；`frozen_zone_guard` **107 锁**完整（本刀零冻结区改动）。
+- ruff：新增文件零违规（RUF100 清理后 `ruff_gate` 通过）。
+
+### 明确不做（V4.46 画布刀）
+
+不接画布 `codeVideo` 节点/端点/SSE 进度；不做 LLM 生成镜头 HTML（`llm_html.py`）；
+不做纯素材 ffmpeg 快速路径（V4.45.5，需先有基准与双路径等价测试）。
+
+---
+
 ## 新增 · 「代码 × 扩散」混合视频契约（CodeVideoSpec，2026-10-19，V4.44.0）
 
 > **定位**：把「大模型写代码做视频」（管文字/版式/动效/交互）与「视频生成大模型做视频」

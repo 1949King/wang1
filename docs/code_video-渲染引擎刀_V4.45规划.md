@@ -1,6 +1,7 @@
 # 「代码 × 扩散」混合视频 · V4.45 渲染引擎刀规划
 
-> **状态**：待实施（V4.44 契约刀已在工作区落地、门禁绿，尚未提交）
+> **状态**：**已落地（V4.45.0，2026-10-19）**——T2-T7 完成；真渲染 + QC + ffprobe 门禁全绿；
+> 仅 T8（用户真机验收：3 镜头分镜 → inbox 播放）待交回用户执行。
 > **日期**：2026-10-19
 > **上游**：[`docs/CHANGELOG.md`](CHANGELOG.md) V4.44.0 条目 · `app/core/code_video/spec.py`
 > **下游**：V4.46 画布刀（`codeVideo` 节点 + 端点 + SSE 进度，需解冻 `canvas-magnetic-intent`）
@@ -264,10 +265,13 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 - 实测：`test_code_video_critic.py` **12 例**；真渲染双乱序 5/5 一致。
 - 响度 EBU R128 显式 `not_wired`（不假装测过）。
 
-### T7 · 能力注册 + 守卫 + 文档
-- 三处注册（catalog / handlers / action 表）；`check_code_video.py` 扩 F/G 节；
-  新增 `_verify/check_code_video_render.py` 并登记 `CODEVIDEORENDER`（94→95 项）。
-- 文档：`现行技术文档.md` §6.10 状态回正（V4.45 已落），CHANGELOG V4.45.0 条目。
+### T7 · 能力注册 + 守卫 + 文档 ✅ 2026-10-19 已落地
+- 三处注册（catalog / handlers / action 表）：`pipeline.code_video_render`（file_write / 免费 /
+  action=dangerous）；`capability_handlers.py` 1,999 行（未破 2000 守卫）。
+- `check_code_video.py` 扩 B（渲染能力注册/级别）、E（七模块 + 薄壳行数棘轮）、F（顶层零
+  Qt/playwright、失败带 stage、`worker_error.json`、无 eval/exec）；新增 `check_code_video_render.py`
+  并登记 `CODEVIDEORENDER`（**95 项**）。
+- 文档：`现行技术文档.md` §6.10 状态回正 + §6.5 能力数 122，CHANGELOG V4.45.0，version/README/上下文包同步。
 - 验收：`check_capability_catalog` / `check_action_wiring` / `check_code_video` / `check_code_video_render` 全绿。
 
 ### T8 · 真机验收（交回用户）
@@ -285,7 +289,7 @@ Chromium 只负责**画面帧**。音频由 `render_host` 用 ffmpeg 精确拼�
 | 守卫 | `check_code_video.py` A-E 原样 + F（引擎零 Qt、规则表在册、no-fallback）+ G（行数棘轮） | run_all_checks |
 | 守卫 | `check_code_video_render.py`：注册一致 + 真渲染冒烟（1s/12fps/360×640，缺 Chromium 显式 SKIP） | run_all_checks |
 | 回归 | 原 23 例 + 新增 ≥20 例 | pre-commit |
-| 全量 | `run_all_checks.py`（当前 **94** 项，V4.44 契约守卫本轮已补入册 → V4.45 再加渲染守卫 = **95** 项）+ `pytest app/tests -q`（726+） | 提交前 |
+| 全量 | `run_all_checks.py`（当前 **95** 项：CODEVIDEO + CODEVIDEORENDER 均已入册）+ `pytest app/tests -q`（736+） | 提交前 |
 | 冻结 | `frozen_zone_guard.py` 必须 **107 locks intact**（本刀零冻结区改动） | 提交前 |
 
 **禁用的「省事」做法**：不 `--update` 冻结基线；不抬 `check_file_size` 基线；不为新能力建空壳注册；

@@ -67,6 +67,9 @@ _AGENT_ACTION_ROWS: Tuple[Tuple[str, str, Optional[str], str], ...] = (
     # V4.44「代码 × 扩散」混合视频：计划态只读 ⇒ safe（渲染 V4.45 落地后再评估级别）
     ("code_video_plan", "safe", "pipeline.code_video_plan",
      "代码×扩散混合视频规划：分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）"),
+    # V4.45：渲染写盘 + 长耗时（≤6 分钟）⇒ dangerous（collaborative 需确认；写操作不自动重试）
+    ("code_video_render", "dangerous", "pipeline.code_video_render",
+     "代码×扩散混合视频渲染：Chromium 逐帧 + ffmpeg 编码，产物落画布 inbox（长耗时，需确认）"),
     # P1-3 异步任务模型：提交会启动生成线（可能花钱）→ 危险动作走确认流；
     # 查询/取消只读/止盈止损 → safe。
     ("submit_pipeline", "dangerous", "pipeline.submit",
@@ -333,6 +336,11 @@ def build_agent_actions_help_block() -> str:
         "（「代码 × 扩散」混合视频规划：分镜表 → CodeVideoSpec 草案，片头/字幕走 html:// 代码层、"
         "镜头走 asset:// 扩散素材位；只出计划态不渲染；缺 duration 的镜头会进 warnings 不猜默认值；"
         "确认后用 code_video_render 落地）。",
+        "code_video_render 参数: {\"spec\":{…CodeVideoSpec…},\"storyboard\":[…],"
+        "\"output_name\":\"可选\",\"qc\":true}"
+        "（「代码 × 扩散」混合视频渲染：Chromium 逐帧 + ffmpeg 编码，产物落画布 inbox；"
+        "spec 与 storyboard 二选一；长耗时（≤6 分钟）且写盘，collaborative 模式需用户确认；"
+        "失败带 stage（compile/security/resolve_assets/render/encode/publish/qc），不交付半成品）。",
         "yue_plan 参数: {\"lyrics\":\"歌词\",\"style\":\"city pop, female vocal\",\"cot\":\"full|melody|off\","
         "\"seed\":42}（YuE 符号规划：只出**可编辑的旋律+和弦乐谱**，不出音频、不花钱；"
         "先用它把「你的意图」给用户看，确认后再 yue_render）。",

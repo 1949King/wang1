@@ -44,13 +44,17 @@ check(hasattr(cv, "compile_spec") and hasattr(cv, "from_storyboard"),
       "spec 域导出面完整（compile_spec / from_storyboard）")
 
 # ── B. 注册 ↔ 目录 ↔ action 别名 ──
-print("[B] pipeline.code_video_plan 三处注册一致")
+print("[B] pipeline.code_video_plan / code_video_render 三处注册一致")
 from app.core import agent_capability_catalog as cat
-from app.core.agent_action_registry import ACTION_TO_CAPABILITY
+from app.core.agent_action_registry import (
+    ACTION_TO_CAPABILITY,
+    get_dangerous_actions,
+)
 
 _CAP_ID = "pipeline.code_video_plan"
+_CAP_RENDER = "pipeline.code_video_render"
 cat_ids = cat.registered_capability_ids()
-check(_CAP_ID in cat_ids, "能力目录 CAPABILITY_ROWS 含该能力")
+check(_CAP_ID in cat_ids, "能力目录 CAPABILITY_ROWS 含 code_video_plan")
 if _CAP_ID in cat_ids:
     row = next(r for r in cat.CAPABILITY_ROWS if r[0] == _CAP_ID)
     check(row[2] == "read" and row[3] is False,
@@ -59,7 +63,7 @@ if _CAP_ID in cat_ids:
 with open(os.path.join(ROOT, "app", "core", "capability_handlers.py"), encoding="utf-8") as f:
     _handlers_src = f.read()
 check(bool(re.search(rf'dispatcher\.register\(\s*"{re.escape(_CAP_ID)}"', _handlers_src)),
-      "capability_handlers.py 有 register 字面量")
+      "capability_handlers.py 有 code_video_plan register 字面量")
 
 check(ACTION_TO_CAPABILITY.get("code_video_plan") == _CAP_ID,
       f"action 别名 code_video_plan → {ACTION_TO_CAPABILITY.get('code_video_plan')}")
@@ -68,6 +72,21 @@ from app.core.agent_policy import _CAPABILITY_EFFECTS
 
 check(_CAPABILITY_EFFECTS.get(_CAP_ID) == ("read", False),
       f"policy effect 表同步（{_CAPABILITY_EFFECTS.get(_CAP_ID)}）")
+
+# V4.45 渲染能力：file_write + dangerous（长耗时写盘需确认）
+check(_CAP_RENDER in cat_ids, "能力目录 CAPABILITY_ROWS 含 code_video_render")
+if _CAP_RENDER in cat_ids:
+    row = next(r for r in cat.CAPABILITY_ROWS if r[0] == _CAP_RENDER)
+    check(row[2] == "file_write" and row[3] is False,
+          f"effect=file_write / paid=False（收到 {row[2]}/{row[3]}）")
+check(bool(re.search(rf'dispatcher\.register\(\s*"{re.escape(_CAP_RENDER)}"', _handlers_src)),
+      "capability_handlers.py 有 code_video_render register 字面量")
+check(ACTION_TO_CAPABILITY.get("code_video_render") == _CAP_RENDER,
+      f"action 别名 code_video_render → {ACTION_TO_CAPABILITY.get('code_video_render')}")
+check(_CAPABILITY_EFFECTS.get(_CAP_RENDER) == ("file_write", False),
+      f"policy effect 表同步（{_CAPABILITY_EFFECTS.get(_CAP_RENDER)}）")
+check("code_video_render" in get_dangerous_actions(),
+      "action 级别 = dangerous（长耗时写盘，collaborative 需确认）")
 
 # ── C. lineage 六键同源 ──
 print("[C] lineage 六键白名单与 glue GENERATION_KEYS 同源")
@@ -100,18 +119,59 @@ check(compiled2 is None and any("文字层铁律" in e for e in cerrs2),
       "文字层铁律反例被拒（text+asset:// ⇒ 编译失败）")
 
 # ── E. 行数棘轮（只减不增）──
-print("[E] 行数棘轮（契约三文件）")
+print("[E] 行数棘轮（code_video 域 + 能力薄壳）")
 _TOLERANCE = 10
 _BASELINE = {
-    "app/core/code_video/spec.py": 678,
-    "app/core/capability_handlers_code_video.py": 96,
-    "app/tests/test_code_video_spec.py": 290,
+    "app/core/code_video/spec.py": 680,
+    "app/core/code_video/security.py": 260,
+    "app/core/code_video/page_builder.py": 369,
+    "app/core/code_video/render_worker.py": 263,
+    "app/core/code_video/render_host.py": 438,
+    "app/core/code_video/audio_graph.py": 107,
+    "app/core/code_video/video_critic.py": 145,
+    "app/core/capability_handlers_code_video.py": 188,
 }
 for rel, base in _BASELINE.items():
     n = sum(1 for _ in open(os.path.join(ROOT, rel), encoding="utf-8"))
     check(n <= base + _TOLERANCE,
           f"{rel} {n} 行（基线 {base} + 容差 {_TOLERANCE}）"
           + ("" if n <= base else " ⇒ 拆分或下调基线，别放任增长"))
+
+# ── F. 渲染引擎隔离 / 诚实失败 ──
+print("[F] 渲染引擎隔离与诚实失败")
+import ast
+
+import app.core.code_video.render_host as _host  # noqa: F401
+
+_heavy2 = [m for m in ("PyQt6", "playwright", "torch", "diffusers") if m in sys.modules]
+check(not _heavy2, f"import render_host 后无重依赖{'' if not _heavy2 else f'：{_heavy2}'}")
+
+
+def _top_level_imports(rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+for rel in ("app/core/code_video/render_host.py", "app/core/code_video/render_worker.py"):
+    imports = _top_level_imports(rel)
+    check(not ({"PyQt6", "PyQt5", "playwright"} & imports),
+          f"{rel} 顶层不 import Qt/playwright（实际 {sorted(imports)[:6]}）")
+
+_host_src = open(os.path.join(ROOT, "app/core/code_video/render_host.py"), encoding="utf-8").read()
+_worker_src = open(os.path.join(ROOT, "app/core/code_video/render_worker.py"), encoding="utf-8").read()
+check("_fail(" in _host_src and '"stage"' in _host_src,
+      "render_host 失败带 stage（诚实失败，不交半成品）")
+check("worker_error.json" in _worker_src,
+      "render_worker 失败写 worker_error.json（失败可定位）")
+check(not re.search(r"\b(?:eval|exec)\s*\(", _host_src),
+      "render_host 不 eval/exec 任何模板（主进程零 RCE 面）")
 
 print()
 if _failures:

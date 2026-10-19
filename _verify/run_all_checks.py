@@ -238,6 +238,9 @@ CHECKS = [
     #    （本项目反复出现；arch_guard 无参空转、check_canvas_frontend_quality 纯摆设均是同病）。
     ("CODEVIDEO", "_verify/check_code_video.py",
      "代码×扩散契约：零重依赖/三处注册一致/lineage六键同源/文字层铁律反例/行数棘轮"),
+    # ── 「代码 × 扩散」渲染引擎（V4.45，2026-10-19；Chromium 缺失显式 SKIP）──
+    ("CODEVIDEORENDER", "_verify/check_code_video_render.py",
+     "渲染引擎：安检规则/Chromium可用/真渲染+QC双乱序/ffprobe产物"),
 ]
 
 _py = _python()

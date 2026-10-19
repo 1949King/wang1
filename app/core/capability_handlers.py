@@ -1680,6 +1680,9 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     dispatcher.register("pipeline.code_video_plan", CapabilityCategory.PIPELINE,
                         _code_video_handlers.code_video_plan,
                         "分镜表→CodeVideoSpec 草案（契约编译；计划态，不渲染）")
+    dispatcher.register("pipeline.code_video_render", CapabilityCategory.PIPELINE,
+                        _code_video_handlers.code_video_render,
+                        "CodeVideoSpec → Chromium 逐帧 + ffmpeg 编码（落画布 inbox；诚实失败）")
     dispatcher.register("canvas.sync_models", CapabilityCategory.CANVAS,
                         canvas_handlers.sync_models, "同步模型管理渠道到画布")
     dispatcher.register("canvas.list_actions", CapabilityCategory.CANVAS,

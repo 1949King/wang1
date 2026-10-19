@@ -20,10 +20,20 @@ from typing import Any, Dict, List
 
 try:
     from app.core.capability_dispatcher import CapabilityRequest, CapabilityResult
-    from app.core.code_video.spec import compile_spec, from_storyboard
+    from app.core.code_video.spec import (
+        CodeVideoSpec,
+        compile_spec,
+        from_storyboard,
+        validate_spec,
+    )
 except ImportError:  # 兼容 `core.*` 旧导入路径
     from core.capability_dispatcher import CapabilityRequest, CapabilityResult  # type: ignore
-    from core.code_video.spec import compile_spec, from_storyboard  # type: ignore
+    from core.code_video.spec import (  # type: ignore
+        CodeVideoSpec,
+        compile_spec,
+        from_storyboard,
+        validate_spec,
+    )
 
 
 def _opt_int(p: Dict[str, Any], key: str, default: int) -> int:
@@ -94,3 +104,85 @@ class CodeVideoCapabilityHandlers:
             },
             error=None,
         )
+
+    def code_video_render(self, req: CapabilityRequest) -> CapabilityResult:
+        """渲染入口：spec 或 storyboard 二选一 → 契约编译 → render_host 出片。
+
+        诚实失败：没输入 / spec 不合法 / 编译不过 / 渲染任一步失败 ⇒ success=False，
+        错误带 stage（不交付半成品，也不把渲染失败包装成「计划态」）。
+        """
+        p: Dict[str, Any] = req.params or {}
+        spec_data = p.get("spec")
+        storyboard = p.get("storyboard")
+        warnings: List[str] = []
+
+        if spec_data is None and storyboard is None:
+            return CapabilityResult(
+                req.request_id, False,
+                error="需要 spec（CodeVideoSpec JSON）或 storyboard（分镜表数组）二选一",
+            )
+
+        if spec_data is not None:
+            if not isinstance(spec_data, dict):
+                return CapabilityResult(
+                    req.request_id, False,
+                    error=f"spec 必须是对象，收到 {type(spec_data).__name__}",
+                )
+            struct_errors = validate_spec(spec_data)
+            if struct_errors:
+                return CapabilityResult(
+                    req.request_id, False,
+                    error="spec 结构校验失败：" + "; ".join(struct_errors),
+                )
+            try:
+                spec = CodeVideoSpec.from_dict(spec_data)
+            except (TypeError, ValueError, KeyError) as exc:
+                return CapabilityResult(
+                    req.request_id, False, error=f"spec 无法反序列化：{exc}"
+                )
+        else:
+            if not isinstance(storyboard, list):
+                return CapabilityResult(
+                    req.request_id, False,
+                    error=f"storyboard 必须是数组，收到 {type(storyboard).__name__}",
+                )
+            spec, draft_errors = from_storyboard(
+                storyboard,
+                width=_opt_int(p, "width", 1080),
+                height=_opt_int(p, "height", 1920),
+                fps=_opt_int(p, "fps", 30),
+                spec_id=str(p.get("spec_id") or ""),
+            )
+            if spec is None:
+                return CapabilityResult(
+                    req.request_id, False,
+                    error="分镜表无法转成 spec 草案：" + "; ".join(draft_errors or ["未知原因"]),
+                )
+            warnings.extend(draft_errors)
+
+        compiled, compile_errors = compile_spec(spec)
+        if compiled is None:
+            return CapabilityResult(
+                req.request_id, False,
+                error="spec 未通过契约编译：" + "; ".join(compile_errors),
+            )
+
+        try:
+            from app.core.code_video.render_host import render
+        except ImportError:  # 兼容 `core.*` 旧导入路径
+            from core.code_video.render_host import render  # type: ignore
+
+        result = render(
+            compiled=compiled,
+            output_name=str(p.get("output_name") or ""),
+            qc=bool(p.get("qc", True)),
+        )
+        if not result.get("ok"):
+            return CapabilityResult(
+                req.request_id, False,
+                error=f"{result.get('stage') or 'render'}: {result.get('error') or '未知错误'}",
+            )
+        output = dict(result)
+        output["warnings"] = list(result.get("warnings") or []) + warnings
+        output["note"] = "渲染完成：产物已落画布 inbox；这是本地产物，未经人工审核"
+        return CapabilityResult(req.request_id, True, output=output, error=None)

@@ -152,9 +152,11 @@ def resolve_html(
 
     返回 (contents, errors)；errors 非空时调用方不得渲染。
     """
-    html_dir, errors = resolve_html_dir(root)
     sources = collect_html_sources(compiled)
     contents: Dict[str, str] = {}
+    if not sources:
+        return contents, []  # 纯素材片子不需要 HTML 根目录
+    html_dir, errors = resolve_html_dir(root)
     if len(sources) > MAX_HTML_FILES:
         errors.append(f"html 文件数 {len(sources)} 超上限 {MAX_HTML_FILES}")
     total = 0

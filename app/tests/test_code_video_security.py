@@ -115,8 +115,15 @@ def test_resolve_html_missing_file(tmp_path):
 
 
 def test_resolve_html_root_missing(tmp_path):
-    _, errors = sec.resolve_html({}, str(tmp_path / "missing"))
+    _, errors = sec.resolve_html(
+        _compiled(["html://a.html"]), str(tmp_path / "missing")
+    )
     assert any("根目录不存在" in e for e in errors)
+
+
+def test_resolve_html_no_sources_needs_no_root(tmp_path):
+    contents, errors = sec.resolve_html({}, str(tmp_path / "missing"))
+    assert contents == {} and errors == []
 
 
 def test_resolve_html_rejects_traversal(tmp_path):

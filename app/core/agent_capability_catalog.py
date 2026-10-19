@@ -453,6 +453,12 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "代码×扩散混合视频规划：分镜表→CodeVideoSpec 草案（契约编译，计划态）",
      "left", "代码视频规划",
      ["代码视频", "混合视频", "代码做视频", "html视频", "code_video", "程序视频"]),
+    # effect=file_write：本地 Chromium 逐帧 + ffmpeg 编码，产物落画布 inbox。
+    # paid=False（无云成本）；长耗时且写盘 ⇒ action 表登记 dangerous（需确认）。
+    ("pipeline.code_video_render", "pipeline", "file_write", False,
+     "代码×扩散混合视频渲染：compiled spec → Chromium frame(t) → ffmpeg → inbox（诚实失败）",
+     "left", "代码视频成片",
+     ["代码视频成片", "混合视频渲染", "渲染代码视频", "code_video_render", "代码成片"]),
 ] + _canvas_node_catalog_rows()
 
 # 策略层专属工具：只在 agent_policy 有 effect/paid，**没有** dispatcher handler，
