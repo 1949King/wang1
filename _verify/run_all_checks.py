@@ -247,6 +247,11 @@ CHECKS = [
     # ── 画布意图胶囊目录 + CodeVideoSpec 前端镜像（2026-10-20）──
     ("CANVASCAPS", "_verify/check_canvas_capsule_catalog.py",
      "胶囊目录：能力id在册/节点kind存在/契约常量同源/7阶段覆盖"),
+    # ── 捏脸枚举镜像漂移基线棘轮（2026-10-20，V4.46.2）──
+    # faceParams.ts 白名单 ↔ canvas_bridge._FACE_*_LABELS：存量 8 项已登记基线
+    # （补全需解冻 stage3d-core），任何**新增**漂移/镜像越权立即报警。
+    ("FACEENUM", "_verify/check_face_enum_mirror.py",
+     "捏脸枚举镜像：TS 白名单↔Python 中文表基线棘轮（存量登记，新增即拦）"),
     # ── 文档数字一致性（2026-10-20）──
     ("DOCNUM", "_verify/check_doc_numbers.py",
      "文档数字：无过时数字/端点=实测/能力=目录/体检项数=CHECKS"),

@@ -1,5 +1,30 @@
 # 拾光剪影 — 变更日志
 
+## 能力暴露 · Agent 全能力可达 + 捏脸枚举漂移守卫 + 虚拟形象全景（V4.46.2，2026-10-20）
+
+> 承接「Agent 能否完全调用」的实测核查（126 能力全部已注册可执行，但对话中的 LLM 被白名单挡在 ~45 action）。本刀把「注册了但模型看不见」的能力门打开，并给上一份《虚拟形象体系全景》里坐实的「捏脸静默丢特征」暗坑装上守卫。**全在非冻结区**（补 8 个中文标签才需解冻，见文末诚实边界）。
+
+### ① Agent 全能力可达（非冻结）
+- **对话面**：`build_agent_actions_help_block` 增「[全能力目录]」一行——`build_catalog_capabilities_line` 从 `CAPABILITY_ROWS`（真源，**非** `dispatcher.list_capabilities()`，后者首次 invoke 前为空——本次实测踩到并修正）按前缀分组列出全部 126 个 `capability_id`；封闭语义「严格只使用下列」放开为「优先白名单，可用目录 id」；`add_clip / import_media` 禁令保留。
+- **执行闸** `ai_agent_panel`：白名单不过时试 `_capability_passthrough`——仅当 action 是「目录里真实存在」的 capability_id 才直通 dispatcher；未知 id / blocked 名单照旧拒绝。**闸门未削**：写类仍被 B 勾选拦截，dispatcher 内 policy 按 session mode 把关（Plan 拒写 / B 需确认 / C 自主）。
+- **勾选分区** `suggest_checklist`：`partition_agent_commands` 加可选 `extra_reads`（默认 None，行为逐字节等价）；只读直通能力（catalog `effect=read`，经 `agent_policy.lookup_tool` 单一真源判定）免弹勾选，不误当写操作。
+- **诚实边界**：画布 fast 路径 `canvas_tools` 经 SSE→前端 `executeRemoteTask`（node camelCase action），**不注入后端 capability_id**（否则前端不认、无回执）；后端全能力可达走剪辑面板 / 绑定 editor 的对话这条真通道。原生 function calling（Track C，`limit=60`+无人传 True）本次不动，另刀处理。
+
+### ② 捏脸枚举镜像漂移守卫 `FACEENUM`（非冻结）
+- **实测暗坑**：`canvas_bridge._FACE_*_LABELS` 比 `faceParams.ts` 白名单少 8 个 A 类值（眉 `round/short`、眼 `cat/sleepy`、唇 `pouty/sharp`、发饰 `glasses/flower_crown`）；这些值可经发饰下拉**直接选**或「随机」按钮 roll 出落库，但 `_face_params_to_text` 走 `.get(...,"")` ⇒ 该特征在生图提示词里**静默消失**。旧守卫只查「名字在册」不查取值。
+- **新增** `_verify/check_face_enum_mirror.py`：纯静态基线棘轮（正则解析 TS 白名单 ↔ AST 取 Python dict keys，仿 `check_file_size` 只减不增）。8 项登记为存量、任何新增漂移 / 镜像越权 `exit 1`。负向已验证「清空基线即报警」。入册 `run_all_checks`（98 → **99 项**）。
+
+### ③ 虚拟形象体系全景
+新增 `docs/虚拟形象体系全景.md`：六条线（角色库 / 捏脸 / 3D 人偶 / 数字人 / 口型双引擎 / 一致性守护）综述，每条带 `文件:行` 实证 + 12 条缺口清单；3 份并行调研交叉复核，「未投产」类绝对化断言经 grep 独立核实后修正为可核验口径（`poseThumbCache`/`stage3dScene` 的命中只是注释、非 import）。
+
+### 仍需解冻才能做（不假装已修）
+补齐那 8 个中文标签要改 `canvas_bridge.py`——它是 `stage3d-core` **冻结文件**。本刀只交付「防复发」守卫；真正修掉 8 个已存在的暗值需用户「解冻 stage3d-core」（可与「捏脸挂载进 3D 导演台」合并同一次解冻）。
+
+### 验证
+`run_all_checks` **99 项全绿**（FACEENUM 入册）；pytest **1,795 passed**（+6 直通行为锁）；`check_action_wiring` 7 项；`frozen_zone_guard` **107 锁完整**（本刀零冻结区）；ruff 存量棘轮通过（改动文件零新增违规）。文档数字/版本三角（W1）同步至 V4.46.2。
+
+---
+
 ## 安全 · 安全底座三刀（V4.46.1，2026-10-20）
 
 > 上一轮缺陷清单 P1 #4/#5/#6 的偿还。全在非冻结区，无需解冻授权。

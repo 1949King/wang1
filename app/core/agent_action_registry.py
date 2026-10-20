@@ -288,7 +288,8 @@ def build_clipskills_layers_block() -> str:
         "L0 决策：优先 suggest_cleanup；Plan 只规划；协作 B 对删除二次确认；自主 C 自动执行白名单。"
         "破坏性删除用 ripple_delete_range；不确定时用 answer 反问。\n"
         "L1 知识：参考下方[长期记忆]与[项目/多集]备注（漫剧节奏、竖屏、平台），不要编造未提供的剧情事实。\n"
-        "L2 执行：只能输出白名单 action；执行结果必须能写回时间线或仅回答。"
+        "L2 执行：输出常用白名单 action，或[全能力目录]中的 capability_id（执行层同样校验）；"
+        "执行结果必须能写回时间线或仅回答。"
         "精剪动作（move_clip/change_speed/add_keyframe/set_keyframes）已开放，"
         "reanchor_clips 可整批重排（默认 dry_run 只出计划，须用户确认再落地），"
         "pinyin_lookup 可查汉字读音（逐字注音+多音字候选，离线字典确定性注音），"
@@ -300,8 +301,11 @@ def build_clipskills_layers_block() -> str:
 
 
 def build_agent_actions_help_block() -> str:
+    catalog_line = build_catalog_capabilities_line()
     lines = [
-        "严格只使用下列 action（未列出的一律不要生成）：",
+        "优先使用下列常用 action（带参数说明，见下）；"
+        "未列出的需求可改用「[全能力目录]」中的 capability_id 直接执行"
+        "（同样走策略闸门；add_clip / import_media 仍未开放，禁止输出）：",
         build_agent_actions_prompt_line() + "。",
         "读素材请用 get_media / inspect_media，参数: {\"clip_id\":\"...\" 或 \"clip_index\":0,\"deep\":true}（deep 追加场景/情绪）。",
         "删除区间请用 ripple_delete_range，参数: {\"t_in\":秒,\"t_out\":秒,\"track\":可选}。",
@@ -377,6 +381,12 @@ def build_agent_actions_help_block() -> str:
         "咨询类用 answer，params.message 写给人看的说明。",
         build_clipskills_layers_block(),
     ]
+    if catalog_line:
+        lines.append(
+            "[全能力目录]\n"
+            "下列 capability_id 可直接作为 action 输出（dispatcher 已注册、策略已把关；"
+            "写类操作协作模式会先给用户勾选确认）：\n" + catalog_line
+        )
     return "\n".join(lines)
 
 
@@ -389,7 +399,7 @@ def list_opentake_gaps(status_filter: Optional[str] = None) -> List[Dict[str, st
     return rows
 
 
-def list_editor_capabilities_for_prompt(max_items: int = 12) -> list:
+def list_editor_capabilities_for_prompt(max_items: int = 45) -> list:
     try:
         from app.core.capability_dispatcher import capability_dispatcher
 
@@ -406,3 +416,36 @@ def list_editor_capabilities_for_prompt(max_items: int = 12) -> list:
         return filtered[:max_items]
     except Exception:
         return []
+
+
+def build_catalog_capabilities_line() -> str:
+    """全能力目录清单（V4.46.2 Agent 全能力可达刀）。
+
+    对话白名单只有 ~45 action，但能力目录注册了 126 个 —— 本行把**全部
+    capability_id** 如实告诉模型：目录 id 可直接当 action 输出，执行层经
+    dispatcher + policy 双重把关（写类协作模式仍需用户勾选确认 / Plan 拒绝）。
+
+    真源 = agent_capability_catalog.CAPABILITY_ROWS（静态表，零副作用；
+    dispatcher.list_capabilities() 在首次 invoke 前是空的，不能用它）。
+    按前缀分组压缩 token（只列 id；参数说明仍由 help block 的 pipeline.*
+    条目承担，守卫 check_action_wiring ⑥ 盯着）。
+
+    失败返回空串（提示词缺该行 ≠ 不可用，诚实降级不硬拦）。
+    """
+    try:
+        from app.core.agent_capability_catalog import CAPABILITY_ROWS
+
+        groups: Dict[str, List[str]] = {}
+        for row in CAPABILITY_ROWS:
+            cid = str(row[0] or "")
+            if not cid:
+                continue
+            prefix = cid.split(".", 1)[0] if "." in cid else "other"
+            groups.setdefault(prefix, []).append(cid)
+        parts = []
+        for prefix in sorted(groups):
+            parts.append(f"{prefix}.*: " + ", ".join(sorted(groups[prefix])))
+        return "\n".join(parts)
+    except Exception:
+        # 诚实降级：清单缺失不影响对话（执行层闸门仍在），不硬拦不炸
+        return ""

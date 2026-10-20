@@ -271,6 +271,10 @@ def _build_canvas_fast_messages(
     """画布 Agent 轻量提示：system + 历史对话 + 当前 user，不拉时间线/拓展清单。"""
     from app.core.agent_policy import canvas_tools_prompt_block, mode_prompt_block
 
+    # 注：画布 fast 路径的 canvas_tools 经 dispatch_canvas_tools **推给前端**
+    # executeRemoteTask 执行（node-level camelCase action），不走后端 dispatcher。
+    # 因此这里只列「前端本地 action」，不注入后端 capability_id（否则前端不认 ⇒ 无回执）。
+    # 后端全能力可达见剪辑面板路径（ai_agent_panel._apply_agent_commands_to_editor）。
     system = (
         "你是拾光剪影「导演台画布」助手（Agent-IM）。"
         "用简短中文直接回答分镜、提示词、站位、生图/生视频建议。"

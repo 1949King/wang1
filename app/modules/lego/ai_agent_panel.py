@@ -59,6 +59,51 @@ _AGENT_DANGEROUS_ACTIONS = get_dangerous_actions()
 _AGENT_ALLOWED_ACTIONS = get_allowed_actions()
 # 对话 action ↔ capability：见 agent_action_registry.ACTION_TO_CAPABILITY
 
+# V4.46.2 Agent 全能力可达刀：45 白名单之外的 capability_id（点分前缀）
+# 允许直通 dispatcher —— 注册即模型可用，不再「有 id 没人知」。
+# 闸门并未削弱：写类照样被 _select_agent_commands_for_apply 的 B 勾选拦截、
+# dispatcher 内 policy 按 session mode 把关（Plan 拒写 / B 需确认 / C 自主）。
+_CAPABILITY_PREFIXES = (
+    "editor.", "model.", "ext.", "workflow.", "account.",
+    "pipeline.", "canvas.", "memory.",
+)
+
+
+def _capability_passthrough(action: str) -> str:
+    """action 若是 dispatcher 已注册 capability_id ⇒ 返回该 id；否则空串。
+
+    只认「目录里真实存在」的 id（不是前缀即放行），未知 id 留给 dispatcher
+    诚实报「未知能力」；blocked 名单（add_clip 等）永远不放行——它们不是
+    capability_id，本函数也拒收一切非注册 id。
+    """
+    a = (action or "").strip()
+    if not a.startswith(_CAPABILITY_PREFIXES):
+        return ""
+    try:
+        from app.core.agent_capability_catalog import registered_capability_ids
+
+        if a in set(registered_capability_ids()):
+            return a
+    except Exception:
+        return ""
+    return ""
+
+
+def is_readonly_capability(action: str) -> bool:
+    """action 若是 catalog 中 effect=read 的 capability ⇒ True（供勾选分区免弹）。
+
+    单一真源 = agent_policy.lookup_tool（不另建只读表，防漂移）。
+    """
+    a = (action or "").strip()
+    if not a.startswith(_CAPABILITY_PREFIXES):
+        return False
+    try:
+        from app.core.agent_policy import lookup_tool
+
+        return lookup_tool(a)[0] == "read"
+    except Exception:
+        return False
+
 
 class AiAgentPanelMixin:
     """AI 智能剪辑与 Agent 指令执行 Mixin。
@@ -364,7 +409,7 @@ class AiAgentPanelMixin:
         mode = normalize_mode(combo.currentData() if combo is not None else "collaborative")
         if mode == MODE_AUTONOMOUS:
             return list(commands)
-        reads, writes = partition_agent_commands(commands)
+        reads, writes = partition_agent_commands(commands, extra_reads=is_readonly_capability)
         if not writes:
             return list(reads)
         labels = [format_agent_command_label(c, i + 1) for i, c in enumerate(writes)]
@@ -412,16 +457,25 @@ class AiAgentPanelMixin:
             action = getattr(command, "action", "unknown")
             try:
                 if action not in _AGENT_ALLOWED_ACTIONS:
-                    allowed = ", ".join(sorted(_AGENT_ALLOWED_ACTIONS))
-                    results.append({
-                        "action": action,
-                        "success": False,
-                        "skipped": True,
-                        "message": (
-                            f"已拒绝未授权指令「{action}」（非假成功）。"
-                            f"允许: {allowed}"
-                        ),
-                    })
+                    cap_id = _capability_passthrough(action)
+                    if not cap_id:
+                        allowed = ", ".join(sorted(_AGENT_ALLOWED_ACTIONS))
+                        results.append({
+                            "action": action,
+                            "success": False,
+                            "skipped": True,
+                            "message": (
+                                f"已拒绝未授权指令「{action}」（非假成功）。"
+                                f"允许: {allowed}"
+                            ),
+                        })
+                        continue
+                    # 直通：裸 capability_id → dispatcher（带会话 mode；写类在
+                    # _agent_dispatch 的 approved=True 之前，B 模式已被勾选闸拦下）
+                    res = self._agent_dispatch(cap_id, getattr(command, "params", {}) or {})
+                    res["action"] = action
+                    res["via"] = "capability_passthrough"
+                    results.append(res)
                     continue
                 if action in _AGENT_DANGEROUS_ACTIONS and not allow_dangerous:
                     results.append({

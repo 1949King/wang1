@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 _READ_ACTIONS = frozenset({"answer", "info"})
 
@@ -31,13 +31,22 @@ def is_read_action(action: str) -> bool:
     return str(action or "") in _READ_ACTIONS
 
 
-def partition_agent_commands(commands: Sequence[Any]) -> tuple[List[Any], List[Any]]:
-    """拆成 (只读, 写时间线)。只读不进勾选清单，写操作默认待确认。"""
+def partition_agent_commands(
+    commands: Sequence[Any],
+    extra_reads: Optional[Callable[[str], bool]] = None,
+) -> tuple[List[Any], List[Any]]:
+    """拆成 (只读, 写时间线)。只读不进勾选清单，写操作默认待确认。
+
+    `extra_reads(action)->bool`（V4.46.2 全能力可达刀）：命中即视为只读——
+    供调用方把「裸 capability_id 且 catalog effect=read」的直通指令归入只读，
+    不被误当写操作弹勾选。默认 None ⇒ 行为与旧版逐字节等价。
+    """
     reads: List[Any] = []
     writes: List[Any] = []
     for cmd in commands:
         action = getattr(cmd, "action", "") if not isinstance(cmd, dict) else cmd.get("action", "")
-        if is_read_action(str(action)):
+        a = str(action)
+        if is_read_action(a) or (extra_reads is not None and extra_reads(a)):
             reads.append(cmd)
         else:
             writes.append(cmd)
