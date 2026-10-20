@@ -1,5 +1,36 @@
 # 拾光剪影 — 变更日志
 
+## 捏脸「永劫无间式」第一刀 —— 模板库 + 三栏布局 + AI 生成接口（2026-10-21）
+
+> 用户构想：进来先给几套现成模板选，选完可微调，也能让 AI 用提示词生成新形象 / 补细节。
+> 本轮把「选模板 → 实时预览 → AI 生成」三层搭起来，**全部非冻结区（零解冻）**。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 模板库 | `faceTemplates.ts`：8 套官方模板 + `applyFaceTemplate`（从 DEFAULT 起算，不在当前脸上打补丁）+ `describeFace` 摘要（纯函数） |
+| 布局 | FaceCard 改三栏：左栏模板/AI · 中间 3D 实时预览 + 参数摘要 chips · 右侧原有参数页签 |
+| 标签单一来源 | 眉/眼/唇/肤色中文表收进 `faceParams.ts`（BROW/EYE/LIP/SKIN_LABELS），下拉从表派生（消除手写第二份） |
+| AI 接口 | `POST /host/face-template/generate` + `app/core/face_template_ai.py`：提示词 → FaceParams；白名单**复用 canvas_bridge 镜像表**，未知/非法值丢弃并记 `dropped`；无模型 / 非 JSON / 无字段一律 ok:false 诚实失败 |
+| 前端客户端 | `bridge.ts::generateFaceTemplateViaHost`；左栏「✨ AI 生成」只改预览，**点「应用」才写回角色库** |
+| 测试 | vitest 新增 faceTemplates 5 例；pytest 新增 face_template_ai 4 例 |
+
+### 验证（全部实跑）
+
+- `pnpm --filter @shiguang/libtv test`：**42 文件 / 605 用例全绿**
+- `pytest app/tests/test_face_template_ai.py`：**4 passed**
+- `tsc --noEmit`：**37 = 既有基线，face 零新增**
+- `check_canvas_routes`：路由表 **101 条** OK（新端点已注册、无死代码）
+- `check_doc_numbers`：端点数字回正 **101 唯一 / 105 注册**
+- `stability_gate` 251 无新增 · `check_file_size` OK · `py_compile` OK
+
+### 诚实边界
+
+- 模板卡是「气质色点 + 名称 + 关键词」，**不是真人渲染缩略图**（本机无生图工具，不造假图）。
+- AI 生成依赖用户已配置模型；未配置时接口返回明确文案，**不返回假参数**。
+- 模板/预设仍只存 localStorage；「把 AI 生成结果存成模板」下一刀再做。
+
 ## 捏脸系统 P0 收口 —— 枚举镜像补全 + 头像覆盖确认（2026-10-21）
 
 > 用户连续追问「捏脸参数选得到、效果却进不了提示词」。本轮把**三处断点**一次打通：

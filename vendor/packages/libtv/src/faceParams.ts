@@ -210,6 +210,25 @@ export const ACCESSORY_META: Record<HairAccessoryId, { label: string; dual: bool
   flower_crown:   { label: "花冠",     dual: true },
 };
 
+/** 眉/眼/唇/肤色的展示名（UI 下拉与模板摘要的唯一来源；改这里即全站生效） */
+export const BROW_LABELS: Record<BrowStyleId, string> = {
+  flat: "平眉", arch: "挑眉", angry: "剑眉", sad: "八字眉", thin: "细眉", thick: "粗眉",
+  round: "柳眉", short: "短眉",
+};
+export const EYE_LABELS: Record<EyeStyleId, string> = {
+  round: "圆眼", almond: "杏眼", narrow: "细长", upturned: "上挑", droopy: "下垂", big: "大眼",
+  cat: "猫眼", sleepy: "睡眼",
+};
+export const LIP_LABELS: Record<LipStyleId, string> = {
+  thin: "薄唇", plump: "饱满", wide: "宽唇", small: "小口", cupid: "丘比特", neutral: "自然",
+  pouty: "嘟唇", sharp: "利落",
+};
+/** 肤色 hex → 展示名（与 SKIN_PALETTE 同源 8 档；未登记色值回落「自定义」） */
+export const SKIN_LABELS: Record<string, string> = {
+  "#fdece4": "冷白", "#f8d9c9": "白皙", "#f0c3a8": "自然", "#e0a882": "小麦",
+  "#c88a63": "蜜色", "#a86a45": "古铜", "#7d4c2e": "深棕", "#54321d": "黝黑",
+};
+
 /** 默认（素颜中性）参数 —— 唯一兜底基线 */
 export const DEFAULT_FACE_PARAMS: FaceParams = {
   v: 1,

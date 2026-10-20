@@ -22,6 +22,9 @@ import {
   DEFAULT_FACE_PARAMS,
   EMOTION_PRESETS,
   ACCESSORY_META,
+  BROW_LABELS,
+  EYE_LABELS,
+  LIP_LABELS,
   EYE_COLOR_HEX,
   MAKEUP_PALETTE,
   SKIN_PALETTE,
@@ -38,6 +41,14 @@ import {
   type HairAccessoryId,
 } from "./faceParams";
 import { buildFaceLayer, disposeFaceParts } from "./faceHeadParts";
+import {
+  OFFICIAL_FACE_TEMPLATES,
+  applyFaceTemplate,
+  describeFace,
+  findFaceTemplate,
+  type FaceTemplate,
+} from "./faceTemplates";
+import { generateFaceTemplateViaHost } from "./bridge";
 import {
   deleteFacePreset,
   downloadPresetFile,
@@ -84,25 +95,16 @@ const SHAPE_SLIDERS: { key: "headWidth" | "headHeight" | "jawWidth" | "cheekbone
   { key: "chin", label: "下巴" },
 ];
 
-/** 枚举选项（与 faceParams 的 pickEnum 白名单同源，UI 不另造口径） */
-const BROW_OPTIONS: { id: BrowStyleId; label: string }[] = [
-  { id: "flat", label: "平眉" }, { id: "arch", label: "挑眉" }, { id: "angry", label: "剑眉" },
-  { id: "sad", label: "八字眉" }, { id: "thin", label: "细眉" }, { id: "thick", label: "粗眉" },
-  // A 类扩展（2026-10-21 补齐：与 faceParams.ts / canvas_bridge 镜像表三方一致）
-  { id: "round", label: "柳眉" }, { id: "short", label: "短眉" },
-];
-const EYE_OPTIONS: { id: EyeStyleId; label: string }[] = [
-  { id: "round", label: "圆眼" }, { id: "almond", label: "杏眼" }, { id: "narrow", label: "细长" },
-  { id: "upturned", label: "上挑" }, { id: "droopy", label: "下垂" }, { id: "big", label: "大眼" },
-  // A 类扩展（2026-10-21 补齐）
-  { id: "cat", label: "猫眼" }, { id: "sleepy", label: "睡眼" },
-];
-const LIP_OPTIONS: { id: LipStyleId; label: string }[] = [
-  { id: "thin", label: "薄唇" }, { id: "plump", label: "饱满" }, { id: "wide", label: "宽唇" },
-  { id: "small", label: "小口" }, { id: "cupid", label: "丘比特" }, { id: "neutral", label: "自然" },
-  // A 类扩展（2026-10-21 补齐）
-  { id: "pouty", label: "嘟唇" }, { id: "sharp", label: "利落" },
-];
+/** 枚举选项：从 faceParams 的标签表派生（UI 不另写一份中文，杜绝两处漂移） */
+const BROW_OPTIONS: { id: BrowStyleId; label: string }[] = (
+  Object.keys(BROW_LABELS) as BrowStyleId[]
+).map((id) => ({ id, label: BROW_LABELS[id] }));
+const EYE_OPTIONS: { id: EyeStyleId; label: string }[] = (
+  Object.keys(EYE_LABELS) as EyeStyleId[]
+).map((id) => ({ id, label: EYE_LABELS[id] }));
+const LIP_OPTIONS: { id: LipStyleId; label: string }[] = (
+  Object.keys(LIP_LABELS) as LipStyleId[]
+).map((id) => ({ id, label: LIP_LABELS[id] }));
 
 /* ───────────────────────── 小组件 ───────────────────────── */
 
@@ -343,6 +345,12 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
   const [locked, setLocked] = useState<ReadonlySet<keyof FaceParams>>(new Set());
   /** 随机种子计数：每次点「随机」+1（确定性可复现，非 Math.random） */
   const [rollCount, setRollCount] = useState(0);
+  /** 当前套用的官方模板（null = 自定义/AI 生成） */
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  /** AI 生成（提示词 → 参数），只改预览不落库 */
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState("");
   /** 预览快照入口（由 FacePreview 挂载后注入；点「应用」时取 3D 头 PNG 作参考图） */
   const captureRef = useRef<(() => string | null) | null>(null);
 
@@ -396,6 +404,45 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
     const seedKey = `${characterId || "face"}#${rollCount + 1}`;
     setRollCount((c) => c + 1);
     setParams((prev) => randomFaceParams(seedKey, locked, prev));
+    setActiveTemplateId(null);
+  };
+
+  /** 套用官方模板：从 DEFAULT 起算的完整脸（不是在当前脸上打补丁）。 */
+  const applyTemplate = (template: FaceTemplate) => {
+    setParams(applyFaceTemplate(template));
+    setActiveTemplateId(template.id);
+    setRollCount(0);
+    setAiMsg("");
+  };
+
+  /** AI 生成：提示词 → 参数（不落库；用户点「应用」才写回角色库）。 */
+  const handleAiGenerate = async () => {
+    const prompt = aiPrompt.trim();
+    if (!prompt) {
+      setAiMsg("先描述想要的脸，例如：冷白皮、猫眼、戴眼镜的知性姐姐");
+      return;
+    }
+    const template = findFaceTemplate(activeTemplateId);
+    const base = template ? applyFaceTemplate(template) : null;
+    setAiBusy(true);
+    setAiMsg("正在请 AI 生成…");
+    const res = await generateFaceTemplateViaHost(
+      prompt,
+      base ? (base as unknown as Record<string, unknown>) : null,
+    );
+    setAiBusy(false);
+    if (!res.ok) {
+      setAiMsg(res.message || "生成失败");
+      return;
+    }
+    try {
+      setParams(normalizeFaceParams(res.params));
+      setActiveTemplateId(null);
+      setRollCount(0);
+      setAiMsg("已应用 AI 生成结果；可继续微调，满意后点「应用」写回角色库");
+    } catch (err) {
+      setAiMsg("AI 返回的参数无法解析：" + String(err));
+    }
   };
 
   // ── 预设操作（C + D） ──
@@ -480,7 +527,56 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
         </div>
 
         <div className="fc-body">
-          <FacePreview params={params} captureRef={captureRef} />
+          {/* 左栏：官方模板 + AI 生成（先选模板起步，再用 AI 补细节） */}
+          <div className="fc-templates">
+            <div className="fc-rail-title">模板</div>
+            {OFFICIAL_FACE_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={"fc-template" + (activeTemplateId === t.id ? " on" : "")}
+                onClick={() => applyTemplate(t)}
+                title={t.tagline}
+              >
+                <span className="fc-template-dot" style={{ background: t.accent }} />
+                <span className="fc-template-text">
+                  <span className="fc-template-name">{t.name}</span>
+                  <span className="fc-template-tag">{t.tagline}</span>
+                </span>
+              </button>
+            ))}
+            <div className="fc-rail-title">AI 生成</div>
+            <input
+              className="fc-ai-input"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !aiBusy) void handleAiGenerate();
+              }}
+              placeholder="描述想要的脸…"
+              disabled={aiBusy}
+            />
+            <button
+              type="button"
+              className="btn small fc-ai-btn"
+              onClick={() => void handleAiGenerate()}
+              disabled={aiBusy}
+            >
+              {aiBusy ? "生成中…" : "✨ AI 生成"}
+            </button>
+            {aiMsg && <div className="fc-ai-msg">{aiMsg}</div>}
+          </div>
+
+          {/* 中间：实时预览 + 当前参数摘要 */}
+          <div className="fc-stage">
+            <FacePreview params={params} captureRef={captureRef} />
+            <div className="fc-summary">
+              {describeFace(params).map((trait) => (
+                <span key={trait.key} className="fc-chip">{trait.label}</span>
+              ))}
+            </div>
+          </div>
+
           <div className="fc-side">
             <div className="sg-modal-tabs">
               {TABS.map((t) => (
@@ -714,10 +810,28 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
 /* ───────────────────────── 卡片样式（内联，避免动全局 styles.css） ───────────────────────── */
 
 const FACE_CARD_CSS = `
-.fc-card { width: min(760px, 94vw); }
-.fc-body { display: flex; gap: 14px; align-items: stretch; }
-.fc-preview { flex: 0 0 300px; height: 340px; border-radius: 10px; overflow: hidden; background: #10151f; }
+.fc-card { width: min(940px, 97vw); }
+.fc-body { display: flex; gap: 12px; align-items: stretch; }
+.fc-preview { flex: 1 1 auto; height: 300px; border-radius: 10px; overflow: hidden; background: #10151f; }
 .fc-side { flex: 1; min-width: 0; max-height: 340px; overflow-y: auto; }
+
+/* 左栏：模板库 + AI 生成（2026-10-21「永劫无间式」捏脸） */
+.fc-templates { flex: 0 0 156px; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.fc-rail-title { font-size: 10px; color: #6b7684; letter-spacing: 1px; margin: 2px 0 3px; text-transform: uppercase; }
+.fc-template { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid #2a3342; border-radius: 8px; background: #121822; color: #d6dde8; cursor: pointer; text-align: left; }
+.fc-template:hover { border-color: #3a4658; }
+.fc-template.on { border-color: #6c9fff; background: #172033; }
+.fc-template-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 14px; }
+.fc-template-text { display: flex; flex-direction: column; min-width: 0; }
+.fc-template-name { font-size: 12px; }
+.fc-template-tag { font-size: 10px; color: #7b8797; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-ai-input { width: 100%; padding: 6px 8px; border-radius: 7px; border: 1px solid #2a3342; background: #0e141c; color: #d6dde8; font-size: 11px; box-sizing: border-box; }
+.fc-ai-btn { width: 100%; }
+.fc-ai-msg { font-size: 10px; color: #8b9bb0; line-height: 1.45; }
+/* 中间：预览 + 参数摘要 */
+.fc-stage { flex: 0 0 300px; display: flex; flex-direction: column; gap: 8px; }
+.fc-summary { display: flex; flex-wrap: wrap; gap: 4px; }
+.fc-chip { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid #2a3342; background: #121822; color: #9aa4b2; }
 .fc-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .fc-label { flex: 0 0 64px; font-size: 12px; color: #9aa4b2; }
 .fc-row input[type="range"] { flex: 1; }
@@ -749,7 +863,12 @@ const FACE_CARD_CSS = `
 .fc-preset-import { gap: 8px; }
 .fc-preset-import input[type="file"] { display: none; }
 .fc-preset-msg { font-size: 11px; color: #7aa2ff; margin: 4px 0; }
-@media (max-width: 640px) { .fc-body { flex-direction: column; } .fc-preview { flex: none; width: 100%; } }
+@media (max-width: 640px) {
+  .fc-body { flex-direction: column; }
+  .fc-preview { flex: none; width: 100%; }
+  .fc-stage { flex: none; width: 100%; }
+  .fc-templates { flex: none; max-height: 180px; }
+}
 /* P3 修复（2026-10-13 审查）：浅色主题适配（项目不变量 7「内联样式=主题盲区」点名反模式）。
    色板对齐 styles.css 的 html[data-theme='light'] token（--line/--text/--muted/--accent）。 */
 html[data-theme='light'] .fc-label { color: #6b7790; }
@@ -766,6 +885,13 @@ html[data-theme='light'] .fc-preset-item { background: #f6f7fb; }
 html[data-theme='light'] .fc-preset-item.on { background: #e6eefc; border-color: #2563eb; }
 html[data-theme='light'] .fc-preset-name { color: #172033; }
 html[data-theme='light'] .fc-preset-msg { color: #2563eb; }
+html[data-theme='light'] .fc-rail-title { color: #6b7790; }
+html[data-theme='light'] .fc-template { border-color: #cdd5e3; background: #ffffff; color: #172033; }
+html[data-theme='light'] .fc-template.on { border-color: #2563eb; background: #e6eefc; }
+html[data-theme='light'] .fc-template-tag { color: #6b7790; }
+html[data-theme='light'] .fc-ai-input { border-color: #cdd5e3; background: #ffffff; color: #172033; }
+html[data-theme='light'] .fc-ai-msg { color: #6b7790; }
+html[data-theme='light'] .fc-chip { border-color: #cdd5e3; background: #f6f7fb; color: #6b7790; }
 /* 3D 预览视口保持深底（建模软件惯例，浅底下五官对比度不足），仅统一圆角边线 */
 html[data-theme='light'] .fc-preview { border: 1px solid #cdd5e3; }
 `;

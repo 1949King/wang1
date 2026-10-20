@@ -1521,6 +1521,24 @@ export async function updateCharacterViaHost(
   }
 }
 
+/** 捏脸 AI 生成（POST /host/face-template/generate）：提示词 → FaceParams 结构，不落库。
+ *  后端未配置模型 / 输出不可解析时返回 ok:false + 明确 message（诚实失败，不造假参数）。 */
+export async function generateFaceTemplateViaHost(
+  prompt: string,
+  base?: Record<string, unknown> | null,
+): Promise<{ ok: boolean; params?: unknown; message?: string; dropped?: string[] }> {
+  try {
+    const res = await fetch(`${BRIDGE}/host/face-template/generate`, {
+      method: "POST",
+      headers: authHeaders(true),
+      body: JSON.stringify({ prompt, base: base ?? null }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `生成接口不可用: ${e}` };
+  }
+}
+
 const persistInflight = new Map<string, Promise<string>>();
 
 function mimeToExt(mime: string): string {

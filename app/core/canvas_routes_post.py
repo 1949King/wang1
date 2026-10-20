@@ -190,6 +190,37 @@ class CanvasPostRoutesMixin:
             self._json(500, {"ok": False, "message": str(e)})
         return
 
+    # ── 捏脸 AI 生成：POST /host/face-template/generate（提示词 → FaceParams 结构，不落库） ──
+    @_route_post("/host/face-template/generate")
+    def _p_host_face_template_generate(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        prompt = str(body.get("prompt") or "").strip()
+        base = body.get("base")
+        if not prompt:
+            self._json(400, {"ok": False, "message": "请先描述想要的脸"})
+            return
+        try:
+            from app.core.face_template_ai import generate_face_params_from_prompt
+
+            result = generate_face_params_from_prompt(
+                prompt, base if isinstance(base, dict) else None
+            )
+            # 业务失败也返回 200 + ok:false：让前端能显示具体原因（未配置模型/JSON 不合法等）
+            self._json(200, result)
+        except Exception as e:
+            logger.exception("[/host/face-template/generate] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+        return
+
     # ── 首尾帧视频生成：POST /host/video-generate（首尾帧 → CogVideoX / Wan 管线入口） ──
     @_route_post("/host/video-generate")
     def _p_host_video_generate(self, parsed, raw: bytes, ctype: str) -> None:
