@@ -252,6 +252,8 @@ CHECKS = [
     # （补全需解冻 stage3d-core），任何**新增**漂移/镜像越权立即报警。
     ("FACEENUM", "_verify/check_face_enum_mirror.py",
      "捏脸枚举镜像：TS 白名单↔Python 中文表基线棘轮（存量登记，新增即拦）"),
+    ("FACETHUMB", "_verify/check_face_template_thumbs.py",
+     "捏脸模板缩略图：无图跳过；有图则校验清单/sha256/128x160"),
     # ── 文档数字一致性（2026-10-20）──
     ("DOCNUM", "_verify/check_doc_numbers.py",
      "文档数字：无过时数字/端点=实测/能力=目录/体检项数=CHECKS"),

@@ -1,5 +1,38 @@
 # 拾光剪影 — 变更日志
 
+## 捏脸模板缩略图管线 —— 真后端渲染 + 诚实跳过（2026-10-21）
+
+> 用户选「用已配置的生图模型把 8 套模板渲染成真实缩略图」。
+> 本机实测：Ollama 只跑文本模型、无 ComfyUI/SD、云端 key 存在 WebView localStorage（CLI 读不到）
+> ⇒ 交付**真管线**；实跑拿到的是「未配置后端」的诚实退出（exit 2、零文件），而不是假图。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 渲染脚本 | `scripts/render_face_template_thumbs.py`：8 条外观 prompt + 后端选择（env OpenAI 兼容 / AIEngine）+ 3:4 裁切 + 128×160 + `manifest.json`(sha256/尺寸/后端) |
+| 前端 | `faceTemplates.ts` 增 `templateThumbUrl` / `FACE_TEMPLATE_THUMB_MANIFEST`；FaceCard **有清单才渲染缩略图**，否则回落色点卡；单张 `onError` 自动隐藏 |
+| 守卫 | `_verify/check_face_template_thumbs.py`：无图 SKIP；有图校验 清单越权/孤儿/sha256/128×160；已挂 `run_all_checks`（**FACETHUMB**） |
+| 体检 | 99 → **100 项**（`接手速查卡.md` / `零基础学习路径与恶补计划.md` 同步回正） |
+
+### 验证（全部实跑）
+
+- 脚本 `--dry-run`：8 套计划正确、未写文件
+- 脚本实跑：**exit 2**「未配置生图后端」、**零文件**（诚实失败）
+- `FACETHUMB`：SKIP（未生成属正常；有图则强校验）
+- vitest **42 文件 / 605 用例全绿**；tsc **37 = 既有基线**
+- `run_all_checks`：**100 项全部通过**；DOCNUM 两份文档 100 项回正
+
+### 怎么真正生成（一条命令）
+
+设置 `SG_IMAGE_BASE_URL` + `SG_IMAGE_API_KEY`（可选 `SG_IMAGE_MODEL`），或在应用内配好图像适配器，然后：
+
+```
+python scripts/render_face_template_thumbs.py
+```
+
+生成后前端自动切换为真实缩略图，`FACETHUMB` 从 SKIP 转为强校验（清单/sha/尺寸）。
+
 ## 捏脸「永劫无间式」第一刀 —— 模板库 + 三栏布局 + AI 生成接口（2026-10-21）
 
 > 用户构想：进来先给几套现成模板选，选完可微调，也能让 AI 用提示词生成新形象 / 补细节。

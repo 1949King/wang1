@@ -42,10 +42,12 @@ import {
 } from "./faceParams";
 import { buildFaceLayer, disposeFaceParts } from "./faceHeadParts";
 import {
+  FACE_TEMPLATE_THUMB_MANIFEST,
   OFFICIAL_FACE_TEMPLATES,
   applyFaceTemplate,
   describeFace,
   findFaceTemplate,
+  templateThumbUrl,
   type FaceTemplate,
 } from "./faceTemplates";
 import { generateFaceTemplateViaHost } from "./bridge";
@@ -351,6 +353,8 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMsg, setAiMsg] = useState("");
+  /** 模板缩略图是否已生成（看清单；没有就回落「色点 + 名称」，不发 8 个 404） */
+  const [thumbsReady, setThumbsReady] = useState(false);
   /** 预览快照入口（由 FacePreview 挂载后注入；点「应用」时取 3D 头 PNG 作参考图） */
   const captureRef = useRef<(() => string | null) | null>(null);
 
@@ -365,6 +369,24 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
     } catch {
       setPresets([]);
     }
+  }, []);
+
+  // 缩略图存在性探测：只看清单，不逐张 head 请求（清单由渲染脚本写）
+  useEffect(() => {
+    let cancelled = false;
+    fetch(FACE_TEMPLATE_THUMB_MANIFEST, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && data.items && Object.keys(data.items).length > 0) {
+          setThumbsReady(true);
+        }
+      })
+      .catch(() => {
+        /* 无清单 = 未生成，保持色点卡（诚实回落） */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const refreshPresets = () => {
@@ -538,7 +560,18 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, initialAv
                 onClick={() => applyTemplate(t)}
                 title={t.tagline}
               >
-                <span className="fc-template-dot" style={{ background: t.accent }} />
+                {thumbsReady ? (
+                  <img
+                    className="fc-template-thumb"
+                    src={templateThumbUrl(t.id)}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <span className="fc-template-dot" style={{ background: t.accent }} />
+                )}
                 <span className="fc-template-text">
                   <span className="fc-template-name">{t.name}</span>
                   <span className="fc-template-tag">{t.tagline}</span>
@@ -822,6 +855,7 @@ const FACE_CARD_CSS = `
 .fc-template:hover { border-color: #3a4658; }
 .fc-template.on { border-color: #6c9fff; background: #172033; }
 .fc-template-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 14px; }
+.fc-template-thumb { width: 28px; height: 35px; border-radius: 4px; object-fit: cover; flex: 0 0 28px; }
 .fc-template-text { display: flex; flex-direction: column; min-width: 0; }
 .fc-template-name { font-size: 12px; }
 .fc-template-tag { font-size: 10px; color: #7b8797; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

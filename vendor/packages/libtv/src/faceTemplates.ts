@@ -154,6 +154,13 @@ export function describeFace(params: FaceParams): FaceTrait[] {
   ];
 }
 
+/** 模板缩略图（由 scripts/render_face_template_thumbs.py 生成；缺失时前端回落色点卡）。 */
+export function templateThumbUrl(id: string): string {
+  return "/face-templates/" + id + ".png";
+}
+/** 缩略图清单：存在才说明已生成（前端据此决定是否渲染 img，避免开门 8 个 404）。 */
+export const FACE_TEMPLATE_THUMB_MANIFEST = "/face-templates/manifest.json";
+
 /** 按 id 取模板（供 AI 生成时传 base_id 校验）。 */
 export function findFaceTemplate(id: string | null | undefined): FaceTemplate | undefined {
   if (!id) return undefined;
