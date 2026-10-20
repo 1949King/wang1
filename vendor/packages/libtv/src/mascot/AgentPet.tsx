@@ -29,10 +29,16 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 
 import "./agentPet.css";
 import {
+  SLEEPY_AFTER_MS,
+  SLEEPY_BUBBLE,
+  SLEEPY_LABEL,
   STATUS_BUBBLES,
   STATUS_LABELS,
   STATUS_RIM_COLORS,
+  getCuriousTilt,
+  nextAmbientGap,
   nextBlinkGap,
+  pickAmbientKind,
   reactionForStatus,
   type PetStatus,
 } from "./mascotMotion";
@@ -53,6 +59,9 @@ export const PET_SIZE = { expanded: 224 } as const;
 
 /** 眨眼帧显示时长（ms）。 */
 const BLINK_MS = 180;
+
+/** 睡眠光晕色（暗橙）——与 idle 的品牌橙 #F7A061 区分开，读作「安静下来了」。 */
+const SLEEPY_RIM = "#C98A5E";
 
 const rimCss = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
 
@@ -90,6 +99,11 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
 
   const hopRef = useRef<HTMLSpanElement | null>(null);
   const prevStatusRef = useRef<PetStatus>(status);
+  /* 生命力层（2026-10-20）：好奇倾角 / 待机小动作 / 打瞌睡。 */
+  const curiousRef = useRef<HTMLSpanElement | null>(null);
+  const framesRef = useRef<HTMLSpanElement | null>(null);
+  const sleepTimerRef = useRef<number | null>(null);
+  const [sleepy, setSleepy] = useState(false);
 
   /* 状态转场的一次性肢体反应（success 跳 / error 摇头）：CSS 动画 + 强制 reflow 重触发。
      与演示页同一手法；曲线两端回中立位（mascotMotion 的不变量），不会留残余位移。 */
@@ -125,6 +139,80 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
     };
   }, [reduceMotionResolved]);
 
+  /* ── 打瞌睡（表现层状态，**不进** petActivity 状态机）──
+     「有生命力」不等于一直动：安静地睡着、被靠近就醒，比随机蹦跳更像活物。
+     只在 idle 且长时间无互动时出现；状态一变忙立刻醒。 */
+  const armSleep = useCallback(() => {
+    if (sleepTimerRef.current !== null) window.clearTimeout(sleepTimerRef.current);
+    sleepTimerRef.current = window.setTimeout(() => {
+      sleepTimerRef.current = null;
+      setSleepy(true);
+    }, SLEEPY_AFTER_MS);
+  }, []);
+
+  const wake = useCallback(() => {
+    setSleepy(false);
+    if (status === "idle") armSleep();
+  }, [status, armSleep]);
+
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    if (status !== "idle") {
+      if (sleepTimerRef.current !== null) {
+        window.clearTimeout(sleepTimerRef.current);
+        sleepTimerRef.current = null;
+      }
+      setSleepy(false);
+      return;
+    }
+    armSleep();
+    return () => {
+      if (sleepTimerRef.current !== null) {
+        window.clearTimeout(sleepTimerRef.current);
+        sleepTimerRef.current = null;
+      }
+    };
+  }, [status, reduceMotionResolved, armSleep]);
+
+  /* ── 待机小动作：每 4~9s 一次（歪头 / 轻摇 / 抖耳），睡着时不动 ── */
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    let timer = 0;
+    /* 刻意不叫 schedule：眨眼 effect 里已有同名函数，画布质量棘轮把
+       同文件同名函数算作「疑似静默覆盖」（dupNames 棘轮只减不增）。 */
+    const scheduleAmbient = () => {
+      timer = window.setTimeout(() => {
+        const el = framesRef.current;
+        if (el && !sleepy) {
+          const kind = pickAmbientKind(Math.random());
+          el.classList.remove("sg-pet-anim--tilt", "sg-pet-anim--sway", "sg-pet-anim--perk");
+          void el.offsetWidth; // 强制 reflow 以重触发动画（与 hop/shake 同手法）
+          el.classList.add(`sg-pet-anim--${kind}`);
+        }
+        scheduleAmbient();
+      }, nextAmbientGap(Math.random()) * 1000);
+    };
+    scheduleAmbient();
+    return () => window.clearTimeout(timer);
+  }, [reduceMotionResolved, sleepy]);
+
+  /* ── 好奇：指针在半径内时身体朝指针轻倾（只写 CSS 变量，不触发 React 渲染）── */
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    const onMove = (event: PointerEvent) => {
+      const el = curiousRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const deg = getCuriousTilt(
+        event.clientX - (rect.left + rect.width / 2),
+        event.clientY - (rect.top + rect.height / 2),
+      );
+      el.style.setProperty("--sg-pet-curious", `${deg.toFixed(2)}deg`);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [reduceMotionResolved]);
+
   /* 隐藏右下角旧「Agent」圆钮：桌宠就是 Agent 的入口，两个入口并存是混乱。
      `.sg-agent-fab` 在冻结区 CanvasShell.tsx 里，不能改它 —— 用 MutationObserver
      写内联样式（同「🧰 工具让位」先例），卸载时恢复。 */
@@ -156,7 +244,9 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
     onActivate();
   }, [consumeClick, onActivate]);
 
-  const bubble = mini ? null : STATUS_BUBBLES[status];
+  const bubble = mini ? null : sleepy ? SLEEPY_BUBBLE : STATUS_BUBBLES[status];
+  const rimColor = sleepy ? SLEEPY_RIM : rimCss(STATUS_RIM_COLORS[status]);
+  const statusLabel = sleepy ? SLEEPY_LABEL : STATUS_LABELS[status];
   const framesClass =
     "sg-pet-frames" +
     (blinking && status !== "success" ? " is-blink" : "") +
@@ -167,11 +257,12 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
       ref={rootRef}
       className={`sg-pet${mini ? " sg-pet--hidden" : ""}${drag.dragging ? " sg-pet--dragging" : ""}`}
       data-state={status}
+      data-sleepy={sleepy ? "1" : undefined}
       data-sg-no-autoclick="1"
       aria-hidden={mini || undefined}
       style={
         {
-          "--sg-pet-rim": rimCss(STATUS_RIM_COLORS[status]),
+          "--sg-pet-rim": rimColor,
         } as CSSProperties
       }
     >
@@ -185,9 +276,10 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
         className="sg-pet-btn"
         data-sg-no-autoclick="1"
         tabIndex={mini ? -1 : 0}
-        title={`${STATUS_LABELS[status]}（单击打开 / 拖动移位 / 右键复位）`}
-        aria-label={STATUS_LABELS[status]}
+        title={`${statusLabel}（单击打开 / 拖动移位 / 右键复位）`}
+        aria-label={statusLabel}
         onPointerDown={onPointerDown}
+        onPointerEnter={wake}
         onClick={handleClick}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -197,10 +289,12 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
         <span ref={hopRef} className="sg-pet-hop" aria-hidden="true">
           <span className="sg-pet-lift">
             <span className="sg-pet-bob">
-              <span className={framesClass}>
-                <img className="sg-pet-img" src={PET_NEUTRAL} alt="" draggable={false} />
-                <img className="sg-pet-img sg-pet-img--blink" src={PET_BLINK} alt="" draggable={false} />
-                <img className="sg-pet-img sg-pet-img--cheer" src={PET_CHEER} alt="" draggable={false} />
+              <span ref={curiousRef} className="sg-pet-curious">
+                <span ref={framesRef} className={framesClass}>
+                  <img className="sg-pet-img" src={PET_NEUTRAL} alt="" draggable={false} />
+                  <img className="sg-pet-img sg-pet-img--blink" src={PET_BLINK} alt="" draggable={false} />
+                  <img className="sg-pet-img sg-pet-img--cheer" src={PET_CHEER} alt="" draggable={false} />
+                </span>
               </span>
             </span>
           </span>

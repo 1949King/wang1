@@ -2516,6 +2516,14 @@ class SettingsModule(BaseModule):
         out.addWidget(logo_card)
         out.addSpacing(24)
 
+        # 1.5 代表形象「拾岚」（2026-10-20）——卡片实现独立成文件，不推高本文件行数
+        from .about_mascot_card import build_about_mascot_card
+
+        _about_mascot = build_about_mascot_card()
+        if _about_mascot is not None:
+            out.addWidget(_about_mascot)
+            out.addSpacing(20)
+
         # ═══════════════════════════════════════════════════════
         # 2. 版本号徽章
         # ═══════════════════════════════════════════════════════

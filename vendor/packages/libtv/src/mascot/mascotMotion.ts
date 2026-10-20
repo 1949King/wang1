@@ -276,3 +276,75 @@ export const STATUS_LABELS: Record<PetStatus, string> = {
   success: "画布助手：已完成",
   error: "画布助手：任务失败",
 };
+
+/* ────────────────────────── 生命力层（2026-10-20） ──────────────────────────
+ * 「有生命力」不等于一直动。这一层的三个动作都**低频、克制**：
+ *   1. 待机小动作：每 4~9s 一次（歪头 / 轻摇 / 抖耳），让静止画面有呼吸感；
+ *   2. 打瞌睡：idle 静置 75s 后呼吸放缓、下沉、冒「呼…」——被靠近或点击就醒；
+ *   3. 好奇：指针进入 160px 半径时身体朝指针轻倾 ≤2°。
+ * 三者都只产出**数值/种类**，渲染仍在 CSS（合成器友好、尊重 reduced-motion）。
+ */
+
+/** 静置多久后进入「打瞌睡」表现（毫秒）。 */
+export const SLEEPY_AFTER_MS = 75_000;
+
+/** 睡眠时的呼吸周期（秒）——比清醒的 3.6s 慢一档。 */
+export const SLEEPY_BREATH_PERIOD = 5.2;
+
+/** 睡眠气泡与无障碍标签。 */
+export const SLEEPY_BUBBLE = "呼…";
+export const SLEEPY_LABEL = "画布助手：打瞌睡";
+
+/** 睡眠时的下沉像素（读作「睡着了往下沉一点」）。 */
+export const SLEEPY_SINK_PX = 3;
+
+/** 睡眠呼吸的纵向压扁量（比清醒的 1.4% 更深）。 */
+const SLEEPY_BREATH_SQUASH = 0.02;
+
+/** 睡眠呼吸的纵向缩放系数（≤1；永不高于原高，与清醒呼吸同一不变量）。 */
+export function getSleepyBreath(timeSec: number): number {
+  return 1 - SLEEPY_BREATH_SQUASH * (0.5 - 0.5 * Math.cos((timeSec / SLEEPY_BREATH_PERIOD) * Math.PI * 2));
+}
+
+/** 待机小动作的种类。 */
+export type AmbientKind = "tilt" | "sway" | "perk";
+
+/** 两次待机小动作之间的间隔区间（秒）。 */
+export const AMBIENT_MIN_GAP = 4;
+export const AMBIENT_MAX_GAP = 9;
+
+/** 下一次待机小动作的间隔（秒）；random 取 [0,1)。 */
+export function nextAmbientGap(random: number): number {
+  const r = Math.min(Math.max(random, 0), 1);
+  return AMBIENT_MIN_GAP + r * (AMBIENT_MAX_GAP - AMBIENT_MIN_GAP);
+}
+
+/**
+ * 按随机数挑一个待机小动作。刻意让「歪头」占比最高（最像活物），抖耳最少
+ * —— 抖耳频率高会像抽搐，只在约 1/5 的时候出现。
+ */
+export function pickAmbientKind(random: number): AmbientKind {
+  const r = Math.min(Math.max(random, 0), 1);
+  if (r < 0.45) return "tilt";
+  if (r < 0.8) return "sway";
+  return "perk";
+}
+
+/** 好奇触发半径（像素）：指针进入这个距离才响应。 */
+export const CURIOUS_RADIUS_PX = 160;
+
+/** 好奇的最大倾角（度）。超过 2° 会被读成「站不稳」。 */
+export const CURIOUS_MAX_TILT_DEG = 2;
+
+/**
+ * 好奇倾角：指针在半径内时朝指针方向倾（左右），距离越近倾得越多；
+ * 半径外恒为 0（不干扰正常使用）。
+ */
+export function getCuriousTilt(pointerDx: number, pointerDy: number): number {
+  const distance = Math.sqrt(pointerDx * pointerDx + pointerDy * pointerDy);
+  if (!Number.isFinite(distance) || distance >= CURIOUS_RADIUS_PX) return 0;
+  const falloff = 1 - distance / CURIOUS_RADIUS_PX;
+  const direction = Math.sign(pointerDx);
+  return direction * CURIOUS_MAX_TILT_DEG * falloff;
+}
+

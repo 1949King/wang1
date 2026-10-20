@@ -5,12 +5,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AMBIENT_MAX_GAP,
+  AMBIENT_MIN_GAP,
+  CURIOUS_MAX_TILT_DEG,
+  CURIOUS_RADIUS_PX,
   EYE_POSES,
   REACTION_DURATIONS,
   STATUS_BUBBLES,
   STATUS_RIM_COLORS,
   getBlinkScaleY,
   getBreath,
+  getCuriousTilt,
+  getSleepyBreath,
+  nextAmbientGap,
+  pickAmbientKind,
   getEarDroop,
   getEarFlick,
   getReactionPose,
@@ -169,5 +177,52 @@ describe("狐狸专属动作", () => {
     expect(reactionForStatus("error")).toBe("shake");
     expect(reactionForStatus("idle")).toBeNull();
     expect(reactionForStatus("thinking")).toBeNull();
+  });
+});
+
+describe("生命力层（2026-10-20）：待机小动作 / 打瞌睡 / 好奇", () => {
+  it("待机小动作间隔落在设计区间内，随机数越界被夹住", () => {
+    for (const random of [0, 0.25, 0.5, 0.75, 1, -1, 2]) {
+      const gap = nextAmbientGap(random);
+      expect(gap).toBeGreaterThanOrEqual(AMBIENT_MIN_GAP);
+      expect(gap).toBeLessThanOrEqual(AMBIENT_MAX_GAP);
+    }
+  });
+
+  it("待机小动作种类确定性、三种都会出现，且歪头占比最高", () => {
+    expect(pickAmbientKind(0)).toBe("tilt");
+    expect(pickAmbientKind(0.44)).toBe("tilt");
+    expect(pickAmbientKind(0.45)).toBe("sway");
+    expect(pickAmbientKind(0.79)).toBe("sway");
+    expect(pickAmbientKind(0.8)).toBe("perk");
+    expect(pickAmbientKind(1)).toBe("perk");
+    expect(new Set([0, 0.5, 0.9].map(pickAmbientKind)).size).toBe(3);
+  });
+
+  it("睡眠呼吸永远是压扁而非变高（同清醒呼吸的不变量），且比清醒更深", () => {
+    for (let time = 0; time < 12; time += 0.15) {
+      const scale = getSleepyBreath(time);
+      expect(scale).toBeLessThanOrEqual(1);
+      expect(scale).toBeGreaterThan(0.95);
+    }
+    const sleepyMin = Math.min(...Array.from({ length: 80 }, (_, i) => getSleepyBreath(i / 10)));
+    const awakeMin = Math.min(...Array.from({ length: 80 }, (_, i) => getBreath(i / 10)));
+    expect(sleepyMin).toBeLessThan(awakeMin);
+  });
+
+  it("好奇倾角有界、半径外为零、方向跟随指针左右、越近越倾", () => {
+    expect(getCuriousTilt(0, 0)).toBe(0);
+    expect(getCuriousTilt(CURIOUS_RADIUS_PX + 10, 0)).toBe(0);
+    expect(getCuriousTilt(99999, 99999)).toBe(0);
+
+    const left = getCuriousTilt(-40, 0);
+    const right = getCuriousTilt(40, 0);
+    expect(left).toBeLessThan(0);
+    expect(right).toBeGreaterThan(0);
+    expect(Math.abs(left)).toBeLessThanOrEqual(CURIOUS_MAX_TILT_DEG);
+    expect(Math.abs(getCuriousTilt(-8, 0))).toBeGreaterThan(Math.abs(left));
+
+    // 非有限输入不得把 NaN 漏进渲染层
+    expect(getCuriousTilt(Number.NaN, 0)).toBe(0);
   });
 });

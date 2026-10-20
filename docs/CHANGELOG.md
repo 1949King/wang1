@@ -1,9 +1,42 @@
 # 拾光剪影 — 变更日志
 
+## 拾岚形象系统 v1.0 —— 角色圣经 + 生命力层 + 关于页露出（2026-10-20）
+
+> 用户需求：「给项目里的虚拟形象做一个完整的东西，让他成为本项目的代表形象，要有活力、有生命力；形象保持原样」。
+> **零冻结区**（mascot 三件套不在任何 zone；样式只进 `agentPet.css`）。
+
+### 交付
+
+| 层 | 交付物 |
+|---|---|
+| **规范** | `docs/design/拾岚形象规范.md`（角色圣经 v1.0：双形态 / 状态机 / 动效数值 / 场景矩阵 / 红线 / 与虚拟形象体系的边界） |
+| **展示** | `docs/design/拾岚形象展示.html`（独立页，双击即开；6 状态可点、眨眼/待机/好奇实时演示） |
+| **生命力** | `mascotMotion.ts` 新增纯函数：待机小动作（4~9s：歪头 45% / 轻摇 35% / 抖耳 20%）、打瞌睡（静置 75s、呼吸 5.2s、下沉 3px）、好奇倾角（160px 内 ≤2°） |
+| **组件** | `AgentPet.tsx`：`sleepy` 表现层状态（不进 petActivity 状态机）+ 待机调度 + 好奇 CSS 变量；唤醒 = 指针进入 / 点击 / 状态变忙 |
+| **样式** | `agentPet.css`：新增 curious / tilt / sway / perk / sleepy 五组 keyframes + reduced-motion 兜底 |
+| **露出** | 关于页新增「拾岚」卡（`about_mascot_card.py` 独立文件；settings_module 仅 +9 行，守住 2000 行棘轮） |
+| **守卫** | `_verify/check_mascot_assets.py`（三帧同画布 316×480 + 主形象卡在位；素材缺失整卡不渲染，不占位假图） |
+
+### 三条纪律
+
+1. **形象本体不变**：仍用 `assets/mascot/` 母版与三帧立绘；不新增第二个角色，换装不换人。
+2. **状态必须真实**：`sleepy` 只在 idle 静置出现；`success/error` 仍由 `petActivity` 真实数据驱动，**禁止随机表演**。
+3. **债务不涨**：卡片拆成独立文件（+9 行在容差内）；新增回归 4 条；素材由守卫锁死。
+
+### 验证（全部实跑）
+
+- `pnpm --filter @shiguang/libtv test` → **40 文件 / 595 用例全绿**（含新增 4 条生命力层回归）
+- `tsc --noEmit` → **37 = 既有基线，mascot 零新增**（37 处全在 Stage3D / riggedHumanoid 冻结区）
+- `py_compile` settings_module + about_mascot_card ✅
+- `check_mascot_assets` OK · `check_file_size` OK · `stability_gate` 无新增 · `frozen_zone_guard` 107 locks OK
+- 视觉实证：展示页（Edge headless 截图）+ 关于页卡片（Qt 实机 `grab()` 截图，已修正「未定高被拉满」）
+
+### 诚实边界
+
+- 表情帧仍只有 3 张（neutral/blink/cheer）；`sleepy` 是**表现层**（不换帧），需要睡眼帧时按角色圣经规格补图，不改代码逻辑。
+- 启动页 / 系统托盘尚未露出（角色圣经 §6 已列为建议项，未擅自动 Qt 托盘与闪屏）。
+
 ## 能力暴露 · Agent 全能力可达 + 捏脸枚举漂移守卫 + 虚拟形象全景（V4.46.2，2026-10-20）
-
-> 承接「Agent 能否完全调用」的实测核查（126 能力全部已注册可执行，但对话中的 LLM 被白名单挡在 ~45 action）。本刀把「注册了但模型看不见」的能力门打开，并给上一份《虚拟形象体系全景》里坐实的「捏脸静默丢特征」暗坑装上守卫。**全在非冻结区**（补 8 个中文标签才需解冻，见文末诚实边界）。
-
 ### ① Agent 全能力可达（非冻结）
 - **对话面**：`build_agent_actions_help_block` 增「[全能力目录]」一行——`build_catalog_capabilities_line` 从 `CAPABILITY_ROWS`（真源，**非** `dispatcher.list_capabilities()`，后者首次 invoke 前为空——本次实测踩到并修正）按前缀分组列出全部 126 个 `capability_id`；封闭语义「严格只使用下列」放开为「优先白名单，可用目录 id」；`add_clip / import_media` 禁令保留。
 - **执行闸** `ai_agent_panel`：白名单不过时试 `_capability_passthrough`——仅当 action 是「目录里真实存在」的 capability_id 才直通 dispatcher；未知 id / blocked 名单照旧拒绝。**闸门未削**：写类仍被 B 勾选拦截，dispatcher 内 policy 按 session mode 把关（Plan 拒写 / B 需确认 / C 自主）。

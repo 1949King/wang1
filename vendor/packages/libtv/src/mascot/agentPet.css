@@ -310,15 +310,101 @@
   }
 }
 
+/* ────────────────────────── 生命力层（2026-10-20） ──────────────────────────
+ * 待机小动作（歪头 / 轻摇 / 抖耳）+ 好奇倾角 + 打瞌睡。
+ * 分层：hop(反应) > lift(浮动) > bob(呼吸) > curious(好奇) > frames(表情 + 待机小动作)。
+ * 好奇与待机小动作分属两层：curious 用外层 transform，待机动画跑在 frames 上，
+ * 避免同属性相互覆盖（与 hop/lift/bob 同一条分层纪律）。
+ */
+
+/* 好奇层：只动 transform，值由 AgentPet 写入 CSS 变量（不触发 React 渲染） */
+.sg-pet-curious {
+  display: flex;
+  justify-content: center;
+  transform-origin: 50% 100%;
+  transform: rotate(var(--sg-pet-curious, 0deg));
+  transition: transform 0.28s ease-out;
+  will-change: transform;
+}
+
+/* 待机小动作：一次性播放，播完回自然态 */
+.sg-pet-frames.sg-pet-anim--tilt {
+  animation: sg-pet-tilt 0.9s ease-in-out;
+  transform-origin: 50% 88%;
+}
+
+.sg-pet-frames.sg-pet-anim--sway {
+  animation: sg-pet-sway 2.4s ease-in-out;
+  transform-origin: 50% 92%;
+}
+
+.sg-pet-frames.sg-pet-anim--perk {
+  animation: sg-pet-perk 0.5s ease-out;
+  transform-origin: 50% 100%;
+}
+
+@keyframes sg-pet-tilt {
+  0%, 100% { transform: rotate(0); }
+  35% { transform: rotate(2.2deg); }
+  70% { transform: rotate(1.4deg); }
+}
+
+@keyframes sg-pet-sway {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-1.2deg); }
+  75% { transform: rotate(1.2deg); }
+}
+
+@keyframes sg-pet-perk {
+  0%, 100% { transform: scale(1, 1); }
+  40% { transform: scale(0.99, 1.02); }
+}
+
+/* 打瞌睡：呼吸放缓到 5.2s + 下沉 3px + 变暗；被靠近/点击即醒（data-sleepy 移除） */
+.sg-pet[data-sleepy="1"] .sg-pet-bob {
+  animation: sg-pet-breathe-sleepy 5.2s ease-in-out infinite;
+}
+
+@keyframes sg-pet-breathe-sleepy {
+  0%, 100% { transform: translateY(3px) scale(1, 1); }
+  50% { transform: translateY(3px) scale(1.008, 1.018); }
+}
+
+.sg-pet[data-sleepy="1"] .sg-pet-img {
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--sg-pet-rim, #c98a5e) 32%, transparent))
+    saturate(0.92) brightness(0.96);
+  transition: filter 0.6s;
+}
+
+.sg-pet[data-sleepy="1"] .sg-pet-name {
+  opacity: 0.6;
+}
+
+.sg-pet[data-sleepy="1"] .sg-pet-bubble {
+  animation: sg-pet-bubble-in 0.18s ease-out, sg-pet-sleepy 3.2s ease-in-out 0.2s infinite;
+}
+
+@keyframes sg-pet-sleepy {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 0.95; }
+}
+
 /* 系统「减弱动态」偏好：去掉所有动画，只留静态形象与状态切换 */
 @media (prefers-reduced-motion: reduce) {
   .sg-pet,
   .sg-pet-lift,
   .sg-pet-bob,
   .sg-pet-hop,
+  .sg-pet-curious,
+  .sg-pet-frames,
   .sg-pet-shadow,
   .sg-pet-bubble {
     animation: none !important;
     transition: none !important;
+  }
+
+  /* 减弱动态时「好奇」不再跟随指针（JS 侧也不再写变量，这里兜底） */
+  .sg-pet-curious {
+    transform: none !important;
   }
 }
