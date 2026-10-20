@@ -187,7 +187,11 @@
 }
 
 .sg-pet-img--blink,
-.sg-pet-img--cheer {
+.sg-pet-img--cheer,
+.sg-pet-img--thinking,
+.sg-pet-img--sleepy,
+.sg-pet-img--sad,
+.sg-pet-img--surprised {
   position: absolute;
   inset: 0;
   margin: auto;
@@ -204,6 +208,16 @@
 }
 
 .sg-pet-frames.is-cheer .sg-pet-img--cheer {
+  opacity: 1;
+}
+
+/* 表情帧按 data-frame 切换（2026-10-20）：待生成帧不会出现在 DOM 里
+   （AgentPet 只渲染 ready 的帧），所以这些规则只在素材就绪后才会命中。 */
+.sg-pet-frames[data-frame="cheer"] .sg-pet-img--cheer,
+.sg-pet-frames[data-frame="thinking"] .sg-pet-img--thinking,
+.sg-pet-frames[data-frame="sleepy"] .sg-pet-img--sleepy,
+.sg-pet-frames[data-frame="sad"] .sg-pet-img--sad,
+.sg-pet-frames[data-frame="surprised"] .sg-pet-img--surprised {
   opacity: 1;
 }
 

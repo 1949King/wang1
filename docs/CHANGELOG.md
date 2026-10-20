@@ -1,7 +1,40 @@
 # 拾光剪影 — 变更日志
 
-## 拾岚形象系统 v1.0 —— 角色圣经 + 生命力层 + 关于页露出（2026-10-20）
+## 拾岚表情帧预接线 + 生成规格（2026-10-20）
 
+> 用户选定「补表情帧」。**无生图工具，不画假图**——交付「规格 + 预接线 + 硬校验」：
+> 图一到位零改代码自动点亮；缺图时如实回落 neutral，绝不假装有表情。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| **规格** | `docs/design/拾岚表情帧规格.md`：5 帧（thinking / sleepy / sad / surprised / proud）的硬规格、状态映射、可直接投喂的提示词（含一致性策略与负向词）、验收清单、三步入库流程 |
+| **清单** | `mascotFrames.ts`：8 帧登记（3 就绪 / 5 待生成）+ `pickFrame` / `resolvedFrame` / `readyExtraFrames` / `frameUrl`（纯函数，可单测） |
+| **组件** | `AgentPet.tsx`：按 `data-frame` 切帧；**只渲染 ready 帧**（缺图不进 DOM，零 404）；眨眼仅在睁眼类帧播放 |
+| **样式** | `agentPet.css`：五帧叠层规则（`[data-frame="..."]` 切 opacity，与既有分层纪律一致） |
+| **守卫** | `check_mascot_assets.py` 扩展为**双向校验**：声明 ready 但缺图 → 报红；有图但未登记 → 报红；另加 **alpha 质心 ≤2px**（换表情不位移的机器保证，实测现有三帧 ≤0.2px） |
+| **展示页** | `拾岚形象展示.html` 新增「目标表情帧（待生成）」表 |
+
+### 状态映射（proud 不接状态机）
+
+`thinking→thinking` · `sleepy→sleepy` · `error→sad` · `awaiting→surprised` · `success→cheer`；
+`proud` 仅品牌 / 表情包专用 —— **不为接而接**。
+
+### 验证
+
+- `pnpm --filter @shiguang/libtv test`：**41 文件 / 601 用例全绿**（新增 mascotFrames 5 例 + 既有 595）
+- `tsc --noEmit`：37 = 既有基线，mascot 零新增
+- `check_mascot_assets`：**8 帧登记 / 3 帧就绪 / 同画布 316×480 / 质心 ≤2.0px** OK
+- `py_compile` + `check_file_size` + `stability_gate` + `frozen_zone_guard` 全绿
+- 画布质量棘轮：`dupNames` 无名冲突（新增函数名均唯一）
+
+### 诚实边界
+
+- 5 张帧**尚未生成**（本机无生图工具）；当前状态机回落 neutral，`data-frame` 如实标注。
+- 拿到 PNG 后按规格书 §5 三步入库（放图 → 改 `ready: true` → 跑守卫），组件无需改动。
+
+## 拾岚形象系统 v1.0 —— 角色圣经 + 生命力层 + 关于页露出（2026-10-20）
 > 用户需求：「给项目里的虚拟形象做一个完整的东西，让他成为本项目的代表形象，要有活力、有生命力；形象保持原样」。
 > **零冻结区**（mascot 三件套不在任何 zone；样式只进 `agentPet.css`）。
 

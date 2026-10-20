@@ -43,11 +43,8 @@ import {
   type PetStatus,
 } from "./mascotMotion";
 import { usePetDrag } from "./usePetDrag";
-
-/** 立绘素材（public/mascot/，三帧同画布 316×480）。 */
-const PET_NEUTRAL = `${import.meta.env.BASE_URL}mascot/pet_neutral.png`;
-const PET_BLINK = `${import.meta.env.BASE_URL}mascot/pet_blink.png`;
-const PET_CHEER = `${import.meta.env.BASE_URL}mascot/pet_cheer.png`;
+/* 表情帧清单与回落（文件名单一真源；缺素材时诚实回落 neutral，不假装有表情）。 */
+import { PET_FRAMES, frameUrl, pickFrame, readyExtraFrames, resolvedFrame } from "./mascotFrames";
 
 /**
  * 形态尺寸（px）。立绘显示高约 200px。
@@ -247,10 +244,11 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
   const bubble = mini ? null : sleepy ? SLEEPY_BUBBLE : STATUS_BUBBLES[status];
   const rimColor = sleepy ? SLEEPY_RIM : rimCss(STATUS_RIM_COLORS[status]);
   const statusLabel = sleepy ? SLEEPY_LABEL : STATUS_LABELS[status];
-  const framesClass =
-    "sg-pet-frames" +
-    (blinking && status !== "success" ? " is-blink" : "") +
-    (status === "success" ? " is-cheer" : "");
+  /* 表情帧：先按状态选首选帧，再收敛到「真的有的帧」；缺素材时回落到 neutral。
+     眨眼只在睁眼类帧上播放（cheer / sleepy 不眨）。 */
+  const activeFrame = resolvedFrame(pickFrame(status, sleepy));
+  const allowBlink = activeFrame !== "cheer" && activeFrame !== "sleepy";
+  const framesClass = "sg-pet-frames" + (blinking && allowBlink ? " is-blink" : "");
 
   return (
     <div
@@ -290,10 +288,18 @@ export default function AgentPet({ status, mini, onActivate, reduceMotion }: Age
           <span className="sg-pet-lift">
             <span className="sg-pet-bob">
               <span ref={curiousRef} className="sg-pet-curious">
-                <span ref={framesRef} className={framesClass}>
-                  <img className="sg-pet-img" src={PET_NEUTRAL} alt="" draggable={false} />
-                  <img className="sg-pet-img sg-pet-img--blink" src={PET_BLINK} alt="" draggable={false} />
-                  <img className="sg-pet-img sg-pet-img--cheer" src={PET_CHEER} alt="" draggable={false} />
+                <span ref={framesRef} className={framesClass} data-frame={activeFrame}>
+                  <img className="sg-pet-img" src={frameUrl("neutral")} alt="" draggable={false} />
+                  <img className="sg-pet-img sg-pet-img--blink" src={frameUrl("blink")} alt="" draggable={false} />
+                  {readyExtraFrames().map((id) => (
+                    <img
+                      key={id}
+                      className={"sg-pet-img sg-pet-img--" + id}
+                      src={frameUrl(id)}
+                      alt=""
+                      draggable={false}
+                    />
+                  ))}
                 </span>
               </span>
             </span>

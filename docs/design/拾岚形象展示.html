@@ -157,6 +157,19 @@
     </table>
   </div>
 
+  <h2>目标表情帧（待生成 5 张 · 规格见 docs/design/拾岚表情帧规格.md）</h2>
+  <div class="card">
+    <table>
+      <tr><th>id</th><th>文件</th><th>接状态</th><th>设计要点</th><th>状态</th></tr>
+      <tr><td><code>thinking</code></td><td><code>pet_thinking.png</code></td><td>thinking</td><td>眉微皱、视线偏上、耳略前倾</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>sleepy</code></td><td><code>pet_sleepy.png</code></td><td>sleepy</td><td>眼半闭、嘴角放松、头略低</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>sad</code></td><td><code>pet_sad.png</code></td><td>error</td><td>眉尾下垂、耳朵垂下、嘴角向下</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>surprised</code></td><td><code>pet_surprised.png</code></td><td>awaiting</td><td>睁大眼、瞳孔放大、耳竖起</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>proud</code></td><td><code>pet_proud.png</code></td><td><b>不接状态机</b></td><td>下巴微抬、眼睛弯、尾巴翘</td><td>⏳ 待生成（品牌/表情包专用）</td></tr>
+    </table>
+    <p class="sub" style="margin:12px 2px 0">硬规格：316×480 透明底、质心与 neutral 偏差 ≤2px（守卫自动判定）。缺素材时代码诚实回落 neutral，<b>不假装有表情</b>；图到位后只改 <code>ready: true</code> 即自动点亮。</p>
+  </div>
+
   <h2>配色</h2>
   <div class="card">
     <div class="row">
