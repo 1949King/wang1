@@ -53,6 +53,9 @@ export type FaceCardProps = {
   initial?: unknown;
   /** 角色 id（随机种子来源之一；缺省用 "face"） */
   characterId?: string;
+  /** 该角色**已有**的头像参考图 URL（存在即「应用会覆盖它」⇒ 弹确认）。
+   *  只读展示用，不参与任何生成逻辑；缺省/空串视为没有头像（首次创建，不打扰）。 */
+  initialAvatarUrl?: string | null | undefined;
   /** 点「应用」：回传序列化串 + 规范化参数 + 预览快照 PNG(dataURL)。
    *  snapshot 供调用方上传为角色参考图；预览不可用时为 undefined（缺省即合法）。 */
   onConfirm?: (serialized: string, params: FaceParams, snapshot?: string) => void;
@@ -85,14 +88,20 @@ const SHAPE_SLIDERS: { key: "headWidth" | "headHeight" | "jawWidth" | "cheekbone
 const BROW_OPTIONS: { id: BrowStyleId; label: string }[] = [
   { id: "flat", label: "平眉" }, { id: "arch", label: "挑眉" }, { id: "angry", label: "剑眉" },
   { id: "sad", label: "八字眉" }, { id: "thin", label: "细眉" }, { id: "thick", label: "粗眉" },
+  // A 类扩展（2026-10-21 补齐：与 faceParams.ts / canvas_bridge 镜像表三方一致）
+  { id: "round", label: "柳眉" }, { id: "short", label: "短眉" },
 ];
 const EYE_OPTIONS: { id: EyeStyleId; label: string }[] = [
   { id: "round", label: "圆眼" }, { id: "almond", label: "杏眼" }, { id: "narrow", label: "细长" },
   { id: "upturned", label: "上挑" }, { id: "droopy", label: "下垂" }, { id: "big", label: "大眼" },
+  // A 类扩展（2026-10-21 补齐）
+  { id: "cat", label: "猫眼" }, { id: "sleepy", label: "睡眼" },
 ];
 const LIP_OPTIONS: { id: LipStyleId; label: string }[] = [
   { id: "thin", label: "薄唇" }, { id: "plump", label: "饱满" }, { id: "wide", label: "宽唇" },
   { id: "small", label: "小口" }, { id: "cupid", label: "丘比特" }, { id: "neutral", label: "自然" },
+  // A 类扩展（2026-10-21 补齐）
+  { id: "pouty", label: "嘟唇" }, { id: "sharp", label: "利落" },
 ];
 
 /* ───────────────────────── 小组件 ───────────────────────── */
@@ -328,7 +337,7 @@ function FacePreview(props: { params: FaceParams; captureRef: React.MutableRefOb
 
 /* ───────────────────────── 卡片主体 ───────────────────────── */
 
-export const FaceCard = memo(function FaceCard({ initial, characterId, onConfirm, onClose }: FaceCardProps) {
+export const FaceCard = memo(function FaceCard({ initial, characterId, initialAvatarUrl, onConfirm, onClose }: FaceCardProps) {
   const [params, setParams] = useState<FaceParams>(() => normalizeFaceParams(initial));
   const [tab, setTab] = useState<TabId>("expression");
   const [locked, setLocked] = useState<ReadonlySet<keyof FaceParams>>(new Set());
@@ -675,7 +684,26 @@ export const FaceCard = memo(function FaceCard({ initial, characterId, onConfirm
           <div className="fc-foot-actions">
             <button type="button" className="btn" onClick={() => setParams(normalizeFaceParams(undefined))}>重置</button>
             <button type="button" className="btn" onClick={doRandom}>随机</button>
-            <button type="button" className="btn primary" onClick={() => onConfirm?.(serializeFaceParams(params), params, captureRef.current?.() ?? undefined)}>应用</button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                /* 覆盖参考图前确认（2026-10-21）：
+                   点「应用」会把 3D 头快照写为该角色 avatar_url。若该角色已有头像，
+                   无条件覆盖会让用户丢图且无感知 ⇒ 已有头像时显式确认。
+                   只在**本次会真的带快照**时才问，避免「只想改参数」被多余打断。 */
+                // captureRef 可能返回 string | null（null = 预览未就绪）⇒ 归一成 undefined，
+                // 与 onConfirm 的 snapshot 可选参数签名一致（原实现直接用 ?? undefined）。
+                const snap = captureRef.current?.() ?? undefined;
+                const hasAvatar = typeof initialAvatarUrl === "string" && initialAvatarUrl.length > 0;
+                if (snap && hasAvatar && !window.confirm("将用当前预览覆盖该角色已有的头像参考图？\n\n点「确定」覆盖；点「取消」则只保存参数、不动头像。")) {
+                  return;
+                }
+                onConfirm?.(serializeFaceParams(params), params, snap);
+              }}
+            >
+              应用
+            </button>
           </div>
         </div>
       </div>

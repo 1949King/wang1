@@ -1,420 +1,419 @@
 {
-  "version": 1,
-  "updated": "2026-10-11",
-  "policy": "未获用户明确「解冻 <zone-id>」授权前，禁止修改下列保护区。修 bug 也须先解冻再改，并重新跑 python scripts/frozen_zone_guard.py --update。",
-  "zones": [
-    {
-      "id": "playback-av",
-      "title": "时间线播放 · 音画同步",
-      "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms；2026-08-07 解冻后允许 speed_ramp 映射 source_t/rate；2026-09-13 用户授权解冻修复：_arm_media_audio 播放速率节流（ramp 连续变速下每 33ms 重设 setPlaybackRate 致 WMF 音频抖动，改为相对变化>8% 才重设）+ 切源清速率缓存，已重锁",
-      "invariants": [
-        "QMediaPlayer 不 setVideoOutput（画面只走 PreviewManager/OpenCV）",
-        "播放主时钟是 QElapsedTimer 墙钟，禁止恢复 playhead += 固定步长",
-        "_on_position_changed / _on_playback_state_changed 在 _timeline_playing 时必须 early-return",
-        "on_deactivated 不得把 _audio_output 置 None",
-        "联动音频片不得被 BGM 播放器双开",
-        "播放中预览质量为 low；tick 约 33ms；顺序 grab 追赶",
-        "主音/BGM 纠偏阈值不宜压回 ~80ms（易可闻卡顿）",
-        "有 speed_ramp 时 source_t/瞬时 rate 走 speed_ramping 映射，否则常数 speed",
-        "_arm_media_audio 播放速率按相对变化>8%节流，禁止恢复每 tick 无条件 setPlaybackRate"
-      ],
-      "symbols": [
+    "version": 1,
+    "updated": "2026-10-11",
+    "policy": "未获用户明确「解冻 <zone-id>」授权前，禁止修改下列保护区。修 bug 也须先解冻再改，并重新跑 python scripts/frozen_zone_guard.py --update。",
+    "zones": [
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_ensure_media_audio_output"
+            "id": "playback-av",
+            "title": "时间线播放 · 音画同步",
+            "reason": "墙钟驱动 + QMediaPlayer 只出声 + 播放头不被片内时钟抢写；已修无声/卡顿；纠偏阈值约 280ms；2026-08-07 解冻后允许 speed_ramp 映射 source_t/rate；2026-09-13 用户授权解冻修复：_arm_media_audio 播放速率节流（ramp 连续变速下每 33ms 重设 setPlaybackRate 致 WMF 音频抖动，改为相对变化>8% 才重设）+ 切源清速率缓存，已重锁",
+            "invariants": [
+                "QMediaPlayer 不 setVideoOutput（画面只走 PreviewManager/OpenCV）",
+                "播放主时钟是 QElapsedTimer 墙钟，禁止恢复 playhead += 固定步长",
+                "_on_position_changed / _on_playback_state_changed 在 _timeline_playing 时必须 early-return",
+                "on_deactivated 不得把 _audio_output 置 None",
+                "联动音频片不得被 BGM 播放器双开",
+                "播放中预览质量为 low；tick 约 33ms；顺序 grab 追赶",
+                "主音/BGM 纠偏阈值不宜压回 ~80ms（易可闻卡顿）",
+                "有 speed_ramp 时 source_t/瞬时 rate 走 speed_ramping 映射，否则常数 speed",
+                "_arm_media_audio 播放速率按相对变化>8%节流，禁止恢复每 tick 无条件 setPlaybackRate"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_ensure_media_audio_output"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_arm_media_audio"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_ensure_media_signals"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_on_media_status_changed"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_on_position_changed"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_on_playback_state_changed"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "on_deactivated"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_play_pause"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_start_timeline_playback"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_stop_timeline_playback"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_on_timeline_playback_tick"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_rebasing_playback_clock"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_sync_bgm_audio"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_is_linked_video_audio_clip"
+                },
+                {
+                    "file": "app/core/preview_manager.py",
+                    "name": "get_frame_at"
+                }
+            ],
+            "markers": [
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "id": "playback-av:init-media"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "id": "playback-av:main-audio"
+                }
+            ]
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_arm_media_audio"
+            "id": "exit-media",
+            "title": "关程序停声 · 防幽灵音频",
+            "reason": "关窗后 Windows WMF 偶发残留出声；已强制 stop/静音/清 source。｜【2026-10-11 用户授权解冻 · 仅 closeEvent 一个符号，其余 84 锁点一字未动】V4.43.14「会话恢复」需在退出时落盘「本次在哪」（当前模块 + 当前工程），唯一可用的挂点就是 closeEvent。初版实现把会话保存插在 _stop_all_media_on_exit() 之前（注释写明「放在最前」），**字面违反不变量 1**；经用户裁定「保不变量，保存挪后」，改为紧跟媒体停止、早于其余清理步骤（后续清理出错也不丢会话）。三条不变量文本一字未改。新增 _verify/check_exit_media_invariant.py：把三条不变量变成 AST 可执行断言（已用「改动前版本」做反例验证，确认必报红），并挂到 pre-commit ③b 与 run_all_checks（EXITMEDIA）—— 起因是 frozen_zone_guard 只比哈希，只能报「代码被改」、报不出「不变量被破」，本次正是靠人眼才发现冲突。｜【2026-10-17 用户授权解冻（用户原话「解冻，随时做好回退的准备」）】`main_window.py` 新增 `_current_module` 属性 + `_on_module_selected` 内同步（**刻意未改 `closeEvent` 本体逻辑** —— 原注释明写「属 exit-media 冻结区，未解冻不可改，此处同步即可让原逻辑生效」；`closeEvent` 区域仅多一处空行）。支撑 V4.43.14「会话恢复」在退出时正确落盘「本次在哪」。改前已备份至 `.workbuddy/tmp/frozen_unlock_20261017/`。改后 `--update` 重锁（99 项）。",
+            "invariants": [
+                "closeEvent 必须先 _stop_all_media_on_exit",
+                "EditorModule.cleanup 调 _shutdown_media(release_source=True)",
+                "关进程路径须 mute + stop + setSource 空 URL"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "cleanup"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_shutdown_media"
+                },
+                {
+                    "file": "app/modules/lego/main_window.py",
+                    "name": "_stop_all_media_on_exit"
+                },
+                {
+                    "file": "app/modules/lego/main_window.py",
+                    "name": "closeEvent"
+                }
+            ],
+            "markers": [
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "id": "exit-media:shutdown"
+                },
+                {
+                    "file": "app/modules/lego/main_window.py",
+                    "id": "exit-media:main-window"
+                }
+            ]
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_ensure_media_signals"
+            "id": "clip-transform",
+            "title": "归一化变换模型",
+            "reason": "预览≈导出共用 x/y/scale/rotation/anchor；已从上帝类抽出",
+            "invariants": [
+                "x/y 语义为 overlay=(W-w)*x:(H-h)*y",
+                "scale 相对画幅约 0.05~2.0",
+                "normalize_clip_transform / apply_normalized_transform 为唯一写入真相"
+            ],
+            "symbols": [],
+            "files": [
+                "app/modules/lego/clip_transform.py"
+            ],
+            "markers": [
+                {
+                    "file": "app/modules/lego/clip_transform.py",
+                    "id": "clip-transform:module"
+                }
+            ]
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_on_media_status_changed"
+            "id": "transform-bake",
+            "title": "变换关键帧导出 bake",
+            "reason": "主轨连续表达式 bake，失败回退分段；已冒烟",
+            "invariants": [
+                "有 scale/x/y/rotation 关键帧时优先 _bake_clip_transform_continuous",
+                "位置动画不用含 t 的 pad，用 overlay eval=frame",
+                "表达式失败必须能回退分段 concat"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "_piecewise_linear_expr"
+                },
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "_clamped_transform_expr"
+                },
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "_bake_clip_transform_continuous"
+                },
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "_bake_clip_transform_scale_segments"
+                },
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "bake_clip_transform"
+                },
+                {
+                    "file": "app/modules/lego/video_processor.py",
+                    "name": "_build_transform_segments"
+                }
+            ],
+            "markers": []
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_on_position_changed"
+            "id": "canvas-transform",
+            "title": "预览画布变换交互",
+            "reason": "边角缩放 / Alt 旋转 / 平移 / Ctrl+滚轮；信箱坐标对齐",
+            "invariants": [
+                "鼠标坐标必须走 _preview_norm_from_pos（扣除信箱）",
+                "命中：边角 scale、Alt rotate、内部 move",
+                "暂停时才画变换框把手"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_preview_content_rect"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_preview_norm_from_pos"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_clip_box_norm"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_hit_preview_transform_mode"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_overlay_transform_handles_on_qimage"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "_apply_preview_transform_to_clip"
+                },
+                {
+                    "file": "app/modules/lego/editor_module.py",
+                    "name": "eventFilter"
+                }
+            ],
+            "markers": []
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_on_playback_state_changed"
+            "id": "plugin-host-ui",
+            "title": "插件宿主常驻 UI 入口",
+            "reason": "账号运营/短剧筛选插件已彻底删除（含 drama_btn 常驻入口与 _open_drama_finder_tab 等），plugins_module 宿主层仅保留 AI特效工坊入口与通用插件打开/初始化逻辑，仍须冻结（2026-09-15 用户授权解冻清理）",
+            "invariants": [
+                "插件中心常驻标签打开不误走仅 apply_effect 的特效插件",
+                "Plugin.__init__ 预置 _widget/_context/_initialized；run 可无先验 initialize"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/plugins_module.py",
+                    "name": "_plugin_offers_widget_ui"
+                },
+                {
+                    "file": "app/modules/lego/plugins_module.py",
+                    "name": "_ensure_plugin_initialized"
+                },
+                {
+                    "file": "app/modules/lego/plugins_module.py",
+                    "name": "_open_plugin_ui"
+                }
+            ],
+            "markers": [
+                {
+                    "file": "app/modules/lego/plugins_module.py",
+                    "id": "plugin-host-ui:plugins-host"
+                }
+            ]
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "on_deactivated"
+            "id": "plugin-store-catalog",
+            "title": "插件商店真实目录",
+            "reason": "仅上架 app/plugins 真实可加载项；已剔除 drama-finder/account-ops 及虚构商品（2026-09-15 用户授权解冻清理）",
+            "invariants": [
+                "OFFICIAL_ITEMS 必须能在磁盘找到 local_path",
+                "FAKE_OFFICIAL_IDS 中的虚构条目不得回写商店",
+                "内置插件 is_installed=True"
+            ],
+            "symbols": [
+                {
+                    "file": "app/modules/lego/plugin_store.py",
+                    "name": "init_official_items"
+                },
+                {
+                    "file": "app/modules/lego/plugin_store.py",
+                    "name": "_resolve_plugin_path"
+                }
+            ],
+            "markers": [
+                {
+                    "file": "app/modules/lego/plugin_store.py",
+                    "id": "plugin-store-catalog:official"
+                }
+            ]
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_play_pause"
+            "id": "stage3d-core",
+            "title": "3D导演台 · 模型渲染与桥接",
+            "reason": "用户明确要求冻结，防止 GLB 模型加载、骨骼绑定、姿势应用、材质渲染、Python 桥接层被误改；2026-08-20。2026-09-13 用户授权解冻两次：① character_management_module.py 仅改「预热时机」（无条件预热 → 仅可见时预热 + 幂等）；② 角色库 CHARACTER_FIELD_SCHEMA 由 10 字段扩到 20 字段并改为按分组动态渲染 UI，canvas_bridge.build_character_prompt 消费新增的 temperament / memory_anchors，两个前端包 CharacterEntry 同步。两次均未动端口（18765/3011/3010）、渲染、GLB 路径与材质，改完重新上锁。2026-09-17 用户授权解冻（修复画布白屏）：仅改 canvas_runtime.py 的端口探测逻辑——新增模块级 http_probe()（无代理 GET 校验真返回画布页面）与 CanvasRuntime._port_serves_canvas()，is_ready()/_start_static_server() 的「端口占用则复用」判断由纯 TCP 探活升级为 HTTP 健康校验，_start_static_server 的 OSError 分支补友好提示；**未动 18765/3011/3010 任何端口值**，未动渲染/GLB/材质/桥接符号，改完重新上锁。2026-09-20 用户授权解冻（模式 B 第四刀：录制白模动作视频）：仅改 Stage3D.tsx —— 新增 recordPoseVideo()（逐帧离屏渲染 → 采集 PNG → 交后端 /host/pose-video-encode 合成 → setMotionRefVideo 挂为 reference_video）、两处状态（poseVideoBusy / poseVideoProgress）、一处 import、动作 tab 一个按钮；**只读渲染结果，未动材质替换/骨名映射/GLB 加载/端口值/预热时机/角色库 schema**。配套新增未冻结文件 stage3dPoseVideo.ts（纯逻辑 + 单测）与 app/core/ai/pose_video_service.py（FFmpeg 合成），canvas_server.py 与 bridge.ts 均不在冻结区故未登记。验证：tsc 存量 37 处→37 处（A/B 证明零新增）、vitest 76/76 通过、vite build rc=0、守卫复跑 OK frozen zones intact (85 locks) 2026-10-05 用户授权解冻（3D 导演台姿势不自然修复）：仅改 riggedHumanoid.ts —— ① JointPose 新增 6 个内旋轴（lShoulderY/rShoulderY/lElbowY/rElbowY/lHipY/rHipY）；② applyBoneDelta 增加 order 参数，肢体用 \"YXZ\"（消侧举万向节锁，Y=0 时与 XYZ 等价 ⇒ 旧预设零回归）；③ 躯干/头 X 轴去 neg —— 实测（bodykun.glb 脚趾朝 +Z 判定前方）原实现使 +spineX 让头顶后移，导致「鞠躬」预设实为后仰；④ 肩 Z 下限 -20→-60（GLB 静止态是 A 字型，旧下限使手臂无法自然下垂）；⑤ 姿势数据（JointPose/JOINT_LABELS/DEFAULT_POSE/POSE_PRESETS）整块抽到新文件 stage3dPoseLibrary.ts（单文件规模棘轮正当解法，riggedHumanoid 3844→3159 行，基线由 3707 下调至 3159；riggedHumanoid 保留 re-export ⇒ 既有导入方零改动）；⑥ 修「叉腰/抱臂」并新增 4 预设（自然站姿/背手/看手机/握手）。**未动**端口值 18765/3011/3010、GLB 路径与 bodyFigureUrl、材质替换、骨名映射、预热时机、且 **Stage3D.tsx 未改一行**（滑杆与预设按钮均从 JOINT_LABELS/POSE_PRESETS 泛型渲染）。验证：tsc 37 处（= 基线，零新增）· vitest 107/107 · vite build ✓ · 新增几何校验 _verify/check_stage3d_pose_dof.mjs（真 GLB 算关节世界坐标，27 项全过：内旋轴生效/前倾符号/鞠躬前倾/叉腰肘在身后/抱臂不穿脖/背手在臀后/自然垂手贴腿/万向节非回归）；改完重新上锁。\n\n2026-10-07 V4.40.55：机位模型「太突兀」重做为**电影级视锥**。诊断（读源码）：旧实现＝高饱和琥珀实心圆锥(#fbbf24)+实心方块(#f59e0b)，两个实心受光体在素模场景里比角色还抢眼；体量硬编码(0.18/0.4/0.28)，**完全忽略 fov/shotSize** ⇒ 18° 长焦与 90° 广角长得一样（机位可视化的唯一价值——读出景别——丢失）；恒定橙＝无状态位。做法：① 几何/标签/状态整块抽到新模块 `stage3dCamGizmo.ts`（389 行），Stage3D.tsx 只留一行接线 ⇒ 4660→4623 行，规模棘轮基线下调（守卫指引的正当解法，同 stage3dPoseLibrary 手法）；② 1px 线框机身(EdgesGeometry 而非 wireframe)+镜头座；③ 视锥**真由 fov 推**（8 条棱+远端矩形+中心轴），镜头座随焦段伸长；④ 名称·景别·mm 标签(Sprite)，mm 复用 `fovToFocalLength`（该函数同时从 Stage3D 迁入本模块 ⇒ 标签与截图元数据同源，不再各算一套系数）；⑤ 地面投点环 + 竖直定位线给空间锚；⑥ 朝向用 `Matrix4.lookAt` 手算基向（不用 Object3D.lookAt，避免父矩阵未刷新导致朝向抖一帧）；⑦ 颜色只表状态：默认中性灰 #8ea3b8 / 当前机位品牌蓝 #2563eb（视锥同时加浓 0.42→0.62）。**连带修一个功能缺陷**：`stage3dControlNet` 的 Depth/Normal 是整场景重渲染，会把机位实体/坐标轴**烘进 ControlNet 图**（AI 会把「一个机位模型」当场景内容学走）；现所有编辑辅助物统一打 `userData.isHelper`，渲染前 `setHelpersVisible(scene,false)` 摘除、渲染后还原，`Stage3D.capture()` 截图与两条导出视频（机位路径视频 / 白模姿势视频）同步套用。验证：tsc 37 处（21 riggedHumanoid + 16 Stage3D，**= 基线零新增**）· vitest **18 文件 / 235 项**全过（新增 `stage3dCamGizmo.test.ts` 15 项，其中锁住「视锥远端半高比 = tan(fov/2)」「半宽:半高 = 16:9」「改 fov 必须重建几何」「每个可渲染子件都带 isHelper」「setHelpersVisible 不会把常态隐藏的 axisHelper 误点亮」）· vite build ✓ · 真 Qt WebEngine 加载 dist 实拍截图确认（加 5 台不同 fov 机位、无 React 崩溃、无实心色块抢戏）· 双库同步零漂移（新增测试入 BASELINE_MISSING，与既有 7 个同因）。**未动**：端口 18765/3011/3010、GLB 路径与 bodyFigureUrl、骨名映射、材质替换规则、画布预热时机。改完重新上锁。\n\n2026-10-11 V4.43.8 用户授权解冻（工具栏可读性修复）：仅改 character_management_module.py 的 _build_ui 顶部工具栏 4 处内联样式 —— ① title QLabel 去掉内联 color:#fff（改 setObjectName(\"titleLabel\")，颜色交全局 QSS）；② hint QLabel 去掉 color:#888（改 #hintLabel）；③ _char_combo 删掉内联 \"QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;...}\" 硬编码深色框（内联样式优先级高于全局 QSS ⇒ 深色下与工具栏背景几乎同色、文字发暗；浅色下变黑框撞色）；④ _interp_check 去掉 color:#ccc。**未动** GLB 加载 / 骨骼绑定 / 姿势应用 / 材质渲染 / 端口值(18765/3011/3010) / 画布预热时机 / 角色库 CHARACTER_FIELD_SCHEMA。验证：ruff 存量棘轮 166 文件零新增 · AST 语法 OK · frozen_zone 重锁 85 项 · 真机启动正常。改完重新上锁。2026-10-12 用户授权解冻（缺口② 刀1：3D 导演台「产物 → 剪辑时间线」接通）：① 新增 src/stage3dArtifacts.ts 作为**唯一入轨通道**（复用已在后端存在但零调用方的 POST /ingest_path，**未新增任何 /host/* 端点**，避免「同一动作两条链路」的反模式）；② Stage3D.tsx 白模录制后登记产物 + 新增「➡ 最近产物 → 时间线」按钮；③ stage3dPoseVideo.ts 的 EncodeResult 补 path。**canvas_bridge.py 一字未动** ⇒ 端口 18765 / 静态 3011·dev 3010 两条不变量未受影响；bodyFigureUrl 取值规则、prepareBodyFigureMeshes / loadGLBRiggedHumanoid 材质处理、export_vinchau_glb 骨名映射全部未改。新增文件已登记进本 zone 的 files（受保护）⇒ 锁点 85 → 86。验证：tsc A/B 逐文件比对 38 → 38（零新增）· vitest 24 文件 308 例全绿 · vite build rc=0 且产物内实测含 /ingest_path 字面量 · 规模守卫 Stage3D.tsx 4646（+23，容差 30）。 2026-10-12 同一轮继续解冻（缺口② 刀2 收尾 + 缺口① 刀3）：① Stage3D.tsx 拆出 stage3dGlUtils.ts（readRenderTargetToDataURL / isWorldVisible / disposeObject3D 三个纯 GL 助手），Stage3D 4646→4604 行，为同一轮的第二/第三刀腾出规模守卫余量；② stage3dArtifacts.ts 增补 registerControlNetArtifacts —— ControlNet 三通道在画布侧只有 data URL、没有本机路径，必须经 /host/upload-asset 落盘拿到 path 才能走唯一入轨通道；③ 新增 stage3dCast.tsx：角色库 → 导演台的投递消费端（useStage3dCast / applyPendingCast / Stage3dCastPanel）+ 确定性映射（体型/发型由 human_variant 与性别年龄段推断，配色由 id 哈希 —— 全链路无随机）；④ character_management_module.py：CHARACTER_FIELD_SCHEMA 增 human_variant 字段，**刻意放 other 组 ⇒ 不进生图提示词，canvas_bridge.build_character_prompt 一字未改**；同时补上动态表单生成器长期存在的枚举控件缺口 —— 此前只认 text/string，enum 字段会「标题看得见、值填不了」，现改为 enum→QComboBox，并在 load_character / clear / set_enabled / _collect_data 五处同步读写（否则仍是「填了不生效」）。**未动**端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、画布预热时机、磁吸任何阈值。新增 4 个文件登记进本 zone（锁点 86 → 90）。验证：tsc A/B 逐文件 38 → 38（零新增）· vitest 25 文件 343 例全绿 · 真机离屏实例化角色库面板冒烟 16/16 通过（下拉真建出、值真写进 JSON、真回读）。2026-10-12 同一轮继续解冻（24 位灯位 → 3D 导演台灯光可视化）：修复「灯位面板与 3D 场景零数据流」的孤儿缺口（实测 lightingPresets.ts 在 Stage3D.tsx 零引用、面板 apply() 只写提示词、3D 场景只有 hemi+dir 两盏灯）——① 新增 src/stage3dLighting.ts 作为**唯一映射通道**（lightPosition 球坐标→笛卡尔 / kelvinToRgb Tanner Helland 近似 / lightStateFor 快照 / applyLightingToApi 副作用 / useStage3dLighting 消费端）；② Stage3D.tsx 只加 import + 一行 hook 调用 + lightPreset effect 的 `stage3dLightingSeq === 0` 守卫（+11 行，4604→4623 内的 4612→4623）；③ store.ts 加同族第三通道（2 字段 + 2 action，2502→2513，严格卡在容差上限）；④ lightingPresets.ts 给 RimLight 加**可选** azimuth/height/azimuths 结构化字段（「双侧轮廓」真给 2 盏）；⑤ LightingPanel.tsx apply() 同写提示词 + 投递快照、remove() 投递 null 恢复 preset、界面明写「3D 为打光意图示意，非出图预览」。**未动**端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、画布预热时机、角色库 schema、磁吸任何阈值。新增 2 个文件登记进本 zone（锁点 90 → 92）。验证：tsc A/B 逐文件 38 → 38（零新增）· vitest 27 文件 406 例全绿（新增 stage3dLighting.test.ts 45 例）· vite build rc=0 且产物含 stage3d-rim-light 字面量 · 新增 _verify/check_stage3d_lighting.mjs（真 three 场景端到端 43 项全过）· 7 条反例逐条喂坏版本确认守卫报红 · 副库 tsc -p tsconfig.app.json 38 → 38。｜【2026-10-17 用户授权解冻（用户原话「解冻，随时做好回退的准备」）】`canvas_runtime.py` 新增 §12-P2「画布启动三段打点」：`canvas boot timing: already running / static ready / vite ready`（各一行 `logger.info`，**零行为变化、零控制流改动**）。改前已备份至 `.workbuddy/tmp/frozen_unlock_20261017/`。改后 `--update` 重锁（99 项）。｜【2026-10-19 用户授权解冻（用户原话「解冻 stage3d-core」）】修复「3D 群像出现占满屏幕的巨型几何」：① riggedHumanoid.ts 的 applyBoneDelta 加 Number.isFinite 守卫——角度为 undefined/NaN 时旧写法 `=== 0` 判 false，deg(undefined)=NaN 会让 Euler/quaternion 全 NaN、骨骼矩阵退化、蒙皮顶点被拉到视口边界；兜底按 0 处理（等价 rest 姿态，合法输入行为不变）。② Stage3D.tsx 的 actor 同步循环加 500ms 节流的世界包围盒自检：高度 > 4m（正常上限约 1.84m）即压回 1.0 并 console.warn 报出角色名与实测高度，自愈而非静默。未动：端口 18765/3011/3010、GLB 路径与材质、24 位灯位单通道、CHARACTER_FIELD_SCHEMA、RIG_MESH_STYLE。改前备份至 .workbuddy/tmp/frozen_unlock_20261019/。tsc A/B 实测 37→37 零新增，vitest 36 文件 550 例全绿，dist 重建通过。｜【2026-10-19 第二轮用户授权解冻（用户原话「三刀的顺序按照这个来吧」「该怎么改还是你自己来看」）】AI 画布模块 UI 瘦身：① 顶栏 8 个控件（启动画布/连接 Agent/同步模型池/刷新/发送文件到剪辑/角色库 + 挂角色 + 补帧）→ 一级只留「标题 + 挂到角色 + 补帧 + ⋯更多」，6 个一次性系统动作收进 QToolButton+QMenu 二级菜单（原 QPushButton 局部变量全删）；② 新增「复制 Agent 地址」菜单项（调试用显式取 URL）；③ `_set_status()` 增加 URL/token 清洗（模块级 `_strip_urls`，URL 正则限定字符集不含 CJK，避免吃掉中文括号）且空文案隐藏状态条 —— 根治用户反馈的「打开画布顶上总有一条网页链接」（根因：canvas-agent 启动返回消息带 `http://127.0.0.1:17371?token=…` 被原样 setText）；④ `_apply_agent_btn_state()` 适配 QAction（QAction 无 setStyleSheet，地址不再写进文案）。**未动**：端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、canvas-agent 运行时与 ensure_started、bridge 注入、角色库 CHARACTER_FIELD_SCHEMA。另：`vendor/packages/libtv/src/LibTvChrome.tsx`（不在冻结区）把「发送到剪辑」从「⚡工具→节点」二级菜单提到 dock 一级（与「添加」并列，props 签名未动）。验证：py_compile OK · `_strip_urls` 四例实测（URL+token 剥离、中文括号保留、裸端口文案不动）· tsc 37→37 零新增 · vitest 36 文件 550 例全绿 · 规模守卫无新增债务 · stability 251 项无新增 · frozen 101 locks intact。④ 删除常驻底部的开发者长提示 `tip` QLabel（原文含「「连接 Agent」拉起本机 :17371 工具通道（Codex/MCP）… 可选 Codex: codex mcp add canvas-agent -- npx -y …」）—— 属集成说明书不是用户状态，`_build_ui` 少 8 行；信息已在「⋯ → 连接 Agent」tooltip 与「复制 Agent 地址」中。改前备份 `.workbuddy/tmp/frozen_unlock_20261019_canvas_ui/`。｜【2026-10-21 用户授权解冻（用户回「a」授权 1 行 prop）】`canvas_bridge.py` 从 zone.files **移除**：仅给 4 张捏脸镜像表补 8 个 A 类枚举中文标签（round/short 眉、cat/sleepy 眼、pouty/sharp 唇、glasses/flower_crown 发饰），**零逻辑改动、零端口/渲染/GLB 触碰**；同步把 FACEENUM 守卫 BASELINE 由 8 项清空转硬断言。改前备份 `.workbuddy/tmp/frozen_unlock_facecard/`。改后 `--update` 重锁（106 项）。",
+            "invariants": [
+                "bodyFigureUrl 只返回 bodychan.glb 或 bodykun.glb（来自用户 blend 文件）",
+                "prepareBodyFigureMeshes 不得覆盖 GLB 原始材质",
+                "loadGLBRiggedHumanoid 加载 GLB 后不做材质替换或颜色覆盖",
+                "canvas_bridge 端口 18765 不得更改",
+                "canvas_runtime 静态端口 3011 / dev 端口 3010 不得更改",
+                "export_vinchau_glb.py 导出时不得修改骨名映射或材质设置",
+                "画布预热只能在模块可见时触发（_bootstrap_if_visible / showEvent + _booted 幂等）；不得恢复 setup_ui 末尾的无条件 QTimer.singleShot(200, self._bootstrap)",
+                "角色库 CHARACTER_FIELD_SCHEMA 新增字段必须同步 canvas_bridge.build_character_prompt（仅 visual 组）与两个前端包的 CharacterEntry；静态校验 _verify/check_character_schema.py",
+                "24 位灯位 → 3D 灯光只有一条通道（2026-10-12）：必须走 store requestStage3dLighting() → stage3dLightingSeq 递增 → stage3dLighting.ts::useStage3dLighting() 消费一次（照抄 stage3dApplySeq/stage3dCastSeq 正统模式）。方位角→笛卡尔的映射数学（0°=镜头=世界 +Z、顺时针；球坐标→笛卡尔）与色温→RGB 只允许存在于 stage3dLighting.ts，禁止在 Stage3D.tsx 另写一套。优先级：stage3dLightingSeq === 0 时 lightPreset 完全生效；seq > 0 后 lightPreset 不得再覆盖 hemi/dir（只保留 bg/fog/地面）；守卫写死在 Stage3D.tsx 的 lightPreset effect 内，禁止移除。轮廓灯由 stage3dLighting.ts 用 WeakMap<Scene, DirectionalLight[]> 惰性持有（castShadow=false），禁止往 apiRef 新增第三个 DirectionalLight。静态校验 _verify/check_stage3d_lighting.mjs",
+                "applyBoneDelta 必须对角度做 Number.isFinite 守卫（2026-10-19 加）：undefined/NaN 会让 quaternion 变 NaN → 骨骼矩阵退化 → 蒙皮顶点飞向视口边界（表现为单个角色炸成占满屏幕的巨型几何）；非法值按 0 处理（等价 rest 姿态），合法输入行为不得改变",
+                "SkeletonUtils.clone() 之后必须先 updateMatrixWorld(true) 再测量包围盒（2026-10-19 加）：clone 出的 matrixWorld 是脏的，直接 Box3.setFromObject 会量出 1/33 的假尺寸（bodychan 实测 0.0512m 而真值 1.70m），归一化据此算出 33 倍补偿 ⇒ 把 1.7m 模型放大成 56.5m。本项目 clone 有两处（loadProcessedGLBTemplate 的模板 + loadGLBRiggedHumanoid 的实例），两处都要结算；attachGLBToHumanoid 挂载后亦需 root.updateMatrixWorld(true) 才能测到可信的 rs/sz。兜底 k 计算须除以 root.scale.y，否则女性 0.94 / 儿童 0.74 会被误判成异常再放大一次。SkinnedMesh 的包围盒一律用 precise 模式（setFromObject(obj, true)），普通模式不含骨骼变换。"
+            ],
+            "symbols": [],
+            "files": [
+                "vendor/packages/libtv/src/riggedHumanoid.ts",
+                "vendor/packages/libtv/src/Stage3D.tsx",
+                "vendor/packages/libtv/src/stage3dArtifacts.ts",
+                "vendor/packages/libtv/src/stage3dArtifacts.test.ts",
+                "vendor/packages/libtv/src/stage3dCast.test.ts",
+                "vendor/packages/libtv/src/stage3dCast.tsx",
+                "vendor/packages/libtv/src/stage3dLighting.ts",
+                "vendor/packages/libtv/src/stage3dLighting.test.ts",
+                "vendor/packages/libtv/src/stage3dGlUtils.ts",
+                "vendor/packages/libtv/src/stage3dControlNet.ts",
+                "app/core/canvas_runtime.py",
+                "app/modules/lego/character_management_module.py",
+                "scripts/export_vinchau_glb.py"
+            ],
+            "markers": []
         },
         {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_start_timeline_playback"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_stop_timeline_playback"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_on_timeline_playback_tick"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_rebasing_playback_clock"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_sync_bgm_audio"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_is_linked_video_audio_clip"
-        },
-        {
-          "file": "app/core/preview_manager.py",
-          "name": "get_frame_at"
+            "id": "canvas-magnetic-intent",
+            "title": "画布磁吸意图系统 · 导演卡 + L1 参数",
+            "reason": "小白画布按《磁吸意图画布开发规格说明书》实现：四向磁吸紧密贴合、六向槽位高亮、导演卡剧本自动拆解、生成卡 L1 导演参数；用户要求冻结锁定，2026-09-12。2026-09-13 用户授权解冻一次：修正磁吸判据（中心距→边缘间隙）、新增 Bond 咬合 + SnapSeam 咬合缝、落地拖拽分离阻力三段式；按规格保留全部阈值数值，改完重新上锁并补登记 bonds.ts / SnapSeam.tsx / novice/*。2026-09-16 用户授权解冻两次：① 吸附视觉无感化改造——撤销「咬合缝常驻可见」，静止贴合零视觉残留，仅拖拽拉扯瞬态显示细线阻力反馈、落座/断裂保留一次性细闪光（无文字胶囊）；② 意图胶囊卡片交互升级——L1/L2 参数按节点类型分派（只渲染 node-factory 真实字段，移除前后端均无消费的 aspectRatio/styleStrength/negativePrompt 假字段）、L3 专业参数经 L2 底部「▾ 专业参数」展开（不再完全隐藏）、单击选中卡片内直接输入主文本（KIND_TEXT_FIELD）、双击卡片经 store.requestProEdit 展开右侧精细编辑；③ 画布 Agent 展开时隐藏右侧设置面板（agentPanelOpen 时 inspector 不渲染，只显示 Agent-IM）；④ 吸附贴合无缝化——落位 gap 0→-2（相邻边框融合消除暗缝）、.nv-card 补 border-box（实尺寸=落位基准 240×200）、圆角 8→4（贴合四角缺口减半）；2026-09-16 用户授权解冻第五次：⑤ 咬合侧描边透明化——贴合边由 bonds 几何推导（bondedSidesMap → store.bondedSides → NoviceCard 挂 bonded-* class）改透明描边+贴合边直角（圆角 0），选中态 1px ring 让位纯投影，两卡贴合处融为一块（Windows 磁贴式全齐平无缝）；⑥ 竖排缩放控件上移 bottom:68px 避让底部 libtv-dock（资产管理行），消除图标重叠；磁吸行为/阈值/阻力手感全部不变，改完重新上锁。2026-09-17 用户授权解冻（追加改动）：放大磁吸阈值 weak 80→120、strong 25→60（medium 50 不动）+ 新增 instant 等级（instantDistance=10，magneticStrength=1.0，拖拽中 gap<10 直接 writeNodePos 到 snapPos，对齐 Win11 磁贴「边对边立刻贴齐」手感）；卡片尺寸 240×200 / 贴合缝机制（bonds/bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid=关闭 / XYDrag 时序 全部不变；改完重新上锁。2026-09-17 用户授权解冻（V4.23.2 追加）：小白自动布局网格步进对齐贴合落位——拉片（store.ts breakdownScript）与导演卡拆解（breakdownDirectorCard）x 步进 230→238、y 步进 200→198（= CARD_SIZE 240×200 − 贴合落位 gap=-2）；旧值 230 使相邻卡重叠 10px，超出 bondTolerance(2px) 不构成咬合、视觉却近乎贴死；同轮重建 dist（此前 V4.23.1 instant snap 仅落 src 未构建，运行时仍跑旧磁吸 weak 80/strong 25），改完重新上锁。2026-09-17 用户授权解冻（V4.24.0「四周灯光包围 + 贴合即连接」）：① 新手卡推翻「咬合侧隐形/静止零残留」——每张卡四周包一圈发光轮廓（青蓝灯光 #22d3ee 系，选中卡绿色灯光 #4ade80 系），贴合处双光带分界；类型色条改 ::before 内缘伪元素；bonded-* 透明+直角 CSS 废除（挂载链路保留）。② 「贴合即连接」——吸附成功不再自动生成软连接虚线与「此节点输出」徽章（onSoftDragStop 移除 pushSoftConnection），softConnections 恒空、固化/丢弃链路保留备用。③ styles.css 修复 sg-agent-head dock 窄面板按钮被压成竖排（flex-wrap:wrap + 按钮 flex-shrink:0/white-space:nowrap）。改完 vite build 重建 dist 并验证（pushSoftConnection 调用=0、发光样式进 CSS bundle、bonded 透明规则 0 残留），重新上锁。2026-09-17 用户授权解冻（修复磁吸方向 180° bug）：computeMagnetic 里 getDirection 返回「目标相对拖拽」的方位（dx=目标中心-拖拽中心，用于六向语义标签），却被直接传给 getSnapPosition（其语义=「拖拽节点应放到目标的哪一侧」），两者相反——导致目标在拖拽右侧时 snap 到目标右侧（用户反馈「左右吸附跑到最右、左边吸不上」），上下同理方向反了；修复为调用前 oppositeDirection 取反（left↔right / top↔bottom，stack 不变），best.direction 仍保留原方位供 MagneticLines 语义标签展示；新增 4 个方向回归测试（MagneticEngine.test.ts：目标在右/左/下/上四向，断言 snap 落点在目标正确一侧）；磁吸阈值（120/50/60/10）/六向语义/gap=-2/三段式阻力手感全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-17 用户授权解冻（修复 Agent 面板不靠右）：styles.css 的 .workspace.agent-open 系列 grid 由 4 列 200px 1fr 240px minmax(300px,360px) 改 3 列（删除 240px inspector 残留列）——agentPanelOpen 时 inspector 本就不渲染（不变量已锁定），DOM 仅 sidebar/canvas-wrap/AgentPanel 三个子元素，4 列模板把 AgentPanel 挤进第 3 列（240px）、最右 360px 空置，用户反馈「Agent 交互界面不在最右边靠齐」；改为 3 列后 Agent-IM 直接落最右 minmax(300px,360px) 列，right-collapsed 对 Agent 面板无效（Agent 打开期间始终贴右）；磁吸行为/阈值/卡片尺寸/贴合缝机制全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-18 用户授权解冻（V4.28.0「1+4 结合」磁贴画布视觉优化）：用户对小白模式 UI 与磁吸手感仍不满意，经 4 套可视化方案选定「1+4 结合」= Windows 磁贴无缝吸附 + 列表块大圆角/蓝色拖拽占位线。改动：① 卡片视觉——圆角 4→16、四周灯光包围改为深色实色块（#151a26 + 1px 白描边）、类型色由标题栏整块背景承载（废除 ::before 内缘色条）、选中态绿色灯光改为白色描边环；② 拖拽占位线——MagneticLines 的弯曲发光磁力线 + 两端发光圆点改为蓝色直线占位缝（#378ADD，3px 核心 + 10px 柔光晕，标在目标卡被贴边全长，stack 走整卡外框），方向语义标签胶囊保留；③ 修复 V4.23.1 遗留 bug——computeMagnetic 的 levelRank 映射漏 instant 档，导致 instant 被后遍历的 strong/medium 覆盖（「instant snap 时灵时不灵」的根因），补 instant:4 并加回归测试；magneticLevels.ts 等级元数据表补 instant 档（消除 tsc 类型错误）。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完 vite build 重建 dist（新 bundle 验证 #378add/seam-blur/instant:4 进包、旧 mag-glow 移除）并重新上锁。2026-09-18 用户授权解冻（V4.28.1「方案 A：剥离方向业务语义」）：用户质疑「上下 = 并行对照」等方向语义是从未确认过的臆造设计——早期规格文档 v3.1 给空间方向（left/right/top/bottom/stack）硬套了「输入/输出/对照/分支/导演卡/历史」业务语义，属过度设计。本次彻底剥离：删除 DIRECTION_SEMANTICS / SOFT_CONNECTION_SEMANTICS 两套语义表、删除 Bond.color 死字段（无人消费）、删除 SnapSlotHighlight.tsx 整个组件（六向槽位彩色语义条+标签）、MagneticLines 去掉方向语义标签胶囊（只留蓝色占位缝）、SoftConnectionLines 去掉语义标签改统一中性青色、NoviceInspector 去掉「六向放置」图例；SpatialDirection 类型与 BOND_COLORS（拉扯阻力反馈色，非语义）保留。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完重新上锁2026-09-18 用户授权解冻（V4.28.2「靠近即吸附」）：推翻「instant 直接 snap + 其它三档渐进吸引」——useMagneticDrag.onNodeDrag 对 weak/medium/strong/instant 一律直接 writeNodePos 到 snapPos，废除 getMagneticOffset 渐进吸引，松手 onNodeDragStop 钉回落点并闪光；删除 MagneticEngine 的 magneticStrength / getMagneticOffset 两个死函数及其测试。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、交互态、三段式阻力（30/50/bondGiveRatio=0.28）、snapToGrid 关闭、XYDrag 时序全部不变，改完重新上锁。 | 【2026-10-11 解冻记录 V4.43.3】升画布版本号 0.3.23 → 0.3.24（代号「6 背景全露 + custom 上传」），同步 `package.json` 0.3.24 与副库副本（三件套：canvasVersion.ts → package.json → CHANGELOG）。custom 上传功能（PNG/JPG → base64 → CSS var(--bg-img)）属本 zone **协作对象替换文件** `canvasBackgrounds.ts`（V4.43.2 新增非冻结文件，V4.43.3 仅改其 CSS 与 applyCanvasBackground），本 zone 的磁吸/咬合/卡片/意图/让位逻辑一行未改；本区仅因版本号文件被触及。 · 画布 AI 增强接线（2026-10-12 V4.43.19 用户授权解冻「前端接线」）：图像节点检查器新增「AI 增强」（超分 sharpen/抠像 cutout，本地引擎不花云端额度，degraded/降级必如实标注）与剧本节点「AI 编剧」（标题→LLM 完整剧本，与 pipeline.script_write / /host/script-write 同一后端单一真源）；新逻辑独立成 canvasEnhanceActions.ts（本 zone 新登记文件，33→34），NoviceInspector 复用 .nv-loop-* 既有样式零 CSS 改动；剧本卡已有正文不覆盖。磁吸全部不变量不变。 | 【2026-10-14 用户授权解冻「捏脸入口：新增 character 角色节点」】原因：新建画布在 AI 画布模块里找不到捏脸卡片/节点，用户裁定方案「加「角色」节点」。实现（全部为**加法**，不改既有 kind）：① node-factory.ts 新增 CharacterData 类型 + NodeData 联合成员 + makeNode 的 base/style + BUILTIN_NODE_KINDS；② registerBuiltinNodes.ts 登记 BUILTIN_NODE_META 与 CharacterNode；③ mediaExtraNodes.tsx 新增 CharacterNode 组件（角色库下拉 + 头像预览 + 🎨 捏脸按钮）；④ NodePalette.tsx 加「角色」palette 项并扩 isBuiltinNodeKind 字面量；⑤ novice/types.ts 补 KIND_STYLE / NOVICE_ENTRY / noviceHint（character → 摆位与实拍组「捏个角色」）；⑥ NoviceCard.tsx 菜单加 character「捏脸」项；⑦ CanvasShell.tsx 新增 sg-open-face-card 窗口事件监听（照抄既有 sg-preview-focus 正统模式）→ 复用**唯一** FaceCard host，避免在 React Flow viewport（有 transform）内渲染固定定位模态；⑧ store.ts re-export CharacterData。配套非冻结文件：ports.ts 加 character 端口（Record<NodeData[ kind ]> 穷尽类型**必须**加否则 tsc 报错）、CanvasContextMenu.tsx 加「角色」右键项。守卫/测试同步：check_port_model.py 21→22（两处 + 文档串）、ports.test.ts toHaveLength 21→22、novice/entry.test.ts ALL_BUILTIN_KINDS 补 character 并改文案 21→22。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；未动端口 18765/3011/3010、GLB/材质/骨骼/预热。 |【2026-10-14 用户授权解冻「React #185 崩溃根因修复」】用户在 Qt WebEngine 生产模式实测画布频繁崩，错误边界截到 `Minified React error #185`（= Maximum update depth exceeded，无限重渲染）。经全库逐行排查（65 处 useEffect / 2 处 subscribe；zustand selector 新引用反模式已由 check_canvas_selectors.py 静态排除），定位闭环为：`CanvasShell.tsx` 的 `bondedSides = useMemo(() => bondedSidesMap(nodes), [nodes])` —— `bondedSidesMap`（`magnetic/bonds.ts`）每轮 `const map = {}` 新建对象 ⇒ 引用必变 ⇒ effect 必跑 ⇒ `store.ts` 的 `setBondedSides` 无幂等守卫、`set({bondedSides: map})` 无条件通知全 store ⇒ 订阅它的 NoviceCard 全量重渲染 ⇒ xyflow 抛 dimensions change ⇒ `onNodesChange` 无条件 `applyNodeChanges` 产出全新 nodes 数组 ⇒ nodes 变 ⇒ 回到第一步，成环。修复（全部为**加法**，不改任何磁吸/咬合/尺寸/阈值行为）：① `store.ts` 的 `setBondedSides` 加内容级幂等守卫（key 数 + 每项 join(',') 相同则整体不 set，引用不变）；② `store.ts` 的 `updateNodeData` 加 patch 幂等守卫（逐键 Object.is 相同则整个 set 不执行，nodes 引用与 dirtyVersion 均不变；已核查全部调用方，无一依赖「空转也 +1 dirtyVersion」）；③ 新增 `src/storeIdempotent.ts` 承载 `bondedSidesEqual` / `nodeDataPatchIsNoop` 纯函数（store.ts 属冻结区只减不增，故判定逻辑外置；vitest 是 node 环境无 jsdom，纯函数才可测）⇒ 本 zone 登记 34→35；④ `windowManager.ts` 的 `syncOpen` 补幂等守卫（非本 zone，防将来成环）；⑤ `CanvasOverlays.tsx` 预览 `tick()` 补越界守卫（step 用完后不再反复 dispatch sg-preview-focus ⇒ 相机抖动）。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap` 几何推导一字未改。2026-10-15 Wave 0 #13 第 2/3 条（用户授权「开始」）：孤儿端点接线 —— 剧本合规检查 `POST /host/compliance-check` 与AI 增强意图目录 `GET /host/enhance-intents` 接入 NoviceInspector（详见不变量 37）。⚠️ 记一条语义红线：本端点 quality_tiers(fast/standard/high) 与前端 QUALITY_TIERS(draft/standard/fine/cinema) 是两套语义，绝不混用。新增文件 hostCompliance.ts / hostEnhanceIntents.ts（bridge.ts 已 1868/2046顶格 ⇒ 一律另开文件）。磁吸几何与阈值全部未动。2026-10-15 Wave 0 #13 第 4/5 条（用户授权「开始」）：孤儿端点接线 —— 深度拉片 L2（`/host/reference-breakdown-l2`，接L2 不接 L1）与时间线回滚栈（`/host/project-snapshot/history` + `/restore`）。详见不变量 38。⚠️ 记两条诚实红线：① L2 的景别/运镜测不出就是空串，**绝不填默认值**；② **回滚不可再回滚**（restore 不 push、前端无 push 端点）。新增文件 hostBreakdownL2.ts / hostSnapshots.ts / editorRollback.ts。本 zone 仅 `styles.css` 被触及且只追加样式。磁吸几何与阈值全部未动。｜【2026-10-19 用户授权解冻（用户原话「解冻的 zone 是 canvas-magnetic-intent」）】AI 画布信息架构 → 左侧竖排导航：① `AppNav.tsx` 顶栏 52px 横排 → 左侧 64px 竖排（品牌只留图标 + 6 项图标/10px 标签 + 底部快捷键·主题·模式·版本）；`ic-tier-seg` 分段控件竖排放不下 ⇒ 改单按钮 `ic-tier-btn` 循环切换（同一份数据、语义不变，`tier`/`onTierChange` props 签名一字未动）。② `styles.css`：`.shell` 加 `padding-left:64px`、`.ic-nav` 改 `position:fixed` 竖排 —— **刻意不把 shell 改成 flex row**（CanvasShell 的 stage3d 分支是 header+content 的 fragment，row 会把 subbar 挤成侧边一列；fixed+padding 让 DOM 结构零改动）。③ 新增 `.ic-nav-label` / `.ic-tier-btn` + 浅色主题覆盖（否则浅色画布上整栏是一条黑边）。**未动**：磁吸几何/阈值/判据、`CanvasShell.tsx`（本次一行未改）、bridge.ts、任何端口与端点。Agent 面板精简在同轮但**未冻结**的 `AgentPanel.tsx` 内完成（四页签去彩色 emoji、对话模型折叠块默认收起、「继续」按钮改为仅在暂停后出现）。验证：tsc 37→37 零新增 · vitest 36 文件 550 例全绿 · web 宿主 vite build ✓ 3.86s（`--emptyOutDir  false` 绕过沙箱 safe-delete 拦截，产物 AgentPanel-CSADWUe1.js 35.94 kB）。｜【2026-10-19 追加（用户原话「要把竖排方向的形式形态切换放到横排上」，经选项确认指「小白/专业」模式切换）】形态切换入口迁移：① `AppNav.tsx` 删除 `.ic-tier-btn`（竖排栏不再放形态切换），改为 `useEffect(installTierBridge)` 挂桥；② 新增**非冻结**桥文件 `canvasTierBridge.ts`（30 行纯函数：`sanitizeTier` 非法值归一 novice、`installTierBridge` 注册 `window.__shiguangSetTier` 并回报 `__shiguangTierChanged`、卸载清全局），未登记进本 zone（非磁吸不变量，同 `canvasCommandsExtra.ts` 先例）；③ `character_management_module.py` 顶栏横排新增「模式: 小白 / 专业」两个 checkable 按钮（`setObjectName('tierBtn')`，颜色交全局 QSS，无内联颜色），`_on_tier_click` 经 `window.__shiguangSetTier('pro')` 下发、画布未加载时诚实提示「无法切换形态」。**真源仍在 `CanvasShell` 的 `editorTier`**，Python 侧不另存。验证：py_compile OK · tsc 37 零新增 · vitest 550/550 · web 宿主 vite build ✓ 4.30s · 真机截图 `_verify/ui_walk/nav_check_20261019{,_pro}.png`（顶栏出现「模式: 小白/专业」、竖排栏底部已无切换、点专业后状态栏显示「已切换到专业模式」）。｜【2026-10-19 第三轮（用户原话「开始」= 同意下一轮第 1-2 项）】顶栏状态收拢 + 左栏默认折叠：① `CanvasShell.tsx` 把常驻的「引擎未安装/引擎在线」与「剪辑 N 片 · 模型名」两块合并成一个状态胶囊 `.libtv-status-pill`（彩点表引擎状态、剪辑数/模型压成小字、完整文案进 tooltip、点击仍刷新引擎）⇒ 顶栏右侧由 4 块减为 3 块（胶囊 / 生成 / Agent / ☰）；② `leftCollapsed` 初始值由 `=== '1'` 改为 `!== '0'` ⇒ 左侧节点列表默认折叠，用户手动展开一次后记住；③ `styles.css` 新增 `.libtv-status-pill` 与浅色主题覆盖。未动：磁吸几何/阈值、生成/Agent 按钮行为、☰ 菜单项。验证：tsc 37 零新增 · vitest 37 文件 568 例全绿 · web 宿主 vite build ✓ 4.41s · CanvasShell 3257→3265（基线 3251 + 容差 30 内）· 真机截图确认胶囊与折叠均生效。｜【2026-10-19 第四轮（用户授权解冻：配方 Recipe + Agent 自动铺卡）】① 新增 4 个配方文件入册（recipePure.ts 纯函数匹配 · recipe.ts 存取与应用 · RecipePanel.tsx 左栏「配方」面板 · recipeBridge.ts Agent 事件桥）+ 1 测试文件 + 1 UI 重构产物 canvasTierSeg.tsx（形态切换从导航移到画布顶栏，用户 2026-10-19 纠正「它属于视图级操作」）；② CanvasShell.tsx 挂 RecipePanel + installRecipeAgentBridge（SSE 订阅 recipe.apply 事件）；③ canvasVersion.ts 0.3.32→0.3.33「配方卡：意图 + 参数可复用，Agent 可一键铺开」；④ 后端 app/core/capability_handlers_recipe.py 新增 canvas.apply_recipe 能力（make_agent_event + broadcast_agent_event 广播，实际铺卡在前端执行），capability_handlers.py 注册、agent_capability_catalog.py 登记（canvas_write）。未动：磁吸几何/阈值、Bond 咬合、生成/Agent 按钮行为。验证：vitest 37 文件 568 例全绿（recipePure 18 例新增）· tsc 存量 37 零新增 · vite build 5.17s · 后端自检 0 问题。｜【2026-10-19 第五轮（用户第二次纠正原话：形态切换的位置该和出现画布和 3D 导演台的位置，它该出现是在这儿，而不是其他的地方。不是最顶部的，不挂角色那个地方的一个位置）】第四轮把形态切换经 canvasTierBridge.ts 挂到 PyQt 宿主顶栏是中间态，本轮按纠正归位：① 删除 canvasTierBridge.ts（桥文件整个废弃，宿主不再参与 tier 下发）；② AppNav.tsx 删除 installTierBridge 调用与 import、styles.css 删除 .ic-tier-btn 三段样式，竖排导航彻底无形态切换残留（props tier/onTierChange 保留签名，void 消接收音）；③ character_management_module.py 删除顶栏「模式: 小白/专业」按钮组与 _on_tier_click 方法，原位留注释说明形态切换刻意不在宿主顶栏；④ CanvasShell.tsx 在「画布 | 3D 导演台」.seg 之后挂 CanvasTierSeg（真源仍是 editorTier），并删除 isNovice 重复 chip；CanvasTierSeg.tsx 内容从第一轮「AppNav 单按钮循环」改定为「画布顶栏 .seg 双按钮」纯展示组件（本 zone 新登记文件，46→47）；⑤ 第四轮登记的 5 个配方文件（recipe.ts / recipePure.ts / recipePure.test.ts / recipeBridge.ts / RecipePanel.tsx）与 canvasTierSeg.tsx 本次随 --update 一并补锁（此前 files 已登记但 hashes 缺条目）。未动：磁吸几何/阈值/判据、Bond 咬合、卡片尺寸、生成/Agent 按钮行为、bridge.ts。验证：vitest 37 文件 568 例全绿 · tsc 存量 37 零新增 · web 宿主 vite build ✓ 4.01s · CanvasShell 3290→3277 行（基线 3251+30 内，seg 内联超限遂抽 canvasTierSeg.tsx）· 真机截图：DOM 断言「画布|3D 导演台」与「小白|专业」相邻（adjacent=true）、宿主顶栏 _tier_btns=None、点「专业」切换生效、workspace left-collapsed 左栏默认折叠。 2026-10-20 用户授权解冻（V4.46 画布 codeVideo 节点）：新增「代码成片」节点 + /host/code-video/render|status 端点 + SSE 进度 + 画布本地异步任务；改 registerBuiltinNodes.ts / NodePalette.tsx / novice/types.ts / stores/node-factory.ts 四处注册与常量；磁吸阈值 120/50/60/instant10、卡片尺寸 240x200、gap=-2、三段式阻力、灯光/配色/交互全部未动；改完重建 dist 并重新上锁。｜【2026-10-21 用户授权解冻（用户回「a」）】`CanvasShell.tsx` 的 FaceCard 调用处**加 1 行** `initialAvatarUrl={faceCardTarget.avatar_url}`（纯加法）：把角色已有头像传入捏脸卡，供「应用」时做覆盖确认；`onFaceConfirm` 里写 avatar_url 的既有逻辑**一字未改**。与 2026-10-17 加 RoughCutReviewDock 挂载同型。磁吸阈值/卡片尺寸/阻力/让位/Bond 全部未动。改前备份 `.workbuddy/tmp/frozen_unlock_facecard/`，改后重锁（106 项）。",
+            "invariants": [
+                "贴合落位（2026-09-16 裁定，2026-09-18「1+4 结合」视觉修订）：吸附落位 gap=-2 保留——Bond 容差内的咬合重叠量，分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（不再是「四周灯光圈双光带」，也不再是边框融合隐形）；.nv-card 必须 box-sizing:border-box（DOM 实尺寸=落位用 240×200）；卡片圆角 16（2026-09-18 用户裁定「1+4 结合」：4→16 大圆角，对齐列表块风）。上下左右吸附统一生效。**卡片高度必须固定 200**（2026-09-23：CARD_GEOMETRY.minHeight → height，禁止内容撑高——曾实测被撑到 ≈306px，高矮不一且违反本基准；见「卡片尺寸统一」条）。自动布局网格步进必须 = CARD_SIZE − 2（x 238 / y 198，V4.23.2）：拉片与导演卡拆解生成的小白卡直接落在贴合位，禁止回退 230/200（会重叠 10px 破坏咬合）",
+                "磁吸阈值 weak/medium/strong = 120/50/60px，瞬时阈值 instant=10px（2026-09-17 用户裁定：放大强吸判定+新增瞬时档，对齐 Win11 磁贴「边对边立刻贴齐」手感）；过冲5、回弹200ms、拉伸30、断裂50",
+                "方向无语义（2026-09-18 方案 A 用户裁定，推翻早期「六向语义」）：磁吸方向 left/right/top/bottom/stack 只表示物理方位，禁止再给方向硬套「输入/输出/对照/分支/导演卡/历史」等业务语义标签与语义色；吸附反馈统一为蓝色占位缝（见「拖拽占位缝」），不再渲染方向语义标签、六向槽位彩色条、软连接语义标签、右侧面板「六向放置」图例",
+                "导演卡自动拆解走 breakdownStoryboard + breakdownDirectorCard，非破坏式追加下游分镜卡",
+                "生成卡 L1 画质四档 qualityTier = draft/standard/fine/cinema，与 shot 一致",
+                "生成卡默认 duration=5、motionStrength=60、consistency=75",
+                "L1 面板仅在非参考视频节点显示（isReference 不显示）",
+                "缩小色块视觉由 .react-flow.zoomed-out 类控制",
+                "磁吸等级判据用「边缘间隙 edge-gap」，不是中心距：卡片 240×200，并排贴合时中心距恰为 240px，用中心距判 25px 阈值必然失效（V4.13.0 修正的根因）",
+                "靠近即落座（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」二次修订）：拖拽中只要进入磁吸范围（edge-gap < weakDistance=120px）即认定「松手会吸附到这里」（magState 记录 snapPos），但**拖拽期间不改卡片位置**；松手时才动画落座。磁吸等级（weak/medium/strong/instant）仅用于目标优先级（levelRank）+ UI 反馈 + 落座过冲判定，不再区分吸附力度、也不在拖拽中产生位移。历史：V4.28.2 曾为「进入范围即整卡瞬移」，2026-09-18 推翻（与手机主屏「绝不瞬移」手感相反且每帧重建 nodes 数组致卡顿）",
+                "Bond 咬合由几何推导：边距 ≤ bondTolerance(2px) 且投影重叠 ≥ MIN_OVERLAP(40px)；不落盘，刷新后自动恢复",
+                "Bond 只识别 左/右/上/下 四向贴合缝，不含 stack 层叠",
+                "咬合缝 SnapSeam（2026-09-16 用户裁定 + 2026-09-18 修订）：静止贴合的分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（见「大圆角色块」），SnapSeam 不再承担静止零残留承诺；仅拖拽拉扯瞬态显示细线阻力反馈（拉伸中 #fbbf24 / 即将断开 #f87171）；落座/断裂保留一次性细闪光，不出现文字胶囊",
+                "贴合即连接（2026-09-17 用户裁定）：吸附成功 = 关系已建立，不再自动生成软连接虚线与方向徽章（CanvasShell onSoftDragStop 的 pushSoftConnection 已移除）；softConnections 状态与固化/丢弃链路保留（恒为空列表、SoftConnectionLines 渲染空列表），未来手动建立血缘可复用",
+                "大圆角色块（2026-09-18 用户裁定「1+4 结合」，推翻 2026-09-17「四周灯光包围」）：每张小白卡为深色实色块——body 背景 #151a26 + 1px 描边 rgba(255,255,255,0.08)，圆角 16px，去掉四周发光光晕（不再有 box-shadow 光晕 / 1px 亮芯）；类型色由标题栏整块背景承载（.nv-card-head background:var(--nv-accent)、文字改深色 #0f1115），废除 .nv-card::before 内缘色条；选中态 .on 改为白色描边环（border #ffffff + box-shadow 0 0 0 1px rgba(255,255,255,0.35)），废除绿色灯光；贴合处由相邻卡片深色块 + 类型色块自然并排分界；bondedSidesMap→store.bondedSides→NoviceCard 挂 bonded-* class 的链路保留，但 bonded-* 的「边框透明+直角」CSS 规则已废除；卡片圆角统一由 novice-cards.css 管理（16px），NoviceCard 不得内联 borderRadius",
+                "拖拽占位缝（2026-09-18 用户裁定「1+4 结合」，推翻旧「弯曲发光磁力线」）：MagneticLines 拖拽靠近目标时，在目标卡被贴的那条边全长绘制蓝色直线占位缝（#378ADD，3px 核心线 + 10px 柔光晕 opacity 0.25，滤镜 seam-blur），替换旧的 Q 曲线磁力线 + 两端发光圆点；方向由 magState.direction 映射——目标在右→贴其左缘竖线、在左→贴其右缘竖线、在下→贴其上缘横线、在上→贴其下缘横线、stack→目标整卡外框；不渲染任何方向语义标签（2026-09-18 方案 A 剥离）",
+                "竖排缩放控件避让（2026-09-16 用户裁定）：.react-flow__controls.react-flow__panel 必须 bottom:68px，抬到 libtv-dock（bottom:10px、顶边≈52px）上方，两者不得重叠",
+                "意图胶囊卡片交互分级（2026-09-16 用户裁定）：单击选中 = 卡片内直接输入主文本（KIND_TEXT_FIELD 绑定 node-factory 真实字段）；双击 = store.requestProEdit 触发右侧面板展开 L2 进阶设置",
+                "画布 Agent 打开时隐藏右侧设置面板（2026-09-16 用户裁定）：agentPanelOpen 时 inspector aside（小白 NoviceInspector / 专业项目+选中节点参数）不渲染，只显示 Agent-IM 交互界面；Agent 关闭后恢复",
+                "L1/L2/L3 参数按节点类型分派（2026-09-16 用户裁定）：只渲染 node-factory 类型定义中真实存在的字段；L3 专业参数（steps/cfg/seed/补帧）经 L2 底部「▾ 专业参数」折叠展开，不再完全隐藏；aspectRatio/styleStrength/negativePrompt 三字段前后端生成链路均无消费，已移除不许复活",
+                "拖拽分离阻力三段式：拉力 ≤30px 完全不动 / 30~50px 只跟出 bondGiveRatio(0.28) / ≥50px 断裂并 muted 该邻居",
+                "仍在咬合时松手须 150ms 平滑回位且不过冲；强吸附落座才带 overshootPx(5) 过冲",
+                "小白模式 snapToGrid 必须关闭：16px 量化会把拉扯变成阶梯跳，吃掉阻力手感",
+                "React Flow v12 的 XYDrag 先写 store 再回调，onNodeDrag/onNodeDragStop 内覆盖位置必然生效——阻力手感依赖此顺序",
+                "跟手浮起（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」，推翻 V4.28.2「靠近即吸附」的拖拽中瞬移）：拖拽中 onNodeDrag **绝不覆写卡片位置**（不再调用 writeNodePos），卡片 1:1 跟指针走；onNodeDrag 只计算并记录 magState（level/targetId/direction/snapX/snapY = 「若现在松手会落在哪」）。性能收益：消除每帧重建 nodes 数组 + 每帧重算 bonds/bondedSides 的正反馈卡顿。落座动作全部移交 onNodeDragStop。禁止恢复「拖拽中 writeNodePos 贴到 snapPos」",
+                "单轴吸附（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」，2026-09-23 修订 top/bottom）：getSnapPosition 必须接受 dragPos（拖拽卡当前左上角）。**case left/right 保持单轴**：y 取 dragPos.y（不再硬取 targetPos.y）——旧行为「吸左右时把 y 拽到目标 y」实测垂直错开 180px 时落点瞬移一整卡高，是「上下吸附不对」的真实根因。**case top/bottom 改为顶边对齐**（2026-09-23 用户裁定）：x 取 targetPos.x（不再取 dragPos.x）——用户反馈「卡片最上端的吸附没有对齐」：上下贴住后左右边缘错开、不成列；水平位移受磁吸范围约束（edge-gap < weakDistance 120px），无瞬移观感。stack 除外（保持 targetPos+8）。dragPos 缺省时回退旧行为保证兼容。回归 _verify: MagneticEngine.test.ts「单轴吸附」describe（3 例）",
+                "卡片尺寸统一（2026-09-23 用户裁定「磁吸意图卡片大小不统一」）：所有小白卡**固定高度 200** —— CARD_GEOMETRY 必须用 height:200，禁止 minHeight（内容曾把卡片撑到 ≈306px：hint + 缩略图 96 + 正文 3 行 + meta）；NoviceCard 内联 style 用 height，且禁止对内层 body 内联 minHeight；.nv-card-body 必须 min-height:0 + overflow:hidden；.nv-card-thumb 必须 flex:1 1 auto + min-height:40px（弹性收缩，img/video 上限 72px）；.nv-card-hint 与 .nv-card-meta 必须 flex:0 0 auto（否则作为 flex 子项被压扁裁字）；有缩略图时必须折叠提示语并把正文收 1 行（:has(.nv-card-thumb) 规则）——渲染实测：正文区可用仅 106px（200−40−32−2−20），而「提示语31+缩略图40+正文2行44+元信息17+间隙16」需 148px，四层内容数学上装不下。目的：DOM 实尺寸恒 240×200（= 磁吸落位基准），画布上高矮一致。回归 _verify: vitest（8 文件 76 例）",
+                "松手落座动画（2026-09-18 用户裁定）：onNodeDragStop 吸附落座必须走 animateNodeTo（snapAnimationMs=200 平滑滑入），不再瞬间 writeNodePos 跳过去；强吸附（strong/instant）落座带 overshootPx(5) 过冲，weak/medium 不带（对齐既有不变量「强吸附落座才带 overshootPx(5)」）。animateNodeTo 收尾自带 findBondFor，参数即形成的咬合；仍粘住松手仍走 150ms 回位不过冲（不变）",
+                "instant 等级（2026-09-17 用户裁定，对齐 Win11 磁贴「边对边立刻贴齐」手感）：computeMagnetic 判定 gap < instantDistance(10px) → level='instant'。**注**：instant 自 2026-09-18「跟手浮起」起不再表示「拖拽中立刻贴齐」，而是作为**最高优先级**（levelRank instant:4）参与目标选择 + 决定落座是否带过冲；所有等级拖拽中一律跟手、松手才落座。卡片尺寸 240×200 / 贴合缝机制（bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid 关闭 / XYDrag 时序 全部不变。levelRank 映射必须含 instant:4：漏掉它时 instant 会被后遍历的 strong/medium 错误覆盖（2026-09-18 修复，补 MagneticEngine.test.ts 回归）",
+                "空间记忆 · 第一层（2026-09-18 用户裁定「下一代概念」）：NoviceCard 挂 data-depth（= 已有 intentDepth 1~3），novice-cards.css 用 [data-depth] 分档配色。**红线：只改颜色**——标题栏 filter(saturate/brightness) + 描边透明度；不得改尺寸（卡片实尺寸恒 240×200，磁吸落位基准）、不得加 box-shadow（不变量「不再有 box-shadow 光晕」）、不得改圆角（统一 16px）。.nv-card.on 选中态描边优先级必须高于所有 [data-depth] 描边规则",
+                "整列让位（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」第 2 条机制）：拖拽卡准备落进被占用的空位时，挡住它的**同一行/列**卡片顺次推开一格，拖拽卡最终落进锚点让出的坑（ghost）。规划由 `magnetic/reflow.ts` 的 planReflow() 纯函数负责，UI 预览由 `magnetic/SlotGhost.tsx`（ViewportPortal 虚线框）承担。**三条红线**：① 只推同一行/列（垂直于让位轴方向投影重叠 ≥ MIN_OVERLAP(40px)，与 bonds.ts 同一把尺子）；② 链式只推一格——链上卡片整体平移 step(=卡尺寸+LANDING_GAP(-2)=238/198)，绝不递归/放大；③ 推动后若链尾撞上同行紧贴的链外卡则整条链放弃（blocked）。另：层叠（两轴均插进）前置排除、不让位。**时序红线**：拖拽中只记录 reflowPlan 预览、绝不移动任何卡（含邻居）；让位位移一律在 onNodeDragStop 执行，且顺序必须是「邻居先滑开（animateNodesTo/180ms）→ 拖拽卡再落进 ghost」，反过来会先叠一下再被挤走。回归 _verify: reflow.test.ts（15 例）",
+                "让位与吸附/咬合的分工（2026-09-18）：computeMagnetic 管「一对一吸附落点」，computeBonds 管「静态咬合关系」，SpatialAnalyzer 只做「布局模式识别」（不返回可执行位移，故让位不可复用它），planReflow 管「一对多位移规划」。禁止把让位逻辑塞进 computeMagnetic 或 SpatialAnalyzer",
+                "画布版本号单一事实来源（2026-09-19 用户裁定「画布独立版本号」）：画布版本线与主程序**刻意不同步**——主程序版本在 `app/version.py`（Qt6 侧显示），画布版本只能来自 `src/canvasVersion.ts` 的 `CANVAS_VERSION`（导航栏 `.ic-nav-ver` 显示）。**禁止在组件里内联版本字符串**。历史坑：版本号曾被硬编码在 `package.json` / `CanvasShell.tsx:827` / `AppNav.tsx:37` 三处，自项目建立起一直停在 `v0.1.0`、历经 V4.21~V4.30 十余轮画布改动从未维护，界面显示与实际功能严重脱节。维护三件套：① 改 `canvasVersion.ts` ② 同步 `package.json` 的 `version`（无 v 前缀）③ 在 `docs/CHANGELOG.md` 画布段落记一笔。`AppNav` 的 `version` 为**必填参数**（已移除默认值，漏传会在界面直接暴露）",
+                "抽卡闭环产物可视化（2026-09-27 V4.40.10 用户授权解冻「第二个一起写动作」）：生图返回的 recommendation / proxy_score / repair_plan 必须回写节点数据并由 NoviceInspector 展示——此前后端回传这些字段但前端零消费（DEFECT C，grep 零命中），闭环对人不可见。① 画幅选择器：ASPECTS = portrait/landscape/square，缺省 portrait（竖屏短剧）；aspect 字段缺省时后端按 DEFAULT_ASPECT=portrait 推导尺寸；② 闭环面板：展示推荐种子/均分、代理分（标注「仅供参考」）、坏区数；③ 局部重绘按钮：仅坏区 >0 且有图时出现，调 repairImageViaHost（/host/repair-image），按钮文案「只修坏区，不重抽整张」，会消耗云端额度故必须用户显式点击。**不改**：磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色。",
+                "YuE（乐）全曲生成接入音乐节点与意图卡片（2026-09-28 用户指令「把 yue 开源项目适配进画布模块里面的音乐节点和意图磁吸卡片」）：音乐节点新增 engine（suno|yue）/ abc / cot / yueMode / seed 字段。**三段式对齐意图分层**——plan（歌词+风格→可编辑旋律和弦 ABC 谱）对应卡片「你的意图」，渲染整曲对应「系统的事」。纪律：**执行端未配置时必须诚实失败**（回传安装指引，绝不返回假音频/假乐谱）。**不得**在无 YuE 时静默降级成 Suno 或伪造音频；engine 缺省按 suno 处理（向后兼容旧节点）。磁吸阈值/卡片尺寸/gap/阻力/跟手/单轴吸附/让位/Bond/方向无语义/空间记忆配色 全部不变。",
+                "本地视频生成接线（2026-10-01 用户授权解冻「前端接线」）：视频节点的**本机**模型通道 id 固定为 `\"local\"`（由 refreshModels 合并时打上），`model` 即后端 video_gen.VIDEO_MODELS 的 id。**分支只允许存在于 `App.tsx` 的 `generateVideoUnified` 一处** ——云端/本地各写一条调用链是本项目反复出现的反模式（任何一侧改行为另一侧必漂移），故主生成路径（视频节点）与双模型对比路径（generateVideoAtKey）**共用**它；生成器·视频节点也已并入。**保持云端行为逐键不变**：`size` 只有原本就传的调用方才带（可选参）。三条红线：① **本机模型是图生视频（i2v）**，无首帧图时必须**诚实报错**，不得退回文生视频；② **绝不自动下载模型**（几 GB；模型没下必须回明确指引，含目标目录）；③ 生成产物必须经 `video_gen.publish_to_inbox()` 落画布 inbox ——**画布是 WebView，加载不了 `D://...` 本地路径**，只认 `/inbox_file/<name>`；落箱失败只降级为「前端播不了」，不得影响产物本身。⚠️ `canvas_bridge.py`（stage3d-core）在此链路里**只被 import，不被修改**。不改：磁吸阈值 120/50/60/instant10、卡片 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色。",
+                "孤儿端点接线之合规检查 + 意图目录（2026-10-15 Wave 0 #13 第 2/3 条，用户授权「开始」）：① `NoviceInspector`剧本卡片新增「🛡️ 合规检查」按钮→ `POST /host/compliance-check`（后端 `project_agent_host.script_compliance_check` 是唯一判定源，前端**不复制任何一条检查规则**，只按 level 分桶着色展示；收集范围=画布 shot 节点(有 title 或 prompt) + character 节点(有 characterName，**空名必须跳过**否则后端刷假「角色冲突」)）。② AI 增强按钮由 `GET /host/enhance-intents` 目录驱动，取代硬编码的两个按钮 —— 后端 `ENHANCE_INTENTS` 的 `face`（修复人脸）前端原先完全够不着。⚠️ **语义红线（新增不变量）**：本端点的 `quality_tiers` = `canvas_enhance.QUALITY_TIERS` = **fast/standard/high**（超分实现档，high 才触发 RealESRGAN 下载），与前端 `novice/types.ts:80` 的 `QUALITY_TIERS` = **draft/standard/fine/cinema**（生成画质档）**是两套不同语义**⇒ 绝不混用，hostEnhanceIntents.ts 刻意不暴露该字段（有测试反锁）。③ `heal`/`style` 两个意图**故意不渲染**：heal 必填 `params.mask` 遮罩而画布无涂抹入口（渲染出来=点了必然报「缺少遮罩」的死按钮）；style 在用户未选风格时会静默套用默认 cyberpunk（= 随机效果，本项目明令禁止）。二者待有对应输入控件后再放开。④ 新样式一律进 `novice-inspector.css`（不内联 —— 内联=主题盲区），沿用同文件既有暗色色板。⑤ 判定逻辑全抽成纯函数放 `hostCompliance.ts` / `hostEnhanceIntents.ts`（vitest 是 node 环境无 jsdom，useEffect 零覆盖）。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap` 几何推导一字未改；`computeMagnetic`/`getSnapPosition`/`planReflow` 一行未碰。",
+                "孤儿端点接线之深度拉片 L2 + 时间线回滚（2026-10-15 Wave 0 #13 第 4/5 条，用户授权「开始」）：① **接L2 不接 L1**：`/host/reference-breakdown-l2` 的桥函数 `referenceBreakdownL2` 早已存在（`bridgeStoryboard.ts:137`）且类型/导出都齐，但**零 UI 调用者** —— 前端比后端多走一步、停在半路。本次补上入口（分镜表节点「🧊 深度拉片」按钮，与既有「📹 拉片」**并行不替换**：前者景别/运镜靠LLM 推断、后者靠深度图实测+置信度门槛，**证据等级不同**，用户自己选）。⚠️ `/host/reference-breakdown`（L1）**刻意不接** —— L2 就是同一个 `rb.build_shot_table(with_depth=True)`，L1 是子集，接它等于造一条更弱的平行线。② **诚实边界（新增不变量）**：`景别`/`运镜` 测不出时后端给**空串**（reference_breakdown.py:702 初始化即 `\"\"`，`:274` 明写「绝不把固定当运镜结论」）⇒ 前端 `hostBreakdownL2.mapL2ShotsToRows` **原样保留空串**，绝不填「中景」「固定」——填了就是把「没测出来」说成「测出来了」。结论行必须明说「景别 x/y · 运镜 x/y，其余留空未猜」。③ `use_vision` **默认 false**：开它素材出域到云端视觉模型，须用户在按钮旁显式勾选（新增 `.sg-node-mini-check` 样式，走 CSS 不内联）。④ 深度拉片**覆盖现有分镜表前必须确认**（改用户数据，与 repair-image 同纪律）。⑤ **时间线回滚**：`project-snapshot/history` + `restore` 两端点前端零调用。缺口是真的 —— `project-snapshot/import`（`projectZip.ts:300pushTimelineToEditor`）调 `write_clips` **整体覆盖**剪辑器时间线，后端自己在 import 里压了一条「导入前自动快照」（canvas_server.py:1353）但前端无回滚入口。入口挂在「导入直导成功之后」那一刻（用户最可能反悔时），编排整块放`editorRollback.ts`（App.tsx 已 1975/2000 顶格 ⇒ 只留两行薄调用）。🔴 **三条不可绕过的限制写进代码注释与 UI 提示**：① 后端 `SnapshotStore` docstring 说「每次导出自动 push」但**实测 export 端点没调 push** ⇒ 实际只有 import 会长栈，空栈是真实状态，UI 必须如实说并告诉用户怎么产生（导一次工程包）；② `list()` 白名单裁剪，**没有 clips**；③ 🔴 **`restore` 端点自己不 push、前端也无 push 端点** ⇒ **回滚不可再回滚**，回滚前的状态找不回来，唯一兜底是先导出 ⇒ 二次确认必须写明这一点。⑥ `window.confirm` 而非 `ConfirmDialog`：后者需在组件里挂 fixed 定位模态，而节点组件在 xyflow viewport 内（有 transform）⇒ 踩已知陷阱；项目内 DirectorPanel/Stage3D同样直接用 confirm。\n**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap`/`computeMagnetic`/`getSnapPosition`/`planReflow` 一行未碰；本zone 唯一被触及的文件是 `styles.css`（仅**追加** `.sg-node-mini-check` 一族样式，未改任何既有规则）。2026-10-17 用户授权解冻「画布粗剪审核卡 UI 消费接线（§6.9-P2）」：粗剪链 rough_cut_chain 的提案/写回事件经 push_to_canvas SSE（type=rough_cut.review）推画布壳层审核卡消费。本 zone 改动**全为加法**：① `CanvasShell.tsx` 仅加 1 个 import（RoughCutReviewDock）+ 1 处挂载（3251→3257 行，规模守卫容差内）；② `styles.css` 仅**追加** `.sg-rc-*` 一族样式（暗色默认 + body.theme-light 双写），未改任何既有规则；③ `store.ts` **未动**（审核卡状态由组件自管 React state，该文件已逼近规模守卫上限）。新登记文件 `hostRoughCut.ts`（纯函数 parseRoughCutEvent 判读 SSE + fetch 薄封装 /host/rough-cut/apply|export；confirmed=True 由后端端点钉死，前端不传）与 `RoughCutReviewDock.tsx`（壳层常驻订阅 rough_cut.review；卡片状态机 pending→applying→applied→exporting→done/error；busy 期间按钮禁用防重复点击；SSE 断线治理沿用 AgentPanel 凭据自愈纪律），副库 libtv 镜像字节一致。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；改完重新上锁。",
+                "配方 Recipe（2026-10-19 第四轮解冻新增）：① 存「意图+参数+母版引用」不存媒体路径（PARAM_WHITELIST 白名单抽参），抗过时；工作流快照复现归 project-snapshot，两者刻意分工；② recipePure.ts 是纯函数零 store 依赖（LCS 中文匹配，禁按标点切 token），vitest node 环境可测；③ applyRecipe 只走 store 已公开的 addNode/updateNodeData，禁新增第二套写入口，位置取视口中心禁随机撒点；④ Agent 链路后端只广播 SSE 事件 recipe.apply（canvas.apply_recipe 能力，effect=canvas_write），实际铺卡在前端 recipeBridge.ts 执行，后端不碰画布 store；⑤ 存储 key shiguang:recipes:v1；匹配不到如实提示，不静默失败不猜配方"
+            ],
+            "symbols": [],
+            "files": [
+                "vendor/packages/libtv/src/magnetic/CardStack.ts",
+                "vendor/packages/libtv/src/magnetic/FloatingToolbar.tsx",
+                "vendor/packages/libtv/src/magnetic/MagneticEngine.ts",
+                "vendor/packages/libtv/src/magnetic/MagneticLines.tsx",
+                "vendor/packages/libtv/src/magnetic/SoftConnection.ts",
+                "vendor/packages/libtv/src/magnetic/SoftConnectionLines.tsx",
+                "vendor/packages/libtv/src/magnetic/SpatialAnalyzer.ts",
+                "vendor/packages/libtv/src/magnetic/SpatialIndex.ts",
+                "vendor/packages/libtv/src/magnetic/StackBadge.tsx",
+                "vendor/packages/libtv/src/magnetic/reflow.ts",
+                "vendor/packages/libtv/src/magnetic/SlotGhost.tsx",
+                "vendor/packages/libtv/src/canvasVersion.ts",
+                "vendor/packages/libtv/src/AppNav.tsx",
+                "vendor/packages/libtv/src/magnetic/StatusBadge.tsx",
+                "vendor/packages/libtv/src/magnetic/types.ts",
+                "vendor/packages/libtv/src/magnetic/useMagneticDrag.ts",
+                "vendor/packages/libtv/src/magnetic/bonds.ts",
+                "vendor/packages/libtv/src/magnetic/SnapSeam.tsx",
+                "vendor/packages/libtv/src/CanvasShell.tsx",
+                "vendor/packages/libtv/src/styles.css",
+                "vendor/packages/libtv/src/nodes.tsx",
+                "vendor/packages/libtv/src/store.ts",
+                "vendor/packages/libtv/src/stores/node-factory.ts",
+                "vendor/packages/libtv/src/mediaExtraNodes.tsx",
+                "vendor/packages/libtv/src/registerBuiltinNodes.ts",
+                "vendor/packages/libtv/src/NodePalette.tsx",
+                "vendor/packages/libtv/src/components/canvas/CanvasEmptyState.tsx",
+                "vendor/packages/libtv/src/novice/types.ts",
+                "vendor/packages/libtv/src/novice/NoviceCard.tsx",
+                "vendor/packages/libtv/src/novice/NoviceInspector.tsx",
+                "vendor/packages/libtv/src/novice/novice-cards.css",
+                "vendor/packages/libtv/src/novice/novice-inspector.css",
+                "vendor/packages/libtv/src/novice/index.ts",
+                "vendor/packages/libtv/src/canvasEnhanceActions.ts",
+                "vendor/packages/libtv/src/storeIdempotent.ts",
+                "vendor/packages/libtv/src/hostCompliance.ts",
+                "vendor/packages/libtv/src/hostEnhanceIntents.ts",
+                "vendor/packages/libtv/src/hostBreakdownL2.ts",
+                "vendor/packages/libtv/src/hostSnapshots.ts",
+                "vendor/packages/libtv/src/editorRollback.ts",
+                "vendor/packages/libtv/src/hostRoughCut.ts",
+                "vendor/packages/libtv/src/RoughCutReviewDock.tsx",
+                "vendor/packages/libtv/src/canvasTierSeg.tsx",
+                "vendor/packages/libtv/src/recipe.ts",
+                "vendor/packages/libtv/src/recipePure.ts",
+                "vendor/packages/libtv/src/recipePure.test.ts",
+                "vendor/packages/libtv/src/recipeBridge.ts",
+                "vendor/packages/libtv/src/RecipePanel.tsx"
+            ],
+            "markers": []
         }
-      ],
-      "markers": [
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "id": "playback-av:init-media"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "id": "playback-av:main-audio"
-        }
-      ]
-    },
-    {
-      "id": "exit-media",
-      "title": "关程序停声 · 防幽灵音频",
-      "reason": "关窗后 Windows WMF 偶发残留出声；已强制 stop/静音/清 source。｜【2026-10-11 用户授权解冻 · 仅 closeEvent 一个符号，其余 84 锁点一字未动】V4.43.14「会话恢复」需在退出时落盘「本次在哪」（当前模块 + 当前工程），唯一可用的挂点就是 closeEvent。初版实现把会话保存插在 _stop_all_media_on_exit() 之前（注释写明「放在最前」），**字面违反不变量 1**；经用户裁定「保不变量，保存挪后」，改为紧跟媒体停止、早于其余清理步骤（后续清理出错也不丢会话）。三条不变量文本一字未改。新增 _verify/check_exit_media_invariant.py：把三条不变量变成 AST 可执行断言（已用「改动前版本」做反例验证，确认必报红），并挂到 pre-commit ③b 与 run_all_checks（EXITMEDIA）—— 起因是 frozen_zone_guard 只比哈希，只能报「代码被改」、报不出「不变量被破」，本次正是靠人眼才发现冲突。｜【2026-10-17 用户授权解冻（用户原话「解冻，随时做好回退的准备」）】`main_window.py` 新增 `_current_module` 属性 + `_on_module_selected` 内同步（**刻意未改 `closeEvent` 本体逻辑** —— 原注释明写「属 exit-media 冻结区，未解冻不可改，此处同步即可让原逻辑生效」；`closeEvent` 区域仅多一处空行）。支撑 V4.43.14「会话恢复」在退出时正确落盘「本次在哪」。改前已备份至 `.workbuddy/tmp/frozen_unlock_20261017/`。改后 `--update` 重锁（99 项）。",
-      "invariants": [
-        "closeEvent 必须先 _stop_all_media_on_exit",
-        "EditorModule.cleanup 调 _shutdown_media(release_source=True)",
-        "关进程路径须 mute + stop + setSource 空 URL"
-      ],
-      "symbols": [
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "cleanup"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_shutdown_media"
-        },
-        {
-          "file": "app/modules/lego/main_window.py",
-          "name": "_stop_all_media_on_exit"
-        },
-        {
-          "file": "app/modules/lego/main_window.py",
-          "name": "closeEvent"
-        }
-      ],
-      "markers": [
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "id": "exit-media:shutdown"
-        },
-        {
-          "file": "app/modules/lego/main_window.py",
-          "id": "exit-media:main-window"
-        }
-      ]
-    },
-    {
-      "id": "clip-transform",
-      "title": "归一化变换模型",
-      "reason": "预览≈导出共用 x/y/scale/rotation/anchor；已从上帝类抽出",
-      "invariants": [
-        "x/y 语义为 overlay=(W-w)*x:(H-h)*y",
-        "scale 相对画幅约 0.05~2.0",
-        "normalize_clip_transform / apply_normalized_transform 为唯一写入真相"
-      ],
-      "symbols": [],
-      "files": [
-        "app/modules/lego/clip_transform.py"
-      ],
-      "markers": [
-        {
-          "file": "app/modules/lego/clip_transform.py",
-          "id": "clip-transform:module"
-        }
-      ]
-    },
-    {
-      "id": "transform-bake",
-      "title": "变换关键帧导出 bake",
-      "reason": "主轨连续表达式 bake，失败回退分段；已冒烟",
-      "invariants": [
-        "有 scale/x/y/rotation 关键帧时优先 _bake_clip_transform_continuous",
-        "位置动画不用含 t 的 pad，用 overlay eval=frame",
-        "表达式失败必须能回退分段 concat"
-      ],
-      "symbols": [
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "_piecewise_linear_expr"
-        },
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "_clamped_transform_expr"
-        },
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "_bake_clip_transform_continuous"
-        },
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "_bake_clip_transform_scale_segments"
-        },
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "bake_clip_transform"
-        },
-        {
-          "file": "app/modules/lego/video_processor.py",
-          "name": "_build_transform_segments"
-        }
-      ],
-      "markers": []
-    },
-    {
-      "id": "canvas-transform",
-      "title": "预览画布变换交互",
-      "reason": "边角缩放 / Alt 旋转 / 平移 / Ctrl+滚轮；信箱坐标对齐",
-      "invariants": [
-        "鼠标坐标必须走 _preview_norm_from_pos（扣除信箱）",
-        "命中：边角 scale、Alt rotate、内部 move",
-        "暂停时才画变换框把手"
-      ],
-      "symbols": [
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_preview_content_rect"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_preview_norm_from_pos"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_clip_box_norm"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_hit_preview_transform_mode"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_overlay_transform_handles_on_qimage"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "_apply_preview_transform_to_clip"
-        },
-        {
-          "file": "app/modules/lego/editor_module.py",
-          "name": "eventFilter"
-        }
-      ],
-      "markers": []
-    },
-    {
-      "id": "plugin-host-ui",
-      "title": "插件宿主常驻 UI 入口",
-      "reason": "账号运营/短剧筛选插件已彻底删除（含 drama_btn 常驻入口与 _open_drama_finder_tab 等），plugins_module 宿主层仅保留 AI特效工坊入口与通用插件打开/初始化逻辑，仍须冻结（2026-09-15 用户授权解冻清理）",
-      "invariants": [
-        "插件中心常驻标签打开不误走仅 apply_effect 的特效插件",
-        "Plugin.__init__ 预置 _widget/_context/_initialized；run 可无先验 initialize"
-      ],
-      "symbols": [
-        {
-          "file": "app/modules/lego/plugins_module.py",
-          "name": "_plugin_offers_widget_ui"
-        },
-        {
-          "file": "app/modules/lego/plugins_module.py",
-          "name": "_ensure_plugin_initialized"
-        },
-        {
-          "file": "app/modules/lego/plugins_module.py",
-          "name": "_open_plugin_ui"
-        }
-      ],
-      "markers": [
-        {
-          "file": "app/modules/lego/plugins_module.py",
-          "id": "plugin-host-ui:plugins-host"
-        }
-      ]
-    },
-    {
-      "id": "plugin-store-catalog",
-      "title": "插件商店真实目录",
-      "reason": "仅上架 app/plugins 真实可加载项；已剔除 drama-finder/account-ops 及虚构商品（2026-09-15 用户授权解冻清理）",
-      "invariants": [
-        "OFFICIAL_ITEMS 必须能在磁盘找到 local_path",
-        "FAKE_OFFICIAL_IDS 中的虚构条目不得回写商店",
-        "内置插件 is_installed=True"
-      ],
-      "symbols": [
-        {
-          "file": "app/modules/lego/plugin_store.py",
-          "name": "init_official_items"
-        },
-        {
-          "file": "app/modules/lego/plugin_store.py",
-          "name": "_resolve_plugin_path"
-        }
-      ],
-      "markers": [
-        {
-          "file": "app/modules/lego/plugin_store.py",
-          "id": "plugin-store-catalog:official"
-        }
-      ]
-    },
-    {
-      "id": "stage3d-core",
-      "title": "3D导演台 · 模型渲染与桥接",
-      "reason": "用户明确要求冻结，防止 GLB 模型加载、骨骼绑定、姿势应用、材质渲染、Python 桥接层被误改；2026-08-20。2026-09-13 用户授权解冻两次：① character_management_module.py 仅改「预热时机」（无条件预热 → 仅可见时预热 + 幂等）；② 角色库 CHARACTER_FIELD_SCHEMA 由 10 字段扩到 20 字段并改为按分组动态渲染 UI，canvas_bridge.build_character_prompt 消费新增的 temperament / memory_anchors，两个前端包 CharacterEntry 同步。两次均未动端口（18765/3011/3010）、渲染、GLB 路径与材质，改完重新上锁。2026-09-17 用户授权解冻（修复画布白屏）：仅改 canvas_runtime.py 的端口探测逻辑——新增模块级 http_probe()（无代理 GET 校验真返回画布页面）与 CanvasRuntime._port_serves_canvas()，is_ready()/_start_static_server() 的「端口占用则复用」判断由纯 TCP 探活升级为 HTTP 健康校验，_start_static_server 的 OSError 分支补友好提示；**未动 18765/3011/3010 任何端口值**，未动渲染/GLB/材质/桥接符号，改完重新上锁。2026-09-20 用户授权解冻（模式 B 第四刀：录制白模动作视频）：仅改 Stage3D.tsx —— 新增 recordPoseVideo()（逐帧离屏渲染 → 采集 PNG → 交后端 /host/pose-video-encode 合成 → setMotionRefVideo 挂为 reference_video）、两处状态（poseVideoBusy / poseVideoProgress）、一处 import、动作 tab 一个按钮；**只读渲染结果，未动材质替换/骨名映射/GLB 加载/端口值/预热时机/角色库 schema**。配套新增未冻结文件 stage3dPoseVideo.ts（纯逻辑 + 单测）与 app/core/ai/pose_video_service.py（FFmpeg 合成），canvas_server.py 与 bridge.ts 均不在冻结区故未登记。验证：tsc 存量 37 处→37 处（A/B 证明零新增）、vitest 76/76 通过、vite build rc=0、守卫复跑 OK frozen zones intact (85 locks) 2026-10-05 用户授权解冻（3D 导演台姿势不自然修复）：仅改 riggedHumanoid.ts —— ① JointPose 新增 6 个内旋轴（lShoulderY/rShoulderY/lElbowY/rElbowY/lHipY/rHipY）；② applyBoneDelta 增加 order 参数，肢体用 \"YXZ\"（消侧举万向节锁，Y=0 时与 XYZ 等价 ⇒ 旧预设零回归）；③ 躯干/头 X 轴去 neg —— 实测（bodykun.glb 脚趾朝 +Z 判定前方）原实现使 +spineX 让头顶后移，导致「鞠躬」预设实为后仰；④ 肩 Z 下限 -20→-60（GLB 静止态是 A 字型，旧下限使手臂无法自然下垂）；⑤ 姿势数据（JointPose/JOINT_LABELS/DEFAULT_POSE/POSE_PRESETS）整块抽到新文件 stage3dPoseLibrary.ts（单文件规模棘轮正当解法，riggedHumanoid 3844→3159 行，基线由 3707 下调至 3159；riggedHumanoid 保留 re-export ⇒ 既有导入方零改动）；⑥ 修「叉腰/抱臂」并新增 4 预设（自然站姿/背手/看手机/握手）。**未动**端口值 18765/3011/3010、GLB 路径与 bodyFigureUrl、材质替换、骨名映射、预热时机、且 **Stage3D.tsx 未改一行**（滑杆与预设按钮均从 JOINT_LABELS/POSE_PRESETS 泛型渲染）。验证：tsc 37 处（= 基线，零新增）· vitest 107/107 · vite build ✓ · 新增几何校验 _verify/check_stage3d_pose_dof.mjs（真 GLB 算关节世界坐标，27 项全过：内旋轴生效/前倾符号/鞠躬前倾/叉腰肘在身后/抱臂不穿脖/背手在臀后/自然垂手贴腿/万向节非回归）；改完重新上锁。\n\n2026-10-07 V4.40.55：机位模型「太突兀」重做为**电影级视锥**。诊断（读源码）：旧实现＝高饱和琥珀实心圆锥(#fbbf24)+实心方块(#f59e0b)，两个实心受光体在素模场景里比角色还抢眼；体量硬编码(0.18/0.4/0.28)，**完全忽略 fov/shotSize** ⇒ 18° 长焦与 90° 广角长得一样（机位可视化的唯一价值——读出景别——丢失）；恒定橙＝无状态位。做法：① 几何/标签/状态整块抽到新模块 `stage3dCamGizmo.ts`（389 行），Stage3D.tsx 只留一行接线 ⇒ 4660→4623 行，规模棘轮基线下调（守卫指引的正当解法，同 stage3dPoseLibrary 手法）；② 1px 线框机身(EdgesGeometry 而非 wireframe)+镜头座；③ 视锥**真由 fov 推**（8 条棱+远端矩形+中心轴），镜头座随焦段伸长；④ 名称·景别·mm 标签(Sprite)，mm 复用 `fovToFocalLength`（该函数同时从 Stage3D 迁入本模块 ⇒ 标签与截图元数据同源，不再各算一套系数）；⑤ 地面投点环 + 竖直定位线给空间锚；⑥ 朝向用 `Matrix4.lookAt` 手算基向（不用 Object3D.lookAt，避免父矩阵未刷新导致朝向抖一帧）；⑦ 颜色只表状态：默认中性灰 #8ea3b8 / 当前机位品牌蓝 #2563eb（视锥同时加浓 0.42→0.62）。**连带修一个功能缺陷**：`stage3dControlNet` 的 Depth/Normal 是整场景重渲染，会把机位实体/坐标轴**烘进 ControlNet 图**（AI 会把「一个机位模型」当场景内容学走）；现所有编辑辅助物统一打 `userData.isHelper`，渲染前 `setHelpersVisible(scene,false)` 摘除、渲染后还原，`Stage3D.capture()` 截图与两条导出视频（机位路径视频 / 白模姿势视频）同步套用。验证：tsc 37 处（21 riggedHumanoid + 16 Stage3D，**= 基线零新增**）· vitest **18 文件 / 235 项**全过（新增 `stage3dCamGizmo.test.ts` 15 项，其中锁住「视锥远端半高比 = tan(fov/2)」「半宽:半高 = 16:9」「改 fov 必须重建几何」「每个可渲染子件都带 isHelper」「setHelpersVisible 不会把常态隐藏的 axisHelper 误点亮」）· vite build ✓ · 真 Qt WebEngine 加载 dist 实拍截图确认（加 5 台不同 fov 机位、无 React 崩溃、无实心色块抢戏）· 双库同步零漂移（新增测试入 BASELINE_MISSING，与既有 7 个同因）。**未动**：端口 18765/3011/3010、GLB 路径与 bodyFigureUrl、骨名映射、材质替换规则、画布预热时机。改完重新上锁。\n\n2026-10-11 V4.43.8 用户授权解冻（工具栏可读性修复）：仅改 character_management_module.py 的 _build_ui 顶部工具栏 4 处内联样式 —— ① title QLabel 去掉内联 color:#fff（改 setObjectName(\"titleLabel\")，颜色交全局 QSS）；② hint QLabel 去掉 color:#888（改 #hintLabel）；③ _char_combo 删掉内联 \"QComboBox{background:#1a1a1a;color:#eee;border:1px solid #333;...}\" 硬编码深色框（内联样式优先级高于全局 QSS ⇒ 深色下与工具栏背景几乎同色、文字发暗；浅色下变黑框撞色）；④ _interp_check 去掉 color:#ccc。**未动** GLB 加载 / 骨骼绑定 / 姿势应用 / 材质渲染 / 端口值(18765/3011/3010) / 画布预热时机 / 角色库 CHARACTER_FIELD_SCHEMA。验证：ruff 存量棘轮 166 文件零新增 · AST 语法 OK · frozen_zone 重锁 85 项 · 真机启动正常。改完重新上锁。2026-10-12 用户授权解冻（缺口② 刀1：3D 导演台「产物 → 剪辑时间线」接通）：① 新增 src/stage3dArtifacts.ts 作为**唯一入轨通道**（复用已在后端存在但零调用方的 POST /ingest_path，**未新增任何 /host/* 端点**，避免「同一动作两条链路」的反模式）；② Stage3D.tsx 白模录制后登记产物 + 新增「➡ 最近产物 → 时间线」按钮；③ stage3dPoseVideo.ts 的 EncodeResult 补 path。**canvas_bridge.py 一字未动** ⇒ 端口 18765 / 静态 3011·dev 3010 两条不变量未受影响；bodyFigureUrl 取值规则、prepareBodyFigureMeshes / loadGLBRiggedHumanoid 材质处理、export_vinchau_glb 骨名映射全部未改。新增文件已登记进本 zone 的 files（受保护）⇒ 锁点 85 → 86。验证：tsc A/B 逐文件比对 38 → 38（零新增）· vitest 24 文件 308 例全绿 · vite build rc=0 且产物内实测含 /ingest_path 字面量 · 规模守卫 Stage3D.tsx 4646（+23，容差 30）。 2026-10-12 同一轮继续解冻（缺口② 刀2 收尾 + 缺口① 刀3）：① Stage3D.tsx 拆出 stage3dGlUtils.ts（readRenderTargetToDataURL / isWorldVisible / disposeObject3D 三个纯 GL 助手），Stage3D 4646→4604 行，为同一轮的第二/第三刀腾出规模守卫余量；② stage3dArtifacts.ts 增补 registerControlNetArtifacts —— ControlNet 三通道在画布侧只有 data URL、没有本机路径，必须经 /host/upload-asset 落盘拿到 path 才能走唯一入轨通道；③ 新增 stage3dCast.tsx：角色库 → 导演台的投递消费端（useStage3dCast / applyPendingCast / Stage3dCastPanel）+ 确定性映射（体型/发型由 human_variant 与性别年龄段推断，配色由 id 哈希 —— 全链路无随机）；④ character_management_module.py：CHARACTER_FIELD_SCHEMA 增 human_variant 字段，**刻意放 other 组 ⇒ 不进生图提示词，canvas_bridge.build_character_prompt 一字未改**；同时补上动态表单生成器长期存在的枚举控件缺口 —— 此前只认 text/string，enum 字段会「标题看得见、值填不了」，现改为 enum→QComboBox，并在 load_character / clear / set_enabled / _collect_data 五处同步读写（否则仍是「填了不生效」）。**未动**端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、画布预热时机、磁吸任何阈值。新增 4 个文件登记进本 zone（锁点 86 → 90）。验证：tsc A/B 逐文件 38 → 38（零新增）· vitest 25 文件 343 例全绿 · 真机离屏实例化角色库面板冒烟 16/16 通过（下拉真建出、值真写进 JSON、真回读）。2026-10-12 同一轮继续解冻（24 位灯位 → 3D 导演台灯光可视化）：修复「灯位面板与 3D 场景零数据流」的孤儿缺口（实测 lightingPresets.ts 在 Stage3D.tsx 零引用、面板 apply() 只写提示词、3D 场景只有 hemi+dir 两盏灯）——① 新增 src/stage3dLighting.ts 作为**唯一映射通道**（lightPosition 球坐标→笛卡尔 / kelvinToRgb Tanner Helland 近似 / lightStateFor 快照 / applyLightingToApi 副作用 / useStage3dLighting 消费端）；② Stage3D.tsx 只加 import + 一行 hook 调用 + lightPreset effect 的 `stage3dLightingSeq === 0` 守卫（+11 行，4604→4623 内的 4612→4623）；③ store.ts 加同族第三通道（2 字段 + 2 action，2502→2513，严格卡在容差上限）；④ lightingPresets.ts 给 RimLight 加**可选** azimuth/height/azimuths 结构化字段（「双侧轮廓」真给 2 盏）；⑤ LightingPanel.tsx apply() 同写提示词 + 投递快照、remove() 投递 null 恢复 preset、界面明写「3D 为打光意图示意，非出图预览」。**未动**端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、画布预热时机、角色库 schema、磁吸任何阈值。新增 2 个文件登记进本 zone（锁点 90 → 92）。验证：tsc A/B 逐文件 38 → 38（零新增）· vitest 27 文件 406 例全绿（新增 stage3dLighting.test.ts 45 例）· vite build rc=0 且产物含 stage3d-rim-light 字面量 · 新增 _verify/check_stage3d_lighting.mjs（真 three 场景端到端 43 项全过）· 7 条反例逐条喂坏版本确认守卫报红 · 副库 tsc -p tsconfig.app.json 38 → 38。｜【2026-10-17 用户授权解冻（用户原话「解冻，随时做好回退的准备」）】`canvas_runtime.py` 新增 §12-P2「画布启动三段打点」：`canvas boot timing: already running / static ready / vite ready`（各一行 `logger.info`，**零行为变化、零控制流改动**）。改前已备份至 `.workbuddy/tmp/frozen_unlock_20261017/`。改后 `--update` 重锁（99 项）。｜【2026-10-19 用户授权解冻（用户原话「解冻 stage3d-core」）】修复「3D 群像出现占满屏幕的巨型几何」：① riggedHumanoid.ts 的 applyBoneDelta 加 Number.isFinite 守卫——角度为 undefined/NaN 时旧写法 `=== 0` 判 false，deg(undefined)=NaN 会让 Euler/quaternion 全 NaN、骨骼矩阵退化、蒙皮顶点被拉到视口边界；兜底按 0 处理（等价 rest 姿态，合法输入行为不变）。② Stage3D.tsx 的 actor 同步循环加 500ms 节流的世界包围盒自检：高度 > 4m（正常上限约 1.84m）即压回 1.0 并 console.warn 报出角色名与实测高度，自愈而非静默。未动：端口 18765/3011/3010、GLB 路径与材质、24 位灯位单通道、CHARACTER_FIELD_SCHEMA、RIG_MESH_STYLE。改前备份至 .workbuddy/tmp/frozen_unlock_20261019/。tsc A/B 实测 37→37 零新增，vitest 36 文件 550 例全绿，dist 重建通过。｜【2026-10-19 第二轮用户授权解冻（用户原话「三刀的顺序按照这个来吧」「该怎么改还是你自己来看」）】AI 画布模块 UI 瘦身：① 顶栏 8 个控件（启动画布/连接 Agent/同步模型池/刷新/发送文件到剪辑/角色库 + 挂角色 + 补帧）→ 一级只留「标题 + 挂到角色 + 补帧 + ⋯更多」，6 个一次性系统动作收进 QToolButton+QMenu 二级菜单（原 QPushButton 局部变量全删）；② 新增「复制 Agent 地址」菜单项（调试用显式取 URL）；③ `_set_status()` 增加 URL/token 清洗（模块级 `_strip_urls`，URL 正则限定字符集不含 CJK，避免吃掉中文括号）且空文案隐藏状态条 —— 根治用户反馈的「打开画布顶上总有一条网页链接」（根因：canvas-agent 启动返回消息带 `http://127.0.0.1:17371?token=…` 被原样 setText）；④ `_apply_agent_btn_state()` 适配 QAction（QAction 无 setStyleSheet，地址不再写进文案）。**未动**：端口 18765/3011/3010、GLB 加载与 bodyFigureUrl、骨骼绑定、姿势应用、材质渲染、canvas-agent 运行时与 ensure_started、bridge 注入、角色库 CHARACTER_FIELD_SCHEMA。另：`vendor/packages/libtv/src/LibTvChrome.tsx`（不在冻结区）把「发送到剪辑」从「⚡工具→节点」二级菜单提到 dock 一级（与「添加」并列，props 签名未动）。验证：py_compile OK · `_strip_urls` 四例实测（URL+token 剥离、中文括号保留、裸端口文案不动）· tsc 37→37 零新增 · vitest 36 文件 550 例全绿 · 规模守卫无新增债务 · stability 251 项无新增 · frozen 101 locks intact。④ 删除常驻底部的开发者长提示 `tip` QLabel（原文含「「连接 Agent」拉起本机 :17371 工具通道（Codex/MCP）… 可选 Codex: codex mcp add canvas-agent -- npx -y …」）—— 属集成说明书不是用户状态，`_build_ui` 少 8 行；信息已在「⋯ → 连接 Agent」tooltip 与「复制 Agent 地址」中。改前备份 `.workbuddy/tmp/frozen_unlock_20261019_canvas_ui/`。",
-      "invariants": [
-        "bodyFigureUrl 只返回 bodychan.glb 或 bodykun.glb（来自用户 blend 文件）",
-        "prepareBodyFigureMeshes 不得覆盖 GLB 原始材质",
-        "loadGLBRiggedHumanoid 加载 GLB 后不做材质替换或颜色覆盖",
-        "canvas_bridge 端口 18765 不得更改",
-        "canvas_runtime 静态端口 3011 / dev 端口 3010 不得更改",
-        "export_vinchau_glb.py 导出时不得修改骨名映射或材质设置",
-        "画布预热只能在模块可见时触发（_bootstrap_if_visible / showEvent + _booted 幂等）；不得恢复 setup_ui 末尾的无条件 QTimer.singleShot(200, self._bootstrap)",
-        "角色库 CHARACTER_FIELD_SCHEMA 新增字段必须同步 canvas_bridge.build_character_prompt（仅 visual 组）与两个前端包的 CharacterEntry；静态校验 _verify/check_character_schema.py",
-        "24 位灯位 → 3D 灯光只有一条通道（2026-10-12）：必须走 store requestStage3dLighting() → stage3dLightingSeq 递增 → stage3dLighting.ts::useStage3dLighting() 消费一次（照抄 stage3dApplySeq/stage3dCastSeq 正统模式）。方位角→笛卡尔的映射数学（0°=镜头=世界 +Z、顺时针；球坐标→笛卡尔）与色温→RGB 只允许存在于 stage3dLighting.ts，禁止在 Stage3D.tsx 另写一套。优先级：stage3dLightingSeq === 0 时 lightPreset 完全生效；seq > 0 后 lightPreset 不得再覆盖 hemi/dir（只保留 bg/fog/地面）；守卫写死在 Stage3D.tsx 的 lightPreset effect 内，禁止移除。轮廓灯由 stage3dLighting.ts 用 WeakMap<Scene, DirectionalLight[]> 惰性持有（castShadow=false），禁止往 apiRef 新增第三个 DirectionalLight。静态校验 _verify/check_stage3d_lighting.mjs",
-        "applyBoneDelta 必须对角度做 Number.isFinite 守卫（2026-10-19 加）：undefined/NaN 会让 quaternion 变 NaN → 骨骼矩阵退化 → 蒙皮顶点飞向视口边界（表现为单个角色炸成占满屏幕的巨型几何）；非法值按 0 处理（等价 rest 姿态），合法输入行为不得改变",
-        "SkeletonUtils.clone() 之后必须先 updateMatrixWorld(true) 再测量包围盒（2026-10-19 加）：clone 出的 matrixWorld 是脏的，直接 Box3.setFromObject 会量出 1/33 的假尺寸（bodychan 实测 0.0512m 而真值 1.70m），归一化据此算出 33 倍补偿 ⇒ 把 1.7m 模型放大成 56.5m。本项目 clone 有两处（loadProcessedGLBTemplate 的模板 + loadGLBRiggedHumanoid 的实例），两处都要结算；attachGLBToHumanoid 挂载后亦需 root.updateMatrixWorld(true) 才能测到可信的 rs/sz。兜底 k 计算须除以 root.scale.y，否则女性 0.94 / 儿童 0.74 会被误判成异常再放大一次。SkinnedMesh 的包围盒一律用 precise 模式（setFromObject(obj, true)），普通模式不含骨骼变换。"
-      ],
-      "symbols": [],
-      "files": [
-        "vendor/packages/libtv/src/riggedHumanoid.ts",
-        "vendor/packages/libtv/src/Stage3D.tsx",
-        "vendor/packages/libtv/src/stage3dArtifacts.ts",
-        "vendor/packages/libtv/src/stage3dArtifacts.test.ts",
-        "vendor/packages/libtv/src/stage3dCast.test.ts",
-        "vendor/packages/libtv/src/stage3dCast.tsx",
-        "vendor/packages/libtv/src/stage3dLighting.ts",
-        "vendor/packages/libtv/src/stage3dLighting.test.ts",
-        "vendor/packages/libtv/src/stage3dGlUtils.ts",
-        "vendor/packages/libtv/src/stage3dControlNet.ts",
-        "app/core/canvas_bridge.py",
-        "app/core/canvas_runtime.py",
-        "app/modules/lego/character_management_module.py",
-        "scripts/export_vinchau_glb.py"
-      ],
-      "markers": []
-    },
-    {
-      "id": "canvas-magnetic-intent",
-      "title": "画布磁吸意图系统 · 导演卡 + L1 参数",
-      "reason": "小白画布按《磁吸意图画布开发规格说明书》实现：四向磁吸紧密贴合、六向槽位高亮、导演卡剧本自动拆解、生成卡 L1 导演参数；用户要求冻结锁定，2026-09-12。2026-09-13 用户授权解冻一次：修正磁吸判据（中心距→边缘间隙）、新增 Bond 咬合 + SnapSeam 咬合缝、落地拖拽分离阻力三段式；按规格保留全部阈值数值，改完重新上锁并补登记 bonds.ts / SnapSeam.tsx / novice/*。2026-09-16 用户授权解冻两次：① 吸附视觉无感化改造——撤销「咬合缝常驻可见」，静止贴合零视觉残留，仅拖拽拉扯瞬态显示细线阻力反馈、落座/断裂保留一次性细闪光（无文字胶囊）；② 意图胶囊卡片交互升级——L1/L2 参数按节点类型分派（只渲染 node-factory 真实字段，移除前后端均无消费的 aspectRatio/styleStrength/negativePrompt 假字段）、L3 专业参数经 L2 底部「▾ 专业参数」展开（不再完全隐藏）、单击选中卡片内直接输入主文本（KIND_TEXT_FIELD）、双击卡片经 store.requestProEdit 展开右侧精细编辑；③ 画布 Agent 展开时隐藏右侧设置面板（agentPanelOpen 时 inspector 不渲染，只显示 Agent-IM）；④ 吸附贴合无缝化——落位 gap 0→-2（相邻边框融合消除暗缝）、.nv-card 补 border-box（实尺寸=落位基准 240×200）、圆角 8→4（贴合四角缺口减半）；2026-09-16 用户授权解冻第五次：⑤ 咬合侧描边透明化——贴合边由 bonds 几何推导（bondedSidesMap → store.bondedSides → NoviceCard 挂 bonded-* class）改透明描边+贴合边直角（圆角 0），选中态 1px ring 让位纯投影，两卡贴合处融为一块（Windows 磁贴式全齐平无缝）；⑥ 竖排缩放控件上移 bottom:68px 避让底部 libtv-dock（资产管理行），消除图标重叠；磁吸行为/阈值/阻力手感全部不变，改完重新上锁。2026-09-17 用户授权解冻（追加改动）：放大磁吸阈值 weak 80→120、strong 25→60（medium 50 不动）+ 新增 instant 等级（instantDistance=10，magneticStrength=1.0，拖拽中 gap<10 直接 writeNodePos 到 snapPos，对齐 Win11 磁贴「边对边立刻贴齐」手感）；卡片尺寸 240×200 / 贴合缝机制（bonds/bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid=关闭 / XYDrag 时序 全部不变；改完重新上锁。2026-09-17 用户授权解冻（V4.23.2 追加）：小白自动布局网格步进对齐贴合落位——拉片（store.ts breakdownScript）与导演卡拆解（breakdownDirectorCard）x 步进 230→238、y 步进 200→198（= CARD_SIZE 240×200 − 贴合落位 gap=-2）；旧值 230 使相邻卡重叠 10px，超出 bondTolerance(2px) 不构成咬合、视觉却近乎贴死；同轮重建 dist（此前 V4.23.1 instant snap 仅落 src 未构建，运行时仍跑旧磁吸 weak 80/strong 25），改完重新上锁。2026-09-17 用户授权解冻（V4.24.0「四周灯光包围 + 贴合即连接」）：① 新手卡推翻「咬合侧隐形/静止零残留」——每张卡四周包一圈发光轮廓（青蓝灯光 #22d3ee 系，选中卡绿色灯光 #4ade80 系），贴合处双光带分界；类型色条改 ::before 内缘伪元素；bonded-* 透明+直角 CSS 废除（挂载链路保留）。② 「贴合即连接」——吸附成功不再自动生成软连接虚线与「此节点输出」徽章（onSoftDragStop 移除 pushSoftConnection），softConnections 恒空、固化/丢弃链路保留备用。③ styles.css 修复 sg-agent-head dock 窄面板按钮被压成竖排（flex-wrap:wrap + 按钮 flex-shrink:0/white-space:nowrap）。改完 vite build 重建 dist 并验证（pushSoftConnection 调用=0、发光样式进 CSS bundle、bonded 透明规则 0 残留），重新上锁。2026-09-17 用户授权解冻（修复磁吸方向 180° bug）：computeMagnetic 里 getDirection 返回「目标相对拖拽」的方位（dx=目标中心-拖拽中心，用于六向语义标签），却被直接传给 getSnapPosition（其语义=「拖拽节点应放到目标的哪一侧」），两者相反——导致目标在拖拽右侧时 snap 到目标右侧（用户反馈「左右吸附跑到最右、左边吸不上」），上下同理方向反了；修复为调用前 oppositeDirection 取反（left↔right / top↔bottom，stack 不变），best.direction 仍保留原方位供 MagneticLines 语义标签展示；新增 4 个方向回归测试（MagneticEngine.test.ts：目标在右/左/下/上四向，断言 snap 落点在目标正确一侧）；磁吸阈值（120/50/60/10）/六向语义/gap=-2/三段式阻力手感全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-17 用户授权解冻（修复 Agent 面板不靠右）：styles.css 的 .workspace.agent-open 系列 grid 由 4 列 200px 1fr 240px minmax(300px,360px) 改 3 列（删除 240px inspector 残留列）——agentPanelOpen 时 inspector 本就不渲染（不变量已锁定），DOM 仅 sidebar/canvas-wrap/AgentPanel 三个子元素，4 列模板把 AgentPanel 挤进第 3 列（240px）、最右 360px 空置，用户反馈「Agent 交互界面不在最右边靠齐」；改为 3 列后 Agent-IM 直接落最右 minmax(300px,360px) 列，right-collapsed 对 Agent 面板无效（Agent 打开期间始终贴右）；磁吸行为/阈值/卡片尺寸/贴合缝机制全部不变，改完 vite build 重建 dist 并重新上锁。2026-09-18 用户授权解冻（V4.28.0「1+4 结合」磁贴画布视觉优化）：用户对小白模式 UI 与磁吸手感仍不满意，经 4 套可视化方案选定「1+4 结合」= Windows 磁贴无缝吸附 + 列表块大圆角/蓝色拖拽占位线。改动：① 卡片视觉——圆角 4→16、四周灯光包围改为深色实色块（#151a26 + 1px 白描边）、类型色由标题栏整块背景承载（废除 ::before 内缘色条）、选中态绿色灯光改为白色描边环；② 拖拽占位线——MagneticLines 的弯曲发光磁力线 + 两端发光圆点改为蓝色直线占位缝（#378ADD，3px 核心 + 10px 柔光晕，标在目标卡被贴边全长，stack 走整卡外框），方向语义标签胶囊保留；③ 修复 V4.23.1 遗留 bug——computeMagnetic 的 levelRank 映射漏 instant 档，导致 instant 被后遍历的 strong/medium 覆盖（「instant snap 时灵时不灵」的根因），补 instant:4 并加回归测试；magneticLevels.ts 等级元数据表补 instant 档（消除 tsc 类型错误）。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完 vite build 重建 dist（新 bundle 验证 #378add/seam-blur/instant:4 进包、旧 mag-glow 移除）并重新上锁。2026-09-18 用户授权解冻（V4.28.1「方案 A：剥离方向业务语义」）：用户质疑「上下 = 并行对照」等方向语义是从未确认过的臆造设计——早期规格文档 v3.1 给空间方向（left/right/top/bottom/stack）硬套了「输入/输出/对照/分支/导演卡/历史」业务语义，属过度设计。本次彻底剥离：删除 DIRECTION_SEMANTICS / SOFT_CONNECTION_SEMANTICS 两套语义表、删除 Bond.color 死字段（无人消费）、删除 SnapSlotHighlight.tsx 整个组件（六向槽位彩色语义条+标签）、MagneticLines 去掉方向语义标签胶囊（只留蓝色占位缝）、SoftConnectionLines 去掉语义标签改统一中性青色、NoviceInspector 去掉「六向放置」图例；SpatialDirection 类型与 BOND_COLORS（拉扯阻力反馈色，非语义）保留。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制、三段式阻力、snapToGrid 关闭、XYDrag 时序 全部不变，改完重新上锁2026-09-18 用户授权解冻（V4.28.2「靠近即吸附」）：推翻「instant 直接 snap + 其它三档渐进吸引」——useMagneticDrag.onNodeDrag 对 weak/medium/strong/instant 一律直接 writeNodePos 到 snapPos，废除 getMagneticOffset 渐进吸引，松手 onNodeDragStop 钉回落点并闪光；删除 MagneticEngine 的 magneticStrength / getMagneticOffset 两个死函数及其测试。磁吸阈值 120/50/60/10、卡片尺寸 240×200、贴合缝机制（bondedSidesMap+gap=-2）、交互态、三段式阻力（30/50/bondGiveRatio=0.28）、snapToGrid 关闭、XYDrag 时序全部不变，改完重新上锁。 | 【2026-10-11 解冻记录 V4.43.3】升画布版本号 0.3.23 → 0.3.24（代号「6 背景全露 + custom 上传」），同步 `package.json` 0.3.24 与副库副本（三件套：canvasVersion.ts → package.json → CHANGELOG）。custom 上传功能（PNG/JPG → base64 → CSS var(--bg-img)）属本 zone **协作对象替换文件** `canvasBackgrounds.ts`（V4.43.2 新增非冻结文件，V4.43.3 仅改其 CSS 与 applyCanvasBackground），本 zone 的磁吸/咬合/卡片/意图/让位逻辑一行未改；本区仅因版本号文件被触及。 · 画布 AI 增强接线（2026-10-12 V4.43.19 用户授权解冻「前端接线」）：图像节点检查器新增「AI 增强」（超分 sharpen/抠像 cutout，本地引擎不花云端额度，degraded/降级必如实标注）与剧本节点「AI 编剧」（标题→LLM 完整剧本，与 pipeline.script_write / /host/script-write 同一后端单一真源）；新逻辑独立成 canvasEnhanceActions.ts（本 zone 新登记文件，33→34），NoviceInspector 复用 .nv-loop-* 既有样式零 CSS 改动；剧本卡已有正文不覆盖。磁吸全部不变量不变。 | 【2026-10-14 用户授权解冻「捏脸入口：新增 character 角色节点」】原因：新建画布在 AI 画布模块里找不到捏脸卡片/节点，用户裁定方案「加「角色」节点」。实现（全部为**加法**，不改既有 kind）：① node-factory.ts 新增 CharacterData 类型 + NodeData 联合成员 + makeNode 的 base/style + BUILTIN_NODE_KINDS；② registerBuiltinNodes.ts 登记 BUILTIN_NODE_META 与 CharacterNode；③ mediaExtraNodes.tsx 新增 CharacterNode 组件（角色库下拉 + 头像预览 + 🎨 捏脸按钮）；④ NodePalette.tsx 加「角色」palette 项并扩 isBuiltinNodeKind 字面量；⑤ novice/types.ts 补 KIND_STYLE / NOVICE_ENTRY / noviceHint（character → 摆位与实拍组「捏个角色」）；⑥ NoviceCard.tsx 菜单加 character「捏脸」项；⑦ CanvasShell.tsx 新增 sg-open-face-card 窗口事件监听（照抄既有 sg-preview-focus 正统模式）→ 复用**唯一** FaceCard host，避免在 React Flow viewport（有 transform）内渲染固定定位模态；⑧ store.ts re-export CharacterData。配套非冻结文件：ports.ts 加 character 端口（Record<NodeData[ kind ]> 穷尽类型**必须**加否则 tsc 报错）、CanvasContextMenu.tsx 加「角色」右键项。守卫/测试同步：check_port_model.py 21→22（两处 + 文档串）、ports.test.ts toHaveLength 21→22、novice/entry.test.ts ALL_BUILTIN_KINDS 补 character 并改文案 21→22。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；未动端口 18765/3011/3010、GLB/材质/骨骼/预热。 |【2026-10-14 用户授权解冻「React #185 崩溃根因修复」】用户在 Qt WebEngine 生产模式实测画布频繁崩，错误边界截到 `Minified React error #185`（= Maximum update depth exceeded，无限重渲染）。经全库逐行排查（65 处 useEffect / 2 处 subscribe；zustand selector 新引用反模式已由 check_canvas_selectors.py 静态排除），定位闭环为：`CanvasShell.tsx` 的 `bondedSides = useMemo(() => bondedSidesMap(nodes), [nodes])` —— `bondedSidesMap`（`magnetic/bonds.ts`）每轮 `const map = {}` 新建对象 ⇒ 引用必变 ⇒ effect 必跑 ⇒ `store.ts` 的 `setBondedSides` 无幂等守卫、`set({bondedSides: map})` 无条件通知全 store ⇒ 订阅它的 NoviceCard 全量重渲染 ⇒ xyflow 抛 dimensions change ⇒ `onNodesChange` 无条件 `applyNodeChanges` 产出全新 nodes 数组 ⇒ nodes 变 ⇒ 回到第一步，成环。修复（全部为**加法**，不改任何磁吸/咬合/尺寸/阈值行为）：① `store.ts` 的 `setBondedSides` 加内容级幂等守卫（key 数 + 每项 join(',') 相同则整体不 set，引用不变）；② `store.ts` 的 `updateNodeData` 加 patch 幂等守卫（逐键 Object.is 相同则整个 set 不执行，nodes 引用与 dirtyVersion 均不变；已核查全部调用方，无一依赖「空转也 +1 dirtyVersion」）；③ 新增 `src/storeIdempotent.ts` 承载 `bondedSidesEqual` / `nodeDataPatchIsNoop` 纯函数（store.ts 属冻结区只减不增，故判定逻辑外置；vitest 是 node 环境无 jsdom，纯函数才可测）⇒ 本 zone 登记 34→35；④ `windowManager.ts` 的 `syncOpen` 补幂等守卫（非本 zone，防将来成环）；⑤ `CanvasOverlays.tsx` 预览 `tick()` 补越界守卫（step 用完后不再反复 dispatch sg-preview-focus ⇒ 相机抖动）。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap` 几何推导一字未改。2026-10-15 Wave 0 #13 第 2/3 条（用户授权「开始」）：孤儿端点接线 —— 剧本合规检查 `POST /host/compliance-check` 与AI 增强意图目录 `GET /host/enhance-intents` 接入 NoviceInspector（详见不变量 37）。⚠️ 记一条语义红线：本端点 quality_tiers(fast/standard/high) 与前端 QUALITY_TIERS(draft/standard/fine/cinema) 是两套语义，绝不混用。新增文件 hostCompliance.ts / hostEnhanceIntents.ts（bridge.ts 已 1868/2046顶格 ⇒ 一律另开文件）。磁吸几何与阈值全部未动。2026-10-15 Wave 0 #13 第 4/5 条（用户授权「开始」）：孤儿端点接线 —— 深度拉片 L2（`/host/reference-breakdown-l2`，接L2 不接 L1）与时间线回滚栈（`/host/project-snapshot/history` + `/restore`）。详见不变量 38。⚠️ 记两条诚实红线：① L2 的景别/运镜测不出就是空串，**绝不填默认值**；② **回滚不可再回滚**（restore 不 push、前端无 push 端点）。新增文件 hostBreakdownL2.ts / hostSnapshots.ts / editorRollback.ts。本 zone 仅 `styles.css` 被触及且只追加样式。磁吸几何与阈值全部未动。｜【2026-10-19 用户授权解冻（用户原话「解冻的 zone 是 canvas-magnetic-intent」）】AI 画布信息架构 → 左侧竖排导航：① `AppNav.tsx` 顶栏 52px 横排 → 左侧 64px 竖排（品牌只留图标 + 6 项图标/10px 标签 + 底部快捷键·主题·模式·版本）；`ic-tier-seg` 分段控件竖排放不下 ⇒ 改单按钮 `ic-tier-btn` 循环切换（同一份数据、语义不变，`tier`/`onTierChange` props 签名一字未动）。② `styles.css`：`.shell` 加 `padding-left:64px`、`.ic-nav` 改 `position:fixed` 竖排 —— **刻意不把 shell 改成 flex row**（CanvasShell 的 stage3d 分支是 header+content 的 fragment，row 会把 subbar 挤成侧边一列；fixed+padding 让 DOM 结构零改动）。③ 新增 `.ic-nav-label` / `.ic-tier-btn` + 浅色主题覆盖（否则浅色画布上整栏是一条黑边）。**未动**：磁吸几何/阈值/判据、`CanvasShell.tsx`（本次一行未改）、bridge.ts、任何端口与端点。Agent 面板精简在同轮但**未冻结**的 `AgentPanel.tsx` 内完成（四页签去彩色 emoji、对话模型折叠块默认收起、「继续」按钮改为仅在暂停后出现）。验证：tsc 37→37 零新增 · vitest 36 文件 550 例全绿 · web 宿主 vite build ✓ 3.86s（`--emptyOutDir  false` 绕过沙箱 safe-delete 拦截，产物 AgentPanel-CSADWUe1.js 35.94 kB）。｜【2026-10-19 追加（用户原话「要把竖排方向的形式形态切换放到横排上」，经选项确认指「小白/专业」模式切换）】形态切换入口迁移：① `AppNav.tsx` 删除 `.ic-tier-btn`（竖排栏不再放形态切换），改为 `useEffect(installTierBridge)` 挂桥；② 新增**非冻结**桥文件 `canvasTierBridge.ts`（30 行纯函数：`sanitizeTier` 非法值归一 novice、`installTierBridge` 注册 `window.__shiguangSetTier` 并回报 `__shiguangTierChanged`、卸载清全局），未登记进本 zone（非磁吸不变量，同 `canvasCommandsExtra.ts` 先例）；③ `character_management_module.py` 顶栏横排新增「模式: 小白 / 专业」两个 checkable 按钮（`setObjectName('tierBtn')`，颜色交全局 QSS，无内联颜色），`_on_tier_click` 经 `window.__shiguangSetTier('pro')` 下发、画布未加载时诚实提示「无法切换形态」。**真源仍在 `CanvasShell` 的 `editorTier`**，Python 侧不另存。验证：py_compile OK · tsc 37 零新增 · vitest 550/550 · web 宿主 vite build ✓ 4.30s · 真机截图 `_verify/ui_walk/nav_check_20261019{,_pro}.png`（顶栏出现「模式: 小白/专业」、竖排栏底部已无切换、点专业后状态栏显示「已切换到专业模式」）。｜【2026-10-19 第三轮（用户原话「开始」= 同意下一轮第 1-2 项）】顶栏状态收拢 + 左栏默认折叠：① `CanvasShell.tsx` 把常驻的「引擎未安装/引擎在线」与「剪辑 N 片 · 模型名」两块合并成一个状态胶囊 `.libtv-status-pill`（彩点表引擎状态、剪辑数/模型压成小字、完整文案进 tooltip、点击仍刷新引擎）⇒ 顶栏右侧由 4 块减为 3 块（胶囊 / 生成 / Agent / ☰）；② `leftCollapsed` 初始值由 `=== '1'` 改为 `!== '0'` ⇒ 左侧节点列表默认折叠，用户手动展开一次后记住；③ `styles.css` 新增 `.libtv-status-pill` 与浅色主题覆盖。未动：磁吸几何/阈值、生成/Agent 按钮行为、☰ 菜单项。验证：tsc 37 零新增 · vitest 37 文件 568 例全绿 · web 宿主 vite build ✓ 4.41s · CanvasShell 3257→3265（基线 3251 + 容差 30 内）· 真机截图确认胶囊与折叠均生效。｜【2026-10-19 第四轮（用户授权解冻：配方 Recipe + Agent 自动铺卡）】① 新增 4 个配方文件入册（recipePure.ts 纯函数匹配 · recipe.ts 存取与应用 · RecipePanel.tsx 左栏「配方」面板 · recipeBridge.ts Agent 事件桥）+ 1 测试文件 + 1 UI 重构产物 canvasTierSeg.tsx（形态切换从导航移到画布顶栏，用户 2026-10-19 纠正「它属于视图级操作」）；② CanvasShell.tsx 挂 RecipePanel + installRecipeAgentBridge（SSE 订阅 recipe.apply 事件）；③ canvasVersion.ts 0.3.32→0.3.33「配方卡：意图 + 参数可复用，Agent 可一键铺开」；④ 后端 app/core/capability_handlers_recipe.py 新增 canvas.apply_recipe 能力（make_agent_event + broadcast_agent_event 广播，实际铺卡在前端执行），capability_handlers.py 注册、agent_capability_catalog.py 登记（canvas_write）。未动：磁吸几何/阈值、Bond 咬合、生成/Agent 按钮行为。验证：vitest 37 文件 568 例全绿（recipePure 18 例新增）· tsc 存量 37 零新增 · vite build 5.17s · 后端自检 0 问题。｜【2026-10-19 第五轮（用户第二次纠正原话：形态切换的位置该和出现画布和 3D 导演台的位置，它该出现是在这儿，而不是其他的地方。不是最顶部的，不挂角色那个地方的一个位置）】第四轮把形态切换经 canvasTierBridge.ts 挂到 PyQt 宿主顶栏是中间态，本轮按纠正归位：① 删除 canvasTierBridge.ts（桥文件整个废弃，宿主不再参与 tier 下发）；② AppNav.tsx 删除 installTierBridge 调用与 import、styles.css 删除 .ic-tier-btn 三段样式，竖排导航彻底无形态切换残留（props tier/onTierChange 保留签名，void 消接收音）；③ character_management_module.py 删除顶栏「模式: 小白/专业」按钮组与 _on_tier_click 方法，原位留注释说明形态切换刻意不在宿主顶栏；④ CanvasShell.tsx 在「画布 | 3D 导演台」.seg 之后挂 CanvasTierSeg（真源仍是 editorTier），并删除 isNovice 重复 chip；CanvasTierSeg.tsx 内容从第一轮「AppNav 单按钮循环」改定为「画布顶栏 .seg 双按钮」纯展示组件（本 zone 新登记文件，46→47）；⑤ 第四轮登记的 5 个配方文件（recipe.ts / recipePure.ts / recipePure.test.ts / recipeBridge.ts / RecipePanel.tsx）与 canvasTierSeg.tsx 本次随 --update 一并补锁（此前 files 已登记但 hashes 缺条目）。未动：磁吸几何/阈值/判据、Bond 咬合、卡片尺寸、生成/Agent 按钮行为、bridge.ts。验证：vitest 37 文件 568 例全绿 · tsc 存量 37 零新增 · web 宿主 vite build ✓ 4.01s · CanvasShell 3290→3277 行（基线 3251+30 内，seg 内联超限遂抽 canvasTierSeg.tsx）· 真机截图：DOM 断言「画布|3D 导演台」与「小白|专业」相邻（adjacent=true）、宿主顶栏 _tier_btns=None、点「专业」切换生效、workspace left-collapsed 左栏默认折叠。 2026-10-20 用户授权解冻（V4.46 画布 codeVideo 节点）：新增「代码成片」节点 + /host/code-video/render|status 端点 + SSE 进度 + 画布本地异步任务；改 registerBuiltinNodes.ts / NodePalette.tsx / novice/types.ts / stores/node-factory.ts 四处注册与常量；磁吸阈值 120/50/60/instant10、卡片尺寸 240x200、gap=-2、三段式阻力、灯光/配色/交互全部未动；改完重建 dist 并重新上锁。",
-      "invariants": [
-        "贴合落位（2026-09-16 裁定，2026-09-18「1+4 结合」视觉修订）：吸附落位 gap=-2 保留——Bond 容差内的咬合重叠量，分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（不再是「四周灯光圈双光带」，也不再是边框融合隐形）；.nv-card 必须 box-sizing:border-box（DOM 实尺寸=落位用 240×200）；卡片圆角 16（2026-09-18 用户裁定「1+4 结合」：4→16 大圆角，对齐列表块风）。上下左右吸附统一生效。**卡片高度必须固定 200**（2026-09-23：CARD_GEOMETRY.minHeight → height，禁止内容撑高——曾实测被撑到 ≈306px，高矮不一且违反本基准；见「卡片尺寸统一」条）。自动布局网格步进必须 = CARD_SIZE − 2（x 238 / y 198，V4.23.2）：拉片与导演卡拆解生成的小白卡直接落在贴合位，禁止回退 230/200（会重叠 10px 破坏咬合）",
-        "磁吸阈值 weak/medium/strong = 120/50/60px，瞬时阈值 instant=10px（2026-09-17 用户裁定：放大强吸判定+新增瞬时档，对齐 Win11 磁贴「边对边立刻贴齐」手感）；过冲5、回弹200ms、拉伸30、断裂50",
-        "方向无语义（2026-09-18 方案 A 用户裁定，推翻早期「六向语义」）：磁吸方向 left/right/top/bottom/stack 只表示物理方位，禁止再给方向硬套「输入/输出/对照/分支/导演卡/历史」等业务语义标签与语义色；吸附反馈统一为蓝色占位缝（见「拖拽占位缝」），不再渲染方向语义标签、六向槽位彩色条、软连接语义标签、右侧面板「六向放置」图例",
-        "导演卡自动拆解走 breakdownStoryboard + breakdownDirectorCard，非破坏式追加下游分镜卡",
-        "生成卡 L1 画质四档 qualityTier = draft/standard/fine/cinema，与 shot 一致",
-        "生成卡默认 duration=5、motionStrength=60、consistency=75",
-        "L1 面板仅在非参考视频节点显示（isReference 不显示）",
-        "缩小色块视觉由 .react-flow.zoomed-out 类控制",
-        "磁吸等级判据用「边缘间隙 edge-gap」，不是中心距：卡片 240×200，并排贴合时中心距恰为 240px，用中心距判 25px 阈值必然失效（V4.13.0 修正的根因）",
-        "靠近即落座（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」二次修订）：拖拽中只要进入磁吸范围（edge-gap < weakDistance=120px）即认定「松手会吸附到这里」（magState 记录 snapPos），但**拖拽期间不改卡片位置**；松手时才动画落座。磁吸等级（weak/medium/strong/instant）仅用于目标优先级（levelRank）+ UI 反馈 + 落座过冲判定，不再区分吸附力度、也不在拖拽中产生位移。历史：V4.28.2 曾为「进入范围即整卡瞬移」，2026-09-18 推翻（与手机主屏「绝不瞬移」手感相反且每帧重建 nodes 数组致卡顿）",
-        "Bond 咬合由几何推导：边距 ≤ bondTolerance(2px) 且投影重叠 ≥ MIN_OVERLAP(40px)；不落盘，刷新后自动恢复",
-        "Bond 只识别 左/右/上/下 四向贴合缝，不含 stack 层叠",
-        "咬合缝 SnapSeam（2026-09-16 用户裁定 + 2026-09-18 修订）：静止贴合的分界视觉由相邻卡片的大圆角深色块 + 类型色块自然并排承担（见「大圆角色块」），SnapSeam 不再承担静止零残留承诺；仅拖拽拉扯瞬态显示细线阻力反馈（拉伸中 #fbbf24 / 即将断开 #f87171）；落座/断裂保留一次性细闪光，不出现文字胶囊",
-        "贴合即连接（2026-09-17 用户裁定）：吸附成功 = 关系已建立，不再自动生成软连接虚线与方向徽章（CanvasShell onSoftDragStop 的 pushSoftConnection 已移除）；softConnections 状态与固化/丢弃链路保留（恒为空列表、SoftConnectionLines 渲染空列表），未来手动建立血缘可复用",
-        "大圆角色块（2026-09-18 用户裁定「1+4 结合」，推翻 2026-09-17「四周灯光包围」）：每张小白卡为深色实色块——body 背景 #151a26 + 1px 描边 rgba(255,255,255,0.08)，圆角 16px，去掉四周发光光晕（不再有 box-shadow 光晕 / 1px 亮芯）；类型色由标题栏整块背景承载（.nv-card-head background:var(--nv-accent)、文字改深色 #0f1115），废除 .nv-card::before 内缘色条；选中态 .on 改为白色描边环（border #ffffff + box-shadow 0 0 0 1px rgba(255,255,255,0.35)），废除绿色灯光；贴合处由相邻卡片深色块 + 类型色块自然并排分界；bondedSidesMap→store.bondedSides→NoviceCard 挂 bonded-* class 的链路保留，但 bonded-* 的「边框透明+直角」CSS 规则已废除；卡片圆角统一由 novice-cards.css 管理（16px），NoviceCard 不得内联 borderRadius",
-        "拖拽占位缝（2026-09-18 用户裁定「1+4 结合」，推翻旧「弯曲发光磁力线」）：MagneticLines 拖拽靠近目标时，在目标卡被贴的那条边全长绘制蓝色直线占位缝（#378ADD，3px 核心线 + 10px 柔光晕 opacity 0.25，滤镜 seam-blur），替换旧的 Q 曲线磁力线 + 两端发光圆点；方向由 magState.direction 映射——目标在右→贴其左缘竖线、在左→贴其右缘竖线、在下→贴其上缘横线、在上→贴其下缘横线、stack→目标整卡外框；不渲染任何方向语义标签（2026-09-18 方案 A 剥离）",
-        "竖排缩放控件避让（2026-09-16 用户裁定）：.react-flow__controls.react-flow__panel 必须 bottom:68px，抬到 libtv-dock（bottom:10px、顶边≈52px）上方，两者不得重叠",
-        "意图胶囊卡片交互分级（2026-09-16 用户裁定）：单击选中 = 卡片内直接输入主文本（KIND_TEXT_FIELD 绑定 node-factory 真实字段）；双击 = store.requestProEdit 触发右侧面板展开 L2 进阶设置",
-        "画布 Agent 打开时隐藏右侧设置面板（2026-09-16 用户裁定）：agentPanelOpen 时 inspector aside（小白 NoviceInspector / 专业项目+选中节点参数）不渲染，只显示 Agent-IM 交互界面；Agent 关闭后恢复",
-        "L1/L2/L3 参数按节点类型分派（2026-09-16 用户裁定）：只渲染 node-factory 类型定义中真实存在的字段；L3 专业参数（steps/cfg/seed/补帧）经 L2 底部「▾ 专业参数」折叠展开，不再完全隐藏；aspectRatio/styleStrength/negativePrompt 三字段前后端生成链路均无消费，已移除不许复活",
-        "拖拽分离阻力三段式：拉力 ≤30px 完全不动 / 30~50px 只跟出 bondGiveRatio(0.28) / ≥50px 断裂并 muted 该邻居",
-        "仍在咬合时松手须 150ms 平滑回位且不过冲；强吸附落座才带 overshootPx(5) 过冲",
-        "小白模式 snapToGrid 必须关闭：16px 量化会把拉扯变成阶梯跳，吃掉阻力手感",
-        "React Flow v12 的 XYDrag 先写 store 再回调，onNodeDrag/onNodeDragStop 内覆盖位置必然生效——阻力手感依赖此顺序",
-        "跟手浮起（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」，推翻 V4.28.2「靠近即吸附」的拖拽中瞬移）：拖拽中 onNodeDrag **绝不覆写卡片位置**（不再调用 writeNodePos），卡片 1:1 跟指针走；onNodeDrag 只计算并记录 magState（level/targetId/direction/snapX/snapY = 「若现在松手会落在哪」）。性能收益：消除每帧重建 nodes 数组 + 每帧重算 bonds/bondedSides 的正反馈卡顿。落座动作全部移交 onNodeDragStop。禁止恢复「拖拽中 writeNodePos 贴到 snapPos」",
-        "单轴吸附（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」，2026-09-23 修订 top/bottom）：getSnapPosition 必须接受 dragPos（拖拽卡当前左上角）。**case left/right 保持单轴**：y 取 dragPos.y（不再硬取 targetPos.y）——旧行为「吸左右时把 y 拽到目标 y」实测垂直错开 180px 时落点瞬移一整卡高，是「上下吸附不对」的真实根因。**case top/bottom 改为顶边对齐**（2026-09-23 用户裁定）：x 取 targetPos.x（不再取 dragPos.x）——用户反馈「卡片最上端的吸附没有对齐」：上下贴住后左右边缘错开、不成列；水平位移受磁吸范围约束（edge-gap < weakDistance 120px），无瞬移观感。stack 除外（保持 targetPos+8）。dragPos 缺省时回退旧行为保证兼容。回归 _verify: MagneticEngine.test.ts「单轴吸附」describe（3 例）",
-        "卡片尺寸统一（2026-09-23 用户裁定「磁吸意图卡片大小不统一」）：所有小白卡**固定高度 200** —— CARD_GEOMETRY 必须用 height:200，禁止 minHeight（内容曾把卡片撑到 ≈306px：hint + 缩略图 96 + 正文 3 行 + meta）；NoviceCard 内联 style 用 height，且禁止对内层 body 内联 minHeight；.nv-card-body 必须 min-height:0 + overflow:hidden；.nv-card-thumb 必须 flex:1 1 auto + min-height:40px（弹性收缩，img/video 上限 72px）；.nv-card-hint 与 .nv-card-meta 必须 flex:0 0 auto（否则作为 flex 子项被压扁裁字）；有缩略图时必须折叠提示语并把正文收 1 行（:has(.nv-card-thumb) 规则）——渲染实测：正文区可用仅 106px（200−40−32−2−20），而「提示语31+缩略图40+正文2行44+元信息17+间隙16」需 148px，四层内容数学上装不下。目的：DOM 实尺寸恒 240×200（= 磁吸落位基准），画布上高矮一致。回归 _verify: vitest（8 文件 76 例）",
-        "松手落座动画（2026-09-18 用户裁定）：onNodeDragStop 吸附落座必须走 animateNodeTo（snapAnimationMs=200 平滑滑入），不再瞬间 writeNodePos 跳过去；强吸附（strong/instant）落座带 overshootPx(5) 过冲，weak/medium 不带（对齐既有不变量「强吸附落座才带 overshootPx(5)」）。animateNodeTo 收尾自带 findBondFor，参数即形成的咬合；仍粘住松手仍走 150ms 回位不过冲（不变）",
-        "instant 等级（2026-09-17 用户裁定，对齐 Win11 磁贴「边对边立刻贴齐」手感）：computeMagnetic 判定 gap < instantDistance(10px) → level='instant'。**注**：instant 自 2026-09-18「跟手浮起」起不再表示「拖拽中立刻贴齐」，而是作为**最高优先级**（levelRank instant:4）参与目标选择 + 决定落座是否带过冲；所有等级拖拽中一律跟手、松手才落座。卡片尺寸 240×200 / 贴合缝机制（bondedSidesMap+gap=-2）/ 交互态 / 三段式阻力（30/50/bondGiveRatio=0.28）/ snapToGrid 关闭 / XYDrag 时序 全部不变。levelRank 映射必须含 instant:4：漏掉它时 instant 会被后遍历的 strong/medium 错误覆盖（2026-09-18 修复，补 MagneticEngine.test.ts 回归）",
-        "空间记忆 · 第一层（2026-09-18 用户裁定「下一代概念」）：NoviceCard 挂 data-depth（= 已有 intentDepth 1~3），novice-cards.css 用 [data-depth] 分档配色。**红线：只改颜色**——标题栏 filter(saturate/brightness) + 描边透明度；不得改尺寸（卡片实尺寸恒 240×200，磁吸落位基准）、不得加 box-shadow（不变量「不再有 box-shadow 光晕」）、不得改圆角（统一 16px）。.nv-card.on 选中态描边优先级必须高于所有 [data-depth] 描边规则",
-        "整列让位（2026-09-18 用户裁定「借鉴手机主屏拖拽手感」第 2 条机制）：拖拽卡准备落进被占用的空位时，挡住它的**同一行/列**卡片顺次推开一格，拖拽卡最终落进锚点让出的坑（ghost）。规划由 `magnetic/reflow.ts` 的 planReflow() 纯函数负责，UI 预览由 `magnetic/SlotGhost.tsx`（ViewportPortal 虚线框）承担。**三条红线**：① 只推同一行/列（垂直于让位轴方向投影重叠 ≥ MIN_OVERLAP(40px)，与 bonds.ts 同一把尺子）；② 链式只推一格——链上卡片整体平移 step(=卡尺寸+LANDING_GAP(-2)=238/198)，绝不递归/放大；③ 推动后若链尾撞上同行紧贴的链外卡则整条链放弃（blocked）。另：层叠（两轴均插进）前置排除、不让位。**时序红线**：拖拽中只记录 reflowPlan 预览、绝不移动任何卡（含邻居）；让位位移一律在 onNodeDragStop 执行，且顺序必须是「邻居先滑开（animateNodesTo/180ms）→ 拖拽卡再落进 ghost」，反过来会先叠一下再被挤走。回归 _verify: reflow.test.ts（15 例）",
-        "让位与吸附/咬合的分工（2026-09-18）：computeMagnetic 管「一对一吸附落点」，computeBonds 管「静态咬合关系」，SpatialAnalyzer 只做「布局模式识别」（不返回可执行位移，故让位不可复用它），planReflow 管「一对多位移规划」。禁止把让位逻辑塞进 computeMagnetic 或 SpatialAnalyzer",
-        "画布版本号单一事实来源（2026-09-19 用户裁定「画布独立版本号」）：画布版本线与主程序**刻意不同步**——主程序版本在 `app/version.py`（Qt6 侧显示），画布版本只能来自 `src/canvasVersion.ts` 的 `CANVAS_VERSION`（导航栏 `.ic-nav-ver` 显示）。**禁止在组件里内联版本字符串**。历史坑：版本号曾被硬编码在 `package.json` / `CanvasShell.tsx:827` / `AppNav.tsx:37` 三处，自项目建立起一直停在 `v0.1.0`、历经 V4.21~V4.30 十余轮画布改动从未维护，界面显示与实际功能严重脱节。维护三件套：① 改 `canvasVersion.ts` ② 同步 `package.json` 的 `version`（无 v 前缀）③ 在 `docs/CHANGELOG.md` 画布段落记一笔。`AppNav` 的 `version` 为**必填参数**（已移除默认值，漏传会在界面直接暴露）",
-        "抽卡闭环产物可视化（2026-09-27 V4.40.10 用户授权解冻「第二个一起写动作」）：生图返回的 recommendation / proxy_score / repair_plan 必须回写节点数据并由 NoviceInspector 展示——此前后端回传这些字段但前端零消费（DEFECT C，grep 零命中），闭环对人不可见。① 画幅选择器：ASPECTS = portrait/landscape/square，缺省 portrait（竖屏短剧）；aspect 字段缺省时后端按 DEFAULT_ASPECT=portrait 推导尺寸；② 闭环面板：展示推荐种子/均分、代理分（标注「仅供参考」）、坏区数；③ 局部重绘按钮：仅坏区 >0 且有图时出现，调 repairImageViaHost（/host/repair-image），按钮文案「只修坏区，不重抽整张」，会消耗云端额度故必须用户显式点击。**不改**：磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色。",
-        "YuE（乐）全曲生成接入音乐节点与意图卡片（2026-09-28 用户指令「把 yue 开源项目适配进画布模块里面的音乐节点和意图磁吸卡片」）：音乐节点新增 engine（suno|yue）/ abc / cot / yueMode / seed 字段。**三段式对齐意图分层**——plan（歌词+风格→可编辑旋律和弦 ABC 谱）对应卡片「你的意图」，渲染整曲对应「系统的事」。纪律：**执行端未配置时必须诚实失败**（回传安装指引，绝不返回假音频/假乐谱）。**不得**在无 YuE 时静默降级成 Suno 或伪造音频；engine 缺省按 suno 处理（向后兼容旧节点）。磁吸阈值/卡片尺寸/gap/阻力/跟手/单轴吸附/让位/Bond/方向无语义/空间记忆配色 全部不变。",
-        "本地视频生成接线（2026-10-01 用户授权解冻「前端接线」）：视频节点的**本机**模型通道 id 固定为 `\"local\"`（由 refreshModels 合并时打上），`model` 即后端 video_gen.VIDEO_MODELS 的 id。**分支只允许存在于 `App.tsx` 的 `generateVideoUnified` 一处** ——云端/本地各写一条调用链是本项目反复出现的反模式（任何一侧改行为另一侧必漂移），故主生成路径（视频节点）与双模型对比路径（generateVideoAtKey）**共用**它；生成器·视频节点也已并入。**保持云端行为逐键不变**：`size` 只有原本就传的调用方才带（可选参）。三条红线：① **本机模型是图生视频（i2v）**，无首帧图时必须**诚实报错**，不得退回文生视频；② **绝不自动下载模型**（几 GB；模型没下必须回明确指引，含目标目录）；③ 生成产物必须经 `video_gen.publish_to_inbox()` 落画布 inbox ——**画布是 WebView，加载不了 `D://...` 本地路径**，只认 `/inbox_file/<name>`；落箱失败只降级为「前端播不了」，不得影响产物本身。⚠️ `canvas_bridge.py`（stage3d-core）在此链路里**只被 import，不被修改**。不改：磁吸阈值 120/50/60/instant10、卡片 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色。",
-        "孤儿端点接线之合规检查 + 意图目录（2026-10-15 Wave 0 #13 第 2/3 条，用户授权「开始」）：① `NoviceInspector`剧本卡片新增「🛡️ 合规检查」按钮→ `POST /host/compliance-check`（后端 `project_agent_host.script_compliance_check` 是唯一判定源，前端**不复制任何一条检查规则**，只按 level 分桶着色展示；收集范围=画布 shot 节点(有 title 或 prompt) + character 节点(有 characterName，**空名必须跳过**否则后端刷假「角色冲突」)）。② AI 增强按钮由 `GET /host/enhance-intents` 目录驱动，取代硬编码的两个按钮 —— 后端 `ENHANCE_INTENTS` 的 `face`（修复人脸）前端原先完全够不着。⚠️ **语义红线（新增不变量）**：本端点的 `quality_tiers` = `canvas_enhance.QUALITY_TIERS` = **fast/standard/high**（超分实现档，high 才触发 RealESRGAN 下载），与前端 `novice/types.ts:80` 的 `QUALITY_TIERS` = **draft/standard/fine/cinema**（生成画质档）**是两套不同语义**⇒ 绝不混用，hostEnhanceIntents.ts 刻意不暴露该字段（有测试反锁）。③ `heal`/`style` 两个意图**故意不渲染**：heal 必填 `params.mask` 遮罩而画布无涂抹入口（渲染出来=点了必然报「缺少遮罩」的死按钮）；style 在用户未选风格时会静默套用默认 cyberpunk（= 随机效果，本项目明令禁止）。二者待有对应输入控件后再放开。④ 新样式一律进 `novice-inspector.css`（不内联 —— 内联=主题盲区），沿用同文件既有暗色色板。⑤ 判定逻辑全抽成纯函数放 `hostCompliance.ts` / `hostEnhanceIntents.ts`（vitest 是 node 环境无 jsdom，useEffect 零覆盖）。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap` 几何推导一字未改；`computeMagnetic`/`getSnapPosition`/`planReflow` 一行未碰。",
-        "孤儿端点接线之深度拉片 L2 + 时间线回滚（2026-10-15 Wave 0 #13 第 4/5 条，用户授权「开始」）：① **接L2 不接 L1**：`/host/reference-breakdown-l2` 的桥函数 `referenceBreakdownL2` 早已存在（`bridgeStoryboard.ts:137`）且类型/导出都齐，但**零 UI 调用者** —— 前端比后端多走一步、停在半路。本次补上入口（分镜表节点「🧊 深度拉片」按钮，与既有「📹 拉片」**并行不替换**：前者景别/运镜靠LLM 推断、后者靠深度图实测+置信度门槛，**证据等级不同**，用户自己选）。⚠️ `/host/reference-breakdown`（L1）**刻意不接** —— L2 就是同一个 `rb.build_shot_table(with_depth=True)`，L1 是子集，接它等于造一条更弱的平行线。② **诚实边界（新增不变量）**：`景别`/`运镜` 测不出时后端给**空串**（reference_breakdown.py:702 初始化即 `\"\"`，`:274` 明写「绝不把固定当运镜结论」）⇒ 前端 `hostBreakdownL2.mapL2ShotsToRows` **原样保留空串**，绝不填「中景」「固定」——填了就是把「没测出来」说成「测出来了」。结论行必须明说「景别 x/y · 运镜 x/y，其余留空未猜」。③ `use_vision` **默认 false**：开它素材出域到云端视觉模型，须用户在按钮旁显式勾选（新增 `.sg-node-mini-check` 样式，走 CSS 不内联）。④ 深度拉片**覆盖现有分镜表前必须确认**（改用户数据，与 repair-image 同纪律）。⑤ **时间线回滚**：`project-snapshot/history` + `restore` 两端点前端零调用。缺口是真的 —— `project-snapshot/import`（`projectZip.ts:300pushTimelineToEditor`）调 `write_clips` **整体覆盖**剪辑器时间线，后端自己在 import 里压了一条「导入前自动快照」（canvas_server.py:1353）但前端无回滚入口。入口挂在「导入直导成功之后」那一刻（用户最可能反悔时），编排整块放`editorRollback.ts`（App.tsx 已 1975/2000 顶格 ⇒ 只留两行薄调用）。🔴 **三条不可绕过的限制写进代码注释与 UI 提示**：① 后端 `SnapshotStore` docstring 说「每次导出自动 push」但**实测 export 端点没调 push** ⇒ 实际只有 import 会长栈，空栈是真实状态，UI 必须如实说并告诉用户怎么产生（导一次工程包）；② `list()` 白名单裁剪，**没有 clips**；③ 🔴 **`restore` 端点自己不 push、前端也无 push 端点** ⇒ **回滚不可再回滚**，回滚前的状态找不回来，唯一兜底是先导出 ⇒ 二次确认必须写明这一点。⑥ `window.confirm` 而非 `ConfirmDialog`：后者需在组件里挂 fixed 定位模态，而节点组件在 xyflow viewport 内（有 transform）⇒ 踩已知陷阱；项目内 DirectorPanel/Stage3D同样直接用 confirm。\n**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；`bondedSidesMap`/`computeMagnetic`/`getSnapPosition`/`planReflow` 一行未碰；本zone 唯一被触及的文件是 `styles.css`（仅**追加** `.sg-node-mini-check` 一族样式，未改任何既有规则）。2026-10-17 用户授权解冻「画布粗剪审核卡 UI 消费接线（§6.9-P2）」：粗剪链 rough_cut_chain 的提案/写回事件经 push_to_canvas SSE（type=rough_cut.review）推画布壳层审核卡消费。本 zone 改动**全为加法**：① `CanvasShell.tsx` 仅加 1 个 import（RoughCutReviewDock）+ 1 处挂载（3251→3257 行，规模守卫容差内）；② `styles.css` 仅**追加** `.sg-rc-*` 一族样式（暗色默认 + body.theme-light 双写），未改任何既有规则；③ `store.ts` **未动**（审核卡状态由组件自管 React state，该文件已逼近规模守卫上限）。新登记文件 `hostRoughCut.ts`（纯函数 parseRoughCutEvent 判读 SSE + fetch 薄封装 /host/rough-cut/apply|export；confirmed=True 由后端端点钉死，前端不传）与 `RoughCutReviewDock.tsx`（壳层常驻订阅 rough_cut.review；卡片状态机 pending→applying→applied→exporting→done/error；busy 期间按钮禁用防重复点击；SSE 断线治理沿用 AgentPanel 凭据自愈纪律），副库 libtv 镜像字节一致。**磁吸阈值 120/50/60/instant10、卡片尺寸 240×200、gap=-2、三段式阻力、跟手浮起、单轴吸附、让位机制、Bond 判据、方向无语义、空间记忆配色 全部未动**；改完重新上锁。",
-        "配方 Recipe（2026-10-19 第四轮解冻新增）：① 存「意图+参数+母版引用」不存媒体路径（PARAM_WHITELIST 白名单抽参），抗过时；工作流快照复现归 project-snapshot，两者刻意分工；② recipePure.ts 是纯函数零 store 依赖（LCS 中文匹配，禁按标点切 token），vitest node 环境可测；③ applyRecipe 只走 store 已公开的 addNode/updateNodeData，禁新增第二套写入口，位置取视口中心禁随机撒点；④ Agent 链路后端只广播 SSE 事件 recipe.apply（canvas.apply_recipe 能力，effect=canvas_write），实际铺卡在前端 recipeBridge.ts 执行，后端不碰画布 store；⑤ 存储 key shiguang:recipes:v1；匹配不到如实提示，不静默失败不猜配方"
-      ],
-      "symbols": [],
-      "files": [
-        "vendor/packages/libtv/src/magnetic/CardStack.ts",
-        "vendor/packages/libtv/src/magnetic/FloatingToolbar.tsx",
-        "vendor/packages/libtv/src/magnetic/MagneticEngine.ts",
-        "vendor/packages/libtv/src/magnetic/MagneticLines.tsx",
-        "vendor/packages/libtv/src/magnetic/SoftConnection.ts",
-        "vendor/packages/libtv/src/magnetic/SoftConnectionLines.tsx",
-        "vendor/packages/libtv/src/magnetic/SpatialAnalyzer.ts",
-        "vendor/packages/libtv/src/magnetic/SpatialIndex.ts",
-        "vendor/packages/libtv/src/magnetic/StackBadge.tsx",
-        "vendor/packages/libtv/src/magnetic/reflow.ts",
-        "vendor/packages/libtv/src/magnetic/SlotGhost.tsx",
-        "vendor/packages/libtv/src/canvasVersion.ts",
-        "vendor/packages/libtv/src/AppNav.tsx",
-        "vendor/packages/libtv/src/magnetic/StatusBadge.tsx",
-        "vendor/packages/libtv/src/magnetic/types.ts",
-        "vendor/packages/libtv/src/magnetic/useMagneticDrag.ts",
-        "vendor/packages/libtv/src/magnetic/bonds.ts",
-        "vendor/packages/libtv/src/magnetic/SnapSeam.tsx",
-        "vendor/packages/libtv/src/CanvasShell.tsx",
-        "vendor/packages/libtv/src/styles.css",
-        "vendor/packages/libtv/src/nodes.tsx",
-        "vendor/packages/libtv/src/store.ts",
-        "vendor/packages/libtv/src/stores/node-factory.ts",
-        "vendor/packages/libtv/src/mediaExtraNodes.tsx",
-        "vendor/packages/libtv/src/registerBuiltinNodes.ts",
-        "vendor/packages/libtv/src/NodePalette.tsx",
-        "vendor/packages/libtv/src/components/canvas/CanvasEmptyState.tsx",
-        "vendor/packages/libtv/src/novice/types.ts",
-        "vendor/packages/libtv/src/novice/NoviceCard.tsx",
-        "vendor/packages/libtv/src/novice/NoviceInspector.tsx",
-        "vendor/packages/libtv/src/novice/novice-cards.css",
-        "vendor/packages/libtv/src/novice/novice-inspector.css",
-        "vendor/packages/libtv/src/novice/index.ts",
-        "vendor/packages/libtv/src/canvasEnhanceActions.ts",
-        "vendor/packages/libtv/src/storeIdempotent.ts",
-        "vendor/packages/libtv/src/hostCompliance.ts",
-        "vendor/packages/libtv/src/hostEnhanceIntents.ts",
-        "vendor/packages/libtv/src/hostBreakdownL2.ts",
-        "vendor/packages/libtv/src/hostSnapshots.ts",
-        "vendor/packages/libtv/src/editorRollback.ts",
-        "vendor/packages/libtv/src/hostRoughCut.ts",
-        "vendor/packages/libtv/src/RoughCutReviewDock.tsx",
-        "vendor/packages/libtv/src/canvasTierSeg.tsx",
-        "vendor/packages/libtv/src/recipe.ts",
-        "vendor/packages/libtv/src/recipePure.ts",
-        "vendor/packages/libtv/src/recipePure.test.ts",
-        "vendor/packages/libtv/src/recipeBridge.ts",
-        "vendor/packages/libtv/src/RecipePanel.tsx"
-      ],
-      "markers": []
-    }
-  ]
+    ]
 }

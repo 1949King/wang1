@@ -3264,6 +3264,10 @@ export default function CanvasShell(props: CanvasShellProps) {
           <FaceCard
             initial={faceCardTarget.face_params}
             characterId={faceCardTarget.id}
+            /* 2026-10-21 用户授权解冻（1 行纯加法）：把角色已有头像传给捏脸卡，
+               供「应用」时做覆盖确认（CanvasShell 里写 avatar_url 的那段逻辑不变）。
+               与 2026-10-17 加 RoughCutReviewDock 挂载同型：只加 prop，不碰磁吸/交互。 */
+            initialAvatarUrl={faceCardTarget.avatar_url}
             onConfirm={onFaceConfirm}
             onClose={() => setFaceCardTarget(null)}
           />

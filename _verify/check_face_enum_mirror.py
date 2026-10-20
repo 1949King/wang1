@@ -15,6 +15,9 @@
   · 任何**新增**漂移（又加 A 类枚举没补表 / 镜像表越权野值）⇒ exit 1 立刻报警；
   · 解冻补全后存量收敛 ⇒ 打印下调提示，total==0 时守卫转防回归硬绿。
 
+【2026-10-21 已转硬断言】用户授权解冻 `stage3d-core` 后 8 项已补全，
+BASELINE 已清空 —— 此后任何漂移（新增枚举没补表 / 镜像表越权野值）一律 exit 1。
+
 纯静态：正则解析 TS（不 build）、AST 取 Python 字面量（不 import，零副作用）。
 """
 from __future__ import annotations
@@ -29,12 +32,9 @@ TS_PATH = os.path.join(ROOT, "vendor", "packages", "libtv", "src", "faceParams.t
 PY_PATH = os.path.join(ROOT, "app", "core", "canvas_bridge.py")
 
 # 已知存量漂移（解冻 canvas_bridge.py 补全后逐项下调；清空后守卫转防回归硬绿）
-BASELINE = {
-    "browStyle": {"round", "short"},
-    "eyeStyle": {"cat", "sleepy"},
-    "lipStyle": {"pouty", "sharp"},
-    "hairAccessory": {"glasses", "flower_crown"},
-}
+# 2026-10-21：8 项已在「stage3d-core 解冻（用户授权）」后补全 ⇒ 基线清空，
+# 守卫转为「镜像表与 faceParams.ts 完全一致」的硬断言（total==0 恒绿）。
+BASELINE: dict[str, set[str]] = {}
 
 # faceParams.ts 字段 → canvas_bridge.py 镜像表名
 FIELD_TO_TABLE = {

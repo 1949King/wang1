@@ -287,10 +287,14 @@ def _remove_canvas_plugin(plugin_id: str) -> bool:
 _FACE_BROW_LABELS = {
     "flat": "平眉", "arch": "挑眉", "angry": "剑眉",
     "sad": "八字眉", "thin": "细眉", "thick": "粗眉",
+    # A 类扩展（2026-10-21 补齐：与 faceParams.ts BrowStyleId 对齐）
+    "round": "柳眉", "short": "短眉",
 }
 _FACE_EYE_LABELS = {
     "round": "圆眼", "almond": "杏眼", "narrow": "细长眼",
     "upturned": "上挑眼", "droopy": "下垂眼", "big": "大眼",
+    # A 类扩展（2026-10-21 补齐：与 faceParams.ts EyeStyleId 对齐）
+    "cat": "猫眼", "sleepy": "睡眼",
 }
 _FACE_EYE_COLOR_LABELS = {
     "black": "黑色", "brown": "棕色", "amber": "琥珀色", "hazel": "榛色",
@@ -299,11 +303,15 @@ _FACE_EYE_COLOR_LABELS = {
 _FACE_LIP_LABELS = {
     "thin": "薄唇", "plump": "饱满唇", "wide": "宽唇",
     "small": "小口", "cupid": "丘比特唇", "neutral": "自然唇",
+    # A 类扩展（2026-10-21 补齐：与 faceParams.ts LipStyleId 对齐）
+    "pouty": "嘟唇", "sharp": "利落唇",
 }
 _FACE_ACCESSORY_LABELS = {
     "hairpin": "单簪", "hairpin_dual": "双簪", "ribbon": "发带",
     "ribbon_tail": "长飘带", "tiara": "冠冕", "flower": "花钿",
     "earring": "耳饰", "forehead_mark": "额饰", "veil": "头纱", "horns": "角",
+    # A 类扩展（2026-10-21 补齐：与 faceParams.ts HairAccessoryId 对齐）
+    "glasses": "眼镜", "flower_crown": "花环",
 }
 # 与 faceParams.SKIN_PALETTE 同源（8 档）
 _FACE_SKIN_LABELS = {

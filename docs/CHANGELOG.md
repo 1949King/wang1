@@ -1,5 +1,38 @@
 # 拾光剪影 — 变更日志
 
+## 捏脸系统 P0 收口 —— 枚举镜像补全 + 头像覆盖确认（2026-10-21）
+
+> 用户连续追问「捏脸参数选得到、效果却进不了提示词」。本轮把**三处断点**一次打通：
+> ① Python 镜像表缺 8 个 A 类枚举（猫眼/睡眼/眼镜/花环…选了静默消失）；
+> ② 前端下拉也缺同样 8 项（根本选不到）；
+> ③ 应用时 3D 头快照无条件覆盖 `avatar_url`（丢图无感知）。
+> **一次解冻 `stage3d-core`（canvas_bridge.py）+ `canvas-magnetic-intent`（CanvasShell 1 行）**，其余全在非冻结区。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 枚举补全 | `canvas_bridge.py` 四张镜像表补 8 项（round/short 眉、cat/sleepy 眼、pouty/sharp 唇、glasses/flower_crown 发饰） |
+| UI 补全 | `FaceCard.tsx` 三个 OPTIONS 表补同样 8 项（下拉可选中，不再只能靠随机 roll） |
+| 覆盖确认 | `FaceCard` 新增 `initialAvatarUrl` prop；「应用」时若角色已有头像且本次带快照 ⇒ `window.confirm` 二次确认；取消则只存参数、不动头像 |
+| 冻结区 | `canvas_bridge.py` 从 `stage3d-core` files 移除（14→13）；`CanvasShell.tsx` 加 1 行 prop（纯加法，磁吸/交互零改动） |
+| 守卫 | `FACEENUM` 基线 **8→0**，转硬断言（此后任何漂移 exit 1） |
+
+### 验证（全部实跑）
+
+- `check_face_enum_mirror`：TS 白名单 36 项 · **漂移 0** · 基线 0
+- `check_character_schema`：fields=22 / visual=5 / groups=4 / enum=1 / variants=5 OK
+- `pnpm --filter @shiguang/libtv test`：**41 文件 / 600 用例全绿**
+- `tsc --noEmit`：**37 = 既有基线，face 相关零新增**
+- `frozen_zone_guard`：**106 locks OK**（107→106，canvas_bridge 移出）
+- `stability_gate` 251 项无新增 · `check_file_size` OK · `py_compile` OK
+
+### 诚实边界
+
+- 本次只解决「参数能否进提示词」与「头像会不会被误覆盖」，**不解决「参数 → 画面长什么样」的可视化断层**——
+  那是下一刀：模板库 + 实时预览 + AI 生成入口（你已定型的「永劫无间式」捏脸，待排期）。
+- 表情帧 5 张仍未生成（mascot 侧规格与接线已就绪，见上一版条目）。
+
 ## 拾岚表情帧预接线 + 生成规格（2026-10-20）
 
 > 用户选定「补表情帧」。**无生图工具，不画假图**——交付「规格 + 预接线 + 硬校验」：
