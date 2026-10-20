@@ -1107,8 +1107,11 @@ class ModelCardWidget(QFrame):
             self._status_label.setText("● 已配置 ✓")
             self._status_label.setStyleSheet("font-size: 12px; color: #22c55e; background: transparent;")
             QMessageBox.information(self, "成功", "配置已保存")
-        except (ImportError, ConnectionError, ValueError) as e:
-            QMessageBox.warning(self, "错误", f"保存失败: {e}")
+        except (ImportError, ConnectionError, OSError, ValueError, RuntimeError) as e:
+            # RuntimeError=安全存储写盘失败（save_configs 抛）：诚实报错，不弹成功
+            self._status_label.setText("● 保存失败")
+            self._status_label.setStyleSheet("font-size: 12px; color: #ef4444; background: transparent;")
+            QMessageBox.warning(self, "保存失败", str(e))
     
     def _load_saved_config(self):
         if self._provider_info.get("is_local"):

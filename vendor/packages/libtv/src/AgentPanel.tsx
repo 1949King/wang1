@@ -26,6 +26,7 @@ import {
   type ProjectTool,
 } from "./bridge";
 import { useCanvasStore, type NodeData } from "./store";
+import { nextFreeSlot } from "./canvasSlot";
 import ConfirmDialog from "./ConfirmDialog";
 import "./agentPanel.css";
 import {
@@ -373,7 +374,12 @@ export default function AgentPanel({
       switch (action) {
         case "addNode": {
           const kind = String(params.kind || params.type || "shot");
-          const pos = params.x != null && params.y != null ? { x: Number(params.x), y: Number(params.y) } : undefined;
+          // Agent 没给坐标 ⇒ 用确定性网格槽位（canvasSlot），不再走 store 的
+          // Math.random() 撒点（一批卡全挤同一小盒子 = 用户看到的「画布很乱」）。
+          const pos =
+            params.x != null && params.y != null
+              ? { x: Number(params.x), y: Number(params.y) }
+              : nextFreeSlot(useCanvasStore.getState().nodes);
           addNode(kind as any, pos);
           // addNode 内部设 selectedId，立即读
           const sid = useCanvasStore.getState().selectedId;
@@ -874,7 +880,7 @@ export default function AgentPanel({
         push("assistant", `未知节点类型：${kind}`);
         return true;
       }
-      addNode(kind);
+      addNode(kind, nextFreeSlot(useCanvasStore.getState().nodes));
       push("assistant", `已添加节点：${kind}`);
       return true;
     }

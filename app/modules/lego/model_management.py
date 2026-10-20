@@ -311,8 +311,11 @@ class ModelManagementModule(QWidget):
                 QMessageBox.information(self, "成功", f"已保存 {', '.join(msg_parts)}")
             else:
                 QMessageBox.information(self, "提示", "没有需要保存的配置")
-        except (ImportError, ConnectionError, OSError, ValueError) as e:
-            QMessageBox.warning(self, "错误", f"保存失败: {e}")
+        except (ImportError, ConnectionError, OSError, ValueError, RuntimeError) as e:
+            # RuntimeError=安全存储写盘失败（cloud_api.save_configs 抛）：
+            # 绝不弹成功——旧行为会让用户以为已保存，重启后密钥凭空消失。
+            self._status_bar.showMessage(f"❌ 保存失败：{e}", 8000)
+            QMessageBox.warning(self, "保存失败", str(e))
 
     def _add_custom_provider_dialog(self):
         dialog = QDialog(self)

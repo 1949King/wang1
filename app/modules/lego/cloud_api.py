@@ -73,11 +73,15 @@ class CloudAPIService:
         except ImportError:
             return None
 
-    def _load_configs(self):
-        config_path = os.path.join(
+    def _config_path(self) -> str:
+        """api_configs.json 路径（抽成方法便于单测重定向，行为不变）。"""
+        return os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "data", "api_configs.json"
         )
+
+    def _load_configs(self):
+        config_path = self._config_path()
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -100,17 +104,26 @@ class CloudAPIService:
                 logger.warning(f"加载 API 配置失败: {e}")
 
     def save_configs(self):
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "data", "api_configs.json"
-        )
+        """落盘配置。安全存储写失败的渠道**不写 encrypted 标记并抛错** ——
+
+        旧行为：不管 secure.set 有没有真的写进磁盘，都先标 "encrypted"，
+        UI 再无条件弹「✅ 已保存」⇒ 下次启动 encrypted→读回空⇒密钥凭空消失
+        （2026-10-21 用户实锤：保存 DeepSeek Key 后重启显示未配置）。
+        新行为：持久化失败 = 大声失败（调用方弹错误，用户当场重试/排查）。
+        """
+        config_path = self._config_path()
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         secure = self._get_secure_storage()
         data = {}
+        failed: list[str] = []
         for provider, config in self._configs.items():
             if secure and config.api_key:
-                secure.set(f"api_key:{provider}", config.api_key)
-                api_key_marker = "encrypted"
+                if secure.set(f"api_key:{provider}", config.api_key):
+                    api_key_marker = "encrypted"
+                else:
+                    # 安全存储写盘失败：绝不标 encrypted（标了下次就读成空=丢密钥）
+                    failed.append(provider)
+                    api_key_marker = ""
             else:
                 api_key_marker = config.api_key
             data[provider] = {
@@ -121,6 +134,16 @@ class CloudAPIService:
                 "temperature": config.temperature,
                 "top_p": config.top_p,
             }
+        if failed:
+            # 先落盘「真实持久化成什么就标什么」的清单（成功的渠道保留 encrypted 标记、
+            # 失败渠道标空 ⇒ 重启后如实显示未配置，不会读成假可用），再抛错。
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            raise RuntimeError(
+                "密钥安全存储写入失败（" + "、".join(failed) + "）："
+                "这些渠道本次未持久化，当前会话仍可用，但重启会丢失。"
+                "请检查磁盘权限/空间（被安全软件拦截时，从桌面快捷方式重启程序再保存）。"
+            )
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 

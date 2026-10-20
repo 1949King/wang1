@@ -278,7 +278,12 @@ class SecureStorage:
             if was_legacy and self._get_fernet() is not None:
                 self._save_secrets()
 
-    def _save_secrets(self):
+    def _save_secrets(self) -> bool:
+        """落盘密钥库；成功 True / 失败 False（不再静默吞）。
+
+        调用方（cloud_api.save_configs）据此决定能否写 "encrypted" 标记 ——
+        写失败还标 encrypted = 下次启动读到空 = 用户密钥「凭空消失」。
+        """
         try:
             encrypted = self._encrypt(json.dumps(self._secrets))
             self._storage_path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,24 +291,28 @@ class SecureStorage:
             with open(tmp, "wb") as f:
                 f.write(encrypted)
             os.replace(tmp, self._storage_path)
+            return True
         except Exception as e:
             logger.error(f"保存密钥失败: {e}")
+            return False
 
     def get(self, key: str, default: str = "") -> str:
         return self._secrets.get(key, default)
     
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: str) -> bool:
+        """写入并落盘；返回是否真的持久化成功（False=内存有、磁盘无）。"""
         self._secrets[key] = value
-        self._save_secrets()
+        return self._save_secrets()
     
-    def delete(self, key: str):
+    def delete(self, key: str) -> bool:
         if key in self._secrets:
             del self._secrets[key]
-            self._save_secrets()
+            return self._save_secrets()
+        return True
     
-    def clear(self):
+    def clear(self) -> bool:
         self._secrets.clear()
-        self._save_secrets()
+        return self._save_secrets()
 
 
 class ConfigManager:
@@ -433,8 +442,14 @@ class ConfigManager:
             
             for key in sensitive_keys:
                 if data['api'].get(key):
-                    self._secure_storage.set(key, data['api'][key])
-                    data['api'][key] = '***SECURE***'
+                    # 与 cloud_api.save_configs 同纪律：写盘失败不标 SECURE，
+                    # 否则下次启动读到标记→取回空→密钥凭空消失。
+                    if self._secure_storage.set(key, data['api'][key]):
+                        data['api'][key] = '***SECURE***'
+                    else:
+                        logger.error(
+                            "密钥 %s 未能持久化，config.json 保留原值（重启后需重填）", key
+                        )
             
             with open(self._config_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

@@ -1,5 +1,32 @@
 # 拾光剪影 — 变更日志
 
+## 修复 · 用户反馈双修：Agent 铺卡混乱 + 密钥保存谎报成功（V4.46.3，2026-10-21）
+
+> 用户截图 + 复现步骤实锤的两个问题。全在非冻结区，零解冻。
+
+### ① Agent 铺画布工作流混乱（截图：5 张卡叠成一团）
+
+- **根因**：`store.addNode` 无坐标时用 `Math.random()` 在 120~440×80~320 的小盒子里撒点（`store.ts` 属冻结区 `canvas-magnetic-intent`，不可改）；而 `AgentPanel.executeRemoteTask` 在 Agent 没传 x/y 时正好传 `undefined` ⇒ 一次铺一批卡全挤进同一小盒子，互相叠压。
+- **修法（非冻结侧绕开）**：新增 [canvasSlot.ts](../vendor/packages/libtv/src/canvasSlot.ts) 确定性网格槽位——5 列 × 300/230 间距，从左上逐槽扫、跳过被现有节点占据的槽（用户拖过的卡占住自己的槽）、满 500 槽走确定性对角兜底，**绝不回退随机**。`AgentPanel` 两处铺卡点（远程 `addNode` / 本地 `/add`）都改为先取空槽。Agent 显式传 x/y 时仍尊重传入值。
+- **锁**：`canvasSlot.test.ts` 7 例（含「批量铺 12 张互不重叠」的用户场景回归）。
+
+### ② 保存 API Key 后重启显示未配置（密钥静默丢失）
+
+- **根因链（日志实锤）**：`SecureStorage.set` 写盘失败只 `logger.error` 不返回状态 ⇒ `cloud_api.save_configs` 无条件先给渠道写 `"encrypted"` 标记 ⇒ UI 无条件弹「✅ 已保存」⇒ 下次启动按标记去安全存储取回**空** ⇒ 密钥凭空消失，全程无人报错。本次触发条件是程序被沙箱环境启动（写 `secrets.enc` 被 Permission denied），但**任何磁盘满/权限/安全软件拦截都会踩同一坑**——独立的真缺陷。
+- **修法**：`SecureStorage.set/delete/clear` 返回落盘成败；`save_configs` 对写失败的渠道**绝不写 encrypted 标记**（如实标空，重启后 UI 诚实显示未配置）并抛 `RuntimeError` 带可操作文案；两处 UI（`model_card` 单卡保存 / `model_management` 保存全部）接住异常改弹「保存失败」+ 状态标红；休眠同族路径 `ConfigManager.save_config` 一并改（写失败不标 `***SECURE***`）。
+- **锁**：`test_key_save_honest_failure.py` 4 例（失败不标记 / 部分成功各标各的 / 成功路径不变 / set 返回 bool）。
+
+### 验证
+
+`run_all_checks` **100 项全绿** · pytest **1,803 passed**（+4）· 画布 vitest **612**（+7）· tsc 37=基线 · ruff 存量棘轮通过 · 冻结区 **107 锁**完整 · dist 已重建。
+
+### 诚实边界
+
+- 用户本次丢失的 Key **找不回**（从未落盘成功）——需重填一次；重填后若再遇写盘失败，现在会当场弹「保存失败」而不是谎报成功。
+- 用户手动点「添加节点」的随机撒点在冻结 `store.ts` 里，本刀未动（要根治需解冻）。
+
+---
+
 ## 捏脸模板缩略图管线 —— 真后端渲染 + 诚实跳过（2026-10-21）
 
 > 用户选「用已配置的生图模型把 8 套模板渲染成真实缩略图」。

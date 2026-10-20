@@ -1,45 +1,41 @@
-__version__ = "4.46.2"
+__version__ = "4.46.3"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 46,
-    "patch": 2,
-    "codename": "Agent 全能力可达 · 捏脸枚举漂移守卫 · 虚拟形象全景",
-    "release_date": "2026-10-20",
+    "patch": 3,
+    "codename": "用户反馈双修：Agent 铺卡确定性网格 + 密钥保存诚实失败",
+    "release_date": "2026-10-21",
     "description": (
-        "V4.46.2：接上「模型看不见的能力」+ 给「捏脸静默丢特征」的暗坑装上守卫，"
-        "并整理《虚拟形象体系全景》。全在非冻结区（补 8 个中文标签才需解冻，见文末）。\n"
-        "\n【① Agent 全能力可达】上一轮核查实锤：126 能力全部已注册可执行，但对话中的"
-        "LLM 只被白名单 ~45 action + 画布 34 本地 action 限制 ⇒ 精剪审计/闸门/配方/codeVideo"
-        "渲染/一致性守护等第二三波能力「注册了但模型看不见」。\n"
-        "· canvas 无关的对话面：help block 增「[全能力目录]」一行（126 capability_id 按前缀"
-        "  分组，真源 CAPABILITY_ROWS，非 dispatcher.list_capabilities——后者首次 invoke 前为空），"
-        "  封闭语义「严格只使用」放开为「优先白名单，可用目录 id」；add_clip/import_media 禁令保留。\n"
-        "· 执行闸（ai_agent_panel，非冻结）：白名单不过时试 _capability_passthrough——"
-        "  仅当 action 是「目录里真实存在」的 capability_id 才直通 dispatcher；未知 id/blocked"
-        "  名单照旧拒绝。闸门未削：写类仍被 B 勾选拦截、dispatcher 内 policy 按 mode 把关。\n"
-        "· 勾选分区（suggest_checklist）：partition_agent_commands 加可选 extra_reads（默认 None"
-        "  行为逐字节等价）；只读直通能力（catalog effect=read）免弹勾选，不误当写操作。\n"
-        "· 诚实边界：画布 fast 路径 canvas_tools 走 SSE→前端 executeRemoteTask（node action），"
-        "  不注入后端 capability_id（否则前端不认、无回执），故只列前端本地 action；后端全能力"
-        "  可达走剪辑面板/绑定 editor 的对话这条真通道。\n"
-        "\n【② 捏脸枚举镜像漂移守卫 FACEENUM】实测（复核 3D/角色库/捏脸三份调研 + 独立复跑）："
-        "canvas_bridge._FACE_*_LABELS 比 faceParams.ts 白名单少 8 个 A 类值（眉 round/short、"
-        "眼 cat/sleepy、唇 pouty/sharp、发饰 glasses/flower_crown）；这些值可经发饰下拉直接选、"
-        "或「随机」按钮 roll 出并落库，但 _face_params_to_text 走 .get(...,\"\") ⇒ 该特征在"
-        "生图提示词里**静默消失**，旧守卫只查「名字在册」不查取值。新增基线棘轮守卫"
-        "check_face_enum_mirror.py（纯静态：正则解析 TS 白名单 ↔ AST 取 Python dict keys）："
-        "8 项登记为存量、任何新增漂移/镜像越权 exit 1；负向已验证「清空基线即报警」。\n"
-        "\n【③ 虚拟形象体系全景.md】六条线（角色库/捏脸/3D 人偶/数字人/口型双引擎/一致性守护）"
-        "综述，每条带文件:行实证，含 12 条缺口清单与下一步；三份并行调研交叉复核，"
-        "「未投产」类绝对化断言经 grep 独立核实后修正为可核验口径。\n"
-        "\n【仍需解冻才能做（不假装已修）】补齐那 8 个中文标签要改 canvas_bridge.py，它是"
-        "stage3d-core 冻结文件——本刀只交付「防复发」的守卫；真正修掉 8 个已存在的暗值"
-        "需用户「解冻 stage3d-core」（可与「捏脸挂载进 3D 导演台」合并同一次解冻）。\n"
-        "\n【验证】run_all_checks 99 项全绿（FACEENUM 入册）；pytest 1,795 passed（+6 直通行为锁）；"
-        "check_action_wiring 7 项；frozen_zone_guard 107 锁完整（本刀零冻结区）；ruff 存量棘轮通过"
-        "（改动文件零新增违规）。\n"
-        "\n【上一版 V4.46.1『安全底座三刀』见 docs/CHANGELOG.md。】"
+        "V4.46.3：修用户实锤的两个问题（截图 + 复现步骤），全在非冻结区。\n"
+        "\n【① Agent 铺画布工作流混乱】截图实锤：Agent 一次铺一批卡全叠在一起。\n"
+        "根因：store.addNode 无坐标时用 Math.random() 在 120~440×80~320 小盒子里撒点\n"
+        "（store.ts 属冻结区 canvas-magnetic-intent 不可改），而 AgentPanel 在 Agent 没传\n"
+        "x/y 时正好传 undefined ⇒ 一批卡全挤同一小盒子互相叠压。\n"
+        "修法（非冻结侧绕开）：新增 canvasSlot.ts 确定性网格槽位（5 列 × 300/230 间距，\n"
+        "从左上逐槽扫、跳过被现有节点占据的槽、满 500 槽确定性对角兜底、绝不回退随机）；\n"
+        "AgentPanel 两处铺卡点（executeRemoteTask addNode / /add 本地指令）都改为先取空槽。\n"
+        "用户手动拖过的卡占住自己的槽 ⇒ 新卡绕开不压。7 例 vitest 锁死（含「批量 12 张互不\n"
+        "重叠」用户场景回归）。\n"
+        "\n【② 保存 API Key 后重启显示未配置（密钥静默丢失）】\n"
+        "根因链（日志实锤）：SecureStorage.set 写盘失败只 logger.error 不返回状态 ⇒\n"
+        "cloud_api.save_configs 无条件先给渠道写 \"encrypted\" 标记 ⇒ UI 无条件弹「✅ 已保存」\n"
+        "⇒ 下次启动按 encrypted 去安全存储取回空 ⇒ 密钥凭空消失且全程无人报错。\n"
+        "（本次触发条件：程序被沙箱环境启动，写 secrets.enc 被 Permission denied；\n"
+        "  但任何磁盘满/权限/安全软件拦截都会踩同一坑，是独立的真缺陷。）\n"
+        "修法：SecureStorage.set/delete/clear 返回落盘成败；save_configs 对写失败的渠道\n"
+        "**绝不写 encrypted 标记**（如实标空）并抛 RuntimeError 带可操作文案；两处 UI\n"
+        "（model_card 保存 / model_management 保存全部）接住异常改弹「保存失败」+ 状态标红；\n"
+        "休眠同族路径 ConfigManager.save_config 一并改（写失败不标 ***SECURE***）。\n"
+        "4 例 pytest 锁死：失败不标记 / 部分成功各标各的 / 成功路径行为不变 / set 返回 bool。\n"
+        "\n【验证】run_all_checks 100 项全绿；pytest 1,803 passed（+4）；画布 vitest 612\n"
+        "（+7）；tsc 37=基线；ruff 存量棘轮通过（改动文件零新增）；frozen_zone_guard\n"
+        "107 锁完整（本刀零冻结区）；dist 已重建。\n"
+        "\n【遗留（不掩盖）】① 若 Agent 显式传 x/y 仍按传入值落点（尊重模型意图）；\n"
+        "② store.ts 里用户手动「添加节点」的随机撒点仍在冻结区，未动；\n"
+        "③ 用户本次丢失的 Key 无法找回（从未落盘），需重填一次——重填后若再遇写盘失败，\n"
+        "  现在会当场弹「保存失败」而不是谎报成功。\n"
+        "\n【上一版 V4.46.2『Agent 全能力可达』见 docs/CHANGELOG.md。】"
     ),
 }
