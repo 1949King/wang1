@@ -1,5 +1,40 @@
 # 拾光剪影 — 变更日志
 
+## 新增 · 数字人「口型成片」诚实管线 + 捏脸漂移盲区收口（V4.46.4，2026-10-22）
+
+> 用户指令「完善捏脸和数字人节点」。全在非冻结区；UI 按钮接线一行留在冻结门外（见文末）。
+
+### ① 数字人「口型成片」：从写死拒绝到真管线
+
+- **旧状（实锤）**：`DigitalHumanNode` 的「口型成片」按钮是写死的拒绝文案（mediaExtraNodes.tsx:303），后端**零端点**（digital/talking/lipsync 全局搜索无命中）。
+- **新增**：
+  - [digital_human_talking.py](../app/core/digital_human_talking.py)：合成核心。三级诚实降级——`still_video`（静态形象+配音 → 含视频+音频双轨 mp4，产物**恒标 `mouth_moved=False`**）→ `unavailable`（缺什么报什么 + `lipsync_note` 如实转告 MuseTalk/LatentSync 未装）。失败清理半成品，绝不产出冒充。
+  - `POST /host/digital-human/talking-video`（[canvas_routes_digital_human.py](../app/core/canvas_routes_digital_human.py) 独立 mixin——`canvas_routes_post.py` 已 1,967/2,000 行，按 dub/roughcut 先例外开）。
+  - **安全边界**：媒体引用只收 dataURL / inbox 文件名，**拒绝任意绝对路径**（防本机进程借 ffmpeg 读磁盘任意文件）；E2E 实测 `C:/Windows/win.ini` 注入 → 400。
+  - 前端客户端 [digitalHumanTalking.ts](../vendor/packages/libtv/src/digitalHumanTalking.ts)（bridge.ts 已 1,897 行 ⇒ 独立模块；已登记进 `check_canvas_routes.py` CLIENTS 名单）。
+- **锁**：后端 12 例（降级矩阵/安全边界/真 ffmpeg 冒烟/失败不留半成品）+ 前端 6 例（含「后端谎称 mouth_moved=true 也被钉回 false」双保险）+ 真桥 E2E 全过。
+
+### ② 捏脸漂移盲区收口
+
+`character_anchor.ANCHOR_TRAITS` 不含 `face_params` ⇒ 用户改捏脸后**漂移检测看不见**，带着旧锚批量生成。已补入锚定字段（只参与指纹/漂移比对；文字化仍由 `_face_params_to_text` 单一入口，不双写）；守卫 `CHARANCHOR` 加新断言，41 例全过。
+
+### ③ 顺手清债
+
+- `check_canvas_route_attrs.py` 的 MIXINS 名单补登 roughcut / code_video / digital_human 三个漏网 mixin（此前它们的 `cs.*` 引用错误测不出——与「端点隐身」同类盲区）。
+- 清 3 处未使用导入（ruff 减债）；文档当前态数字回正：端点 102 唯一/106 注册、冻结锁 106（守卫实测；旧文档写 107 系配方轮遗留口径）。
+
+### 遗留（不掩盖）
+
+- **节点 UI 接线**：`mediaExtraNodes.tsx` 属冻结区 `canvas-magnetic-intent`——端点/客户端已备好，按钮改调 `makeTalkingVideoViaHost` 是一行级改动，需你一句「解冻 canvas-magnetic-intent」。当前状态：后端可用、画布按钮仍显示旧拒绝文案。
+- 真·口型同步需安装 MuseTalk/LatentSync（`video_lipsync.py` 接口已留，装好即点亮）。
+- Agent 能力目录暂未注册该端点（先给画布节点用，验证后再开）。
+
+### 验证
+
+`run_all_checks` **100 项全绿** · pytest **1,815**（+12）· vitest **618**（+6）· tsc 37=基线 · `frozen_zone_guard` **106 锁完整**（本刀零冻结区改动）· 真桥 E2E：产物 ffprobe 验 video+audio 双轨 / 绝对路径注入 400 / 缺输入 400 · dist 已重建。
+
+---
+
 ## 修复 · 用户反馈双修：Agent 铺卡混乱 + 密钥保存谎报成功（V4.46.3，2026-10-21）
 
 > 用户截图 + 复现步骤实锤的两个问题。全在非冻结区，零解冻。

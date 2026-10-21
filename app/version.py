@@ -1,41 +1,38 @@
-__version__ = "4.46.3"
+__version__ = "4.46.4"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 46,
-    "patch": 3,
-    "codename": "用户反馈双修：Agent 铺卡确定性网格 + 密钥保存诚实失败",
-    "release_date": "2026-10-21",
+    "patch": 4,
+    "codename": "数字人口型成片管线（诚实档）+ 捏脸漂移盲区收口",
+    "release_date": "2026-10-22",
     "description": (
-        "V4.46.3：修用户实锤的两个问题（截图 + 复现步骤），全在非冻结区。\n"
-        "\n【① Agent 铺画布工作流混乱】截图实锤：Agent 一次铺一批卡全叠在一起。\n"
-        "根因：store.addNode 无坐标时用 Math.random() 在 120~440×80~320 小盒子里撒点\n"
-        "（store.ts 属冻结区 canvas-magnetic-intent 不可改），而 AgentPanel 在 Agent 没传\n"
-        "x/y 时正好传 undefined ⇒ 一批卡全挤同一小盒子互相叠压。\n"
-        "修法（非冻结侧绕开）：新增 canvasSlot.ts 确定性网格槽位（5 列 × 300/230 间距，\n"
-        "从左上逐槽扫、跳过被现有节点占据的槽、满 500 槽确定性对角兜底、绝不回退随机）；\n"
-        "AgentPanel 两处铺卡点（executeRemoteTask addNode / /add 本地指令）都改为先取空槽。\n"
-        "用户手动拖过的卡占住自己的槽 ⇒ 新卡绕开不压。7 例 vitest 锁死（含「批量 12 张互不\n"
-        "重叠」用户场景回归）。\n"
-        "\n【② 保存 API Key 后重启显示未配置（密钥静默丢失）】\n"
-        "根因链（日志实锤）：SecureStorage.set 写盘失败只 logger.error 不返回状态 ⇒\n"
-        "cloud_api.save_configs 无条件先给渠道写 \"encrypted\" 标记 ⇒ UI 无条件弹「✅ 已保存」\n"
-        "⇒ 下次启动按 encrypted 去安全存储取回空 ⇒ 密钥凭空消失且全程无人报错。\n"
-        "（本次触发条件：程序被沙箱环境启动，写 secrets.enc 被 Permission denied；\n"
-        "  但任何磁盘满/权限/安全软件拦截都会踩同一坑，是独立的真缺陷。）\n"
-        "修法：SecureStorage.set/delete/clear 返回落盘成败；save_configs 对写失败的渠道\n"
-        "**绝不写 encrypted 标记**（如实标空）并抛 RuntimeError 带可操作文案；两处 UI\n"
-        "（model_card 保存 / model_management 保存全部）接住异常改弹「保存失败」+ 状态标红；\n"
-        "休眠同族路径 ConfigManager.save_config 一并改（写失败不标 ***SECURE***）。\n"
-        "4 例 pytest 锁死：失败不标记 / 部分成功各标各的 / 成功路径行为不变 / set 返回 bool。\n"
-        "\n【验证】run_all_checks 100 项全绿；pytest 1,803 passed（+4）；画布 vitest 612\n"
-        "（+7）；tsc 37=基线；ruff 存量棘轮通过（改动文件零新增）；frozen_zone_guard\n"
-        "107 锁完整（本刀零冻结区）；dist 已重建。\n"
-        "\n【遗留（不掩盖）】① 若 Agent 显式传 x/y 仍按传入值落点（尊重模型意图）；\n"
-        "② store.ts 里用户手动「添加节点」的随机撒点仍在冻结区，未动；\n"
-        "③ 用户本次丢失的 Key 无法找回（从未落盘），需重填一次——重填后若再遇写盘失败，\n"
-        "  现在会当场弹「保存失败」而不是谎报成功。\n"
-        "\n【上一版 V4.46.2『Agent 全能力可达』见 docs/CHANGELOG.md。】"
+        "V4.46.4：完善捏脸与数字人节点（用户指令），全在非冻结区。\n"
+        "\n【① 数字人「口型成片」从写死拒绝变成真管线】\n"
+        "旧状：DigitalHumanNode 的「口型成片」按钮是写死的拒绝文案，后端零端点。\n"
+        "新增：digital_human_talking.py（合成核心）+ POST /host/digital-human/\n"
+        "talking-video（独立 mixin，canvas_routes_post.py 已 1967/2000 行）。\n"
+        "三级诚实降级：still_video（静态形象+配音→含音视频轨 mp4，产物恒标\n"
+        "mouth_moved=False）→ unavailable（缺什么报什么 + lipsync_note 转告真引擎\n"
+        "状态）。安全边界：媒体引用只收 dataURL / inbox 文件名，**拒绝任意绝对路径**\n"
+        "（防借 ffmpeg 读磁盘任意文件）；失败清理半成品不假成功。\n"
+        "前端 digitalHumanTalking.ts 客户端（bridge.ts 已 1897 行 ⇒ 独立模块 + 登记\n"
+        "路由契约 CLIENTS）；后端 12 例 + 前端 6 例 + 真桥 E2E（真 ffmpeg 产物\n"
+        "ffprobe 验双轨 / 绝对路径注入 400 / 缺输入 400）全过。\n"
+        "\n【② 捏脸漂移盲区收口】character_anchor 的 ANCHOR_TRAITS 不含 face_params\n"
+        "⇒ 用户改捏脸后漂移检测看不见、带旧锚批量生成。已补入锚定字段（只参与\n"
+        "指纹/漂移比对，不进 render_anchor_prompt——文字化仍由 _face_params_to_text\n"
+        "单一入口）；守卫 CHARANCHOR 41 例含新断言全过。\n"
+        "\n【③ 顺手】路由 mixin 守卫补登 roughcut/code_video/digital_human 三个漏网\n"
+        "mixin（cs.* 盲区）；清 3 处未使用导入（ruff 减债）。\n"
+        "\n【遗留（需授权/后续刀）】DigitalHumanNode UI 按钮接线在冻结文件\n"
+        "mediaExtraNodes.tsx（canvas-magnetic-intent）⇒ 需「解冻 canvas-magnetic-intent」\n"
+        "一行接线；真·口型同步需装 MuseTalk/LatentSync（video_lipsync 已留接口）；\n"
+        "Agent 能力目录暂未注册该端点（先给画布用，验证后再开）。\n"
+        "\n【验证】run_all_checks 100 项全绿（DOCNUM 端点 102/106 回正）；pytest\n"
+        "1,815（+12）；vitest 618（+6）；tsc 37=基线；frozen_zone_guard 106 锁完整\n"
+        "（文档旧写 107 已按实测回正）；dist 已重建。\n"
+        "\n【上一版 V4.46.3『用户反馈双修』见 docs/CHANGELOG.md。】"
     ),
 }

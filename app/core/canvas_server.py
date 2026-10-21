@@ -118,6 +118,8 @@ from app.core.canvas_routes_post import CanvasPostRoutesMixin
 # 2000 行规模阈值，照 dub 先例单开 mixin）。
 from app.core.canvas_routes_roughcut import CanvasRoughCutRoutesMixin
 from app.core.canvas_routes_code_video import CanvasCodeVideoRoutesMixin
+# 2026-10-22 数字人「口型成片」端点（canvas_routes_post.py 已 1967/2000 行，同 dub 先例）。
+from app.core.canvas_routes_digital_human import CanvasDigitalHumanRoutesMixin
 from app.core.canvas_http_file import serve_file as _serve_file
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
@@ -383,7 +385,7 @@ def _read_local_prompt_json(source_id: str) -> Any:
 # 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, CanvasDigitalHumanRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:

@@ -52,6 +52,8 @@ SERVER_FILES = [
     os.path.join("app", "core", "canvas_routes_roughcut.py"),
     # 2026-10-20：codeVideo 渲染端点（/host/code-video/render|status）独立 mixin。
     os.path.join("app", "core", "canvas_routes_code_video.py"),
+    # 2026-10-22：数字人「口型成片」端点（/host/digital-human/talking-video）独立 mixin。
+    os.path.join("app", "core", "canvas_routes_digital_human.py"),
 ]
 CLIENTS = [
     # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除，两宿主共用真源包，
@@ -79,6 +81,8 @@ CLIENTS = [
     os.path.join("vendor", "packages", "libtv", "src", "hostRoughCut.ts"),
     # 2026-10-20：codeVideoClient.ts 承载 /host/code-video/render|status（V4.46）。
     os.path.join("vendor", "packages", "libtv", "src", "codeVideoClient.ts"),
+    # 2026-10-22：digitalHumanTalking.ts 承载 /host/digital-human/talking-video（V4.46.4）。
+    os.path.join("vendor", "packages", "libtv", "src", "digitalHumanTalking.ts"),
 ]
 
 _PATH_LIT = r'[\'"`](/host/[A-Za-z0-9_\-/{}$.]+)[\'"`]'

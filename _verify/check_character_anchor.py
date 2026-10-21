@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,12 +67,14 @@ def main() -> int:
         "id": "c1", "name": "林晚", "gender": "女", "age_range": "青年",
         "appearance": "长发红衣", "memory_anchors": "左眼泪痣",
         "personality": "清冷", "core_desire": "找回记忆",   # inner 组不该进 traits
+        "face_params": '{"v":1,"eyeStyle":"cat"}',          # 捏脸写回 ⇒ 必须参与锚定
     }
 
     # ── 1. 特征提取 ──
     t = ca.extract_traits(CHAR)
     check("traits 只收录锚定字段", set(t) == {"name", "gender", "age_range",
-                                            "appearance", "memory_anchors", "personality"})
+                                            "appearance", "memory_anchors",
+                                            "personality", "face_params"})
     check("inner 组不收录", "core_desire" not in t)
     check("空值不收录", "temperament" not in t)
     check("_norm list 归一", ca._norm(["a", "b"]) == "a,b")

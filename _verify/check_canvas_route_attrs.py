@@ -33,6 +33,11 @@ MIXINS = [
     os.path.join(ROOT, "app", "core", "canvas_routes_post.py"),
     # 2026-10-15：配音编排端点迁至 canvas_routes_dub.py（同样用 cs.xxx 延迟取用）。
     os.path.join(ROOT, "app", "core", "canvas_routes_dub.py"),
+    # 2026-10-22 补登：dub 之后新开的三个 mixin 全都用 cs.*，此前漏在本守卫名单外
+    # （= 它们引用了 canvas_server 不存在的名字也不会报警，与「端点隐身」同类盲区）。
+    os.path.join(ROOT, "app", "core", "canvas_routes_roughcut.py"),
+    os.path.join(ROOT, "app", "core", "canvas_routes_code_video.py"),
+    os.path.join(ROOT, "app", "core", "canvas_routes_digital_human.py"),
 ]
 
 

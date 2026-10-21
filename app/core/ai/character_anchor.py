@@ -34,9 +34,13 @@ from .guard_base import diff_traits, normalize_text, normalize_traits, stable_fi
 logger = logging.getLogger("AI短剧编辑器.core.ai.character_anchor")
 
 # 应跨镜头保持稳定的特征项（对齐 CHARACTER_FIELD_SCHEMA：visual 组 + 关键 base）
+# 2026-10-22 补 face_params：捏脸卡片写回的视觉参数属 visual 组（进生图提示词），
+# 但此前不在锚定字段里 ⇒ 用户改捏脸后漂移检测「看不见」，带着旧锚继续批量生成。
+# 只参与指纹/漂移比对；render_anchor_prompt 不读它（原始 JSON 不进提示词，
+# 文字化由 canvas_bridge._face_params_to_text 单一入口负责）。
 ANCHOR_TRAITS: tuple = (
     "name", "gender", "age_range",
-    "appearance", "temperament", "memory_anchors", "personality",
+    "appearance", "temperament", "memory_anchors", "personality", "face_params",
 )
 
 # 「强特征」：最影响辨识度、最易被漏拼，镜头对齐校验只盯这两项
