@@ -319,6 +319,18 @@ class CanvasPostRoutesMixin:
         else:
             interp = bool(cs._BRIDGE_PREFS.get("enable_interpolation"))
         path = str(data.get("path") or "")
+        # ── 资产中间表示（刀2 · 2026-10-23）─────────────────────────────
+        # 产物此前只有 6 个程序性字段（无身份/无版本/血缘只 4/6 键）。这里在**入轨
+        # 之前**先落一条 AssetNode，让「同一角色跨镜复用有唯一来源」成立；落账失败
+        # 只记 debug，绝不拦住入轨（诚实降级，既有链路零行为变化）。
+        try:
+            from app.core.asset_hub import asset_ref_from_ingest, remember_ingest
+
+            _ref = asset_ref_from_ingest(data, now=time.time())
+            if _ref.asset_id and _ref.path and not remember_ingest(_ref):
+                logger.debug("资产落账失败（不影响入轨）: %s", _ref.path)
+        except Exception:
+            logger.debug("资产落账异常（不影响入轨）", exc_info=True)
         res = cs.ingest_local_file(
             path,
             title=str(data.get("title") or ""),
