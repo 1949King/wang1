@@ -176,6 +176,29 @@ CHECKS = [
     # ── MCP 工具清单导出（Agent 编排演进 · 工具化第一步，2026-10-18）──
     ("MCPMANI", "_verify/check_mcp_manifest.py",
      "MCP 工具清单：spec形状/能力目录完整性/注解诚实映射/导出往返"),
+    # ── WS-D 上游模型三件（2026-10-23 刀0：模型已落但零守卫，补齐）──
+    ("ASSETMASTER", "_verify/check_asset_master.py",
+     "AssetMaster 母版：结构在册/纯模型纪律/继承不动入参/不猜/stale不动产物/往返恒等/单一真相源"),
+    ("IDEACARD", "_verify/check_idea_card.py",
+     "IdeaCard 立意卡：结构在册/纯模型/不猜题材受众/三态硬/blocked需合规备注/返回新对象/往返恒等"),
+    ("SCRIPTDOC", "_verify/check_script_doc.py",
+     "ScriptDoc 长篇结构：结构在册/纯模型/不猜集数/不猜集号/不编造钩子时长/返回新对象且升序/往返恒等"),
+    # ── 凭据密钥库（2026-10-23：纯随机钥匙+DPAPI，解耦硬件指纹；XOR 写入已弃用）──
+    ("CREDKEY", "_verify/check_credential_key.py",
+     "凭据密钥库：DPAPI可用/往返恒等/钥匙与硬件解耦/DPAPI1落盘+旧键迁移/"
+     "唯一写入路由(禁XOR)/空密文不落盘/旧库只读兼容/无第二套派生"),
+    # ── 时间线乐观并发（2026-10-23 刀1：revision/CAS，补「写操作永不自动重试」的缺口）──
+    ("TIMEREV", "_verify/check_timeline_revision.py",
+     "时间线乐观并发：版本语义/不空转/CAS拒绝且不写/None兼容+非法TypeError/"
+     "冲突可诊断/两入口接线/同一性保持/单一计数器"),
+    # ── 资产中间表示（2026-10-23 刀2：画布产物带身份/血缘/版本，补 D2 缺口）──
+    ("ASSETHUB", "_verify/check_asset_hub.py",
+     "资产中间表示：身份确定性/六键铁律/不猜不造假/唯一存储(委托registry)/"
+     "覆盖率诚实/入轨前接线/母版分工/双加载免疫"),
+    # ── 入轨治理闸门（2026-10-23 刀3 / E2：aesthetic_gate 接进入轨，补「有分无闸」）──
+    ("INGESTGATE", "_verify/check_ingest_gate.py",
+     "入轨治理闸门：无分数不拦(防误拦用户素材)/D级硬拦/C级复核/force留痕/"
+     "批量硬闸/接线在册(clear前)/开关可用/治理单一来源"),
     # ── 时间线互操作桥接（OTIO/EDL/FCPXML · §6.8.7 时间线交换，2026-10-18）──
     ("INTEROP", "_verify/check_interchange_bridge.py",
      "互操作桥接：字段映射契约/OTIO端到端往返/Qt段错误红线/导出UI接线/依赖在册"),
