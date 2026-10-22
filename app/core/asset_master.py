@@ -68,6 +68,9 @@ class AssetVariant:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AssetVariant":
+        # 契约是「吃 to_dict 的产物」：非 dict 落回空变体，不抛异常。
+        if not isinstance(data, dict):
+            return cls(variant_id="", master_id="")
         return cls(
             variant_id=str(data.get("variant_id") or ""),
             master_id=str(data.get("master_id") or ""),
@@ -110,12 +113,19 @@ class AssetMaster:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AssetMaster":
+        # 契约是「吃 to_dict 的产物」：非 dict / 畸形 variants 一律落回空，
+        # 不抛异常（此前 variants 传字符串会 AttributeError 炸穿调用方）。
+        if not isinstance(data, dict):
+            return cls(master_id="", kind="", name="")
+        raw_variants = data.get("variants")
+        variants = ([AssetVariant.from_dict(v) for v in raw_variants if isinstance(v, dict)]
+                    if isinstance(raw_variants, list) else [])
         return cls(
             master_id=str(data.get("master_id") or ""),
             kind=str(data.get("kind") or ""),
             name=str(data.get("name") or ""),
-            canonical=copy.deepcopy(data.get("canonical") or {}),
-            variants=[AssetVariant.from_dict(v) for v in (data.get("variants") or [])],
+            canonical=copy.deepcopy(data.get("canonical") if isinstance(data.get("canonical"), dict) else {}),
+            variants=variants,
             version=int(data.get("version") or 1),
             created_at=float(data.get("created_at") or _now()),
             updated_at=float(data.get("updated_at") or _now()),
