@@ -36,8 +36,38 @@ logger = logging.getLogger("AI短剧编辑器.secure_store")
 _FERNET_KEY_FILE = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())) / "AI短剧编辑器" / "secret.key"
 
 
+def _key_dirs() -> list:
+    """密钥文件候选**目录**（按优先级）。
+
+    2026-10-23 起密钥不再来自机器码，改由 `dpapi.load_or_create_key(dir)`
+    在下列目录里找 `secret.key.dpapi`（DPAPI 包裹的随机钥匙）；保留多目录是
+    为了兼容历史安装位置，**不再每个目录各生成一份** —— 只认第一个可用目录。
+    """
+    dirs = []
+    for env_name in ("LOCALAPPDATA", "APPDATA"):
+        base = os.environ.get(env_name, "")
+        if base:
+            dirs.append(Path(base) / "AI短剧编辑器")
+    dirs.append(Path.home() / ".ai_drama_editor")
+    dirs.append(Path(__file__).parent.parent / "logs")  # 兜底: app/logs/
+    # 去重且保序
+    seen, out = set(), []
+    for d in dirs:
+        key = str(d).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
 def _get_or_create_fernet_key():
-    """获取或创建 Fernet 密钥 (用户级) - 多路径 fallback, 解决 Windows 权限问题"""
+    """获取或创建 Fernet 密钥 —— **纯随机 + DPAPI 守护**（不再绑硬件指纹）。
+
+    历史行为（已弃用）：钥匙由机器码 PBKDF2 派生，改机器名/换硬件即失效。
+    现行为：`Fernet.generate_key()` 生成随机钥匙，用 Windows DPAPI
+    （绑定当前用户账户）加密后落盘 `secret.key.dpapi`；读到旧的明文
+    `secret.key` 会自动迁移并改名 `.legacy`。
+    """
     global _FERNET_INSTANCE
     try:
         from cryptography.fernet import Fernet
@@ -45,43 +75,30 @@ def _get_or_create_fernet_key():
         logger.warning("cryptography 库未安装, PII 加密降级为明文 (请 pip install cryptography)")
         return None
 
-    # 尝试多个候选路径
-    candidate_paths = [
-        Path(os.environ.get("LOCALAPPDATA", "")) / "AI短剧编辑器" / "secret.key",
-        Path(os.environ.get("APPDATA", "")) / "AI短剧编辑器" / "secret.key",
-        Path.home() / ".ai_drama_editor" / "secret.key",
-        Path(__file__).parent.parent / "logs" / ".secret.key",  # 兜底: app/logs/
-    ]
-
-    for key_file in candidate_paths:
+    try:
+        from app.core.dpapi import load_or_create_key
+    except ImportError:
         try:
-            if key_file.exists():
-                key = key_file.read_bytes().strip()
-                if key:
-                    _FERNET_INSTANCE = Fernet(key)
-                    logger.info(f"使用已存在密钥: {key_file}")
-                    return _FERNET_INSTANCE
-        except Exception:
-            continue
+            from core.dpapi import load_or_create_key  # type: ignore
+        except ImportError:
+            load_or_create_key = None  # type: ignore
 
-    # 生成新密钥,尝试多个路径直到成功
-    for key_file in candidate_paths:
-        try:
-            key_file.parent.mkdir(parents=True, exist_ok=True)
-            key = Fernet.generate_key()
-            key_file.write_bytes(key)
+    if load_or_create_key is not None:
+        for key_dir in _key_dirs():
             try:
-                os.chmod(key_file, 0o600)
-            except Exception as e:
-                logger.debug(f"密钥文件权限设置失败 {key_file}: {e}")
-            _FERNET_INSTANCE = Fernet(key)
-            logger.info(f"已生成加密密钥: {key_file}")
-            return _FERNET_INSTANCE
-        except Exception as e:
-            logger.debug(f"尝试路径失败 {key_file}: {e}")
-            continue
+                key = load_or_create_key(key_dir)
+            except Exception as e:  # 守卫：任何异常都不许炸穿调用方
+                logger.warning("读取凭据密钥失败 %s: %s", key_dir, e)
+                continue
+            if key:
+                try:
+                    _FERNET_INSTANCE = Fernet(key)
+                    return _FERNET_INSTANCE
+                except Exception as e:
+                    logger.warning("密钥格式不可用 %s: %s", key_dir, e)
+                    continue
 
-    logger.warning("所有候选路径均无法写入, 降级为明文 (cryptography 不可用或权限受限)")
+    logger.warning("所有候选路径均无法提供可用密钥, PII 加密降级 (cryptography 或权限受限)")
     return None
 
 

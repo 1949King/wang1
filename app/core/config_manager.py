@@ -129,6 +129,9 @@ class SecureStorage:
             return
         self._initialized = True
         
+        # 2026-10-23：**不再**用机器码派生钥匙写库（XOR 写入路由已弃用）。
+        # `_key` 仍赋值为「现行机器码」的结果，仅用于：①读取历史 XOR 文件时
+        # 试钥匙（`_legacy_key_candidates` 的首候选就是它）；②测试手工构造旧格式样本。
         self._key = self._derive_key()
         self._storage_path = self._get_storage_path()
         self._fernet_cached = False
@@ -176,14 +179,19 @@ class SecureStorage:
             dklen=32
         )
     
-    def _get_machine_id(self) -> str:
+    def _machine_id_from(self, components: List[str]) -> str:
+        """由部件列表算机器码（纯函数，便于多候选共存）。"""
+        return hashlib.sha256('|'.join(components).encode()).hexdigest()[:32]
+
+    def _machine_components(self, *, with_uuid: bool) -> List[str]:
         components = [
             platform.node(),
             platform.system(),
             platform.machine(),
             str(os.cpu_count() or 0),
         ]
-        
+        if not with_uuid:
+            return components
         try:
             if platform.system() == "Windows":
                 # ★ A-14（2026-10-05）：改用统一 WMI 助手（CIM 优先 / wmic 兜底）。
@@ -197,22 +205,57 @@ class SecureStorage:
                     components.append(uuid)
         except Exception as e:
             logger.debug(f"[ConfigManager] 获取机器UUID失败 (Windows): {e}")
-        
-        return hashlib.sha256('|'.join(components).encode()).hexdigest()[:32]
-    
+        return components
+
+    def _get_machine_id(self) -> str:
+        return self._machine_id_from(self._machine_components(with_uuid=True))
+
+    def _legacy_key_candidates(self) -> List[bytes]:
+        """旧 XOR 格式的**密钥候选**（新→旧）。
+
+        为什么需要多候选：机器码参与 PBKDF2，而 `_get_machine_id()` 在 A-14
+        （2026-10-05）之后追加了 WMI UUID 部件。此前版本写下的旧 XOR 文件是
+        「无 UUID」机器码加密的 ⇒ 用现行单值永远解不开，每次启动都误判为
+        「文件损坏」并隔离。此处把两种算法都列出来逐次尝试：
+          ① 现行（含 UUID）—— 与 `_key` 同一个值，先试，绝不改变新文件行为
+          ② 历史（不含 UUID）—— 只为读回 A-14 之前写下的文件
+        只作用于**旧 XOR 分支**；sgv2 走 Fernet，与机器码无关。
+        """
+        seen: List[bytes] = []
+        candidates = [
+            self._machine_id_from(self._machine_components(with_uuid=True)),
+            self._machine_id_from(self._machine_components(with_uuid=False)),
+        ]
+        for machine_id in candidates:
+            key = hashlib.pbkdf2_hmac(
+                'sha256',
+                machine_id.encode(),
+                b'ai_drama_editor_salt_v1',
+                100000,
+                dklen=32
+            )
+            if key not in seen:
+                seen.append(key)
+        return seen
+
     def _encrypt(self, data: str) -> bytes:
+        """加密并落盘格式 = `sgv2:` + Fernet。
+
+        2026-10-23 起**只有这一条写入路由**：旧 XOR 分支已弃用（不再写 XOR），
+        因为 XOR 的钥匙来自机器码，改机器名/换硬件即永久失效。Fernet 钥匙
+        改由 DPAPI 守护的纯随机值提供（见 `secure_store.py` / `dpapi.py`），
+        与硬件指纹解耦。Fernet 不可用时返回空字节，由 `_save_secrets` 判失败
+        —— 绝不回退 XOR 写盘（宁可保存失败并如实报错，也不产生下一个解不开的库）。
+        """
         f = self._get_fernet()
-        if f is not None:
-            token = f.encrypt(data.encode("utf-8"))
-            return self._ENC_MARKER + base64.b64encode(token)
-        # 回退：cryptography 缺失/密钥不可用 ⇒ 维持旧 XOR（不假装更强，如实 warning）
-        logger.warning("Fernet 不可用，密钥存储回退旧 XOR 加密（建议安装 cryptography）")
-        nonce = secrets.token_bytes(16)
-        key = self._key
-        cipher = bytearray()
-        for i, byte in enumerate(data.encode()):
-            cipher.append(byte ^ key[i % len(key)])
-        return base64.b64encode(nonce + bytes(cipher))
+        if f is None:
+            logger.error(
+                "Fernet 不可用（cryptography 缺失或密钥不可用）：拒绝以旧 XOR 格式写盘。"
+                "请安装 cryptography 后重试保存。"
+            )
+            return b""
+        token = f.encrypt(data.encode("utf-8"))
+        return self._ENC_MARKER + base64.b64encode(token)
 
     def _decrypt(self, data: bytes) -> str:
         try:
@@ -223,32 +266,49 @@ class SecureStorage:
                     return ""
                 token = base64.b64decode(data[len(self._ENC_MARKER):])
                 return f.decrypt(token).decode("utf-8")
-            # 旧 XOR 格式（sgv2 之前）：机器码一致才能解开
+            # 旧 XOR 格式（sgv2 之前）：机器码一致才能解开。
+            # 逐候选尝试（见 _legacy_key_candidates）——A-14 前后的机器码不同，
+            # 只认现行单值会把旧文件误判成“损坏”而隔离。
             decoded = base64.b64decode(data)
             cipher = decoded[16:]  # 前 16 字节为旧格式 nonce（XOR 模式未参与密钥流，忽略）
-            key = self._key
-            plain = bytearray()
-            for i, byte in enumerate(cipher):
-                plain.append(byte ^ key[i % len(key)])
-            return plain.decode()
+            last_error: Optional[Exception] = None
+            for key in self._legacy_key_candidates():
+                try:
+                    plain = bytearray()
+                    for i, byte in enumerate(cipher):
+                        plain.append(byte ^ key[i % len(key)])
+                    return plain.decode()
+                except Exception as e:  # 候选不对 ⇒ 解出乱码，换下一个
+                    last_error = e
+                    continue
+            raise last_error or ValueError("旧格式解密无可用密钥候选")
         except Exception as e:
             logger.error(f"解密失败: {e}")
             return ""
 
     def _quarantine_corrupt(self) -> None:
-        """解密失败：损坏文件改名保留（可人工找回），不再静默吞掉。"""
+        """解密失败：损坏文件改名保留（可人工找回），不再静默吞掉。
+
+        并发安全：`run_all_checks` 的 103 项每项都会新建一次（单例已重置），
+        同一文件可能被判定多轮。先 `os.replace` 抢名字，抢到的人负责改名；
+        `FileNotFoundError` 说明别人已隔离，静默返回即正确结论（不是失败）。
+        """
         try:
-            if self._storage_path.exists() and self._storage_path.stat().st_size > 0:
-                ts = datetime.now().strftime("%Y%m%d%H%M%S")
-                bad = self._storage_path.with_name(
-                    f"{self._storage_path.stem}.corrupt-{ts}{self._storage_path.suffix}"
-                )
-                os.replace(self._storage_path, bad)
-                logger.error(
-                    "密钥存储无法解密，已隔离到 %s（本机指纹变化或文件损坏；"
-                    "请到模型管理重新填写各渠道 Key）",
-                    bad,
-                )
+            if not self._storage_path.exists() or self._storage_path.stat().st_size == 0:
+                return
+            ts = datetime.now().strftime("%Y%m%d%H%M%S")
+            bad = self._storage_path.with_name(
+                f"{self._storage_path.stem}.corrupt-{ts}{self._storage_path.suffix}"
+            )
+            os.replace(self._storage_path, bad)
+            logger.error(
+                "密钥存储无法解密，已隔离到 %s（本机指纹变化或文件损坏；"
+                "请到模型管理重新填写各渠道 Key）",
+                bad,
+            )
+        except FileNotFoundError:
+            # 并发下已被另一方隔离 ⇒ 目标状态已达成。记 debug 留痕，不静默吞。
+            logger.debug("密钥库已被其他调用方隔离（目标状态已达成）: %s", self._storage_path)
         except OSError as e:
             logger.error(f"隔离损坏密钥文件失败: {e}")
 
@@ -283,9 +343,15 @@ class SecureStorage:
 
         调用方（cloud_api.save_configs）据此决定能否写 "encrypted" 标记 ——
         写失败还标 encrypted = 下次启动读到空 = 用户密钥「凭空消失」。
+
+        空密文即失败：`_encrypt` 在 Fernet 不可用时返回 `b""`（拒绝写 XOR），
+        此处必须拦下，否则会把 0 字节文件落盘 —— 那是一个必然解不开的库。
         """
         try:
             encrypted = self._encrypt(json.dumps(self._secrets))
+            if not encrypted:
+                logger.error("未生成密文（Fernet 不可用），本次保存作废；磁盘原库保持不变")
+                return False
             self._storage_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._storage_path.with_name(self._storage_path.name + ".tmp")
             with open(tmp, "wb") as f:
