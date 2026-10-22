@@ -148,18 +148,17 @@ export default function App() {
   // 现改为**完全不预热**：Stage3D 仍由 React.lazy 在首次切导演台时按需加载；
   // GLB 由 Stage3D 挂载时预热。首屏只付画布自身成本。
 
-  // 启动引导：确保工作区存在并跳到画布视图
+  // 启动引导：确保工作区存在，并进入 home 首页
   useEffect(() => {
     // 1) ensureWorkspace 负责：迁移 legacy 数据 → 创建默认项目 → 打开首个项目
     useCanvasStore.getState().ensureWorkspace();
-    // 2) 默认进入画布视图（而非 home 首页），让顶栏/侧栏/Tab bar 立即可见
-    const lastMode = localStorage.getItem("shiguang-canvas:last-viewmode");
-    const mode = lastMode && ["canvas", "stage3d", "assets", "home"].includes(lastMode)
-      ? (lastMode as import("./store").ViewMode)
-      : "canvas";
-    useCanvasStore.getState().setViewMode(mode);
-    // 3) 后续 viewMode 变化时持久化（用户切到 home 再回来保留状态）
-    // 4) 拉角色库（bridge 在线时填充；bridge 离线时静默跳过）
+    // 2) 2026-10-23 用户要求「取消（默认进画布），换成首页」：
+    //    启动第一屏固定是 home 落地页，由用户在首页点入口再进画布/导演台。
+    //    不再读 last-viewmode 直接跳画布——旧行为会让首屏直接落在画布上。
+    if (useCanvasStore.getState().viewMode !== "home") {
+      useCanvasStore.getState().setViewMode("home");
+    }
+    // 3) 拉角色库（bridge 在线时填充；bridge 离线时静默跳过）
     useCanvasStore.getState().refreshCharacters();
   }, []);
   // viewMode 变化时持久化到 localStorage，下次刷新恢复
