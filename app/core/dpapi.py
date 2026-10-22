@@ -234,7 +234,14 @@ def load_or_create_key(key_dir: Path) -> Optional[bytes]:
         logger.warning("cryptography 不可用，无法生成 Fernet 钥匙")
         return None
     if not _persist_key(key_dir, key):
-        logger.error("新密钥落盘失败（%s）；本次会话可用，重启后失效", key_dir)
+        # **不能返回这把临时钥匙**：调用方会拿它加密并落盘密钥库，而重启后
+        # 这把钥匙已不存在 ⇒ 用户本次保存的所有 Key 一律读不出（静默数据丢失）。
+        # 宁可让上游走它的诚实降级（保存失败并报错），也不制造下一个解不开的库。
+        logger.error(
+            "新密钥无法落盘（%s）：拒绝使用临时钥匙——否则本次会话保存的 Key "
+            "下次启动必然读不出。请检查该目录的写权限。", key_dir,
+        )
+        return None
     return key
 
 

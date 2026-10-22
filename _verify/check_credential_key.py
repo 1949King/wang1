@@ -340,6 +340,35 @@ def check_single_key_derivation() -> None:
             _fail(f"⑧ `_encrypt` 引用机器码钥匙 `{token}`（写入须只用 DPAPI 提供的 Fernet）")
 
 
+# ── ⑨ 落盘失败必须拒绝，不许返回临时钥匙 ─────────────────────────────
+
+def check_fail_closed_on_persist_failure() -> None:
+    """落盘失败时**不得**返回临时钥匙。
+
+    为什么：调用方会拿这把钥匙加密并落盘密钥库；重启后钥匙已不存在 ⇒
+    用户本次保存的所有 Key 一律读不出（静默数据丢失）。这条是 2026-10-23
+    实测踩到的真实隐患（启动日志里 `secret.key.dpapi` 写入 Permission denied，
+    而代码当时仍返回了新钥匙）。
+    """
+    import io
+
+    src = io.open(os.path.join(ROOT, "app", "core", "dpapi.py"),
+                  encoding="utf-8").read()
+    start = src.find("def load_or_create_key")
+    body = src[start:] if start >= 0 else ""
+    persist_at = body.find("if not _persist_key(")
+    if persist_at < 0:
+        _fail("⑨ 找不到「落盘失败」分支（防线被删）")
+        return
+    tail = body[persist_at:]
+    # 该分支必须在返回 None 之前，不能顺着往下 `return key`
+    branch = tail[:tail.find("return key")] if "return key" in tail else tail
+    if "return None" not in branch:
+        _fail("⑨ 落盘失败时未返回 None（会给出临时钥匙 ⇒ 用户存了 Key 下次读不出）")
+    if "本次会话可用" in body:
+        _fail("⑨ 仍保留「本次会话可用，重启后失效」的旧说法（那是数据丢失陷阱）")
+
+
 def main() -> int:
     check_gateway()
     check_roundtrip()
@@ -349,12 +378,14 @@ def main() -> int:
     check_empty_cipher_not_persisted()
     check_legacy_read_still_works()
     check_single_key_derivation()
+    check_fail_closed_on_persist_failure()
     if problems:
         for p in problems:
             print(f"FAIL  {p}")
         return 1
     print("PASS  凭据密钥库：DPAPI可用/往返恒等/钥匙与硬件解耦/DPAPI1落盘+旧键迁移/"
-          "唯一写入路由(禁XOR)/空密文不落盘/旧库只读兼容/无第二套派生")
+          "唯一写入路由(禁XOR)/空密文不落盘/旧库只读兼容/无第二套派生/"
+          "落盘失败拒用临时钥匙")
     return 0
 
 
