@@ -67,10 +67,20 @@ class CloudAPIService:
         return {name: self._registry.resolve(name) for name in self._registry.names()}
 
     def _get_secure_storage(self):
+        """安全存储句柄；None = 本机加密存储当前不可用。
+
+        构造失败也要如实降级（旧版只接 ImportError，SecureStorage() 抛 OSError/
+        ValueError 时会把整个保存动作炸成未捕获异常）。返回 None 后由
+        save_configs 决定「拒绝保存并报错」，绝不静默改写明文。
+        """
         try:
             from app.core.config_manager import SecureStorage
             return SecureStorage()
-        except ImportError:
+        except ImportError as e:
+            logger.error("config_manager 不可导入，密钥加密存储不可用: %s", e)
+            return None
+        except Exception as e:
+            logger.error("SecureStorage 初始化失败，密钥加密存储不可用: %s", e)
             return None
 
     def _config_path(self) -> str:
@@ -89,8 +99,16 @@ class CloudAPIService:
                 secure = self._get_secure_storage()
                 for provider, config_data in data.items():
                     api_key = config_data.get("api_key", "")
-                    if api_key == "encrypted" and secure:
-                        api_key = secure.get(f"api_key:{provider}", "")
+                    if api_key == "encrypted":
+                        # 标记不是密钥。旧写法 `== "encrypted" and secure` 在
+                        # secure 不可用时会把字面量 "encrypted" 当成 API Key 用
+                        # ——渠道显示"已配置"、请求期才炸，且 get_provider 的
+                        # `if not config.api_key` 空值判据会被它绕过。
+                        api_key = secure.get(f"api_key:{provider}", "") if secure else ""
+                        if not api_key:
+                            logger.warning(
+                                "渠道 %s 的密钥无法读回（加密存储不可用或密钥库缺该键），"
+                                "本次按未配置处理", provider)
                     self._configs[provider] = APIConfig(
                         provider=provider,
                         api_key=api_key,
@@ -103,25 +121,52 @@ class CloudAPIService:
             except Exception as e:
                 logger.warning(f"加载 API 配置失败: {e}")
 
-    def save_configs(self):
-        """落盘配置。安全存储写失败的渠道**不写 encrypted 标记并抛错** ——
+    def _existing_markers(self, config_path: str) -> dict:
+        """读回磁盘上现存的 api_key 标记（provider -> marker），读不到给 {}。"""
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {p: str(v.get("api_key", "")) for p, v in data.items()
+                    if isinstance(v, dict)}
+        except Exception:
+            return {}
 
-        旧行为：不管 secure.set 有没有真的写进磁盘，都先标 "encrypted"，
-        UI 再无条件弹「✅ 已保存」⇒ 下次启动 encrypted→读回空⇒密钥凭空消失
-        （2026-10-21 用户实锤：保存 DeepSeek Key 后重启显示未配置）。
-        新行为：持久化失败 = 大声失败（调用方弹错误，用户当场重试/排查）。
+    def save_configs(self):
+        """落盘配置。没能持久化的密钥**绝不留下「已保存」假象** ——
+
+        两条失败路径都大声失败（RuntimeError，调用方弹错误框）：
+          ① 加密存储整体不可用（config_manager 导入失败 / SecureStorage 构造抛错）；
+          ② 存储可用，但某渠道 set() 落盘失败（磁盘满/权限/被安全软件拦截）。
+
+        旧行为（2026-10-21 丢 Key 事故根因）：不管有没有真写进磁盘都先标 "encrypted"，
+        UI 无条件弹「✅ 已保存」⇒ 下次启动读回空 ⇒ 密钥凭空消失。
+        ②分支修好后仍留着 ①：`secure` 为 None 时**静默把明文 Key 写进
+        api_configs.json**（审计 2026-10-23 定 CWE-312：明文随备份盘/同步盘外泄），
+        且同样是"失败伪装成成功"。现在 ① 一律拒绝降级。
+
+        两条路径对**磁盘标记**的处置不同，是有意的：
+          · ②写失败 → 标 ""：存储文件本次没写成功，内容已不可信，如实显示未配置；
+          · ①不可用 → 保留原标记：本次根本没碰存储，它就是上次成功保存的样子，
+            覆盖成 "" 反而会把上次已存好的密钥挡在门外。
+        两种情况下内存里的配置都仍在用，所以当前会话不受影响，只是重启需重填。
         """
         config_path = self._config_path()
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         secure = self._get_secure_storage()
         data = {}
         failed: list[str] = []
+        unavailable = secure is None and any(c.api_key for c in self._configs.values())
+        existing = self._existing_markers(config_path) if unavailable else {}
         for provider, config in self._configs.items():
-            if secure and config.api_key:
+            if unavailable and config.api_key:
+                # 路径①：加密存储不可用 ⇒ 不写明文、不标 encrypted、保留原标记
+                failed.append(provider)
+                api_key_marker = existing.get(provider, "")
+            elif secure and config.api_key:
                 if secure.set(f"api_key:{provider}", config.api_key):
                     api_key_marker = "encrypted"
                 else:
-                    # 安全存储写盘失败：绝不标 encrypted（标了下次就读成空=丢密钥）
+                    # 路径②：安全存储写盘失败，绝不标 encrypted（标了下次读成空=丢密钥）
                     failed.append(provider)
                     api_key_marker = ""
             else:
@@ -136,11 +181,21 @@ class CloudAPIService:
             }
         if failed:
             # 先落盘「真实持久化成什么就标什么」的清单（成功的渠道保留 encrypted 标记、
-            # 失败渠道标空 ⇒ 重启后如实显示未配置，不会读成假可用），再抛错。
+            # 失败渠道如实标记 ⇒ 重启后显示未配置，不会读成假可用），再抛错。
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            names = "、".join(failed)
+            if unavailable:
+                # 路径①：连加密存储都起不来 ⇒ 绝不退化成明文落盘
+                raise RuntimeError(
+                    "密钥加密存储当前不可用，已拒绝保存这些渠道的密钥：" + names
+                    + "。为避免明文密钥落盘（会随备份/同步盘外泄），本次未写入密钥；"
+                    "其余非密钥设置已保存，当前会话仍可继续使用，但重启需重新填写。"
+                    "常见原因：程序未从安装目录启动（找不到 config_manager）、"
+                    "或缺少 cryptography 依赖 —— 请从桌面快捷方式启动程序后再保存。"
+                )
             raise RuntimeError(
-                "密钥安全存储写入失败（" + "、".join(failed) + "）："
+                "密钥安全存储写入失败（" + names + "）："
                 "这些渠道本次未持久化，当前会话仍可用，但重启会丢失。"
                 "请检查磁盘权限/空间（被安全软件拦截时，从桌面快捷方式重启程序再保存）。"
             )

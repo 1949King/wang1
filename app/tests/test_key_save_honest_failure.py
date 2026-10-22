@@ -105,3 +105,101 @@ def test_success_path_unchanged(svc):
     data = json.loads((tmp / "api_configs.json").read_text(encoding="utf-8"))
     assert data["deepseek"]["api_key"] == "encrypted"
     assert ok_storage.written["api_key:deepseek"] == "sk-good"
+
+
+# ── V4.46.5：加密存储「整体不可用」这一支（审计 2026-10-23 CWE-312）──────────────
+# 上面几条覆盖了「存储可用但写盘失败」；本组覆盖 _get_secure_storage() 返回 None。
+# 旧行为：`if secure and config.api_key` 短路进 else ⇒ 明文 Key 直写 api_configs.json，
+# UI 照样弹「✅ 已保存」——既是明文落盘，又是「失败伪装成成功」。
+
+
+def test_unavailable_storage_refuses_plaintext(svc):
+    obj, tmp = svc
+    from app.modules.lego.cloud_providers.base import APIConfig
+
+    obj._configs["deepseek"] = APIConfig(
+        provider="deepseek", api_key="sk-secret", base_url="u", model="m"
+    )
+    obj._get_secure_storage = lambda: None
+    with pytest.raises(RuntimeError, match="拒绝保存"):
+        obj.save_configs()
+    data = json.loads((tmp / "api_configs.json").read_text(encoding="utf-8"))
+    # 关键：明文密钥绝不允许出现在磁盘上
+    assert data["deepseek"]["api_key"] == ""
+    blob = (tmp / "api_configs.json").read_text(encoding="utf-8")
+    assert "sk-secret" not in blob
+
+
+def test_unavailable_storage_preserves_existing_marker(svc):
+    """存储本次不可用 ≠ 上次没存成功：已有 encrypted 标记不能被抹掉。
+
+    抹成 "" 会把上次已加密保存的密钥挡在门外（重启显示未配置），
+    等于用「修 bug」的名义制造第二次同类事故。
+    """
+    obj, tmp = svc
+    from app.modules.lego.cloud_providers.base import APIConfig
+
+    (tmp / "api_configs.json").write_text(
+        json.dumps({"deepseek": {"api_key": "encrypted", "base_url": "u",
+                                 "model": "m", "max_tokens": 1, "temperature": 0.5,
+                                 "top_p": 0.5}}),
+        encoding="utf-8",
+    )
+    obj._configs["deepseek"] = APIConfig(
+        provider="deepseek", api_key="sk-new", base_url="u", model="m"
+    )
+    obj._get_secure_storage = lambda: None
+    with pytest.raises(RuntimeError, match="加密存储当前不可用"):
+        obj.save_configs()
+    data = json.loads((tmp / "api_configs.json").read_text(encoding="utf-8"))
+    assert data["deepseek"]["api_key"] == "encrypted"      # 保留，未被覆盖成 ""
+    assert "sk-new" not in json.dumps(data)
+
+
+def test_unavailable_storage_ok_when_no_keys(svc):
+    """没有密钥要存时不该惊动用户：正常落盘、不抛错。"""
+    obj, tmp = svc
+    from app.modules.lego.cloud_providers.base import APIConfig
+
+    obj._configs["ollama"] = APIConfig(
+        provider="ollama", api_key="", base_url="http://127.0.0.1:11434", model="m"
+    )
+    obj._get_secure_storage = lambda: None
+    obj.save_configs()  # 不抛
+    data = json.loads((tmp / "api_configs.json").read_text(encoding="utf-8"))
+    assert data["ollama"]["api_key"] == ""
+
+
+def test_marker_is_never_used_as_key(svc):
+    """读回侧：存储不可用时 "encrypted" 标记不能被当成 API Key。
+
+    旧写法 `if api_key == "encrypted" and secure` 在 secure=None 时整条短路，
+    字面量 "encrypted" 留在 api_key 上 ⇒ 渠道显示「已配置」、请求期才炸，
+    且绕过 get_provider 的 `if not config.api_key` 空值判据。
+    """
+    obj, tmp = svc
+    (tmp / "api_configs.json").write_text(
+        json.dumps({"deepseek": {"api_key": "encrypted", "base_url": "u",
+                                 "model": "m", "max_tokens": 1, "temperature": 0.5,
+                                 "top_p": 0.5}}),
+        encoding="utf-8",
+    )
+    obj._get_secure_storage = lambda: None
+    obj._load_configs()
+    cfg = obj._configs["deepseek"]
+    assert cfg.api_key != "encrypted"
+    assert cfg.api_key == ""
+    assert obj.get_provider("deepseek") is None   # 真被判为未配置
+
+
+def test_secure_storage_init_crash_degrades_not_explodes(svc, monkeypatch):
+    """SecureStorage() 构造抛错也要降级成 None（旧版只接 ImportError ⇒ 整个保存炸掉）。"""
+    obj, tmp = svc
+    import app.core.config_manager as cm
+
+    def _boom():
+        raise OSError("密钥库被占用")
+
+    monkeypatch.setattr(cm.SecureStorage, "__new__", lambda cls: _boom(), raising=False)
+    # _get_secure_storage 内部 import 后构造；构造异常应被吞成 None
+    assert obj._get_secure_storage() is None
