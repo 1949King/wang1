@@ -3514,7 +3514,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                         except Exception as e:
                             logger.debug("换轨同步 UI 失败: %s", e)
 
-    def _apply_action(self, action: dict, mode: str) -> None:
+    def _apply_action(self, action: dict, mode: str, *, base_revision: Optional[int] = None) -> None:
         """执行一次操作或其逆操作（**整段持 `_clips_lock`**）。
 
         ★ A3（2026-10-05）加锁原因：本方法多步改 `self._clips`（delete/batch/split/
@@ -3522,12 +3522,12 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         `_clips_snapshot()` 与 autosave 会读到「半新半旧」的真相源（本文件 L473-479
         自写的纪律要求所有非原子整段替换都持锁，此处此前是自违反）。
         RLock 可重入 ⇒ 内部 `_sync_*` 与 compound 递归再取锁不会死锁。
+
+        ``base_revision``（刀1）：非 None 则执行前做 CAS，冲突抛 ``RevisionConflict``。
         """
-        lock = getattr(self, "_clips_lock", None)
-        if lock is None:
-            lock = threading.RLock()
-            self._clips_lock = lock
+        self._clips_lock = lock = getattr(self, "_clips_lock", None) or threading.RLock()
         with lock:
+            self._timeline_store.check_revision(base_revision, op=f"apply_action:{action.get('type')}")
             self._apply_action_locked(action, mode)
 
     def _apply_action_locked(self, action: dict, mode: str) -> None:
@@ -7997,24 +7997,29 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             logger.warning(f"[Agent] agent_get_timeline_context 失败: {e}")
             return {"error": str(e), "clip_count": 0, "clips": []}
 
-    def agent_replace_timeline_clips(self, clips: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def agent_replace_timeline_clips(self, clips: List[Dict[str, Any]], *,
+                                     base_revision: Optional[int] = None,
+                                     enforce_gate: bool = True) -> Dict[str, Any]:
         """Agent 公开接口：整条替换时间线片段（工程级快照直导/回滚的落点）。
 
         复用 ``import_project`` 的重建序列（清空 _clips → 逐个 add_clip → 同步内核 →
         重排 → 刷首帧），但不弹文件框、不碰字幕/贴纸（那些属于独立工程资产）。
         返回诚实结果：失败时 ``ok:False`` + 可执行中文指引，绝不假成功。
+        ``base_revision``（刀1）陈旧 ⇒ ``conflict``；``enforce_gate``（刀3）block ⇒
+        ``gate_blocked`` 整段不写；无分数素材不判定（语境区分见 ``ingest_gate``）。
         """
         try:
             if not isinstance(clips, list):
                 return {"ok": False, "message": "clips 必须是数组"}
-            # ⚠️ 整段持有 _clips_lock：本方法是**跨线程写入口**（画布桥调用），
-            # 「先清空再逐个 append」若不原子，渲染/autosave/导出线程会读到
-            # 空列表或半截列表。RLock 可重入，内部方法再取锁不会死锁。
-            lock = getattr(self, "_clips_lock", None)
-            if lock is None:
-                lock = threading.RLock()
-                self._clips_lock = lock
+            lock = getattr(self, "_clips_lock", None) or threading.RLock()
+            self._clips_lock = lock
             with lock:
+                busy = self._timeline_store.stale_or_none(base_revision)  # 闸在所有写入之前
+                if busy is not None:
+                    return busy
+                refused = self._gate_before_ingest(clips, enforce=enforce_gate)
+                if refused is not None:
+                    return refused
                 self._timeline_store.clear()
                 self._clip_widgets = []
                 self._clip_id_to_widget = {}
@@ -8056,8 +8061,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     self._heal_linked_av_duration_mismatch()
                 except Exception as e:
                     logger.error(f"联动音画时长修复失败: {e}")
-                # 主选优先视频片
-                for c in self._clips:
+                for c in self._clips:  # 主选优先视频片
                     if str(c.get("type", "")).lower() != "audio" and c.get("path"):
                         self._current_clip = c
                         break

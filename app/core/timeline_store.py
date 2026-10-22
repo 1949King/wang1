@@ -38,6 +38,28 @@ TIMELINE_DSL_FORMAT = "timeline-dsl"
 TIMELINE_DSL_SCHEMA_VERSION = 1
 
 
+class RevisionConflict(Exception):
+    """陈旧写入被拒绝（对应 FableCut 的 HTTP 409 语义，刀1 · 2026-10-23）。
+
+    **为什么是异常而不是返回值**：结构写 API（``add``/``remove_by_id``/
+    ``set_fields``…）全部返回 None/bool/int 表示「命中与否」，把冲突塞进
+    这些返回值会让既有调用方把「冲突」误读成「没命中」，从而**静默跳过写入**
+    却不报错——那正是本刀要消除的故障模式。异常是唯一不会被忽略的信号。
+
+    调用方要么显式捕获并转成 409 / CapabilityResult(error=...)，
+    要么就让异常向上冒（宁可报错，不可静默丢写）。
+    """
+
+    def __init__(self, expected: int, actual: int, op: str = ""):
+        self.expected = expected
+        self.actual = actual
+        self.op = op
+        super().__init__(
+            f"时间线写入冲突（{op or 'write'}）：基于 revision={expected}，"
+            f"当前已是 revision={actual}；请重读后再应用（本次写入未执行）"
+        )
+
+
 class TimelineStore:
     """时间线片段列表的唯一所有者（live dict 行数据 + 同一性不变量）。"""
 
@@ -56,6 +78,83 @@ class TimelineStore:
             raise TypeError("TimelineStore 必须 adopt 既有 list 对象（保持同一性）")
         self._rows = rows
         self._lock = lock if lock is not None else threading.RLock()
+        #: 单调递增的写入版本号（每成功一次结构/字段写 +1）。粗粒度即可：
+        #: 时间线编辑「低频且粗糙」，FableCut 实测 last-writer-wins + 版本校验
+        #: 足够，不需要 OT/CRDT（见刀1 决策依据）。
+        self._revision = 0
+
+    # ── 版本号（刀1 · 2026-10-23）──────────────────────────────────────
+
+    def revision(self) -> int:
+        """当前写入版本号（读操作，不 bump）。"""
+        with self._lock:
+            return self._revision
+
+    def _bump_locked(self) -> int:
+        """**锁内**自增版本号并返回新值（调用方必须已持锁）。"""
+        self._revision += 1
+        return self._revision
+
+    def _check_base_locked(self, base_revision: Optional[int], op: str) -> None:
+        """**锁内**做乐观并发校验（CAS）。
+
+        ``base_revision is None`` ⇒ 不校验（既有的、非 Agent 的调用方保持
+        原行为，逐键不变）；传了整数但 ≠ 当前值 ⇒ 抛 ``RevisionConflict``，
+        **并且一个字节都不写**（校验在前，写入在后）。
+        """
+        if base_revision is None:
+            return
+        if not isinstance(base_revision, int) or isinstance(base_revision, bool):
+            raise TypeError(
+                f"base_revision 必须是 int 或 None（收到 {type(base_revision).__name__}）"
+            )
+        if base_revision != self._revision:
+            raise RevisionConflict(base_revision, self._revision, op)
+
+    def check_revision(self, base_revision: Optional[int], *, op: str = "") -> None:
+        """公开的乐观并发校验（**调用方须已持 ``_clips_lock``**）。
+
+        给宿主（EditorModule）的写入口用：那些入口需要先校验、再走多步
+        非 store 的副作用（控件重建、内核同步），故校验与写入必须落在
+        同一把锁的作用域内。只有 store 自己持有那把锁，所以把这颗
+        「锁内断言」开放出来，而不是让宿主直接碰私有方法。
+        """
+        with self._lock:
+            self._check_base_locked(base_revision, op)
+
+    def conflict_payload(self, base_revision: int) -> Dict[str, Any]:
+        """构造**冲突响应**（宿主写入口直接返回它，别在宿主里拼 dict）。
+
+        为什么在这里：宿主文件受单文件规模守卫（只许减不许增）约束，
+        把「冲突消息 + 两个 revision 字段」的结构留在 store 里，
+        宿主侧只需 ``return store.conflict_payload(base)`` 一行。
+        形状对齐能力层的 ``{"ok": False, "code": ...}`` 约定与 HTTP 409。
+        """
+        current = self.revision()
+        return {
+            "ok": False,
+            "code": "conflict",
+            "message": (f"时间线已被其他操作修改（基于 revision={base_revision}，"
+                        f"当前 {current}）；本次未写入，请重读后再应用"),
+            "expected_revision": base_revision,
+            "current_revision": current,
+        }
+
+    def stale_or_none(self, base_revision: Optional[int]) -> Optional[Dict[str, Any]]:
+        """宿主写入口的**一行式**并发闸：陈旧返回冲突载荷，新鲜/None 返回 None。
+
+        用法（宿主里只多一行）::
+
+            busy = self._timeline_store.stale_or_none(base_revision)
+            if busy is not None:
+                return busy
+        """
+        if base_revision is None:
+            return None
+        with self._lock:
+            if base_revision == self._revision:
+                return None
+        return self.conflict_payload(base_revision)
 
     # ── 读 ──────────────────────────────────────────────────────────
 
@@ -83,32 +182,50 @@ class TimelineStore:
 
     # ── 结构写入（唯一合法入口，全部原地突变、保同一性） ─────────────
 
-    def add(self, clip: Dict[str, Any]) -> None:
-        """追加片段（不查重；调用方需要去重时先 ``find_by_id``）。"""
+    def add(self, clip: Dict[str, Any], *, base_revision: Optional[int] = None) -> None:
+        """追加片段（不查重；调用方需要去重时先 ``find_by_id``）。
+
+        ``base_revision`` 给了就在写前做 CAS 校验：值不匹配抛 ``RevisionConflict``
+        且**一个字节都不写**；不给（None）保持既有行为逐键不变。
+        """
         if not isinstance(clip, dict):
             raise TypeError("clip 必须是 dict")
         with self._lock:
+            self._check_base_locked(base_revision, "add")
             self._rows.append(clip)
+            self._bump_locked()
 
-    def remove_by_id(self, clip_id: Any) -> int:
-        """按 id 移除（切片赋值，不换列表对象）。返回移除条数。"""
+    def remove_by_id(self, clip_id: Any, *, base_revision: Optional[int] = None) -> int:
+        """按 id 移除（切片赋值，不换列表对象）。返回移除条数。
+
+        未命中（removed == 0）**不 bump**：没有真实改动就不该让别人的 revision 失效。
+        """
         with self._lock:
+            self._check_base_locked(base_revision, "remove_by_id")
             kept = [c for c in self._rows if c.get("id") != clip_id]
             removed = len(self._rows) - len(kept)
             if removed:
                 self._rows[:] = kept
+                self._bump_locked()
         return removed
 
-    def replace_all(self, new_rows: List[Dict[str, Any]]) -> None:
+    def replace_all(self, new_rows: List[Dict[str, Any]],
+                    *, base_revision: Optional[int] = None) -> None:
         """整段原子替换（切片赋值保对象同一；非 dict 行被过滤）。"""
         if not isinstance(new_rows, list):
             raise TypeError("new_rows 必须是 list")
         with self._lock:
+            self._check_base_locked(base_revision, "replace_all")
             self._rows[:] = [c for c in new_rows if isinstance(c, dict)]
+            self._bump_locked()
 
-    def clear(self) -> None:
+    def clear(self, *, base_revision: Optional[int] = None) -> None:
         with self._lock:
+            self._check_base_locked(base_revision, "clear")
+            if not self._rows:
+                return  # 空列表再清 = 无改动，不 bump
             self._rows.clear()
+            self._bump_locked()
 
     # ── 字段写入（唯一合法入口，OTIO 迁移·刀4） ──────────────────────
     # 语义：锁内按 id 定位 live dict 后原地 update —— 读点拿到的仍是同一对象，
@@ -117,28 +234,38 @@ class TimelineStore:
     # clip_transform.normalize/apply_normalized 冻结入口，本 API 不实现第二套
     # 变换写入（方案 §3 刀4 风险②）。撤销记账（_record_action）由调用方负责。
 
-    def set_fields(self, clip_id: Any, **fields: Any) -> bool:
-        """按 id 更新片段字段（原地突变）。返回是否命中片段。"""
+    def set_fields(self, clip_id: Any, *, base_revision: Optional[int] = None,
+                   **fields: Any) -> bool:
+        """按 id 更新片段字段（原地突变）。返回是否命中片段。
+
+        命中才 bump；未命中不 bump（无真实改动）。
+        """
         if not fields:
             return False
         with self._lock:
+            self._check_base_locked(base_revision, "set_fields")
             for c in self._rows:
                 if c.get("id") == clip_id:
                     c.update(fields)
+                    self._bump_locked()
                     return True
         return False
 
-    def update_where(self, predicate, **fields: Any) -> int:
+    def update_where(self, predicate, *, base_revision: Optional[int] = None,
+                     **fields: Any) -> int:
         """按谓词批量更新字段（锁内遍历 live dict 原地 update）。返回命中条数。
 
         Args:
             predicate: 单参数可调用对象，接收 clip dict，返回 bool。
             fields: 要写入的键值对。
+
+        命中 ≥1 条才 bump。
         """
         if not callable(predicate) or not fields:
             return 0
         hit = 0
         with self._lock:
+            self._check_base_locked(base_revision, "update_where")
             for c in self._rows:
                 try:
                     matched = bool(predicate(c))
@@ -148,6 +275,8 @@ class TimelineStore:
                 if matched:
                     c.update(fields)
                     hit += 1
+            if hit:
+                self._bump_locked()
         return hit
 
     # ── canonical 出口：类型化视图 / 序列化 ──────────────────────────

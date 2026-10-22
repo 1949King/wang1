@@ -514,3 +514,36 @@ class EditorAiProcessMixin:
             return mixed
         return None
 
+    # ── 入轨治理闸门（刀3 / E2 · 2026-10-23）──────────────────────────
+    # 为什么放在 mixin：`editor_module.py` 已顶到单文件规模守卫上限（9717+30），
+    # 而那正是本方法要服务的宿主。闸门逻辑全部委托 `app/core/ingest_gate.py`
+    # （纯函数、可单测），本方法只做「判定 → 组装拒绝响应」的薄壳，
+    # 保证宿主侧只多一行调用、且判定语义只有一个来源。
+    def _gate_before_ingest(self, clips, *, enforce: bool = True):
+        """入轨前过治理闸门；返回**拒绝载荷**（通过则返回 None）。
+
+        * `enforce=False` ⇒ 不判定，直接放行（既有调用方的零行为变化路径）；
+        * 无分数素材**不判定、放行**——治理只判「测过的坏素材」，不判用户
+          自己导入的文件（`_add_clip_to_timeline` 有 13 个调用方，其中包含
+          用户手动导入，误拦代价极高）；
+        * 任一 block ⇒ 整批拒绝（坏素材混进来就不许整段过）；
+        * `review` 不拦，但会在成功消息里如实计数（不静默）。
+        """
+        if not enforce:
+            return None
+        try:
+            from app.core.ingest_gate import decide_batch, rejection_payload
+        except ImportError:  # 兼容 `core.*` 旧导入路径
+            try:
+                from core.ingest_gate import decide_batch, rejection_payload  # type: ignore
+            except ImportError:
+                return None  # 治理模块缺失 ⇒ 不拦（诚实降级，不让它炸入轨）
+        try:
+            verdict = decide_batch(clips)
+        except Exception:
+            logger.warning("入轨治理判定异常，按放行处理（不拦入轨）", exc_info=True)
+            return None
+        if verdict.get("verdict") == "block":
+            return rejection_payload(verdict, stage="agent_replace_timeline_clips")
+        return None
+
