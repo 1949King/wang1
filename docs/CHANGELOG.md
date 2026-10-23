@@ -1,5 +1,53 @@
 # 拾光剪影 — 变更日志
 
+## 视频侧用法感知（SVD 管线常驻复用 -39%）+ 修 SVD 出片必崩的既有 bug（V4.46.10，2026-10-24）
+
+> 用户指令：「视频侧同样做用法感知策略」。做完，并顺带挖出一个让 SVD 本地出片**此前必崩**的既有 bug。
+
+### ① 视频侧的「用法感知」≠ 图像侧的整卡热提升
+
+图像侧固定开销在 offload 搬运，所以「首图后热提升整卡」有效；但 **SVD 实测 offload 全程不亏、不能整卡**（V4.46.0 的血泪调优，本刀一个参数都没动）⇒ 它的固定开销**在每次 `from_pretrained` 重载 4.2GB 权重**。
+
+所以视频侧的正确落点是**进程级管线常驻**：[local_video_pipe_cache.py](../app/core/local_video_pipe_cache.py)，按 `(kind, model_path)` 缓存已就绪的 pipeline（LRU 上限 1，可 `SHIGUANG_VIDEO_PIPE_CACHE_MAX` 放宽）。
+
+**真机实测**（SVD i2v · 4060 8GB · 1s/7帧/8步）：
+
+| | 耗时 | pipe_source |
+|---|---|---|
+| 第 1 次（加载 + 推理） | 58.73 s | `miss` |
+| 第 2 次（复用常驻管线） | **35.68 s** | `hit` |
+| **净收益** | **省 23.05s（39%）** | |
+
+OOM 时自动 `evict`（下次重载干净管线）；**只认 OOM**，其它异常原样上抛，不吞真实错误。
+
+### ② 修既有 bug：SVD 本地出片此前必崩（真机暴露）
+
+`_save_video_frames` 在 cv2 分支先读 `frames[0].shape` 取尺寸，但 SVD 的 `result.frames[0]` 是 **PIL.Image（无 `.shape`）** ⇒ 只要装了 cv2（本项目装了），SVD 出片就抛 `'Image' object has no attribute 'shape'`，而下面**能处理 PIL 的 imageio 分支永远走不到**。
+
+修复：取尺寸前先 `np.array(frames[0])` 归一化（两处分支都能处理 PIL，作者本意如此）。
+
+**为什么一直没被发现**：并行会话 V4.46.6 的视频测试只测 `resolve_image_path`，明确标注「不加载模型、不联网」——**从没覆盖真编码链路**。这是典型的「测试没打到的主路径」：功能看起来"有测试、有提交"，实际出片必失败。
+
+补 [test_local_video_save_frames.py](../app/tests/test_local_video_save_frames.py) 两条回归锁：PIL 帧 + numpy 帧都必须产出**非空真 mp4**（不加载模型，直测编码函数）。
+
+### ③ 可观测
+
+`_infer_svd` 结果新增 `pipe_source`（`hit`/`miss`），供排障与后续遥测接入。
+
+### ④ 验证
+
+- 新增 [test_local_video_pipe_cache.py](../app/tests/test_local_video_pipe_cache.py) 6 例：命中/未命中、LRU 淘汰、**加载失败绝不写缓存**、evict、status 形状、**并发同 key 只加载一次**。
+- 新增 `test_local_video_save_frames.py` 2 例（见上）。
+- 并行会话的 `test_local_video_first_frame.py` 4 例仍全过（改动没打破）。
+- 真机验证：两次生成均 `ok=True` 并产出真实 mp4（434KB / 173KB）。
+
+### ⑤ 遗留（诚实）
+
+- 缓存只在进程内，重启即失效（桌面应用可接受）。
+- LRU 上限默认 1：多模型交替会反复重载，需要时调环境变量。
+- **只给 SVD 接了缓存**；wan / cogvideox / hunyuan / ltx / mochi 等族接入方式相同但需逐个真机验证，本刀未做。
+- 其它视频族是否也有同类「PIL vs numpy 帧」问题**未排查**（只有 SVD 被真机跑过）。
+
 ## 用法感知显存策略（首图后热提升 -25%）+ 装不下不硬上（V4.46.9，2026-10-24）
 
 > 用户追问：「单张 offload / 连续整卡、首图后热切换，实测 -26%，这部分优化了吗？」

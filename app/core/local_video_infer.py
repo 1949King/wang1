@@ -254,7 +254,11 @@ def _save_video_frames(
     path = os.path.join(out_dir, name)
     try:
         if cv2 is not None:
-            h, w = int(frames[0].shape[0]), int(frames[0].shape[1])
+            # ★ 修复（2026-10-24 真机验证暴露）：SVD 的 result.frames[0] 是 PIL.Image，
+            #   直接读 .shape 会抛 'Image' object has no attribute 'shape'（cv2 可用时必崩，
+            #   走不到下面能处理 PIL 的 np.array 分支）。先归一为 numpy 再取尺寸。
+            _first = np.array(frames[0])
+            h, w = int(_first.shape[0]), int(_first.shape[1])
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(path, fourcc, 24.0, (w, h))
             for f in frames:
@@ -782,30 +786,56 @@ def _infer_svd(
         return {"ok": False, "message": f"输入图无法读取：{img_src[:80]}"}
 
     dtype = torch.float16
-    pipe = StableVideoDiffusionPipeline.from_pretrained(
-        model_path, torch_dtype=dtype, variant="fp16", use_safetensors=True,
-    )
-    # 实测：offload 全程不亏（更快更省显存），且防大帧数分页 —— 无条件开启
-    try:
-        pipe.enable_model_cpu_offload()
-    except Exception:
-        logger.debug("cpu offload 不可用，直接上卡", exc_info=True)
-        pipe.to(device)
+
+    def _load_svd_pipe():
+        # 只在缓存未命中时执行：读 4.2GB 权重 + 建 offload hook（首帧慢的根源）。
+        p = StableVideoDiffusionPipeline.from_pretrained(
+            model_path, torch_dtype=dtype, variant="fp16", use_safetensors=True,
+        )
+        # 实测：offload 全程不亏（更快更省显存），且防大帧数分页 —— 无条件开启
+        try:
+            p.enable_model_cpu_offload()
+        except Exception:
+            logger.debug("cpu offload 不可用，直接上卡", exc_info=True)
+            p.to(device)
+        return p
+
+    # ★ 用法感知（视频侧，2026-10-24）：SVD 固定开销不在搬运（offload 实测最优、不能整卡），
+    #   而在每次 from_pretrained 重载 4.2GB ⇒ 进程级常驻复用，第二次起省掉整段加载。
+    #   生成参数（steps/frames/motion_bucket/CFG）仍每次传，不缓存 ⇒ 调优语义不变。
+    from app.core.local_video_pipe_cache import get_or_load
+
+    pipe, _src = get_or_load(("svd", os.path.abspath(model_path)), _load_svd_pipe)
 
     n_steps = int(steps) if steps is not None else 14
     n_frames = max(2, int(round(float(duration) * 7)))       # SVD 训练 fps = 7
-    result = pipe(
-        image=pil,
-        num_frames=n_frames,
-        decode_chunk_size=1,                                  # ★ 实测关键项
-        num_inference_steps=n_steps,
-        motion_bucket_id=80,                                  # ★ 实测画质项
-        noise_aug_strength=0.02,
-        min_guidance_scale=1.0,                               # ★ CFG 必须显式给
-        max_guidance_scale=3.0,
-    )
+    _key = ("svd", os.path.abspath(model_path))
+    try:
+        result = pipe(
+            image=pil,
+            num_frames=n_frames,
+            decode_chunk_size=1,                                  # ★ 实测关键项
+            num_inference_steps=n_steps,
+            motion_bucket_id=80,                                  # ★ 实测画质项
+            noise_aug_strength=0.02,
+            min_guidance_scale=1.0,                               # ★ CFG 必须显式给
+            max_guidance_scale=3.0,
+        )
+    except Exception as e:
+        # 常驻管线若把显存撑爆（帧数升高/被别的任务挤占）：淘汰缓存，下次重载干净管线。
+        #   只认 OOM，其它异常原样上抛（不吞真实错误）。
+        if "out of memory" in str(e).lower():
+            from app.core.local_video_pipe_cache import evict
+
+            evict(_key)
+            logger.warning("[local_video_infer] SVD 生成 OOM，已淘汰常驻管线待重载")
+        raise
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    out = _save_video_frames(frames, out_dir, bridge_port)
+    if isinstance(out, dict):
+        out["pipe_source"] = _src      # hit=复用常驻管线 / miss=本次新加载（首帧慢的那次）
+    return out
+
 
 
 def _infer_mochi(
