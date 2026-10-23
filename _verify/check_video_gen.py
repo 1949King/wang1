@@ -152,7 +152,10 @@ def main() -> int:
         check("video_gen 可加载并读注册表", False, f"{type(e).__name__}: {e}")
 
     # ⑩ 端点已注册，且**不与既有云端 `/host/video-generate` 撞名**
+    # 2026-10-24：本地视频端点外开到 canvas_routes_local_video.py（post 文件顶 2000 行守卫），
+    # 故把两份源码拼在一起判「已声明」与「不撞名」。
     post_src = _read(os.path.join("app", "core", "canvas_routes_post.py"))
+    post_src += "\n" + _read(os.path.join("app", "core", "canvas_routes_local_video.py"))
     check("端点已声明 POST /host/local-video-generate",
           '@_route_post("/host/local-video-generate")' in post_src)
     check("★ 本地端点使用独立路径（不占用云端 /host/video-generate）",

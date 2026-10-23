@@ -1,5 +1,32 @@
 # 拾光剪影 — 变更日志
 
+## 视频侧真本地双路 + 画布算力滑块（V4.46.6，2026-10-24）
+
+> 用户指令：「把视频侧的真本地双路接起来（需要先解决 SVD 的首帧输入链路），把滑块也搬到画布界面上」。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 首帧链路（后端） | `local_video_infer.resolve_image_path`：data URL / `/inbox_file/` / 本地路径**三态**（远端 URL 拒绝，不偷偷下载）；`/host/local-video-generate` 接受 image / image_url / first_frame / reference_image；端点外开 `canvas_routes_local_video.py`（post 文件顶 2,000 行守卫，与 dub/roughcut 同例） |
+| 双路（前端） | `localVideo.ts` 新增 `auto` 通道：`/host/execution-plan` → `buildVideoChain`（缺首帧不排本地、无云端模型不排云端）→ 依次尝试/失败切换，返回 `route_used` / `chain_tried`；`pickCloudVideoFallback` 自动取首个非本地渠道兜底 |
+| 滑块（画布） | `ExecutionBiasChip.tsx` 左下角常驻胶囊：0~100 偏好 + 三档文案（`executionBias.ts`）+ 本地/云端状态 + 「试算视频双路」；只读写既有端点，不新增 |
+| 生成器修复 | `App.tsx` 生成器·视频分支此前 `referenceImage` 硬编码为空串（本地 SVD 必失败），改为复用 `buildPromptFor` 的上游图 |
+
+### 验证（全部实跑）
+
+- vitest：**46 文件 / 626 用例全绿**（新增双路链 5 例 + 偏好档位 3 例）
+- pytest：新增 `test_local_video_first_frame.py` **4 例全过**（data URL / inbox URL / 本地路径 / 非法回落）
+- tsc：**37 = 既有基线，零新增**
+- `run_all_checks`：**107 项全绿**（VIDEOGEN 守卫已同步新 mixin 文件）
+- `check_file_size` / `stability_gate` / `frozen_zone_guard`（106 锁）/ `check_canvas_routes` 全绿
+
+### 怎么用
+
+1. 视频节点的模型下拉里选「**自动 · 执行层调度（本地 SVD ↔ 云端，按算力滑块）**」；
+2. 左下角「算力」胶囊拖到 0~100（≤24 本地优先 / 25-74 动态混合 / ≥75 云端优先），点「试算视频双路」可看当前计划；
+3. 有首帧图（节点自己的图或上游图）时本地 SVD 会先跑，失败自动切云端；没有首帧则只走云端并如实说明。
+
 ## 新增 · 执行层专项决策器 + 混合算力（本地 SD × 云端 API）（V4.46.5，2026-10-23）
 
 > 用户指令：「前面加一个专项执行层模型，让它决定怎么调度本地与 API 之间的运算逻辑和方式；也要能加进画布模块和剪辑模块的智能体」。全在非冻结区。

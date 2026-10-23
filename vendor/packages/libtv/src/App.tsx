@@ -602,8 +602,8 @@ export default function App() {
         const res = await generateVideoUnified({
           parsed: resolveModel(selectedVideoModelKey),
           prompt: data.prompt || bp.prompt,
-          // 原实现不传参考图（保持 ""）；若用本机图生视频模型，会如实提示「需要首帧图」
-          referenceImage: "",
+          // 首帧：复用 buildPromptFor 解出的上游图（本机 SVD 是 i2v，缺图会如实报错）
+          referenceImage: bp.assetRef || "",
           duration: 5,
           quality: "standard",
           awaitOpts,

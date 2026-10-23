@@ -679,32 +679,64 @@ def _infer_ltx(
     return _save_video_frames(frames, out_dir, bridge_port)
 
 
-def _load_input_image(src: str):
-    """把 data URL / 本地路径 / inbox URL 读成 PIL.Image（SVD 等 i2v 族用）。
+def resolve_image_path(
+    src: str, *, dest_dir: str = "", name_hint: str = "input"
+) -> Optional[str]:
+    """把画布传图的**三种形态**统一成本地文件路径（SVD 首帧输入链路）。
 
-    三态统一收在这里，避免各族各写一份（本项目反模式清单里就有「同一件事两套实现」）。
+    接受：
+      · data URL（`data:image/...;base64,...`）→ 落成临时 PNG；
+      · `/inbox_file/<name>` 或 `http://127.0.0.1:<port>/inbox_file/<name>` → 映射回
+        `canvas_bridge.canvas_inbox_dir()/<name>`；
+      · 本地绝对/相对路径（必须真实存在）。
+
+    其余形态（远端 URL、空串、不存在的路径）返回 None —— 由调用方如实报错，
+    绝不下载任意远端图（那是另一条需要联网与安全审阅的链路）。
     """
-    from PIL import Image
-    import io
-    import base64
-
     s = (src or "").strip()
     if not s:
         return None
     if s.startswith("data:image/"):
-        b64 = s.split(",", 1)[-1]
-        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+        try:
+            import base64
+
+            raw = base64.b64decode(s.split(",", 1)[-1])
+            target_dir = dest_dir or os.path.join("短剧AI剪辑输出", "_video_input")
+            os.makedirs(target_dir, exist_ok=True)
+            path = os.path.join(target_dir, f"_{name_hint}_first_frame.png")
+            with open(path, "wb") as f:
+                f.write(raw)
+            return path
+        except Exception:
+            logger.debug("[local_video_infer] data URL 落盘失败", exc_info=True)
+            return None
     p = s
     if "/inbox_file/" in s:                     # inbox URL → 映射回本地
         try:
             from app.core.canvas_bridge import canvas_inbox_dir
-            p = os.path.join(canvas_inbox_dir(), s.rsplit("/", 1)[-1])
+
+            name = s.rsplit("/", 1)[-1].split("?")[0]
+            p = os.path.join(canvas_inbox_dir(), name)
         except Exception:
-            logger.debug("inbox URL 映射失败", exc_info=True)
+            logger.debug("[local_video_infer] inbox URL 映射失败", exc_info=True)
             return None
     if os.path.isfile(p):
-        return Image.open(p).convert("RGB")
+        return p
     return None
+
+
+def _load_input_image(src: str):
+    """把 data URL / 本地路径 / inbox URL 读成 PIL.Image（SVD 等 i2v 族用）。
+
+    三态统一收在 resolve_image_path，避免各族各写一份
+    （本项目反模式清单里就有「同一件事两套实现」）。
+    """
+    from PIL import Image
+
+    path = resolve_image_path(src)
+    if not path:
+        return None
+    return Image.open(path).convert("RGB")
 
 
 def _infer_svd(

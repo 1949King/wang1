@@ -43,6 +43,7 @@ import { useCanvasStore } from "./store";
 import { useUpstreamRefsSync } from "./upstreamRefs";
 import { useToolboxStore } from "./toolboxStore";
 import { useWindowManager } from "./windowManager";
+import ExecutionBiasChip from "./ExecutionBiasChip";
 
 const AgentPet = lazy(() => import("./mascot/AgentPet"));
 
@@ -182,6 +183,8 @@ export default function CanvasOverlays() {
       </SectionErrorBoundary>
       {/* Agent 桌宠（Q 版狐狸「拾岚」）：Agent 面板打开时隐藏（V4.41.14）。
           懒载 + fallback=null —— 加载期间画布零影响。 */}
+      {/* 混合算力滑块（2026-10-24）：常驻小胶囊，点开是 0~100 偏好 + 视频双路试算 */}
+      <ExecutionBiasChip />
       <Suspense fallback={null}>
         <AgentPet status={petStatus} mini={agentOpen} onActivate={openAgent} />
       </Suspense>
