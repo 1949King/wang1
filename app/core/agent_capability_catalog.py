@@ -352,6 +352,18 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
     ("workflow.submit_batch", "workflow", "file_write", False,
      "提交批量任务", "left", "批量任务", ["批量", "任务", "batch"]),
 
+    # ── 执行层专项决策器（2026-10-23，用户指令：本地/云端调度裁定层）──
+    # 只读能力：只产出「走本地还是云端、混合顺序、理由」，不触发生成/计费。
+    # 画布与剪辑两侧的智能体共用同一对入口（同一 dispatcher）。
+    ("execution.plan", "pipeline", "read", False,
+     "执行层裁定：本次走本地引擎还是云端 API、混合顺序与理由（只读，不执行生成）",
+     "left", "执行层裁定",
+     ["执行层", "本地还是云端", "混合", "调度", "算力", "execution_plan"]),
+    ("execution.status", "pipeline", "read", False,
+     "执行层快照：本地引擎/硬件档/预算 λ/云端渠道可用性（只读）",
+     "left", "执行层快照",
+     ["执行层状态", "引擎状态", "显存档", "预算", "execution_status"]),
+
     # ── Agent 全链路闭环 ──
     ("pipeline.route", "pipeline", "read", False,
      "业务分流：AI生成/素材剪辑", "cc", "业务分流", ["分流", "路由", "判断"]),

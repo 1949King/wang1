@@ -1,38 +1,37 @@
-__version__ = "4.46.4"
+__version__ = "4.46.5"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 46,
-    "patch": 4,
-    "codename": "数字人口型成片管线（诚实档）+ 捏脸漂移盲区收口",
-    "release_date": "2026-10-22",
+    "patch": 5,
+    "codename": "执行层专项决策器 + 混合算力（本地 SD × 云端 API）",
+    "release_date": "2026-10-23",
     "description": (
-        "V4.46.4：完善捏脸与数字人节点（用户指令），全在非冻结区。\n"
-        "\n【① 数字人「口型成片」从写死拒绝变成真管线】\n"
-        "旧状：DigitalHumanNode 的「口型成片」按钮是写死的拒绝文案，后端零端点。\n"
-        "新增：digital_human_talking.py（合成核心）+ POST /host/digital-human/\n"
-        "talking-video（独立 mixin，canvas_routes_post.py 已 1967/2000 行）。\n"
-        "三级诚实降级：still_video（静态形象+配音→含音视频轨 mp4，产物恒标\n"
-        "mouth_moved=False）→ unavailable（缺什么报什么 + lipsync_note 转告真引擎\n"
-        "状态）。安全边界：媒体引用只收 dataURL / inbox 文件名，**拒绝任意绝对路径**\n"
-        "（防借 ffmpeg 读磁盘任意文件）；失败清理半成品不假成功。\n"
-        "前端 digitalHumanTalking.ts 客户端（bridge.ts 已 1897 行 ⇒ 独立模块 + 登记\n"
-        "路由契约 CLIENTS）；后端 12 例 + 前端 6 例 + 真桥 E2E（真 ffmpeg 产物\n"
-        "ffprobe 验双轨 / 绝对路径注入 400 / 缺输入 400）全过。\n"
-        "\n【② 捏脸漂移盲区收口】character_anchor 的 ANCHOR_TRAITS 不含 face_params\n"
-        "⇒ 用户改捏脸后漂移检测看不见、带旧锚批量生成。已补入锚定字段（只参与\n"
-        "指纹/漂移比对，不进 render_anchor_prompt——文字化仍由 _face_params_to_text\n"
-        "单一入口）；守卫 CHARANCHOR 41 例含新断言全过。\n"
-        "\n【③ 顺手】路由 mixin 守卫补登 roughcut/code_video/digital_human 三个漏网\n"
-        "mixin（cs.* 盲区）；清 3 处未使用导入（ruff 减债）。\n"
-        "\n【遗留（需授权/后续刀）】DigitalHumanNode UI 按钮接线在冻结文件\n"
-        "mediaExtraNodes.tsx（canvas-magnetic-intent）⇒ 需「解冻 canvas-magnetic-intent」\n"
-        "一行接线；真·口型同步需装 MuseTalk/LatentSync（video_lipsync 已留接口）；\n"
-        "Agent 能力目录暂未注册该端点（先给画布用，验证后再开）。\n"
-        "\n【验证】run_all_checks 100 项全绿（DOCNUM 端点 102/106 回正）；pytest\n"
-        "1,815（+12）；vitest 618（+6）；tsc 37=基线；frozen_zone_guard 106 锁完整\n"
-        "（文档旧写 107 已按实测回正）；dist 已重建。\n"
-        "\n【上一版 V4.46.3『用户反馈双修』见 docs/CHANGELOG.md。】"
+        "V4.46.5：用户指令「前面加一个专项执行层模型，让它决定怎么调度本地与 API 之间的\n"
+        "运算逻辑和方式；也要能加进画布模块和剪辑模块的智能体」。全在非冻结区。\n"
+        "\n【① 执行层专项决策器（新层）】app/core/ai/execution_planner.py\n"
+        "此前：本地 SD 引擎（实测 diffsynth 主选、非降级、SD1.5/SDXL/SVD 权重齐全）与\n"
+        "云端 API 之间**没有任何统一裁定点**；compute_bias 只是个数字无人消费；\n"
+        "decide_execution 生产里只在视频 local/ 分支被调一次，图像路径根本不经过。\n"
+        "现在：plan() 一处产出可解释计划 {route, chain, engine, model_hint, reasons,\n"
+        "bias, hw_tier, budget_lambda, degrade_level}，按「用户算力偏好 + 本地引擎可用性\n"
+        "+ 硬件档 + 预算 λ + 云端 Key」裁定 local / cloud / hybrid 与尝试顺序。\n"
+        "诚实边界：本机视频模型 SVD 是 i2v ⇒ 无参考图/首帧时**不声称可本地**（写进\n"
+        "reasons 并自动走云端），不假装能纯 prompt 出片。\n"
+        "\n【② 混合算力偏好（滑块真源）】app/core/ai/compute_bias.py\n"
+        "0≤bias≤24 本地优先 / 25-74 动态混合 / ≥75 云端优先；持久化 data/compute_bias.json\n"
+        "（原子写、异常不抛）。Qt「模型广场」头部新增滑块（实时落盘），画布侧经\n"
+        "GET/POST /host/execution-bias 读写同一份数据 ⇒ 两端永远一致。\n"
+        "\n【③ 执行器严格按计划走】app/core/ai/hybrid_dispatch.py\n"
+        "/host/generate-image 改走 generate_image_hybrid：**按 chain 顺序真执行**\n"
+        "（先本地失败再云端 / 先云端失败再本地），全链失败时逐路交代原因（不隐藏前一条）。\n"
+        "默认档(engine)行为与旧版逐键一致：既有云端链路不变，只有用户拉低滑块才启用本机。\n"
+        "\n【④ 智能体可直接调用】execution.plan / execution.status（effect=read，不触发生成\n"
+        "与计费）；画布与剪辑两侧共用同一 dispatcher ⇒ 同一套调度语义。\n"
+        "\n【验证】execution_planner 12 例 + 密钥诚实失败 9 例全过；全量 pytest 报见 CHANGELOG；\n"
+        "run_all_checks 107 项；frozen_zone_guard 106 锁；ruff 棘轮零新增。\n"
+        "端点 102→105 唯一（106→109 注册）、能力 126→128（文档数字已同步）。\n"
+        "\n【上一版 V4.46.4『数字人口型成片 + 捏脸收口』见 docs/CHANGELOG.md。】"
     ),
 }

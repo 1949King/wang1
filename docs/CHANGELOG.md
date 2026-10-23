@@ -1,5 +1,46 @@
 # 拾光剪影 — 变更日志
 
+## 新增 · 执行层专项决策器 + 混合算力（本地 SD × 云端 API）（V4.46.5，2026-10-23）
+
+> 用户指令：「前面加一个专项执行层模型，让它决定怎么调度本地与 API 之间的运算逻辑和方式；也要能加进画布模块和剪辑模块的智能体」。全在非冻结区。
+
+### ① 为什么加这一层（实测诊断）
+
+- **本机 SD 引擎其实健康**：`resolve_execution_engine()` 返回 `diffsynth`（主选、`is_fallback=False`）；SD1.5 3.97GB / SDXL 6.46GB / SVD 4.20GB 权重均在盘；`resolve_local_image_engine().ok=True`。
+- **但没有任何一个地方决定「这次谁上」**：`decide_execution()` 生产里只在视频 `local/` 分支被消费一次，**图像路径根本不经过**；`compute_bias` 只是个数字无人消费。
+- 你看到的现象——「切换模型后混合运算没生效」——**不是引擎坏了，是裁判缺席**。
+
+### ② 新增执行层专项决策器
+
+- [execution_planner.py](../app/core/ai/execution_planner.py)：`plan()` 产出可解释计划 `{route, chain, engine, model_hint, reasons, bias, hw_tier, budget_lambda, degrade_level}`，按「用户偏好 + 本地引擎可用性 + 硬件档 + 预算 λ + 云端 Key」裁定 `local / cloud / hybrid` **与尝试顺序**。
+- **诚实边界**：本机视频模型 SVD 是 i2v ⇒ 无参考图/首帧时**不声称可本地**（写进 reasons 并自动走云端），不假装纯 prompt 能出片。
+- [compute_bias.py](../app/core/ai/compute_bias.py)：`0–24 本地优先 / 25–74 动态混合 / ≥75 云端优先`；持久化 `data/compute_bias.json`（原子写、异常不抛、测试隔离用 `COMPUTE_BIAS_STORE_PATH`）。
+
+### ③ 执行器严格按计划走（不是又一处空转）
+
+- [hybrid_dispatch.py](../app/core/ai/hybrid_dispatch.py)：`/host/generate-image` 改走 `generate_image_hybrid`，**按 `chain` 顺序真执行**；全链失败时**逐路交代原因**（云端真实原因不会被后一路覆盖）。
+- 默认档（bias=50）行为与旧版**逐键一致**：既有云端链路不变，只有用户拉低滑块才启用本机 SD。
+
+### ④ 智能体可直接调用
+
+- 能力目录新增 `execution.plan` / `execution.status`（`effect=read`，**不触发生成与计费**）；注册落在 [execution_planner_handlers.py](../app/core/ai/execution_planner_handlers.py)，`capability_handlers.py` 只留 2 行委托（该文件 1,999/2,000 行，规模硬线内）。
+- 画布与剪辑共用同一 dispatcher ⇒ 同一套调度语义；`execution.plan` 是只读预演，不会让 Agent 顺手花钱。
+
+### ⑤ UI 与端点
+
+- Qt「模型广场」头部新增**混合算力滑块**（0–100，实时落盘，提示文案与本层边界一致）。
+- 新端点（独立 mixin [canvas_routes_execution.py](../app/core/canvas_routes_execution.py)，避免 `canvas_routes_post.py` 破 2,000 行）：`GET /host/execution-status`、`POST /host/execution-bias`、`GET /host/execution-plan`。
+
+### ⑥ 门禁与数字
+
+- 端点 **102→105 唯一 / 106→109 注册**、能力 **126→128**（`check_doc_numbers` 全绿）；`run_all_checks` 107 项；`frozen_zone_guard` 106 锁；ruff 棘轮零新增。
+- 测试：`app/tests/test_execution_planner.py` 12 例（档位边界/持久化/五档裁定/i2v 边界/显式不改道/链条执行顺序/全链失败留痕/目录一致性）。
+
+### ⑦ 遗留（诚实）
+
+- 视频侧「双路融合」（D 模式）仍受 i2v 输入限制，本刀**未点亮**；本层只做单路裁定 + 兜底顺序，不冒充融合。
+- 真实本地出图 E2E（SD1.5 真跑一张）需在应用内触发；本轮以引擎可用性探测 + 桩测试覆盖，**未做真推理验证**。
+
 ## 新增 · 数字人「口型成片」诚实管线 + 捏脸漂移盲区收口（V4.46.4，2026-10-22）
 
 > 用户指令「完善捏脸和数字人节点」。全在非冻结区；UI 按钮接线一行留在冻结门外（见文末）。

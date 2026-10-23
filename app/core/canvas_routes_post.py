@@ -395,7 +395,10 @@ class CanvasPostRoutesMixin:
         quality = str(data.get("quality") or "standard")
         aspect = str(data.get("aspect") or "") or cs.DEFAULT_ASPECT
         size = str(data.get("size") or "") or cs.translate_quality(quality, cs.CAPABILITY_IMAGE, aspect)["size"]
-        res = cs.generate_image_openai_compatible(
+        # 执行层专项决策：/host/generate-image 是画布生图主入口 ⇒ 在此接混合调度。
+        # 默认档(engine)行为不变；只有用户把算力滑块拉到本地档才会走本机 SD 引擎。
+        from app.core.ai.hybrid_dispatch import generate_image_hybrid
+        res = generate_image_hybrid(
             prompt=str(data.get("prompt") or ""),
             model=str(data.get("model") or ""),
             size=size,

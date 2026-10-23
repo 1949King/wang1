@@ -54,6 +54,8 @@ SERVER_FILES = [
     os.path.join("app", "core", "canvas_routes_code_video.py"),
     # 2026-10-22：数字人「口型成片」端点（/host/digital-human/talking-video）独立 mixin。
     os.path.join("app", "core", "canvas_routes_digital_human.py"),
+    # 2026-10-23：执行层（混合算力）端点 status / bias / plan 独立 mixin。
+    os.path.join("app", "core", "canvas_routes_execution.py"),
 ]
 CLIENTS = [
     # P0-1 Phase 2（2026-10-18）：tauri 侧 src/libtv 副本已删除，两宿主共用真源包，

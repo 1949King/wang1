@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QFrame, QScrollArea, QComboBox, QLineEdit,
     QGroupBox, QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QStatusBar, QTabWidget, QDialog, QFormLayout,
-    QDialogButtonBox, QApplication
+    QDialogButtonBox, QApplication, QSlider
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -77,6 +77,26 @@ class ModelManagementModule(QWidget):
         except (OSError, ValueError) as e:
             logger.warning(f"保存活跃模型配置失败: {e}")
 
+    @staticmethod
+    def _bias_hint_text(value: int) -> str:
+        """滑块文案：把 0-100 翻成人话（判定边界与 compute_bias.bias_mode 一致）。"""
+        if value <= 24:
+            return f"{value} · 本机优先"
+        if value >= 75:
+            return f"{value} · 云端优先"
+        return f"{value} · 动态混合"
+
+    def _on_bias_changed(self, value: int):
+        """滑块变化 ⇒ 落盘到 data/compute_bias.json（执行层下次裁定即生效）。"""
+        self._bias_hint.setText(self._bias_hint_text(value))
+        try:
+            from app.core.ai.compute_bias import get_bias
+
+            if not get_bias().set(int(value)):
+                logger.warning("混合算力偏好落盘失败（值 %s 仅本次会话生效）", value)
+        except Exception as e:
+            logger.warning("混合算力偏好设置失败: %s", e)
+
     def _restore_active_state(self):
         if not self._active_provider:
             return
@@ -109,6 +129,27 @@ class ModelManagementModule(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
         header_layout.addWidget(title)
         header_layout.addStretch()
+
+        # ── 混合算力滑块（2026-10-23）：0=纯本地 · 50=动态混合 · 100=纯云端 ──
+        # 只决定「执行层偏好」；真正选路在 app/core/ai/execution_planner.py。
+        # 画布侧同一份数据经 /host/execution-bias 读写 ⇒ 两处永远一致（单一真源）。
+        header_layout.addWidget(QLabel("混合算力"))
+        self._bias_slider = QSlider(Qt.Orientation.Horizontal)
+        self._bias_slider.setRange(0, 100)
+        self._bias_slider.setFixedWidth(160)
+        self._bias_slider.setToolTip("0=只用本机模型 · 50=按质量/成本动态混合 · 100=只用云端 API")
+        self._bias_hint = QLabel("")
+        self._bias_hint.setStyleSheet("font-size: 11px; color: #888888;")
+        try:
+            from app.core.ai.compute_bias import get_bias
+
+            self._bias_slider.setValue(int(get_bias().get()))
+        except Exception:
+            self._bias_slider.setValue(50)
+        self._bias_hint.setText(self._bias_hint_text(self._bias_slider.value()))
+        self._bias_slider.valueChanged.connect(self._on_bias_changed)
+        header_layout.addWidget(self._bias_slider)
+        header_layout.addWidget(self._bias_hint)
 
         self._active_label = QLabel("未选择激活模型")
         self._active_label.setStyleSheet("font-size: 12px; color: #888888;")

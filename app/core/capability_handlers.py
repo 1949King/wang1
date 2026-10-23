@@ -1896,6 +1896,8 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
                         "生成质量守护总入口：多守护 + 全量负面词")
 
     logger.info("[capability_handlers] 已注册内置能力（含画布）")
+    from app.core.ai.execution_planner_handlers import register_execution_capabilities as _reg_exec
+    _reg_exec(dispatcher)
 
     # ═══════════════════════════════════════════════════════════════
     # 启动自检（三项）——2026-09-19 加固

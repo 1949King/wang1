@@ -38,6 +38,8 @@ MIXINS = [
     os.path.join(ROOT, "app", "core", "canvas_routes_roughcut.py"),
     os.path.join(ROOT, "app", "core", "canvas_routes_code_video.py"),
     os.path.join(ROOT, "app", "core", "canvas_routes_digital_human.py"),
+    # 2026-10-23：执行层端点 mixin（execution-status / execution-bias / execution-plan）。
+    os.path.join(ROOT, "app", "core", "canvas_routes_execution.py"),
 ]
 
 
