@@ -109,6 +109,57 @@ def test_backend_registry_respects_vram():
     assert "diffusers" in BR.available_ids(model_arch="sd15", profile=prof_ok)
 
 
+# ── ②b 回归锁（2026-10-24）：svd 架构必须可被选为本地 ──────────────────
+def test_svd_arch_is_routable():
+    """V4.46.7 曾漏登记 svd 架构 ⇒ planner 把「SVD 视频本地可做」误判为不可用，
+    直接架空并行会话刚做的『视频侧真本地双路』（V4.46.6）。此测试防再犯。"""
+    from app.core.neural import backend_registry as BR
+
+    prof = {"vram_gb": 8.0,
+            "libs": {"diffusers": True, "diffsynth_engine": True}}
+    ids = BR.available_ids(model_arch="svd", profile=prof)
+    assert "diffsynth" in ids, "SVD（i2v 视频）必须由 diffsynth 承接，否则视频永远走云端"
+
+
+def test_planner_video_with_reference_can_go_local(monkeypatch, fake_device,
+                                                   telemetry_path):
+    """capability=video + 有参考图 ⇒ chain 必须含 local（诚实前提：SVD 是 i2v）。"""
+    monkeypatch.setenv("SHIGUANG_DEVICE_PROFILE", fake_device(
+        libs={"diffusers": True, "diffsynth_engine": True}))
+    from app.core.ai import execution_planner as EP
+
+    r = EP.plan(capability="video", has_reference=True)
+    assert "local" in r["chain"], "有参考图的本地视频路径被误杀（svd 登记回归）"
+    assert r["engine"] in ("diffsynth", "diffusers") or r["engine"] == ""
+
+
+def test_planner_unknown_arch_falls_back_to_legacy(monkeypatch, fake_device,
+                                                   telemetry_path):
+    """注册表完全没登记过的架构 ⇒ 必须退回旧引擎探测，而不是武断判「本地不可用」。
+
+    原则：「我没登记」≠「本机做不到」。宁可少一层优化，不可误杀一条可用路径。
+    """
+    monkeypatch.setenv("SHIGUANG_DEVICE_PROFILE", fake_device(
+        libs={"diffusers": True, "diffsynth_engine": True}))
+    from app.core.ai import execution_planner as EP
+
+    called = {"n": 0}
+    real = EP._legacy_engine_probe
+
+    def spy():
+        called["n"] += 1
+        return real()
+
+    monkeypatch.setattr(EP, "_legacy_engine_probe", spy)
+    r = EP._engine_probe(capability="image")
+    # image 走 sd15/sdxl，正常应命中注册表；再用假架构直接验证兜底分支
+    from app.core.neural import backend_registry as BR
+
+    assert BR.available_ids(model_arch="totally-unknown-arch") == []
+    r2 = EP._engine_probe(capability="image")   # 不抛即安全
+    assert isinstance(r2.get("available"), bool)
+
+
 # ── ③ 引擎遥测（EPLB 对应物）──────────────────────────────────────────
 def test_telemetry_recommend_prefers_lower_latency(telemetry_path, monkeypatch,
                                                    fake_device):

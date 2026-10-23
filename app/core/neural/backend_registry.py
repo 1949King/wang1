@@ -32,11 +32,13 @@ _BACKENDS: Dict[str, Dict[str, Any]] = {
     "diffsynth": {
         "label": "DiffSynth（主选栈）",
         "libs": ("diffsynth_engine",),
-        "model_archs": ("sd15", "sdxl"),
+        # svd：本机视频是 SVD i2v（stabilityai img2vid-xt 权重在盘，diffsynth 支持）
+        # ★ 2026-10-24 回归修复：这里漏登记 svd 曾让执行层把「视频本地可做」误判为不可用。
+        "model_archs": ("sd15", "sdxl", "svd"),
         "precisions": ("fp16",),
-        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0},
+        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0, "svd": 5.0},
         "accelerators": ("cache",),
-        "note": "SD1.5 首图快；SDXL 首次推理有长编译（实测 415s）",
+        "note": "SD1.5 首图快；SDXL 首次推理有长编译（实测 415s）；SVD 视频 i2v",
     },
     # 以下为「部署期可选」后端：不装就自然不在册，代码里无需 if
     "nunchaku": {

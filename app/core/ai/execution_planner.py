@@ -59,6 +59,26 @@ def _arch_of(capability: str) -> str:
     return "sdxl" if "sdxl" in hint else "sd15"
 
 
+def _legacy_engine_probe() -> Dict[str, Any]:
+    """旧引擎探测（V4.46.5 路径），返回与新路径同构的字段。
+
+    用途：注册表未登记该架构时的兜底 —— 宁可少一层优化，不可误杀一条可用路径。
+    """
+    try:
+        from app.core.ai.execution_decider import resolve_execution_engine
+
+        r = resolve_execution_engine()
+    except Exception as e:
+        logger.debug("[execution_planner] 旧引擎探测失败", exc_info=True)
+        return {"engine": "", "available": False, "is_fallback": True,
+                "reason": "引擎探测异常 %s: %s" % (type(e).__name__, e),
+                "device": {}, "accelerators": [], "engine_reasons": []}
+    return {"engine": r.get("engine", ""), "available": bool(r.get("available")),
+            "is_fallback": bool(r.get("is_fallback")),
+            "reason": r.get("reason", ""), "device": {},
+            "accelerators": [], "engine_reasons": ["走旧引擎探测（注册表未登记该架构）"]}
+
+
 def _engine_probe(capability: str = "image") -> Dict[str, Any]:
     """选本地引擎：设备画像 → 后端注册表 → 实测遥测（EPLB 映射）。
 
@@ -86,12 +106,20 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
 
         cands = BR.candidates(model_arch=arch, profile=prof)
         avail = [c["id"] for c in cands if c["available"]]
+        known_archs = {a for c in cands for a in (c["spec"].get("model_archs") or ())}
         for c in cands:
             if not c["available"]:
                 reasons.append("后端 %s 不在册：%s" % (c["id"], "；".join(c["reasons"])))
     except Exception:
         logger.debug("[execution_planner] 后端注册表不可用", exc_info=True)
-        cands, avail = [], []
+        cands, avail, known_archs = [], set(), set()
+
+    # ★ 兜底（2026-10-24 回归教训）：注册表**完全没登记过**的架构（漏配/新模型）
+    #   退回旧探测 resolve_execution_engine()——「我没登记」不等于「本机做不到」，
+    #   武断判死会把真可用的路径（如 SVD 视频本地）误杀成纯云端。
+    if arch not in known_archs:
+        reasons.append("注册表未登记架构 %s ⇒ 退回引擎探测" % arch)
+        return _legacy_engine_probe()
 
     chosen = ""
     engine_reasons: List[str] = []
