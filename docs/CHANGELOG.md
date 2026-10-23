@@ -1,5 +1,44 @@
 # 拾光剪影 — 变更日志
 
+## 修本地视频 fps 写死 24（各族按原生帧率编码，时长不再被压缩）（V4.46.11，2026-10-24）
+
+> 用户选「C：排查其它视频族的帧格式问题」。排查挖出的不是帧格式，而是一个更严重的既有 bug。
+
+### ① 发现的 bug（静态审查 + ffprobe 实证）
+
+`_save_video_frames` 把 fps **写死 24.0**，但各族生成时 `num_frames` 都是按**自己的原生帧率**算的：
+
+| 族 | num_frames 系数（= 原生 fps） | 旧编码 fps | 后果 |
+|---|---|---|---|
+| minimax | 24 | 24 | ✅ 恰好对得上 |
+| wan / cogvideox / hunyuan / mochi | 16 | 24 | ❌ 播放快 1.5×、时长压缩 |
+| ltx | 25 | 24 | ⚠️ 略慢 |
+| **svd** | **7** | **24** | ❌ **播放快 3.4×** |
+
+**真机证据**（V4.46.10 那轮的 SVD 产物）：请求 `duration=1s`（7 帧 @7fps），ffprobe 实测 `r_frame_rate=24/1, duration=0.29s` ⇒ 快 3.4 倍。
+
+**为什么一直没被发现**：与帧格式 bug 同因——视频族的真编码链路从没被测试覆盖过（并行会话 V4.46.6 测试明确「不加载模型」）。
+
+### ② 修复
+
+`_save_video_frames` 新增 `fps` 参数（默认 24 保持兼容）；7 个 `_infer_*` 各自定义 `_native_fps`（**取自本族算 num_frames 用的同一个系数**，让编码器与帧数计算自洽，不是猜模型）并在 return 时传入。cv2 分支用 float、imageio 分支用 int。
+
+### ③ 验证（决定性）
+
+- 单测 `test_save_video_frames_respects_fps`：同 7 帧，fps=7 应≈1.0s、fps=24 应≈0.29s，用 **ffprobe 实测断言**（ffprobe 不可用则 skip，不假绿）。3 passed。
+- 端到端真机：SVD `duration=1` 重生成 → ffprobe `r_frame_rate=7/1, duration=1.000s` ✅（修复前 24fps/0.29s）。
+- 全量 pytest 1944 passed；run_all_checks 107 项；frozen_zone_guard 106 锁；ruff 棘轮零新增。
+
+### ④ 顺带修测试自己的 bug
+
+新加的 fps 测试首跑被 skip：第二个输出写到**不存在的子目录**，`cv2.VideoWriter` 静默写失败（返回 ok=True 却没文件）⇒ ffprobe 读不到。补 `mkdir` + 断言文件真实落盘。**这暴露 cv2 的坑：目录不存在时不报错、只产不出文件**。
+
+### ⑤ 遗留（诚实）
+
+- 帧格式本身（PIL vs numpy）：minimax/wan 的 `raw_frames` 归一化路径已能处理（list/cpu tensor 分支），但**只有 SVD 被真机跑过**，其余族仍未经端到端生成验证（权重不在盘）。
+- `_native_fps` 按各族 num_frames 系数定；若某族实际原生帧率与其 num_frames 计算不符，需真机跑过才能发现（现有信息下自洽）。
+- 常驻复用（V4.46.10 的 pipe cache）仍只接了 SVD，其余族未接。
+
 ## 视频侧用法感知（SVD 管线常驻复用 -39%）+ 修 SVD 出片必崩的既有 bug（V4.46.10，2026-10-24）
 
 > 用户指令：「视频侧同样做用法感知策略」。做完，并顺带挖出一个让 SVD 本地出片**此前必崩**的既有 bug。

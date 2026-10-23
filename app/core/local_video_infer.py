@@ -236,11 +236,18 @@ def _save_video_frames(
     *,
     audio_waveform: Optional[Any] = None,
     audio_sample_rate: int = 32000,
+    fps: int = 24,
 ) -> Dict[str, Any]:
     """把 diffusers pipeline 输出的帧列表编码为 mp4 存到 canvas inbox。
 
     可选传入 audio_waveform（numpy float32 数组，多声道 shape=[samples, channels]
     或单声道 shape=[samples]），会自动用 ffmpeg mux 成带音频的 mp4。
+
+    ★ fps 必须由调用方按**模型原生帧率**传入（2026-10-24 静态审查暴露的 bug）：
+      各族的 num_frames 都是 `int(duration * 原生fps)` 算的（SVD=7、wan/cogvideox/
+      hunyuan/mochi=16、ltx=25、minimax=24），但旧实现把编码帧率写死 24 ⇒ 除 minimax 外
+      所有族输出视频**播放过快、时长被压缩**（SVD 实测：请求 1s 只出 0.29s，快 3.4 倍）。
+      默认 24 仅为兼容，正确用法是显式传该族的原生 fps。
     """
     import numpy as np
 
@@ -252,6 +259,7 @@ def _save_video_frames(
 
     name = f"{int(time.time())}_local.mp4"
     path = os.path.join(out_dir, name)
+    _fps = float(fps) if fps and int(fps) > 0 else 24.0
     try:
         if cv2 is not None:
             # ★ 修复（2026-10-24 真机验证暴露）：SVD 的 result.frames[0] 是 PIL.Image，
@@ -260,7 +268,7 @@ def _save_video_frames(
             _first = np.array(frames[0])
             h, w = int(_first.shape[0]), int(_first.shape[1])
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(path, fourcc, 24.0, (w, h))
+            writer = cv2.VideoWriter(path, fourcc, _fps, (w, h))
             for f in frames:
                 arr = np.array(f)
                 if arr.dtype != np.uint8:
@@ -274,7 +282,7 @@ def _save_video_frames(
                 writer.write(arr)
             writer.release()
         else:
-            writer = imageio.get_writer(path, fps=24, codec="libx264")
+            writer = imageio.get_writer(path, fps=int(_fps), codec="libx264")
             for f in frames:
                 arr = np.array(f)
                 if arr.dtype != np.uint8:
@@ -374,6 +382,8 @@ def _infer_minimax_h3(
     import torch
 
     from diffusers import MiniMaxH3ModularPipeline
+
+    _native_fps = 24   # 本族 num_frames=int(duration*24) ⇒ 编码必须 24fps 才不失真
 
     width = int(size.split("x")[0]) if "x" in size else 1280
     height = int(size.split("x")[1]) if "x" in size else 720
@@ -477,6 +487,7 @@ def _infer_minimax_h3(
         frames, out_dir, bridge_port,
         audio_waveform=audio_wav,
         audio_sample_rate=audio_sr,
+        fps=_native_fps,
     )
 
 
@@ -497,6 +508,8 @@ def _infer_wan(
     import torch
 
     from diffusers import WanVideoPipeline
+
+    _native_fps = 16   # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -545,7 +558,7 @@ def _infer_wan(
             height=height,
         )
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
 def _infer_cogvideox(
@@ -567,6 +580,8 @@ def _infer_cogvideox(
     import torch
 
     from diffusers import CogVideoXPipeline
+
+    _native_fps = 16   # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -594,7 +609,7 @@ def _infer_cogvideox(
         height=height,
     )
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
 def _infer_hunyuan(
@@ -614,6 +629,8 @@ def _infer_hunyuan(
     import torch
 
     from diffusers import HunyuanVideoPipeline
+
+    _native_fps = 16   # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -637,7 +654,7 @@ def _infer_hunyuan(
         height=height,
     )
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
 def _infer_ltx(
@@ -657,6 +674,8 @@ def _infer_ltx(
     import torch
 
     from diffusers import LTXVideoPipeline
+
+    _native_fps = 25   # num_frames=int(duration*25)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -680,7 +699,7 @@ def _infer_ltx(
         height=height,
     )
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
 def resolve_image_path(
@@ -775,6 +794,8 @@ def _infer_svd(
 
     from diffusers import StableVideoDiffusionPipeline
 
+    _native_fps = 7    # SVD 训练 fps=7，n_frames=round(duration*7)
+
     img_src = (reference_image or first_frame or "").strip()
     if not img_src:
         return {
@@ -831,7 +852,7 @@ def _infer_svd(
             logger.warning("[local_video_infer] SVD 生成 OOM，已淘汰常驻管线待重载")
         raise
     frames = result.frames[0] if result.frames else []
-    out = _save_video_frames(frames, out_dir, bridge_port)
+    out = _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
     if isinstance(out, dict):
         out["pipe_source"] = _src      # hit=复用常驻管线 / miss=本次新加载（首帧慢的那次）
     return out
@@ -855,6 +876,8 @@ def _infer_mochi(
 
     from diffusers import MochiPipeline
 
+    _native_fps = 16   # num_frames=int(duration*16)
+
     width, _, height = (
         int(size.split("x")[0]),
         0,
@@ -877,7 +900,7 @@ def _infer_mochi(
         height=height,
     )
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port)
+    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
 _INFER_FUNC_MAP = {
