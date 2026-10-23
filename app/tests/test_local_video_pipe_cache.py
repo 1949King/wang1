@@ -4,6 +4,7 @@
 锁死：命中/未命中语义、LRU 上限、失败不写缓存、OOM 淘汰、并发只加载一次。
 全部用假 loader（不碰 torch/diffusers/GPU）。
 """
+
 import threading
 
 import pytest
@@ -55,12 +56,12 @@ def test_failure_not_cached():
 def test_evict_returns_truth():
     C.get_or_load(("svd", "/e"), lambda: "E")
     assert C.evict(("svd", "/e")) is True
-    assert C.evict(("svd", "/e")) is False   # 已没了
+    assert C.evict(("svd", "/e")) is False  # 已没了
 
 
 def test_status_shape():
     C.get_or_load(("svd", "/s"), lambda: "S")
-    C.get_or_load(("svd", "/s"), lambda: "S")   # 一次命中
+    C.get_or_load(("svd", "/s"), lambda: "S")  # 一次命中
     st = C.status()
     assert st["cached"] == 1
     assert st["entries"][0]["hits"] == 1

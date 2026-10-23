@@ -16,6 +16,7 @@
   · 加载在锁内串行：避免并发把两份 4.2GB 同时塞进内存。
   · 失败不写缓存；调用方可在 OOM 后 evict(key) 强制下次重载。
 """
+
 from __future__ import annotations
 
 import logging
@@ -89,8 +90,7 @@ def status() -> Dict[str, Any]:
     """供 UI/排障回显：当前常驻了哪些视频管线、各自复用次数、上限。"""
     with _lock:
         entries: List[Dict[str, Any]] = [
-            {"kind": k[0], "model_path": k[1], "hits": _HITS.get(k, 0)}
-            for k in _CACHE.keys()
+            {"kind": k[0], "model_path": k[1], "hits": _HITS.get(k, 0)} for k in _CACHE.keys()
         ]
         return {"max_pipes": _MAX_PIPES, "cached": len(entries), "entries": entries}
 
