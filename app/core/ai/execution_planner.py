@@ -47,16 +47,93 @@ _SUPPORTED = {"image", "video", "audio", "music"}
 _LOCAL_PROMPT_ONLY = {"image"}
 
 
-def _engine_probe() -> Dict[str, Any]:
-    """本地引擎健康度（惰性、包异常）。返回 {engine, available, is_fallback, reason}。"""
+def _arch_of(capability: str) -> str:
+    """能力 → 模型架构（用于后端注册表与遥测维度）。"""
+    cap = (capability or "").lower()
+    if cap == "video":
+        return "svd"
     try:
-        from app.core.ai.execution_decider import resolve_execution_engine
+        hint = _local_model_hint()
+    except Exception:
+        hint = "sd15-t2i"
+    return "sdxl" if "sdxl" in hint else "sd15"
 
-        return resolve_execution_engine()
-    except Exception as e:
-        logger.debug("[execution_planner] 引擎探测失败", exc_info=True)
-        return {"engine": "", "available": False, "is_fallback": True,
-                "reason": f"引擎探测异常 {type(e).__name__}: {e}"}
+
+def _engine_probe(capability: str = "image") -> Dict[str, Any]:
+    """选本地引擎：设备画像 → 后端注册表 → 实测遥测（EPLB 映射）。
+
+    返回（兼容旧键 + 新增键）：
+      {engine, available, is_fallback, reason, device, accelerators, engine_reasons}
+    · 有实测证据（n≥3）时按「失败率 → 首图 → 稳态」选栈；
+    · 无证据时退回保守默认（diffsynth 优先、diffusers 兜底），与改动前一致；
+    · 一个后端都不在册 ⇒ available=False（换设备装不上时，上层自然走云端）。
+    """
+    reasons: List[str] = []
+    arch = _arch_of(capability)
+    prof: Dict[str, Any] = {}
+    try:
+        from app.core.neural import device_profile as DP
+
+        prof = DP.probe(use_cache=True)
+        reasons.append("设备：%s（%s/%s，%.1fGB）"
+                       % (prof.get("device_id"), prof.get("vendor"),
+                          prof.get("arch"), float(prof.get("vram_gb") or 0)))
+    except Exception:
+        logger.debug("[execution_planner] 设备画像不可用", exc_info=True)
+
+    try:
+        from app.core.neural import backend_registry as BR
+
+        cands = BR.candidates(model_arch=arch, profile=prof)
+        avail = [c["id"] for c in cands if c["available"]]
+        for c in cands:
+            if not c["available"]:
+                reasons.append("后端 %s 不在册：%s" % (c["id"], "；".join(c["reasons"])))
+    except Exception:
+        logger.debug("[execution_planner] 后端注册表不可用", exc_info=True)
+        cands, avail = [], []
+
+    chosen = ""
+    engine_reasons: List[str] = []
+    try:
+        from app.core.ai import engine_telemetry as ET
+
+        picked, engine_reasons = ET.recommend(candidates=avail, model_arch=arch)
+        if picked:
+            chosen = picked
+            reasons.append("按实测证据选 %s" % picked)
+    except Exception:
+        logger.debug("[execution_planner] 引擎遥测不可用", exc_info=True)
+
+    if not chosen:
+        # 保守默认：与改动前一致（diffsynth 优先 / diffusers 兜底）
+        for pref in ("diffsynth", "diffusers"):
+            if pref in avail:
+                chosen = pref
+                reasons.append("无实测证据 ⇒ 保守默认 %s" % pref)
+                break
+
+    accelerators: List[str] = []
+    if chosen:
+        spec = next((c["spec"] for c in cands if c["id"] == chosen), {}) or {}
+        usable = (prof.get("usable") or {})
+        for acc in spec.get("accelerators") or ():
+            if acc == "fp8" and not usable.get("fp8"):
+                continue          # 无 torchao 或硬件不支持 ⇒ 不声明
+            if acc == "int4" and not usable.get("int4"):
+                continue
+            if acc == "compiled" and not usable.get("compile"):
+                continue
+            accelerators.append(acc)
+
+    return {"engine": chosen, "available": bool(chosen),
+            "is_fallback": bool(chosen and chosen != "diffsynth"),
+            "reason": "；".join(reasons) or "无可用后端",
+            "device": {"device_id": prof.get("device_id"),
+                       "vendor": prof.get("vendor"), "arch": prof.get("arch"),
+                       "vram_gb": prof.get("vram_gb")},
+            "accelerators": accelerators,
+            "engine_reasons": engine_reasons}
 
 
 def _hw_probe() -> Dict[str, Any]:
@@ -131,7 +208,7 @@ def plan(*, capability: str = "image", has_reference: bool = False,
         mode = bias_mode(bias)
     except Exception:
         logger.debug("[execution_planner] 偏好读取失败，按默认 engine", exc_info=True)
-    eng = _engine_probe()
+    eng = _engine_probe(cap)
     hw = _hw_probe()
     lam = _budget_lambda()
     cloud_ok = _cloud_available()
@@ -151,14 +228,20 @@ def plan(*, capability: str = "image", has_reference: bool = False,
                 "model_hint": _local_model_hint() if is_local else "",
                 "reasons": reasons, "bias": bias, "mode": mode,
                 "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
-                "degrade_level": 0}
+                "degrade_level": 0,
+                "device": eng.get("device", {}),
+                "accelerators": eng.get("accelerators", []),
+                "engine_reasons": eng.get("engine_reasons", [])}
 
     # ── 1) 能力是否本地可做（诚实边界）──
     if cap not in _SUPPORTED:
         reasons.append(f"能力 {cap} 不在本层裁定范围 ⇒ 走既有路径")
         return {"ok": False, "route": "cloud", "engine": "", "chain": ["cloud"],
                 "model_hint": "", "reasons": reasons, "bias": bias, "mode": mode,
-                "hw_tier": hw.get("tier", ""), "budget_lambda": lam, "degrade_level": 0}
+                "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
+                "degrade_level": 0,
+                "device": eng.get("device", {}),
+                "accelerators": [], "engine_reasons": eng.get("engine_reasons", [])}
 
     local_doable = local_ok
     if local_doable and cap not in _LOCAL_PROMPT_ONLY and not has_reference:
@@ -206,12 +289,15 @@ def plan(*, capability: str = "image", has_reference: bool = False,
             "chain": chain, "model_hint": _local_model_hint() if "local" in chain else "",
             "reasons": reasons, "bias": bias, "mode": mode,
             "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
-            "degrade_level": degrade}
+            "degrade_level": degrade,
+            "device": eng.get("device", {}),
+            "accelerators": eng.get("accelerators", []) if "local" in chain else [],
+            "engine_reasons": eng.get("engine_reasons", [])}
 
 
 def status() -> Dict[str, Any]:
     """供 UI/Agent 回显当前执行层快照（只读）。"""
-    eng = _engine_probe()
+    eng = _engine_probe("image")
     hw = _hw_probe()
     bias, mode = 50, "engine"
     try:

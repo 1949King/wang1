@@ -1,5 +1,48 @@
 # 拾光剪影 — 变更日志
 
+## 可移植推理底座（设备画像 / 后端注册 / 引擎遥测）+ 批量复用编码（V4.46.7，2026-10-24）
+
+> 用户指令：「要为后面适配其他设备着想，而不是光适配现在的 4060」。全在非冻结区。
+> 说明：V4.46.6『视频侧真本地双路』由并行会话落地（只加本文件条目、未改 version.py），本版在其之上做底座，版本号顺延。
+
+### ① 为什么改（诊断）
+
+原有三处**绑死当前设备**：
+
+| 位置 | 问题 | 换设备后果 |
+|---|---|---|
+| `execution_decider.detect_hardware_tier` | 用显存阈值（4096/16384MB）分三档，只认 CUDA | AMD / Apple / CPU 全落「全云档」 |
+| `memory_policy` | offload 概念假设「权重能从 CPU 搬到 GPU」 | 统一内存设备上策略无意义 |
+| 双栈优先级 | diffsynth 优先写死在代码里 | 某设备上它更慢/装不上时无法按证据换 |
+
+### ② 新增三件地基
+
+- [device_profile.py](../app/core/neural/device_profile.py)：探测 vendor/arch/vram/能力位/可选库，**CUDA·ROCm·MPS·CPU 四路**；`usable.fp8` = 硬件支持 **AND** torchao 已装（缺一不可）；不认识的架构一律按不支持（不编造）。`SHIGUANG_DEVICE_PROFILE` 可注入假画像 ⇒ 无第二台机器也能测跨设备。缓存 `data/device_profile.json`。
+- [backend_registry.py](../app/core/neural/backend_registry.py)：diffsynth / diffusers / nunchaku / tensorrt **声明式**登记（架构、精度、最小显存、所需库）。装不上的后端表现为「不在册」，代码里不需要 if。
+- [engine_telemetry.py](../app/core/ai/engine_telemetry.py)（**EPLB 对应物**）：按 (设备指纹, 引擎, 模型架构) 记首图/稳态耗时与失败率（EMA、原子写、`SHIGUANG_ENGINE_TELEMETRY_PATH` 隔离）。决策器按「失败率→首图→稳态」选栈，证据 n≥3 才用，否则退回保守默认。
+
+**效果**：直接消掉「SDXL 首图 diffsynth 415s / diffusers 35s」被固定优先级稳定复现的问题。
+
+### ③ 批量出图复用文本编码（KV cache 对应物）
+
+[diffusers_image.py](../app/core/neural/diffusers_image.py) 新增 `generate_batch()`：同 prompt 出 N 张改用 `num_images_per_prompt`，**文本编码只做一次**（交给库内部正确处理 SD1.5 单编码器 / SDXL 双编码器 + pooled embeds；不手工拼 `prompt_embeds`，避免随版本漂移）。`generate()`/`generate_batch()` 都把真实耗时写进遥测。
+
+### ④ 决策器输出扩展
+
+`plan()` / `status()` 新增 `device` / `accelerators` / `engine_reasons`：加速器只在**硬件支持 + 库已装 + 后端声明**三者同时满足时声明，绝不虚报。
+
+### ⑤ 验证
+
+- 新增 [test_device_portability.py](../app/tests/test_device_portability.py) 11 例：假设备注入覆盖 apple / cpu / hopper / sm89，含「fp8 双条件」（硬件支持但无 torchao ⇒ 不可用）、后端注册表按依赖/显存筛除、遥测按延迟推荐与高失败率淘汰、证据不足返回 None、批量入口诚实失败。
+- 既有 `test_execution_planner.py` 12 例同步更新桩签名（决策器 `_engine_probe` 现接收能力参数）。
+- 全量 pytest 与 107 项门禁、ruff 棘轮、冻结区 106 锁见提交记录。
+
+### ⑥ 遗留（诚实）
+
+- **后处理重叠（DualPipe 对应物）未做**：人脸修复/超分与下一张推理并行仍待实现。
+- **FP8 只完成「判定与声明」**：torchao 未安装、未做真实量化与精度评测。
+- **`check_device_portability` 守卫未加**：会改变体检项数（107→108），留待下一刀统一同步文档。
+
 ## 视频侧真本地双路 + 画布算力滑块（V4.46.6，2026-10-24）
 
 > 用户指令：「把视频侧的真本地双路接起来（需要先解决 SVD 的首帧输入链路），把滑块也搬到画布界面上」。

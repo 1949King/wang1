@@ -516,6 +516,7 @@ class DiffusersImageEngine:
             from app.core.neural.video_gen import publish_to_inbox
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t0
+            self._record_telemetry(spec, elapsed, ok=True)
             return {"ok": True, "path": out_path,
                     "image_path": out_path,
                     "image_url": published.get("url", ""),
@@ -526,7 +527,99 @@ class DiffusersImageEngine:
                     "message": f"生成完成：{out_path}（{n_steps} 步 · cfg {n_cfg} · {elapsed:.1f}s）"}
         except Exception as e:
             logger.debug("[diffusers_image] generate 失败", exc_info=True)
+            self._record_telemetry(DIFFUSERS_IMAGE_MODELS.get(model_id) or {}, 0.0, ok=False)
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
+
+    # ── 遥测（EPLB 对应物）────────────────────────────────────────────
+    def _record_telemetry(self, spec: Dict[str, Any], elapsed: float, ok: bool) -> None:
+        """把真实执行结果写进引擎遥测（首图/稳态分开记；失败只记失败率）。
+
+        纪律：遥测写入失败绝不影响生成（包 try、只 debug）。
+        """
+        try:
+            from app.core.ai import engine_telemetry as ET
+
+            arch = "sdxl" if str(spec.get("arch")) == "sdxl" else "sd15"
+            n = int(getattr(self, "_gen_count", 0))
+            ms = max(0.0, float(elapsed) * 1000.0)
+            ET.record(engine="diffusers", model_arch=arch, ok=bool(ok),
+                      first_ms=ms if (ok and n == 0) else 0.0,
+                      steady_ms=ms if (ok and n > 0) else 0.0)
+            if ok:
+                self._gen_count = n + 1
+        except Exception:
+            logger.debug("[diffusers_image] 遥测写入失败（不阻断）", exc_info=True)
+
+    # ── 批量出图（KV cache 复用的对应物）────────────────────────────────
+    def generate_batch(self, model_id: str, *, prompt: str = "",
+                       negative_prompt: str = "", count: int = 1,
+                       width: int = 0, height: int = 0, seed: int = 0,
+                       steps: int = 0, cfg: float = 0.0,
+                       out_dir: str = "") -> Dict[str, Any]:
+        """**一次文本编码、批量出 N 张**（同 prompt 的 text-encoder 结果复用）。
+
+        对应 DeepSeek「KV cache 复用同一前缀」的思路：同一 prompt 出 N 张时，
+        文本编码只做一次，N 个 latent 共用同一份 prompt_embeds。
+        实现上交给 diffusers 的 `num_images_per_prompt`（它内部对 SD1.5/SDXL 双编码器
+        的处理是正确的；手工拼 prompt_embeds 会随版本漂移，故不自己实现）。
+
+        诚实边界：这是**单次前向的批量**，显存随 N 增长；8GB 卡建议 N≤4（512²）。
+        失败一律 ok=False，不产出半成品。
+        """
+        spec = DIFFUSERS_IMAGE_MODELS.get(model_id)
+        if not spec:
+            return {"ok": False, "message": f"未知模型 id: {model_id}"}
+        n_img = max(1, int(count))
+        if not prompt.strip():
+            return {"ok": False, "message": "批量文生图必须提供 prompt"}
+        r = self.load(model_id)
+        if not r.get("ok"):
+            return {"ok": False, "message": r.get("message") or "加载失败"}
+        try:
+            import time as _time
+            import torch
+            t0 = _time.time()
+            n_steps = int(steps) if steps else int(spec["steps"])
+            n_cfg = float(cfg) if cfg else float(spec["cfg"])
+            native = int(spec["native_size"])
+            n_w = int(width) if width else native
+            n_h = int(height) if height else native
+            gen = torch.Generator("cpu").manual_seed(int(seed)) if seed else None
+            out = self._pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                guidance_scale=n_cfg,
+                height=n_h, width=n_w,
+                num_inference_steps=n_steps,
+                num_images_per_prompt=n_img,   # ★ 文本编码只做一次
+                generator=gen,
+            )
+            base = out_dir or os.path.join("短剧AI剪辑输出")
+            os.makedirs(base, exist_ok=True)
+            from app.core.neural.video_gen import publish_to_inbox
+
+            saved: List[Dict[str, Any]] = []
+            for idx, img in enumerate(out.images[:n_img]):
+                p = os.path.join(base, f"batch_{model_id}_{int(seed)}_{idx}.png")
+                img.save(p)
+                pub = publish_to_inbox(p)
+                saved.append({"path": p, "image_path": p,
+                              "image_url": pub.get("url", ""),
+                              "inbox_path": pub.get("inbox_path", "")})
+            elapsed = _time.time() - t0
+            self._record_telemetry(spec, elapsed, ok=True)
+            per = round(elapsed / max(1, len(saved)), 2)
+            return {"ok": bool(saved), "images": saved, "count": len(saved),
+                    "steps": n_steps, "cfg": n_cfg, "width": n_w, "height": n_h,
+                    "seconds_elapsed": round(elapsed, 1),
+                    "per_image_seconds": per,
+                    "text_encode_reused": True,
+                    "message": f"批量完成 {len(saved)} 张（{n_steps} 步 · 合计 {elapsed:.1f}s · "
+                               f"均 {per}s/张 · 文本编码复用 1 次）"}
+        except Exception as e:
+            logger.debug("[diffusers_image] generate_batch 失败", exc_info=True)
+            self._record_telemetry(spec, 0.0, ok=False)
+            return {"ok": False, "message": f"批量生成失败：{type(e).__name__}: {e}"}
 
 
 _engine: Optional[DiffusersImageEngine] = None

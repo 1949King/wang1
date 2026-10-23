@@ -59,9 +59,10 @@ def test_bias_persist_roundtrip(bias_store):
 # ── ② 执行层裁定 ──────────────────────────────────────────────────────
 def _stub_env(monkeypatch, *, local=True, cloud=True, tier="mainstream", lam=0.05):
     """把环境探测打桩，专注验裁定逻辑本身。"""
-    monkeypatch.setattr(EP, "_engine_probe", lambda: {
+    monkeypatch.setattr(EP, "_engine_probe", lambda *a, **kw: {
         "engine": "diffsynth", "available": local, "is_fallback": False,
-        "reason": "stub"}, raising=False)
+        "reason": "stub", "device": {"device_id": "stub"},
+        "accelerators": [], "engine_reasons": []}, raising=False)
     monkeypatch.setattr(EP, "_hw_probe", lambda: {
         "tier": tier, "memory_mb": 8192, "gpu_name": "stub", "reason": "stub"},
         raising=False)
