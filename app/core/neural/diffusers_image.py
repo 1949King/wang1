@@ -159,6 +159,55 @@ def available_models() -> List[Dict[str, Any]]:
     return out
 
 
+# ── 质量档位（2026-10-24 实测标定：4060 8GB · SDXL 1024² · offload）────────
+# 基线 = 20 步 cfg7.5 默认采样器 = 24.99s（本项目实测，干净无干扰）。
+# 实测数据（详见 docs/CHANGELOG.md V4.46.8 与 .workbuddy/tmp/bench/*.log）：
+#   fast  : LCM 8 步 cfg1.0  → 12.84s（51%）· CLIP 对齐 ≈99%，但**目视偏软**（草稿/抽卡）
+#   high  : DPM++ 12 步      → 17.84s（71%）· CLIP 97.5%，目视接近满质量
+#   final : 20 步（基线本身，不动）
+# SD1.5 512² 整卡只要 3.08s，少步代价小得多 ⇒ fast 用 DPM++ 8 步（实测 1.55s≈49%）。
+#
+# ★ 为什么 SDXL 的 fast 只能到 51%（不是 25%）：8GB 卡上 SDXL fp16 权重恰好占满显存
+#   （实测加载后空闲 0.00GB）⇒ offload 强必需 ⇒ 每次调用固定开销 ~7s（文本编码+搬运+VAE
+#   解码），占总时间 28%；批量摊薄也试过，1024² 批量在 8GB 上直接换页卡死。
+QUALITY_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "sd15-t2i": {
+        "final": {"steps": 20, "cfg": 7.5, "sampler": "default"},
+        "high": {"steps": 12, "cfg": 7.5, "sampler": "dpm"},
+        "fast": {"steps": 8, "cfg": 7.5, "sampler": "dpm"},
+    },
+    "sdxl-t2i": {
+        "final": {"steps": 20, "cfg": 7.5, "sampler": "default"},
+        "high": {"steps": 12, "cfg": 7.5, "sampler": "dpm"},
+        "fast": {"steps": 8, "cfg": 1.0, "sampler": "lcm"},
+    },
+}
+
+
+def resolve_preset(model_id: str, preset: str) -> Dict[str, Any]:
+    """把质量档位解析成 {steps, cfg, sampler, preset}。
+
+    未知档位一律退回 `final`（宁慢不糊），空串表示「不干预，用调用方参数」。
+    """
+    spec = QUALITY_PRESETS.get(model_id) or {}
+    p = (preset or "").strip().lower()
+    if not p:
+        return {"steps": 0, "cfg": 0.0, "sampler": "default", "preset": ""}
+    if p not in spec:
+        logger.warning("[diffusers_image] 未知质量档位 %r ⇒ 按 final", preset)
+        p = "final"
+    row = dict(spec[p])
+    row["preset"] = p
+    return row
+
+
+def _force_whole_gpu_policy(*_a: Any, **_kw: Any) -> Dict[str, Any]:
+    """仅在「装 LoRA」这一瞬间使用：整卡直载，避免 offload hook 与 LoRA 互撕。"""
+    return {"mode": "whole_gpu", "offload": False, "decode_chunk_size": 1,
+            "quant": "fp16", "floor_gb": None, "free_vram_gb": 0.0,
+            "total_vram_gb": 0.0, "reasons": ["装 LoRA 临时整卡"], "planned_modes": []}
+
+
 class DiffusersImageEngine:
     """自研图像生成引擎（diffusers 栈）。**模型不自动下载**，须先 `pull()`。"""
 
@@ -422,6 +471,9 @@ class DiffusersImageEngine:
                 logger.info("[diffusers_image] 显存策略: %s", _r)
 
             self._pipe = pipe
+            self._base_scheduler = pipe.scheduler   # 质量档位切采样器时用它还原
+            self._lcm = False
+            self._lcm_lora = ""
             self._pipe_i2i = None     # 换模型后 i2i 管道须重建
             self._loaded_id = model_id
             logger.info("[diffusers_image] 已加载 %s（%s）· offload=%s",
@@ -451,7 +503,7 @@ class DiffusersImageEngine:
                  negative_prompt: str = "", image_path: str = "",
                  width: int = 0, height: int = 0, seed: int = 0,
                  steps: int = 0, cfg: float = 0.0,
-                 out_path: str = "") -> Dict[str, Any]:
+                 out_path: str = "", preset: str = "") -> Dict[str, Any]:
         """生成图像。**不自动下载模型**；未加载会先尝试加载。
 
         `steps`/`cfg`/`width`/`height` 为 0 时取注册表实测默认（SD1.5: 20 步 / 7.5 / 512²）。
@@ -474,6 +526,16 @@ class DiffusersImageEngine:
             t0 = _time.time()
             n_steps = int(steps) if steps else int(spec["steps"])
             n_cfg = float(cfg) if cfg else float(spec["cfg"])
+            # ★ 质量档位（2026-10-24）：覆盖步数/CFG/采样器；LCM 档需先安全装 LoRA。
+            pre = resolve_preset(model_id, preset)
+            if pre["preset"]:
+                if pre["sampler"] == "lcm":
+                    ok_l, why = self.enable_lcm(model_id)
+                    if not ok_l:
+                        return {"ok": False,
+                                "message": f"质量档位 {pre['preset']} 需要 LCM-LoRA：{why}"}
+                self._apply_sampler(pre["sampler"])
+                n_steps, n_cfg = int(pre["steps"]), float(pre["cfg"])
             native = int(spec["native_size"])
             n_w = int(width) if width else native
             n_h = int(height) if height else native
@@ -549,6 +611,129 @@ class DiffusersImageEngine:
                 self._gen_count = n + 1
         except Exception:
             logger.debug("[diffusers_image] 遥测写入失败（不阻断）", exc_info=True)
+
+    # ── 采样器切换 ──────────────────────────────────────────────────
+    def _apply_sampler(self, kind: str) -> None:
+        """按档位切采样器；`default` 还原到加载时的那个。失败不抛（保持原样）。"""
+        k = (kind or "default").strip().lower()
+        if self._pipe is None:
+            return
+        base = getattr(self, "_base_scheduler", None)
+        try:
+            if k == "dpm":
+                from diffusers import DPMSolverMultistepScheduler
+
+                cfg = self._pipe.scheduler.config if base is None else base.config
+                self._pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+                    cfg, use_karras_sigmas=True)
+            elif k == "lcm":
+                from diffusers import LCMScheduler
+
+                cfg = self._pipe.scheduler.config
+                self._pipe.scheduler = LCMScheduler.from_config(cfg)
+            elif base is not None:
+                self._pipe.scheduler = type(base).from_config(base.config)
+        except Exception:
+            logger.warning("[diffusers_image] 采样器切换失败（保持原样）: %s", k,
+                           exc_info=True)
+
+    # ── LCM-LoRA（少步加速）─────────────────────────────────────────
+    @staticmethod
+    def _find_lcm_lora() -> str:
+        """定位 LCM-LoRA 权重：`SHIGUANG_LCM_LORA_DIR` 优先，其次项目缓存目录。"""
+        import glob as _glob
+
+        env = os.environ.get("SHIGUANG_LCM_LORA_DIR", "").strip()
+        cands: List[str] = []
+        if env:
+            cands.append(env)          # ★ 显式指定即权威：不再回落缓存（便于测试/部署隔离）
+        else:
+            cache = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))), "app", "models", "cache")
+            cands.append(os.path.join(cache, "lcm-lora-sdxl"))
+        for root in cands:
+            if os.path.isfile(root) and root.endswith(".safetensors"):
+                return root
+            if os.path.isdir(root):
+                hits = _glob.glob(os.path.join(root, "**", "*.safetensors"),
+                                  recursive=True)
+                if hits:
+                    return hits[0]
+        return ""
+
+    def lcm_status(self) -> Dict[str, Any]:
+        """LCM 可用性（供 UI/Agent 判断能不能用 fast 档）。
+
+        ★ 用 `find_spec` 而非 `import peft`：只为「查是否存在」就真 import
+          peft 会把它和 transformers 的原生层一起拉进来（实测在整套 pytest 中
+          触发 0xC0000005 访问冲突），探测必须是零副作用。
+        """
+        lora = self._find_lcm_lora()
+        try:
+            import importlib.util as _u
+
+            peft_ok = _u.find_spec("peft") is not None
+        except (ImportError, ValueError):
+            peft_ok = False
+        return {"ready": bool(getattr(self, "_lcm", False)),
+                "lora_found": bool(lora), "lora": lora,
+                "peft_available": peft_ok,
+                "usable": bool(lora) and peft_ok}
+
+    def enable_lcm(self, model_id: str = "") -> tuple:
+        """装载 LCM-LoRA 并把采样器切到 LCM —— **按实测唯一可行顺序**。
+
+        为什么这么绕（三个都是实测踩出来的，见 CHANGELOG V4.46.8）：
+          ① 在 offload 管线上直接 `load_lora_weights()` → 卡死 >7 分钟（hook 与 LoRA 互撕）；
+          ② 整卡跑 1024² → SDXL fp16 权重恰好占满 8GB，换页卡死；
+          ③ `fuse_lora()` 要复制一份 6.5GB 权重 → 8GB 卡必卡。
+        正确顺序：卸 offload → 整卡装载 LoRA（2.3s）→ **不 fuse** → 重新开 offload。
+
+        返回 (ok, 说明)。失败一律 ok=False 并给原因，绝不静默降级成「慢但你说快」。
+        """
+        mid = (model_id or self._loaded_id or "").strip()
+        if getattr(self, "_lcm", False):
+            return True, "已装载"
+        # 先查权重（纯文件系统，零副作用）；没有就直接失败，不必惊动 peft。
+        lora = self._find_lcm_lora()
+        if not lora:
+            return False, "未找到 LCM-LoRA 权重（可用 SHIGUANG_LCM_LORA_DIR 指定）"
+        try:
+            import peft  # noqa: F401  真装载才需要后端
+        except Exception:
+            return False, "缺少 peft（diffusers 的 LoRA 加载必需）"
+        arch = str((DIFFUSERS_IMAGE_MODELS.get(mid) or {}).get("arch") or "")
+        if arch != "sdxl":
+            return False, "当前只有 SDXL 版 LCM-LoRA 权重（SD1.5 版 ModelScope 无镜像）"
+        try:
+            # ★ load() 内部是函数级 `from ... import pick_memory_policy`，
+            #   所以必须改源模块属性，改本模块全局无效（此处曾写错过一次）。
+            from app.core.neural import memory_policy as _mp
+
+            _orig = _mp.pick_memory_policy
+            _mp.pick_memory_policy = _force_whole_gpu_policy
+            try:
+                self.unload()
+                r = self.load(mid)
+            finally:
+                _mp.pick_memory_policy = _orig
+            if not r.get("ok") or self._pipe is None:
+                return False, (r.get("message") or "整卡装载失败")
+            self._pipe.load_lora_weights(lora, adapter_name="lcm")
+            self._pipe.set_adapters(["lcm"], adapter_weights=[1.0])
+            self._apply_sampler("lcm")
+            try:
+                self._pipe.enable_model_cpu_offload()
+                self._offload = "model"
+            except Exception:
+                logger.warning("[diffusers_image] LCM 后重新开 offload 失败（可能显存吃紧）",
+                               exc_info=True)
+            self._lcm = True
+            self._lcm_lora = lora
+            return True, "已装载 LCM-LoRA（未 fuse，8GB 卡必须如此）"
+        except Exception as e:
+            logger.debug("[diffusers_image] enable_lcm 失败", exc_info=True)
+            return False, f"{type(e).__name__}: {e}"
 
     # ── 批量出图（KV cache 复用的对应物）────────────────────────────────
     def generate_batch(self, model_id: str, *, prompt: str = "",
