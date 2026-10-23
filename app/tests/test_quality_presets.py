@@ -73,3 +73,56 @@ def test_apply_sampler_noop_without_pipe():
     eng._apply_sampler("dpm")      # 不应抛
     eng._apply_sampler("lcm")
     eng._apply_sampler("default")
+
+
+# ── ⑤ 用法感知显存策略（首图后热提升 -26%）────────────────────────────
+def test_can_promote_threshold():
+    assert DIF.can_promote(1.5) is True
+    assert DIF.can_promote(1.2) is True            # 恰好等于 reserve 也算够
+    assert DIF.can_promote(0.9) is False
+    assert DIF.can_promote(0.0) is False           # SDXL 实测就是这个值 ⇒ 不许提升
+    assert DIF.can_promote("nonsense") is False    # 非法值不猜，按不许
+
+
+def test_promote_state_starts_pending():
+    eng = DIF.DiffusersImageEngine()
+    st = eng.promote_status()
+    assert st["state"] == "pending"
+    assert st["reserve_gb"] == DIF.HOT_PROMOTE_RESERVE_GB
+
+
+def test_promote_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("SHIGUANG_HOT_PROMOTE", "0")
+    eng = DIF.DiffusersImageEngine()
+    eng._pipe = None
+    eng._maybe_promote()
+    assert eng.promote_status()["state"] == "disabled"
+
+
+def test_rollback_without_pipe_is_safe():
+    """回退路径不能因为没管线就抛（真实场景：提升失败时管线可能已被 to() 弄脏）。"""
+    eng = DIF.DiffusersImageEngine()
+    eng._pipe = None
+    eng._rollback_offload("测试原因")
+    st = eng.promote_status()
+    assert st["state"] == "kept_offload"
+    assert "测试原因" in st["note"]
+
+
+def test_promotion_fits_matches_measured_reality():
+    """预测判定必须与本机实测一致：SD1.5 装得下、SDXL@8GB 装不下。"""
+    assert DIF.promotion_fits(3.97, 8.0) is True      # 实测整卡峰值 4.34GB
+    assert DIF.promotion_fits(6.46, 8.0) is False     # 实测整卡后空闲 0.00GB
+    # 同样的模型在更大显存上应该允许 ⇒ 换机器自动生效（可移植性）
+    assert DIF.promotion_fits(6.46, 24.0) is True
+    assert DIF.promotion_fits(0.0, 8.0) is False      # 未知权重大小不瞎提升
+    assert DIF.promotion_fits("x", 8.0) is False
+
+
+def test_unload_resets_promote_state():
+    """换模型必须重新评估：SD1.5 提升过后再 load SDXL，状态不能残留在 promoted。"""
+    eng = DIF.DiffusersImageEngine()
+    eng._promote_state = "promoted"
+    eng._pipe = None
+    eng.unload()
+    assert eng.promote_status()["state"] == "pending"

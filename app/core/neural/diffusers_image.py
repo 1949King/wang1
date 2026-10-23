@@ -208,6 +208,45 @@ def _force_whole_gpu_policy(*_a: Any, **_kw: Any) -> Dict[str, Any]:
             "total_vram_gb": 0.0, "reasons": ["装 LoRA 临时整卡"], "planned_modes": []}
 
 
+# ── 用法感知显存策略（2026-10-24 实测：稳态 -26%）─────────────────────────
+# 实测（SD1.5 512²/20步，同机同权重）：
+#   offload=model : 首图 5.4s + 稳态 4.17s/张（加载 31s）
+#   whole_gpu     : 首图 7.2s + 稳态 3.08s/张（加载 55.7s，峰值 4.34GB）
+# ⇒ 单张用 offload 总耗时更少；连续/批量用整卡，稳态快 26%。
+# 策略 = 首图先按 offload 出（用户立刻拿到结果），出完**若显存放得下就热提升**，
+# 之后都吃 -26%；放不下（如 SDXL fp16 恰好占满 8GB）保持 offload，**绝不硬上**。
+# 用「实测空闲显存」而不是「模型名」做判据 ⇒ 换大显存机器自动生效（可移植）。
+HOT_PROMOTE_RESERVE_GB = 1.2      # 提升后至少要留这么多空闲，否则回退
+
+
+def can_promote(free_after_gb: float,
+                reserve_gb: float = HOT_PROMOTE_RESERVE_GB) -> bool:
+    """提升后仍留有 reserve 以上空闲才允许整卡常驻。纯函数，便于测试。"""
+    try:
+        return float(free_after_gb) >= float(reserve_gb)
+    except (TypeError, ValueError):
+        return False
+
+
+def promotion_fits(size_gb: float, total_vram_gb: float,
+                   reserve_gb: float = HOT_PROMOTE_RESERVE_GB) -> bool:
+    """**移动之前**的预测性判定：这个模型整卡装得下吗。
+
+    用注册表权重大小 ×1.15（fp16 权重 + 组件开销）+ reserve，与显存 92%（留系统占用）比。
+    实测校准：SD1.5 3.97GB ⇒ 5.77GB ≤ 7.36GB ✓ 提升（实测剩 4.84GB）；
+              SDXL 6.46GB ⇒ 8.63GB > 7.36GB ✗ 不提升（实测整卡后空闲 0.00GB）。
+    先判再动，避免「先 to('cuda') 把卡塞爆、再回退」这种危险动作。
+    """
+    try:
+        size = float(size_gb)
+        if size <= 0:          # 权重未知 ⇒ 不盲提升（宁可慢，不可炸）
+            return False
+        need = size * 1.15 + float(reserve_gb)
+        return need <= float(total_vram_gb) * 0.92
+    except (TypeError, ValueError):
+        return False
+
+
 class DiffusersImageEngine:
     """自研图像生成引擎（diffusers 栈）。**模型不自动下载**，须先 `pull()`。"""
 
@@ -217,6 +256,9 @@ class DiffusersImageEngine:
         self._loaded_id = ""
         self._offload = ""
         self._memory_policy: Dict[str, Any] = {}
+        # 用法感知显存策略状态：pending→(promoted | kept_offload | disabled)
+        self._promote_state = "pending"
+        self._promote_note = ""
 
     # ── 能力探测（不加载模型）──────────────────────
 
@@ -474,6 +516,9 @@ class DiffusersImageEngine:
             self._base_scheduler = pipe.scheduler   # 质量档位切采样器时用它还原
             self._lcm = False
             self._lcm_lora = ""
+            # 换模型/重载后重新评估显存策略（SD1.5 能整卡、SDXL 不能）
+            self._promote_state = "pending"
+            self._promote_note = ""
             self._pipe_i2i = None     # 换模型后 i2i 管道须重建
             self._loaded_id = model_id
             logger.info("[diffusers_image] 已加载 %s（%s）· offload=%s",
@@ -487,15 +532,33 @@ class DiffusersImageEngine:
             return {"ok": False, "message": f"加载失败：{type(e).__name__}: {e}"}
 
     def unload(self) -> None:
-        """释放显存与管道引用。"""
+        """释放显存与管道引用。
+
+        ★ 2026-10-24 实测教训：SD1.5 整卡常驻 → unload → 同进程再 load SDXL，
+          SDXL 会因**显存碎片**换页卡死（>22min）。所以卸载必须「先 gc 掉引用、
+          再 synchronize、最后 empty_cache」，让 CUDA 真正回收整块显存。
+        """
+        import gc
+
         self._pipe = None
         self._pipe_i2i = None
         self._loaded_id = ""
         self._memory_policy = {}
+        self._base_scheduler = None
+        self._lcm = False
+        self._lcm_lora = ""
+        self._promote_state = "pending"      # 换模型后重新评估（模型不同，能不能整卡也不同）
+        self._promote_note = ""
+        gc.collect()
         try:
             import torch
             if torch.cuda.is_available():
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                try:
+                    torch.cuda.ipc_collect()
+                except Exception:  # stability-gate: allow-swallow（IPC 回收是 best-effort：老版本 torch 无此 API / 无 IPC 句柄时失败无后果，不影响显存释放）
+                    pass
         except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；best-effort 回收，失败无后果）
             pass
 
@@ -576,20 +639,31 @@ class DiffusersImageEngine:
             image.save(out_path)
             # 落画布 inbox（WebView 读不了本地路径，与 video_gen 同一机制）
             from app.core.neural.video_gen import publish_to_inbox
+            mode_at_start = self._offload      # 本次实际执行用的模式（提升发生在这之后）
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t0
             self._record_telemetry(spec, elapsed, ok=True)
+            # ★ 首图已交付 ⇒ 尝试热提升到整卡（后续 -26%）；装不下自动留 offload。
+            self._maybe_promote()
             return {"ok": True, "path": out_path,
                     "image_path": out_path,
                     "image_url": published.get("url", ""),
                     "inbox_path": published.get("inbox_path", ""),
                     "steps": n_steps, "cfg": n_cfg,
                     "width": n_w, "height": n_h,
+                    "memory_mode": mode_at_start,
+                    "promote_after": self.promote_status()["state"],
                     "seconds_elapsed": round(elapsed, 1),
                     "message": f"生成完成：{out_path}（{n_steps} 步 · cfg {n_cfg} · {elapsed:.1f}s）"}
         except Exception as e:
             logger.debug("[diffusers_image] generate 失败", exc_info=True)
             self._record_telemetry(DIFFUSERS_IMAGE_MODELS.get(model_id) or {}, 0.0, ok=False)
+            low = str(e).lower()
+            if "out of memory" in low or "outofmemory" in low:
+                # 显存不足：回退 offload 并如实告知，不假装成功、不无限重试。
+                self._rollback_offload("生成时显存不足（%s）" % type(e).__name__)
+                return {"ok": False, "memory_mode": self._offload,
+                        "message": "显存不足，已自动回退到 offload 模式，请再试一次"}
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
 
     # ── 遥测（EPLB 对应物）────────────────────────────────────────────
@@ -611,6 +685,76 @@ class DiffusersImageEngine:
                 self._gen_count = n + 1
         except Exception:
             logger.debug("[diffusers_image] 遥测写入失败（不阻断）", exc_info=True)
+
+    # ── 用法感知显存策略（首图后热提升）────────────────────────────────
+    def promote_status(self) -> Dict[str, Any]:
+        """回显热提升状态（供 UI/排障）。"""
+        return {"state": getattr(self, "_promote_state", "pending"),
+                "note": getattr(self, "_promote_note", ""),
+                "offload": getattr(self, "_offload", ""),
+                "reserve_gb": HOT_PROMOTE_RESERVE_GB}
+
+    def _rollback_offload(self, why: str) -> None:
+        """提升失败/显存不足时退回 offload（宁慢不炸）。"""
+        try:
+            if self._pipe is not None:
+                self._pipe.enable_model_cpu_offload()
+                self._offload = "model"
+        except Exception:
+            logger.warning("[diffusers_image] 回退 offload 失败", exc_info=True)
+        self._promote_state = "kept_offload"
+        self._promote_note = why
+        logger.info("[diffusers_image] 保持 offload：%s", why)
+
+    def _maybe_promote(self) -> None:
+        """首图成功之后尝试把管线**整卡常驻**（实测稳态 -26%）。
+
+        只在「加载时是 offload」且「提升后仍留得住 reserve」时提升；
+        任何异常都退回 offload 并如实记录原因 —— 绝不硬上导致后续全部换页。
+        """
+        if os.environ.get("SHIGUANG_HOT_PROMOTE", "1") == "0":
+            self._promote_state = "disabled"
+            self._promote_note = "SHIGUANG_HOT_PROMOTE=0"
+            return
+        if getattr(self, "_promote_state", "pending") != "pending" or self._pipe is None:
+            return
+        if self._offload not in ("model", "sequential", "layer_cpu"):
+            self._promote_state = "promoted"
+            self._promote_note = "加载时已是整卡"
+            return
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                self._promote_state = "kept_offload"
+                self._promote_note = "无 CUDA"
+                return
+            try:
+                self._pipe.remove_all_hooks()   # 摘掉 offload hook（若版本提供）
+            except Exception:
+                logger.debug("[diffusers_image] remove_all_hooks 不可用", exc_info=True)
+            # ★ 先判再动：模型本身装不下就**别去 to('cuda')**（否则会先把卡塞爆再回退）
+            spec = DIFFUSERS_IMAGE_MODELS.get(self._loaded_id) or {}
+            total_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+            if not promotion_fits(float(spec.get("size_gb") or 0.0), total_gb):
+                self._rollback_offload(
+                    "模型 %.2fGB 整卡装不下（总显存 %.1fGB，需 %.2fGB）"
+                    % (float(spec.get("size_gb") or 0.0), total_gb,
+                       float(spec.get("size_gb") or 0.0) * 1.15 + HOT_PROMOTE_RESERVE_GB))
+                return
+            self._pipe.to("cuda")
+            free, _total = torch.cuda.mem_get_info()
+            free_gb = free / 1024 ** 3
+            if not can_promote(free_gb):
+                self._rollback_offload("提升后仅剩 %.2fGB < %.2fGB"
+                                       % (free_gb, HOT_PROMOTE_RESERVE_GB))
+                return
+            self._offload = "none"
+            self._promote_state = "promoted"
+            self._promote_note = "已整卡常驻（剩 %.2fGB）" % free_gb
+            logger.info("[diffusers_image] 显存热提升成功：%s", self._promote_note)
+        except Exception as e:
+            self._rollback_offload("%s: %s" % (type(e).__name__, str(e)[:120]))
 
     # ── 采样器切换 ──────────────────────────────────────────────────
     def _apply_sampler(self, kind: str) -> None:
