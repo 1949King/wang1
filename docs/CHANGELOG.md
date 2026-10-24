@@ -1,5 +1,25 @@
 # 拾光剪影 — 变更日志
 
+## 统一推理引擎 M2 · 后端收编 + SVD 引擎归属诚实修正（V4.46.15，2026-10-24）
+
+> 统一引擎路线第二刀：planner 改读模型族注册表。接线过程中发现并修正一处 **V4.46.11 我自己引入的登记错误**——教训入库。
+
+### ① 接线：execution_planner 消费注册表
+
+`model_family` 新增 `BACKEND_TO_ENGINE`（模块 id → 引擎 id）与 `preferred_engines()`（族 → 引擎优先级序）；planner 的「无实测证据保守默认」从写死 `diffsynth→diffusers` 改为查注册表。注册表不可用/族未登记 ⇒ 退回旧默认，行为逐键一致。`is_fallback` 语义同步修正：主选基准 = 注册表序首个可用，不再写死「!= diffsynth 即备选」（SVD 选 diffusers 是唯一正解，旧语义会误标降级）。
+
+### ② 事实修正：SVD 的引擎归属是 diffusers
+
+`video_gen.py:419` 实测 `from diffusers import DiffusionPipeline`；③ `_infer_svd` 同样走 diffusers ⇒ **两条 SVD 实现 import 的都是 diffusers**。V4.46.11 修「svd 漏登记误杀视频路径」时把 svd 登记到 diffsynth 名下——只恢复了路由，归属不实。**假登记比漏登记更隐蔽：规划器会选一个跑不通的栈。** 本刀按真实依赖修正：diffusers 挂 svd、diffsynth 撤 svd；回归锁断言改为诚实事实（含"只有 diffsynth 的机器 svd 判不可用"反例）；设计稿 §1.1 同步修正。
+
+### ③ 测试 +2 例
+
+`preferred_engines` 全族映射断言；planner 视频探测 `engine=diffusers` 且 `is_fallback=False` 且 reason 可见默认序来源（图像族对照回归）。接线验证时发现并修掉测试自身一处键名错误（`_engine_probe` 返回 `reason` 字符串非 `reasons` 列表）——失败先读详情再改，不猜。
+
+### 验证
+
+全量 pytest **1969 passed**；`run_all_checks` **109 项全绿**；frozen 106 锁；ruff 零新增；stability 251/251。
+
 ## 统一推理引擎 M1 · 模型族注册表（V4.46.14，2026-10-24）
 
 > 用户拍板：「把三条线合并成一条，做支持市面已有视频/大模型/多模态模型的统一引擎」。本刀交付路线的 **M1（协议层）**：设计稿 + `model_family.py` + 10 例测试 + 守卫入册（108→109）。

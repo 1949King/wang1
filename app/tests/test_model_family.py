@@ -113,3 +113,50 @@ def test_backend_health_detects_typo():
     """守卫自检思路：后端 id 拼错必须被 resolve 抓到（防 svd 漏登记类回归）。"""
     ok, why = MF._backend_available("not_a_real_backend")
     assert ok is False and "未知后端" in why
+
+
+# ── ⑤ M2 接线：族→引擎优先级映射 + planner 消费注册表 ──────────────────
+def test_preferred_engines_mapping():
+    """引擎归属是核实过的事实：两条 SVD 实现 import 的都是 diffusers（video_gen.py:419）。"""
+    assert MF.preferred_engines("svd") == ["diffusers"]
+    assert MF.preferred_engines("sd15") == ["diffsynth", "diffusers"]
+    assert MF.preferred_engines("sdxl") == ["diffsynth", "diffusers"]
+    assert MF.preferred_engines("wan") == ["diffusers"]
+    assert MF.preferred_engines("no-such-family") == []
+
+
+def test_planner_default_order_comes_from_registry(monkeypatch, tmp_path):
+    """无遥测证据时，planner 的保守默认序必须读模型族注册表（M2 收编）。
+
+    svd 族 ⇒ engine=diffusers 且 is_fallback=False（diffusers 就是它的主选，
+    旧逻辑写死「!= diffsynth 即备选」会把正确的视频选择误标成降级）。
+    """
+    import json
+
+    monkeypatch.setenv(
+        "SHIGUANG_DEVICE_PROFILE",
+        json.dumps(
+            {
+                "vendor": "nvidia",
+                "arch": "sm89",
+                "name": "Fake Ada",
+                "vram_gb": 8.0,
+                "device_id": "nvidia:sm89:8.0gb",
+                "capabilities": {},
+                "libs": {"diffusers": True, "diffsynth_engine": True},
+            }
+        ),
+    )
+    monkeypatch.setenv("SHIGUANG_ENGINE_TELEMETRY_PATH", str(tmp_path / "tel.json"))
+    from app.core.ai import execution_planner as EP
+
+    r = EP._engine_probe("video")
+    assert r["available"] is True, r.get("reason")
+    assert r["engine"] == "diffusers", "SVD 必须路由到真实承接它的 diffusers 栈"
+    assert r["is_fallback"] is False, "diffusers 是 svd 族的主选，不该标「退到备选」"
+    assert "模型族注册表" in (r.get("reason") or ""), "默认序来源必须可见（R9）"
+
+    # 图像族回归对照：sd15/sdxl 主选仍是 diffsynth（与改动前一致）
+    r2 = EP._engine_probe("image")
+    assert r2["engine"] == "diffsynth"
+    assert r2["is_fallback"] is False

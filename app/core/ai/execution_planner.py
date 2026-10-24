@@ -31,6 +31,7 @@
   · 一切异常不外抛：探测失败按「云端优先」兜底并如实写 reason（R3/R9 诚实）。
   · **不改既有行为**：本层只产出计划；调用方没接它时，旧路径逐键不变。
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,13 +71,24 @@ def _legacy_engine_probe() -> Dict[str, Any]:
         r = resolve_execution_engine()
     except Exception as e:
         logger.debug("[execution_planner] 旧引擎探测失败", exc_info=True)
-        return {"engine": "", "available": False, "is_fallback": True,
-                "reason": "引擎探测异常 %s: %s" % (type(e).__name__, e),
-                "device": {}, "accelerators": [], "engine_reasons": []}
-    return {"engine": r.get("engine", ""), "available": bool(r.get("available")),
-            "is_fallback": bool(r.get("is_fallback")),
-            "reason": r.get("reason", ""), "device": {},
-            "accelerators": [], "engine_reasons": ["走旧引擎探测（注册表未登记该架构）"]}
+        return {
+            "engine": "",
+            "available": False,
+            "is_fallback": True,
+            "reason": "引擎探测异常 %s: %s" % (type(e).__name__, e),
+            "device": {},
+            "accelerators": [],
+            "engine_reasons": [],
+        }
+    return {
+        "engine": r.get("engine", ""),
+        "available": bool(r.get("available")),
+        "is_fallback": bool(r.get("is_fallback")),
+        "reason": r.get("reason", ""),
+        "device": {},
+        "accelerators": [],
+        "engine_reasons": ["走旧引擎探测（注册表未登记该架构）"],
+    }
 
 
 def _engine_probe(capability: str = "image") -> Dict[str, Any]:
@@ -95,9 +107,15 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
         from app.core.neural import device_profile as DP
 
         prof = DP.probe(use_cache=True)
-        reasons.append("设备：%s（%s/%s，%.1fGB）"
-                       % (prof.get("device_id"), prof.get("vendor"),
-                          prof.get("arch"), float(prof.get("vram_gb") or 0)))
+        reasons.append(
+            "设备：%s（%s/%s，%.1fGB）"
+            % (
+                prof.get("device_id"),
+                prof.get("vendor"),
+                prof.get("arch"),
+                float(prof.get("vram_gb") or 0),
+            )
+        )
     except Exception:
         logger.debug("[execution_planner] 设备画像不可用", exc_info=True)
 
@@ -121,6 +139,24 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
         reasons.append("注册表未登记架构 %s ⇒ 退回引擎探测" % arch)
         return _legacy_engine_probe()
 
+    # 保守默认序（统一引擎 M2）：优先读模型族注册表（声明式真源），替代原先写死的
+    # diffsynth→diffusers。例：svd 族 → ("diffusers",)，因为两条 SVD 实现 import 的
+    # 都是 diffusers（video_gen.py:419 实测）。注册表不可用/族未登记 ⇒ 旧默认，
+    # 行为与改动前逐键一致（兜底不变）。
+    prefs = ("diffsynth", "diffusers")
+    try:
+        from app.core.neural import model_family as MF
+
+        got = MF.preferred_engines(arch)  # arch 即族名（sd15/sdxl/svd）
+        if got:
+            prefs = tuple(got)
+            reasons.append("默认序取自模型族注册表（%s→%s）" % (arch, "/".join(prefs)))
+    except Exception:
+        logger.debug("[execution_planner] 模型族注册表不可用，退回旧默认", exc_info=True)
+    # 主选基准 = 注册表序中首个可用后端（is_fallback 的参照，M2 修正：
+    # svd 族选 diffusers 是唯一正解，不该标「退到备选」）。
+    primary = next((p for p in prefs if p in avail), "")
+
     chosen = ""
     engine_reasons: List[str] = []
     try:
@@ -134,8 +170,7 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
         logger.debug("[execution_planner] 引擎遥测不可用", exc_info=True)
 
     if not chosen:
-        # 保守默认：与改动前一致（diffsynth 优先 / diffusers 兜底）
-        for pref in ("diffsynth", "diffusers"):
+        for pref in prefs:
             if pref in avail:
                 chosen = pref
                 reasons.append("无实测证据 ⇒ 保守默认 %s" % pref)
@@ -144,24 +179,32 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
     accelerators: List[str] = []
     if chosen:
         spec = next((c["spec"] for c in cands if c["id"] == chosen), {}) or {}
-        usable = (prof.get("usable") or {})
+        usable = prof.get("usable") or {}
         for acc in spec.get("accelerators") or ():
             if acc == "fp8" and not usable.get("fp8"):
-                continue          # 无 torchao 或硬件不支持 ⇒ 不声明
+                continue  # 无 torchao 或硬件不支持 ⇒ 不声明
             if acc == "int4" and not usable.get("int4"):
                 continue
             if acc == "compiled" and not usable.get("compile"):
                 continue
             accelerators.append(acc)
 
-    return {"engine": chosen, "available": bool(chosen),
-            "is_fallback": bool(chosen and chosen != "diffsynth"),
-            "reason": "；".join(reasons) or "无可用后端",
-            "device": {"device_id": prof.get("device_id"),
-                       "vendor": prof.get("vendor"), "arch": prof.get("arch"),
-                       "vram_gb": prof.get("vram_gb")},
-            "accelerators": accelerators,
-            "engine_reasons": engine_reasons}
+    return {
+        "engine": chosen,
+        "available": bool(chosen),
+        # M2：主选基准 = 注册表序首个可用（图像 diffsynth 主选、视频 diffusers 主选），
+        # 不再是写死的「!= diffsynth 即备选」。
+        "is_fallback": bool(chosen and primary and chosen != primary),
+        "reason": "；".join(reasons) or "无可用后端",
+        "device": {
+            "device_id": prof.get("device_id"),
+            "vendor": prof.get("vendor"),
+            "arch": prof.get("arch"),
+            "vram_gb": prof.get("vram_gb"),
+        },
+        "accelerators": accelerators,
+        "engine_reasons": engine_reasons,
+    }
 
 
 def _hw_probe() -> Dict[str, Any]:
@@ -171,8 +214,12 @@ def _hw_probe() -> Dict[str, Any]:
         return detect_hardware_tier()
     except Exception as e:
         logger.debug("[execution_planner] 硬件探测失败", exc_info=True)
-        return {"tier": "cloud", "memory_mb": 0, "gpu_name": "",
-                "reason": f"硬件探测异常 {type(e).__name__}（按全云档）"}
+        return {
+            "tier": "cloud",
+            "memory_mb": 0,
+            "gpu_name": "",
+            "reason": f"硬件探测异常 {type(e).__name__}（按全云档）",
+        }
 
 
 def _budget_lambda() -> float:
@@ -214,8 +261,13 @@ def _local_model_hint() -> str:
     return "sd15-t2i"
 
 
-def plan(*, capability: str = "image", has_reference: bool = False,
-         explicit_channel: str = "", urgency: str = "") -> Dict[str, Any]:
+def plan(
+    *,
+    capability: str = "image",
+    has_reference: bool = False,
+    explicit_channel: str = "",
+    urgency: str = "",
+) -> Dict[str, Any]:
     """产出本次执行的调度计划（纯决策）。调用方按 `chain` 依次尝试即可。
 
     Args:
@@ -241,35 +293,53 @@ def plan(*, capability: str = "image", has_reference: bool = False,
     lam = _budget_lambda()
     cloud_ok = _cloud_available()
     local_ok = bool(eng.get("available")) and hw.get("tier") != "cloud"
-    reasons.append(f"偏好 bias={bias}（{mode}）· 硬件 {hw.get('tier')} · "
-                   f"本地引擎 {eng.get('engine') or '无'}（可用={local_ok}）· "
-                   f"云端渠道={'有' if cloud_ok else '无'} · λ={lam:.2f}")
+    reasons.append(
+        f"偏好 bias={bias}（{mode}）· 硬件 {hw.get('tier')} · "
+        f"本地引擎 {eng.get('engine') or '无'}（可用={local_ok}）· "
+        f"云端渠道={'有' if cloud_ok else '无'} · λ={lam:.2f}"
+    )
 
     # ── 0) 显式手选：最高意图，不改道 ──
     cid = (explicit_channel or "").strip()
     if cid:
         is_local = cid.startswith("local/")
         reasons.append(f"调用方显式指定 {cid!r} ⇒ 按选择执行（本层不改道）")
-        return {"ok": True, "route": "local" if is_local else "cloud",
-                "engine": eng.get("engine", "") if is_local else "",
-                "chain": ["local"] if is_local else ["cloud"],
-                "model_hint": _local_model_hint() if is_local else "",
-                "reasons": reasons, "bias": bias, "mode": mode,
-                "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
-                "degrade_level": 0,
-                "device": eng.get("device", {}),
-                "accelerators": eng.get("accelerators", []),
-                "engine_reasons": eng.get("engine_reasons", [])}
+        return {
+            "ok": True,
+            "route": "local" if is_local else "cloud",
+            "engine": eng.get("engine", "") if is_local else "",
+            "chain": ["local"] if is_local else ["cloud"],
+            "model_hint": _local_model_hint() if is_local else "",
+            "reasons": reasons,
+            "bias": bias,
+            "mode": mode,
+            "hw_tier": hw.get("tier", ""),
+            "budget_lambda": lam,
+            "degrade_level": 0,
+            "device": eng.get("device", {}),
+            "accelerators": eng.get("accelerators", []),
+            "engine_reasons": eng.get("engine_reasons", []),
+        }
 
     # ── 1) 能力是否本地可做（诚实边界）──
     if cap not in _SUPPORTED:
         reasons.append(f"能力 {cap} 不在本层裁定范围 ⇒ 走既有路径")
-        return {"ok": False, "route": "cloud", "engine": "", "chain": ["cloud"],
-                "model_hint": "", "reasons": reasons, "bias": bias, "mode": mode,
-                "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
-                "degrade_level": 0,
-                "device": eng.get("device", {}),
-                "accelerators": [], "engine_reasons": eng.get("engine_reasons", [])}
+        return {
+            "ok": False,
+            "route": "cloud",
+            "engine": "",
+            "chain": ["cloud"],
+            "model_hint": "",
+            "reasons": reasons,
+            "bias": bias,
+            "mode": mode,
+            "hw_tier": hw.get("tier", ""),
+            "budget_lambda": lam,
+            "degrade_level": 0,
+            "device": eng.get("device", {}),
+            "accelerators": [],
+            "engine_reasons": eng.get("engine_reasons", []),
+        }
 
     local_doable = local_ok
     if local_doable and cap not in _LOCAL_PROMPT_ONLY and not has_reference:
@@ -296,8 +366,9 @@ def plan(*, capability: str = "image", has_reference: bool = False,
         if local_doable and cloud_ok:
             if lam >= 0.35 or urgency == "fast":
                 route, chain = "hybrid", ["local", "cloud"]
-                reasons.append(f"engine 档 ⇒ 混合：本地先跑（λ={lam:.2f} 偏紧/要求快）"
-                               "，云端补强或兜底")
+                reasons.append(
+                    f"engine 档 ⇒ 混合：本地先跑（λ={lam:.2f} 偏紧/要求快），云端补强或兜底"
+                )
             else:
                 route, chain = "hybrid", ["cloud", "local"]
                 reasons.append(f"engine 档 ⇒ 混合：云端先跑（λ={lam:.2f} 宽松），本地兜底")
@@ -313,14 +384,22 @@ def plan(*, capability: str = "image", has_reference: bool = False,
 
     # 与既有六级降级对齐：只有真混合才算 L1；单路（本地或云端）不抬降级级数。
     degrade = 1 if route == "hybrid" else 0
-    return {"ok": True, "route": route, "engine": eng.get("engine", ""),
-            "chain": chain, "model_hint": _local_model_hint() if "local" in chain else "",
-            "reasons": reasons, "bias": bias, "mode": mode,
-            "hw_tier": hw.get("tier", ""), "budget_lambda": lam,
-            "degrade_level": degrade,
-            "device": eng.get("device", {}),
-            "accelerators": eng.get("accelerators", []) if "local" in chain else [],
-            "engine_reasons": eng.get("engine_reasons", [])}
+    return {
+        "ok": True,
+        "route": route,
+        "engine": eng.get("engine", ""),
+        "chain": chain,
+        "model_hint": _local_model_hint() if "local" in chain else "",
+        "reasons": reasons,
+        "bias": bias,
+        "mode": mode,
+        "hw_tier": hw.get("tier", ""),
+        "budget_lambda": lam,
+        "degrade_level": degrade,
+        "device": eng.get("device", {}),
+        "accelerators": eng.get("accelerators", []) if "local" in chain else [],
+        "engine_reasons": eng.get("engine_reasons", []),
+    }
 
 
 def status() -> Dict[str, Any]:
@@ -335,7 +414,13 @@ def status() -> Dict[str, Any]:
         mode = bias_mode(bias)
     except Exception:
         logger.debug("[execution_planner] status 偏好读取失败", exc_info=True)
-    return {"bias": bias, "mode": mode, "engine": eng,
-            "hw_tier": hw.get("tier", ""), "gpu": hw.get("gpu_name", ""),
-            "budget_lambda": _budget_lambda(), "cloud_available": _cloud_available(),
-            "local_prompt_only": sorted(_LOCAL_PROMPT_ONLY)}
+    return {
+        "bias": bias,
+        "mode": mode,
+        "engine": eng,
+        "hw_tier": hw.get("tier", ""),
+        "gpu": hw.get("gpu_name", ""),
+        "budget_lambda": _budget_lambda(),
+        "cloud_available": _cloud_available(),
+        "local_prompt_only": sorted(_LOCAL_PROMPT_ONLY),
+    }

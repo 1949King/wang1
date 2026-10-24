@@ -221,6 +221,34 @@ FAMILIES: Tuple[ModelFamilySpec, ...] = (
 
 _BY_FAMILY: Dict[str, ModelFamilySpec] = {s.family: s for s in FAMILIES}
 
+# 模块 id（本表 backends）→ 引擎 id（backend_registry / execution_planner / 遥测命名空间）。
+# 关键事实（统一引擎 M2 核实）：④ video_gen 与 ③ local_video_infer 两条 SVD 实现
+# import 的都是 diffusers（video_gen.py:419 `from diffusers import DiffusionPipeline`）
+# ⇒ 它们的引擎归属是 "diffusers"，不是 "diffsynth"。
+BACKEND_TO_ENGINE: Dict[str, str] = {
+    BACKEND_DIFFSYNTH_IMAGE: "diffsynth",
+    BACKEND_DIFFUSERS_IMAGE: "diffusers",
+    BACKEND_VIDEO_GEN: "diffusers",
+    BACKEND_LOCAL_VIDEO: "diffusers",
+}
+
+
+def preferred_engines(family: str) -> List[str]:
+    """族 → 引擎 id 优先级序（去重保序，backend_registry 命名空间）。
+
+    供 execution_planner 取「无实测证据时的保守默认」，替代写死的 diffsynth→diffusers。
+    查无族 ⇒ []（调用方自行兜底，绝不武断判死——svd 漏登记误杀视频路径的教训）。
+    """
+    s = spec_of(family)
+    if s is None:
+        return []
+    out: List[str] = []
+    for b in s.backends:
+        e = BACKEND_TO_ENGINE.get(b)
+        if e and e not in out:
+            out.append(e)
+    return out
+
 
 def spec_of(family: str) -> Optional[ModelFamilySpec]:
     return _BY_FAMILY.get((family or "").strip().lower())

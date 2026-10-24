@@ -9,6 +9,7 @@
     避免「探测即加载 4GB 权重」的老坑。
   · 与 execution_planner 的分工：本表回答「谁可用」，planner 回答「这次选谁 + 为什么」。
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,28 +24,32 @@ _BACKENDS: Dict[str, Dict[str, Any]] = {
     "diffusers": {
         "label": "diffusers（自研栈）",
         "libs": ("diffusers",),
-        "model_archs": ("sd15", "sdxl"),
+        # svd 归属修正（统一引擎 M2，2026-10-24）：③ local_video_infer 与 ④ video_gen
+        # 两条 SVD 实现 import 的都是 diffusers（video_gen.py:419 `from diffusers import
+        # DiffusionPipeline`）⇒ svd 登记在本名下才是事实。V4.46.11 曾把它登记到
+        # diffsynth 名下（当时只恢复了「视频可本地」的路由，归属不实）——漏登记误杀
+        # 路径的教训不变，但这次按真实依赖登记。
+        "model_archs": ("sd15", "sdxl", "svd"),
         "precisions": ("fp16", "fp8"),
-        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0},
+        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0, "svd": 5.0},
         "accelerators": ("cache", "fp8"),
-        "note": "官方生态、SDXL 首图快；fp8 需 torchao",
+        "note": "官方生态、SDXL 首图快；fp8 需 torchao；SVD 视频 i2v 两条实现都走这里",
     },
     "diffsynth": {
         "label": "DiffSynth（主选栈）",
         "libs": ("diffsynth_engine",),
-        # svd：本机视频是 SVD i2v（stabilityai img2vid-xt 权重在盘，diffsynth 支持）
-        # ★ 2026-10-24 回归修复：这里漏登记 svd 曾让执行层把「视频本地可做」误判为不可用。
-        "model_archs": ("sd15", "sdxl", "svd"),
+        # 只登记项目代码真的用它跑的架构（图像）。SVD 见上方 diffusers 条目。
+        "model_archs": ("sd15", "sdxl"),
         "precisions": ("fp16",),
-        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0, "svd": 5.0},
+        "min_vram_gb": {"sd15": 2.5, "sdxl": 5.0},
         "accelerators": ("cache",),
-        "note": "SD1.5 首图快；SDXL 首次推理有长编译（实测 415s）；SVD 视频 i2v",
+        "note": "SD1.5 首图快；SDXL 首次推理有长编译（实测 415s）",
     },
     # 以下为「部署期可选」后端：不装就自然不在册，代码里无需 if
     "nunchaku": {
         "label": "Nunchaku（INT4 量化）",
         "libs": ("nunchaku",),
-        "model_archs": ("sdxl",),      # 支持面需按版本核实，先只声明 sdxl
+        "model_archs": ("sdxl",),  # 支持面需按版本核实，先只声明 sdxl
         "precisions": ("int4",),
         "min_vram_gb": {"sdxl": 3.0},
         "accelerators": ("int4", "cache"),
@@ -73,8 +78,9 @@ def _lib_ok(name: str, profile: Optional[Dict[str, Any]]) -> bool:
         return False
 
 
-def candidates(*, model_arch: str, profile: Optional[Dict[str, Any]] = None
-               ) -> List[Dict[str, Any]]:
+def candidates(
+    *, model_arch: str, profile: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
     """返回该模型架构下**可用**的后端列表（含不可用原因，便于排障）。
 
     判据三条：① 声明的依赖库都在 ② 支持该 arch ③ 设备显存 ≥ 声明下限（无 vram 的
@@ -98,14 +104,20 @@ def candidates(*, model_arch: str, profile: Optional[Dict[str, Any]] = None
         if vram is not None and need and vram < need:
             ok = False
             reasons.append("显存不足：需 %.1fGB，本机 %.1fGB" % (need, vram))
-        out.append({"id": bid, "label": spec["label"], "available": ok,
-                    "spec": spec, "reasons": reasons or ["可用"]})
+        out.append(
+            {
+                "id": bid,
+                "label": spec["label"],
+                "available": ok,
+                "spec": spec,
+                "reasons": reasons or ["可用"],
+            }
+        )
     return out
 
 
 def available_ids(*, model_arch: str, profile: Optional[Dict[str, Any]] = None) -> List[str]:
-    return [c["id"] for c in candidates(model_arch=model_arch, profile=profile)
-            if c["available"]]
+    return [c["id"] for c in candidates(model_arch=model_arch, profile=profile) if c["available"]]
 
 
 def describe() -> List[Dict[str, Any]]:
