@@ -1,5 +1,36 @@
 # 拾光剪影 — 变更日志
 
+## 统一推理引擎 M5 · Wan2.1 真机验收（V4.46.18，2026-10-25）
+
+> 收官刀：用真实新模型（**Wan2.1-T2V-1.3B**，26.95GB，ModelScope 通道）验收「登记即接入」协议。**协议成立**——但验收过程暴露并修掉了 ③ 手写族从未跑过的四个坑（这正是它们此前 unverified 标注的价值）。
+
+### ① 真机验收产物
+
+17 帧 480² 20 步 = **58.5s**（offload，8GB 卡）；ffprobe 1.0625s = 17/16（fps 语义正确）；帧间差 32.4（真运动）；目视：橙猫草地上走、语义与 prompt 一致、画质干净。`wan` 族 verification 升 **VERIFIED**，实测数据写进登记 note。
+
+### ② 修掉的四个坑（`_infer_wan` 此前从未真跑过）
+
+| # | 坑 | 修法 |
+|---|---|---|
+| 1 | `WanVideoPipeline` 类名在 diffusers 0.40 **不存在**（真名 `WanPipeline`）；同查同修 `LTXVideoPipeline→LTXPipeline` | 守卫新增 **E 项**：`PIPELINE_CLASS_MAP` 全部类名必须 `dir(diffusers)` 真实存在（反向验证过牙齿） |
+| 2 | `num_frames` 必须 **4k+1**（时序 VAE 4× 压缩）——原 `int(duration*16)` 给 16/32/80 全不合法 | `_wan_num_frames`（就近取 4k+1） |
+| 3 | 宽高必须被 **16** 整除（patch 2 × VAE 8×）——488 被 `check_inputs` 拒 | `_wan_div_size`（向下取整） |
+| 4 | **RAM 墙**：全家桶 bf16 ≈16.4GB > 本机 15.29GB，一次 `from_pretrained` 必被硬杀（实测加载后可用仅剩 1.00GB）；且 `WanPipeline.from_pretrained` 不支持 `device_map` | 生产路径改**两阶段**：UMT5 模型级 device_map 分层编码（编完即释放，embeds 仅 0.83MB）→ 无编码器管线（`text_encoder=None`）只载 transformer+vae |
+
+### ③ 花屏根因（本轮最贵的发现）
+
+前两版产物是噪声（绿块/彩斑）。逐层排除（embeds 数值健康 → scheduler 配置正确 → dtype 改 bf16 仍噪）后读官方 `_get_t5_prompt_embeds` 源码定位：**embeds 必须复刻官方契约——裁到真实长度 + 补【精确零】到 512**。分开编码再 zero-pad 到 53 是错的：padding 位算出的非零垃圾污染 cross-attn 条件（1 步前向对照实测：垃圾 pad 与官方形状输出差 0.265，比全零还远）。修后立刻出猫。
+
+**教训**：传 `prompt_embeds` 走捷径时，契约必须逐位复刻官方，不能近似。
+
+### ④ I2V 诚实拒绝 + ⑤ 权重归位
+
+盘上只有 T2V 权重（无 image encoder）⇒ `_infer_wan` 收到 `reference_image` 时**在任何重导入之前**明确拒绝（fail fast + 0xC0000005 纪律，测试用假模块占位验证不 import）。权重落盘 `app/models/cache/Wan-AI_Wan2.1-T2V-1.3B-Diffusers`（gitignore），归位后 `_scan_local_models` 自动发现（kind=wan）。
+
+### 验证
+
+新增 6 例（test_wan_m5.py）；全量 pytest **1984 passed**；`run_all_checks` **109 项全绿**；frozen 106 锁；ruff 零新增。
+
 ## 统一推理引擎 M4 · 入口合一（端点注册表路由 + 验证态透出）（V4.46.17，2026-10-24）
 
 > 统一引擎路线第四刀：两个视频入口收编到注册表裁定之下。**侦察再次修正设计稿预设**——画布 `local/` 分支本就走 `generate_video_local` 统一入口（无需改 canvas_aigc）；真正要合的是 ④ 端点的「族盲路由」与验证态不可见。

@@ -97,8 +97,8 @@ def test_weights_probe_no_crash_on_absent():
 def test_unverified_excluded_from_default_list():
     default = MF.families(capability=MF.CAP_VIDEO, include_unverified=False)
     names = {s.family for s in default}
-    assert "svd" in names, "唯一验证过的视频族必须在默认可选里"
-    assert not (names & {"wan", "ltx", "mochi"}), "未验证族混进了默认可选"
+    assert {"svd", "wan"} <= names, "真机验证过的视频族必须在默认可选（wan=M5 验收）"
+    assert not (names & {"ltx", "mochi", "hunyuan"}), "未验证族混进了默认可选"
 
 
 def test_status_shape():

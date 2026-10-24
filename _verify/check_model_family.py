@@ -166,6 +166,21 @@ def main() -> int:
     check("C1 默认可选不含任何 unverified 族", not (defaults & unv), f"混入：{defaults & unv}")
     check("C2 svd/sd15/sdxl 在默认可选（verified 三族）", {"svd", "sd15", "sdxl"} <= defaults)
 
+    # E 类名真实性（M5 教训固化，2026-10-24）：③ 的 PIPELINE_CLASS_MAP 曾有 **两个**
+    #   在 diffusers 里根本不存在的类名（WanVideoPipeline / LTXVideoPipeline），因为
+    #   族从未真机跑过 ⇒ 错名存活至今。dir(lazy_module) 只列名不触发子模块加载，安全。
+    try:
+        import diffusers
+
+        real = set(dir(diffusers))
+        from app.core.local_video_infer import PIPELINE_CLASS_MAP
+
+        ghosts = sorted(c for c in PIPELINE_CLASS_MAP.values() if c not in real)
+        check("E PIPELINE_CLASS_MAP 全部类名在 diffusers 真实存在", not ghosts,
+              f"不存在的类名：{ghosts}")
+    except ImportError:
+        check("E 类名真实性（diffusers 未装 ⇒ 跳过，不假装通过）", True, "已跳过")
+
     # D 自检：反例必须被抓出
     print("  —— 自检（守卫必须能抓出这些反例）——")
     bad_back = [

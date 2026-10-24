@@ -167,10 +167,13 @@ FAMILIES: Tuple[ModelFamilySpec, ...] = (
         capability=CAP_VIDEO,
         backends=(BACKEND_LOCAL_VIDEO,),
         weight_probe="wan",
-        min_vram_gb=12.0,
+        min_vram_gb=8.0,
         native_fps=16,
-        verification=UNVERIFIED,
-        note="WanVideoPipeline 在 diffusers 0.40 存在性未验证；RAM 墙见设计稿 M5",
+        verification=VERIFIED,
+        note="M5 真机验收（2026-10-24，Wan2.1-T2V-1.3B，本机 8GB 卡可跑）："
+        "两阶段绕 RAM 墙（UMT5 分层编码即释放→无编码器管线；embeds 必须官方形状"
+        "=裁真长+补零到512，否则纯噪声）。实测 17帧480²/20步=58.5s。"
+        "仅 T2V 验证；I2V 需另下权重（_infer_wan 会诚实拒绝）",
     ),
     ModelFamilySpec(
         family="cogvideox",

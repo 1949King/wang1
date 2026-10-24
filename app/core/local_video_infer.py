@@ -53,10 +53,14 @@ MODEL_KEYWORD_MAP: Dict[str, List[str]] = {
 }
 
 PIPELINE_CLASS_MAP: Dict[str, str] = {
-    "wan": "WanVideoPipeline",
+    # ★ M5 真机验收（2026-10-24）实测修正：本表原有两个类名在 diffusers 0.40 里
+    #   **根本不存在**（`WanVideoPipeline` / `LTXVideoPipeline`）。它们来自未跑过的
+    #   登记式宣称 —— 实测 `dir(diffusers)` 后按真名改正（WanPipeline /
+    #   LTXImageToVideoPipeline，后者无图时即 T2V）。教训：类名也要实测，不能猜。
+    "wan": "WanPipeline",
     "cogvideox": "CogVideoXPipeline",
     "hunyuan": "HunyuanVideoPipeline",
-    "ltx": "LTXVideoPipeline",
+    "ltx": "LTXPipeline",
     "mochi": "MochiPipeline",
     "minimax_h3": "MiniMaxH3ModularPipeline",
     "svd": "StableVideoDiffusionPipeline",
@@ -508,6 +512,104 @@ def _infer_minimax_h3(
     )
 
 
+# Wan 官方推荐的负面提示词（Wan2.1 model card 原文）：M5 实测编码时固定使用，
+# 与 prompt 同批编码、同 pad 到 512（embeds 契约，见 _encode_wan_prompts）。
+_WAN_NEGATIVE_DEFAULT = (
+    "bright tones, overexposed, static, blurred details, subtitles, style, works, "
+    "paintings, images, static, overall gray, worst quality, low quality, JPEG "
+    "compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly "
+    "drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture"
+)
+
+
+def _wan_num_frames(duration: float, native_fps: int = 16) -> int:
+    """Wan 的 num_frames 必须是 **4k+1**（时序 VAE 4× 压缩，实测非 4k+1 直接报错）。
+
+    ★ M5 真机验收（2026-10-24）发现的第二个坑：原实现 `int(duration*16)` 给出 16/32/80
+      这类值全都不合法 ⇒ 即使类名修对也跑不通。这里按 4k+1 就近取（至少 5 帧）。
+    """
+    k = max(1, int(round(float(duration) * native_fps / 4.0)))
+    return k * 4 + 1
+
+
+def _wan_div_size(size: str, div: int = 16) -> "tuple[int, int]":
+    """Wan 要求宽高被 **16** 整除（transformer patch_size=2 × VAE 8×）。
+
+    ★ M5 实测：488（只是 8 的倍数）被 `check_inputs` 拒 ⇒ 向下取整到 16 的倍数。
+    """
+    try:
+        w_s, _, h_s = str(size).partition("x")
+        w, h = int(w_s), int(h_s or w_s)
+    except (TypeError, ValueError):
+        w, h = 832, 480
+    return max(div, (w // div) * div), max(div, (h // div) * div)
+
+
+def _encode_wan_prompts(
+    model_path: str, prompt: str, negative: str, vram_gb: int, max_seq: int = 512
+):
+    """两阶段之 Stage A：UMT5 编码 prompt/negative → 官方契约 embeds（CPU bf16）。
+
+    ★ 为什么必须两阶段（M5 实测，2026-10-24，本机 15.29GB RAM / 8GB VRAM）：
+      Wan2.1-1.3B 全家桶权重 bf16 ≈ 16.4GB（UMT5 10.6 + transformer 5.3 + VAE 0.5）
+      > 总内存 ⇒ 一次 from_pretrained 必换页被硬杀（实测加载后可用仅剩 1.00GB）；
+      而 `WanPipeline.from_pretrained(device_map=...)` 又**不支持**（实测只认
+      balanced/cuda/cpu）⇒ 唯一可行：模型级 device_map 分层载 UMT5（未驻留层进
+      meta/mmap 按需分页）编完即释放，只留 KB 级 embeds，再载无编码器管线。
+    ★ embeds 必须复刻官方形状（实测花屏根因）：裁到真实长度 + **补精确零**到 512；
+      直接取 padding 位（非零垃圾）会把 cross-attn 条件污染成纯噪声输出。
+    """
+    import gc
+
+    import torch
+
+    from transformers import T5Tokenizer, UMT5EncoderModel
+
+    from app.core.local_video_pipe_cache import available_ram_gb
+
+    tok = T5Tokenizer.from_pretrained(model_path, subfolder="tokenizer")
+    # 配额按实测余量给：GPU 取显存 3/4，CPU 取当前可用的 60%（都留安全垫）
+    gpu_q = "%dGiB" % max(4, int(vram_gb * 0.75))
+    avail = available_ram_gb()
+    cpu_q = "%dGiB" % (max(4, int(avail * 0.6)) if avail else 8)
+    te = UMT5EncoderModel.from_pretrained(
+        model_path,
+        subfolder="text_encoder",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        max_memory={0: gpu_q, "cpu": cpu_q},
+    )
+    te.eval()
+    try:
+        ti = tok(
+            [prompt, negative],
+            padding="max_length",
+            max_length=max_seq,
+            truncation=True,
+            add_special_tokens=True,
+            return_tensors="pt",
+        )
+        am = ti.attention_mask
+        ti = {k: v.to(te.device) for k, v in ti.items()}
+        with torch.no_grad():
+            hidden = te(**ti).last_hidden_state
+        lens = am.gt(0).sum(dim=1).long()
+        out = []
+        for i in range(hidden.shape[0]):
+            u = hidden[i, : int(lens[i])].cpu()
+            pad = torch.zeros(max_seq - u.shape[0], u.shape[1], dtype=u.dtype)
+            out.append(torch.cat([u, pad], 0))  # 官方做法：补【零】，不是补垃圾
+        return out[0], out[1]
+    finally:
+        del te, tok
+        gc.collect()
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:  # stability-gate: allow-swallow（清缓存是 best-effort，失败不影响正确性）
+            pass
+
+
 def _infer_wan(
     *,
     prompt: str,
@@ -521,61 +623,97 @@ def _infer_wan(
     out_dir: str = "",
     steps: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Wan 系列推理：Wan 2.1 / 2.2 / 2.6 / 3.0，支持 T2V + I2V。"""
+    """Wan 系列推理：Wan 2.1 / 2.2 / 2.6 / 3.0（本函数当前只支持 **T2V**）。
+
+    ★ M5 真机验收（2026-10-24，Wan2.1-T2V-1.3B，本机 8GB VRAM / 15.29GB RAM）：
+      出片成功（17 帧 480² 20步 58.5s，猫在草地上走，语义正确）。过程中修掉四个
+      此前从未暴露的问题（本函数此前一次都没真跑过）：
+        1. 类名 `WanVideoPipeline` 不存在 ⇒ 真名 `WanPipeline`；
+        2. `num_frames` 必须 4k+1（时序 VAE 4× 压缩）⇒ 原 `int(duration*16)` 全不合法；
+        3. 宽高必须被 16 整除 ⇒ 原 8 的倍数会被 check_inputs 拒；
+        4. 一次加载全家桶（bf16 ≈16.4GB）超本机 RAM ⇒ 必须两阶段（见
+           `_encode_wan_prompts`）；embeds 还要复刻官方形状（裁真长+补零到 512），
+           否则输出纯噪声（实测花屏根因）。
+      I2V 需要 image encoder，T2V 权重里没有 ⇒ 明确拒绝而不是假装能跑。
+    """
+    # ★ 拒绝路径放在任何重导入之前：fail fast，且测试/调用方走这条路时不必 import
+    #   torch/diffusers（diffusers 的 lazy 面在全量 pytest 里曾触发 0xC0000005，见 V4.46.16）。
+    if reference_image:
+        return {
+            "ok": False,
+            "message": "本地 Wan 通道目前只验证了 T2V（文生视频）；"
+            "图生视频需要 Wan2.1-I2V 权重（含 image encoder），本机未部署",
+        }
+
     import torch
 
-    from diffusers import WanVideoPipeline
+    from diffusers import AutoencoderKLWan, WanPipeline, WanTransformer3DModel
+    from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 
-    _native_fps = 16  # num_frames=int(duration*16)
+    _native_fps = 16
 
-    width, _, height = (
-        int(size.split("x")[0]),
-        0,
-        int(size.split("x")[1]) if "x" in size else 720,
+    width, height = _wan_div_size(size)
+    n_frames = _wan_num_frames(duration, _native_fps)
+    # bf16 是 Wan 官方推荐（fp16 动态范围不足）；不支持就用 fp16 兜底
+    dtype = (
+        torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16
     )
-    use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported() and vram_gb >= 24
-    dtype = torch.bfloat16 if use_bf16 else torch.float16
-    pipe = WanVideoPipeline.from_pretrained(model_path, torch_dtype=dtype)
-    pipe.to(device)
-    if vram_gb and vram_gb < 12:
+
+    # ── Stage A：UMT5 分层加载编码 prompt，编完即释放（RAM 墙，见 _encode_wan_prompts）──
+    try:
+        pe, ne = _encode_wan_prompts(model_path, prompt, _WAN_NEGATIVE_DEFAULT, vram_gb)
+    except Exception as e:
+        return {"ok": False, "message": f"Wan 文本编码失败: {type(e).__name__}: {e}"}
+
+    # ── Stage B：只载 transformer + vae（无编码器管线），embeds 直喂 ──
+    try:
+        vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
+        tr = WanTransformer3DModel.from_pretrained(
+            model_path, subfolder="transformer", torch_dtype=dtype
+        )
+        sch = UniPCMultistepScheduler.from_pretrained(model_path, subfolder="scheduler")
+        pipe = WanPipeline(
+            transformer=tr, text_encoder=None, tokenizer=None, vae=vae, scheduler=sch
+        )
+    except Exception as e:
+        return {"ok": False, "message": f"Wan 模型加载失败: {type(e).__name__}: {e}"}
+
+    try:
         pipe.enable_model_cpu_offload()
+    except Exception:
+        logger.debug("cpu offload 不可用，直接上卡", exc_info=True)
+        pipe.to(device)
     try:
         pipe.enable_vae_slicing()
     except Exception:
         logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
 
-    steps = steps if steps is not None else (30 if vram_gb >= 16 else 24)
-    cfg = 5.0
-
-    if reference_image:
-        import base64
-        import io
-
-        from PIL import Image
-
-        mime, b64 = reference_image.split(",", 1) if "," in reference_image else ("", "")
-        img_bytes = base64.b64decode(b64) if b64 else reference_image.encode()
-        ref_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    n_steps = int(steps) if steps is not None else 20  # 20 步 = M5 实测可用档
+    key = ("wan", os.path.abspath(model_path))
+    try:
         result = pipe(
-            prompt=prompt,
-            image=ref_img,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            num_frames=int(duration * 16),
+            prompt_embeds=pe.unsqueeze(0).to(dtype).to(device),
+            negative_prompt_embeds=ne.unsqueeze(0).to(dtype).to(device),
+            num_frames=n_frames,
+            num_inference_steps=n_steps,
+            guidance_scale=5.0,
             width=width,
             height=height,
         )
-    else:
-        result = pipe(
-            prompt=prompt,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            num_frames=int(duration * 16),
-            width=width,
-            height=height,
-        )
+    except Exception as e:
+        # 与 SVD 同纪律：OOM 时淘汰常驻管线，下次重载干净的（其它异常原样上抛由外层记）
+        if "out of memory" in str(e).lower():
+            from app.core.local_video_pipe_cache import evict
+
+            evict(key)
+            logger.warning("[local_video_infer] Wan 生成 OOM，已淘汰常驻管线待重载")
+        raise
     frames = result.frames[0] if result.frames else []
-    return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
+    out = _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
+    if isinstance(out, dict):
+        out["num_frames"] = n_frames
+        out["steps"] = n_steps
+    return out
 
 
 def _infer_cogvideox(
@@ -690,7 +828,10 @@ def _infer_ltx(
     """LTX-Video 系列推理：Lightricks 开源，支持 T2V + I2V，4K 50fps。"""
     import torch
 
-    from diffusers import LTXVideoPipeline
+    # ★ M5 实测修正：diffusers 0.40 里没有 `LTXVideoPipeline`（真名 LTXPipeline）。
+    #   同 wan：本函数从未真机跑过，错名一直没暴露。调用签名是否完全匹配仍未验证
+    #   （无权重可跑）⇒ model_family 里保持 unverified，只保证类名是真的。
+    from diffusers import LTXPipeline
 
     _native_fps = 25  # num_frames=int(duration*25)
 
@@ -700,7 +841,7 @@ def _infer_ltx(
         int(size.split("x")[1]) if "x" in size else 720,
     )
     dtype = torch.float16
-    pipe = LTXVideoPipeline.from_pretrained(model_path, torch_dtype=dtype)
+    pipe = LTXPipeline.from_pretrained(model_path, torch_dtype=dtype)
     pipe.to(device)
     if vram_gb and vram_gb < 12:
         pipe.enable_model_cpu_offload()
