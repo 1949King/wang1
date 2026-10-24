@@ -135,7 +135,7 @@ def _has_weights(path: str, max_depth: int = 3) -> bool:
         if not os.path.isdir(path):
             return False
         for root, dirs, files in os.walk(path):
-            depth = root[len(path):].count(os.sep)
+            depth = root[len(path) :].count(os.sep)
             if depth >= max_depth:
                 dirs[:] = []
                 continue
@@ -309,15 +309,22 @@ def _save_video_frames(
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
             result = subprocess.run(
                 [
-                    ffmpeg_exe, "-y",
-                    "-i", path,
-                    "-i", wav_path,
-                    "-c:v", "copy",
-                    "-c:a", "aac",
+                    ffmpeg_exe,
+                    "-y",
+                    "-i",
+                    path,
+                    "-i",
+                    wav_path,
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
                     "-shortest",
                     muxed,
                 ],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode == 0 and os.path.isfile(muxed):
                 os.remove(path)
@@ -383,14 +390,16 @@ def _infer_minimax_h3(
 
     from diffusers import MiniMaxH3ModularPipeline
 
-    _native_fps = 24   # 本族 num_frames=int(duration*24) ⇒ 编码必须 24fps 才不失真
+    _native_fps = 24  # 本族 num_frames=int(duration*24) ⇒ 编码必须 24fps 才不失真
 
     width = int(size.split("x")[0]) if "x" in size else 1280
     height = int(size.split("x")[1]) if "x" in size else 720
 
     use_bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
     dtype = torch.bfloat16 if use_bf16 else torch.float16
-    pipe = MiniMaxH3ModularPipeline.from_pretrained(model_path, torch_dtype=dtype, trust_remote_code=True)
+    pipe = MiniMaxH3ModularPipeline.from_pretrained(
+        model_path, torch_dtype=dtype, trust_remote_code=True
+    )
     pipe.to(device)
     if vram_gb and vram_gb < 24:
         pipe.enable_model_cpu_offload()
@@ -415,7 +424,9 @@ def _infer_minimax_h3(
         try:
             result = pipe.load_workflow("ref2va")
         except Exception:
-            result = pipe.load_workflow("fl2va") if (has_ff or has_lf) else pipe.load_workflow("t2va")
+            result = (
+                pipe.load_workflow("fl2va") if (has_ff or has_lf) else pipe.load_workflow("t2va")
+            )
         result = pipe(
             prompt=prompt,
             images=[ref_img],
@@ -464,7 +475,11 @@ def _infer_minimax_h3(
         raw_audio = getattr(result, "audio", None)
 
     if raw_frames is not None:
-        if isinstance(raw_frames, (list, tuple)) and raw_frames and isinstance(raw_frames[0], (list, tuple)):
+        if (
+            isinstance(raw_frames, (list, tuple))
+            and raw_frames
+            and isinstance(raw_frames[0], (list, tuple))
+        ):
             frames = raw_frames[0]
         elif isinstance(raw_frames, (list, tuple)):
             frames = list(raw_frames)
@@ -484,7 +499,9 @@ def _infer_minimax_h3(
         return {"ok": False, "message": f"MiniMax H3 返回无帧数据: type={type(result).__name__}"}
 
     return _save_video_frames(
-        frames, out_dir, bridge_port,
+        frames,
+        out_dir,
+        bridge_port,
         audio_waveform=audio_wav,
         audio_sample_rate=audio_sr,
         fps=_native_fps,
@@ -509,7 +526,7 @@ def _infer_wan(
 
     from diffusers import WanVideoPipeline
 
-    _native_fps = 16   # num_frames=int(duration*16)
+    _native_fps = 16  # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -581,7 +598,7 @@ def _infer_cogvideox(
 
     from diffusers import CogVideoXPipeline
 
-    _native_fps = 16   # num_frames=int(duration*16)
+    _native_fps = 16  # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -630,7 +647,7 @@ def _infer_hunyuan(
 
     from diffusers import HunyuanVideoPipeline
 
-    _native_fps = 16   # num_frames=int(duration*16)
+    _native_fps = 16  # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -675,7 +692,7 @@ def _infer_ltx(
 
     from diffusers import LTXVideoPipeline
 
-    _native_fps = 25   # num_frames=int(duration*25)
+    _native_fps = 25  # num_frames=int(duration*25)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -702,9 +719,7 @@ def _infer_ltx(
     return _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
 
 
-def resolve_image_path(
-    src: str, *, dest_dir: str = "", name_hint: str = "input"
-) -> Optional[str]:
+def resolve_image_path(src: str, *, dest_dir: str = "", name_hint: str = "input") -> Optional[str]:
     """把画布传图的**三种形态**统一成本地文件路径（SVD 首帧输入链路）。
 
     接受：
@@ -734,7 +749,7 @@ def resolve_image_path(
             logger.debug("[local_video_infer] data URL 落盘失败", exc_info=True)
             return None
     p = s
-    if "/inbox_file/" in s:                     # inbox URL → 映射回本地
+    if "/inbox_file/" in s:  # inbox URL → 映射回本地
         try:
             from app.core.canvas_bridge import canvas_inbox_dir
 
@@ -794,7 +809,7 @@ def _infer_svd(
 
     from diffusers import StableVideoDiffusionPipeline
 
-    _native_fps = 7    # SVD 训练 fps=7，n_frames=round(duration*7)
+    _native_fps = 7  # SVD 训练 fps=7，n_frames=round(duration*7)
 
     img_src = (reference_image or first_frame or "").strip()
     if not img_src:
@@ -811,7 +826,10 @@ def _infer_svd(
     def _load_svd_pipe():
         # 只在缓存未命中时执行：读 4.2GB 权重 + 建 offload hook（首帧慢的根源）。
         p = StableVideoDiffusionPipeline.from_pretrained(
-            model_path, torch_dtype=dtype, variant="fp16", use_safetensors=True,
+            model_path,
+            torch_dtype=dtype,
+            variant="fp16",
+            use_safetensors=True,
         )
         # 实测：offload 全程不亏（更快更省显存），且防大帧数分页 —— 无条件开启
         try:
@@ -828,19 +846,27 @@ def _infer_svd(
 
     pipe, _src = get_or_load(("svd", os.path.abspath(model_path)), _load_svd_pipe)
 
-    n_steps = int(steps) if steps is not None else 14
-    n_frames = max(2, int(round(float(duration) * 7)))       # SVD 训练 fps = 7
+    # ★ M3 参数单源（统一引擎，2026-10-24）：默认参数不再在此硬编码（此前是「抄自
+    #   TUNED」的第二真源，改表必漏此处），直接读 video_gen.tuned_for —— 调优语义
+    #   不变（值本来就来自同一实测），真源收敛到 TUNED 一张表。
+    from app.core.neural.video_gen import tuned_for
+
+    _tun = tuned_for("svd-xt-i2v")
+    n_steps = int(steps) if steps is not None else int(_tun["steps"])
+    n_frames = max(2, int(round(float(duration) * 7)))  # SVD 训练 fps = 7
+    _is_distilled = bool(_tun.get("distilled"))
     _key = ("svd", os.path.abspath(model_path))
     try:
         result = pipe(
             image=pil,
             num_frames=n_frames,
-            decode_chunk_size=1,                                  # ★ 实测关键项
+            decode_chunk_size=int(_tun["decode_chunk_size"]),  # ★ 实测关键项（TUNED）
             num_inference_steps=n_steps,
-            motion_bucket_id=80,                                  # ★ 实测画质项
-            noise_aug_strength=0.02,
-            min_guidance_scale=1.0,                               # ★ CFG 必须显式给
-            max_guidance_scale=3.0,
+            motion_bucket_id=int(_tun["motion_bucket_id"]),  # ★ 实测画质项（TUNED）
+            noise_aug_strength=float(_tun["noise_aug_strength"]),
+            # ★ CFG 必须显式给（关掉出废片，实测）；蒸馏权重则必须 1.0（同 ④ 语义）
+            min_guidance_scale=1.0 if _is_distilled else float(_tun["cfg_min"]),
+            max_guidance_scale=1.0 if _is_distilled else float(_tun["cfg_max"]),
         )
     except Exception as e:
         # 常驻管线若把显存撑爆（帧数升高/被别的任务挤占）：淘汰缓存，下次重载干净管线。
@@ -854,9 +880,8 @@ def _infer_svd(
     frames = result.frames[0] if result.frames else []
     out = _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
     if isinstance(out, dict):
-        out["pipe_source"] = _src      # hit=复用常驻管线 / miss=本次新加载（首帧慢的那次）
+        out["pipe_source"] = _src  # hit=复用常驻管线 / miss=本次新加载（首帧慢的那次）
     return out
-
 
 
 def _infer_mochi(
@@ -876,7 +901,7 @@ def _infer_mochi(
 
     from diffusers import MochiPipeline
 
-    _native_fps = 16   # num_frames=int(duration*16)
+    _native_fps = 16  # num_frames=int(duration*16)
 
     width, _, height = (
         int(size.split("x")[0]),
@@ -954,7 +979,10 @@ def generate_video_local(
     if not _torch_available():
         return {"ok": False, "message": "未安装 torch，请先 pip install torch"}
     if not _diffusers_available():
-        return {"ok": False, "message": "未安装 diffusers，请先 pip install diffusers transformers accelerate"}
+        return {
+            "ok": False,
+            "message": "未安装 diffusers，请先 pip install diffusers transformers accelerate",
+        }
 
     device, vram_gb = _get_device()
     if device == "cpu":

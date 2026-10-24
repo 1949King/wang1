@@ -1,5 +1,29 @@
 # 拾光剪影 — 变更日志
 
+## 统一推理引擎 M3 · SVD 驻留合一 + 参数单源（V4.46.16，2026-10-24）
+
+> 统一引擎路线第三刀——第一个动生产路径的阶段。**侦察修正了设计稿的预设方案**，先记结论。
+
+### ① 侦察：双轨的真实病灶不是"两份代码"，是"双驻留 + 双参数源"
+
+③ `_infer_svd` 与 ④ `video_gen.generate` 都是 diffusers 实现，各有资产：③ 有进程级共享缓存（OOM 让位、实测复用 35.68s）+ 帧保存链；④ 有 TUNED 参数真源 + 质量/运动档位 + 蒸馏 CFG 语义。**委托谁都会丢东西**；而两条路径顺序使用会各持一份 4.2GB 管线（双驻留 8.4GB，15GB 机器直接压爆）。⇒ 正确归一 = **驻留合一（共享缓存）+ 参数单源（TUNED）**，两份代码都保留。
+
+### ② 驻留合一
+
+④ 的 `load(svd-xt-i2v)` 改走 `local_video_pipe_cache.get_or_load`——与 ③ 同 key（`(svd, abspath)`，两侧目录解析实测相等）⇒ 任一条先加载，另一条直接命中，全程只驻留一条管线。offload 实际状态随管线走（`p._sg_offload_mode`，命中时 loader 不执行、不能误报 none）。load 返回值新增 `pipe_source`（hit/miss 可见性）。④ 的 `unload()`/OOM 连带 evict 共享缓存——只断 `self._pipe` 而缓存还持着就是假卸载（V4.46.13 weakref 教训同款，这次用 `cached_keys` 断言锁死）。
+
+### ③ 参数单源
+
+③ 的生成参数（steps/chunk/motion/noise_aug/CFG）从硬编码字面量改为 `video_gen.tuned_for("svd-xt-i2v")` 实读——此前注释写"抄自 TUNED"但代码是第二真源，改表必漏此处。现在改 TUNED ⇒ 两条实现同步生效（测试 monkeypatch `motion_bucket_id=999` 证明传导）。显式 steps 仍优先；③ 同步获得蒸馏 CFG 语义（distilled ⇒ cfg=1.0）。
+
+### ④ 测试 +4 例（test_video_residency_m3.py，零真权重）
+
+跨实例共享命中（第二次 load 不再 from_pretrained、`_pipe` 同一对象）；unload 连带 evict；参数随 TUNED 变（单源证明）；显式 steps 优先回归。既有 `check_video_gen` / `VIDEOCHAIN` 守卫全绿（③ 删字面量未破「CFG 不得关闭」「帧数↔fps 自洽」断言）。
+
+### 验证
+
+全量 pytest **1973 passed**；`run_all_checks` **109 项全绿**；frozen 106 锁；ruff 零新增；stability 无新增。
+
 ## 统一推理引擎 M2 · 后端收编 + SVD 引擎归属诚实修正（V4.46.15，2026-10-24）
 
 > 统一引擎路线第二刀：planner 改读模型族注册表。接线过程中发现并修正一处 **V4.46.11 我自己引入的登记错误**——教训入库。

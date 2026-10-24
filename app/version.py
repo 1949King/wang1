@@ -1,37 +1,41 @@
-__version__ = "4.46.15"
+__version__ = "4.46.16"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 46,
-    "patch": 15,
-    "codename": "统一推理引擎 M2 · 后端收编 + SVD 引擎归属诚实修正",
+    "patch": 16,
+    "codename": "统一推理引擎 M3 · SVD 驻留合一 + 参数单源",
     "release_date": "2026-10-24",
     "description": (
-        "V4.46.15：统一引擎路线 M2（后端收编）。接线过程中发现并修正一处我自己在\n"
-        "V4.46.11 引入的登记错误——教训入库，写在这里免得后人重查。\n"
-        "\n【① 接线：execution_planner 改读模型族注册表】\n"
-        "model_family 新增 BACKEND_TO_ENGINE（模块 id → 引擎 id）与 preferred_engines()\n"
-        "（族 → 引擎优先级序，backend_registry 命名空间）；planner 的「无实测证据保守\n"
-        "默认」从写死 diffsynth→diffusers 改为查注册表（svd 族 → diffusers 唯一序）。\n"
-        "注册表不可用/族未登记 ⇒ 退回旧默认，行为与改动前逐键一致（兜底不变）。\n"
-        "is_fallback 语义同步修正：主选基准 = 注册表序首个可用，不再写死「!= diffsynth\n"
-        "即备选」——SVD 选 diffusers 是唯一正解，旧语义会把它误标成降级。\n"
-        "\n【② 事实修正：SVD 的引擎归属是 diffusers，不是 diffsynth】\n"
-        "video_gen.py:419 实测 `from diffusers import DiffusionPipeline`；③ local_video_infer\n"
-        "的 _infer_svd 同样走 diffusers ⇒ 两条 SVD 实现 import 的都是 diffusers。\n"
-        "V4.46.11 我修「svd 漏登记误杀视频路径」时，把 svd 登记到了 diffsynth 名下——\n"
-        "当时只恢复了路由，归属不实（假登记比漏登记更隐蔽：规划器会选一个跑不通的栈）。\n"
-        "本刀按真实依赖修正：backend_registry 的 diffusers 挂 svd、diffsynth 撤 svd；\n"
-        "回归锁 test_svd_arch_is_routable 断言改为诚实事实（diffusers 在、diffsynth 不在、\n"
-        "只有 diffsynth 的机器 svd 判不可用）；设计稿 §1.1 同步修正并记教训。\n"
-        "\n【③ 测试】\n"
-        "test_model_family.py +2 例（preferred_engines 映射全族断言；planner 视频探测\n"
-        "engine=diffusers 且 is_fallback=False 且 reason 可见默认序来源；图像族对照回归）。\n"
-        "接线验证时发现并修掉测试自身一处键名错误（_engine_probe 返回 reason 字符串\n"
-        "而非 reasons 列表）——失败先读详情再改，不猜。\n"
-        "\n【验证】全量 pytest 1969 passed；run_all_checks 109 项全绿；frozen_zone_guard\n"
-        "106 锁；ruff 棘轮零新增；stability gate 251/251 无新增。\n"
-        "\n【上一版 V4.46.14『统一推理引擎 M1 · 模型族注册表』见 docs/CHANGELOG.md。】"
+        "V4.46.16：统一引擎路线 M3——消灭 SVD 双轨的真实病灶。侦察修正了设计稿的\n"
+        "预设方案（「③ 委托 ④」），按实测事实选了更优的归一方向，先记在这里：\n"
+        "\n【① 侦察：双轨的真实病灶不是「两份代码」，是「双驻留 + 双参数源」】\n"
+        "③ local_video_infer._infer_svd 与 ④ video_gen.generate 都是 diffusers 实现，\n"
+        "各有资产：③ 有进程级共享缓存（OOM 让位、实测复用 35.68s）+ 帧保存链；\n"
+        "④ 有 TUNED 参数真源 + 质量/运动档位 + 蒸馏 CFG 语义。委托谁都会丢东西；\n"
+        "而两条路径顺序使用会各持一份 4.2GB 管线（双驻留 8.4GB，15GB 机器直接压爆）。\n"
+        "⇒ 正确归一 = 驻留合一（共享缓存）+ 参数单源（TUNED），两份代码都保留。\n"
+        "\n【② 驻留合一】\n"
+        "④ 的 load(svd-xt-i2v) 改走 local_video_pipe_cache.get_or_load —— 与 ③ 同 key\n"
+        "（(svd, abspath) 二元组，两侧目录解析实测相等）⇒ 任一条先加载，另一条直接命中，\n"
+        "全程只驻留一条管线。offload 实际状态随管线走（p._sg_offload_mode，命中时\n"
+        "loader 不执行、不能误报 none）。load 返回值新增 pipe_source（hit/miss，可见性）。\n"
+        "④ 的 unload()/OOM 必须连带 evict 共享缓存 —— 只断 self._pipe 而缓存还持着\n"
+        "就是假卸载（V4.46.13 的 weakref 教训同款，这次用 cached_keys 断言锁死）。\n"
+        "\n【③ 参数单源】\n"
+        "③ 的生成参数（steps/chunk/motion/noise_aug/CFG）从硬编码字面量改为\n"
+        "video_gen.tuned_for(svd-xt-i2v) 实读 —— 此前注释写「抄自 TUNED」但代码是\n"
+        "第二真源，改表必漏此处。现在改 TUNED ⇒ 两条实现同步生效（测试用 monkeypatch\n"
+        "改 motion_bucket_id=999 证明传导）。显式 steps 参数仍优先（档位入口不被吃掉）。\n"
+        "③ 同步获得蒸馏 CFG 语义（distilled ⇒ cfg=1.0），与 ④ 对齐。\n"
+        "\n【④ 测试 +4 例（test_video_residency_m3.py，零真权重）】\n"
+        "跨实例共享命中（第二次 load 不再 from_pretrained、_pipe 同一对象）；\n"
+        "unload 连带 evict（cached_keys 真放手）；参数随 TUNED 变（单源证明）；\n"
+        "显式 steps 优先回归。既有 check_video_gen / VIDEOCHAIN 守卫全绿\n"
+        "（③ 删字面量未破「CFG 不得关闭」「帧数↔fps 自洽」断言）。\n"
+        "\n【验证】全量 pytest 1973 passed；run_all_checks 109 项全绿；frozen 106 锁；\n"
+        "ruff 棘轮零新增；stability gate 无新增。\n"
+        "\n【上一版 V4.46.15『统一推理引擎 M2 · 后端收编』见 docs/CHANGELOG.md。】"
     ),
 }

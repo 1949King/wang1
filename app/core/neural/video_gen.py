@@ -34,6 +34,7 @@ ComfyUI 会引入第二套模型管理（它自己的 models/ 目录、它自己
 3. **不自动下载**：`generate()` **不触发下载**；必须显式 `pull()`。
    理由：一个模型 4~32GB，默默开始下载是极差的体验。
 """
+
 from __future__ import annotations
 
 import logging
@@ -114,9 +115,9 @@ QUALITY_PRESETS: Dict[str, int] = {
     #   ⚠️ 蒸馏模型**要求 CFG=1.0**（训练时就是无 CFG 的）—— 由 `TUNED[..]["distilled"]` 控制，
     #   见 `generate()` 里的分支与 `_verify/check_video_gen.py` 的旁路。
     "preview": 6,
-    "fast": 10,        # 极速：动漫/立绘素材够用
-    "balanced": 14,    # 默认
-    "best": 25,        # 原默认质量
+    "fast": 10,  # 极速：动漫/立绘素材够用
+    "balanced": 14,  # 默认
+    "best": 25,  # 原默认质量
 }
 
 # ── 运动档位（motion_bucket_id）：★ 漫剧素材的**免费画质提升** ──────────
@@ -130,9 +131,9 @@ QUALITY_PRESETS: Dict[str, int] = {
 # ⇒ **本项目主力素材是漫剧/立绘 ⇒ 默认取 `calm`(80)**。
 #   真实照片若确实需要更大幅度运镜，再上 `normal`(127) / `lively`(180)。
 MOTION_PRESETS: Dict[str, int] = {
-    "calm": 80,        # 默认：立绘/漫剧，主体保得住
-    "normal": 127,     # SVD 原默认（真实照片场景）
-    "lively": 180,     # 明显运动，但形变风险高
+    "calm": 80,  # 默认：立绘/漫剧，主体保得住
+    "normal": 127,  # SVD 原默认（真实照片场景）
+    "lively": 180,  # 明显运动，但形变风险高
 }
 
 # SVD 的 CFG 参数。**必须显式传入**（别依赖隐式默认）：
@@ -153,14 +154,14 @@ _CFG_MAX = 3.0
 
 TUNED: Dict[str, Dict[str, Any]] = {
     "svd-xt-i2v": {
-        "steps": QUALITY_PRESETS["balanced"],     # 14
+        "steps": QUALITY_PRESETS["balanced"],  # 14
         "decode_chunk_size": 1,
         "offload": True,
         "offload_max_frames": 0,
         # ★ 漫剧/立绘素材取 calm(80)：实测主体 6 帧全程稳定，
         #   而默认 127/180 后段崩坏 —— 且三者耗时相同（纯赚）。
         "motion_bucket_id": MOTION_PRESETS["calm"],
-        "noise_aug_strength": 0.02,               # SVD 默认，未发现需要改
+        "noise_aug_strength": 0.02,  # SVD 默认，未发现需要改
         "cfg_min": _CFG_MIN,
         "cfg_max": _CFG_MAX,
         # ★ 是否**步数蒸馏**权重（2026-10-02 引入）。
@@ -173,10 +174,11 @@ TUNED: Dict[str, Dict[str, Any]] = {
     },
 }
 _DEFAULT_TUNED: Dict[str, Any] = {
-    "steps": 25, "decode_chunk_size": 2, "offload": True, "offload_max_frames": 0,
+    "steps": 25,
+    "decode_chunk_size": 2,
+    "offload": True,
+    "offload_max_frames": 0,
 }
-
-
 
 
 def tuned_for(model_id: str) -> Dict[str, Any]:
@@ -195,10 +197,16 @@ def should_offload(model_id: str, frames: int = 0) -> bool:
     此处保留签名仅为兼容既有调用方与测试/守卫。
     """
     from app.core.neural.memory_policy import pick_memory_policy
+
     spec = VIDEO_MODELS.get(model_id) or {}
-    return bool(pick_memory_policy(
-        model_id, frames=frames, tuned=tuned_for(model_id),
-        registered_vram_gb=spec.get("vram_gb"))["offload"])
+    return bool(
+        pick_memory_policy(
+            model_id,
+            frames=frames,
+            tuned=tuned_for(model_id),
+            registered_vram_gb=spec.get("vram_gb"),
+        )["offload"]
+    )
 
 
 # ────────────────────────── 模型注册表（唯一真源）──────────────────────────
@@ -211,7 +219,7 @@ VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
         "params": "1.5B",
         "modes": ["i2v"],
         "full_repo_gb": 30.4,
-        "subset_gb": 4.2,            # 只取 fp16 推理子集
+        "subset_gb": 4.2,  # 只取 fp16 推理子集
         "vram_gb": 7.0,
         "ram_gb": 8.0,
         "note": "8GB 显存 + 15GB 内存下唯一跑得动的；CLIP 编码器，无巨型 T5",
@@ -226,7 +234,7 @@ VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
         "full_repo_gb": 31.9,
         "subset_gb": 31.9,
         "vram_gb": 8.0,
-        "ram_gb": 20.0,              # ← T5 单独 10.58GB，需大内存 offload
+        "ram_gb": 20.0,  # ← T5 单独 10.58GB，需大内存 offload
         "note": "质量最好，但 T5 编码器 10.58GB，本机 15GB 内存**不够 offload**",
         "license": "Apache-2.0",
     },
@@ -263,17 +271,19 @@ def available_models() -> List[Dict[str, Any]]:
     """列出可选视频模型（供 UI 渲染；含体积/显存/内存需求，便于用户判断）。"""
     out = []
     for mid, spec in VIDEO_MODELS.items():
-        out.append({
-            "id": mid,
-            "label": spec["label"],
-            "params": spec["params"],
-            "modes": list(spec["modes"]),
-            "download_gb": spec["subset_gb"],
-            "vram_gb": spec["vram_gb"],
-            "ram_gb": spec["ram_gb"],
-            "note": spec["note"],
-            "license": spec["license"],
-        })
+        out.append(
+            {
+                "id": mid,
+                "label": spec["label"],
+                "params": spec["params"],
+                "modes": list(spec["modes"]),
+                "download_gb": spec["subset_gb"],
+                "vram_gb": spec["vram_gb"],
+                "ram_gb": spec["ram_gb"],
+                "note": spec["note"],
+                "license": spec["license"],
+            }
+        )
     return out
 
 
@@ -283,9 +293,12 @@ class VideoGenEngine:
     def __init__(self) -> None:
         self._pipe = None
         self._loaded_id = ""
-        self._offload = ""          # "" / "model" / "sequential" / "none"
+        self._offload = ""  # "" / "model" / "sequential" / "none"
         self._tuned: Dict[str, Any] = dict(_DEFAULT_TUNED)
-        self._memory_policy: Dict[str, Any] = {}   # 最近一次 load 的显存策略（可见性）
+        self._memory_policy: Dict[str, Any] = {}  # 最近一次 load 的显存策略（可见性）
+        # M3：svd 驻留合一后，本引擎持有的管线可能同时活在共享缓存里；
+        # unload/OOM 时必须连带 evict，否则「释放显存」只释放了引用、缓存还留着。
+        self._shared_key = None
 
     # ── 能力探测（不加载模型）──────────────────────
 
@@ -302,11 +315,13 @@ class VideoGenEngine:
              真正 `import diffusers` 只放在 `load()` 里，即**只在用户明确要加载模型时**才发生。
         """
         import importlib.util as _u
+
         for mod in ("torch", "diffusers"):
             if _u.find_spec(mod) is None:
                 return False
         try:
             import torch  # torch 是本项目的基础依赖，导入代价可接受
+
             return bool(torch.cuda.is_available())
         except Exception:
             logger.debug("[video_gen] CUDA 探测失败", exc_info=True)
@@ -316,12 +331,14 @@ class VideoGenEngine:
     def unavailable_reason() -> str:
         """不可用时给出**具体**原因（而不是笼统说"不可用"）。同样**不 import diffusers**。"""
         import importlib.util as _u
+
         if _u.find_spec("torch") is None:
             return "未安装 torch"
         if _u.find_spec("diffusers") is None:
             return "未安装 diffusers（pip install diffusers accelerate）"
         try:
             import torch
+
             if not torch.cuda.is_available():
                 return "已装依赖但 CUDA 不可用（视频扩散会极慢或不可行）"
         except Exception:
@@ -334,6 +351,7 @@ class VideoGenEngine:
     def local_dir(model_id: str) -> str:
         """该模型在本地的落盘目录（可预测；不下载）。"""
         from app.core.neural_engine import get_neural_engine
+
         spec = VIDEO_MODELS.get(model_id) or {}
         repo = spec.get("repo") or model_id
         return get_neural_engine().repo_local_dir(repo)
@@ -363,36 +381,55 @@ class VideoGenEngine:
 
     # ── 拉取（项目原生链路：neural_engine → HF 镜像 → ModelScope）──
 
-    def pull(self, model_id: str,
-             progress_cb: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    def pull(
+        self, model_id: str, progress_cb: Optional[Callable[[str], None]] = None
+    ) -> Dict[str, Any]:
         """下载模型到 `models/cache/<repo>/`。**异常绝不外抛。**
 
         返回 ``{ok, model_id, path, bytes, message}``。
         """
         spec = VIDEO_MODELS.get(model_id)
         if not spec:
-            return {"ok": False, "model_id": model_id,
-                    "message": f"未知模型 id（可选：{', '.join(VIDEO_MODELS)}）"}
+            return {
+                "ok": False,
+                "model_id": model_id,
+                "message": f"未知模型 id（可选：{', '.join(VIDEO_MODELS)}）",
+            }
 
         if self.is_downloaded(model_id):
-            return {"ok": True, "model_id": model_id, "path": self.local_dir(model_id),
-                    "bytes": self.downloaded_bytes(model_id), "message": "已在本机，无需重复下载"}
+            return {
+                "ok": True,
+                "model_id": model_id,
+                "path": self.local_dir(model_id),
+                "bytes": self.downloaded_bytes(model_id),
+                "message": "已在本机，无需重复下载",
+            }
 
         try:
             from app.core.neural_engine import get_neural_engine
+
             eng = get_neural_engine()
             patterns = _SVD_FP16_PATTERNS if model_id == "svd-xt-i2v" else None
-            path = eng.download_snapshot(spec["repo"], allow_patterns=patterns,
-                                         progress_cb=progress_cb, max_workers=4)
+            path = eng.download_snapshot(
+                spec["repo"], allow_patterns=patterns, progress_cb=progress_cb, max_workers=4
+            )
         except Exception as e:
             logger.debug("[video_gen] pull 异常", exc_info=True)
             return {"ok": False, "model_id": model_id, "message": f"{type(e).__name__}: {e}"}
 
         if not path:
-            return {"ok": False, "model_id": model_id,
-                    "message": "两条下载通道都失败（HF 镜像 / ModelScope），未落盘任何东西"}
-        return {"ok": True, "model_id": model_id, "path": path,
-                "bytes": self.downloaded_bytes(model_id), "message": "下载完成"}
+            return {
+                "ok": False,
+                "model_id": model_id,
+                "message": "两条下载通道都失败（HF 镜像 / ModelScope），未落盘任何东西",
+            }
+        return {
+            "ok": True,
+            "model_id": model_id,
+            "path": path,
+            "bytes": self.downloaded_bytes(model_id),
+            "message": "下载完成",
+        }
 
     # ── 加载 / 生成 / 卸载 ─────────────────────────
 
@@ -409,8 +446,7 @@ class VideoGenEngine:
             return {"ok": False, "message": self.unavailable_reason()}
         if not self.is_downloaded(model_id):
             d = self.local_dir(model_id)
-            return {"ok": False,
-                    "message": f"模型未下载。请先拉取（目标目录: {d}）"}
+            return {"ok": False, "message": f"模型未下载。请先拉取（目标目录: {d}）"}
         if self._pipe is not None and self._loaded_id == model_id:
             return {"ok": True, "message": "已加载"}
 
@@ -420,35 +456,61 @@ class VideoGenEngine:
 
             spec = VIDEO_MODELS[model_id]
             d = self.local_dir(model_id)
-            kwargs: Dict[str, Any] = {"torch_dtype": torch.float16, "use_safetensors": True}
-            if model_id == "svd-xt-i2v":
-                kwargs["variant"] = "fp16"
-            pipe = DiffusionPipeline.from_pretrained(d, **kwargs)
-
             tun = tuned_for(model_id)
             # ★ 显存策略由 memory_policy 统一决策（V4.40.24 收口，W1）。
             #   SVD 定稿结论仍是 model_offload（实测又稳又快，见文件顶部 ②）；
             #   别改成「8GB 装得下就不 offload」——10 帧实测会分页卡死。
             from app.core.neural.memory_policy import (
-                MODE_SEQUENTIAL_OFFLOAD, MODE_WHOLE_GPU, pick_memory_policy)
+                MODE_SEQUENTIAL_OFFLOAD,
+                MODE_WHOLE_GPU,
+                pick_memory_policy,
+            )
+
             pol = pick_memory_policy(
-                model_id, frames=frames, tuned=tun,
-                registered_vram_gb=spec.get("vram_gb"))
-            if pol["mode"] != MODE_WHOLE_GPU:
-                try:
-                    if pol["mode"] == MODE_SEQUENTIAL_OFFLOAD:
-                        pipe.enable_sequential_cpu_offload()
-                        self._offload = "sequential"
-                    else:
-                        pipe.enable_model_cpu_offload()
-                        self._offload = "model"
-                except Exception:
-                    logger.debug("[video_gen] cpu offload 不可用，直接上卡", exc_info=True)
-                    pipe = pipe.to("cuda")
-                    self._offload = "none"
+                model_id, frames=frames, tuned=tun, registered_vram_gb=spec.get("vram_gb")
+            )
+            _offload_state = {"label": "none"}
+
+            def _build_pipe():
+                kwargs: Dict[str, Any] = {"torch_dtype": torch.float16, "use_safetensors": True}
+                if model_id == "svd-xt-i2v":
+                    kwargs["variant"] = "fp16"
+                p = DiffusionPipeline.from_pretrained(d, **kwargs)
+                if pol["mode"] != MODE_WHOLE_GPU:
+                    try:
+                        if pol["mode"] == MODE_SEQUENTIAL_OFFLOAD:
+                            p.enable_sequential_cpu_offload()
+                            _offload_state["label"] = "sequential"
+                        else:
+                            p.enable_model_cpu_offload()
+                            _offload_state["label"] = "model"
+                    except Exception:
+                        logger.debug("[video_gen] cpu offload 不可用，直接上卡", exc_info=True)
+                        p = p.to("cuda")
+                        _offload_state["label"] = "none"
+                else:
+                    p = p.to("cuda")
+                    _offload_state["label"] = "none"
+                # ★ offload 实际状态随管线走：缓存命中时 loader 不执行，
+                #   必须从管线对象上读回「建它的人启用了什么」，否则会误报 none。
+                p._sg_offload_mode = _offload_state["label"]
+                return p
+
+            # ★ M3 驻留合一（统一引擎，2026-10-24）：svd 与 ③ local_video_infer._infer_svd
+            #   共用进程级缓存（同 key = ("svd", abspath(同一目录)，两侧解析已实测相等)）
+            #   ⇒ 两条实现不再各持一份 4.2GB（此前顺序使用会双驻留 8.4GB）。
+            #   loader 只在未命中时执行；offload 语义两侧一致（都 model_offload，实测定稿）。
+            #   其余模型（未下载/未验证）维持单槽行为，不扩大改动面。
+            if model_id == "svd-xt-i2v":
+                from app.core import local_video_pipe_cache as VPC
+
+                pipe, src = VPC.get_or_load(("svd", os.path.abspath(d)), _build_pipe)
+                self._shared_key = ("svd", os.path.abspath(d))
             else:
-                pipe = pipe.to("cuda")
-                self._offload = "none"
+                pipe, src = _build_pipe(), "miss"
+                self._shared_key = None
+            # 命中共享缓存时 loader 没跑过 ⇒ 以管线对象上标注的实际 offload 为准。
+            self._offload = getattr(pipe, "_sg_offload_mode", _offload_state["label"])
             self._tuned = tun
             self._memory_policy = pol
             for _r in pol.get("reasons", []):
@@ -456,11 +518,22 @@ class VideoGenEngine:
 
             self._pipe = pipe
             self._loaded_id = model_id
-            logger.info("[video_gen] 已加载 %s（%s）· offload=%s（frames=%s）· steps=%s · chunk=%s",
-                        model_id, spec["label"], self._offload, frames,
-                        tun["steps"], tun["decode_chunk_size"])
-            return {"ok": True,
-                    "message": f"已加载 {spec['label']}（offload={self._offload}）"}
+            logger.info(
+                "[video_gen] 已加载 %s（%s·%s）· offload=%s（frames=%s）· steps=%s · chunk=%s",
+                model_id,
+                spec["label"],
+                "共享缓存命中" if src == "hit" else "新载入",
+                self._offload,
+                frames,
+                tun["steps"],
+                tun["decode_chunk_size"],
+            )
+            return {
+                "ok": True,
+                "pipe_source": src,
+                "message": f"已加载 {spec['label']}（offload={self._offload}"
+                + ("·复用常驻管线）" if src == "hit" else "）"),
+            }
         except Exception as e:
             logger.debug("[video_gen] load 失败", exc_info=True)
             self._pipe = None
@@ -468,20 +541,41 @@ class VideoGenEngine:
             return {"ok": False, "message": f"加载失败：{type(e).__name__}: {e}"}
 
     def unload(self) -> None:
-        """释放显存。"""
+        """释放显存。M3：svd 走共享缓存后，这里必须连带 evict ——
+        只断 self._pipe 引用而缓存还持着，「卸载」就是假的（weakref 实测过这条链）。"""
         self._pipe = None
         self._loaded_id = ""
+        k = getattr(self, "_shared_key", None)
+        self._shared_key = None
+        if k is not None:
+            try:
+                from app.core import local_video_pipe_cache as VPC
+
+                VPC.evict(k)
+            except Exception:  # stability-gate: allow-swallow（evict 失败最坏是缓存多留一条管线，下次 LRU/让位仍会收；卸载语义已在本侧完成）
+                logger.debug("[video_gen] 共享缓存 evict 失败", exc_info=True)
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；best-effort 回收，失败无后果）
             pass
 
-    def generate(self, model_id: str, *, prompt: str = "", image_path: str = "",
-                 seconds: float = 2.0, fps: int = 7, seed: int = 0,
-                 out_path: str = "", steps: int = 0,
-                 quality: str = "", motion: str = "") -> Dict[str, Any]:
+    def generate(
+        self,
+        model_id: str,
+        *,
+        prompt: str = "",
+        image_path: str = "",
+        seconds: float = 2.0,
+        fps: int = 7,
+        seed: int = 0,
+        out_path: str = "",
+        steps: int = 0,
+        quality: str = "",
+        motion: str = "",
+    ) -> Dict[str, Any]:
         """生成视频。**不自动下载模型**；未加载会先尝试加载。
 
         `quality`（质量/速度档，基于实测）：
@@ -504,8 +598,9 @@ class VideoGenEngine:
 
         tun = tuned_for(model_id)
         # 档位解析：显式 steps 优先；档位名未知时退回默认并如实提示
-        n_steps = int(steps) if int(steps) > 0 else int(
-            QUALITY_PRESETS.get(quality or "", tun["steps"]))
+        n_steps = (
+            int(steps) if int(steps) > 0 else int(QUALITY_PRESETS.get(quality or "", tun["steps"]))
+        )
         n_mb = int(MOTION_PRESETS.get(motion or "", tun.get("motion_bucket_id", 127)))
         n_frames = max(2, int(round(seconds * fps)))
 
@@ -517,6 +612,7 @@ class VideoGenEngine:
 
         try:
             import time as _time
+
             t_gen0 = _time.time()
             import imageio.v3 as iio
             import numpy as np
@@ -529,8 +625,7 @@ class VideoGenEngine:
             # ★ chunk 由 memory_policy 决策（V4.40.24 收口）：
             #   load() 已按同一帧数算出策略，直接复用（单一决策点，不重复计算）。
             #   SVD 实测必须 1（比 2 快约 6 倍且更省显存）。
-            _chunk = int(self._memory_policy.get("decode_chunk_size")
-                         or tun["decode_chunk_size"])
+            _chunk = int(self._memory_policy.get("decode_chunk_size") or tun["decode_chunk_size"])
             kw: Dict[str, Any] = {
                 "num_frames": n_frames,
                 "decode_chunk_size": _chunk,
@@ -552,6 +647,7 @@ class VideoGenEngine:
                 # ★ diffusers 的 SVD 管道只接受 PIL.Image / torch.Tensor，
                 #   **不接受 numpy**（实测报 ValueError: `image` has to be of type ...）
                 from PIL import Image as _PILImage
+
                 kw["image"] = _PILImage.fromarray(img[:, :, :3])
                 frames = self._pipe(**kw).frames[0]
             else:
@@ -573,29 +669,31 @@ class VideoGenEngine:
             # 落箱失败不影响产物本身：video_path 仍然有效，只是前端播不了。
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t_gen0
-            return {"ok": True, "path": out_path, "frames": len(frames),
-                    "video_path": out_path,
-                    "video_url": published.get("url", ""),
-                    "inbox_path": published.get("inbox_path", ""),
-                    # 把实测参数与耗时一并回传：用户能直接看到快了多少
-                    "steps": n_steps,
-                    "motion_bucket_id": n_mb,
-                    "offload": self._offload or "none",
-                    "seconds_elapsed": round(elapsed, 1),
-                    "s_per_frame": round(elapsed / max(1, len(frames)), 2),
-                    "message": f"生成完成：{out_path}（{n_steps} 步 · motion {n_mb} · "
-                               f"{elapsed:.0f}s · {elapsed / max(1, len(frames)):.1f}s/帧）"}
+            return {
+                "ok": True,
+                "path": out_path,
+                "frames": len(frames),
+                "video_path": out_path,
+                "video_url": published.get("url", ""),
+                "inbox_path": published.get("inbox_path", ""),
+                # 把实测参数与耗时一并回传：用户能直接看到快了多少
+                "steps": n_steps,
+                "motion_bucket_id": n_mb,
+                "offload": self._offload or "none",
+                "seconds_elapsed": round(elapsed, 1),
+                "s_per_frame": round(elapsed / max(1, len(frames)), 2),
+                "message": f"生成完成：{out_path}（{n_steps} 步 · motion {n_mb} · "
+                f"{elapsed:.0f}s · {elapsed / max(1, len(frames)):.1f}s/帧）",
+            }
         except torch.cuda.OutOfMemoryError:
             self.unload()
-            return {"ok": False,
-                    "message": "显存不足（OOM）。请缩短时长/降低帧数，或换更小模型。"}
+            return {"ok": False, "message": "显存不足（OOM）。请缩短时长/降低帧数，或换更小模型。"}
         except Exception as e:
             logger.debug("[video_gen] generate 失败", exc_info=True)
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
 
 
-def write_data_url(data_url: str, dest_dir: str,
-                   name_hint: str = "input") -> Optional[str]:
+def write_data_url(data_url: str, dest_dir: str, name_hint: str = "input") -> Optional[str]:
     """把 data URL（画布传图的方式）落成临时文件，返回路径。失败返回 None。
 
     为什么要落盘而不是直接把字节喂给管道：diffusers 的 i2v 管道入口是
@@ -609,6 +707,7 @@ def write_data_url(data_url: str, dest_dir: str,
         return None
     try:
         import base64
+
         raw = base64.b64decode(m.group(1), validate=False)
         os.makedirs(dest_dir, exist_ok=True)
         path = os.path.join(dest_dir, f"_{name_hint}_input.png")
@@ -670,24 +769,25 @@ def _to_uint8_array(frames) -> Any:
     """
     try:
         import numpy as np
+
         if isinstance(frames, np.ndarray):
             arr = frames
         elif isinstance(frames, (list, tuple)) and frames:
             first = frames[0]
-            if hasattr(first, "convert"):                      # PIL.Image
+            if hasattr(first, "convert"):  # PIL.Image
                 arr = np.stack([np.asarray(f.convert("RGB")) for f in frames])
             else:
                 arr = np.stack([np.asarray(f) for f in frames])
-        elif hasattr(frames, "detach"):                        # torch.Tensor
+        elif hasattr(frames, "detach"):  # torch.Tensor
             t = frames.detach().cpu().numpy()
-            if t.ndim == 4 and t.shape[1] in (1, 3):           # (N,C,H,W) → (N,H,W,C)
+            if t.ndim == 4 and t.shape[1] in (1, 3):  # (N,C,H,W) → (N,H,W,C)
                 t = np.transpose(t, (0, 2, 3, 1))
             arr = t
         else:
             return None
         if arr.dtype != np.uint8:
             arr = np.clip(arr, 0, 255).astype(np.uint8)
-        if arr.ndim == 4 and arr.shape[-1] == 4:               # 丢 alpha
+        if arr.ndim == 4 and arr.shape[-1] == 4:  # 丢 alpha
             arr = arr[..., :3]
         return arr if arr.ndim == 4 else None
     except Exception:
