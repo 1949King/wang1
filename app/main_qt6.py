@@ -50,9 +50,19 @@ def _probe_webengine() -> bool:
 
     成功结果按「PyQt6 + WebEngine 版本」缓存到 data/webengine_probe.json，
     避免每次启动多等 2~5s；失败不缓存（装好依赖后下次启动自动重试）。
+
+    🔴 2026-10-25 二次修正：探针**本身**曾因 ``QApplication([])`` 传空 argv 而必崩
+    （Chromium：base::CommandLine cannot be properly initialized ⇒ 0xC0000409），
+    结论恒为「不可用」⇒ 应用内画布被永久禁用。已修在 probe_webengine.py。
+    这里补三件事：① 探针 stderr 落 data/startup.log（失败原因可见）；
+    ② ``SHIGUANG_FORCE_WEBENGINE=1`` 强制启用（用户自救，跳过探针）；
+    ③ 探针超时/崩溃与「真不可用」在日志里区分开，避免再次误判无据可查。
     """
     if os.environ.get("SHIGUANG_SKIP_WEBENGINE_PROBE") == "1":
         return os.environ.get("SHIGUANG_NO_WEBENGINE") != "1"
+    if os.environ.get("SHIGUANG_FORCE_WEBENGINE") == "1":
+        _startup_mark("[startup] SHIGUANG_FORCE_WEBENGINE=1 ⇒ 跳过 QtWebEngine 预检，强制启用")
+        return True
     try:
         import subprocess
         import sys as _sys
@@ -79,9 +89,16 @@ def _probe_webengine() -> bool:
         probe = os.path.join(root, "_verify", "probe_webengine.py")
         if not os.path.isfile(probe):
             return True
-        r = subprocess.run([_sys.executable, probe], timeout=30,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if r.returncode == 0:
+        try:
+            r = subprocess.run([_sys.executable, probe], timeout=30,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.PIPE)
+            detail = (r.stderr or b"").decode("utf-8", "replace").strip()
+            rc = r.returncode
+        except subprocess.TimeoutExpired:
+            _startup_mark("[startup] QtWebEngine 预检超时(>30s) ⇒ 按不可用处理")
+            return False
+        if rc == 0:
             try:
                 import json as _json
 
@@ -91,14 +108,33 @@ def _probe_webengine() -> bool:
             except Exception:  # stability-gate: allow-swallow（写缓存失败 ⇒ 下次重探，不影响启动）
                 pass
             return True
+        _startup_mark(
+            f"[startup] QtWebEngine 预检失败 rc={rc} :: "
+            + (detail[-400:] if detail else "无 stderr（疑似渲染进程 fail-fast）")
+        )
         return False
-    except Exception:
+    except Exception as _e:
+        _startup_mark(f"[startup] QtWebEngine 预检异常 :: {_e}")
         return False
+
+
+def _startup_mark(msg: str) -> None:
+    """把启动诊断同时写入 data/startup.log（PowerShell 管道缓冲时也能查）。"""
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _p = os.path.join(_root, "data", "startup.log")
+        os.makedirs(os.path.dirname(_p), exist_ok=True)
+        with open(_p, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:  # stability-gate: allow-swallow（诊断日志写失败不得影响启动）
+        pass
 
 
 if not _probe_webengine():
     os.environ["SHIGUANG_NO_WEBENGINE"] = "1"
+    _startup_mark("[startup] QtWebEngine 不可用 ⇒ AI 画布将用系统浏览器打开")
     print("[startup] QtWebEngine 不可用（版本错配/渲染进程崩溃）⇒ AI 画布将用系统浏览器打开")  # stability-gate: allow-print（启动诊断：预检失败必须让用户看见）
+    print("[startup] 若确信 WebEngine 正常，可设 SHIGUANG_FORCE_WEBENGINE=1 跳过预检")  # stability-gate: allow-print（自救开关必须让用户看见）
 
 import sys
 import json
@@ -642,7 +678,11 @@ class Application:
         from PyQt6.QtWidgets import QApplication  # type: ignore[reportMissingImports]
         from PyQt6.QtGui import QFont  # type: ignore[reportMissingImports]
         
-        self._qt_app = QApplication(sys.argv)
+        # 🔴 argv 必须非空（2026-10-25）：Qt 6.11 的 QtWebEngine 依赖 base::CommandLine，
+        # 空 argv 会让 Chromium 渲染进程 fail-fast（0xC0000409），整块画布黑屏。
+        # 打包/被别的进程以无参方式拉起时 sys.argv 可能为空，这里兜底一个程序名。
+        _qargv = [a for a in (sys.argv or []) if isinstance(a, str)] or ["shiguang"]
+        self._qt_app = QApplication(_qargv)
         self._qt_app.setStyle("Fusion")  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
         
         font = QFont("Microsoft YaHei", 10)

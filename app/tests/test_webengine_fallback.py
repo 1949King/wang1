@@ -37,6 +37,53 @@ def test_probe_script_exists_and_exits_nonzero_on_broken_env() -> None:
     assert "sys.exit(0 if state[\"ok\"] else 3)" in src
 
 
+def test_probe_passes_non_empty_argv() -> None:
+    """🔴 回归锁（2026-10-25）：探针不得给 QApplication 传空 argv。
+
+    实测：`QApplication([])` ⇒ Chromium 打印「Argument list is empty, the program
+    name is not passed to QCoreApplication. base::CommandLine cannot be properly
+    initialized.」⇒ 渲染进程 fail-fast（0xC0000409 / exit 127），探针**恒失败**
+    ⇒ main_qt6 置 SHIGUANG_NO_WEBENGINE=1 ⇒ 应用内画布被永久禁用（黑屏 +
+    「画布页面加载失败」）。同一台机器换成非空 argv 立刻 exit 0。
+
+    用 AST 只看**真实调用**，避免被注释/文档字符串里的示例误伤。
+    """
+    import ast
+
+    src = (_ROOT / "_verify" / "probe_webengine.py").read_text(encoding="utf-8")
+    calls = [
+        node
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "QApplication"
+    ]
+    assert calls, "探针必须真的创建 QApplication"
+    for call in calls:
+        argv = call.args[0] if call.args else None
+        # 空列表字面量 / 无参 ⇒ Chromium base::CommandLine 初始化失败 ⇒ fail-fast
+        assert not (isinstance(argv, ast.List) and not argv.elts), (
+            "QApplication 不得传空 argv（渲染进程会 fail-fast）"
+        )
+        assert argv is not None, "QApplication 必须显式传非空 argv"
+
+
+
+def test_probe_failure_reason_is_observable() -> None:
+    """探针诊断必须写 stderr（stdout 被调用方丢弃），否则失败原因不可查。"""
+    src = (_ROOT / "_verify" / "probe_webengine.py").read_text(encoding="utf-8")
+    assert "sys.stderr.write" in src or "sys.stderr" in src
+
+
+def test_main_probe_helpers() -> None:
+    """main_qt6 必须具备：失败原因落盘（stderr 捕获）+ 强制启用逃生开关。"""
+    src = _MAIN.read_text(encoding="utf-8")
+    assert "SHIGUANG_FORCE_WEBENGINE" in src
+    assert "stderr=subprocess.PIPE" in src
+    assert "_startup_mark" in src
+
+
+
 def test_ensure_web_view_short_circuits_on_flag(monkeypatch) -> None:
     monkeypatch.setenv("SHIGUANG_NO_WEBENGINE", "1")
     s = _FakeSelf()

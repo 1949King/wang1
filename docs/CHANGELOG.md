@@ -1,5 +1,59 @@
 # 拾光剪影 — 变更日志
 
+## 画布黑屏真凶：WebEngine 预检空 argv 误判（V4.46.26 · 2026-10-25）
+
+> 用户截图：AI 画布区一片黑，只有一行「画布页面加载失败（请点「刷新」或「启动画布」）」，
+> 点刷新 / 启动画布都没用。
+
+### 根因（实测对照，非推测）
+
+预检脚本 `_verify/probe_webengine.py` 用 `QApplication([])` 传**空 argv**。Qt 6.11 的 Chromium 因此报
+`Argument list is empty, the program name is not passed to QCoreApplication.
+base::CommandLine cannot be properly initialized.` 并 fail-fast：
+
+| 探针写法 | 退出码 |
+| --- | --- |
+| `QApplication([])` | `127`（`0xC0000409`） |
+| `QApplication(["probe"])` | `0`（`loadFinished=True`） |
+
+⇒ 探针**恒判不可用** ⇒ `main_qt6` 置 `SHIGUANG_NO_WEBENGINE=1` ⇒ 应用内画布被永久禁用。
+即：炸的不是 WebEngine，是探针自己；上一版「版本混装」的结论只是当时环境叠加的巧合。
+
+### 修复
+
+- `_verify/probe_webengine.py`：argv 一律非空；失败原因写 stderr；
+- `main_qt6.py`：捕获探针 stderr 落 `data/startup.log`（区分超时/崩溃/真不可用）；
+  新增 `SHIGUANG_FORCE_WEBENGINE=1` 强制启用开关；主 `QApplication` argv 非空兜底；
+- `app/tests/test_webengine_fallback.py`：新增 AST 回归锁（`QApplication([])` / 无参直接判红）。
+
+### 验证
+
+- 真机实跑：`canvas page loadFinished ok url=http://127.0.0.1:3011?token=…`，
+  且 WebView console 镜像出现前端 JS 日志（页面真执行了，不是假成功）；
+- `data/webengine_probe.json` 已写入 ok=true（后续启动跳过预检）；
+- pytest `app/tests/test_webengine_fallback.py` **7 passed**；AST 守卫反例验证（空/无参被抓、非空放行）。
+
+### 同轮发现（未修，待授权）
+
+内置插件 4 条（markdown / svg-viewer / timeline-embed 等）声明 `/plugins/*.js` 但产物不存在，
+静态服务回 404 HTML ⇒ 前端 import 报 `Unexpected token '<'`；2 条社区插件指向不存在的 CDN。
+详见 `docs/现行技术文档.md §21.2`。
+
+### 同轮修复：内置插件 4 条假产物 + 2 条死 CDN
+
+- 根因：注册表声明 `/plugins/*.js` 但产物不存在；静态服务的 SPA 兜底把缺文件改写成
+  `index.html`（**200 + HTML**，不是 404）⇒ 前端当 ESM import 报 `Unexpected token '<'`；
+  另有 2 条社区插件指向不存在的 `cdn.shiguang.io`。且这些 url 早写进用户缓存
+  `~/.video_editor_cache/canvas_plugins.json` ⇒ 只改代码不清缓存用户照样报错。
+- 交付：4 个**真实** bundle（`vendor/shiguang-canvas/public/plugins/`
+  sticky-note / markdown / svg-viewer / timeline-embed + `index.json`，并同步 dist/plugins/）；
+  零 import 约束落地（React 取 `rt.React`，数据走 `ctx.updateMetadata`，SVG 走
+  `sandbox=""` iframe 防 XSS）；registry 删死地址 + 修正 timeline-embed 描述（原本吹
+  "双向跳转"，实际只读预览）；manifest 读取时清理死地址条目并回写。
+- 守卫：新增 `app/tests/test_canvas_plugin_assets.py`（6 例，反例验证过牙齿）。
+- 真机：03:52 实跑 —— 清理 2 条死地址 → 4 个 bundle 全 200 → **零 sync install failed**
+  → `GET /host/timeline-snapshot 200`（timeline-embed 组件真的挂载跑起来了）。
+
 ## 画布模块内置「本地模型」入口 + 面板下载（2026-10-25）
 
 > 用户：本地模型放到画布模块的模型管理里，切模块去拉太麻烦；主模块页签保持不变。

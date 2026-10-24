@@ -157,7 +157,16 @@ def session_token() -> str:
 
 
 # ── 画布节点插件官方注册表（Qt 端维护，GET /host/plugins 返回给前端）──
-# 真实生态下应从 GitHub 插件仓库拉取，这里内置 6 个示例便于启动。
+# 铁律（2026-10-25 血泪）：**注册表里每一条 url 都必须真的能取到**。
+# 此前这里声明了 4 条 `/plugins/*.js` 但产物根本不存在（public/ 与 dist/ 都没有）。
+# 注意静态服务的 SPA 兜底（canvas_runtime._SPAHandler.do_GET）对缺文件**不返回 404**，
+# 而是把 path 改写成 /index.html ⇒ 前端拿到 **200 + HTML**，再当 ESM import ⇒
+# `SyntaxError: Unexpected token '<'`，每次进画布刷 4 条 sync install failed；
+# 另有 2 条社区插件指向 `cdn.shiguang.io`（域名不存在）⇒ 必然 `Failed to fetch`。
+# 现在：4 个官方插件是**真实 bundle**，落在
+# `vendor/shiguang-canvas/public/plugins/*.js`（vite build 会同步到 dist/plugins/）；
+# 守卫见 app/tests/test_canvas_plugin_assets.py（注册表 url → 必须有对应文件）。
+# 社区插件需要真实可用的 CDN 再回归，宁可空着也不留假地址。
 _BUILTIN_PLUGIN_REGISTRY: List[Dict[str, Any]] = [
     {
         "id": "builtin:sticky-note",
@@ -172,7 +181,7 @@ _BUILTIN_PLUGIN_REGISTRY: List[Dict[str, Any]] = [
         "id": "builtin:markdown",
         "name": "Markdown 文档",
         "version": "0.1.0",
-        "description": "渲染 Markdown 文档节点，支持代码高亮和表格",
+        "description": "渲染 Markdown 文档节点（标题/列表/引用/代码块/粗体斜体行内码链接）",
         "nodes": [{"type": "builtin:markdown", "title": "Markdown", "icon": "📄"}],
         "url": "/plugins/markdown.js",
         "official": True,
@@ -181,7 +190,7 @@ _BUILTIN_PLUGIN_REGISTRY: List[Dict[str, Any]] = [
         "id": "builtin:svg-viewer",
         "name": "SVG 查看器",
         "version": "0.1.0",
-        "description": "嵌入 SVG 图形，支持缩放和导出",
+        "description": "嵌入 SVG 图形并缩放预览（sandbox iframe 渲染，禁脚本）",
         "nodes": [{"type": "builtin:svg-viewer", "title": "SVG", "icon": "🎨"}],
         "url": "/plugins/svg-viewer.js",
         "official": True,
@@ -190,28 +199,11 @@ _BUILTIN_PLUGIN_REGISTRY: List[Dict[str, Any]] = [
         "id": "builtin:timeline-embed",
         "name": "时间线嵌入",
         "version": "0.1.0",
-        "description": "嵌入剪辑时间线预览，画布节点可双向跳转",
+        # 只读预览：数据来自 GET /host/timeline-snapshot；双向跳转尚未实现，描述不吹
+        "description": "只读预览剪辑时间线（片段/时长/轨道/空隙），数据来自 /host/timeline-snapshot",
         "nodes": [{"type": "builtin:timeline-embed", "title": "时间线", "icon": "🎬"}],
         "url": "/plugins/timeline-embed.js",
         "official": True,
-    },
-    {
-        "id": "community:comfyui-controlnet",
-        "name": "ControlNet 姿态控制",
-        "version": "0.2.1",
-        "description": "通过骨骼节点精准控制视频生成的人物姿态（社区插件）",
-        "nodes": [{"type": "community:comfyui-controlnet", "title": "姿态控制", "icon": "🧍"}],
-        "url": "https://cdn.shiguang.io/plugins/comfyui-controlnet-0.2.1.js",
-        "official": False,
-    },
-    {
-        "id": "community:prompt-expander",
-        "name": "提示词展开器",
-        "version": "0.1.3",
-        "description": "自动把简短提示词展开成详细描述词（社区插件）",
-        "nodes": [{"type": "community:prompt-expander", "title": "提示词展开", "icon": "✨"}],
-        "url": "https://cdn.shiguang.io/plugins/prompt-expander-0.1.3.js",
-        "official": False,
     },
 ]
 
@@ -220,15 +212,38 @@ _CANVAS_PLUGINS_JSON = os.path.join(
     os.path.expanduser("~"), ".video_editor_cache", "canvas_plugins.json"
 )
 
+# 已知死地址（域名从未存在 / 已下线）。2026-10-25：历史上 registry 里编造过两条
+# `https://cdn.shiguang.io/plugins/*.js`（社区插件示例），它们被写进用户 manifest 后
+# 每次进画布都触发 `Failed to fetch`；registry 已删，用户缓存里的残留也要清掉，
+# 否则「改了代码但用户还是报错」——缓存迁移与代码修复同等重要。
+_DEAD_PLUGIN_URL_PREFIXES = ("https://cdn.shiguang.io/",)
+
 
 def _load_canvas_plugins_manifest() -> List[Dict[str, Any]]:
-    """读取 Qt 端已安装画布节点插件列表"""
+    """读取 Qt 端已安装画布节点插件列表（顺带清掉指向死地址的残留条目）。"""
     try:
         if os.path.isfile(_CANVAS_PLUGINS_JSON):
             with open(_CANVAS_PLUGINS_JSON, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                return data
+                kept = [
+                    p
+                    for p in data
+                    if not (
+                        isinstance(p, dict)
+                        and str(p.get("url") or "").startswith(_DEAD_PLUGIN_URL_PREFIXES)
+                    )
+                ]
+                if len(kept) != len(data):
+                    dropped = [
+                        str(p.get("id"))
+                        for p in data
+                        if isinstance(p, dict)
+                        and str(p.get("url") or "").startswith(_DEAD_PLUGIN_URL_PREFIXES)
+                    ]
+                    logger.info("canvas_plugins.json 清理死地址条目: %s", dropped)
+                    _save_canvas_plugins_manifest(kept)
+                return kept
     except Exception as e:
         logger.warning("读取 canvas_plugins.json 失败: %s", e)
     return []

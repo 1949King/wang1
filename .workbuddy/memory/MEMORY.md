@@ -21,6 +21,8 @@
 核电管工转 AIGC；简体中文；指令极简；**先结论后展开**；小白模式（比喻+表格）；拒绝随机效果；要证据（文件+行号）；被纠正直接认错重查不辩解。🔴 **「迭代设计文档」≠「把数字改对」**——要设计增量（骨架/架构/概念重定义），改版本号行数锁数只是校准。
 
 ## 四、持久约束（血泪）
+- 🔴 **Qt 6.11 WebEngine 必须给 QApplication 非空 argv**（2026-10-25 实证）：`QApplication([])` ⇒ Chromium `base::CommandLine` 初始化失败 ⇒ 渲染进程 fail-fast `0xC0000409`；`QApplication(["x"])` 正常。画布「永久黑屏 + 点刷新/启动都没用」先查这条（预检脚本、子进程小工具同样中招）。
+- 🔴 **画布静态服务有 SPA 兜底，缺文件不返回 404**：`_SPAHandler.do_GET` 把不存在的 path 改写成 `/index.html` ⇒ **200 + HTML**；前端把它当 ESM import 就报 `Unexpected token '<'`。排查插件/资源缺失时别只看状态码，要看 body 是不是 HTML。
 - 🔴 **`SkeletonUtils.clone` 后必须先 `updateMatrixWorld(true)` 再测包围盒**：clone 的 matrixWorld 是脏的，`Box3.setFromObject` 会量出 1/33 假尺寸（bodychan 0.0512m vs 真值 1.70m）⇒ 归一化算出 33× 补偿 ⇒ 1.7m 模型放大成 56.5m（「群像第三个角色一只脚占满屏幕」）。
 - 🔴 **SkinnedMesh 包围盒必须 precise**：`setFromObject(obj, true)`，普通模式只读 geometry.boundingBox 测不出骨骼异常。
 - 🔴 **尺寸自检必须进 `tick()` 渲染循环**（每秒一次）：GLB 异步加载完成时 actors 数组没变 ⇒ 挂 actors effect 里 = 死代码。
@@ -39,6 +41,7 @@
 - `run_all_checks.py`（在 `_verify/`）**不含**稳定性门禁 ⇒ 须另跑 `scripts/stability_gate.py`。**哈希 ≠ 不变量**：冻结区新不变量必须 AST 断言 + 反例验证，否则守卫可能是永远绿的摆设；**门禁项本身也可能是摆设**（2026-10-19：dual-repo 的 tauri filter 大小写不匹配但 pnpm 退出码 0 ⇒ 长期假绿；空跑退出码为 0 的工具链最危险）。
 - 🔴 **沙箱 safe-delete 的 `scope:"turn"` 累计删除计数**超 50 即拦（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`）：vite 构建末尾清 `dist/assets`/`prompts/bundled` 会被拦 ⇒ 表现「构建成功但退出码 1」。绕开 = `mv` 旧产物到 `.workbuddy/tmp/`（同分区 rename 不计数），下个 turn 计数自动重置。**不是代码回归，别改代码**。
 - 🔴 **禁 `git add -A`**（复发多次夹带无关文件）⇒ 一律精确 pathspec；`.cursor/` 需 `git add -f`。
+- 🔴 **远程仓库格局（2026-10-24 实测）**：origin = `git@github.com:1949King/wang1.git`（私有）；远程 main 原是单 commit 网页上传快照（575ed7bd，与本地历史不相关）；本地历史含 3 个 >100MB 文件（发布版 zip 743MB / 纵年华 mp4 723MB / avfilter dll 104MB）触发 GitHub 硬限 ⇒ 已 filter-repo 克隆手术剥除（2.88GB→316MB，236 提交完整）后强推成功（远程 main = be198520b）；**本地 main 仍是旧历史未对齐，下次推送前需再手术**；GitHub 副本不含 ffmpeg 二进制/发布包/示例视频。
 - 🔴 **`frozen_zones.json` 改 files 禁 `sorted()`** ⇒ 取 HEAD 原顺序 + 尾部追加。
 - 🔴 **`frozen_zone_guard.py --update` 必须是最后一次动冻结文件之后** ⇒ 正序：改完全部文件 → `--update` → `git add` → 跑门禁。
 - ⚠️ `precommit_gates.sh` 口径不一致：ruff 按**已暂存**筛（未暂存 = 正常空跑），冻结区按**工作区全量**算。
