@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,21 @@ def promotion_fits(size_gb: float, total_vram_gb: float,
         return need <= float(total_vram_gb) * 0.92
     except (TypeError, ValueError):
         return False
+
+
+def apply_fp8_quantization(pipe: Any) -> Tuple[bool, str]:
+    """对 UNet 应用 torchao fp8 权重只量化；返回 (ok, 失败原因)。
+
+    单独成函数便于单测：注入假 torchao 模块即可验证「调用链真的走到 quantize_」，
+    不依赖 GPU/权重。失败不抛，交给调用方决定回落还是严格失败。
+    """
+    try:
+        from torchao.quantization import Float8WeightOnlyConfig, quantize_
+
+        quantize_(pipe.unet, Float8WeightOnlyConfig())
+        return True, ""
+    except Exception as e:
+        return False, "fp8 量化失败，回落 fp16：%s: %s" % (type(e).__name__, e)
 
 
 class DiffusersImageEngine:
@@ -520,15 +535,12 @@ class DiffusersImageEngine:
             self._precision = _prec["precision"]
             self._precision_reason = _prec.get("fallback") or ""
             if self._precision == "fp8":
-                try:
-                    from torchao.quantization import Float8WeightOnlyConfig, quantize_
-
-                    quantize_(pipe.unet, Float8WeightOnlyConfig())
+                _ok, _why = apply_fp8_quantization(pipe)
+                if _ok:
                     logger.info("[diffusers_image] fp8 权重只量化已应用（%s）", model_id)
-                except Exception as e:
+                else:
                     self._precision = "fp16"
-                    self._precision_reason = "fp8 量化失败，回落 fp16：%s: %s" % (
-                        type(e).__name__, e)
+                    self._precision_reason = _why
                     if _strict:
                         return {"ok": False, "message": self._precision_reason}
                     logger.warning("[diffusers_image] %s", self._precision_reason)

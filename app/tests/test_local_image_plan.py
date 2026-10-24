@@ -144,3 +144,113 @@ def test_hybrid_local_image_unresolvable_reference_falls_back_to_t2i(monkeypatch
     assert out and out["ok"]
     assert seen["image_path"] == ""
     assert any("参考图无法解析" in r for r in reasons)
+
+
+def test_apply_fp8_quantization_calls_torchao(monkeypatch):
+    """fp8 路径：注入假 torchao，验证真的走到 quantize_(unet, Float8WeightOnlyConfig)。"""
+    import sys
+    import types
+
+    from app.core.neural import diffusers_image as D
+
+    calls = {}
+
+    class Cfg:
+        pass
+
+    def quantize_(mod, cfg):
+        calls["cfg"] = type(cfg).__name__
+        calls["mod"] = mod
+
+    fake = types.ModuleType("torchao.quantization")
+    fake.Float8WeightOnlyConfig = Cfg
+    fake.quantize_ = quantize_
+    pkg = types.ModuleType("torchao")
+    pkg.quantization = fake
+    monkeypatch.setitem(sys.modules, "torchao", pkg)
+    monkeypatch.setitem(sys.modules, "torchao.quantization", fake)
+
+    class P:
+        unet = object()
+
+    ok, why = D.apply_fp8_quantization(P())
+    assert ok is True and why == ""
+    assert calls["cfg"] == "Cfg"
+    assert calls["mod"] is P.unet
+
+
+def test_apply_fp8_quantization_honest_fail(monkeypatch):
+    import sys
+
+    from app.core.neural import diffusers_image as D
+
+    monkeypatch.setitem(sys.modules, "torchao", None)  # import 必然失败
+
+    class P:
+        unet = object()
+
+    ok, why = D.apply_fp8_quantization(P())
+    assert ok is False and "fp8 量化失败" in why
+
+
+def test_hybrid_local_image_uses_plan_engine_and_model(monkeypatch):
+    """引擎链消费：plan 指定 diffusers + sdxl 时，本地跳必须照办。"""
+    import app.core.ai.hybrid_dispatch as HD
+
+    seen = {}
+
+    class FakeBackend:
+        def generate(self, model_id, **kw):
+            seen["model"] = model_id
+            return {"ok": True, "image_path": "", "image_url": "", "seed": kw.get("seed", 0)}
+
+        def lcm_status(self):
+            return {"usable": True}
+
+    def fake_resolve(prefer=""):
+        seen["prefer"] = prefer
+        return {"ok": True, "engine": "diffusers", "is_fallback": False,
+                "backend": FakeBackend(), "reasons": [], "message": ""}
+
+    monkeypatch.setattr("app.core.ai.execution_decider.resolve_local_image_engine", fake_resolve)
+    monkeypatch.setattr(
+        "app.core.neural.diffusers_image.DiffusersImageEngine.is_downloaded",
+        staticmethod(lambda mid: True),
+    )
+    reasons = []
+    out = HD._local_image(prompt="p", size="", seed=1, reference_image="",
+                          reasons=reasons, quality="fine",
+                          prefer_engine="diffusers", model_id="sdxl-t2i")
+    assert out and out["ok"]
+    assert seen["prefer"] == "diffusers" and seen["model"] == "sdxl-t2i"
+    assert out["local_model"] == "sdxl-t2i"
+
+
+def test_hybrid_local_image_plan_model_missing_falls_back(monkeypatch):
+    import app.core.ai.hybrid_dispatch as HD
+
+    seen = {}
+
+    class FakeBackend:
+        def generate(self, model_id, **kw):
+            seen["model"] = model_id
+            return {"ok": True, "image_path": "", "image_url": "", "seed": 0}
+
+        def lcm_status(self):
+            return {"usable": False}
+
+    monkeypatch.setattr(
+        "app.core.ai.execution_decider.resolve_local_image_engine",
+        lambda **kw: {"ok": True, "engine": "diffsynth", "is_fallback": False,
+                      "backend": FakeBackend(), "reasons": [], "message": ""},
+    )
+    monkeypatch.setattr(
+        "app.core.neural.diffusers_image.DiffusersImageEngine.is_downloaded",
+        staticmethod(lambda mid: mid == "sd15-t2i"),
+    )
+    reasons = []
+    out = HD._local_image(prompt="p", size="", seed=0, reference_image="",
+                          reasons=reasons, quality="fine",
+                          prefer_engine="diffsynth", model_id="sdxl-t2i")
+    assert out and out["local_model"] == "sd15-t2i" and seen["model"] == "sd15-t2i"
+    assert any("未下载" in r for r in reasons)

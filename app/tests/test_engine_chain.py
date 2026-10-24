@@ -74,3 +74,18 @@ def test_plan_reads_quality_gate_when_quality_empty(monkeypatch, tmp_path) -> No
     # bias=90 ⇒ cloud 档：云端先、本地兜底；本地那跳的族按 cinema 走 sdxl
     assert [e["kind"] for e in p["engines"]] == ["cloud", "local"]
     assert p["engines"][1]["family"] == "sdxl"
+
+
+def test_decide_compute_mode_exposes_engines(monkeypatch) -> None:
+    """执行器要能拿到 plan 的 engines（否则链只是展示品）。"""
+    import app.core.ai.execution_planner as EP2
+    import app.core.ai.hybrid_dispatch as HD
+
+    monkeypatch.setattr(EP2, "plan", lambda **kw: {
+        "route": "hybrid", "chain": ["local", "cloud"], "mode": "engine",
+        "engines": [{"kind": "local", "engine": "diffusers", "model": "sdxl-t2i",
+                     "family": "sdxl"}, {"kind": "cloud"}],
+        "reasons": [], "model_hint": "sdxl-t2i"})
+    dec = HD.decide_compute_mode(channel_id="", capability="image", has_reference=False)
+    assert dec["engines"][0]["engine"] == "diffusers"
+    assert dec["engines"][0]["model"] == "sdxl-t2i"

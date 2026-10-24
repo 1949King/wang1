@@ -64,6 +64,7 @@ def decide_compute_mode(*, channel_id: str = "",
     return {"mode": p.get("mode") or "engine",
             "route": p.get("route") or "cloud",
             "chain": list(p.get("chain") or ["cloud"]),
+            "engines": list(p.get("engines") or []),
             "use_local": use_local,
             "explicit_channel": bool((channel_id or "").strip()),
             "model_hint": p.get("model_hint") or "",
@@ -71,7 +72,8 @@ def decide_compute_mode(*, channel_id: str = "",
 
 
 def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
-                 reasons: list, quality: str = "standard") -> Optional[Dict[str, Any]]:
+                 reasons: list, quality: str = "standard",
+                 prefer_engine: str = "", model_id: str = "") -> Optional[Dict[str, Any]]:
     """走本机 SD 引擎出图。成功返回与云端同形的 dict；不可用/失败返回 None（调用方降级）。
 
     2026-10-25 接线（修三处写死）：
@@ -84,7 +86,7 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
         from app.core.ai import local_image_plan as LP
         from app.core.ai.execution_decider import resolve_local_image_engine
 
-        sel = resolve_local_image_engine()
+        sel = resolve_local_image_engine(prefer=prefer_engine)
         if not sel.get("ok"):
             reasons.append("本机引擎不可用：" + str(sel.get("message")
                            or (sel.get("reasons") or ["未知"])[-1]))
@@ -110,22 +112,29 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
                 w, h = int(parts[0]), int(parts[1])
         except (TypeError, ValueError):
             w = h = 0
-        # 选模型 + 适配尺寸（纯函数层，可单测）
-        model_id, native = "sd15-t2i", 512
+        # 选模型 + 适配尺寸（纯函数层，可单测）：plan 指定优先（须已下载），否则按质量/尺寸选
+        plan_model = str(model_id or "").strip()
+        local_model, native = "sd15-t2i", 512
         try:
             from app.core.neural import diffusers_image as _dfe
 
             downloaded = [m["id"] for m in _dfe.available_models()
                           if _dfe.DiffusersImageEngine.is_downloaded(m["id"])]
-            model_id = LP.pick_model(quality=quality, width=w, height=h,
-                                     downloaded=downloaded)
-            native = int((_dfe.DIFFUSERS_IMAGE_MODELS.get(model_id) or {})
+            if plan_model and plan_model in downloaded:
+                local_model = plan_model
+                reasons.append("按执行层计划用模型 %s" % plan_model)
+            else:
+                if plan_model:
+                    reasons.append("计划模型 %s 未下载 ⇒ 按质量/尺寸改选" % plan_model)
+                local_model = LP.pick_model(quality=quality, width=w, height=h,
+                                            downloaded=downloaded)
+            native = int((_dfe.DIFFUSERS_IMAGE_MODELS.get(local_model) or {})
                          .get("native_size") or 512)
         except Exception:
             logger.debug("[hybrid_dispatch] 本地模型探测失败，按 sd15/512", exc_info=True)
         fw, fh = LP.fit_size(w, h, native)
         preset = LP.resolve_preset(
-            quality=quality, model_id=model_id,
+            quality=quality, model_id=local_model,
             lcm_usable=LP.lcm_usable(backend),
             supports_preset=LP.supports_preset(backend))
         gen_kw: Dict[str, Any] = {"prompt": prompt, "image_path": image_path,
@@ -133,19 +142,19 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
                                   "seed": int(seed) if isinstance(seed, int) else 0}
         if preset:
             gen_kw["preset"] = preset
-        res = backend.generate(model_id, **gen_kw)
+        res = backend.generate(local_model, **gen_kw)
         if not res.get("ok"):
             reasons.append("本机出图失败：" + str(res.get("message")))
             return None
         reasons.append("本机 SD 出图（engine=%s · model=%s · preset=%s · %dx%d）"
-                       % (sel.get("engine"), model_id, preset or "默认", fw, fh))
+                       % (sel.get("engine"), local_model, preset or "默认", fw, fh))
         data_url = res.get("image_data_url") or _file_to_data_url(
             res.get("image_path") or "")
         return {"ok": True, "image_data_url": data_url,
                 "image_url": res.get("image_url", ""),
                 "image_path": res.get("image_path", ""),
                 "source": "local", "engine": sel.get("engine"),
-                "model": "local/" + model_id, "local_model": model_id,
+                "model": "local/" + local_model, "local_model": local_model,
                 "preset": preset, "size": "%dx%d" % (fw, fh),
                 "channel_id": "local",
                 "seed": res.get("seed", seed), "seed_sent": True}
@@ -174,9 +183,13 @@ def generate_image_hybrid(*, prompt: str, model: str = "", size: str = "",
 
     for step in chain:
         if step == "local":
+            local_step = next((e for e in (dec.get("engines") or [])
+                               if e.get("kind") == "local"), {})
             loc = _local_image(prompt=prompt, size=size, seed=seed,
                                reference_image=reference_image, reasons=reasons,
-                               quality=quality)
+                               quality=quality,
+                               prefer_engine=str(local_step.get("engine") or ""),
+                               model_id=str(local_step.get("model") or ""))
             if loc is not None:
                 loc["compute_mode"] = dec["mode"]
                 loc["compute_route"] = dec["route"]

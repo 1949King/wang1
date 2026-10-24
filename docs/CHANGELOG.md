@@ -1,5 +1,34 @@
 # 拾光剪影 — 变更日志
 
+## fp8 验证受阻（诚实记录）+ 量化路径可测化 + 引擎链被真消费（2026-10-25）
+
+> 「开始」的目标是 fp8 真机验证。实测**网络阻断**：pypi 镜像 10061 拒绝连接、系统无代理、
+> 其他运行环境也没有 torchao ⇒ 本机无法真跑 fp8。**不谎报成功**，把可验证的部分做实。
+
+### 1. fp8：链路可测化（真机验收待网络恢复）
+
+- 量化抽成 `diffusers_image.apply_fp8_quantization(pipe) -> (ok, reason)`；`load()` 复用它；
+- 单测用**假 torchao 模块**证明：确实调用 `quantize_(unet, Float8WeightOnlyConfig())`；
+  缺 torchao 时返回 `(False, 'fp8 量化失败，回落 fp16：...')`（严格模式再升级为失败）；
+- `bench_fp8_sdxl.py` 保持不变：装好 torchao 直接跑即可真机验收。
+
+### 2. 引擎链被真消费（不再是展示品）
+
+- `decide_compute_mode()` 返回 `engines`；`_local_image()` 接受 `prefer_engine` 与 `model_id`：
+  - engine → `resolve_local_image_engine(prefer=...)`；
+  - model：**已下载才用**，未下载则按质量/尺寸改选，并在 reasons 里写明；
+- 新增 4 例测试（plan engine/model 透传、未下载回落、decide 透出 engines）。
+
+### 验证（全部实跑）
+
+- pytest：**2009 passed**（新增 5 例）
+- `run_all_checks`：**109 项全绿**；vitest **626 用例**；tsc **37 基线**；ruff 0
+
+### 诚实边界
+
+- fp8 **真机未验证**（网络阻断 + 无 torchao）；不是「fp8 可用」的声明；
+- 网络恢复后的验收命令：`pip install torchao` → `python _verify/bench/bench_fp8_sdxl.py`。
+
 ## 引擎链化 + 质量总闸 —— planner 输出引擎级链，滑块升级为算力/质量双旋钮（2026-10-25）
 
 > 此前 plan() 只给 `chain: [local, cloud]`（位置级），不告诉调用方本地那一跳是谁；
