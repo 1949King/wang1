@@ -423,4 +423,18 @@ def status() -> Dict[str, Any]:
         "budget_lambda": _budget_lambda(),
         "cloud_available": _cloud_available(),
         "local_prompt_only": sorted(_LOCAL_PROMPT_ONLY),
+        # M4 入口合一：模型族注册表全量视图（族/验证态/权重/后端健康），
+        # 画布与排障面板由此看到「哪些族真验过、哪些只是登记」。
+        "families": _families_view(),
     }
+
+
+def _families_view() -> Dict[str, Any]:
+    """model_family.status() 的安全包装：注册表不可用不影响 status 主体。"""
+    try:
+        from app.core.neural import model_family as MF
+
+        return MF.status()
+    except Exception:
+        logger.debug("[execution_planner] families 视图不可用", exc_info=True)
+        return {}

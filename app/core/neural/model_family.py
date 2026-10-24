@@ -157,7 +157,8 @@ FAMILIES: Tuple[ModelFamilySpec, ...] = (
         tuned_ref="video_gen.TUNED:svd-xt-i2v",
         verification=VERIFIED,
         telemetry_arch="svd",
-        note="i2v：必须有参考图/首帧；③ 的 _infer_svd 是历史双轨，M3 委托到 ④ 后退役",
+        note="i2v：必须有参考图/首帧；M3 已驻留合一（③④ 共享缓存）+ 参数单源（TUNED），"
+        "两条实现保留、一份驻留",
     ),
     # 视频 · ③ 系六族：有适配代码，但权重不在盘 / pipeline 类存在性未验证 ⇒ unverified。
     # native_fps 取自各族 num_frames 系数（V4.46.11 实测登记），杜绝编码帧率再写死。

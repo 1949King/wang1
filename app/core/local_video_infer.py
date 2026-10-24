@@ -1019,8 +1019,38 @@ def generate_video_local(
             }
 
     infer_fn = _INFER_FUNC_MAP.get(kind)
+
+    # ★ M4 入口合一（统一引擎，2026-10-24）：执行前咨询模型族注册表 —— 把「验证态」
+    #   随结果透出（unverified 警示 / 未登记提示），但**不拦路**：本入口已完成权重
+    #   解析、调用方显式指定了模型，是最高意图；「我没登记 ≠ 本机做不到」（planner
+    #   兜底同理）。警示随结果返回，由 UI/Agent 如实展示（R9 可见）。
+    _fam_warnings: list = []
+    _verification = ""
+    try:
+        from app.core.neural import model_family as MF
+
+        _spec = MF.spec_of(kind or "")
+        if _spec is None:
+            _fam_warnings.append(
+                f"模型族 {kind!r} 未登记 model_family ⇒ 请补登记（本次仍执行：未登记不代表不可用）"
+            )
+        else:
+            _verification = _spec.verification
+            if _spec.verification == MF.UNVERIFIED:
+                _fam_warnings.append(
+                    f"族 {_spec.family} 未在本机真机验证过（unverified）⇒ 失败按事实上报，勿当已支持宣称"
+                )
+    except Exception:
+        logger.debug("[local_video_infer] 模型族注册表咨询失败（不影响执行）", exc_info=True)
+
     if not infer_fn:
-        return {"ok": False, "message": f"暂不支持的本地开源模型类型: {kind}"}
+        return {
+            "ok": False,
+            "message": f"暂不支持的本地开源模型类型: {kind}",
+            "family": kind or "",
+            "verification": _verification,
+            "warnings": _fam_warnings,
+        }
 
     if not out_dir:
         try:
@@ -1058,11 +1088,23 @@ def generate_video_local(
     try:
         result = infer_fn(**fn_kwargs)
     except Exception as e:
-        return {"ok": False, "message": f"本地 {kind} 推理失败: {type(e).__name__}: {e}"}
+        return {
+            "ok": False,
+            "message": f"本地 {kind} 推理失败: {type(e).__name__}: {e}",
+            "family": kind or "",
+            "verification": _verification,
+            "warnings": _fam_warnings,
+        }
 
     if result.get("ok"):
         result["model"] = f"local/{kind}/{model}" if model else f"local/{kind}"
         result["channel_id"] = "local-gpu"
         result["channel_name"] = f"本地 GPU ({device.upper()}, {vram_gb}GB)"
         result["message"] = f"本地 {kind} 推理成功（{device.upper()} / {vram_gb}GB VRAM）"
+    # M4：验证态随结果透出（成功/失败都带 —— 失败时 UI 更需要知道这族没验过）
+    result.setdefault("family", kind or "")
+    if _verification:
+        result.setdefault("verification", _verification)
+    if _fam_warnings:
+        result.setdefault("warnings", list(result.get("warnings") or []) + _fam_warnings)
     return result

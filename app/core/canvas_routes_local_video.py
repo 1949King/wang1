@@ -10,6 +10,7 @@ digital_human 先例外开）。路由注册方式与既有 mixin 完全一致�
 落画布 inbox 后就是这个 URL），此前只认 data URL ⇒ 本地 SVD 永远拿不到图。
 现统一走 `local_video_infer.resolve_image_path`：data URL / inbox URL / 本地路径三态通吃。
 """
+
 from __future__ import annotations
 
 import json
@@ -25,6 +26,49 @@ def _cs():
     from app.core import canvas_server
 
     return canvas_server
+
+
+def _family_of_model_id(model_id: str) -> str:
+    """model_id → 模型族名。复用 ③ 的关键词表（_guess_model_kind），
+    不另造第二套映射 —— 否则又是一处「同一件事两套实现」的漂移源。"""
+    try:
+        from app.core.local_video_infer import _guess_model_kind
+
+        return _guess_model_kind(model_id or "") or ""
+    except Exception:
+        logger.debug("[/host/local-video-generate] 族名解析失败", exc_info=True)
+        return ""
+
+
+def _delegate_local_video_infer(body: dict, image_path: str, fam: str) -> dict:
+    """按注册表声明委托 ③ generate_video_local（非 svd 族的统一出口）。
+
+    诚实边界：③ 的签名不接 seed（不静默假装支持 —— 传了 seed 就在 warnings 里说明）。
+    """
+    try:
+        from app.core.local_video_infer import generate_video_local
+    except Exception as e:
+        return {"ok": False, "message": f"local_video_infer 不可用: {e}"}
+    try:
+        res = generate_video_local(
+            prompt=str(body.get("prompt") or ""),
+            model=str(body.get("model_id") or fam),
+            duration=float(body.get("seconds") or 2.0),
+            size=str(body.get("size") or "1280x720"),
+            first_frame=image_path,
+            reference_image=image_path,
+            steps=(int(body["steps"]) if body.get("steps") else None),
+        )
+    except Exception as e:
+        logger.exception("[/host/local-video-generate] 委托 ③ 失败")
+        return {"ok": False, "message": f"{fam} 生成失败: {type(e).__name__}: {e}"}
+    if body.get("seed") and isinstance(res, dict):
+        res.setdefault(
+            "warnings",
+            list(res.get("warnings") or [])
+            + [f"seed 参数在 {fam} 族的本地通道（local_video_infer）暂不支持，本次已忽略"],
+        )
+    return res
 
 
 class CanvasLocalVideoRoutesMixin:
@@ -53,14 +97,20 @@ class CanvasLocalVideoRoutesMixin:
 
         # ── models：只读列出可选模型（含实测体积/显存/内存需求）──
         if action == "models":
-            self._json(200, {
-                "ok": True,
-                "models": vg.available_models(),
-                "available": vg.VideoGenEngine.is_available(),
-                "unavailable_reason": vg.VideoGenEngine.unavailable_reason(),
-                "downloaded": [m["id"] for m in vg.available_models()
-                               if vg.VideoGenEngine.is_downloaded(m["id"])],
-            })
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "models": vg.available_models(),
+                    "available": vg.VideoGenEngine.is_available(),
+                    "unavailable_reason": vg.VideoGenEngine.unavailable_reason(),
+                    "downloaded": [
+                        m["id"]
+                        for m in vg.available_models()
+                        if vg.VideoGenEngine.is_downloaded(m["id"])
+                    ],
+                },
+            )
             return
 
         # ── pull：下载模型（长耗时；前端应轮询或接受长请求）──
@@ -83,23 +133,54 @@ class CanvasLocalVideoRoutesMixin:
             try:
                 from app.core.local_video_infer import resolve_image_path
 
-                image_path = resolve_image_path(
-                    image_data,
-                    dest_dir=os.path.join("短剧AI剪辑输出", "_video_input"),
-                    name_hint="canvas",
-                ) or ""
+                image_path = (
+                    resolve_image_path(
+                        image_data,
+                        dest_dir=os.path.join("短剧AI剪辑输出", "_video_input"),
+                        name_hint="canvas",
+                    )
+                    or ""
+                )
             except Exception:
-                logger.debug("[/host/local-video-generate] 首帧解析失败", exc_info=True)
+                logger.debug("[/host/local-video-infer] 首帧解析失败", exc_info=True)
                 image_path = ""
             if not image_path:
-                self._json(400, {
-                    "ok": False,
-                    "message": "首帧图无法解析：支持 data URL / 本地路径 / /inbox_file/ URL（SVD 是图生视频）",
-                })
+                self._json(
+                    400,
+                    {
+                        "ok": False,
+                        "message": "首帧图无法解析：支持 data URL / 本地路径 / /inbox_file/ URL",
+                    },
+                )
                 return
+
+        # ★ M4 入口合一（统一引擎，2026-10-24）：本端点从「video_gen 专属」升级为
+        #   「本地视频统一入口」——族→后端的裁定交给 model_family 注册表：
+        #   svd 族（本端点原生）走 ④；其余族按注册表声明委托 ③ generate_video_local。
+        #   新模型接入 = 登记一条 spec，端点零改动（这正是合一的意义）。
+        if not model_id.startswith("svd"):
+            fam = _family_of_model_id(model_id)
+            if fam:
+                from app.core.neural import model_family as MF
+
+                spec = MF.spec_of(fam)
+                if spec is not None and MF.BACKEND_LOCAL_VIDEO in spec.backends:
+                    res = _delegate_local_video_infer(body, image_path, fam)
+                    logger.info(
+                        "[/host/local-video-generate] M4 注册表路由 %s→local_video_infer ok=%s",
+                        fam,
+                        res.get("ok"),
+                    )
+                    self._json(200 if res.get("ok") else 400, res)
+                    return
         if not image_path:
-            self._json(400, {"ok": False,
-                             "message": "需要首帧图（image / image_url / first_frame / image_path 任一，SVD 是图生视频）"})
+            self._json(
+                400,
+                {
+                    "ok": False,
+                    "message": "需要首帧图（image / image_url / first_frame / image_path 任一，SVD 是图生视频）",
+                },
+            )
             return
         try:
             res = vg.get_video_engine().generate(
