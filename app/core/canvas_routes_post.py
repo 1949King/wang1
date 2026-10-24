@@ -1613,19 +1613,19 @@ class CanvasPostRoutesMixin:
         from app.core.ai.draw_ledger import normalize_seed
 
         seed_used, _seed_explicit = normalize_seed(body.get("seed"))
+        # 质量档/preset 透传（仅自研栈接受 preset；主选栈由纯函数层探测后跳过）
+        from app.core.ai import local_image_plan as LP
+
+        kw = LP.generate_kwargs(
+            backend=eng, model_id=model_id,
+            quality=str(body.get("quality") or ""), preset=str(body.get("preset") or ""),
+            prompt=str(body.get("prompt") or ""), negative_prompt=str(body.get("negative_prompt") or ""),
+            image_path=image_path, width=int(body.get("width") or 0),
+            height=int(body.get("height") or 0), seed=seed_used,
+            steps=int(body.get("steps") or 0), cfg=float(body.get("cfg") or 0.0),
+            out_path=str(body.get("out_path") or ""))
         try:
-            res = eng.generate(
-                model_id,
-                prompt=str(body.get("prompt") or ""),
-                negative_prompt=str(body.get("negative_prompt") or ""),
-                image_path=image_path,
-                width=int(body.get("width") or 0),
-                height=int(body.get("height") or 0),
-                seed=seed_used,
-                steps=int(body.get("steps") or 0),
-                cfg=float(body.get("cfg") or 0.0),
-                out_path=str(body.get("out_path") or ""),
-            )
+            res = eng.generate(model_id, **kw)
         except Exception as e:
             logger.exception("[/host/local-image-generate] 失败")
             self._json(500, {"ok": False, "message": str(e)})
@@ -1634,6 +1634,7 @@ class CanvasPostRoutesMixin:
         res["engine"] = sel["engine"]
         res["engine_is_fallback"] = sel.get("is_fallback", False)
         res["engine_reasons"] = sel.get("reasons", [])
+        res["preset"] = kw.get("preset", "")
         if res.get("ok"):
             # P0b：本地生图收尾入闭环（代理分 + draw_book 账本 + 推荐回传）。
             # 接线层内部吞异常，入账失败绝不影响生成结果。

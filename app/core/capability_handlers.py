@@ -192,12 +192,9 @@ class CanvasCapabilityHandlers:
         )
 
     def local_generate_image(self, req: CapabilityRequest) -> CapabilityResult:
-        """本地生图（刀 A1，2026-10-04）：复用 /host/local-image-generate 的引擎分派。
-
-        与 generate_image（云端付费渠道）刻意分列；主备引擎选择走
-        execution_decider.resolve_local_image_engine（R9 降级可见）。
-        params：model_id / prompt / negative_prompt / image_path / width / height /
-        seed / steps / cfg / engine（可选，显式指定 "diffsynth"/"builtin"）。
+        """本地生图（刀 A1）：分派同 /host/local-image-generate（R9 降级可见）。
+        params: model_id / prompt / negative_prompt / image_path / width / height /
+        seed / steps / cfg / quality / preset / engine。
         """
         try:
             from app.core.ai.execution_decider import resolve_local_image_engine
@@ -218,22 +215,22 @@ class CanvasCapabilityHandlers:
 
         seed_used, _seed_explicit = normalize_seed(p.get("seed"))
         model_id = str(p.get("model_id") or "sd15-t2i")
+        from app.core.ai import local_image_plan as LP
+
+        kw = LP.generate_kwargs(
+            backend=sel["backend"], model_id=model_id,
+            quality=str(p.get("quality") or ""), preset=str(p.get("preset") or ""),
+            prompt=str(p.get("prompt") or ""), negative_prompt=str(p.get("negative_prompt") or ""),
+            image_path=str(p.get("image_path") or ""), width=int(p.get("width") or 0),
+            height=int(p.get("height") or 0), seed=seed_used,
+            steps=int(p.get("steps") or 0), cfg=float(p.get("cfg") or 0.0))
         try:
-            res = sel["backend"].generate(
-                model_id,
-                prompt=str(p.get("prompt") or ""),
-                negative_prompt=str(p.get("negative_prompt") or ""),
-                image_path=str(p.get("image_path") or ""),
-                width=int(p.get("width") or 0),
-                height=int(p.get("height") or 0),
-                seed=seed_used,
-                steps=int(p.get("steps") or 0),
-                cfg=float(p.get("cfg") or 0.0),
-            )
+            res = sel["backend"].generate(model_id, **kw)
         except Exception as e:
             return CapabilityResult(req.request_id, False, error=f"本地生图失败: {e}")
         res["engine"] = sel["engine"]
         res["engine_is_fallback"] = sel.get("is_fallback", False)
+        res["preset"] = kw.get("preset", "")
         ok = bool(res.get("ok"))
         if ok:
             # P0b：本地生图收尾入闭环（代理分 + draw_book 账本 + 推荐回传）。

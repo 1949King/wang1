@@ -1,5 +1,28 @@
 # 拾光剪影 — 变更日志
 
+## 自研 diffusers 栈接线 —— 模型/质量档/参考图三处写死修掉（2026-10-25）
+
+> 背景：Skeleton 齐了但混合生成链路里有三处写死，导致自研栈「能跑但产品里不真用」。
+> 本轮不动引擎本体，只把三条接线补上（纯函数层 + 三个入口同口径）。
+
+### 交付
+
+| # | 原状 | 接线后 |
+|---|---|---|
+| 1 | 本地跳模型恒 `sd15-t2i` | `fine`/`cinema` 或长边 ≥900 ⇒ `sdxl-t2i`（未下载如实回落 sd15） |
+| 2 | 不传 `preset`，混合链里 fast/high 全失效 | 画布档 `draft/standard/fine/cinema` → 引擎档 `fast/high/final`；按引擎能力传参（diffsynth 不接受 → 探测后跳过，不硬塞） |
+| 3 | i2i 参考图只认 data URL | 走 `resolve_image_path` 三态（data URL / `/inbox_file/` / 本地路径）；解析失败记 reason 后按 t2i |
+
+- **纯函数层**：`app/core/ai/local_image_plan.py` —— `fit_size`（等比收进原生分辨率 + 对齐 64）、`pick_model`、`resolve_preset`、`supports_preset`、`lcm_usable`；零重依赖，可单测。
+- **SDXL `fast` 诚实降级**：LCM-LoRA 不可用 ⇒ 自动降 `high`，不宣称快档。
+- **三入口同口径**：`/host/generate-image`（混合链）、`/host/local-image-generate`、能力 `canvas.local_generate_image`。
+
+### 验证（全部实跑）
+
+- pytest：新增 `test_local_image_plan.py` **7 例**（尺寸/选模型/档位映射/三处接线集成 + 无 preset 引擎不炸 + 参考图解析失败回落）；相关套件 38 passed
+- `ruff`：新/改文件 0 违规
+- 未改引擎本体（`diffusers_image.py` / `diffsynth_image.py` 零改动）
+
 ## 统一推理引擎 M5 · Wan2.1 真机验收（V4.46.18，2026-10-25）
 
 > 收官刀：用真实新模型（**Wan2.1-T2V-1.3B**，26.95GB，ModelScope 通道）验收「登记即接入」协议。**协议成立**——但验收过程暴露并修掉了 ③ 手写族从未跑过的四个坑（这正是它们此前 unverified 标注的价值）。

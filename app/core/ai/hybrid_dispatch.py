@@ -71,9 +71,17 @@ def decide_compute_mode(*, channel_id: str = "",
 
 
 def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
-                 reasons: list) -> Optional[Dict[str, Any]]:
-    """走本机 SD 引擎出图。成功返回与云端同形的 dict；不可用/失败返回 None（调用方降级）。"""
+                 reasons: list, quality: str = "standard") -> Optional[Dict[str, Any]]:
+    """走本机 SD 引擎出图。成功返回与云端同形的 dict；不可用/失败返回 None（调用方降级）。
+
+    2026-10-25 接线（修三处写死）：
+      · 模型不再恒 sd15——按质量档/尺寸选 sd15 或 sdxl；
+      · 质量档透传为 preset（fast/high/final），仅对支持 preset 的引擎传；
+      · i2i 参考图改走 resolve_image_path 三态（data URL / inbox URL / 本地路径），
+        不再只认 data URL（否则 /inbox_file/ 会静默退化成 t2i）。
+    """
     try:
+        from app.core.ai import local_image_plan as LP
         from app.core.ai.execution_decider import resolve_local_image_engine
 
         sel = resolve_local_image_engine()
@@ -82,17 +90,19 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
                            or (sel.get("reasons") or ["未知"])[-1]))
             return None
         backend = sel["backend"]
-        # 参考图（i2i）：云端传 data URL，本地要文件路径 ⇒ 先落临时输入图。
+        # 参考图（i2i）：三态统一解析成文件路径（与视频首帧同一入口）。
         image_path = ""
         if reference_image:
             try:
-                from app.core.neural.video_gen import write_data_url
+                from app.core.local_video_infer import resolve_image_path
 
-                image_path = write_data_url(
-                    reference_image, os.path.join("短剧AI剪辑输出", "_image_input"),
+                image_path = resolve_image_path(
+                    reference_image, dest_dir=os.path.join("短剧AI剪辑输出", "_image_input"),
                     name_hint="hybrid") or ""
             except Exception:
                 logger.debug("[hybrid_dispatch] 参考图落地失败", exc_info=True)
+            if not image_path:
+                reasons.append("参考图无法解析（i2i 跳过，按 t2i 生成）")
         w = h = 0
         try:
             parts = (size or "").lower().split("x")
@@ -100,20 +110,44 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
                 w, h = int(parts[0]), int(parts[1])
         except (TypeError, ValueError):
             w = h = 0
-        res = backend.generate(
-            "sd15-t2i", prompt=prompt, image_path=image_path,
-            width=w, height=h, seed=int(seed) if isinstance(seed, int) else 0)
+        # 选模型 + 适配尺寸（纯函数层，可单测）
+        model_id, native = "sd15-t2i", 512
+        try:
+            from app.core.neural import diffusers_image as _dfe
+
+            downloaded = [m["id"] for m in _dfe.available_models()
+                          if _dfe.DiffusersImageEngine.is_downloaded(m["id"])]
+            model_id = LP.pick_model(quality=quality, width=w, height=h,
+                                     downloaded=downloaded)
+            native = int((_dfe.DIFFUSERS_IMAGE_MODELS.get(model_id) or {})
+                         .get("native_size") or 512)
+        except Exception:
+            logger.debug("[hybrid_dispatch] 本地模型探测失败，按 sd15/512", exc_info=True)
+        fw, fh = LP.fit_size(w, h, native)
+        preset = LP.resolve_preset(
+            quality=quality, model_id=model_id,
+            lcm_usable=LP.lcm_usable(backend),
+            supports_preset=LP.supports_preset(backend))
+        gen_kw: Dict[str, Any] = {"prompt": prompt, "image_path": image_path,
+                                  "width": fw, "height": fh,
+                                  "seed": int(seed) if isinstance(seed, int) else 0}
+        if preset:
+            gen_kw["preset"] = preset
+        res = backend.generate(model_id, **gen_kw)
         if not res.get("ok"):
             reasons.append("本机出图失败：" + str(res.get("message")))
             return None
-        reasons.append(f"本机 SD 出图（engine={sel.get('engine')}）")
+        reasons.append("本机 SD 出图（engine=%s · model=%s · preset=%s · %dx%d）"
+                       % (sel.get("engine"), model_id, preset or "默认", fw, fh))
         data_url = res.get("image_data_url") or _file_to_data_url(
             res.get("image_path") or "")
         return {"ok": True, "image_data_url": data_url,
                 "image_url": res.get("image_url", ""),
                 "image_path": res.get("image_path", ""),
                 "source": "local", "engine": sel.get("engine"),
-                "model": "local/sd15-t2i", "channel_id": "local",
+                "model": "local/" + model_id, "local_model": model_id,
+                "preset": preset, "size": "%dx%d" % (fw, fh),
+                "channel_id": "local",
                 "seed": res.get("seed", seed), "seed_sent": True}
     except Exception as e:
         logger.debug("[hybrid_dispatch] 本机路径异常", exc_info=True)
@@ -141,7 +175,8 @@ def generate_image_hybrid(*, prompt: str, model: str = "", size: str = "",
     for step in chain:
         if step == "local":
             loc = _local_image(prompt=prompt, size=size, seed=seed,
-                               reference_image=reference_image, reasons=reasons)
+                               reference_image=reference_image, reasons=reasons,
+                               quality=quality)
             if loc is not None:
                 loc["compute_mode"] = dec["mode"]
                 loc["compute_route"] = dec["route"]
