@@ -73,6 +73,21 @@ class CanvasExecutionRoutesMixin:
             logger.debug("[/host/execution-bias] 失败", exc_info=True)
             self._json(500, {"ok": False, "message": f"算力偏好设置失败: {e}"})
 
+    @_route_get("/host/engines")
+    def _g_host_engines(self, parsed) -> None:
+        """引擎注册表快照（W1）：族/角色/健康/用量，供画布与排障面板消费。"""
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            from app.core.engine_registry import status
+
+            self._json(200, {"ok": True, **status()})
+        except Exception as e:
+            logger.debug("[/host/engines] 失败", exc_info=True)
+            self._json(500, {"ok": False, "message": f"引擎注册表读取失败: {e}"})
+
     @_route_get("/host/execution-plan")
     def _g_host_execution_plan(self, parsed) -> None:
         cs = _cs()

@@ -1,5 +1,40 @@
 # 拾光剪影 — 变更日志
 
+## 引擎注册表 W1 —— 9 族 56 条登记 + `/host/engines` + 使用报告 + 死按钮清理（2026-10-24）
+
+> 背景：用户给出约 55 个自研引擎模块清单，问「怎么整合，别空着」。
+> W1 不接新引擎，先让「谁在用 / 谁空着 / 谁只是库内能力」变成可查的数据。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 注册表 | `app/core/engine_registry.py`：9 族 / **56 条**登记；四档 role（primary/fallback/library-only/retired）+ disabled；健康探测只 `find_spec` 不 import 重依赖；用量只读遥测，**未埋点返回 None**（不伪造 0 调用） |
+| 端点 | `GET /host/engines`：族 / 角色 / 健康 / 用量快照 |
+| 报告 | `scripts/engine_usage_report.py`：表格 + 「空着清单」（0 调用 / 库内 / 待清理），`--json` 与 `--fail-on-idle` |
+| UI | 左下「算力」胶囊新增引擎计数行：就绪 / 库内 / 待清理 / 禁用 |
+| 死按钮清理 | 画布右键「智能剪辑 Beta」按钮与 `smart_edit` 动作类型已删——该动作此前**无任何 handler**；真正的智能剪辑在 Qt `ai_agent_panel`，注册表里 `smart_edit.engine` 标 `retired` 待归并 |
+| 测试 | pytest 新增 `test_engine_registry.py` **5 例**（族数/唯一 id/角色合法/健康规则/用量聚合与 idle 口径） |
+
+### 实测出来的「空着」名单（注册表口径）
+
+- **retired（零调用）**：`smart_editing_engine`
+- **library-only（有引擎无入口）**：`style_transfer` / `super_resolution` / `face_restore` / `background_replace` / `video_lipsync` / `voice_clone` / `redub_orchestrator`
+- **disabled（环境不满足）**：`yue_music`（本机跑不动，诚实失败）
+- 其余 36 个 primary / 11 个 fallback
+
+### 验证（全部实跑）
+
+- pytest：注册表 5 例全过；报告脚本可直跑（56 条 / 9 族 / 55 ready / 1 disabled）
+- vitest：**46 文件 / 626 用例全绿**；tsc **37 = 既有基线**
+- `run_all_checks`：**107 项全绿**（DOCNUM 端点数字回正 **106 唯一 / 110 注册**）
+
+### 下一步（W2 候选，待拍板）
+
+1. 特效五件套统一 `POST /host/effect` + 画布节点右键「后期」菜单 → 4 个 `library-only` 直接变 `primary`；
+2. `smart_editing_engine` 并入 `professional_video_engine` 的「建议」模式，或删除；
+3. `execution_planner` 从「本地/云端」扩成「引擎链」，滑块升级为成本/质量总闸。
+
 ## 本地视频编码链路守卫：把两轮教训变成机器护栏（V4.46.12，2026-10-24）
 
 > 用户选「C：把测试盲区教训固化成守卫」。连续两轮挖出「有提交、有测试、实际出片必坏」的 bug，这次不靠下一个人记得查。

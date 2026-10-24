@@ -364,7 +364,6 @@ export type CtxPaneAction =
   | { type: "node"; kind: NodeData["kind"] }
   | { type: "stage3d" }
   | { type: "breakdown" }
-  | { type: "smart_edit" }
   | { type: "upload" }
   | { type: "history" }
   | { type: "assets" }
@@ -387,9 +386,6 @@ export function LibTvPaneContextMenu({
       </button>
       <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "node", kind: "video" })}>
         <span className="ctx-ico">▶</span> 视频
-      </button>
-      <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "smart_edit" })}>
-        <span className="ctx-ico">✂</span> 智能剪辑 <span className="badge-beta">Beta</span>
       </button>
       <button type="button" className="ctx-menu-item" onClick={() => onAction({ type: "node", kind: "director" })}>
         <span className="ctx-ico">🎥</span> 3D 导演台节点 <span className="badge-new">NEW</span>

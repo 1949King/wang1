@@ -25,24 +25,34 @@ type ExecStatus = {
 
 type Plan = { route?: string; chain?: string[]; reasons?: string[] };
 
+type EnginesSummary = {
+  total?: number;
+  by_role?: Record<string, number>;
+  by_health?: Record<string, number>;
+};
+
 export default function ExecutionBiasChip() {
   const [open, setOpen] = useState(false);
   const [bias, setBias] = useState(50);
   const [status, setStatus] = useState<ExecStatus | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [engines, setEngines] = useState<EnginesSummary | null>(null);
   const [msg, setMsg] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(BRIDGE + "/host/execution-status", {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      const data = await res.json();
+      const [sRes, eRes] = await Promise.all([
+        fetch(BRIDGE + "/host/execution-status", { headers: authHeaders(), cache: "no-store" }),
+        fetch(BRIDGE + "/host/engines", { headers: authHeaders(), cache: "no-store" }),
+      ]);
+      const data = await sRes.json();
       if (data && data.ok) {
         setStatus(data as ExecStatus);
         setBias(Number(data.bias ?? 50));
       }
+      // 引擎注册表（W1）：只回显计数，详情走 /host/engines 或 usage report
+      const eng = await eRes.json();
+      if (eng && eng.ok) setEngines(eng as EnginesSummary);
     } catch {
       /* 后端离线：保持占位，不打断画布 */
     }
@@ -123,6 +133,13 @@ export default function ExecutionBiasChip() {
             本地引擎 {status?.engine?.engine || "—"} · 云端{" "}
             {status?.cloud_available ? "可用" : "未配置"} · 硬件 {status?.hw_tier || "—"}
           </div>
+          {engines ? (
+            <div className="exec-chip__engines">
+              引擎 {engines.total ?? 0} 个：就绪 {engines.by_health?.ready ?? 0} · 库内{" "}
+              {engines.by_role?.["library-only"] ?? 0} · 待清理 {engines.by_role?.retired ?? 0} · 禁用{" "}
+              {engines.by_role?.disabled ?? 0}
+            </div>
+          ) : null}
           <button type="button" className="exec-chip__preview" onClick={() => void preview()}>
             试算视频双路
           </button>
@@ -153,6 +170,7 @@ const CSS = [
   ".exec-chip__hint, .exec-chip__meta { font-size: 11px; color: #8b9bb0; line-height: 1.5; }",
   ".exec-chip__preview { padding: 5px 8px; border-radius: 7px; border: 1px solid #2a3342; background: #172033; color: #d6dde8; cursor: pointer; font-size: 11px; }",
   ".exec-chip__plan, .exec-chip__msg { font-size: 11px; color: #9aa4b2; line-height: 1.5; }",
+  ".exec-chip__engines { font-size: 11px; color: #7f8fa6; line-height: 1.5; }",
   "html[data-theme='light'] .exec-chip__btn { border-color: #cdd5e3; background: #ffffff; color: #172033; }",
   "html[data-theme='light'] .exec-chip__panel { border-color: #cdd5e3; background: #ffffff; }",
   "html[data-theme='light'] .exec-chip__hint, html[data-theme='light'] .exec-chip__meta { color: #6b7790; }",
