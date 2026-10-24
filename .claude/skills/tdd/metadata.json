@@ -1,0 +1,8 @@
+{
+  "id": "tdd",
+  "name": "测试驱动开发",
+  "version": "1.0.0",
+  "author": "基于 Matt Pocock Skills",
+  "description": "红-绿-重构循环的测试驱动开发实践",
+  "installed_at": "2026-05-30T18:00:00.000000"
+}

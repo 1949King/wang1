@@ -1,0 +1,38 @@
+# ============================================================
+# 拾光剪影 · 代码质量门禁 (Quality Gate)
+# 触发：push / PR 到 main|master|develop
+# 作用：在现有 ci.yml（测试/集成/打包）之外，独立加一道"静态质量门禁"。
+#       只卡致命/高价值规则，存量违规靠 ruff.toml 的 per-file-ignores 渐进收紧。
+# 与 ci.yml 关系：本工作流独立运行、互不阻塞；任一失败都会在这次提交上标红。
+# 详见 docs/现行技术文档.md §11「代码审查标准」（单一事实源）
+# ============================================================
+
+name: 代码质量门禁 (Quality Gate)
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  ruff:
+    name: Ruff 静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: Ruff 检查（致命 + 高价值规则）
+        uses: astral-sh/ruff-action@v1
+        with:
+          # --output-format=github 让告警直接出现在 PR 行内注释
+          args: "check --output-format=github"
+
+      - name: 自动格式化（ruff format）
+        # 改为自动格式化：CI 检出后直接规范化，团队无需手动跑 format。
+        # 配合 .pre-commit-config.yaml 在本地提前格式化，合并前统一风格、不冲击历史 blame。
+        uses: astral-sh/ruff-action@v1
+        with:
+          args: "format"

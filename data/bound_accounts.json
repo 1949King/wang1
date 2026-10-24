@@ -1,0 +1,76 @@
+{
+  "douyin": [
+    {"name": "@短剧剪辑师", "status": "正常", "fans": "12.5万粉"},
+    {"name": "@短剧达人号", "status": "正常", "fans": "8.9万粉"},
+    {"name": "@影视剪辑王", "status": "正常", "fans": "25.6万粉"}
+  ],
+  "kuaishou": [
+    {"name": "@快手短剧", "status": "正常", "fans": "6.7万粉"},
+    {"name": "@快手影视号", "status": "正常", "fans": "4.5万粉"}
+  ],
+  "weixin": [
+    {"name": "@视频号主", "status": "正常", "fans": "4.5万粉"},
+    {"name": "@微信短剧", "status": "正常", "fans": "3.2万粉"}
+  ],
+  "xiaohongshu": [
+    {"name": "@小红书博主", "status": "正常", "fans": "23万粉"},
+    {"name": "@短剧推荐官", "status": "正常", "fans": "15.6万粉"}
+  ],
+  "bilibili": [
+    {"name": "@B站UP主", "status": "正常", "fans": "15.6万粉"},
+    {"name": "@影视解说", "status": "正常", "fans": "9.8万粉"}
+  ],
+  "weibo": [
+    {"name": "@微博大V", "status": "正常", "fans": "8.9万粉"},
+    {"name": "@短剧博主", "status": "正常", "fans": "5.6万粉"}
+  ],
+  "zhihu": [
+    {"name": "@知乎答者", "status": "正常", "fans": "3.4万粉"}
+  ],
+  "toutiao": [
+    {"name": "@头条作者", "status": "正常", "fans": "5.6万粉"},
+    {"name": "@头条影视", "status": "正常", "fans": "4.2万粉"}
+  ],
+  "baijiahao": [
+    {"name": "@百家号主", "status": "正常", "fans": "1.2万粉"}
+  ],
+  "dayu": [
+    {"name": "@大鱼号主", "status": "异常", "fans": "0.8万粉"}
+  ],
+  "qq_video": [
+    {"name": "@腾讯视频", "status": "正常", "fans": "4.5万粉"}
+  ],
+  "iqiyi": [
+    {"name": "@爱奇艺号", "status": "正常", "fans": "3.8万粉"}
+  ],
+  "youku": [
+    {"name": "@优酷创作者", "status": "正常", "fans": "2.8万粉"}
+  ],
+  "mgtv": [
+    {"name": "@芒果创作者", "status": "正常", "fans": "2.2万粉"}
+  ],
+  "sohu": [
+    {"name": "@搜狐视频", "status": "正常", "fans": "1.8万粉"}
+  ],
+  "xigua": [
+    {"name": "@西瓜视频", "status": "正常", "fans": "6.7万粉"}
+  ],
+  "douyin_wx": [
+    {"name": "@抖音小程序", "status": "正常", "fans": "8.9万粉"}
+  ],
+  "kuaishou_wx": [
+    {"name": "@快手小程序", "status": "正常", "fans": "7.6万粉"}
+  ],
+  "pinduoduo": [
+    {"name": "@拼多多店铺", "status": "正常", "fans": "4.5万粉"}
+  ],
+  "taobao": [
+    {"name": "@淘宝店铺", "status": "正常", "fans": "5.6万粉"}
+  ],
+  "jd": [
+    {"name": "@京东店铺", "status": "正常", "fans": "3.8万粉"}
+  ],
+  "douban": [
+    {"name": "@豆瓣影评", "status": "正常", "fans": "1.2万粉"}
+  ]
+}

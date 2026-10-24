@@ -1,0 +1,245 @@
+/**
+ * gallery.css — 图库面板网格区样式（V4.41.16）。
+ * 外壳复用 .oh-panel（outputHistory.css），这里只写网格专属样式。
+ */
+
+.sg-gallery {
+  width: min(680px, calc(100vw - 48px));
+}
+
+.sg-gallery-body {
+  padding: 10px 12px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.sg-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.sg-gallery-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.14s;
+}
+
+.sg-gallery-cell:hover {
+  border-color: #3b82f6;
+}
+
+.sg-gallery-cell.on {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb, 0 4px 16px rgba(37, 99, 235, 0.25);
+}
+
+.sg-gallery-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #101623;
+}
+
+/* ⤢ 放大角标：hover 才出现，点击进 lightbox（不触发选中节点） */
+.sg-gallery-zoom {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.82);
+  color: #cfe0ff;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.14s, transform 0.14s;
+  cursor: zoom-in;
+}
+
+.sg-gallery-cell:hover .sg-gallery-zoom {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sg-gallery-zoom:hover {
+  background: rgba(37, 99, 235, 0.85);
+  color: #fff;
+}
+
+.sg-gallery-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sg-gallery-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(10, 14, 20, 0.78);
+  color: #cfe0ff;
+  font-size: 9px;
+}
+
+.sg-gallery-label {
+  padding: 0 2px;
+  font-size: 11px;
+  color: #9aa7bf;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.sg-gallery-cell.on .sg-gallery-label {
+  color: #eaf2ff;
+}
+
+.sg-gallery-empty {
+  padding: 42px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #8b95ad;
+  line-height: 2;
+}
+
+.sg-gallery-hint {
+  font-size: 11px;
+  color: #5c6478;
+}
+
+.sg-gallery-tabs {
+  padding: 8px 12px 0;
+}
+
+/* ── 大图预览（lightbox）：全屏遮罩 + 居中大图 + 左右导航 ── */
+
+.sg-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(4, 7, 12, 0.88);
+  animation: sg-lightbox-in 0.18s ease-out;
+}
+
+@keyframes sg-lightbox-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sg-lightbox-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: min(78vw, 1280px);
+}
+
+.sg-lightbox-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 74vh;
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  object-fit: contain;
+}
+
+.sg-lightbox-caption {
+  font-size: 12px;
+  color: #c8d3ec;
+  background: rgba(13, 18, 28, 0.9);
+  border: 1px solid #232b3d;
+  border-radius: 999px;
+  padding: 5px 14px;
+  max-width: 70vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sg-lightbox-nav {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #2c3650;
+  border-radius: 50%;
+  background: rgba(16, 22, 34, 0.9);
+  color: #c8d3ec;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.14s, background 0.14s;
+}
+
+.sg-lightbox-nav:hover {
+  border-color: #3b82f6;
+  background: rgba(37, 99, 235, 0.22);
+  color: #fff;
+}
+
+.sg-lightbox-close {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #2c3650;
+  border-radius: 50%;
+  background: rgba(16, 22, 34, 0.9);
+  color: #c8d3ec;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.sg-lightbox-close:hover {
+  border-color: #d98282;
+  color: #fff;
+  background: rgba(217, 130, 130, 0.22);
+}
+
+/* 浅色主题 */
+.theme-light .sg-gallery-cell.on,
+body[data-theme="light"] .sg-gallery-cell.on {
+  box-shadow: 0 0 0 1px #2563eb, 0 4px 16px rgba(37, 99, 235, 0.15);
+}
+
+.theme-light .sg-gallery-thumb,
+body[data-theme="light"] .sg-gallery-thumb {
+  background: #e8edf5;
+}
+
+.theme-light .sg-gallery-label,
+body[data-theme="light"] .sg-gallery-label {
+  color: #4a5a75;
+}

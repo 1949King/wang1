@@ -1,0 +1,32 @@
+{
+  "短剧筛选": {
+    "ratings": [
+      5
+    ],
+    "reviews": [
+      {
+        "rating": 5,
+        "text": "继续加油·",
+        "time": "2026-06-28 19:41:26"
+      }
+    ],
+    "avg_rating": 5.0,
+    "count": 1,
+    "user_rating": 5
+  },
+  "字幕生成": {
+    "ratings": [
+      5
+    ],
+    "reviews": [
+      {
+        "rating": 5,
+        "text": "1",
+        "time": "2026-06-28 19:41:40"
+      }
+    ],
+    "avg_rating": 5.0,
+    "count": 1,
+    "user_rating": 5
+  }
+}

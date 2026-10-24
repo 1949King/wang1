@@ -1,0 +1,430 @@
+"""
+运动补偿补帧引擎（非神经网络）
+==============================
+基于前后帧做场景变化检测，并用**光流运动补偿**生成中间帧，改善预览观感。
+
+说明（诚实预期）：
+- 不是深度学习插帧（无 RIFE / DAIN 等模型）
+- 实现为帧差检测 + Farneback 光流前/后向 warp + 加权合成（auto/flow）；
+  光流不可用时回退线性混合（blend）
+- 默认可关闭；开启后可在时间轴标记补帧位置
+
+历史命名含「AI」仅为兼容；UI/日志应使用「运动补偿补帧 / 线性补帧」。
+"""
+
+from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+from PyQt6.QtCore import QObject, pyqtSignal, QThread
+import logging
+import threading
+import time
+import numpy as np
+
+logger = logging.getLogger("AI短剧编辑器.ai_interpolation")
+
+
+class InterpolationMode(Enum):
+    """补帧模式"""
+    DISABLED = "disabled"
+    AUTO = "auto"
+    ALWAYS = "always"
+    SMART = "smart"
+
+
+class FrameDifferenceType(Enum):
+    """帧差异类型"""
+    SMOOTH = "smooth"
+    JUMP_CUT = "jump_cut"
+    MOTION_BLUR = "motion_blur"
+    SCENE_CHANGE = "scene_change"
+
+
+@dataclass
+class FrameAnalysisResult:
+    """帧分析结果"""
+    frame_index: int
+    frame_time: float
+    difference_type: FrameDifferenceType
+    similarity_score: float
+    motion_vector: Optional[Tuple[float, float]] = None
+    needs_interpolation: bool = False
+    interpolation_count: int = 0
+
+
+@dataclass
+class InterpolationResult:
+    """补帧结果"""
+    success: bool
+    inserted_frames: List[np.ndarray] = field(default_factory=list)
+    source_frame_indices: Tuple[int, int] = (0, 0)
+    target_time: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class SceneChangeDetector:
+    """场景变化检测器"""
+    
+    def __init__(self):
+        self._last_frame = None
+        self._last_frame_time = 0.0
+        self._frame_buffer = []
+        self._max_buffer_size = 5
+    
+    def analyze_frame(self, frame: np.ndarray, frame_time: float) -> FrameAnalysisResult:
+        """分析帧差异"""
+        if self._last_frame is None:
+            self._last_frame = frame
+            self._last_frame_time = frame_time
+            return FrameAnalysisResult(
+                frame_index=0,
+                frame_time=frame_time,
+                difference_type=FrameDifferenceType.SMOOTH,
+                similarity_score=1.0,
+                needs_interpolation=False,
+            )
+        
+        diff_type, score, motion_vec = self._calculate_difference(frame)
+        
+        result = FrameAnalysisResult(
+            frame_index=0,
+            frame_time=frame_time,
+            difference_type=diff_type,
+            similarity_score=score,
+            motion_vector=motion_vec,
+            needs_interpolation=self._should_interpolate(diff_type, score),
+        )
+        
+        if result.needs_interpolation:
+            result.interpolation_count = self._calculate_interpolation_count(score)
+        
+        self._update_buffer(frame, frame_time)
+        self._last_frame = frame
+        self._last_frame_time = frame_time
+        
+        return result
+    
+    def _calculate_difference(self, frame: np.ndarray) -> Tuple[FrameDifferenceType, float, Optional[Tuple[float, float]]]:
+        """计算帧差异"""
+        try:
+            gray1 = cv2.cvtColor(self._last_frame, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            
+            hist1 = cv2.calcHist([gray1], [0], None, [256], [0, 256])
+            hist2 = cv2.calcHist([gray2], [0], None, [256], [0, 256])
+            hist_diff = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+            
+            diff = cv2.absdiff(gray1, gray2)
+            mean_diff = np.mean(diff)
+            
+            if mean_diff > 80 and hist_diff < 0.5:
+                return FrameDifferenceType.SCENE_CHANGE, hist_diff, None
+            elif mean_diff > 40 and mean_diff <= 80:
+                return FrameDifferenceType.JUMP_CUT, hist_diff, None
+            elif mean_diff > 20 and mean_diff <= 40:
+                flow = self._calculate_optical_flow(gray1, gray2)
+                return FrameDifferenceType.MOTION_BLUR, hist_diff, flow
+            else:
+                return FrameDifferenceType.SMOOTH, hist_diff, None
+                
+        except Exception:
+            return FrameDifferenceType.SMOOTH, 0.9, None
+    
+    def _calculate_optical_flow(self, gray1, gray2) -> Optional[Tuple[float, float]]:
+        """计算光流"""
+        try:
+            flow = cv2.calcOpticalFlowFarneback(
+                gray1, gray2, None,
+                0.5, 3, 15, 3, 5, 1.2, 0
+            )
+            avg_flow = np.mean(flow, axis=(0, 1))
+            return (float(avg_flow[0]), float(avg_flow[1]))
+        except Exception:
+            return None
+    
+    def _should_interpolate(self, diff_type: FrameDifferenceType, score: float) -> bool:
+        """判断是否需要插帧"""
+        if diff_type in (FrameDifferenceType.JUMP_CUT, FrameDifferenceType.SCENE_CHANGE):
+            return score < 0.7
+        if diff_type == FrameDifferenceType.MOTION_BLUR:
+            return score < 0.85
+        return False
+    
+    def _calculate_interpolation_count(self, score: float) -> int:
+        """计算需要插入的帧数"""
+        if score < 0.3:
+            return 3
+        elif score < 0.5:
+            return 2
+        else:
+            return 1
+    
+    def _update_buffer(self, frame, frame_time):
+        """更新帧缓冲区"""
+        self._frame_buffer.append((frame_time, frame))
+        if len(self._frame_buffer) > self._max_buffer_size:
+            self._frame_buffer.pop(0)
+    
+    def reset(self):
+        """重置检测器状态"""
+        self._last_frame = None
+        self._last_frame_time = 0.0
+        self._frame_buffer = []
+
+
+class ContextAwareInterpolator:
+    """运动补偿补帧器（光流优先，线性混合回退；非神经网络）"""
+    
+    def __init__(self):
+        self._scene_detector = SceneChangeDetector()
+        self._interpolation_enabled = True
+        self._mode = InterpolationMode.SMART
+        self._inserted_frames = []
+        self._markers = []
+        # 插值方法：auto = 光流运动补偿（失败回退线性混合）；flow / blend 可强制。
+        self._method = "auto"
+        self._last_method_used = ""
+
+    def set_method(self, method: str):
+        """设置插值方法：auto / flow / blend。"""
+        m = str(method or "auto").strip().lower()
+        self._method = m if m in ("auto", "flow", "blend") else "auto"
+
+    @property
+    def last_method_used(self) -> str:
+        """上一帧实际采用的插值方法（flow / blend / none），供 UI/日志展示。"""
+        return self._last_method_used
+    
+    def set_mode(self, mode: InterpolationMode):
+        """设置补帧模式"""
+        self._mode = mode
+    
+    def enable(self, enabled: bool):
+        """启用/禁用补帧"""
+        self._interpolation_enabled = enabled
+    
+    def process_frame(self, frame: np.ndarray, frame_time: float) -> List[np.ndarray]:
+        """处理帧，返回需要插入的中间帧（运动补偿优先）。
+
+        **关键**：必须在 `analyze_frame` 之前抓取「上一帧」——`analyze_frame`
+        结束时会执行 `_last_frame = frame`；若之后再取，拿到的就是当前帧本身，
+        插值结果退化为当前帧的拷贝（这是原实现的真实缺陷：根本没有中间帧）。
+        """
+        if not self._interpolation_enabled or self._mode == InterpolationMode.DISABLED:
+            return []
+        prev = self._scene_detector._last_frame
+
+        if self._mode == InterpolationMode.ALWAYS:
+            self._scene_detector.analyze_frame(frame, frame_time)  # 同步缓冲区/上一帧
+            if prev is None:
+                return []
+            return self._generate_interpolated_frames(prev, frame, 1)
+
+        analysis = self._scene_detector.analyze_frame(frame, frame_time)
+        if analysis.needs_interpolation and prev is not None:
+            return self._generate_interpolated_frames(
+                prev, frame, analysis.interpolation_count
+            )
+        return []
+
+    def _generate_interpolated_frames(self, prev: np.ndarray, cur: np.ndarray,
+                                      count: int = 1) -> List[np.ndarray]:
+        """在 prev → cur 之间生成 count 个中间帧。"""
+        if prev is None or cur is None or prev.shape != cur.shape:
+            return []
+        return [self._interpolate_pair(prev, cur, (i + 1) / (count + 1))
+                for i in range(count)]
+
+    def _interpolate_pair(self, prev: np.ndarray, cur: np.ndarray, alpha: float) -> np.ndarray:
+        """单帧插值：auto/flow 走光流运动补偿，失败回退线性混合。"""
+        if self._method in ("auto", "flow") and CV2_AVAILABLE:
+            flowed = self._flow_interpolate(prev, cur, alpha)
+            if flowed is not None:
+                self._last_method_used = "flow"
+                return flowed
+        self._last_method_used = "blend"
+        return self._linear_interpolate(prev, cur, alpha)
+
+    def _flow_interpolate(self, prev: np.ndarray, cur: np.ndarray,
+                          alpha: float) -> Optional[np.ndarray]:
+        """光流运动补偿插值（Farneback 前/后向 warp + 加权），非神经网络。
+
+        相比直接 alpha blend（运动时会重影），先把 prev 沿正向光流前推 alpha、
+        把 cur 沿反向光流后推 (1-alpha)，再加权合成——对平移与镜头运动明显更自然。
+        任何异常返回 None，由调用方回退线性混合（不抛错、不阻断渲染）。
+        """
+        try:
+            g1 = cv2.cvtColor(prev, cv2.COLOR_RGB2GRAY)
+            g2 = cv2.cvtColor(cur, cv2.COLOR_RGB2GRAY)
+            flow = cv2.calcOpticalFlowFarneback(g1, g2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            h, w = g1.shape[:2]
+            grid_x, grid_y = np.meshgrid(
+                np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32)
+            )
+            fx, fy = flow[..., 0], flow[..., 1]
+            warp_prev = cv2.remap(
+                prev, (grid_x + fx * alpha).astype(np.float32),
+                (grid_y + fy * alpha).astype(np.float32),
+                cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+            )
+            warp_cur = cv2.remap(
+                cur, (grid_x - fx * (1.0 - alpha)).astype(np.float32),
+                (grid_y - fy * (1.0 - alpha)).astype(np.float32),
+                cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+            )
+            out = (warp_prev.astype(np.float32) * (1.0 - alpha)
+                   + warp_cur.astype(np.float32) * alpha)
+            return np.clip(out, 0, 255).astype(np.uint8)
+        except Exception as e:
+            logger.debug(f"光流插值失败，回退线性混合: {e}")
+            return None
+
+    def _linear_interpolate(self, frame1: np.ndarray, frame2: np.ndarray, alpha: float) -> np.ndarray:
+        """线性插值（alpha blend）——光流不可用时的回退路径。"""
+        result = frame1.astype(np.float32) * (1 - alpha) + frame2.astype(np.float32) * alpha
+        return result.astype(np.uint8)
+    
+    def get_markers(self) -> List[Dict]:
+        """获取补帧标记"""
+        return self._markers
+    
+    def reset(self):
+        """重置状态"""
+        self._scene_detector.reset()
+        self._inserted_frames = []
+        self._markers = []
+
+
+class InterpolationWorker(QThread):
+    """补帧工作线程"""
+    
+    # 2026-10-09 修：原为 pyqtSignal(float, List[np.ndarray])。
+    # pyqtSignal 只接受**真实 Python 类型 / bytes / ASCII 字符串**，不接受
+    # typing 的泛型别名（typing.List[np.ndarray] 是 _GenericAlias）——它会抛
+    #     TypeError: bytes or ASCII string expected not '_GenericAlias'
+    # 且因为异常发生在**类体执行期**，整个模块 import 即崩。后果：
+    #   * preview_manager._process_frame 里 `from app.core.ai_interpolation import ...`
+    #     会 ImportError（该处无 try/except，一旦用户开启补帧就崩渲染线程）；
+    #   * deformity_repair_skill._try_real_interpolation 被 try/except 吞掉，
+    #     永远返回「ai_interpolation 不可用」，Agent 补帧能力**静默失效**。
+    # 载荷是 list，用 object 声明（PyQt 会按 Python 对象传递，不复制）。
+    interpolation_ready = pyqtSignal(float, object)
+    marker_added = pyqtSignal(object)
+    progress = pyqtSignal(int, str)
+    
+    def __init__(self, interpolator: ContextAwareInterpolator):
+        super().__init__()
+        self._interpolator = interpolator
+        self._frame_queue = []
+        self._running = True
+        self._lock = threading.Lock()
+    
+    def add_frame(self, frame: np.ndarray, frame_time: float):
+        """添加待处理帧"""
+        with self._lock:
+            self._frame_queue.append((frame_time, frame))
+    
+    def run(self):
+        """处理帧队列"""
+        while self._running:
+            try:
+                with self._lock:
+                    if not self._frame_queue:
+                        time.sleep(0.01)
+                        continue
+                    frame_time, frame = self._frame_queue.pop(0)
+                
+                inserted = self._interpolator.process_frame(frame, frame_time)
+                
+                if inserted:
+                    self.interpolation_ready.emit(frame_time, inserted)
+                    
+                    from app.core.highlight_preview import InterpolationMarker, InterpolationType, highlight_preview_manager
+                    marker = InterpolationMarker(
+                        id=f"interp_{int(frame_time * 1000)}",
+                        time=frame_time,
+                        interpolation_type=InterpolationType.CONTEXT_FILL,
+                        confidence=0.85,
+                        metadata={"frames_inserted": len(inserted)},
+                    )
+                    highlight_preview_manager.add_interpolation_marker(marker)
+                    self.marker_added.emit(marker)
+                
+            except Exception as e:
+                logger.error(f"线性补帧处理失败: {e}", exc_info=True)
+    
+    def stop(self):
+        """停止线程"""
+        self._running = False
+
+
+class AIInterpolationEngine(QObject):
+    """线性补帧引擎（历史类名保留 AI 前缀以兼容导入）"""
+    
+    # 同 InterpolationWorker 的修复理由：typing 泛型别名不能进 pyqtSignal。
+    # 原为 pyqtSignal(float, List[np.ndarray]) / pyqtSignal(List)。
+    interpolation_ready = pyqtSignal(float, object)
+    markers_updated = pyqtSignal(object)
+    
+    def __init__(self):
+        super().__init__()
+        self._interpolator = ContextAwareInterpolator()
+        self._worker = None
+        self._mode = InterpolationMode.SMART
+        self._enabled = False
+    
+    def start(self):
+        """启动引擎"""
+        if self._worker and self._worker.isRunning():
+            return
+        
+        self._worker = InterpolationWorker(self._interpolator)
+        self._worker.interpolation_ready.connect(self.interpolation_ready.emit)
+        self._worker.marker_added.connect(self._on_marker_added)
+        self._worker.start()
+    
+    def stop(self):
+        """停止引擎"""
+        if self._worker and self._worker.isRunning():
+            self._worker.stop()
+            self._worker.wait()
+        self._interpolator.reset()
+    
+    def process_frame(self, frame: np.ndarray, frame_time: float):
+        """处理帧"""
+        if not self._enabled or not self._worker:
+            return
+        
+        self._worker.add_frame(frame, frame_time)
+    
+    def set_mode(self, mode: InterpolationMode):
+        """设置补帧模式"""
+        self._mode = mode
+        self._interpolator.set_mode(mode)
+    
+    def enable(self, enabled: bool):
+        """启用/禁用补帧"""
+        self._enabled = enabled
+        self._interpolator.enable(enabled)
+    
+    def _on_marker_added(self, marker):
+        """处理补帧标记添加"""
+        from app.core.highlight_preview import highlight_preview_manager
+        markers = highlight_preview_manager.get_interpolation_markers()
+        self.markers_updated.emit(markers)
+    
+    def shutdown(self):
+        """关闭引擎"""
+        self.stop()
+
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
+
+ai_interpolation_engine = AIInterpolationEngine()
+# 兼容旧命名：并非神经网络 AI
+linear_frame_blend_engine = ai_interpolation_engine

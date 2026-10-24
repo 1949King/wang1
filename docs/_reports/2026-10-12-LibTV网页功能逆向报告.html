@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LibTV 网页版功能逆向报告 · 2026-10-12</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#172033; --sub:#5a6478; --line:#e4e8ee;
+    --blue:#2f7bff; --violet:#6366f1; --green:#0f9d58; --orange:#f97316; --red:#e5484d;
+    --code:#f2f4f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    line-height:1.7;font-size:15px;}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 80px;}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.5px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+  h3{font-size:16.5px;margin:26px 0 10px;color:var(--ink)}
+  .meta{color:var(--sub);font-size:13.5px;margin-bottom:22px}
+  .lede{background:linear-gradient(135deg,#eef3ff,#f7f4ff);border:1px solid #dde4f5;
+    border-radius:12px;padding:18px 20px;margin:18px 0 26px}
+  .lede b{color:var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--card);
+    border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(23,32,51,.06);font-size:14px}
+  th{background:#eef1f6;text-align:left;padding:10px 12px;font-weight:600;color:#28324a}
+  td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top}
+  tr:hover td{background:#fafbfd}
+  code{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.8px;
+    font-family:"SF Mono",Consolas,monospace;color:#334}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:12px;font-weight:600}
+  .t-blue{background:#e8f0ff;color:#1f5fd6}
+  .t-green{background:#e6f7ee;color:#0b7a45}
+  .t-orange{background:#fff1e5;color:#c2570c}
+  .t-red{background:#fdecec;color:#c0343a}
+  .t-violet{background:#eeecfe;color:#4b4bc4}
+  ul{margin:8px 0 8px 2px;padding-left:20px}
+  li{margin:3px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    box-shadow:0 1px 2px rgba(23,32,51,.05)}
+  .card h4{margin:0 0 8px;font-size:14.5px;color:var(--blue)}
+  .k{color:var(--sub);font-size:12.5px}
+  .note{background:#fffbe9;border-left:4px solid #f5c518;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.8px}
+  .danger{background:#fdf0f0;border-left:4px solid var(--red);padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13.8px}
+  .imgs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+  .imgs figure{margin:0}
+  .imgs img{width:100%;border-radius:10px;border:1px solid var(--line);box-shadow:0 2px 8px rgba(23,32,51,.08)}
+  .imgs figcaption{font-size:12.5px;color:var(--sub);margin-top:6px;text-align:center}
+  .mono{font-family:"SF Mono",Consolas,monospace;font-size:12.6px;background:var(--code);
+    border-radius:8px;padding:12px 14px;overflow-x:auto;display:block;white-space:pre;color:#334}
+  footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--sub);font-size:12.8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>LibTV 网页版 · 功能逆向报告</h1>
+<div class="meta">
+  目标：<code>https://www.liblib.tv/</code>（Liblib 旗下 LibTV）&nbsp;·&nbsp;
+  逆向日期：2026-10-12&nbsp;·&nbsp;
+  方法：真实浏览器实测 + 前端 JS 包静态挖掘 + 官方版本 API + 官方 Agent Skill 仓库&nbsp;·&nbsp;
+  用途：供「拾光剪影」对标参考
+</div>
+
+<div class="lede">
+  <b>一句话结论：</b>LibTV 是一个 <b>Next.js 单页应用</b>，用「<b>无限画布 + 节点工作流</b>」把「剧本 → 分镜 → 资产 → 视频 → 剪辑」串成一条链；
+  它最大的结构性特征是<b>双入口</b>——一扇给人类创作者（画布 UI，需登录），一扇给 AI Agent（<code>im.liblib.tv</code> OpenAPI，<b>无需打开网页</b>）。
+  全部核心交互（画布 / Agent / 五大特色功能）都在<b>登录墙</b>之后；未登录只能看到产品外壳与功能清单。
+</div>
+
+<h2>一、逆向方法与证据链</h2>
+<table>
+<tr><th style="width:22%">手段</th><th>做法</th><th style="width:26%">拿到的证据</th></tr>
+<tr><td>浏览器实测</td><td><code>agent-browser 0.34.0</code> 真实 Chromium 打开站点，抓可访问性树、截图、网络请求</td><td>页面结构、导航、屏幕截图、<code>network requests</code> 全量 266 条</td></tr>
+<tr><td>JS 包挖掘</td><td>下载 89 个前端 chunk（<code>--compressed</code> 解压，9.0 MB），正则抽取中文功能串与路由</td><td>节点类型、菜单项、提示文案（<b>登录墙背后的功能词汇全在这里</b>）</td></tr>
+<tr><td>官方接口</td><td><code>POST api.liblib.tv/api/feature-news/version/list</code></td><td>官方 v1.0 / v1.5 功能清单原文（权威）</td></tr>
+<tr><td>官方仓库</td><td><code>github.com/libtv-labs/libtv-skills</code>（MIT）</td><td>Agent 入口的 OpenAPI 协议、鉴权、脚本</td></tr>
+</table>
+
+<div class="imgs">
+  <figure><img src="libtv_home.png" alt="LibTV 首页"><figcaption>实测截图 · 首页（未登录）</figcaption></figure>
+  <figure><img src="libtv_3dbox.png" alt="LibTV 3D-BOX"><figcaption>实测截图 · 3D-BOX 落地页</figcaption></figure>
+</div>
+
+<h2>二、产品外壳（实测页面结构）</h2>
+<p>未登录即可完整看到左侧导航与首页入口，说明这是一个「先给船票、后验身份」的 SPA 外壳。</p>
+<table>
+<tr><th style="width:16%">区域</th><th>内容</th></tr>
+<tr><td>主导航</td><td>首页 / 项目 / 资产 / 插件（可展开）</td></tr>
+<tr><td>创作 <span class="tag t-blue">核心</span></td><td><b>LibTV 画布</b> · <b>LibTV Agent</b> <span class="tag t-orange">BETA</span></td></tr>
+<tr><td>社区</td><td>学院（大师开讲）/ TV Show（全网爆款）/ 创作者挑战赛（王者大赛）</td></tr>
+<tr><td>首页入口</td><td><b>新建画布创作</b> ｜ 快捷模型 <code>Wan 3.0</code> <code>Vidu Q4 Preview</code> <code>Seedance 2.5</code> ｜ 视频生成 / 图片生成 / 音频生成 / 剧本生成 / 智能剪辑</td></tr>
+<tr><td>特色功能</td><td>王者荣耀联名活动 · <b>3D-BOX</b> · <b>剧本原创与改编</b> · <b>导演执导</b> · <b>角色造型室</b>（+ 创意片头）</td></tr>
+<tr><td>TV Show 分区</td><td>全部 / AI短片黑客松 / 全网爆款 / 王者无界剧场 / 精选画布 / 专业影视 / 短剧漫剧 / 商业广告 / 动漫游戏 / 教育生活 / TV工具箱</td></tr>
+<tr><td>商业化</td><td>积分超市 · 开通会员（限时 45 折）· 团队席位 · 连续包月/季/年 · 积分卡（通用 / 专属模型卡）</td></tr>
+</table>
+
+<h2>三、官方功能清单（权威，来自官方版本 API）</h2>
+<h3>v1.5（2026-09-20）· 五大独家功能</h3>
+<table>
+<tr><th style="width:15%">功能</th><th>官方描述（原文摘要）</th></tr>
+<tr><td><b>剧本原创与改编</b></td><td>从一个想法到原创剧本，局部打磨，也照顾前后的故事；按题材、人设与背景辅助创作，对台词、冲突等局部改写、对比确认；<b>关联修改会提示对大纲、钩子与伏笔的影响</b>，由用户决定是否同步调整。</td></tr>
+<tr><td><b>导演执导</b></td><td>可调用的导演能力，拆分镜、写提示词、批量推进；可选<b>预设导演</b>或<b>导入自己的创作方法与提示词模板生成「导演分身」</b>；手动模式下先审核计划、确认后再生成。</td></tr>
+<tr><td><b>角色造型室</b></td><td>从人设 / 参考图 / 已有角色出发，可视化调整五官、发型、服装，细化痣、雀斑、疤痕等特征；<b>可关联音色、保存角色卡，跨项目复用</b>。</td></tr>
+<tr><td><b>创意片头</b></td><td>基于选中画面设计片名、生成文字动效，提供字幕识别与样式调整；口播视频支持<b>自动粗剪、画中画、B-Roll 匹配与音效配乐</b>。</td></tr>
+<tr><td><b>3D-BOX</b></td><td>不会建模也能开机；文字/参考图描述需求，Agent 帮搭场景、安排角色动作与机位，完成<b>多分镜预演</b>；<b>手绘轨迹即可预演运镜</b>，支持对话或手动调整场景与镜头。</td></tr>
+</table>
+<p class="k">v1.5 其他优化（官方原文）：【TV Director】支持新建、更新、运行画布节点；支持 Agent 运行中切换自动/手动模式；画布打开速度显著提升；优化数千节点卡顿；修复画布偶发丢节点。</p>
+
+<h3>v1.0（2026-09-11）· 十项能力（多数标注「独家」）</h3>
+<table>
+<tr><th style="width:20%">能力</th><th>要点</th></tr>
+<tr><td>深度动作捕捉</td><td>一键提取视频深度信息，让动作/运镜参考不受原风格干扰</td></tr>
+<tr><td>逐帧拉片</td><td>从叙事分镜 / 精彩运镜 / 动作片段 / 音频参考多维度分析视频，输出素材供 Seedance 使用</td></tr>
+<tr><td>智能引用 AutoLink</td><td>输入提示词后实时把相关参考素材<b>@引用</b>到提示词后，配合多参模型</td></tr>
+<tr><td>片段重拍</td><td>毫秒级时间戳定位，时间轴上选一段或多段重拍，用文字描述改动</td></tr>
+<tr><td>视频智能续写</td><td>从任意时间点续写，可加新参考图/视频</td></tr>
+<tr><td>智能剪辑</td><td>口播视频 / 批量广告 / 智能混剪 / 无人出镜解说；自动匹配动效、卡点、布局，一键剪辑；<b>素材粗剪（去口水词、停顿、重复）</b></td></tr>
+<tr><td>图层分离</td><td>把图片中人物/物体/文字/背景拆成可独立编辑图层，支持移动、缩放、旋转、层级、景深</td></tr>
+<tr><td>宫格切分</td><td>可拖动分割线自定义位置</td></tr>
+<tr><td>Seedance 2.5 长片直出</td><td>一键直出 <b>5 分钟</b>成片，支持查看过程片段与画布精修</td></tr>
+<tr><td>Blender 插件</td><td>在 Blender 录制 3D 白模视频/截图，一键发送到 LibTV（<code>liblib.tv/blender</code>）</td></tr>
+</table>
+
+<h2>四、画布能力全景（从前端 JS 包挖掘，越过登录墙）</h2>
+<p>以下词汇均从打包后的前端代码中抽取，代表画布内部<b>实际存在的节点/面板/操作</b>。</p>
+
+<div class="grid">
+  <div class="card"><h4>剧本域</h4>
+    <ul><li>剧本创编 / 剧本浓缩 / 剧本结构 / 剧本设定器</li>
+    <li>文本生剧本 · 视频生剧本 · 角色生剧本</li>
+    <li>上传剧本 / 剧本文本快照 / 选择剧本模型</li>
+    <li>微电影剧本创作 · 原创剧本 · 分集剧本</li></ul></div>
+  <div class="card"><h4>分镜域</h4>
+    <ul><li>智能分镜 / 生成分镜 / 分镜生成器</li>
+    <li>分镜组（创建/删除/合并/复制/转组）</li>
+    <li>分镜单元格 · 分镜总时长 · 分镜提示词</li>
+    <li>分镜叙事</li></ul></div>
+  <div class="card"><h4>导演域</h4>
+    <ul><li>3D 导演台 / 导演控制台 / 导演台节点</li>
+    <li>导演视角 · 导演风格 · 导演角色</li>
+    <li>导演级提示词 · 插入当前导演台</li>
+    <li>选择/自定义导演角色</li></ul></div>
+  <div class="card"><h4>造型域</h4>
+    <ul><li>角色造型室 · 人设定制造型</li>
+    <li>上传造型参考图 · 造型技能</li>
+    <li>「创建、管理并复用角色的造型、状态与音色」</li></ul></div>
+  <div class="card"><h4>3D 域</h4>
+    <ul><li>3D-BOX（我的/创建/保存/分享/删除）</li>
+    <li>3D 场景 / 3D 视图 / 3D 资产 / 3D 动画</li>
+    <li>Agent 搭景 · 角色动作 · 机位调度</li></ul></div>
+  <div class="card"><h4>资产域</h4>
+    <ul><li>角色库 / 角色组 · 场景库 · 道具</li>
+    <li>风格库 / 风格广场 · 素材库</li>
+    <li>一致性资产 · 资产图锚定</li></ul></div>
+  <div class="card"><h4>机位域</h4>
+    <ul><li>多机位九宫格 · 机位轨 · 机位关键帧</li>
+    <li>切换/定位/进入/退出机位</li>
+    <li>空间与机位 · 选择机位视角</li></ul></div>
+  <div class="card"><h4>视频域</h4>
+    <ul><li>首帧 / 尾帧 / 首尾帧生视频</li>
+    <li>智能续写 · 片段重拍 · 深度动作捕捉</li>
+    <li>逐帧拉片 · 视频故事 · 运镜轨迹</li></ul></div>
+  <div class="card"><h4>图像域</h4>
+    <ul><li>九宫格 / 情绪九宫格 / 多机位九宫格 4K</li>
+    <li>高清放大（宫格放大）· 智能抠像</li>
+    <li>图层分离 · 宫格切分 · 裁剪</li></ul></div>
+  <div class="card"><h4>剪辑域</h4>
+    <ul><li>智能剪辑 · 口播粗剪 · B-Roll 匹配</li>
+    <li>轨道（视频/音频/字幕/文本/运镜）</li>
+    <li>字幕（含智能去字幕、框选去字幕）</li>
+    <li>转场库 / 特效库 · 时间线</li></ul></div>
+  <div class="card"><h4>引用与工作流</h4>
+    <ul><li>智能引用 AutoLink（@引用节点/素材）</li>
+    <li>「@ 引用工作流 / 节点 / 资源」</li>
+    <li>脚本工作流规划 · 成片工作流</li></ul></div>
+  <div class="card"><h4>Agent 与技能</h4>
+    <ul><li>掌握技能点 · 造型技能 · 不使用技能</li>
+    <li>分享「agent 对话 + agent 一致性资产」</li>
+    <li>「让 {brand} 进入你的 Agent 工作流」</li></ul></div>
+</div>
+
+<h2>五、技术架构（实测网络请求）</h2>
+<table>
+<tr><th style="width:26%">层</th><th>实测结论</th></tr>
+<tr><td>前端框架</td><td><b>Next.js + Turbopack</b>（chunk 头 <code>globalThis.TURBOPACK</code>），静态资源托管在 <code>liblibai-web-static.liblib.cloud/liblibtv_online/</code></td></tr>
+<tr><td>LibTV 专属 API</td><td><code>https://api.liblib.tv/api/*</code>（feature-news、community、canvas project、task）</td></tr>
+<tr><td>Liblib 平台 API</td><td><code>https://api2.liblib.art/api/www/*</code>（登录、模型、会员、积分、优惠券、活动）</td></tr>
+<tr><td>Agent OpenAPI</td><td><code>https://im.liblib.tv/openapi/*</code>（会话式生成，见第七节）</td></tr>
+<tr><td>生成网关</td><td><code>/gateway/sd-api/generate/image</code> · <code>/generate/video/history</code> · <code>/generate/progress/msg/v3</code> · <code>/segment-anything-api/inference</code>（SAM 分割）</td></tr>
+<tr><td>第三方</td><td>百度 fclog（投放归因）、阿里云 SLS RUM（前端性能）、七鱼 qiyukf（客服）、howxm（风控/防刷）、iconify</td></tr>
+</table>
+
+<h3>关键业务 API（从 JS 抽取）</h3>
+<pre class="mono">登录         POST /api/www/login/sendLoginPhoneCode | loginByPhoneCode
+画布/项目    /api/canvas/project/detail | /template/list | /template/republish | /share/detail
+任务/产物    /api/task/artifact/list | /api/task/artifact/delete
+             /api/task/generation/detail | /api/canvas/task/generation/detail
+生成网关     /gateway/sd-api/generate/image | video/history | editor/list | progress/msg/v3
+模型         /api/www/model/search | /model/getMyModel/ | /model/listByTeam
+             /api/www/video/recommend-models
+技能         /skill/create
+ComfyUI      /comfy/like/list
+商业化       /api/www/power/v2/{recharge,deduct}log | /api/www/priority/... 
+             /api/www/member/packages | /member/powers | /api/www/coupon/query/available</pre>
+
+<h2>六、登录墙与逆向边界</h2>
+<div class="danger">
+  <b>实测：点「LibTV 画布」「3D-BOX」等均弹出登录框</b>（微信一键登录 / 手机号登录 / 团队邮箱登录 / QQ 扫码登录）。
+  因此<b>画布内部 UI、Agent 面板、特色功能的实际操作流程无法在未登录下直接观测</b>——本报告第四节的能力来自前端代码静态挖掘，属「代码级真实存在」，但未逐一在 UI 上验证交互细节。
+</div>
+<table>
+<tr><th style="width:34%">未登录可见</th><th>需登录</th></tr>
+<tr><td>首页与完整左侧导航 · 特色功能入口 · TV Show 展示与分区 · 3D-BOX 落地页（<code>/3d-box</code>）· Blender 插件页（<code>/blender</code>）· 版本更新记录</td><td>画布编辑 · Agent 对话 · 项目 / 资产 / 插件 · 各特色功能实操 · 生成与下载</td></tr>
+</table>
+
+<h2>七、双入口模型（LibTV 最值得注意的结构）</h2>
+<div class="grid">
+  <div class="card"><h4>门 1 · 人类创作者</h4>
+    <ul><li>载体：无限画布 + 节点图</li>
+    <li>入口：<code>www.liblib.tv/canvas</code>（需登录）</li>
+    <li>特点：画布、节点、分镜、编辑等全部精细控制</li></ul></div>
+  <div class="card"><h4>门 2 · AI Agent <span class="tag t-violet">开放 API</span></h4>
+    <ul><li>载体：会话式 OpenAPI，<b>不经过网页</b></li>
+    <li>入口：<code>https://im.liblib.tv/openapi/*</code></li>
+    <li>规范：OpenClaw Skill（`npx skills add libtv-labs/libtv-skills`）</li>
+    <li>鉴权：<code>Authorization: Bearer &lt;LIBTV_ACCESS_KEY&gt;</code></li></ul></div>
+</div>
+<pre class="mono">POST /openapi/session            创建会话 / 发送生成指令      → {projectUuid, sessionId}
+GET  /openapi/session/:id        查询会话消息（afterSeq 增量轮询）
+POST /openapi/session/change-project  切换绑定项目
+POST /openapi/file/upload        上传图片/视频到 OSS（仅 image/* 与 video/*）
+
+Agent 工作流：用户指令 → create_session → 轮询 query_session → download_results → 展示结果 + 画布链接</pre>
+<p class="note">
+  <b>战略含义：</b>LibTV 把「生成能力」抽成一个<b>面向 Agent 的会话 API</b>，让外部 Agent（OpenClaw 等）无需 UI 就能驱动它出片；
+  这与「拾光剪影」在 <code>docs/_reports/2026-09-26-LibTV1.5对标升级方案.md</code> 中的判断一致——
+  <b>对标它的产品形态，不搬它的「云端 Agent 全包、用户只传话」哲学</b>。
+</p>
+
+<h2>八、对「拾光剪影」的可借鉴点</h2>
+<table>
+<tr><th style="width:24%">LibTV 做法</th><th>拾光剪影现状</th><th style="width:16%">建议</th></tr>
+<tr><td>画布节点 + 无限画布承载全链路</td><td>画布（React Flow）已具备，节点体系在演进</td><td><span class="tag t-green">已对齐</span></td></tr>
+<tr><td>「@引用」把素材/节点挂到提示词（AutoLink）</td><td>已有「连线上游素材引用」（对标 AI Canvas 0.9.21）</td><td><span class="tag t-green">已对齐</span></td></tr>
+<tr><td>导演分身 / 导演执导（可调用、可导入模板）</td><td>能力目录含「导演分身·可调用能力」，但结果未落时间线</td><td><span class="tag t-orange">补最后一公里</span></td></tr>
+<tr><td>角色造型室：可视化捏脸 + 关联音色 + 角色卡复用</td><td>角色库 20 字段很全，但<b>存不了形象图</b>（只有文字）</td><td><span class="tag t-red">缺口</span></td></tr>
+<tr><td>剧本原创与改编：局部改写 + 影响面提示（大纲/钩子/伏笔）</td><td>剧本节点是纯文本框，无生产端</td><td><span class="tag t-red">缺口</span></td></tr>
+<tr><td>3D-BOX：Agent 搭景 + 手绘轨迹预演运镜</td><td>已有 3D 导演台 / Stage3D / 白模视频；缺与角色库、时间线接口</td><td><span class="tag t-orange">补接口</span></td></tr>
+<tr><td>Agent OpenAPI（会话式生成，供外部 Agent 调用）</td><td>MCP 客户端 + canvas bridge 已通，但无对外「会话式生成 API」</td><td><span class="tag t-blue">可考虑</span></td></tr>
+<tr><td>智能剪辑：去口水词/停顿/重复的素材粗剪</td><td>精剪管线强，缺「一键粗剪写 _clips」入口（已被列入待办）</td><td><span class="tag t-orange">在办</span></td></tr>
+</table>
+
+<h2>九、结论</h2>
+<ul>
+  <li><b>LibTV = 无限画布 + 节点工作流 + 双入口（人类 UI / Agent API）</b>，底座是 Next.js，生成走自建 gateway。</li>
+  <li>它的护城河是<b>「一条链走完」</b>与<b>「云端 Agent 全包」</b>；护城河之外是<b>登录墙 + 积分/会员商业化</b>。</li>
+  <li>拾光剪影在多个点已对齐甚至更深（角色 20 字段、转场语义分层、冻结区工程纪律）；真正缺的是
+      <b>资产本体（形象图）</b>、<b>剧本生产端</b>、<b>导演结果落时间线</b>三处「最后一公里」。</li>
+  <li>本次逆向的完整原始证据（截图 / 网络请求 / JS 抽取 / 官方接口原始 JSON）保存在
+      <code>.workbuddy/tmp/libtv/</code>，可复核。</li>
+</ul>
+
+<footer>
+  报告生成时间：2026-10-12 &nbsp;·&nbsp; 原始证据目录：<code>D:\拾光剪影\.workbuddy\tmp\libtv\</code><br>
+  证据文件：<code>01_home.png</code>（首页截图）、<code>02_3dbox.png</code>、<code>net.txt</code>（266 条网络请求）、
+  <code>kwout.txt</code>（关键词抽取）、<code>ver.json</code>（官方版本 API 原始返回）、<code>js/</code>（89 个前端 chunk）。
+</footer>
+
+</div>
+</body>
+</html>

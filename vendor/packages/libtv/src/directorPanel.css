@@ -1,0 +1,110 @@
+/* directorPanel.css — 导演指导面板（2026-10-06）
+ * 深色为主 + 浅色可读（不变量 #8）。三段式布局：诊断 / 招式 / 预览。
+ */
+.dp-panel {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 58px;
+  width: min(680px, calc(100vw - 32px));
+  max-height: 54vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 46;
+  border-radius: 12px;
+  background: #151a26;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: #edf3ff;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+  overflow: hidden;
+}
+.dp-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid rgba(237, 243, 255, 0.12);
+}
+.dp-title { font-weight: 500; }
+.dp-sub { font-size: 12px; color: rgba(237, 243, 255, 0.55); }
+.dp-spacer { flex: 1; }
+.dp-x {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(237, 243, 255, 0.16); background: transparent;
+  color: #edf3ff; cursor: pointer;
+}
+.dp-body { display: flex; gap: 12px; padding: 10px; overflow-y: auto; }
+.dp-diag { flex: 0 0 220px; }
+.dp-moves { flex: 1; min-width: 0; }
+.dp-preview { flex: 0 0 220px; display: flex; flex-direction: column; }
+.dp-sec-title { font-size: 12px; color: rgba(237, 243, 255, 0.6); margin: 4px 0; }
+.dp-diag-text { font-size: 12px; color: #f9c74f; margin: 0 0 8px; line-height: 1.5; }
+.dp-quote {
+  font-size: 12px; line-height: 1.6; padding: 6px 8px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); color: rgba(237, 243, 255, 0.85);
+  word-break: break-word; max-height: 120px; overflow-y: auto;
+}
+.dp-quote-preview { color: #9fe1cb; }
+.dp-cat { margin-bottom: 6px; }
+.dp-miss {
+  font-style: normal; margin-left: 5px; font-size: 11px;
+  padding: 0 4px; border-radius: 4px; background: #f97316; color: #1b1b1b;
+}
+.dp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dp-chip {
+  border: 1px solid rgba(237, 243, 255, 0.14); background: transparent;
+  color: rgba(237, 243, 255, 0.82); border-radius: 8px;
+  padding: 2px 8px; font-size: 12px; cursor: pointer;
+}
+.dp-chip.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+.dp-hint { font-size: 11px; color: rgba(237, 243, 255, 0.5); margin-top: 6px; line-height: 1.5; }
+.dp-actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.dp-apply {
+  border: 1px solid #2563eb; background: #2563eb; color: #fff;
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.dp-undo, .dp-all {
+  border: 1px solid rgba(237, 243, 255, 0.18); background: transparent; color: #edf3ff;
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.dp-msg { font-size: 12px; color: rgba(237, 243, 255, 0.65); margin-top: 6px; min-height: 16px; }
+
+/* 浅色主题 */
+.theme-light .dp-panel, body[data-theme="light"] .dp-panel {
+  background: #fff; color: #172033; border-color: rgba(23, 32, 51, 0.16);
+}
+.theme-light .dp-sub, .theme-light .dp-sec-title, .theme-light .dp-hint,
+.theme-light .dp-msg,
+body[data-theme="light"] .dp-sub, body[data-theme="light"] .dp-sec-title,
+body[data-theme="light"] .dp-hint, body[data-theme="light"] .dp-msg {
+  color: rgba(23, 32, 51, 0.6);
+}
+.theme-light .dp-quote, body[data-theme="light"] .dp-quote {
+  background: rgba(23, 32, 51, 0.05); color: #172033;
+}
+.theme-light .dp-quote-preview, body[data-theme="light"] .dp-quote-preview { color: #0f6e56; }
+.theme-light .dp-diag-text, body[data-theme="light"] .dp-diag-text { color: #8a5a00; }
+.theme-light .dp-chip, .theme-light .dp-x, .theme-light .dp-undo, .theme-light .dp-all,
+body[data-theme="light"] .dp-chip, body[data-theme="light"] .dp-x,
+body[data-theme="light"] .dp-undo, body[data-theme="light"] .dp-all {
+  color: #172033; border-color: rgba(23, 32, 51, 0.18);
+}
+
+/* ── V4.41.18 窗口管理：header 拖拽把手 + 最小化按钮 ── */
+.dp-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.dp-head:active {
+  cursor: grabbing;
+}
+.dp-min {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(237, 243, 255, 0.16);
+  background: transparent; color: #edf3ff; cursor: pointer; line-height: 1;
+}
+.dp-min:hover { border-color: #3b82f6; color: #fff; }
+.theme-light .dp-min,
+body[data-theme="light"] .dp-min {
+  color: #172033; border-color: rgba(23, 32, 51, 0.18);
+}

@@ -1,0 +1,4 @@
+2026-02-03 15:28:48,788 - INFO - 🔧 成功导入 faster-whisper。
+2026-02-03 15:28:48,793 - WARNING - ⚠️  未能导入 MediaPipe: No module named 'mediapipe'
+2026-02-03 15:28:48,793 - WARNING -    姿态识别功能将不可用。
+2026-02-03 15:28:55,678 - INFO - 🔧 成功导入 EasyOCR。

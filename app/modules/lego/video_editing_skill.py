@@ -1,0 +1,694 @@
+"""
+视频编辑技能模块
+================
+提供各种视频编辑相关的AI技能
+"""
+
+from .skill_engine import Skill, skill_registry, StepResult
+import os
+import subprocess
+import json
+import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class AutoSubtitleSkill(Skill):
+    """自动生成字幕技能"""
+    
+    skill_id = "auto-subtitle"
+    skill_name = "自动生成字幕"
+    skill_description = "自动为视频生成字幕，支持多语言"
+    skill_category = "字幕工具"
+    skill_icon = "📝"
+    skill_version = "1.0.0"
+    
+    def _setup_steps(self):
+        self.add_step(
+            name="检查输入文件",
+            handler=self._check_input_file
+        ).add_step(
+            name="提取音频",
+            handler=self._extract_audio
+        ).add_step(
+            name="识别语音",
+            handler=self._recognize_speech
+        ).add_step(
+            name="生成字幕文件",
+            handler=self._generate_subtitle
+        ).add_step(
+            name="完成",
+            handler=self._complete
+        )
+    
+    def _check_input_file(self, context):
+        """检查输入文件"""
+        input_file = context.get_input("input_file")
+        if not input_file or not os.path.exists(input_file):
+            return StepResult(success=False, error="输入文件不存在")
+        context.set_variable("input_file", input_file)
+        return StepResult(success=True)
+    
+    def _extract_audio(self, context):
+        """提取音频"""
+        input_file = context.get_variable("input_file")
+        audio_file = os.path.splitext(input_file)[0] + ".wav"
+        
+        try:
+            # 使用ffmpeg提取音频（避免shell=True，防止命令注入）
+            cmd = [
+                "ffmpeg", "-i", input_file,
+                "-vn", "-acodec", "pcm_s16le",
+                "-ar", "16000", "-ac", "1",
+                audio_file
+            ]
+            subprocess.run(cmd, shell=False, check=True,
+                         capture_output=True,
+                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            context.set_variable("audio_file", audio_file)
+            return StepResult(success=True, output={"audio_file": audio_file})
+        except Exception as e:
+            return StepResult(success=False, error=f"提取音频失败: {e}")
+    
+    def _recognize_speech(self, context):
+        """识别语音 - 使用统一的 whisper_asr 共享模块"""
+        audio_file = context.get_variable("audio_file")
+        language = context.get_input("language", "zh")
+
+        try:
+            from app.core.ai.whisper_asr import transcribe
+        except ImportError:
+            try:
+                from core.ai.whisper_asr import transcribe
+            except ImportError:
+                # 修复：此前 whisper 不可用时会伪造一条占位字幕并 success=True，
+                # 后续步骤据此生成一个"看起来完成了"的 SRT 文件，但内容完全不是
+                # 真实转写——用户拿到"成功"提示和一个只有一行提示文本的字幕文件，
+                # 容易被当成真实识别结果使用。这里如实标记为失败，而不是
+                # 制造一个假的成功产物。
+                return StepResult(success=False, error="Whisper 语音识别模块不可用（未安装或导入失败），无法生成真实字幕，请先安装 whisper 依赖")
+
+        result = transcribe(audio_file, model_size="base", language=language)
+        if result:
+            context.set_variable("subtitles", result)
+            return StepResult(success=True, output={"subtitles": result})
+        return StepResult(success=False, error="语音识别返回空结果")
+    
+    def _generate_subtitle(self, context):
+        """生成字幕文件"""
+        input_file = context.get_variable("input_file")
+        subtitles = context.get_variable("subtitles")
+        output_file = context.get_input("output_file") or os.path.splitext(input_file)[0] + ".srt"
+        
+        try:
+            # 生成SRT字幕文件
+            with open(output_file, 'w', encoding='utf-8') as f:
+                for i, subtitle in enumerate(subtitles, 1):
+                    start = self._format_time(subtitle["start"])
+                    end = self._format_time(subtitle["end"])
+                    f.write(f"{i}\n")
+                    f.write(f"{start} --> {end}\n")
+                    f.write(f"{subtitle['text']}\n\n")
+            
+            context.set_variable("output_file", output_file)
+            return StepResult(success=True, output={"output_file": output_file})
+        except Exception as e:
+            return StepResult(success=False, error=f"生成字幕失败: {e}")
+    
+    def _complete(self, context):
+        """完成"""
+        output_file = context.get_variable("output_file")
+        return StepResult(success=True, output={"result": f"字幕生成成功，保存到 {output_file}"})
+    
+    def _format_time(self, seconds):
+        """格式化时间"""
+        ms = int((seconds % 1) * 1000)
+        s = int(seconds % 60)
+        m = int(seconds // 60 % 60)
+        h = int(seconds // 3600)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+class SmartClipSkill(Skill):
+    """智能剪辑技能"""
+    
+    skill_id = "smart-clip"
+    skill_name = "智能剪辑"
+    skill_description = "AI驱动的智能剪辑，自动识别精彩片段"
+    skill_category = "视频处理"
+    skill_icon = "🎬"
+    skill_version = "1.0.0"
+    
+    def _setup_steps(self):
+        self.add_step(
+            name="检查输入文件",
+            handler=self._check_input_file
+        ).add_step(
+            name="分析视频内容",
+            handler=self._analyze_video
+        ).add_step(
+            name="识别精彩片段",
+            handler=self._identify_clips
+        ).add_step(
+            name="剪辑视频",
+            handler=self._clip_video
+        ).add_step(
+            name="完成",
+            handler=self._complete
+        )
+    
+    def _check_input_file(self, context):
+        """检查输入文件"""
+        input_file = context.get_input("input_file")
+        if not input_file or not os.path.exists(input_file):
+            return StepResult(success=False, error="输入文件不存在")
+        context.set_variable("input_file", input_file)
+        return StepResult(success=True)
+    
+    def _analyze_video(self, context):
+        """分析视频内容
+
+        修复：此前不管输入什么视频都写死 duration=60.0，后续片段全部基于
+        这个假时长挑选，短视频会挑出超出实际长度的区间。这里改为用
+        ffprobe 读取真实时长/分辨率/帧率；ffprobe 不可用时才回退默认值，
+        并在 video_info 里标注 is_estimated=True，供下游诚实展示。
+        """
+        input_file = context.get_variable("input_file")
+
+        try:
+            video_info = self._probe_video_info(input_file)
+            context.set_variable("video_info", video_info)
+            return StepResult(success=True, output={"video_info": video_info})
+        except Exception as e:
+            return StepResult(success=False, error=f"分析视频失败: {e}")
+
+    def _probe_video_info(self, input_file: str) -> dict:
+        try:
+            cmd = [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,r_frame_rate:format=duration",
+                "-of", "json", input_file,
+            ]
+            result = subprocess.run(
+                cmd, shell=False, capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+            )
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout)
+                stream = (data.get("streams") or [{}])[0]
+                duration = float((data.get("format") or {}).get("duration", 0) or 0)
+                width = stream.get("width")
+                height = stream.get("height")
+                fps_raw = stream.get("r_frame_rate", "0/1")
+                num, _, den = fps_raw.partition("/")
+                fps = round(float(num) / float(den), 2) if den and float(den) else 0
+                if duration > 0 and width and height:
+                    return {
+                        "duration": duration,
+                        "resolution": f"{width}x{height}",
+                        "fps": fps,
+                        "is_estimated": False,
+                    }
+        except Exception:
+            logger.debug("ffprobe 探测视频信息失败，使用估计值兜底: %s", input_file, exc_info=True)
+        # ffprobe 不可用/失败时的诚实兜底：明确标注为估计值，不冒充真实探测结果
+        return {"duration": 60.0, "resolution": "未知（ffprobe 不可用）", "fps": 0, "is_estimated": True}
+
+    def _identify_clips(self, context):
+        """识别精彩片段
+
+        如实说明：这里没有接入真实的精彩片段识别模型（例如基于音量/运动量/
+        人脸的启发式算法，或视觉-语言模型打分），只是把视频均匀切成 3 段
+        作为占位片段。score 字段是固定值，不代表真实置信度。
+        """
+        video_info = context.get_variable("video_info")
+
+        try:
+            duration = max(float(video_info.get("duration") or 0), 3.0)
+            seg = duration / 4.0
+            clips = [
+                {"start": round(seg * 0.5, 2), "end": round(seg * 1.2, 2), "score": None},
+                {"start": round(seg * 1.8, 2), "end": round(seg * 2.5, 2), "score": None},
+                {"start": round(seg * 3.0, 2), "end": round(min(seg * 3.7, duration), 2), "score": None},
+            ]
+            context.set_variable("clips", clips)
+            context.set_variable("clips_are_heuristic", True)
+            return StepResult(success=True, output={
+                "clips": clips,
+                "note": "⚠️ 暂未接入真实精彩片段识别模型，以下为均匀切分的占位片段",
+            })
+        except Exception as e:
+            return StepResult(success=False, error=f"识别精彩片段失败: {e}")
+
+    def _clip_video(self, context):
+        """剪辑视频
+
+        修复：此前只把输出路径塞进变量就 success=True，从未调用任何视频
+        处理逻辑，output_file 实际上不存在——是彻底的假成功。这里改为真正
+        用 ffmpeg 按 clips 逐段裁剪并 concat 成一个输出文件；任何一步失败
+        都如实返回 success=False，不再假装完成。
+        """
+        input_file = context.get_variable("input_file")
+        clips = context.get_variable("clips") or []
+        output_file = context.get_input("output_file") or os.path.splitext(input_file)[0] + "_clipped.mp4"
+
+        if not clips:
+            return StepResult(success=False, error="没有可用的剪辑片段")
+
+        segment_files = []
+        try:
+            tmp_dir = os.path.join(os.path.dirname(output_file) or ".", ".smart_clip_tmp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            for i, clip in enumerate(clips):
+                seg_path = os.path.join(tmp_dir, f"seg_{i}.mp4")
+                cmd = [
+                    "ffmpeg", "-y", "-ss", str(clip["start"]), "-to", str(clip["end"]),
+                    "-i", input_file, "-c", "copy", "-avoid_negative_ts", "make_zero",
+                    seg_path,
+                ]
+                r = subprocess.run(cmd, shell=False, capture_output=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                if r.returncode != 0 or not os.path.exists(seg_path):
+                    raise RuntimeError(f"片段 {i} 裁剪失败: {(r.stderr or b'').decode('utf-8', errors='ignore')[-300:]}")
+                segment_files.append(seg_path)
+
+            concat_list = os.path.join(tmp_dir, "concat_list.txt")
+            with open(concat_list, "w", encoding="utf-8") as f:
+                for seg_path in segment_files:
+                    f.write(f"file '{os.path.abspath(seg_path)}'\n")
+
+            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c", "copy", output_file]
+            r = subprocess.run(cmd, shell=False, capture_output=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if r.returncode != 0 or not os.path.exists(output_file):
+                raise RuntimeError(f"合并片段失败: {(r.stderr or b'').decode('utf-8', errors='ignore')[-300:]}")
+
+            context.set_variable("output_file", output_file)
+            return StepResult(success=True, output={"output_file": output_file})
+        except Exception as e:
+            return StepResult(success=False, error=f"剪辑视频失败: {e}")
+        finally:
+            for seg_path in segment_files:
+                try:
+                    os.remove(seg_path)
+                except OSError:
+                    logger.debug("清理临时分段文件失败（不影响结果）: %s", seg_path, exc_info=True)
+
+    def _complete(self, context):
+        """完成"""
+        output_file = context.get_variable("output_file")
+        clips = context.get_variable("clips")
+        result_msg = f"智能剪辑完成，保存到 {output_file}"
+        if context.get_variable("clips_are_heuristic"):
+            result_msg += "（片段为均匀切分的占位选择，非真实AI精彩片段识别）"
+        return StepResult(success=True, output={"result": result_msg, "clips": clips})
+
+
+class CoverGeneratorSkill(Skill):
+    """智能生成封面图技能（v1.1：真实画质打分选帧 + 可选片头标题卡）
+
+    输入参数（inputs）：
+        - input_file:        str  必填，视频文件路径
+        - output_file:       str  可选，封面输出路径（默认 <视频名>_cover.jpg）
+        - title_text:        str  可选，提供后追加生成片头标题卡
+        - subtitle_text:     str  可选，标题卡副标题
+        - title_card_output: str  可选，标题卡输出路径（默认 <视频名>_titlecard.jpg）
+    """
+
+    skill_id = "cover-generator"
+    skill_name = "智能生成封面图"
+    skill_description = "按真实画质打分（清晰度/曝光/对比度/饱和度）从 3 个候选帧选最优作封面，可选生成片头标题卡"
+    skill_category = "视频处理"
+    skill_icon = "🖼️"
+    skill_version = "1.1.0"
+
+    # CJK 字体候选（标题卡用；找不到时若标题含中文则如实跳过，不画豆腐块）
+    _FONT_CANDIDATES = (
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\msyh.ttf",
+        r"C:\Windows\Fonts\simhei.ttf",
+        r"C:\Windows\Fonts\simsun.ttc",
+    )
+
+    def _setup_steps(self):
+        self.add_step(
+            name="检查输入文件",
+            handler=self._check_input_file
+        ).add_step(
+            name="提取关键帧",
+            handler=self._extract_keyframes
+        ).add_step(
+            name="分析内容",
+            handler=self._analyze_content
+        ).add_step(
+            name="生成封面图",
+            handler=self._generate_cover
+        ).add_step(
+            name="生成片头卡",
+            handler=self._make_title_card,
+            condition=self._should_make_title_card,
+            dependencies=["生成封面图"]
+        ).add_step(
+            name="完成",
+            handler=self._complete
+        )
+
+    def _check_input_file(self, context):
+        """检查输入文件，并同步可选输入（condition 只读 variables，参照 DirectorSkill 的写法）"""
+        input_file = context.get_input("input_file")
+        if not input_file or not os.path.exists(input_file):
+            return StepResult(success=False, error="输入文件不存在")
+        context.set_variable("input_file", input_file)
+        context.set_variable("_title_text", str(context.get_input("title_text") or "").strip())
+        context.set_variable("_subtitle_text", str(context.get_input("subtitle_text") or "").strip())
+        context.set_variable("_title_card_output", str(context.get_input("title_card_output") or "").strip())
+        return StepResult(success=True)
+
+    def _extract_keyframes(self, context):
+        """提取关键帧候选（时间点 + 320px 代理图，供真实打分）。
+
+        修复链：
+          ① 更早版本写死 10s/25s/40s 且不抽帧（短视频会越界）；
+          ② 上一版按真实时长取 20%/50%/75% 时间点但**不抽帧**，分析步只能
+             "取中间"占位；
+          ③ 本版把 3 个候选帧**真抽成 320px 代理 JPEG**，让分析步能做
+             像素级画质打分；最终封面仍按选中时间点全分辨率重截（画质不降级）。
+        """
+        input_file = context.get_variable("input_file")
+
+        try:
+            duration = self._probe_duration(input_file)
+            candidates = [round(duration * r, 2) for r in (0.2, 0.5, 0.75)]
+            tmp_dir = tempfile.mkdtemp(prefix="cover_kf_")
+            keyframes = []
+            for idx, t in enumerate(candidates):
+                proxy = os.path.join(tmp_dir, f"kf_{idx}.jpg")
+                ok = self._extract_frame_file(input_file, t, proxy, width=320)
+                keyframes.append({"time": t, "path": proxy if ok else None})
+            context.set_variable("keyframes", keyframes)
+            context.set_variable("_kf_tmp_dir", tmp_dir)
+            context.set_variable("video_duration", duration)
+            return StepResult(success=True, output={"keyframes": keyframes})
+        except Exception as e:
+            return StepResult(success=False, error=f"提取关键帧失败: {e}")
+
+    @staticmethod
+    def _extract_frame_file(input_file: str, t: float, out_path: str, width: int = 0) -> bool:
+        """用 ffmpeg 在 t 秒截一帧；width>0 时按比例缩宽（打分代理用小图提速）。"""
+        cmd = ["ffmpeg", "-y", "-ss", str(t), "-i", input_file, "-frames:v", "1"]
+        if width > 0:
+            cmd += ["-vf", f"scale={width}:-2"]
+        cmd += ["-q:v", "4", out_path]
+        try:
+            r = subprocess.run(cmd, shell=False, capture_output=True, timeout=30,
+                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            return r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0
+        except Exception:
+            return False
+
+    def _probe_duration(self, input_file: str) -> float:
+        try:
+            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", input_file]
+            r = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=15,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if r.returncode == 0 and r.stdout:
+                duration = float(json.loads(r.stdout).get("format", {}).get("duration", 0) or 0)
+                if duration > 0:
+                    return duration
+        except Exception:
+            logger.debug("ffprobe 探测时长失败，使用保守默认值: %s", input_file, exc_info=True)
+        return 30.0  # ffprobe 不可用时的保守默认值
+
+    # ── 像素级画质打分（P1-3，2026-09-26 LibTV 对标）──────────────
+
+    @staticmethod
+    def _frame_metrics(path: str):
+        """算单帧画质指标：清晰度(Laplacian方差)/平均亮度/对比度(灰度std)/饱和度。
+
+        优先 cv2（快），PIL 兜底；都不可用返回 None（调用方如实降级）。
+
+        注意：cv2.imread 在 Windows 上打不开**中文路径**（本项目目录就含
+        「拾光剪影」），必须用 np.fromfile + imdecode 读文件，否则含中文的
+        素材路径会静默返回 None、整条打分链退回占位。
+        """
+        try:
+            import cv2
+            import numpy as np
+            buf = np.fromfile(path, dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_COLOR) if buf.size else None
+            if img is None:
+                return None
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            brightness = float(gray.mean())
+            contrast = float(gray.std())
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            saturation = float(hsv[..., 1].mean())
+            return {"sharpness": sharpness, "brightness": brightness,
+                    "contrast": contrast, "saturation": saturation, "engine": "cv2"}
+        except ImportError:
+            logger.debug("cv2 不可用，帧打分降级到 PIL 引擎")
+        except Exception:
+            return None
+        try:
+            from PIL import Image, ImageFilter, ImageStat
+            img = Image.open(path).convert("L")
+            stat = ImageStat.Stat(img)
+            brightness = float(stat.mean[0])
+            contrast = float(stat.stddev[0])
+            edges = img.filter(ImageFilter.FIND_EDGES)
+            sharpness = float(ImageStat.Stat(edges).mean[0]) * 10.0  # 与 cv2 量级对齐（近似）
+            # PIL 灰度图无饱和度通道，用彩色图重开
+            rgb = Image.open(path).convert("HSV")
+            saturation = float(ImageStat.Stat(rgb).mean[1])
+            return {"sharpness": sharpness, "brightness": brightness,
+                    "contrast": contrast, "saturation": saturation, "engine": "pil"}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _frame_score(m: dict) -> float:
+        """画质启发式打分（0~1）。
+
+        如实说明：这是**技术画质**打分（清晰不糊 / 曝光不崩 / 有层次 / 有色彩），
+        不是语义理解（不知道画面里是谁、美不美）。
+        """
+        s_sharp = min(1.0, m["sharpness"] / 300.0)
+        s_expo = max(0.0, 1.0 - abs(m["brightness"] - 128.0) / 128.0)
+        s_contrast = min(1.0, m["contrast"] / 64.0)
+        s_sat = min(1.0, m["saturation"] / 100.0)
+        return round(0.45 * s_sharp + 0.20 * s_expo + 0.20 * s_contrast + 0.15 * s_sat, 4)
+
+    def _analyze_content(self, context):
+        """分析内容：对 3 个候选帧做像素级画质打分，选最优作封面。
+
+        修复：上一版三个字段全是「未识别（未接入CV模型，占位值）」且策略是
+        「取候选中间的一帧」——选帧是假的。本版：cv2/PIL 真打分选最优；
+        打分引擎全部不可用时才回退中间帧，并保持 is_placeholder=True 的诚实标注。
+        """
+        keyframes = context.get_variable("keyframes") or []
+
+        try:
+            scored = []
+            for kf in keyframes:
+                path = kf.get("path")
+                metrics = self._frame_metrics(path) if path and os.path.exists(path) else None
+                scored.append({
+                    "time": kf.get("time"),
+                    "path": path,
+                    "metrics": metrics,
+                    "score": self._frame_score(metrics) if metrics else -1.0,
+                })
+            best = max(scored, key=lambda s: s["score"], default=None)
+            engine = (best or {}).get("metrics", {}).get("engine") if best else None
+
+            if best and best["score"] >= 0:
+                chosen = {"time": best["time"], "path": best.get("path"),
+                          "score": best["score"], "metrics": best["metrics"]}
+                is_placeholder = False
+            else:
+                # 打分不可用（无 cv2/PIL 或抽帧全失败）→ 回退中间帧，如实标注
+                chosen = keyframes[len(keyframes) // 2] if keyframes else {"time": 1.0}
+                is_placeholder = True
+
+            content_analysis = {
+                "main_subject": "未接入语义识别（v1.1 为像素级画质选帧，非内容理解）",
+                "scene": "未接入语义识别",
+                "mood": "未接入语义识别",
+                "keywords": [],
+                "frame_scores": [
+                    {"time": s["time"], "score": s["score"],
+                     "metrics": s["metrics"]} for s in scored
+                ],
+                "score_engine": engine or "unavailable",
+                "is_placeholder": is_placeholder,
+            }
+            context.set_variable("chosen_keyframe", chosen)
+            context.set_variable("content_analysis", content_analysis)
+            return StepResult(success=True, output={"content_analysis": content_analysis})
+        except Exception as e:
+            return StepResult(success=False, error=f"分析内容失败: {e}")
+
+    def _generate_cover(self, context):
+        """生成封面图
+
+        修复：此前只把输出路径塞进变量就 success=True，从未调用任何图像
+        处理逻辑，output_file 实际上是不存在的文件——彻底的假成功。这里
+        改为真正用 ffmpeg 在选中的时间点截取一帧并保存为 jpg；失败时如实
+        返回 success=False。
+        """
+        input_file = context.get_variable("input_file")
+        chosen = context.get_variable("chosen_keyframe") or {"time": 1.0}
+        output_file = context.get_input("output_file") or os.path.splitext(input_file)[0] + "_cover.jpg"
+
+        try:
+            cmd = [
+                "ffmpeg", "-y", "-ss", str(chosen.get("time", 1.0)),
+                "-i", input_file, "-frames:v", "1", "-q:v", "2",
+                output_file,
+            ]
+            r = subprocess.run(cmd, shell=False, capture_output=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if r.returncode != 0 or not os.path.exists(output_file):
+                raise RuntimeError((r.stderr or b"").decode("utf-8", errors="ignore")[-300:])
+
+            context.set_variable("output_file", output_file)
+            return StepResult(success=True, output={"output_file": output_file})
+        except Exception as e:
+            return StepResult(success=False, error=f"生成封面图失败: {e}")
+
+    # ── 片头标题卡（P1-3 连接器第一步：选中帧 + 片名 → 创意片头图）────
+
+    def _should_make_title_card(self, variables) -> bool:
+        return bool(variables.get("_title_text"))
+
+    def _load_cjk_font(self, size: int):
+        """加载第一个可用的 CJK TTF/TTC；全不可用返回 None。"""
+        from PIL import ImageFont
+        for fp in self._FONT_CANDIDATES:
+            if os.path.isfile(fp):
+                try:
+                    return ImageFont.truetype(fp, size)
+                except Exception:
+                    continue
+        return None
+
+    def _make_title_card(self, context):
+        """片头标题卡：选中封面帧 + 底部渐变带 + 片名/副题（PIL，零外部进程）。
+
+        诚实边界：字体缺失时若标题含非 ASCII 字符则不硬画（避免豆腐块），
+        输出 generated=False 并说明原因；这是「选一帧 → 设计片头」的第一步
+        （静态标题卡），文字动效/版式模板包属后续 P1 工作。
+        """
+        title = context.get_variable("_title_text")
+        subtitle = context.get_variable("_subtitle_text")
+        cover = context.get_variable("output_file")
+        input_file = context.get_variable("input_file")
+        out = (context.get_variable("_title_card_output")
+               or os.path.splitext(input_file)[0] + "_titlecard.jpg")
+
+        if not cover or not os.path.exists(cover):
+            return StepResult(success=False, error="封面不存在，无法生成片头卡")
+
+        try:
+            from PIL import Image, ImageDraw
+            base = Image.open(cover).convert("RGB")
+            w, h = base.size
+
+            # 底部渐变带（alpha 0→200）
+            overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            band_h = max(int(h * 0.30), 120)
+            px = overlay.load()
+            for y in range(h - band_h, h):
+                alpha = int(200 * (y - (h - band_h)) / band_h)
+                for x in range(w):
+                    px[x, y] = (0, 0, 0, alpha)
+            card = Image.alpha_composite(base.convert("RGBA"), overlay)
+            draw = ImageDraw.Draw(card)
+
+            has_cjk = any(ord(ch) > 127 for ch in (title + subtitle))
+            title_size = max(28, min(96, h // 14))
+            font = self._load_cjk_font(title_size)
+            if font is None and has_cjk:
+                context.set_variable("title_card_file", "")
+                return StepResult(success=True, output={
+                    "generated": False,
+                    "reason": "未找到可用中文字体（C:/Windows/Fonts 下无 msyh/simhei），"
+                              "为避免显示豆腐块未生成标题卡"})
+            sub_font = self._load_cjk_font(max(18, int(title_size * 0.55))) if subtitle else None
+
+            def _text_w(text, f):
+                if f is None:
+                    return 0
+                try:
+                    box = draw.textbbox((0, 0), text, font=f, stroke_width=2)
+                    return box[2] - box[0]
+                except Exception:
+                    return draw.textlength(text, font=f)
+
+            # 标题过宽则逐级缩字号到 90% 宽以内
+            while font is not None and _text_w(title, font) > w * 0.9 and title_size > 24:
+                title_size = int(title_size * 0.9)
+                font = self._load_cjk_font(title_size)
+                sub_font = self._load_cjk_font(max(18, int(title_size * 0.55))) if subtitle else None
+
+            cur_y = h - band_h + int(band_h * 0.22)
+            if font is not None:
+                tw = _text_w(title, font)
+                draw.text(((w - tw) / 2, cur_y), title, font=font, fill=(255, 255, 255, 255),
+                          stroke_width=2, stroke_fill=(0, 0, 0, 200))
+                cur_y += int(title_size * 1.35)
+            if subtitle and sub_font is not None:
+                sw = _text_w(subtitle, sub_font)
+                draw.text(((w - sw) / 2, cur_y), subtitle, font=sub_font,
+                          fill=(235, 235, 235, 255), stroke_width=1,
+                          stroke_fill=(0, 0, 0, 180))
+
+            card.convert("RGB").save(out, "JPEG", quality=92)
+            context.set_variable("title_card_file", out)
+            return StepResult(success=True, output={"generated": True, "title_card_file": out})
+        except Exception as e:
+            return StepResult(success=False, error=f"生成片头卡失败: {e}")
+
+    def _complete(self, context):
+        """完成（汇总并写 context.outputs —— Skill 工坊只展示 outputs）"""
+        output_file = context.get_variable("output_file")
+        content_analysis = context.get_variable("content_analysis")
+        title_card = context.get_variable("title_card_file")
+        chosen = context.get_variable("chosen_keyframe") or {}
+        result_msg = f"封面图已提取，保存到 {output_file}"
+        score = chosen.get("score")
+        if isinstance(score, float) and score >= 0:
+            result_msg += (f"（画质打分选帧：t={chosen.get('time')}s, 得分 {score:.3f}，"
+                           f"引擎 {content_analysis.get('score_engine')}）")
+        elif content_analysis and content_analysis.get("is_placeholder"):
+            result_msg += "（打分引擎不可用，回退中间帧，非画质选帧）"
+        if title_card:
+            result_msg += f"；片头标题卡: {title_card}"
+        # 修复：本 Skill 此前从不调 set_output，Skill 工坊展示 outputs 恒为 {}。
+        context.set_output("result", result_msg)
+        context.set_output("output_file", output_file)
+        context.set_output("chosen_keyframe", chosen)
+        context.set_output("content_analysis", content_analysis)
+        if title_card:
+            context.set_output("title_card_file", title_card)
+        return StepResult(success=True, output={"result": result_msg, "content_analysis": content_analysis})
+
+
+# 注册技能
+def register_skills():
+    """注册视频编辑技能（由 main_qt6.py _show_main_window 显式调用）
+
+    修复：之前此函数从未被调用，导致 Skill 工坊列表为空。
+    现在包含 5 个 Skill：3 个原视频处理 Skill + 全功能型 AI 导演 Skill + 畸形根治闭环 Skill。
+    """
+    skill_registry.register(AutoSubtitleSkill)
+    skill_registry.register(SmartClipSkill)
+    skill_registry.register(CoverGeneratorSkill)
+    # 新增：全功能型 AI 导演 Skill（独立文件，延迟导入避免循环依赖）
+    from .director_skill import DirectorSkill
+    skill_registry.register(DirectorSkill)
+    # 新增：畸形根治四层闭环 Skill（前置约束→生成管控→插帧补偿→质检修复→入库）
+    from .deformity_repair_skill import DeformityRepairSkill
+    skill_registry.register(DeformityRepairSkill)

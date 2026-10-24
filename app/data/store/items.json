@@ -1,0 +1,351 @@
+{
+  "items": [
+    {
+      "id": "ai-effects-plugin",
+      "name": "AI特效制作",
+      "type": "plugin",
+      "category": "AI工具",
+      "version": "1.0.0",
+      "author": "拾光剪影官方",
+      "description": "深度学习特效：风格迁移、背景替换、超分、美颜、物体移除（需 torch/opencv）。",
+      "icon": "🎨",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "AI",
+        "特效",
+        "风格迁移",
+        "超分辨率"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-action",
+      "name": "动作特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "动作场景动感特效，增强视觉冲击力。",
+      "icon": "💥",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "动作"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-comedy",
+      "name": "喜剧特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "喜剧风格色彩与氛围特效。",
+      "icon": "😄",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "喜剧"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-dark-tone",
+      "name": "暗调特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "暗调冷色氛围特效。",
+      "icon": "🌑",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "暗调"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-gold-rush",
+      "name": "金光特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "金色光泽高光特效。",
+      "icon": "✨",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "金光"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-highlight",
+      "name": "高亮特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "画面高光增强特效。",
+      "icon": "💡",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "高亮"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-horror",
+      "name": "恐怖特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "恐怖片冷调压抑氛围特效。",
+      "icon": "👻",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "恐怖"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "effect-soft-light",
+      "name": "柔光特效",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "柔光梦幻氛围特效。",
+      "icon": "🌸",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "特效",
+        "柔光"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-fade",
+      "name": "淡入淡出",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "经典淡入淡出转场。",
+      "icon": "🌅",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-slide",
+      "name": "滑动转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "画面滑动过渡转场。",
+      "icon": "↔️",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-dissolve",
+      "name": "溶解转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "帧间溶解过渡转场。",
+      "icon": "🌫️",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-flip",
+      "name": "翻转转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "画面翻转过渡转场。",
+      "icon": "🔄",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-glitch",
+      "name": "故障转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "故障抖动风格转场。",
+      "icon": "📺",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-spin",
+      "name": "旋转转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "旋转过渡转场。",
+      "icon": "🌀",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-wipe",
+      "name": "擦除转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "擦除过渡转场。",
+      "icon": "🧹",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    },
+    {
+      "id": "transition-zoom",
+      "name": "缩放转场",
+      "type": "plugin",
+      "category": "特效工具",
+      "version": "1.0.0",
+      "author": "官方",
+      "description": "从中心放大/缩小过渡转场。",
+      "icon": "🔍",
+      "price": 0.0,
+      "is_free": true,
+      "rating": 0.0,
+      "downloads": 0,
+      "tags": [
+        "转场"
+      ],
+      "min_version": "1.0.0",
+      "download_url": "",
+      "is_installed": true,
+      "is_official": true
+    }
+  ],
+  "updated_at": "2026-09-21T04:03:44.511506"
+}

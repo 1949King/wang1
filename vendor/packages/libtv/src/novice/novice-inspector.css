@@ -1,0 +1,701 @@
+/* 小白模式右侧面板样式 */
+
+.nv-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  color: #c9cee0;
+  font-size: 12px;
+}
+
+.nv-insp-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #9aa0b4;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+.nv-insp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+}
+
+.nv-insp-ico {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.nv-insp-title-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #2a2f42;
+  color: #e6e8ef;
+  font-size: 13px;
+  padding: 3px 2px;
+  outline: none;
+}
+
+.nv-insp-title-input:focus {
+  border-bottom-color: #38bdf8;
+}
+
+.nv-insp-kind {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #9aa0b4;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.nv-insp-textarea {
+  width: 100%;
+  resize: vertical;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  color: #e6e8ef;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px;
+  font-family: inherit;
+  outline: none;
+}
+
+.nv-insp-textarea:focus {
+  border-color: #38bdf8;
+}
+
+.nv-insp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nv-insp-field label {
+  color: #9aa0b4;
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.nv-insp-field label b {
+  color: #e6e8ef;
+  font-weight: 500;
+}
+
+.nv-insp-field input[type="range"] {
+  width: 100%;
+  accent-color: #38bdf8;
+}
+
+.nv-insp-field input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+  color: #e6e8ef;
+  padding: 5px 7px;
+  font-size: 12px;
+  outline: none;
+}
+
+.nv-seg {
+  display: flex;
+  gap: 4px;
+}
+
+.nv-seg.wrap {
+  flex-wrap: wrap;
+}
+
+.nv-seg button {
+  flex: 1;
+  min-width: 44px;
+  padding: 5px 6px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+  color: #9aa0b4;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.nv-seg button:hover {
+  border-color: #3f465e;
+  color: #e6e8ef;
+}
+
+.nv-seg button.on {
+  background: #1f3a52;
+  border-color: #38bdf8;
+  color: #e6f4ff;
+}
+
+.nv-insp-tip {
+  margin: 0;
+  font-size: 10px;
+  color: #6b7285;
+  line-height: 1.5;
+}
+
+.nv-insp-fold {
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  color: #c9cee0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nv-insp-fold.on {
+  border-color: #3f465e;
+  color: #ffffff;
+}
+
+.nv-insp-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: #12151f;
+  border: 1px dashed #2a2f42;
+  border-radius: 8px;
+}
+
+/* ── L3 专业参数（2026-09-16）：向下展开箭头 + 折叠体 ── */
+.nv-insp-pro {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nv-pro-arrow {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: #8b93ad;
+}
+
+.nv-pro-arrow.down {
+  transform: rotate(90deg);
+}
+
+.nv-insp-l3 {
+  background: #0e1119;
+  border-style: dotted;
+}
+
+.nv-insp-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.nv-insp-mini {
+  padding: 5px 9px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+  color: #9aa0b4;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nv-insp-capsule {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nv-capsule-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 7px 9px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.nv-capsule-row.on {
+  border-color: #c084fc;
+  background: #1d1830;
+}
+
+.nv-capsule-idx {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2a2f42;
+  color: #c9cee0;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nv-capsule-row.on .nv-capsule-idx {
+  background: #c084fc;
+  color: #22143a;
+}
+
+.nv-capsule-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nv-capsule-txt b {
+  color: #e6e8ef;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.nv-capsule-txt em {
+  color: #6b7285;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.nv-insp-foot {
+  margin: 6px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #2a2f42;
+  color: #6b7285;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.nv-insp-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: #c9cee0;
+  line-height: 1.9;
+}
+
+/* 一键开始快捷入口 */
+.nv-insp-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nv-insp-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 10px;
+  color: #c9cee0;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.nv-insp-quick-btn:hover {
+  border-color: #3f465e;
+  background: #1a1e2b;
+}
+
+.nv-insp-quick-btn.primary {
+  border-color: #7c5cff33;
+  background: #1d1830;
+}
+
+.nv-insp-quick-btn.primary:hover {
+  border-color: #c084fc;
+}
+
+.nv-insp-quick-ico {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* 意图胶囊「一句话解析」内嵌输入框 */
+.nv-insp-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #1d1830;
+  border: 1px solid #c084fc;
+  border-radius: 10px;
+}
+
+.nv-insp-intent-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.nv-insp-quick-go {
+  padding: 6px 14px;
+  background: #c084fc;
+  border: 1px solid #c084fc;
+  border-radius: 6px;
+  color: #22143a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nv-insp-quick-go:hover {
+  background: #a76df0;
+  border-color: #a76df0;
+}
+
+.nv-insp-quick-go:disabled {
+  background: #2a2f42;
+  border-color: #2a2f42;
+  color: #6b7285;
+  cursor: not-allowed;
+}
+
+.nv-insp-quick-btn b {
+  display: block;
+  color: #e6e8ef;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.nv-insp-quick-btn em {
+  display: block;
+  color: #6b7285;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.nv-insp-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nv-insp-legend li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #9aa0b4;
+  font-size: 11px;
+}
+
+.nv-insp-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* 快速开始 · 模板画廊 */
+.nv-insp-tpl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nv-insp-tpl-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: #161922;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  color: #c9cee0;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.nv-insp-tpl-item:hover {
+  border-color: #c084fc;
+  background: #1d1830;
+}
+
+.nv-insp-tpl-ico {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.nv-insp-tpl-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nv-insp-tpl-txt b {
+  color: #e6e8ef;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.nv-insp-tpl-txt em {
+  color: #6b7285;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+/* ===== 3D 导演台卡片专属面板 ===== */
+.nv-director-preview {
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #12151f;
+}
+
+.nv-director-preview img {
+  width: 100%;
+  display: block;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.nv-director-empty {
+  padding: 18px 12px;
+  border: 1px dashed #2a2f42;
+  border-radius: 8px;
+  color: #6b7285;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.nv-director-thumbs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.nv-director-thumb {
+  padding: 0;
+  border: 2px solid #2a2f42;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #12151f;
+}
+
+.nv-director-thumb.on {
+  border-color: #c084fc;
+}
+
+.nv-director-thumb img {
+  width: 100%;
+  display: block;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+/* ── 抽卡闭环产物（V4.40.10）：推荐 / 代理分 / 坏区重绘 ── */
+.nv-insp-loop .nv-loop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 9px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+}
+
+.nv-loop-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.nv-loop-k {
+  flex: 0 0 42px;
+  color: #6b7288;
+}
+
+.nv-loop-v {
+  color: #c7cbd8;
+  word-break: break-all;
+}
+
+.nv-loop-warn {
+  color: #f0b84a;
+}
+
+.nv-loop-repair {
+  flex: 1;
+  padding: 5px 8px;
+  background: #1b2333;
+  border: 1px solid #3a4a6a;
+  border-radius: 6px;
+  color: #9dc0ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nv-loop-repair:hover:not(:disabled) {
+  border-color: #4d6ea8;
+  color: #c3dbff;
+}
+
+.nv-loop-repair:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.nv-loop-msg {
+  font-size: 11px;
+  color: #8b93a7;
+  padding-top: 2px;
+}
+
+/* ── 剧本合规守护结果列表（Wave 0 #13，2026-10-15）──
+   走 CSS 而非内联 style：项目不变量「内联样式 = 主题盲区」。 */
+.nv-cp-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.nv-cp-item {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border-left: 2px solid #3a4a6a;
+  background: #12151f;
+  color: #c7cbd8;
+}
+
+.nv-cp-item b {
+  color: #8b93a7;
+  margin-right: 5px;
+  font-weight: 600;
+}
+
+/* warning = 提审会被打回的口径级问题，标红 */
+.nv-cp-item.warn {
+  border-left-color: #e05c5c;
+}
+
+/* info = 值得看一眼（遗留绑定、过度拆分） */
+.nv-cp-item.info {
+  border-left-color: #f0b84a;
+}
+
+/* ok / 其他级别：中性，不抢注意力 */
+.nv-cp-item.other {
+  border-left-color: #3a4a6a;
+  opacity: 0.85;
+}
+
+/* ── YuE（乐）全曲生成面板（2026-09-28）── */
+.nv-insp-yue .nv-yue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.nv-yue-plan {
+  padding: 6px 8px;
+  background: #1b2333;
+  border: 1px solid #3a4a6a;
+  border-radius: 6px;
+  color: #9dc0ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nv-yue-plan:hover:not(:disabled) {
+  border-color: #4d6ea8;
+  color: #c3dbff;
+}
+
+.nv-yue-plan:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.nv-yue-abc-label {
+  font-size: 11px;
+  color: #8b93a7;
+}
+
+.nv-yue-abc {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+  color: #c7cbd8;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.nv-yue-abc:focus {
+  outline: none;
+  border-color: #3f465e;
+}
+
+/* ── YuE 翻唱前置（参考曲 → 旋律谱，2026-09-28）── */
+.nv-yue-cover {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  background: #12151f;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+}
+
+.nv-yue-ref {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  background: #0d1017;
+  border: 1px solid #2a2f42;
+  border-radius: 5px;
+  color: #c7cbd8;
+  font-size: 11px;
+}
+
+.nv-yue-ref:focus {
+  outline: none;
+  border-color: #3f465e;
+}

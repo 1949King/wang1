@@ -1,0 +1,45 @@
+
+[2026-02-16 14:18:00.054193] 错误类型: ModuleNotFoundError
+错误信息: No module named 'utils'
+堆栈跟踪:
+  File "C:\Users\叶常伟\Desktop\AI短剧编辑器\app\ai_short_drama_editor_optimized.py", line 8578, in <module>
+    class PluginManager:
+
+================================================================================
+
+[2026-02-16 14:19:07.825999] 错误类型: ModuleNotFoundError
+错误信息: No module named 'utils'
+堆栈跟踪:
+  File "C:\Users\叶常伟\Desktop\AI短剧编辑器\app\ai_short_drama_editor_optimized.py", line 8574, in <module>
+    from utils.logger import logger
+
+================================================================================
+
+[2026-03-23 21:52:53.292561] 错误类型: ModuleNotFoundError
+错误信息: No module named 'integrations'
+堆栈跟踪:
+  File "d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2\ai_short_drama_editor_optimized.py", line 285, in <module>
+    from integrations.olive import olive_editor
+
+================================================================================
+
+[2026-03-23 21:55:15.803386] 错误类型: ModuleNotFoundError
+错误信息: No module named 'integrations'
+堆栈跟踪:
+  File "d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2\ai_short_drama_editor_optimized.py", line 285, in <module>
+    from integrations.olive import olive_editor
+
+================================================================================
+
+[2026-03-23 21:55:41.482122] 错误类型: ModuleNotFoundError
+错误信息: No module named 'psutil'
+堆栈跟踪:
+  File "d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2\ai_short_drama_editor_optimized.py", line 15881, in <module>
+    app = AIShortDramaEditor()
+  File "d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2\ai_short_drama_editor_optimized.py", line 810, in __init__
+    lazy_import()
+    ~~~~~~~~~~~^^
+  File "d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2\ai_short_drama_editor_optimized.py", line 60, in lazy_import
+    import psutil
+
+================================================================================

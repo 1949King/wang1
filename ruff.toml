@@ -1,0 +1,51 @@
+# ============================================================
+# 拾光剪影 · Ruff 静态检查配置
+# 设计原则：先卡"致命/高价值"规则，避免存量噪声淹没真问题；
+#           对巨型遗留文件渐进豁免，新代码严格。
+# 详见 docs/现行技术文档.md §11「代码审查标准」（单一事实源）
+# ============================================================
+
+target-version = "py312"
+line-length = 100
+
+# 只扫自研代码，排除依赖与生成物（app/ 下混有大量依赖/打包产物）
+extend-exclude = [
+    "app/packaging_env",
+    "app/.venv",
+    ".venv",
+    "venv",
+    "bmf_env",
+    "openshot-qt",
+    "build",
+    "dist",
+    "__pycache__",
+]
+
+[lint]
+# E9  : 语法错误（必须，零容忍）
+# F   : Pyflakes —— 未使用导入(F401)/变量(F841)、**重复定义(F811)**
+#        ↑ F811 直接对应我们踩过的"同名方法定义两遍、后者静默覆盖前者"的坑
+# B   : flake8-bugbear —— 常见 bug 模式
+# C4  : flake8-comprehensions —— 冗余列表/字典推导写法
+# PIE : flake8-pie —— 小优化
+# RUF100: 无用的 # noqa 注释
+select = ["E9", "F", "B", "C4", "PIE", "RUF100"]
+ignore = [
+    "B008",   # 函数参数里调用函数（FastAPI/信号连接常见，按需放宽）
+    "B904",   # raise 未包裹原异常（过渡期放宽）
+    "C401",   # 可用推导式替代（风格，暂放宽）
+    "C408",   # 可用字面量替代（风格，暂放宽）
+    "PIE790", # 多余 pass（过渡期放宽）
+    "PIE794", # 多余 elif（过渡期放宽）
+]
+
+[lint.per-file-ignores]
+# 巨型遗留文件：仅保留"致命"规则（E9 语法 + F 重复定义/未使用），
+# 其余规则暂放，待后续重构时逐步收紧。目的：让 CI 门禁先能跑起来，
+# 而不是被几千条存量告警淹没。
+"app/modules/lego/editor_module.py" = ["B", "C4", "PIE", "RUF100", "E501"]
+"app/modules/lego/timeline_widget.py" = ["B", "C4", "PIE", "RUF100", "E501"]
+"app/modules/lego/video_editor/*.py" = ["B", "C4", "PIE", "RUF100", "E501"]
+
+[format]
+quote-style = "double"

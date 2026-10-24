@@ -1,0 +1,28 @@
+# AI 短剧编辑器 - 可选依赖 (OPTIONAL)
+# 安装方式: pip install -r requirements-optional.txt
+# 缺失时 main_qt6.py 不会报错,功能降级或不可用
+
+# 计算机视觉
+mediapipe>=0.10.0
+
+# 国产 LLM SDK (阿里 DashScope / 智谱)
+dashscope>=1.14.0
+anthropic>=0.18.0
+zhipuai>=2.0.0
+
+# 文字转语音
+gTTS>=2.5.0
+
+# 中文语言（离线注音字典：字→读音；缺失时注音能力诚实降级，不影响其他功能）
+pypinyin>=0.53.0
+
+# GPU 监控
+pynvml>=11.5.0
+
+# 爬虫与浏览器自动化
+playwright>=1.40.0
+cryptography>=41.0.0
+
+# 时间线互操作（OTIO/EDL/FCPXML 导入导出；缺失时 interchange 诚实降级为不可用，
+# 注意：Qt GUI 进程绝不 import 它——C 扩展在 PyQt6 之后加载会段错误，读写走子进程）
+opentimelineio>=0.18.0

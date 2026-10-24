@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光剪影 · 智能项目地图</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --card:#ffffff; --ink:#172033; --sub:#5b6b85;
+    --brand:#6366f1; --blue:#2f7bff; --orange:#f97316; --green:#10b981;
+    --red:#ef4444; --line:#e3e9f2; --chipbg:#eef2f9;
+    --mono:"Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;padding:28px 4% 60px;line-height:1.6}
+  h1{font-size:26px;letter-spacing:.5px}
+  h2{font-size:18px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  h2 .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:var(--brand);color:#fff;font-size:13px;font-weight:700}
+  section{margin-top:34px}
+  .sub{color:var(--sub);font-size:13px;margin-top:4px}
+  .mono{font-family:var(--mono);font-size:12px}
+
+  /* 名片 */
+  .hero{background:linear-gradient(135deg,#ffffff 0%,#eef2ff 100%);border:1px solid var(--line);border-radius:16px;padding:26px 30px;box-shadow:0 4px 18px rgba(23,32,51,.05)}
+  .hero-top{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+  .badge{display:inline-block;padding:3px 12px;border-radius:999px;font-size:12px;font-weight:600}
+  .b-main{background:#e8efff;color:#1d4ed8}
+  .b-canvas{background:#f3e8ff;color:#7c3aed}
+  .b-loc{background:#fff4e5;color:#c2410c}
+  .hero p{margin-top:10px;color:var(--sub);max-width:860px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:20px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .stat .v{font-size:22px;font-weight:800;color:var(--brand)}
+  .stat .v small{font-size:12px;font-weight:500;color:var(--sub)}
+  .stat .k{font-size:12px;color:var(--sub);margin-top:2px}
+
+  /* tabs */
+  .tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .tab{padding:7px 16px;border-radius:999px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-size:13px;color:var(--sub);transition:.15s}
+  .tab:hover{border-color:var(--brand)}
+  .tab.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+  .panel{display:none}
+  .panel.on{display:block;animation:fadein .25s}
+  @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* 架构分层 */
+  .arch{display:flex;flex-direction:column;gap:10px}
+  .layer{display:grid;grid-template-columns:210px 1fr;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+  .layer .name{padding:14px 16px;font-weight:700;font-size:14px;display:flex;flex-direction:column;justify-content:center;gap:4px;border-right:1px solid var(--line)}
+  .layer .name small{font-weight:400;color:var(--sub);font-size:11px}
+  .layer .body{padding:12px 16px;font-size:13px;color:var(--sub)}
+  .layer .body b{color:var(--ink)}
+  .lq{background:linear-gradient(90deg,#eef2ff,transparent 70%)}
+  .lc{background:linear-gradient(90deg,#eff6ff,transparent 70%)}
+  .lg{background:linear-gradient(90deg,#f0fdf4,transparent 70%)}
+  .la{background:linear-gradient(90deg,#fff7ed,transparent 70%)}
+  .lk{background:linear-gradient(90deg,#fdf2f8,transparent 70%)}
+  .arrow-down{text-align:center;color:#a5b4cf;font-size:16px;line-height:1;margin:-4px 0}
+
+  /* 专注轨 */
+  .tracks{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .track{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .track .tt{display:flex;justify-content:space-between;align-items:baseline}
+  .track .pct{font-size:20px;font-weight:800}
+  .bar{height:8px;border-radius:999px;background:var(--chipbg);margin:10px 0 8px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px;width:0;transition:width 1s cubic-bezier(.2,.8,.2,1)}
+  .track p{font-size:12px;color:var(--sub)}
+
+  /* 规模图 */
+  .chart{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .crow{display:grid;grid-template-columns:240px 1fr 110px;align-items:center;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .crow:last-child{border-bottom:none}
+  .cbar{height:18px;border-radius:5px;background:linear-gradient(90deg,var(--brand),var(--blue));width:0;transition:width 1s cubic-bezier(.2,.8,.2,1);min-width:2px}
+  .cnum{text-align:right;font-family:var(--mono);font-size:12px;color:var(--sub)}
+  .crow.h{color:var(--ink);font-weight:700}
+
+  /* 冻结区 */
+  .fz-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .fz{background:var(--card);border:1px solid #fecaca;border-left:4px solid var(--red);border-radius:10px;padding:13px 15px}
+  .fz .id{font-family:var(--mono);font-size:13px;font-weight:700}
+  .fz .locks{font-size:12px;color:var(--sub);margin-top:3px}
+  .fz .locks b{color:var(--red)}
+  .warn{margin-top:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;font-size:13px;color:#991b1b}
+
+  /* 门禁流水线 */
+  .gates{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .gate{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px;min-width:150px}
+  .gate b{display:block;font-size:13px}
+  .gate span{font-size:11px;color:var(--sub)}
+  .gsep{color:#a5b4cf;font-weight:800}
+
+  /* 目录导览 */
+  table.dir{width:100%;border-collapse:collapse;background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--line);font-size:13px}
+  table.dir th{background:var(--chipbg);text-align:left;padding:10px 14px;font-size:12px;color:var(--sub)}
+  table.dir td{padding:10px 14px;border-top:1px solid var(--line)}
+  table.dir td:first-child{font-family:var(--mono);font-weight:600;white-space:nowrap}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;margin-right:6px}
+  .t-hot{background:#e8efff;color:#1d4ed8}
+  .t-frz{background:#fee2e2;color:#b91c1c}
+  .t-doc{background:#ecfdf5;color:#047857}
+  .t-test{background:#fff7ed;color:#c2410c}
+  footer{margin-top:44px;color:var(--sub);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-top">
+    <h1>拾光剪影 · 智能项目地图</h1>
+    <span class="badge b-main">主程序 V4.43.14</span>
+    <span class="badge b-canvas">画布 0.3.24</span>
+    <span class="badge b-loc">快照 2026-10-11</span>
+  </div>
+  <p>PyQt6 桌面端「短剧精剪 + AI 导演台画布」。活路径两条：剪辑模块（时间线编辑 / 预览 / 导出）+ AI 画布（导演台节点 / 生图生视频 / 智能体 / 数字人）。北极星：竖切可重复「导演台 → 分镜图 → 入轨精剪」，智能体只做确认后执行的遥控器。</p>
+  <div class="stats">
+    <div class="stat"><div class="v">23.4<small> 万行</small></div><div class="k">生产代码（Python 185K + TS 48.5K）</div></div>
+    <div class="stat"><div class="v">481<small> 文件</small></div><div class="k">app/ 下 Python 模块</div></div>
+    <div class="stat"><div class="v">9<small> zone / 85 锁</small></div><div class="k">冻结区（改前必解冻）</div></div>
+    <div class="stat"><div class="v">11<small> 道</small></div><div class="k">提交前门禁卡点</div></div>
+    <div class="stat"><div class="v">18765</div><div class="k">画布服务端口（HTTP+SSE）</div></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" data-p="p-arch">架构分层</div>
+    <div class="tab" data-p="p-track">四条专注轨</div>
+    <div class="tab" data-p="p-size">模块规模</div>
+    <div class="tab" data-p="p-frozen">冻结区地图</div>
+    <div class="tab" data-p="p-gate">门禁流水线</div>
+    <div class="tab" data-p="p-dir">目录导览</div>
+  </div>
+</div>
+
+<!-- ① 架构分层 -->
+<section class="panel on" id="p-arch">
+  <h2><span class="no">1</span>架构分层（一个 Qt 壳 + 一份 React 画布 × 两个宿主）</h2>
+  <div class="arch">
+    <div class="layer lq"><div class="name">Qt 桌面壳<small>app/main_qt6.py</small></div>
+      <div class="body"><b>app/modules/lego/（98 个 .py，77,321 行）</b> — 剪辑、首页、设置、角色库、文案等全部 UI 模块。剪辑主文件 <span class="mono">editor_module.py（9,746 行，冻结区）</span>，时间线真相源 = <span class="mono">EditorModule._clips</span>（跨线程必须持 RLock）。</div></div>
+    <div class="arrow-down">▼</div>
+    <div class="layer lc"><div class="name">业务内核<small>app/core/ · 97,864 行</small></div>
+      <div class="body"><b>Agent 系</b> agent_brain / agent_runtime / capability_catalog（能力元数据唯一入口）· <b>画布桥</b> canvas_server(18765) + canvas_routes_get/post + <span class="mono">glue/</span> 契约层（跨线字段收拢+校验+溯源）· <b>AI 系</b> app/core/ai/（draw_orchestrator 抽卡、gen_critic 评分、llm_clipper、whisper_asr、yue_music…）· <b>主题</b> theme_tokens.py 57 keys 单一真相源。</div></div>
+    <div class="arrow-down">▼ HTTP + SSE（端口 18765）</div>
+    <div class="layer lg"><div class="name">画布前端<small>vendor/shiguang-canvas/src · 48,535 行</small></div>
+      <div class="body"><b>React 19 + Zustand + Three.js + @xyflow/react</b>，Vite 构建。导演台节点 / 生图生视频 / 3D 舞台（Stage3D.tsx 4,660 行）/ 磁吸画布（canvas-magnetic-intent，33 整文件冻结）。宿主 A：WebEngine 嵌入 Qt；宿主 B：独立 Tauri 进程（副库 src/libtv 副本同步）。</div></div>
+    <div class="arrow-down">▼</div>
+    <div class="layer la"><div class="name">插件与技能<small>app/plugins · app/skills</small></div>
+      <div class="body"><b>app/plugins/（7,209 行）</b> 18 个转场插件（fade/glitch/page/zoom…，语义分层 exact vs bake）+ ai_effects_plugin；两套注册表 ExtensionsRegistry + PluginManager，注册表 id = <span class="mono">extensions</span>。<b>app/skills + integrations（2,958 行）</b> Agent 技能与外部集成（MCP 客户端 stdio+SSE，Blender 通道已通）。</div></div>
+    <div class="arrow-down">▼</div>
+    <div class="layer lk"><div class="name">质量体系<small>scripts + _verify + tests · 41,724 行</small></div>
+      <div class="body"><b>scripts/（4,533）</b> 11 道门禁（ruff 棘轮 / 冻结区守护 / 稳定性 / 架构守护 / 双库一致性…）· <b>_verify/（18,714）</b> 回归脚本（run_all_checks、canvas_bridge_e2e…）· <b>app/tests（18,477）</b> pytest 单元测试。全量体检单入口：<span class="mono">bash scripts/check_all.sh</span>。</div></div>
+  </div>
+</section>
+
+<!-- ② 专注轨 -->
+<section class="panel" id="p-track">
+  <h2><span class="no">2</span>四条专注轨（资源配比）</h2>
+  <div class="tracks">
+    <div class="track"><div class="tt"><b>🛠 N 剪辑</b><span class="pct" style="color:var(--blue)">30%</span></div>
+      <div class="bar"><i style="background:var(--blue)" data-w="30%"></i></div>
+      <p>时间线手感、建议入轨、冻结区回归。真相源 _clips，双内核（FFmpeg/PyAV/MLT）。</p></div>
+    <div class="track"><div class="tt"><b>🎨 P 画布</b><span class="pct" style="color:var(--brand)">35%</span></div>
+      <div class="bar"><i style="background:var(--brand)" data-w="35%"></i></div>
+      <p>vendor/shiguang-canvas 节点 / 落盘 / 诚实生成（执行端不可用必须诚实失败，不造假产物）。</p></div>
+    <div class="track"><div class="tt"><b>🤖 A Agent</b><span class="pct" style="color:var(--orange)">25%</span></div>
+      <div class="bar"><i style="background:var(--orange)" data-w="25%"></i></div>
+      <p>白名单、确认后拉片 / 去水词 / 批量；剪辑↔画布 round-trip。人格「知心秘书」。</p></div>
+    <div class="track"><div class="tt"><b>👤 D 数字人</b><span class="pct" style="color:var(--green)">10%</span></div>
+      <div class="bar"><i style="background:var(--green)" data-w="10%"></i></div>
+      <p>画布 digitalHuman 节点（TTS + 形象；口型成片有模型再接）。</p></div>
+  </div>
+</section>
+
+<!-- ③ 模块规模 -->
+<section class="panel" id="p-size">
+  <h2><span class="no">3</span>模块规模实测（2026-10-11，wc -l）</h2>
+  <div class="chart">
+    <div class="crow h"><span>目录</span><span></span><span style="text-align:right">行数</span></div>
+    <div class="crow"><span class="mono">app/core/</span><div><div class="cbar" data-w="100%"></div></div><span class="cnum">97,864</span></div>
+    <div class="crow"><span class="mono">app/modules/lego/</span><div><div class="cbar" data-w="79%"></div></div><span class="cnum">77,321</span></div>
+    <div class="crow"><span class="mono">vendor/shiguang-canvas/src/</span><div><div class="cbar" data-w="50%"></div></div><span class="cnum">48,535 (TS)</span></div>
+    <div class="crow"><span class="mono">app/tests/</span><div><div class="cbar" data-w="19%"></div></div><span class="cnum">18,477</span></div>
+    <div class="crow"><span class="mono">_verify/</span><div><div class="cbar" data-w="19%"></div></div><span class="cnum">18,714</span></div>
+    <div class="crow"><span class="mono">app/plugins/</span><div><div class="cbar" data-w="7%"></div></div><span class="cnum">7,209</span></div>
+    <div class="crow"><span class="mono">scripts/</span><div><div class="cbar" data-w="5%"></div></div><span class="cnum">4,533</span></div>
+    <div class="crow"><span class="mono">app/skills/ + integrations/</span><div><div class="cbar" data-w="3%"></div></div><span class="cnum">2,958</span></div>
+  </div>
+  <p class="sub" style="margin-top:12px">⚠️ 单文件规模守卫阈值 2000 行：editor_module.py 9,746 · Stage3D.tsx 4,660 · riggedHumanoid.ts 3,707 等存量冻结为基线，<b>只许减不许增</b>；拆分模块是标准答案，不是抬基线。</p>
+</section>
+
+<!-- ④ 冻结区 -->
+<section class="panel" id="p-frozen">
+  <h2><span class="no">4</span>冻结区地图（9 zone / 85 锁点 · frozen_zone_guard.py）</h2>
+  <div class="fz-grid">
+    <div class="fz"><div class="id">playback-av</div><div class="locks"><b>15 锁</b> · 播放/音画对齐主链路（纠偏 ~280ms 勿压回）</div></div>
+    <div class="fz"><div class="id">exit-media</div><div class="locks"><b>4 锁</b> · 退出媒体清理</div></div>
+    <div class="fz"><div class="id">clip-transform</div><div class="locks"><b>整文件级</b> · 片段变换</div></div>
+    <div class="fz"><div class="id">transform-bake</div><div class="locks"><b>6 锁</b> · 变换烘焙（预览-导出对齐）</div></div>
+    <div class="fz"><div class="id">canvas-transform</div><div class="locks"><b>7 锁</b> · 画布侧变换</div></div>
+    <div class="fz"><div class="id">plugin-host-ui</div><div class="locks"><b>3 锁</b> · 插件宿主 UI</div></div>
+    <div class="fz"><div class="id">plugin-store-catalog</div><div class="locks"><b>2 锁</b> · 插件商店目录</div></div>
+    <div class="fz"><div class="id">stage3d-core</div><div class="locks"><b>整文件级</b> · 3D 舞台核心（Stage3D）</div></div>
+    <div class="fz"><div class="id">canvas-magnetic-intent</div><div class="locks"><b>33 整文件</b> · 磁吸画布（所有画布改动需解冻）</div></div>
+  </div>
+  <div class="warn">⛔ 未获「解冻 &lt;zone-id&gt;」授权前禁止改动。标准流程：<b>解冻 → 备份 → 改 → 回归 → frozen_zone_guard.py --update 重锁</b>。改 zone 须同步 4 处：frozen_zones.json · 现行技术文档 §5 · .cursor/rules/frozen-zones.mdc · 基线 hashes。</div>
+</section>
+
+<!-- ⑤ 门禁 -->
+<section class="panel" id="p-gate">
+  <h2><span class="no">5</span>提交前门禁流水线（scripts/precommit_gates.sh，入库版）</h2>
+  <div class="gates">
+    <div class="gate"><b>① ruff 棘轮</b><span>逐文件存量只减不增</span></div><span class="gsep">→</span>
+    <div class="gate"><b>② ruff format</b><span>仅警告不阻断</span></div><span class="gsep">→</span>
+    <div class="gate"><b>③ 冻结区守护</b><span>9 zone / 85 锁哈希漂移</span></div><span class="gsep">→</span>
+    <div class="gate"><b>④ 稳定性门禁</b><span>裸except / 静默except / print</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑤ 粘合层契约</b><span>跨线字段等价性断言</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑥a 架构守护</b><span>arch_guard --scan app</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑥b 双库一致性</b><span>主/副库画布副本漂移</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑦ 前端三卡点</b><span>tsc 棘轮 · vitest · 质量棘轮</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑧ 规模守卫</b><span>单文件 ≤2000 行（存量冻结）</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑨ 路由 mixin 属性</b><span>cs.* 静默失效检测</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑩ pyqtSignal 类型</b><span>typing 泛型别名→整模块崩</span></div><span class="gsep">→</span>
+    <div class="gate"><b>⑪ 素材不出域</b><span>SHIGUANG_NO_EGRESS</span></div>
+  </div>
+  <p class="sub" style="margin-top:14px">血泪纪律：静态门禁全绿 ≠ 运行时没崩（QColor 事故）——自绘控件必须真机启动验收；提交必须原生 bash 发起；并发会话时永不裸 git commit，须路径限定精确清单。</p>
+</section>
+
+<!-- ⑥ 目录导览 -->
+<section class="panel" id="p-dir">
+  <h2><span class="no">6</span>目录导览（新人必看）</h2>
+  <table class="dir">
+    <tr><th>路径</th><th>说明</th></tr>
+    <tr><td>app/ <span class="tag t-hot">核心</span></td><td>主程序全部 Python：main_qt6.py 入口 · modules/lego UI 模块 · core 业务内核 · plugins 插件 · tests 测试</td></tr>
+    <tr><td>vendor/shiguang-canvas/ <span class="tag t-hot">画布真源</span></td><td>React 画布前端唯一源码（版本独立 0.3.x）；改动后 tsc + vitest + build 三验</td></tr>
+    <tr><td>vendor/AI-Canvas-tauri/ <span class="tag t-frz">副库</span></td><td>第三方仓库克隆，src/libtv 为画布副本（已入跟踪可回滚）；origin 是别人的仓库，<b>绝不 push</b></td></tr>
+    <tr><td>docs/ <span class="tag t-doc">文档</span></td><td><b>现行技术文档.md（唯一事实源）</b> · CHANGELOG.md · knowledge/ 知识库 · _archive/ 历史归档</td></tr>
+    <tr><td>scripts/ <span class="tag t-test">门禁</span></td><td>frozen_zone_guard · ruff_gate · stability_gate · arch_guard · precommit_gates.sh</td></tr>
+    <tr><td>_verify/ <span class="tag t-test">回归</span></td><td>run_all_checks.py 全量回归 · canvas_bridge_e2e 真起服务打 HTTP · 各专项检查 244 文件</td></tr>
+    <tr><td>data/ <span class="tag t-hot">数据</span></td><td>projects/*.timeline 工程文件 · canvas_appearance.json（画布外观通道，别用 QSettings）</td></tr>
+    <tr><td>.venv312/</td><td>项目 Python 虚拟环境（依赖最全，回归优先用它）</td></tr>
+    <tr><td>.workbuddy/memory/</td><td>跨会话项目记忆（每日工作日志 + 长期约定）</td></tr>
+  </table>
+</section>
+
+<footer>拾光剪影 · 智能项目地图 — 2026-10-11 基于实测数据生成（version.py / wc -l / frozen_zones.json / git log）· 流程纪律以 docs/现行技术文档.md 为准</footer>
+
+<script>
+  // tab 切换
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.onclick=()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));
+      t.classList.add('on');
+      document.getElementById(t.dataset.p).classList.add('on');
+      document.querySelectorAll('#'+t.dataset.p+' [data-w]').forEach(b=>b.style.width=b.dataset.w);
+    };
+  });
+  // 首屏动画
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    document.querySelectorAll('.on [data-w]').forEach(b=>b.style.width=b.dataset.w);
+  }));
+</script>
+</body>
+</html>

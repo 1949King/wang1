@@ -1,0 +1,39 @@
+# 拾光剪影 — 根依赖清单（与 app/requirements.txt 对齐）
+# 推荐一键安装: powershell -ExecutionPolicy Bypass -File scripts\setup_deps.ps1
+#
+# PyTorch CUDA 请单独安装，避免被 CPU 源覆盖:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# Whisper 模型镜像（国内）:
+#   set HF_ENDPOINT=https://hf-mirror.com
+
+# 核心
+requests>=2.31.0
+numpy>=1.24.0
+Pillow>=10.0.0
+psutil>=5.9.0
+aiohttp>=3.9.0
+
+# 视频
+imageio>=2.30.0
+opencv-python-headless>=4.8.0
+
+# AI / 字幕 / OCR
+faster-whisper>=1.0.0
+easyocr>=1.7.0
+transformers>=4.30.0
+onnxruntime>=1.14.0
+# torch / torchvision / torchaudio → 见上方 CUDA 安装命令
+
+# UI
+PyQt6>=6.6.0
+
+# 音频
+librosa>=0.10.0
+numba>=0.58.0
+
+# 中文语言（离线注音字典：字→读音，供 TTS 正音 / 口型 / Agent 查询）
+pypinyin>=0.53.0
+
+# 打包（可选）
+# pyinstaller>=6.0.0

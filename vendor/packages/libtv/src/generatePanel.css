@@ -1,0 +1,175 @@
+/**
+ * generatePanel.css — V4.41.20 「生成/入轨」浮动面板样式（沿用 OutputHistoryPanel /
+ * LightingPanel / DirectorPanel 的 .xx-head/.xx-min 视觉系统）。
+ */
+
+.gen-panel {
+  position: fixed;
+  width: 320px;
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  color: #e6edf3;
+  overflow: hidden;
+  font-size: 12px;
+}
+.gen-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.gen-head:active {
+  cursor: grabbing;
+}
+.gen-ico {
+  font-size: 14px;
+}
+.gen-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.gen-sub {
+  font-size: 11px;
+  color: #8b949e;
+  margin-left: 4px;
+}
+.gen-spacer {
+  flex: 1;
+}
+.gen-min,
+.gen-close {
+  background: transparent;
+  color: #cbd5e1;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.gen-min:hover,
+.gen-close:hover {
+  background: #334155;
+  color: #fff;
+}
+.gen-close {
+  font-size: 16px;
+}
+.gen-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gen-body .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gen-body .field label {
+  font-size: 11px;
+  color: #8b949e;
+}
+.gen-body .field select,
+.gen-body .field input {
+  background: #161b22;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.gen-body .btn {
+  background: #161b22;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+.gen-body .btn:hover:not(:disabled) {
+  background: #1f2937;
+  border-color: #475569;
+}
+.gen-body .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.gen-body .btn.primary {
+  background: #1d4ed8;
+  border-color: #2563eb;
+  color: #fff;
+}
+.gen-body .btn.primary:hover:not(:disabled) {
+  background: #2563eb;
+}
+.gen-body .btn.teal {
+  background: #0e7490;
+  border-color: #0891b2;
+  color: #fff;
+}
+.gen-body .btn.teal:hover:not(:disabled) {
+  background: #0891b2;
+}
+.gen-body .btn-row {
+  display: flex;
+  gap: 6px;
+}
+.gen-body .btn-row .btn {
+  flex: 1;
+}
+
+/* 浅色主题双写 */
+body.theme-light .gen-panel {
+  background: #ffffff;
+  border-color: #d0d7de;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+  color: #1f2328;
+}
+body.theme-light .gen-head {
+  background: #f6f8fa;
+  border-bottom-color: #d0d7de;
+}
+body.theme-light .gen-sub {
+  color: #57606a;
+}
+body.theme-light .gen-min,
+body.theme-light .gen-close {
+  color: #57606a;
+}
+body.theme-light .gen-min:hover,
+body.theme-light .gen-close:hover {
+  background: #eaeef2;
+  color: #1f2328;
+}
+body.theme-light .gen-body .field label {
+  color: #57606a;
+}
+body.theme-light .gen-body .field select,
+body.theme-light .gen-body .field input {
+  background: #ffffff;
+  border-color: #d0d7de;
+  color: #1f2328;
+}
+body.theme-light .gen-body .btn {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+  color: #1f2328;
+}
+body.theme-light .gen-body .btn:hover:not(:disabled) {
+  background: #eaeef2;
+}

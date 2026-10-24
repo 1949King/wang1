@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>GLB Skeleton Inspector</title>
+<style>
+  body { margin:0; background:#0a0a10; color:#e0e0e0; font-family:monospace; padding:12px; }
+  #out { white-space:pre-wrap; font-size:13px; }
+  h2 { color:#93c5fd; margin:0 0 8px 0; font-size:15px; }
+  .sep { height:1px; background:#334155; margin:12px 0; }
+</style>
+</head>
+<body>
+<div id="out">Loading...</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const out = document.getElementById("out");
+
+function log(msg) { out.textContent += msg + "\n"; }
+
+const files = ["/models/Soldier.glb", "/models/Xbot.glb"];
+let idx = 0;
+
+function analyze(url) {
+  log(`\n${"=".repeat(60)}`);
+  log(`LOADING: ${url}`);
+  log("=".repeat(60));
+
+  const loader = new GLTFLoader();
+  loader.load(url, (gltf) => {
+    const scene = gltf.scene;
+    log(`\nScene: ${scene.type}`);
+
+    const skinnedMeshes = [];
+    const bones = [];
+    const animations = gltf.animations || [];
+
+    scene.traverse((obj) => {
+      if (obj.isSkinnedMesh) skinnedMeshes.push(obj);
+      if (obj.isBone) bones.push(obj);
+    });
+
+    log(`\n[SkinnedMeshes] count=${skinnedMeshes.length}`);
+    skinnedMeshes.forEach((m, i) => {
+      log(`  [${i}] name="${m.name}" verts=${m.geometry.attributes.position.count}`);
+      if (m.skeleton) {
+        log(`      skeleton.bones=${m.skeleton.bones.length}`);
+      }
+    });
+
+    log(`\n[Bones in scene tree] count=${bones.length}`);
+    bones.forEach((b, i) => {
+      const indent = "  ".repeat(Math.max(0, b.parent?.isBone ? (bones.findIndex(x=>x===b.parent)+1) : 0));
+      log(`  ${indent}[${String(i).padStart(3)}] "${b.name}"`);
+    });
+
+    log(`\n[Animations] count=${animations.length}`);
+    animations.forEach((a, i) => {
+      const tracks = a.tracks.length;
+      log(`  [${i}] "${a.name}" tracks=${tracks}`);
+    });
+
+    // 骨架层级树
+    log(`\n[Full scene hierarchy (bone paths)]`);
+    function printTree(obj, depth) {
+      const prefix = "│  ".repeat(depth);
+      const marker = obj.isBone ? "◆" : "○";
+      log(`  ${prefix}${marker} "${obj.name || "(none)"}" [${obj.type}]`);
+      obj.children.forEach(c => printTree(c, depth + 1));
+    }
+    printTree(scene, 0);
+
+    idx++;
+    if (idx < files.length) analyze(files[idx]);
+  }, undefined, (err) => {
+    log(`ERROR loading ${url}: ${err.message || err}`);
+  });
+}
+
+analyze(files[idx]);
+</script>
+</body>
+</html>

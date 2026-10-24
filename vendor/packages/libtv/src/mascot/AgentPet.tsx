@@ -1,0 +1,313 @@
+/**
+ * 桌宠主体：Q 版拟人狐狸「拾岚」的桌面形态 —— **2D 立绘 + 表情帧**版。
+ *
+ * 为什么从 3D 几何改成 2D 立绘（2026-10-10 用户实测拍板）
+ * =======================================================
+ * 上一版（b237626）用 Three.js 程序化几何拼狐狸，用户看到实机效果后直接否定：
+ * 「这是一个正常人审美能做出来的东西吗？」——程序化几何做角色形象是错误路线：
+ * 可爱感来自设计（比例 / 线条 / 配色），不来自几何参数；参考实现能看是因为
+ * 它有 48 层专业毛发着色器。项目 `assets/mascot/` 里本来就有 AI 生成的
+ * chibi 立绘（用户认可的审美基准），本版直接以立绘为形象本体。
+ *
+ * 表情帧体系（用户点名「不要一直挂笑」）
+ * =====================================
+ * 三帧同一画布（316×480，质心对齐 IoU≥0.985，叠放零位移）：
+ *   - pet_neutral  自然平和表情 —— 默认主帧，idle/thinking/awaiting/error 全用它
+ *   - pet_blink    眨眼帧 —— 随机 2.2~5.5s 闪一次（180ms），她就是"活"的
+ *   - pet_cheer    大笑挥手帧 —— 只在 success 状态出现，庆祝完回自然脸
+ *
+ * 沿用的骨架经验（来自参考实现 + 上一版）：
+ *   1. 拖拽逐帧零重渲染（usePetDrag 直接写 style）；
+ *   2. 动作曲线纯函数层（mascotMotion.ts）——本版只用它的眨眼间隔与状态反应调度，
+ *      3D 专属的耳/尾/眼球曲线保留在文件里供回归基线，不再参与渲染；
+ *   3. 状态之间的切换完全由真实数据决定（petActivity + usePetStatus），
+ *      随机只用于同一状态内的自然变化（几点眨眼）。
+ * 渲染层从 WebGL 换成纯 CSS transform + img opacity 切换：
+ * 不再创建 GL 上下文（不与生成任务抢 GPU/上下文配额），帧率分档也随之不需要了。
+ */
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+
+import "./agentPet.css";
+import {
+  SLEEPY_AFTER_MS,
+  SLEEPY_BUBBLE,
+  SLEEPY_LABEL,
+  STATUS_BUBBLES,
+  STATUS_LABELS,
+  STATUS_RIM_COLORS,
+  getCuriousTilt,
+  nextAmbientGap,
+  nextBlinkGap,
+  pickAmbientKind,
+  reactionForStatus,
+  type PetStatus,
+} from "./mascotMotion";
+import { usePetDrag } from "./usePetDrag";
+/* 表情帧清单与回落（文件名单一真源；缺素材时诚实回落 neutral，不假装有表情）。 */
+import { PET_FRAMES, frameUrl, pickFrame, readyExtraFrames, resolvedFrame } from "./mascotFrames";
+
+/**
+ * 形态尺寸（px）。立绘显示高约 200px。
+ * `mini` = Agent 面板打开 —— 桌宠**完全隐藏**（对齐参考开源项目：
+ * 点开桌宠 → 桌宠变成对话窗口并消失；关闭对话 → 桌宠回来），
+ * 不再有「缩成角落小头像」形态，故只此一档尺寸。
+ */
+export const PET_SIZE = { expanded: 224 } as const;
+
+/** 眨眼帧显示时长（ms）。 */
+const BLINK_MS = 180;
+
+/** 睡眠光晕色（暗橙）——与 idle 的品牌橙 #F7A061 区分开，读作「安静下来了」。 */
+const SLEEPY_RIM = "#C98A5E";
+
+const rimCss = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
+
+/** 跟随系统「减弱动态」偏好（三种状态：不支持 matchMedia / 关 / 开）。 */
+function useReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduce(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduce;
+}
+
+export interface AgentPetProps {
+  status: PetStatus;
+  /** Agent 面板已打开 —— 桌宠完全隐藏（面板关闭即回归，位置记忆保留） */
+  mini: boolean;
+  /** 单击：进入 Agent 对话画面 */
+  onActivate: () => void;
+  /** 覆盖系统「减弱动态」偏好；不传则自动读取 `prefers-reduced-motion` */
+  reduceMotion?: boolean;
+}
+
+export default function AgentPet({ status, mini, onActivate, reduceMotion }: AgentPetProps) {
+  const prefersReduce = useReducedMotion();
+  const reduceMotionResolved = reduceMotion ?? prefersReduce;
+  const drag = usePetDrag(PET_SIZE.expanded, 0);
+  const { rootRef, onPointerDown, consumeClick, resetPosition } = drag;
+
+  const hopRef = useRef<HTMLSpanElement | null>(null);
+  const prevStatusRef = useRef<PetStatus>(status);
+  /* 生命力层（2026-10-20）：好奇倾角 / 待机小动作 / 打瞌睡。 */
+  const curiousRef = useRef<HTMLSpanElement | null>(null);
+  const framesRef = useRef<HTMLSpanElement | null>(null);
+  const sleepTimerRef = useRef<number | null>(null);
+  const [sleepy, setSleepy] = useState(false);
+
+  /* 状态转场的一次性肢体反应（success 跳 / error 摇头）：CSS 动画 + 强制 reflow 重触发。
+     与演示页同一手法；曲线两端回中立位（mascotMotion 的不变量），不会留残余位移。 */
+  useEffect(() => {
+    if (prevStatusRef.current === status) return;
+    prevStatusRef.current = status;
+    const kind = reactionForStatus(status);
+    const el = hopRef.current;
+    if (!el || !kind || reduceMotionResolved) return;
+    el.classList.remove("sg-pet-anim--hop", "sg-pet-anim--shake");
+    void el.offsetWidth;
+    el.classList.add(kind === "hop" ? "sg-pet-anim--hop" : "sg-pet-anim--shake");
+  }, [status, reduceMotionResolved]);
+
+  /* 眨眼调度：随机 2.2~5.5s（mascotMotion.nextBlinkGap，与旧版同分布）。
+     success 显示大笑帧时眨眼没有意义，跳过即可，调度不必停。 */
+  const [blinking, setBlinking] = useState(false);
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    let timer = 0;
+    let offTimer = 0;
+    const schedule = () => {
+      timer = window.setTimeout(() => {
+        setBlinking(true);
+        offTimer = window.setTimeout(() => setBlinking(false), BLINK_MS);
+        schedule();
+      }, nextBlinkGap(Math.random()) * 1000);
+    };
+    schedule();
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(offTimer);
+    };
+  }, [reduceMotionResolved]);
+
+  /* ── 打瞌睡（表现层状态，**不进** petActivity 状态机）──
+     「有生命力」不等于一直动：安静地睡着、被靠近就醒，比随机蹦跳更像活物。
+     只在 idle 且长时间无互动时出现；状态一变忙立刻醒。 */
+  const armSleep = useCallback(() => {
+    if (sleepTimerRef.current !== null) window.clearTimeout(sleepTimerRef.current);
+    sleepTimerRef.current = window.setTimeout(() => {
+      sleepTimerRef.current = null;
+      setSleepy(true);
+    }, SLEEPY_AFTER_MS);
+  }, []);
+
+  const wake = useCallback(() => {
+    setSleepy(false);
+    if (status === "idle") armSleep();
+  }, [status, armSleep]);
+
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    if (status !== "idle") {
+      if (sleepTimerRef.current !== null) {
+        window.clearTimeout(sleepTimerRef.current);
+        sleepTimerRef.current = null;
+      }
+      setSleepy(false);
+      return;
+    }
+    armSleep();
+    return () => {
+      if (sleepTimerRef.current !== null) {
+        window.clearTimeout(sleepTimerRef.current);
+        sleepTimerRef.current = null;
+      }
+    };
+  }, [status, reduceMotionResolved, armSleep]);
+
+  /* ── 待机小动作：每 4~9s 一次（歪头 / 轻摇 / 抖耳），睡着时不动 ── */
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    let timer = 0;
+    /* 刻意不叫 schedule：眨眼 effect 里已有同名函数，画布质量棘轮把
+       同文件同名函数算作「疑似静默覆盖」（dupNames 棘轮只减不增）。 */
+    const scheduleAmbient = () => {
+      timer = window.setTimeout(() => {
+        const el = framesRef.current;
+        if (el && !sleepy) {
+          const kind = pickAmbientKind(Math.random());
+          el.classList.remove("sg-pet-anim--tilt", "sg-pet-anim--sway", "sg-pet-anim--perk");
+          void el.offsetWidth; // 强制 reflow 以重触发动画（与 hop/shake 同手法）
+          el.classList.add(`sg-pet-anim--${kind}`);
+        }
+        scheduleAmbient();
+      }, nextAmbientGap(Math.random()) * 1000);
+    };
+    scheduleAmbient();
+    return () => window.clearTimeout(timer);
+  }, [reduceMotionResolved, sleepy]);
+
+  /* ── 好奇：指针在半径内时身体朝指针轻倾（只写 CSS 变量，不触发 React 渲染）── */
+  useEffect(() => {
+    if (reduceMotionResolved) return;
+    const onMove = (event: PointerEvent) => {
+      const el = curiousRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const deg = getCuriousTilt(
+        event.clientX - (rect.left + rect.width / 2),
+        event.clientY - (rect.top + rect.height / 2),
+      );
+      el.style.setProperty("--sg-pet-curious", `${deg.toFixed(2)}deg`);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [reduceMotionResolved]);
+
+  /* 隐藏右下角旧「Agent」圆钮：桌宠就是 Agent 的入口，两个入口并存是混乱。
+     `.sg-agent-fab` 在冻结区 CanvasShell.tsx 里，不能改它 —— 用 MutationObserver
+     写内联样式（同「🧰 工具让位」先例），卸载时恢复。 */
+  useEffect(() => {
+    const HIDE_MARK = "data-sg-fab-hidden-by-pet";
+    const apply = () => {
+      document.querySelectorAll<HTMLElement>(".sg-agent-fab").forEach((el) => {
+        el.style.setProperty("display", "none", "important");
+        el.setAttribute(HIDE_MARK, "1");
+      });
+    };
+    apply();
+    const mo = new MutationObserver(() => {
+      // 只在有「未被处理过的 FAB」时才动手，避免高频 DOM 变动空转
+      if (document.querySelector(`.sg-agent-fab:not([${HIDE_MARK}])`)) apply();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      document.querySelectorAll<HTMLElement>(`[${HIDE_MARK}]`).forEach((el) => {
+        el.style.removeProperty("display");
+        el.removeAttribute(HIDE_MARK);
+      });
+    };
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (consumeClick()) return; // 刚拖过，这次 click 是拖拽收尾
+    onActivate();
+  }, [consumeClick, onActivate]);
+
+  const bubble = mini ? null : sleepy ? SLEEPY_BUBBLE : STATUS_BUBBLES[status];
+  const rimColor = sleepy ? SLEEPY_RIM : rimCss(STATUS_RIM_COLORS[status]);
+  const statusLabel = sleepy ? SLEEPY_LABEL : STATUS_LABELS[status];
+  /* 表情帧：先按状态选首选帧，再收敛到「真的有的帧」；缺素材时回落到 neutral。
+     眨眼只在睁眼类帧上播放（cheer / sleepy 不眨）。 */
+  const activeFrame = resolvedFrame(pickFrame(status, sleepy));
+  const allowBlink = activeFrame !== "cheer" && activeFrame !== "sleepy";
+  const framesClass = "sg-pet-frames" + (blinking && allowBlink ? " is-blink" : "");
+
+  return (
+    <div
+      ref={rootRef}
+      className={`sg-pet${mini ? " sg-pet--hidden" : ""}${drag.dragging ? " sg-pet--dragging" : ""}`}
+      data-state={status}
+      data-sleepy={sleepy ? "1" : undefined}
+      data-sg-no-autoclick="1"
+      aria-hidden={mini || undefined}
+      style={
+        {
+          "--sg-pet-rim": rimColor,
+        } as CSSProperties
+      }
+    >
+      {bubble ? (
+        <div className="sg-pet-bubble" role="status">
+          {bubble}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="sg-pet-btn"
+        data-sg-no-autoclick="1"
+        tabIndex={mini ? -1 : 0}
+        title={`${statusLabel}（单击打开 / 拖动移位 / 右键复位）`}
+        aria-label={statusLabel}
+        onPointerDown={onPointerDown}
+        onPointerEnter={wake}
+        onClick={handleClick}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          resetPosition();
+        }}
+      >
+        <span ref={hopRef} className="sg-pet-hop" aria-hidden="true">
+          <span className="sg-pet-lift">
+            <span className="sg-pet-bob">
+              <span ref={curiousRef} className="sg-pet-curious">
+                <span ref={framesRef} className={framesClass} data-frame={activeFrame}>
+                  <img className="sg-pet-img" src={frameUrl("neutral")} alt="" draggable={false} />
+                  <img className="sg-pet-img sg-pet-img--blink" src={frameUrl("blink")} alt="" draggable={false} />
+                  {readyExtraFrames().map((id) => (
+                    <img
+                      key={id}
+                      className={"sg-pet-img sg-pet-img--" + id}
+                      src={frameUrl(id)}
+                      alt=""
+                      draggable={false}
+                    />
+                  ))}
+                </span>
+              </span>
+            </span>
+          </span>
+        </span>
+        <span className="sg-pet-shadow" aria-hidden="true" />
+        {mini ? null : <span className="sg-pet-name">拾岚</span>}
+      </button>
+    </div>
+  );
+}

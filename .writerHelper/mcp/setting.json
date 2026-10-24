@@ -1,0 +1,10 @@
+{
+  "text": {
+    "key": "enc:dTkg2wl6+0Y3h8rt8hj/a4kWfvRKSrclfJjm8arM9+acs/5YXEu8uFAOIefnC3VlJFxe4W7DlwU8hiBhQvffn+JjHjKD1zFH9p5jNI9P/AQP",
+    "url": "https://api.siliconflow.cn/v1",
+    "model": "Pro/MiniMaxAI/MiniMax-M2.5",
+    "provider": "custom",
+    "extraParams": {}
+  },
+  "updatedAt": 1780118870580
+}

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-canvas-bg="default">
+<head>
+<meta charset="UTF-8">
+<title>画布背景预设 · V4.43.2 预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    background: #0b0f16; color: #e8eef6;
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: #8b9bb0; font-size: 13px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .card {
+    border: 1px solid #1e2a38; border-radius: 12px; overflow: hidden;
+    background: #101820;
+  }
+  .stage {
+    height: 150px; position: relative; overflow: hidden;
+    /* ↓ 与 vendor/shiguang-canvas/src/canvasBackgrounds.ts 的 --bg 值一致 */
+  }
+  .stage[data-bg="default"]      { background: #0a0e14; }
+  .stage[data-bg="off-white"]    { background: #f6f8fc; }
+  .stage[data-bg="solar-system"] {
+    background:
+      radial-gradient(circle at 78% 30%, rgba(249,115,22,.22) 0%, rgba(249,115,22,0) 34%),
+      radial-gradient(circle at 72% 34%, rgba(168,85,247,.30) 0%, rgba(168,85,247,0) 46%),
+      radial-gradient(circle at 20% 80%, rgba(99,102,241,.16) 0%, rgba(99,102,241,0) 55%),
+      #0a0a12;
+  }
+  .stage[data-bg="frosted-glass"] {
+    background: linear-gradient(160deg, #fdfbf7 0%, #f3f5fb 52%, #eef1f8 100%);
+  }
+  /* 迷你节点卡（示意画布上的节点） */
+  .node {
+    position: absolute; left: 22px; top: 40px; width: 116px; height: 62px;
+    border-radius: 8px; padding: 8px 10px;
+    font-size: 9px; line-height: 1.5;
+  }
+  .stage[data-bg="default"] .node,
+  .stage[data-bg="solar-system"] .node {
+    background: #1a1a26; border: 1px solid rgba(255,255,255,.10); color: #dddde4;
+  }
+  .stage[data-bg="off-white"] .node,
+  .stage[data-bg="frosted-glass"] .node {
+    background: #ffffff; border: 1px solid rgba(0,0,0,.10); color: #33364d;
+  }
+  .node .t { font-weight: 600; margin-bottom: 4px; }
+  .node .b { opacity: .55; }
+  /* 连线 */
+  .wire {
+    position: absolute; left: 148px; top: 71px; width: 86px;
+    border-top: 1px dashed rgba(255,255,255,.35);
+  }
+  .stage[data-bg="off-white"] .wire,
+  .stage[data-bg="frosted-glass"] .wire { border-top-color: rgba(0,0,0,.30); }
+  .dot {
+    position: absolute; right: 40px; top: 63px; width: 16px; height: 16px;
+    border-radius: 50%; background: #6366f1; border: 3px solid #fff;
+    box-shadow: 0 0 0 1px rgba(99,102,241,.6);
+  }
+  .meta { padding: 10px 12px; display: flex; align-items: center; gap: 8px; }
+  .name { font-size: 13px; font-weight: 600; }
+  .tag {
+    font-size: 10px; padding: 2px 8px; border-radius: 8px;
+    background: rgba(99,102,241,.15); color: #818cf8; font-weight: 600;
+  }
+  .id { font-size: 10px; color: #8b9bb0; font-family: ui-monospace, Consolas, monospace; }
+  .note {
+    margin-top: 24px; padding: 14px 16px; border-radius: 10px;
+    border: 1px solid #1e2a38; background: #101820;
+    color: #8b9bb0; font-size: 12px; line-height: 1.8;
+  }
+  .note b { color: #e8eef6; }
+</style>
+</head>
+<body>
+  <h1>画布背景预设 · V4.43.2 预览</h1>
+  <div class="sub">
+    移植自开源 AI Canvas <code>components/backgrounds/backgroundOptions.ts</code> ——
+    4 个「外观预设」现在全部落地为真实画布背景（此前太阳系 / 磨砂曝光是视觉占位）。
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="stage" data-bg="default">
+        <div class="node"><div class="t">📝 节点预览</div><div class="b">输入提示词…</div></div>
+        <div class="wire"></div><div class="dot"></div>
+      </div>
+      <div class="meta"><span class="name">深色</span><span class="tag">当前使用</span></div>
+      <div class="meta"><span class="id">canvas_bg = "default" · theme = dark</span></div>
+    </div>
+
+    <div class="card">
+      <div class="stage" data-bg="off-white">
+        <div class="node"><div class="t">📝 节点预览</div><div class="b">输入提示词…</div></div>
+        <div class="wire"></div><div class="dot"></div>
+      </div>
+      <div class="meta"><span class="name">浅色</span></div>
+      <div class="meta"><span class="id">canvas_bg = "off-white" · theme = light</span></div>
+    </div>
+
+    <div class="card">
+      <div class="stage" data-bg="solar-system">
+        <div class="node"><div class="t">📝 节点预览</div><div class="b">输入提示词…</div></div>
+        <div class="wire"></div><div class="dot"></div>
+      </div>
+      <div class="meta"><span class="name">太阳系</span></div>
+      <div class="meta"><span class="id">canvas_bg = "solar-system" · theme = dark</span></div>
+    </div>
+
+    <div class="card">
+      <div class="stage" data-bg="frosted-glass">
+        <div class="node"><div class="t">📝 节点预览</div><div class="b">输入提示词…</div></div>
+        <div class="wire"></div><div class="dot"></div>
+      </div>
+      <div class="meta"><span class="name">磨砂曝光</span></div>
+      <div class="meta"><span class="id">canvas_bg = "frosted-glass" · theme = light</span></div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>链路：</b>PyQt「设置 → 外观 → 外观预设」点击 → 写 <code>data/canvas_appearance.json</code>（递增 revision）
+    → 画布每 2.5s 轮询 <code>GET /host/canvas-settings</code> → 按 revision 增量应用
+    （只在设置真变过时生效，<b>不覆盖</b>画布内的本地主题切换）。<br>
+    <b>实现：</b>运行时注入 <code>&lt;style&gt;</code> + <code>html[data-canvas-bg]</code> 属性 ——
+    <code>styles.css</code> / <code>store.ts</code> / <code>CanvasShell.tsx</code> <b>一字未改</b>，
+    冻结区仅动 <code>canvasVersion.ts</code>（版本号）。<br>
+    <b>另有两个背景</b>（开源同款，暂未进设置卡）：<code>nebula</code> 星云 / <code>custom</code> 自定义图片。
+  </div>
+</body>
+</html>

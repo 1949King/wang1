@@ -1,0 +1,288 @@
+/**
+ * LibTvChrome.css — 底部停靠栏 V2 样式（2026-10-10 C 方案重做）。
+ *
+ * 独立文件纪律（同 agentPet.css）：`styles.css` 属于冻结区
+ * `canvas-magnetic-intent`，dock 新样式一律写在这里、用 `ltd-*` 新类名；
+ * 容器 `.libtv-dock` 沿用 styles.css 的定位（absolute bottom:10 等），
+ * 旧 `.libtv-dock-left/center/text/ico/plus/zoom` 类不再被渲染、样式自然失效。
+ *
+ * 动效纪律：只用 transform / opacity（合成器友好）。
+ */
+
+.ltd-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.ltd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid #232b3d;
+  border-radius: 999px;
+  background: rgba(16, 22, 34, 0.92);
+  color: #c8d3ec;
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s, color 0.16s;
+}
+
+.ltd-btn:hover {
+  border-color: #3b82f6;
+  color: #fff;
+  background: rgba(30, 40, 60, 0.95);
+}
+
+.ltd-btn--primary {
+  border-color: #2f6fd8;
+  color: #eaf2ff;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.ltd-btn--primary:hover {
+  border-color: #5b9bff;
+  background: rgba(37, 99, 235, 0.32);
+}
+
+.ltd-plus {
+  font-size: 14px;
+  line-height: 1;
+  color: #7fb1ff;
+}
+
+.ltd-ico {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ltd-zoom {
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: left;
+}
+
+/* ⚡工具 按钮激活态 */
+.ltd-tools.on {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.2);
+  color: #fff;
+}
+
+/* ── 横向工具板：dock 上方弹出，4 组并排 ─────────────────────────── */
+
+.ltd-board {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 12px 16px 10px;
+  border: 1px solid #2c3650;
+  border-radius: 14px;
+  background: rgba(13, 18, 28, 0.97);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.35);
+  animation: ltd-board-in 0.16s ease-out;
+  z-index: 60;
+  pointer-events: auto;
+}
+
+@keyframes ltd-board-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.ltd-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 96px;
+}
+
+.ltd-group-title {
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: #6f7d99;
+  border-bottom: 1px solid #232b3d;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.ltd-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 128px;
+}
+
+.ltd-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(26, 33, 48, 0.9);
+  color: #b9c4dd;
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.ltd-item:hover {
+  border-color: #3b82f6;
+  color: #fff;
+  background: rgba(37, 99, 235, 0.16);
+}
+
+/* 数据组开关类项：激活 = 蓝色描边 + 高亮（面板开着 / 开关开着） */
+.ltd-item.on {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.18);
+  color: #fff;
+}
+
+/* 上游引用的 toggle 小开关 */
+.ltd-switch {
+  width: 18px;
+  height: 10px;
+  border-radius: 999px;
+  background: #2c3650;
+  position: relative;
+  transition: background 0.16s;
+}
+
+.ltd-switch::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8b95ad;
+  transition: transform 0.16s, background 0.16s;
+}
+
+.ltd-switch.on {
+  background: #2563eb;
+}
+
+.ltd-switch.on::after {
+  transform: translateX(8px);
+  background: #fff;
+}
+
+/* 浅色主题 */
+.theme-light .ltd-btn,
+body[data-theme="light"] .ltd-btn {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #d5dbe7;
+  color: #3a4a63;
+}
+
+.theme-light .ltd-btn:hover,
+body[data-theme="light"] .ltd-btn:hover {
+  border-color: #2563eb;
+  color: #172033;
+}
+
+.theme-light .ltd-board,
+body[data-theme="light"] .ltd-board {
+  background: rgba(248, 250, 253, 0.98);
+  border-color: #d5dbe7;
+  box-shadow: 0 12px 40px rgba(20, 30, 50, 0.18);
+}
+
+.theme-light .ltd-group-title,
+body[data-theme="light"] .ltd-group-title {
+  color: #6f7d99;
+  border-bottom-color: #e2e8f2;
+}
+
+.theme-light .ltd-item,
+body[data-theme="light"] .ltd-item {
+  background: #eef2f8;
+  color: #3a4a63;
+}
+
+/* ── AgentOS S1：dock 最小化面板恢复图标区（space-between 自动靠右） ── */
+
+.ltd-minis {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.ltd-mini {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #232b3d;
+  border-radius: 50%;
+  background: rgba(16, 22, 34, 0.92);
+  color: #c8d3ec;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  animation: ltd-mini-in 0.16s ease-out;
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+@keyframes ltd-mini-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ltd-mini:hover {
+  border-color: #3b82f6;
+  color: #fff;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.theme-light .ltd-mini,
+body[data-theme="light"] .ltd-mini {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #d5dbe7;
+  color: #3a4a63;
+}
+
+.theme-light .ltd-mini:hover,
+body[data-theme="light"] .ltd-mini:hover {
+  border-color: #2563eb;
+  color: #172033;
+}
+
+/* 系统「减弱动态」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .ltd-board,
+  .ltd-btn,
+  .ltd-item,
+  .ltd-switch,
+  .ltd-switch::after,
+  .ltd-mini {
+    animation: none !important;
+    transition: none !important;
+  }
+}

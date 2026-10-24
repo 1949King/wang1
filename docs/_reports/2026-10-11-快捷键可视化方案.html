@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>快捷键可视化方案 · 拾光导演台</title>
+<style>
+/* ============================================================
+   主题变量（沿用项目品牌色：深藏蓝 #172033 + 主蓝 #2563eb + 强调橙 #f97316）
+   ============================================================ */
+:root,
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0a0e14;
+  --bg-2: #0d131b;
+  --panel: rgba(14, 20, 28, 0.92);
+  --panel-solid: #101820;
+  --line: #1e2a38;
+  --line2: #2a3a4d;
+  --text: #e8eef6;
+  --muted: #8b9bb0;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.18);
+  --teal: #14b8a6;
+  --orange: #f97316;
+  --brand-deep: #172033;
+  --shadow-key: 0 2px 0 #050709, 0 4px 8px rgba(0, 0, 0, 0.45), inset 0 -2px 0 rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --shadow-key-pressed: 0 1px 0 #050709, inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+html[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f8fc;
+  --bg-2: #ffffff;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-solid: #ffffff;
+  --line: #e3e8f1;
+  --line2: #cdd5e3;
+  --text: #172033;
+  --muted: #6b7790;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --teal: #0d9488;
+  --orange: #ea580c;
+  --brand-deep: #172033;
+  --shadow-key: 0 2px 0 #cbd5e3, 0 3px 6px rgba(20, 30, 60, 0.18), inset 0 -2px 0 rgba(20, 30, 60, 0.08), inset 0 1px 0 #ffffff;
+  --shadow-key-pressed: 0 1px 0 #cbd5e3, inset 0 2px 4px rgba(20, 30, 60, 0.14);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+body { padding: 0; }
+
+/* ============================================================
+   顶栏
+   ============================================================ */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  height: 48px; padding: 0 18px;
+  background: var(--bg-2); border-bottom: 1px solid var(--line);
+}
+.brand {
+  font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+}
+.brand span { color: var(--muted); font-weight: 500; margin-left: 6px; font-size: 11px; }
+.topbar .spacer { flex: 1; }
+.toggle-theme {
+  display: inline-grid; place-items: center;
+  width: 30px; height: 30px; padding: 0;
+  border: 1px solid var(--line2); border-radius: 8px;
+  background: var(--panel-solid); color: var(--orange);
+  font-size: 15px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.toggle-theme:hover { background: var(--accent-soft); border-color: var(--accent); }
+.toggle-mode {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 7px;
+  border: 1px solid var(--line2); background: var(--panel-solid); color: var(--text);
+  font-size: 12px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-mode:hover { border-color: var(--accent); color: var(--accent); }
+.toggle-mode.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* ============================================================
+   主区
+   ============================================================ */
+.main { display: flex; height: calc(100% - 48px); }
+
+/* —— 左栏：分组导航 —— */
+.sidebar {
+  width: 220px; padding: 16px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-2);
+  overflow-y: auto;
+}
+.sidebar h3 { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; padding: 0 8px; }
+.group-nav { list-style: none; }
+.group-nav li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; margin-bottom: 4px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px; color: var(--text);
+  transition: background 0.15s;
+}
+.group-nav li:hover { background: var(--panel); }
+.group-nav li.on { background: var(--accent-soft); color: var(--accent); }
+.group-nav .ico { width: 18px; text-align: center; font-size: 14px; }
+.group-nav .count {
+  margin-left: auto; font-size: 11px; color: var(--muted);
+  background: var(--bg); padding: 1px 6px; border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.group-nav li.on .count { background: var(--accent); color: #fff; border-color: transparent; }
+
+/* —— 搜索 —— */
+.search-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.search-bar input {
+  flex: 1; max-width: 480px;
+  padding: 7px 12px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 7px;
+  color: var(--text); font-size: 13px;
+  outline: none;
+}
+.search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-bar .hint { font-size: 11px; color: var(--muted); }
+.search-bar .stat { margin-left: auto; font-size: 12px; color: var(--muted); }
+.search-bar .stat strong { color: var(--accent); font-weight: 600; }
+
+/* —— 卡片列表 —— */
+.cards { flex: 1; overflow-y: auto; padding: 18px 24px 40px; }
+.card-group { margin-bottom: 22px; }
+.card-group-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 12px; padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
+}
+.card-group-head .ico {
+  display: inline-grid; place-items: center;
+  width: 26px; height: 26px;
+  background: var(--accent-soft); color: var(--accent);
+  border-radius: 7px; font-size: 14px;
+}
+.card-group-head h2 { font-size: 14px; font-weight: 600; }
+.card-group-head .desc { font-size: 11px; color: var(--muted); }
+.card-group-head .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+/* —— 卡片（每行一个快捷键） —— */
+.kb-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.kb-row:hover { background: var(--panel); border-color: var(--line2); }
+.kb-row.hidden { display: none; }
+
+.kb-row .op { flex: 1; min-width: 0; }
+.kb-row .op .name { font-size: 13px; font-weight: 500; }
+.kb-row .op .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* —— 拟物键盘 —— */
+.kb-keys { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.kb-keys .plus {
+  font-size: 11px; color: var(--muted);
+  margin: 0 1px;
+}
+.key {
+  display: inline-grid; place-items: center;
+  min-width: 28px; height: 28px;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #2a3340 0%, #1c2330 100%);
+  color: var(--text);
+  border: 1px solid #3a4452;
+  border-radius: 6px;
+  font-family: "Consolas", "SF Mono", "Cascadia Code", monospace;
+  font-size: 12px; font-weight: 500;
+  box-shadow: var(--shadow-key);
+  user-select: none;
+  position: relative;
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+html[data-theme='light'] .key {
+  background: linear-gradient(180deg, #fcfdff 0%, #e9edf5 100%);
+  color: #172033;
+  border-color: #cbd5e3;
+}
+.key.wide-2 { min-width: 48px; }
+.key.wide-3 { min-width: 68px; }
+.key.wide-4 { min-width: 88px; }
+.key.fn { color: var(--accent); }
+.key.mod { font-size: 11px; font-weight: 600; color: var(--accent-strong); }
+.key.del { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+.key:hover { transform: translateY(-1px); }
+.key:active { transform: translateY(2px); box-shadow: var(--shadow-key-pressed); }
+
+/* —— 触发预览 —— */
+.preview {
+  display: inline-grid; place-items: center;
+  width: 60px; height: 36px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* ============================================================
+   触发预览的迷你可视化（SVG）
+   ============================================================ */
+.pv-undo { animation: spin-back 4s linear infinite; }
+@keyframes spin-back { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
+
+/* —— 对比视图 —— */
+.compare-toggle {
+  display: inline-flex; align-items: center;
+  gap: 6px; padding: 5px 11px;
+  border: 1px solid var(--line2); border-radius: 7px;
+  background: var(--panel-solid);
+  font-size: 12px; cursor: pointer;
+  color: var(--text);
+}
+.compare-toggle.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* —— 旧版对比（左栏） —— */
+.before-panel {
+  width: 380px; padding: 18px 20px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-2);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.before-panel h3 {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+.before-panel .old-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; margin-bottom: 4px;
+  border-radius: 8px; background: var(--bg);
+}
+.before-panel .old-row:hover { background: var(--panel); }
+.before-panel .old-row span { font-size: 13px; }
+.before-panel .old-row .old-kbd {
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--panel-solid); border: 1px solid var(--line);
+  font-family: monospace; font-size: 11px; color: var(--muted);
+}
+
+/* —— 冲突标记 —— */
+.kb-row .conflict {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; margin-right: 6px;
+  background: rgba(249, 115, 22, 0.12); border: 1px solid rgba(249, 115, 22, 0.4);
+  border-radius: 5px; font-size: 11px; color: var(--orange);
+}
+
+/* —— 占空：响应式 —— */
+@media (max-width: 1100px) {
+  .before-panel { display: none; }
+}
+
+/* —— 滚动条 —— */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+
+<!-- ============ 顶栏 ============ -->
+<div class="topbar">
+  <div class="brand">↗ 拾光导演台 <span>v0.3.21 · 主题系统 P1</span></div>
+  <button class="toggle-mode on" id="toggleCompare">
+    <span>⚏</span>对比模式（vs AI-Canvas-tauri 原版）
+  </button>
+  <div class="spacer"></div>
+  <button class="toggle-theme" id="toggleTheme" title="Ctrl+Shift+T 切换主题">
+    <span id="themeIcon">☀</span>
+  </button>
+</div>
+
+<div class="main">
+
+  <!-- ============ 旧版对比（左侧） ============ -->
+  <aside class="before-panel" id="beforePanel">
+    <h3>改进前 · AI-Canvas-tauri 24 行原版</h3>
+    <div class="old-row"><span>保存画布</span><span class="old-kbd">Ctrl + S</span></div>
+    <div class="old-row"><span>撤销</span><span class="old-kbd">Ctrl + Z</span></div>
+    <div class="old-row"><span>重做</span><span class="old-kbd">Ctrl + Y</span></div>
+    <div class="old-row"><span>复制节点</span><span class="old-kbd">Ctrl + C</span></div>
+    <div class="old-row"><span>粘贴节点</span><span class="old-kbd">Ctrl + V</span></div>
+    <div class="old-row"><span>删除节点</span><span class="old-kbd">Delete</span></div>
+    <div class="old-row"><span>分组 / 取消分组</span><span class="old-kbd">Ctrl + G</span></div>
+    <div class="old-row"><span>创建生成节点</span><span class="old-kbd">1–6</span></div>
+    <div class="old-row"><span>创建源节点</span><span class="old-kbd">Alt + 1–5</span></div>
+    <div class="old-row"><span>弹出对话框</span><span class="old-kbd">选中节点+Space</span></div>
+    <div class="old-row"><span>锁定比例缩放</span><span class="old-kbd">缩放时按住 Shift</span></div>
+    <div class="old-row"><span>关闭菜单 / 设置</span><span class="old-kbd">Escape</span></div>
+    <div class="old-row"><span>画布复位</span><span class="old-kbd">F</span></div>
+    <div class="old-row"><span>小地图</span><span class="old-kbd">M</span></div>
+    <div class="old-row"><span>资源搜索窗口</span><span class="old-kbd">Alt + Space</span></div>
+    <div class="old-row"><span>显示/隐藏吉祥物</span><span class="old-kbd">Ctrl + Shift + M</span></div>
+    <div style="margin-top: 14px; padding: 10px; background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; font-size: 11px; color: var(--muted); line-height: 1.6;">
+      问题：
+      <br>· 单行布局无视觉层次
+      <br>· 无分组（编辑/视图/系统混杂）
+      <br>· 无搜索
+      <br>· 无触发效果预览
+      <br>· 无冲突检测
+      <br>· "1–6" "Alt+1–5" "Ctrl+Shift+M" 等组合看不出层次
+    </div>
+  </aside>
+
+  <!-- ============ 左栏：分组导航 ============ -->
+  <nav class="sidebar">
+    <h3>分组</h3>
+    <ul class="group-nav" id="groupNav">
+      <li data-group="all" class="on"><span class="ico">✦</span><span>全部</span><span class="count">17</span></li>
+      <li data-group="edit"><span class="ico">✎</span><span>编辑</span><span class="count">6</span></li>
+      <li data-group="node"><span class="ico">▣</span><span>节点创建</span><span class="count">4</span></li>
+      <li data-group="view"><span class="ico">◉</span><span>视图与导航</span><span class="count">3</span></li>
+      <li data-group="system"><span class="ico">⚙</span><span>系统与资源</span><span class="count">4</span></li>
+    </ul>
+
+    <h3 style="margin-top: 24px;">冲突检测</h3>
+    <ul class="group-nav">
+      <li><span class="ico">⚠</span><span>已检测</span><span class="count">2</span></li>
+    </ul>
+  </nav>
+
+  <!-- ============ 主区：搜索 + 卡片 ============ -->
+  <main style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+    <div class="search-bar">
+      <span style="font-size: 14px; color: var(--muted);">🔍</span>
+      <input id="search" placeholder="搜索快捷键（如「撤销」「Ctrl+Z」「创建」）" autocomplete="off">
+      <span class="hint">↑↓ 切换 · Enter 执行（演示）</span>
+      <span class="stat" id="searchStat"><strong id="matchCount">17</strong> / 17 个匹配</span>
+    </div>
+
+    <div class="cards" id="cards">
+
+      <!-- ===== 分组：编辑 ===== -->
+      <section class="card-group" data-group="edit">
+        <header class="card-group-head">
+          <span class="ico">✎</span>
+          <h2>编辑</h2>
+          <span class="desc">操作画布内容 · 剪贴板 · 历史</span>
+          <span class="count">6 个</span>
+        </header>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">保存画布</div>
+            <div class="sub">立即写 localStorage · 状态栏显示时间戳</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="4" y="6" width="20" height="20" rx="2" stroke="#8b9bb0" stroke-width="1.4" fill="rgba(37,99,235,0.1)"/>
+              <path d="M10 14h8M10 18h8M10 22h5" stroke="#8b9bb0" stroke-width="1" stroke-linecap="round"/>
+              <path d="M28 16l4-4 4 4M32 12v8" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="44" cy="16" r="2" fill="#22c55e"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">S</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">撤销</div>
+            <div class="sub">回退上一步画布操作 · 含粘贴/移动/删除</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="10" width="14" height="14" rx="2" stroke="#f97316" stroke-width="1.4" fill="rgba(249,115,22,0.18)"/>
+              <rect x="20" y="6" width="14" height="14" rx="2" stroke="#f97316" stroke-width="1.4" fill="rgba(249,115,22,0.28)"/>
+              <path d="M40 10a6 6 0 1 0 0 12" stroke="#f97316" stroke-width="1.5" fill="none"/>
+              <path d="M37 11l3 2-1 3" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">Z</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">重做</div>
+            <div class="sub">Ctrl+Y 或 Ctrl+Shift+Z（双路径兼容）</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="10" width="14" height="14" rx="2" stroke="#f97316" stroke-width="1.4" fill="rgba(249,115,22,0.28)"/>
+              <rect x="22" y="6" width="14" height="14" rx="2" stroke="#f97316" stroke-width="1.4" fill="rgba(249,115,22,0.18)"/>
+              <path d="M42 10a6 6 0 1 1 0 12" stroke="#f97316" stroke-width="1.5" fill="none"/>
+              <path d="M45 11l-3 2 1 3" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">Y</span>
+            <span class="plus" style="color: var(--muted);">/</span>
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">⇧</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">Z</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">复制节点</div>
+            <div class="sub">复制选中节点到剪贴板 · 不写剪贴板系统</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="6" width="14" height="14" rx="2" stroke="#2563eb" stroke-width="1.4" fill="rgba(37,99,235,0.2)"/>
+              <rect x="14" y="14" width="14" height="14" rx="2" stroke="#2563eb" stroke-width="1.4" fill="rgba(37,99,235,0.4)"/>
+              <path d="M32 8h12v16h-12" stroke="#22c55e" stroke-width="1.4" stroke-dasharray="2 2" fill="none"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">C</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">粘贴节点</div>
+            <div class="sub">从剪贴板贴在指针位置 · 自动滚屏到可见</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <path d="M32 8h12v16h-12" stroke="#8b9bb0" stroke-width="1.4" stroke-dasharray="2 2" fill="none"/>
+              <rect x="38" y="12" width="14" height="14" rx="2" stroke="#2563eb" stroke-width="1.4" fill="rgba(37,99,235,0.4)"/>
+              <path d="M45 17l-3 3 3 3" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">V</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">删除节点</div>
+            <div class="sub">含节点连线一并清理 · Backspace 同效</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="8" y="6" width="16" height="20" rx="2" stroke="#f87171" stroke-width="1.4" fill="rgba(248,113,113,0.18)"/>
+              <path d="M14 12v6M22 12v6" stroke="#f87171" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="6" y1="6" x2="26" y2="26" stroke="#f87171" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key del wide-4">Delete</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===== 分组：节点创建 ===== -->
+      <section class="card-group" data-group="node">
+        <header class="card-group-head">
+          <span class="ico">▣</span>
+          <h2>节点创建</h2>
+          <span class="desc">在指针位置快速生成节点 · 仅小白模式生效</span>
+          <span class="count">4 个</span>
+        </header>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">创建生成节点 · 剧本/镜头/提示词/设定/生成器/文本</div>
+            <div class="sub">数字 1-6 → 6 种内置生成节点</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="2" y="10" width="8" height="12" rx="1.5" fill="#6366f1"/>
+              <rect x="12" y="10" width="8" height="12" rx="1.5" fill="#22c55e"/>
+              <rect x="22" y="10" width="8" height="12" rx="1.5" fill="#f59e0b"/>
+              <rect x="32" y="10" width="8" height="12" rx="1.5" fill="#3b82f6"/>
+              <rect x="42" y="10" width="8" height="12" rx="1.5" fill="#ec4899"/>
+              <text x="29" y="29" font-size="8" fill="#8b9bb0" text-anchor="middle">1—6</text>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key wide-2">1</span>
+            <span class="plus">—</span>
+            <span class="key wide-2">6</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">创建源节点 · 图片/视频/音频/音乐/分镜/导演卡</div>
+            <div class="sub">按住 Alt 再按数字 · 从素材而非生成得到</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="2" y="10" width="8" height="12" rx="1.5" fill="#22c55e" opacity="0.7"/>
+              <rect x="12" y="10" width="8" height="12" rx="1.5" fill="#3b82f6" opacity="0.7"/>
+              <rect x="22" y="10" width="8" height="12" rx="1.5" fill="#f97316" opacity="0.7"/>
+              <rect x="32" y="10" width="8" height="12" rx="1.5" fill="#a855f7" opacity="0.7"/>
+              <rect x="42" y="10" width="8" height="12" rx="1.5" fill="#06b6d4" opacity="0.7"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key fn wide-2">Alt</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">1</span>
+            <span class="plus">—</span>
+            <span class="key wide-2">6</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">弹出节点菜单</div>
+            <div class="sub">在选中节点时按 Space · 打开该节点的操作菜单</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="6" width="20" height="20" rx="2" stroke="#2563eb" stroke-width="1.4" fill="rgba(37,99,235,0.18)"/>
+              <rect x="22" y="14" width="28" height="14" rx="3" stroke="#2563eb" stroke-width="1.4" fill="rgba(37,99,235,0.32)"/>
+              <line x1="28" y1="20" x2="44" y2="20" stroke="#8b9bb0" stroke-width="1.2"/>
+              <line x1="28" y1="24" x2="38" y2="24" stroke="#8b9bb0" stroke-width="1.2"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key wide-3">Space</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">分组 / 取消分组</div>
+            <div class="sub">Ctrl+G 把选中节点包成组 · 再次触发取消分组</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="8" width="18" height="16" rx="2" stroke="#a855f7" stroke-width="1.4" fill="rgba(168,85,247,0.18)"/>
+              <rect x="10" y="12" width="6" height="6" rx="1" fill="#a855f7"/>
+              <rect x="20" y="12" width="6" height="6" rx="1" fill="#a855f7"/>
+              <rect x="10" y="20" width="6" height="6" rx="1" fill="#a855f7"/>
+              <rect x="20" y="20" width="6" height="6" rx="1" fill="#a855f7"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key wide-2">G</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===== 分组：视图 ===== -->
+      <section class="card-group" data-group="view">
+        <header class="card-group-head">
+          <span class="ico">◉</span>
+          <h2>视图与导航</h2>
+          <span class="desc">画布缩放/导航/缩略图</span>
+          <span class="count">3 个</span>
+        </header>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">画布复位</div>
+            <div class="sub">fitView · 把所有节点塞进可视区 · 220ms 缓动</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="6" width="20" height="20" rx="2" stroke="#8b9bb0" stroke-width="1" stroke-dasharray="3 2" fill="none"/>
+              <rect x="16" y="12" width="12" height="12" rx="1" fill="rgba(37,99,235,0.4)" stroke="#2563eb"/>
+              <path d="M22 12v-3l4 3-4 3v-3z" fill="#2563eb"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key fn wide-2">F</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">小地图切换</div>
+            <div class="sub">显示 / 隐藏右下角缩略图 · 切换状态写到 store</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="4" y="4" width="36" height="24" rx="2" stroke="#8b9bb0" stroke-width="1" fill="none"/>
+              <circle cx="22" cy="16" r="4" fill="rgba(37,99,235,0.5)"/>
+              <rect x="40" y="20" width="14" height="10" rx="1.5" fill="#2563eb" opacity="0.85"/>
+              <rect x="42" y="22" width="6" height="3" fill="#fff" opacity="0.6"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key fn wide-2">M</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">锁定比例缩放</div>
+            <div class="sub">滚轮缩放时按住 Shift · 防止宽高比变形</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="6" y="4" width="20" height="24" rx="2" stroke="#8b9bb0" stroke-width="1" fill="none"/>
+              <rect x="22" y="8" width="14" height="16" rx="1.5" fill="rgba(37,99,235,0.4)" stroke="#2563eb"/>
+              <line x1="14" y1="28" x2="38" y2="8" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key fn wide-2">⇧</span>
+            <span class="plus">+</span>
+            <span style="font-size: 11px; color: var(--muted); margin-left: 4px;">滚轮</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===== 分组：系统 ===== -->
+      <section class="card-group" data-group="system">
+        <header class="card-group-head">
+          <span class="ico">⚙</span>
+          <h2>系统与资源</h2>
+          <span class="desc">面板/弹窗/资源检索/吉祥物</span>
+          <span class="count">4 个</span>
+        </header>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">关闭菜单 / 设置</div>
+            <div class="sub">Esc · 弹窗/菜单/指令面板通用关闭</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <rect x="8" y="6" width="40" height="20" rx="3" stroke="#8b9bb0" stroke-width="1" fill="rgba(14,20,28,0.4)"/>
+              <line x1="44" y1="10" x2="36" y2="18" stroke="#f87171" stroke-width="1.8" stroke-linecap="round"/>
+              <line x1="44" y1="18" x2="36" y2="10" stroke="#f87171" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key wide-3">Esc</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">资源搜索窗口</div>
+            <div class="sub">Alt+Space 或 Ctrl+Shift+Space · 全局资源检索</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <circle cx="20" cy="14" r="6" stroke="#f97316" stroke-width="1.5" fill="none"/>
+              <line x1="25" y1="19" x2="30" y2="24" stroke="#f97316" stroke-width="1.8" stroke-linecap="round"/>
+              <rect x="32" y="8" width="20" height="14" rx="2" fill="rgba(249,115,22,0.15)" stroke="#f97316"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key fn wide-2">Alt</span>
+            <span class="plus">+</span>
+            <span class="key wide-3">Space</span>
+            <span class="plus" style="color: var(--muted);">/</span>
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">⇧</span>
+            <span class="plus">+</span>
+            <span class="key wide-3">Space</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">显示/隐藏吉祥物</div>
+            <div class="sub">右下角 Agent 宠物 · 状态指示 + 唤醒对话</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <circle cx="28" cy="18" r="8" fill="rgba(249,115,22,0.3)" stroke="#f97316" stroke-width="1.4"/>
+              <circle cx="25" cy="16" r="1.2" fill="#fff"/>
+              <circle cx="31" cy="16" r="1.2" fill="#fff"/>
+              <path d="M25 21q3 2 6 0" stroke="#f97316" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">⇧</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">M</span>
+          </div>
+        </div>
+
+        <div class="kb-row">
+          <div class="op">
+            <div class="name">切换主题</div>
+            <div class="sub">Ctrl+Shift+T · 暗色 ↔ 浅色 · 持久化到 localStorage</div>
+          </div>
+          <div class="preview">
+            <svg width="56" height="32" viewBox="0 0 56 32" fill="none">
+              <circle cx="22" cy="16" r="6" fill="#f97316"/>
+              <path d="M28 16a6 6 0 0 1-6 6" fill="#172033" stroke="#f97316"/>
+              <text x="22" y="20" font-size="9" fill="#fff" text-anchor="middle">☀</text>
+            </svg>
+          </div>
+          <div class="kb-keys">
+            <span class="key mod wide-3">Ctrl</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">⇧</span>
+            <span class="plus">+</span>
+            <span class="key fn wide-2">T</span>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+// ===================== 交互逻辑 =====================
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+const html = document.documentElement;
+const iconEl = document.querySelector('#themeIcon');
+
+// —— 主题切换（验证主题系统真的工作） ——
+function toggleTheme() {
+  const cur = html.getAttribute('data-theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  iconEl.textContent = next === 'dark' ? '☀' : '☾';
+  try { localStorage.setItem('shiguang-canvas:theme:v1', next); } catch {}
+}
+document.querySelector('#toggleTheme').addEventListener('click', toggleTheme);
+
+// 读取持久化主题
+try {
+  const saved = localStorage.getItem('shiguang-canvas:theme:v1');
+  if (saved) { html.setAttribute('data-theme', saved); iconEl.textContent = saved === 'dark' ? '☀' : '☾'; }
+} catch {}
+
+// 全局快捷键 Ctrl+Shift+T
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+    e.preventDefault();
+    toggleTheme();
+  }
+});
+
+// —— 分组筛选 ——
+const groupNavItems = document.querySelectorAll('#groupNav li');
+groupNavItems.forEach((li) => {
+  li.addEventListener('click', () => {
+    groupNavItems.forEach((x) => x.classList.remove('on'));
+    li.classList.add('on');
+    const g = li.dataset.group;
+    document.querySelectorAll('.card-group').forEach((section) => {
+      section.style.display = (g === 'all' || section.dataset.group === g) ? '' : 'none';
+    });
+    updateStat();
+  });
+});
+
+// —— 搜索 ——
+const searchInput = document.querySelector('#search');
+const matchCountEl = document.querySelector('#matchCount');
+function updateStat() {
+  const visibleGroups = Array.from(document.querySelectorAll('.card-group')).filter(s => s.style.display !== 'none');
+  const visibleRows = visibleGroups.reduce((sum, g) => sum + g.querySelectorAll('.kb-row:not(.hidden)').length, 0);
+  matchCountEl.textContent = visibleRows;
+}
+searchInput.addEventListener('input', (e) => {
+  const q = e.target.value.toLowerCase().trim();
+  document.querySelectorAll('.kb-row').forEach((row) => {
+    const text = row.textContent.toLowerCase();
+    const hit = q === '' || text.includes(q);
+    row.classList.toggle('hidden', !hit);
+  });
+  document.querySelectorAll('.card-group').forEach((section) => {
+    const visible = section.querySelectorAll('.kb-row:not(.hidden)').length;
+    section.style.display = visible === 0 ? 'none' : '';
+  });
+  updateStat();
+});
+
+// —— 对比模式开关 ——
+const compareToggle = document.querySelector('#toggleCompare');
+const beforePanel = document.querySelector('#beforePanel');
+compareToggle.addEventListener('click', () => {
+  compareToggle.classList.toggle('on');
+  beforePanel.style.display = compareToggle.classList.contains('on') ? '' : 'none';
+});
+
+updateStat();
+</script>
+</body>
+</html>

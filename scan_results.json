@@ -1,0 +1,1374 @@
+{
+  "CORE_FILES": [
+    {
+      "file": "app/core/ai/__init__.py",
+      "size_kb": 0.5,
+      "lines": 14,
+      "status": "skeleton",
+      "reason": "有可执行代码但无类/函数结构",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/__init__.py",
+      "size_kb": 0.1,
+      "lines": 5,
+      "status": "skeleton",
+      "reason": "有可执行代码但无类/函数结构",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/__init__.py",
+      "size_kb": 2.1,
+      "lines": 118,
+      "status": "implemented",
+      "reason": "类:0, 函数:0(实际实现:0), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/ai/llm_clipper.py",
+      "size_kb": 15.5,
+      "lines": 483,
+      "status": "implemented",
+      "reason": "类:1, 函数:8(实际实现:17), 有顶层执行代码",
+      "referenced_by": 4
+    },
+    {
+      "file": "app/core/ai/prompt_templates.py",
+      "size_kb": 9.7,
+      "lines": 245,
+      "status": "implemented",
+      "reason": "类:0, 函数:2(实际实现:2), 有顶层执行代码",
+      "referenced_by": 4
+    },
+    {
+      "file": "app/core/ai/viral_detector.py",
+      "size_kb": 21.5,
+      "lines": 648,
+      "status": "implemented",
+      "reason": "类:4, 函数:12(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/ai_editing_assistant.py",
+      "size_kb": 22.9,
+      "lines": 601,
+      "status": "implemented",
+      "reason": "类:10, 函数:0(实际实现:26)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/ai_enhanced.py",
+      "size_kb": 10.8,
+      "lines": 308,
+      "status": "implemented",
+      "reason": "类:2, 函数:2(实际实现:15), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/ai_tools.py",
+      "size_kb": 3.9,
+      "lines": 100,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:3)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/alert_system.py",
+      "size_kb": 21.1,
+      "lines": 645,
+      "status": "implemented",
+      "reason": "类:7, 函数:1(实际实现:27), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/api_gateway.py",
+      "size_kb": 26.1,
+      "lines": 722,
+      "status": "implemented",
+      "reason": "类:12, 函数:5(实际实现:44), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/api_platform.py",
+      "size_kb": 30.7,
+      "lines": 939,
+      "status": "implemented",
+      "reason": "类:17, 函数:2(实际实现:50), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/apm_monitoring.py",
+      "size_kb": 23.0,
+      "lines": 703,
+      "status": "implemented",
+      "reason": "类:7, 函数:5(实际实现:35), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/asset_library.py",
+      "size_kb": 9.9,
+      "lines": 265,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:16)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/asset_manager.py",
+      "size_kb": 7.8,
+      "lines": 205,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:20), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/asset_repository.py",
+      "size_kb": 3.5,
+      "lines": 99,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:10)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/async_client.py",
+      "size_kb": 11.7,
+      "lines": 349,
+      "status": "implemented",
+      "reason": "类:3, 函数:2(实际实现:22), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/audio_manager.py",
+      "size_kb": 7.9,
+      "lines": 239,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:20)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/audio_processor.py",
+      "size_kb": 22.0,
+      "lines": 577,
+      "status": "implemented",
+      "reason": "类:9, 函数:0(实际实现:34)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/audio_scopes.py",
+      "size_kb": 7.2,
+      "lines": 226,
+      "status": "implemented",
+      "reason": "类:7, 函数:0(实际实现:8), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/auto_backup.py",
+      "size_kb": 8.2,
+      "lines": 249,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:16), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/automation/__init__.py",
+      "size_kb": 13.7,
+      "lines": 385,
+      "status": "implemented",
+      "reason": "类:3, 函数:2(实际实现:15), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/base_repository.py",
+      "size_kb": 4.4,
+      "lines": 129,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:10), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/cache_enhanced.py",
+      "size_kb": 12.9,
+      "lines": 362,
+      "status": "implemented",
+      "reason": "类:3, 函数:2(实际实现:18), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/cache_manager.py",
+      "size_kb": 8.3,
+      "lines": 236,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/cache_manager_refactor.py",
+      "size_kb": 2.1,
+      "lines": 64,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:6)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/cache_strategy_optimization.py",
+      "size_kb": 20.9,
+      "lines": 624,
+      "status": "implemented",
+      "reason": "类:10, 函数:2(实际实现:47), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/cache_system.py",
+      "size_kb": 19.4,
+      "lines": 591,
+      "status": "implemented",
+      "reason": "类:5, 函数:1(实际实现:47), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/chapter_markers.py",
+      "size_kb": 7.5,
+      "lines": 241,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:18), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/code_refactoring.py",
+      "size_kb": 23.4,
+      "lines": 643,
+      "status": "implemented",
+      "reason": "类:6, 函数:3(实际实现:27), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/config_manager.py",
+      "size_kb": 14.3,
+      "lines": 426,
+      "status": "implemented",
+      "reason": "类:7, 函数:0(实际实现:25), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/conflict_resolution.py",
+      "size_kb": 26.4,
+      "lines": 708,
+      "status": "implemented",
+      "reason": "类:13, 函数:2(实际实现:37), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/developer_community.py",
+      "size_kb": 36.0,
+      "lines": 1078,
+      "status": "implemented",
+      "reason": "类:22, 函数:2(实际实现:74), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/editing_capabilities.py",
+      "size_kb": 4.8,
+      "lines": 134,
+      "status": "implemented",
+      "reason": "类:0, 函数:2(实际实现:2), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/editor_interface.py",
+      "size_kb": 24.1,
+      "lines": 777,
+      "status": "implemented",
+      "reason": "类:16, 函数:1(实际实现:28), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/editor_scheduler.py",
+      "size_kb": 10.4,
+      "lines": 272,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:18), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/effect_manager.py",
+      "size_kb": 11.6,
+      "lines": 373,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/exceptions.py",
+      "size_kb": 11.5,
+      "lines": 409,
+      "status": "implemented",
+      "reason": "类:16, 函数:3(实际实现:15), 有顶层执行代码",
+      "referenced_by": 13
+    },
+    {
+      "file": "app/core/file_operator.py",
+      "size_kb": 2.7,
+      "lines": 90,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:10)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/frame_navigator.py",
+      "size_kb": 5.2,
+      "lines": 183,
+      "status": "implemented",
+      "reason": "类:2, 函数:4(实际实现:27), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/gpu_acceleration.py",
+      "size_kb": 21.0,
+      "lines": 618,
+      "status": "implemented",
+      "reason": "类:6, 函数:4(实际实现:30), 有顶层执行代码",
+      "referenced_by": 6
+    },
+    {
+      "file": "app/core/history_manager.py",
+      "size_kb": 4.6,
+      "lines": 146,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:18)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/i18n.py",
+      "size_kb": 9.8,
+      "lines": 311,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:7), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/keyframe_animation.py",
+      "size_kb": 8.0,
+      "lines": 238,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:23)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/local_asset_manager.py",
+      "size_kb": 21.5,
+      "lines": 625,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:31), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/log_aggregation.py",
+      "size_kb": 19.9,
+      "lines": 576,
+      "status": "implemented",
+      "reason": "类:5, 函数:2(实际实现:30), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/log_manager.py",
+      "size_kb": 8.5,
+      "lines": 252,
+      "status": "implemented",
+      "reason": "类:4, 函数:3(实际实现:20), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/logging_enhanced.py",
+      "size_kb": 18.5,
+      "lines": 524,
+      "status": "implemented",
+      "reason": "类:5, 函数:7(实际实现:31), 有顶层执行代码",
+      "referenced_by": 13
+    },
+    {
+      "file": "app/core/lut_loader.py",
+      "size_kb": 9.3,
+      "lines": 279,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:11), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/mask_system.py",
+      "size_kb": 8.4,
+      "lines": 266,
+      "status": "implemented",
+      "reason": "类:4, 函数:0(实际实现:9), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/memory_optimization.py",
+      "size_kb": 22.6,
+      "lines": 679,
+      "status": "implemented",
+      "reason": "类:4, 函数:3(实际实现:29), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/metadata_extractor.py",
+      "size_kb": 4.4,
+      "lines": 111,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:4)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/multithread_rendering.py",
+      "size_kb": 18.8,
+      "lines": 572,
+      "status": "implemented",
+      "reason": "类:5, 函数:2(实际实现:30), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/multitrack_editor.py",
+      "size_kb": 24.5,
+      "lines": 790,
+      "status": "implemented",
+      "reason": "类:9, 函数:0(实际实现:65)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/music_recommendation.py",
+      "size_kb": 22.1,
+      "lines": 633,
+      "status": "implemented",
+      "reason": "类:7, 函数:0(实际实现:20)",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/permission_management.py",
+      "size_kb": 21.7,
+      "lines": 655,
+      "status": "implemented",
+      "reason": "类:7, 函数:1(实际实现:26), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/platform_adapter.py",
+      "size_kb": 10.9,
+      "lines": 296,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:10), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/plugin_authentication.py",
+      "size_kb": 23.6,
+      "lines": 622,
+      "status": "implemented",
+      "reason": "类:7, 函数:0(实际实现:27), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/plugin_hotloader.py",
+      "size_kb": 25.7,
+      "lines": 707,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:65)",
+      "referenced_by": 4
+    },
+    {
+      "file": "app/core/plugin_loader.py",
+      "size_kb": 37.4,
+      "lines": 1055,
+      "status": "implemented",
+      "reason": "类:16, 函数:0(实际实现:53)",
+      "referenced_by": 12
+    },
+    {
+      "file": "app/core/plugin_manager.py",
+      "size_kb": 9.8,
+      "lines": 284,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:22)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/plugin_marketplace.py",
+      "size_kb": 15.5,
+      "lines": 462,
+      "status": "implemented",
+      "reason": "类:5, 函数:2(实际实现:24), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/plugin_sandbox.py",
+      "size_kb": 21.1,
+      "lines": 587,
+      "status": "implemented",
+      "reason": "类:5, 函数:1(实际实现:21), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/preset_manager.py",
+      "size_kb": 10.8,
+      "lines": 328,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/preview_generator.py",
+      "size_kb": 2.1,
+      "lines": 63,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:5)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/preview_manager.py",
+      "size_kb": 17.7,
+      "lines": 473,
+      "status": "implemented",
+      "reason": "类:1, 函数:1(实际实现:34), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/project_manager.py",
+      "size_kb": 10.0,
+      "lines": 294,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:9), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/project_repository.py",
+      "size_kb": 4.2,
+      "lines": 116,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:8)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/proxy_media.py",
+      "size_kb": 12.3,
+      "lines": 346,
+      "status": "implemented",
+      "reason": "类:3, 函数:2(实际实现:15), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/realtime_collaboration.py",
+      "size_kb": 25.3,
+      "lines": 744,
+      "status": "implemented",
+      "reason": "类:16, 函数:2(实际实现:41), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/render_manager.py",
+      "size_kb": 28.1,
+      "lines": 809,
+      "status": "implemented",
+      "reason": "类:12, 函数:2(实际实现:28), 有顶层执行代码",
+      "referenced_by": 6
+    },
+    {
+      "file": "app/core/secure_store.py",
+      "size_kb": 7.9,
+      "lines": 249,
+      "status": "implemented",
+      "reason": "类:0, 函数:9(实际实现:9), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/security.py",
+      "size_kb": 30.8,
+      "lines": 939,
+      "status": "implemented",
+      "reason": "类:10, 函数:5(实际实现:51), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/core/service_decomposition.py",
+      "size_kb": 18.8,
+      "lines": 571,
+      "status": "implemented",
+      "reason": "类:8, 函数:6(实际实现:32), 有顶层执行代码",
+      "referenced_by": 6
+    },
+    {
+      "file": "app/core/shortcut_manager.py",
+      "size_kb": 23.1,
+      "lines": 561,
+      "status": "implemented",
+      "reason": "类:4, 函数:0(实际实现:24), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/smart_cache.py",
+      "size_kb": 10.6,
+      "lines": 315,
+      "status": "implemented",
+      "reason": "类:5, 函数:2(实际实现:21), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/speed_ramping.py",
+      "size_kb": 10.2,
+      "lines": 313,
+      "status": "implemented",
+      "reason": "类:3, 函数:3(实际实现:14), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/startup_optimization.py",
+      "size_kb": 14.3,
+      "lines": 462,
+      "status": "implemented",
+      "reason": "类:4, 函数:6(实际实现:31), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/subtitle_generator.py",
+      "size_kb": 20.7,
+      "lines": 594,
+      "status": "implemented",
+      "reason": "类:10, 函数:0(实际实现:30)",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/subtitle_manager.py",
+      "size_kb": 13.1,
+      "lines": 347,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:30)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/test_base.py",
+      "size_kb": 13.4,
+      "lines": 431,
+      "status": "implemented",
+      "reason": "类:8, 函数:4(实际实现:52), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/thread_safety.py",
+      "size_kb": 11.8,
+      "lines": 371,
+      "status": "implemented",
+      "reason": "类:6, 函数:1(实际实现:38), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/timeline/__init__.py",
+      "size_kb": 4.3,
+      "lines": 129,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:7), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/timeline_dsl.py",
+      "size_kb": 27.5,
+      "lines": 807,
+      "status": "implemented",
+      "reason": "类:16, 函数:2(实际实现:37), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/timeline_manager.py",
+      "size_kb": 28.8,
+      "lines": 889,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:32), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/title_templates.py",
+      "size_kb": 10.6,
+      "lines": 247,
+      "status": "implemented",
+      "reason": "类:2, 函数:4(实际实现:4), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/track_manager.py",
+      "size_kb": 2.1,
+      "lines": 54,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:4)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/transition_manager.py",
+      "size_kb": 14.0,
+      "lines": 419,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/transitions.py",
+      "size_kb": 14.8,
+      "lines": 355,
+      "status": "implemented",
+      "reason": "类:2, 函数:6(实际实现:6), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/type_annotation_enhancement.py",
+      "size_kb": 18.5,
+      "lines": 535,
+      "status": "implemented",
+      "reason": "类:5, 函数:4(实际实现:24), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/update_manager.py",
+      "size_kb": 7.5,
+      "lines": 246,
+      "status": "implemented",
+      "reason": "类:2, 函数:1(实际实现:18), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/validation.py",
+      "size_kb": 17.1,
+      "lines": 545,
+      "status": "implemented",
+      "reason": "类:15, 函数:5(实际实现:33), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/version_control.py",
+      "size_kb": 33.9,
+      "lines": 965,
+      "status": "implemented",
+      "reason": "类:13, 函数:2(实际实现:59), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/video_effects.py",
+      "size_kb": 18.3,
+      "lines": 562,
+      "status": "implemented",
+      "reason": "类:6, 函数:0(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/cpp_engine/__init__.py",
+      "size_kb": 14.8,
+      "lines": 463,
+      "status": "implemented",
+      "reason": "类:4, 函数:3(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/cpp_engine/build.py",
+      "size_kb": 2.7,
+      "lines": 93,
+      "status": "implemented",
+      "reason": "类:0, 函数:0(实际实现:0), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/cpp_engine/install_ffmpeg_dev.py",
+      "size_kb": 4.1,
+      "lines": 113,
+      "status": "implemented",
+      "reason": "类:0, 函数:1(实际实现:1), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/cpp_engine/performance_optimizer.py",
+      "size_kb": 10.5,
+      "lines": 325,
+      "status": "implemented",
+      "reason": "类:4, 函数:1(实际实现:11), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/video_processing/cpp_engine/test_cpp_engine.py",
+      "size_kb": 5.6,
+      "lines": 178,
+      "status": "implemented",
+      "reason": "类:2, 函数:1(实际实现:10), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/drama_mlt.py",
+      "size_kb": 10.5,
+      "lines": 297,
+      "status": "implemented",
+      "reason": "类:3, 函数:1(实际实现:13), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processing/mlt_engine.py",
+      "size_kb": 16.5,
+      "lines": 462,
+      "status": "implemented",
+      "reason": "类:10, 函数:1(实际实现:17), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/video_processing/mlt_engine_cpp.py",
+      "size_kb": 28.0,
+      "lines": 802,
+      "status": "implemented",
+      "reason": "类:4, 函数:10(实际实现:45), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/video_processing/pyav_engine.py",
+      "size_kb": 14.7,
+      "lines": 395,
+      "status": "implemented",
+      "reason": "类:3, 函数:2(实际实现:16), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/video_processor.py",
+      "size_kb": 12.4,
+      "lines": 311,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/video_processor_stable.py",
+      "size_kb": 12.7,
+      "lines": 355,
+      "status": "implemented",
+      "reason": "类:5, 函数:2(实际实现:23), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/core/virtual_timeline.py",
+      "size_kb": 15.7,
+      "lines": 433,
+      "status": "implemented",
+      "reason": "类:6, 函数:1(实际实现:25), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/voice_generator.py",
+      "size_kb": 18.6,
+      "lines": 516,
+      "status": "implemented",
+      "reason": "类:8, 函数:0(实际实现:21)",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/core/waveform_generator.py",
+      "size_kb": 9.9,
+      "lines": 305,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:10), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/performance_benchmark.py",
+      "size_kb": 18.2,
+      "lines": 540,
+      "status": "unknown",
+      "reason": "语法错误无法解析",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/core/service_discovery_enhanced.py",
+      "size_kb": 25.3,
+      "lines": 680,
+      "status": "unknown",
+      "reason": "语法错误无法解析",
+      "referenced_by": 0
+    }
+  ],
+  "LEGO_FILES": [
+    {
+      "file": "app/modules/lego/utils/__init__.py",
+      "size_kb": 0.1,
+      "lines": 4,
+      "status": "skeleton",
+      "reason": "有可执行代码但无类/函数结构",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/__init__.py",
+      "size_kb": 0.8,
+      "lines": 20,
+      "status": "implemented",
+      "reason": "类:0, 函数:0(实际实现:0), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/account_analyzer.py",
+      "size_kb": 7.7,
+      "lines": 198,
+      "status": "implemented",
+      "reason": "类:1, 函数:1(实际实现:8), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/account_skills.py",
+      "size_kb": 20.1,
+      "lines": 491,
+      "status": "implemented",
+      "reason": "类:4, 函数:1(实际实现:24), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/account_widgets.py",
+      "size_kb": 24.3,
+      "lines": 644,
+      "status": "implemented",
+      "reason": "类:6, 函数:2(实际实现:19)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/agent_workflow.py",
+      "size_kb": 26.9,
+      "lines": 806,
+      "status": "implemented",
+      "reason": "类:10, 函数:1(实际实现:25), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/ai_clip_flow.py",
+      "size_kb": 10.6,
+      "lines": 293,
+      "status": "implemented",
+      "reason": "类:6, 函数:0(实际实现:4)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/auth.py",
+      "size_kb": 22.1,
+      "lines": 654,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:45), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/base_block.py",
+      "size_kb": 8.2,
+      "lines": 298,
+      "status": "implemented",
+      "reason": "类:8, 函数:0(实际实现:19)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/batch_task_manager.py",
+      "size_kb": 14.8,
+      "lines": 463,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:18), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/bilibili_playwright_api.py",
+      "size_kb": 11.4,
+      "lines": 298,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:9), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/block_loader.py",
+      "size_kb": 11.0,
+      "lines": 341,
+      "status": "implemented",
+      "reason": "类:3, 函数:0(实际实现:27), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/builtin_blocks.py",
+      "size_kb": 24.9,
+      "lines": 704,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:30), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/cloud_api.py",
+      "size_kb": 49.1,
+      "lines": 1481,
+      "status": "implemented",
+      "reason": "类:18, 函数:0(实际实现:56), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/core.py",
+      "size_kb": 16.6,
+      "lines": 537,
+      "status": "implemented",
+      "reason": "类:6, 函数:0(实际实现:60), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/data_collector.py",
+      "size_kb": 20.9,
+      "lines": 578,
+      "status": "implemented",
+      "reason": "类:9, 函数:0(实际实现:39), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/douyin_playwright_api.py",
+      "size_kb": 11.8,
+      "lines": 323,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:8), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/drama_crawler.py",
+      "size_kb": 54.5,
+      "lines": 1307,
+      "status": "implemented",
+      "reason": "类:10, 函数:1(实际实现:57), 有顶层执行代码",
+      "referenced_by": 8
+    },
+    {
+      "file": "app/modules/lego/drama_crawler_example.py",
+      "size_kb": 2.8,
+      "lines": 95,
+      "status": "implemented",
+      "reason": "类:0, 函数:1(实际实现:1), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/drama_understanding_engine.py",
+      "size_kb": 37.7,
+      "lines": 1003,
+      "status": "implemented",
+      "reason": "类:11, 函数:2(实际实现:24), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/email_service.py",
+      "size_kb": 12.3,
+      "lines": 355,
+      "status": "implemented",
+      "reason": "类:3, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/email_verify.py",
+      "size_kb": 10.4,
+      "lines": 318,
+      "status": "implemented",
+      "reason": "类:3, 函数:0(实际实现:12), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/enhanced_thread_pool.py",
+      "size_kb": 16.4,
+      "lines": 452,
+      "status": "implemented",
+      "reason": "类:6, 函数:2(实际实现:13), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/flow_orchestrator.py",
+      "size_kb": 16.4,
+      "lines": 476,
+      "status": "implemented",
+      "reason": "类:6, 函数:0(实际实现:25)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/license_manager.py",
+      "size_kb": 16.8,
+      "lines": 510,
+      "status": "implemented",
+      "reason": "类:5, 函数:3(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/login_window.py",
+      "size_kb": 32.2,
+      "lines": 946,
+      "status": "implemented",
+      "reason": "类:8, 函数:0(实际实现:42)",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/main_window.py",
+      "size_kb": 38.4,
+      "lines": 1113,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:47), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/model_management.py",
+      "size_kb": 70.7,
+      "lines": 1637,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:50), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/modules.py",
+      "size_kb": 377.3,
+      "lines": 9133,
+      "status": "implemented",
+      "reason": "类:24, 函数:2(实际实现:286), 有顶层执行代码",
+      "referenced_by": 4
+    },
+    {
+      "file": "app/modules/lego/ollama_client.py",
+      "size_kb": 16.8,
+      "lines": 492,
+      "status": "implemented",
+      "reason": "类:3, 函数:1(实际实现:19), 有顶层执行代码",
+      "referenced_by": 3
+    },
+    {
+      "file": "app/modules/lego/online_materials.py",
+      "size_kb": 12.0,
+      "lines": 326,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:15), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/openclow_engine.py",
+      "size_kb": 16.1,
+      "lines": 411,
+      "status": "implemented",
+      "reason": "类:1, 函数:1(实际实现:20), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/plugin_manager_legacy.py",
+      "size_kb": 11.1,
+      "lines": 274,
+      "status": "implemented",
+      "reason": "类:2, 函数:1(实际实现:17), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/plugin_store.py",
+      "size_kb": 18.8,
+      "lines": 526,
+      "status": "implemented",
+      "reason": "类:4, 函数:1(实际实现:17), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/professional_video_engine.py",
+      "size_kb": 34.2,
+      "lines": 1031,
+      "status": "implemented",
+      "reason": "类:10, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/render/__init__.py",
+      "size_kb": 8.0,
+      "lines": 277,
+      "status": "implemented",
+      "reason": "类:4, 函数:0(实际实现:22), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/render/export_render.py",
+      "size_kb": 16.2,
+      "lines": 427,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:21), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/render/gpu_render.py",
+      "size_kb": 16.6,
+      "lines": 427,
+      "status": "implemented",
+      "reason": "类:2, 函数:1(实际实现:34), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/render/preview_render.py",
+      "size_kb": 8.2,
+      "lines": 223,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:16), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/render/soft_render.py",
+      "size_kb": 9.9,
+      "lines": 270,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:14), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/settings_module.py",
+      "size_kb": 74.4,
+      "lines": 1556,
+      "status": "implemented",
+      "reason": "类:5, 函数:0(实际实现:56)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/skill_engine.py",
+      "size_kb": 20.2,
+      "lines": 590,
+      "status": "implemented",
+      "reason": "类:8, 函数:0(实际实现:43), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/smart_editing_engine.py",
+      "size_kb": 19.5,
+      "lines": 568,
+      "status": "implemented",
+      "reason": "类:6, 函数:0(实际实现:16), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/stealth_browser.py",
+      "size_kb": 8.4,
+      "lines": 249,
+      "status": "implemented",
+      "reason": "类:1, 函数:4(实际实现:10), 有顶层执行代码",
+      "referenced_by": 5
+    },
+    {
+      "file": "app/modules/lego/thread_pool.py",
+      "size_kb": 2.6,
+      "lines": 96,
+      "status": "implemented",
+      "reason": "类:1, 函数:1(实际实现:8), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/tiktokhub_douyin_api.py",
+      "size_kb": 9.6,
+      "lines": 271,
+      "status": "implemented",
+      "reason": "类:1, 函数:2(实际实现:6), 有顶层执行代码",
+      "referenced_by": 2
+    },
+    {
+      "file": "app/modules/lego/timeline_ui.py",
+      "size_kb": 4.9,
+      "lines": 148,
+      "status": "implemented",
+      "reason": "类:3, 函数:0(实际实现:10)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/top0_integration.py",
+      "size_kb": 13.5,
+      "lines": 412,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:11), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/user_prefs_store.py",
+      "size_kb": 4.0,
+      "lines": 125,
+      "status": "implemented",
+      "reason": "类:0, 函数:7(实际实现:7), 有顶层执行代码",
+      "referenced_by": 4
+    },
+    {
+      "file": "app/modules/lego/utils/hardware_monitor.py",
+      "size_kb": 2.6,
+      "lines": 68,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:3), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/utils/thread_pool.py",
+      "size_kb": 1.2,
+      "lines": 44,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:5)",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editing_skill.py",
+      "size_kb": 11.7,
+      "lines": 309,
+      "status": "implemented",
+      "reason": "类:3, 函数:1(实际实现:20), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/__init__.py",
+      "size_kb": 0.7,
+      "lines": 19,
+      "status": "implemented",
+      "reason": "类:0, 函数:0(实际实现:0), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/ai_integration.py",
+      "size_kb": 16.9,
+      "lines": 457,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:18), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/frame_editor.py",
+      "size_kb": 9.5,
+      "lines": 271,
+      "status": "implemented",
+      "reason": "类:2, 函数:0(实际实现:13), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/multi_track_editor.py",
+      "size_kb": 12.3,
+      "lines": 329,
+      "status": "implemented",
+      "reason": "类:4, 函数:0(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/professional_editor.py",
+      "size_kb": 11.7,
+      "lines": 336,
+      "status": "implemented",
+      "reason": "类:4, 函数:0(实际实现:27), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/timeline_ui.py",
+      "size_kb": 10.2,
+      "lines": 278,
+      "status": "implemented",
+      "reason": "类:1, 函数:0(实际实现:19), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_editor/undo_manager.py",
+      "size_kb": 12.0,
+      "lines": 338,
+      "status": "implemented",
+      "reason": "类:3, 函数:0(实际实现:38), 有顶层执行代码",
+      "referenced_by": 0
+    },
+    {
+      "file": "app/modules/lego/video_processor.py",
+      "size_kb": 15.2,
+      "lines": 549,
+      "status": "implemented",
+      "reason": "类:3, 函数:11(实际实现:14), 有顶层执行代码",
+      "referenced_by": 1
+    },
+    {
+      "file": "app/modules/lego/viral_optimization_engine.py",
+      "size_kb": 23.4,
+      "lines": 650,
+      "status": "implemented",
+      "reason": "类:7, 函数:0(实际实现:15), 有顶层执行代码",
+      "referenced_by": 0
+    }
+  ]
+}

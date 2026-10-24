@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>拾岚 · Shilan —— 拾光剪影代表形象</title>
+<style>
+  :root {
+    --bg: #0b0e13;
+    --panel: #121722;
+    --panel2: #171d2a;
+    --line: #232c3d;
+    --text: #e7ecf5;
+    --muted: #93a0b5;
+    --orange: #f7a061;
+    --blue: #6c9fff;
+    --mint: #57c7a2;
+    --pink: #d98282;
+    --sleepy: #c98a5e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 6vw 72px;
+    background: radial-gradient(1200px 600px at 70% -10%, #1a2133 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 14px/1.7 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  }
+  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: 1px; }
+  h1 span { color: var(--orange); }
+  .sub { color: var(--muted); margin-bottom: 36px; }
+  h2 { font-size: 16px; margin: 44px 0 14px; padding-left: 10px; border-left: 3px solid var(--orange); }
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .maincard img { width: 100%; border-radius: 12px; display: block; }
+  .maincard p { color: var(--muted); font-size: 12px; margin: 12px 2px 0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 54px; height: 38px; border-radius: 8px; border: 1px solid #00000055; position: relative; }
+  .swatch small { position: absolute; left: 4px; bottom: 3px; font-size: 9px; color: #00000099; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  code { background: #1b2230; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; color: var(--orange); }
+  /* ── 桌宠舞台 ── */
+  .stage { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
+  .stage-btns { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+  .stage-btns button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 9px 12px; cursor: pointer; text-align: left; font: inherit; font-size: 13px;
+  }
+  .stage-btns button:hover { border-color: var(--orange); }
+  .stage-btns button.on { border-color: var(--orange); background: #241a12; color: var(--orange); }
+  .petbox { position: relative; width: 224px; height: 300px; display: flex; align-items: flex-end; justify-content: center; }
+  .pet { position: relative; width: 150px; height: 224px; }
+  .pet-hop, .pet-lift, .pet-bob, .pet-curious, .pet-frames { display: flex; justify-content: center; }
+  .pet-lift { animation: floaty 2.9s ease-in-out infinite; }
+  .pet-bob { transform-origin: 50% 100%; animation: breathe 3.6s ease-in-out infinite; }
+  .pet-curious { transform-origin: 50% 100%; transform: rotate(var(--curious, 0deg)); transition: transform .28s ease-out; }
+  .pet-frames { position: relative; }
+  .pet-frames img { display: block; height: 196px; width: auto; pointer-events: none;
+    filter: drop-shadow(0 0 14px var(--rim, #f7a06155)); transition: filter .5s; }
+  .pet-frames img.blink, .pet-frames img.cheer { position: absolute; inset: 0; margin: auto; height: 100%; opacity: 0; }
+  .pet-frames.is-blink img.blink { opacity: 1; }
+  .pet-frames.is-cheer img.cheer { opacity: 1; }
+  .pet-shadow { width: 92px; height: 13px; margin-top: -9px; border-radius: 50%;
+    background: radial-gradient(ellipse at center, #00000080 0%, #00000000 68%);
+    animation: shadowbreathe 3.6s ease-in-out infinite; }
+  .bubble { position: absolute; left: 50%; bottom: calc(100% - 12px); transform: translateX(-50%);
+    max-width: 168px; padding: 5px 10px; border-radius: 10px; white-space: nowrap;
+    border: 1px solid var(--rim, #f7a06166); background: #0e141ceb; color: var(--text);
+    font-size: 11px; line-height: 16px; pointer-events: none; }
+  .name { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); white-space: nowrap; }
+  /* 状态 */
+  .pet[data-state="thinking"] .pet-bob { animation-duration: 1.7s; }
+  .pet[data-state="awaiting"] .pet-hop { animation: hoploop 1.9s ease-in-out infinite; transform-origin: 50% 100%; }
+  .pet[data-state="success"] .pet-anim { animation: hoponce .62s ease-out; transform-origin: 50% 100%; }
+  .pet[data-state="error"] .pet-anim { animation: shake .5s ease-in-out; transform-origin: 50% 95%; }
+  .pet[data-sleepy="1"] .pet-bob { animation: breathesleepy 5.2s ease-in-out infinite; }
+  .pet[data-sleepy="1"] img { filter: drop-shadow(0 0 10px #c98a5e55) saturate(.92) brightness(.96); }
+  /* 待机小动作 */
+  .pet-frames.anim-tilt { animation: tilt .9s ease-in-out; transform-origin: 50% 88%; }
+  .pet-frames.anim-sway { animation: sway 2.4s ease-in-out; transform-origin: 50% 92%; }
+  .pet-frames.anim-perk { animation: perk .5s ease-out; transform-origin: 50% 100%; }
+  @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+  @keyframes breathe { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.012,1.024); } }
+  @keyframes breathesleepy { 0%,100% { transform: translateY(3px) scale(1,1); } 50% { transform: translateY(3px) scale(1.008,1.018); } }
+  @keyframes shadowbreathe { 0%,100% { transform: scaleX(1); opacity:.8; } 50% { transform: scaleX(.96); opacity:.62; } }
+  @keyframes hoploop { 0%,55%,100% { transform: translateY(0) scale(1,1); } 62% { transform: translateY(-15px) scale(.98,1.03); } 76% { transform: translateY(0) scale(1,1); } 82% { transform: translateY(0) scale(1.07,.9); } }
+  @keyframes hoponce { 0% { transform: translateY(0) scale(1,1); } 30% { transform: translateY(-18px) scale(.97,1.04); } 68% { transform: translateY(0) scale(1,1); } 76% { transform: translateY(0) scale(1.09,.88); } 88% { transform: translateY(0) scale(.99,1.01); } }
+  @keyframes shake { 0%,100% { transform: rotate(0); } 22% { transform: rotate(3.2deg); } 52% { transform: rotate(-3.4deg); } 78% { transform: rotate(1.8deg); } }
+  @keyframes tilt { 0%,100% { transform: rotate(0); } 35% { transform: rotate(2.2deg); } 70% { transform: rotate(1.4deg); } }
+  @keyframes sway { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-1.2deg); } 75% { transform: rotate(1.2deg); } }
+  @keyframes perk { 0%,100% { transform: scale(1,1); } 40% { transform: scale(.99,1.02); } }
+  @media (prefers-reduced-motion: reduce) {
+    .pet *, .pet { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <h1>拾岚 <span>· Shilan</span></h1>
+  <div class="sub">拾光剪影 · 代表形象 / 导演台常驻小狐狸 —— 她的状态就是画布的真实状态。</div>
+
+  <div class="grid">
+    <div class="card maincard">
+      <img src="../../assets/mascot/shilan-主形象卡-v3-成年比例.png" alt="拾岚主形象" />
+      <p>主形象（成年比例）：狐耳 · 蓝色挑染 · 青瞳 · 圆眼镜 · 藏青旗袍 · 灰白狐尾</p>
+    </div>
+    <div class="card">
+      <table>
+        <tr><th style="width:86px">名字</th><td>拾岚（Shilan），日常称「小拾岚」</td></tr>
+        <tr><th>身份</th><td>画布助手 / 导演台常驻小狐狸</td></tr>
+        <tr><th>性格</th><td>安静、手稳、眼睛很毒。不抢话，但总在你需要时递上那一帧。熟了会有点小骄傲。</td></tr>
+        <tr><th>口头禅</th><td>「这一帧，我帮你盯着。」/「好啦。」/「这步要我继续吗？」</td></tr>
+        <tr><th>名字含义</th><td>「拾」= 拾光；「岚」= 山间雾气 —— 在雾里也能看清</td></tr>
+        <tr><th>双形态</th><td>主形象（成年比例，品牌展示） ↔ 桌宠（Q版 2 头身，画布常驻）—— 同一角色，换装不换人</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2>桌宠状态演示（点击切换，全部来自真实状态机）</h2>
+  <div class="card stage">
+    <div class="petbox">
+      <div class="pet" id="pet" data-state="idle">
+        <div class="bubble" id="bubble" style="display:none"></div>
+        <div class="pet-hop"><div class="pet-lift"><div class="pet-bob"><div class="pet-curious">
+          <div class="pet-anim"><div class="pet-frames" id="frames">
+            <img src="../../vendor/shiguang-canvas/public/mascot/pet_neutral.png" alt="" />
+            <img class="blink" src="../../vendor/shiguang-canvas/public/mascot/pet_blink.png" alt="" />
+            <img class="cheer" src="../../vendor/shiguang-canvas/public/mascot/pet_cheer.png" alt="" />
+          </div></div>
+        </div></div></div></div>
+        <div class="pet-shadow"></div>
+        <div class="name">拾岚</div>
+      </div>
+    </div>
+    <div class="stage-btns" id="btns">
+      <button data-s="idle" class="on">idle · 待命（呼吸+眨眼+待机小动作）</button>
+      <button data-s="thinking">thinking · 正在生成（呼吸加速）</button>
+      <button data-s="awaiting">awaiting · 等你确认（周期小跳）</button>
+      <button data-s="success">success · 完成（蹦跳 + 大笑帧）</button>
+      <button data-s="error">error · 失败（摇头）</button>
+      <button data-s="sleepy">sleepy · 打瞌睡（75s 静置后）</button>
+    </div>
+  </div>
+
+  <h2>状态 → 视觉映射</h2>
+  <div class="card">
+    <table>
+      <tr><th>状态</th><th>触发</th><th>表情帧</th><th>动效</th><th>气泡</th><th>光晕</th></tr>
+      <tr><td><code>idle</code></td><td>无任务</td><td>neutral</td><td>呼吸 3.6s + 浮动 2.9s + 眨眼 2.2~5.5s + 待机小动作</td><td>—</td><td><span class="swatch" style="background:#f7a061;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+      <tr><td><code>thinking</code></td><td>节点生成中</td><td>neutral</td><td>呼吸加速 1.7s</td><td>正在生成…</td><td><span class="swatch" style="background:#7ea6ff;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+      <tr><td><code>awaiting</code></td><td>确认弹窗</td><td>neutral</td><td>周期小跳 1.9s</td><td>这步要我继续吗？</td><td><span class="swatch" style="background:#f97316;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+      <tr><td><code>success</code></td><td>忙 → 完成</td><td>cheer</td><td>一次性蹦跳 0.62s</td><td>好啦</td><td><span class="swatch" style="background:#57c7a2;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+      <tr><td><code>error</code></td><td>节点失败</td><td>neutral</td><td>一次性摇头 0.5s</td><td>出错了</td><td><span class="swatch" style="background:#d98282;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+      <tr><td><code>sleepy</code></td><td>idle 静置 75s</td><td>neutral</td><td>呼吸 5.2s + 下沉 3px</td><td>呼…</td><td><span class="swatch" style="background:#c98a5e;display:inline-block;width:24px;height:14px;vertical-align:middle"></span></td></tr>
+    </table>
+  </div>
+
+  <h2>目标表情帧（待生成 5 张 · 规格见 docs/design/拾岚表情帧规格.md）</h2>
+  <div class="card">
+    <table>
+      <tr><th>id</th><th>文件</th><th>接状态</th><th>设计要点</th><th>状态</th></tr>
+      <tr><td><code>thinking</code></td><td><code>pet_thinking.png</code></td><td>thinking</td><td>眉微皱、视线偏上、耳略前倾</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>sleepy</code></td><td><code>pet_sleepy.png</code></td><td>sleepy</td><td>眼半闭、嘴角放松、头略低</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>sad</code></td><td><code>pet_sad.png</code></td><td>error</td><td>眉尾下垂、耳朵垂下、嘴角向下</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>surprised</code></td><td><code>pet_surprised.png</code></td><td>awaiting</td><td>睁大眼、瞳孔放大、耳竖起</td><td>⏳ 待生成（现回落 neutral）</td></tr>
+      <tr><td><code>proud</code></td><td><code>pet_proud.png</code></td><td><b>不接状态机</b></td><td>下巴微抬、眼睛弯、尾巴翘</td><td>⏳ 待生成（品牌/表情包专用）</td></tr>
+    </table>
+    <p class="sub" style="margin:12px 2px 0">硬规格：316×480 透明底、质心与 neutral 偏差 ≤2px（守卫自动判定）。缺素材时代码诚实回落 neutral，<b>不假装有表情</b>；图到位后只改 <code>ready: true</code> 即自动点亮。</p>
+  </div>
+
+  <h2>配色</h2>
+  <div class="card">
+    <div class="row">
+      <div class="swatch" style="background:#f7a061"><small>#F7A061</small></div>
+      <div class="swatch" style="background:#fff3e6"><small>#FFF3E6</small></div>
+      <div class="swatch" style="background:#b4663a"><small>#B4663A</small></div>
+      <div class="swatch" style="background:#3ec9c0"><small>#3EC9C0</small></div>
+      <div class="swatch" style="background:#1b2040"><small>#1B2040</small></div>
+      <div class="swatch" style="background:#6c9fff"><small>#6C9FFF</small></div>
+      <div class="swatch" style="background:#57c7a2"><small>#57C7A2</small></div>
+      <div class="swatch" style="background:#c98a5e"><small>#C98A5E</small></div>
+    </div>
+  </div>
+
+  <h2>使用场景</h2>
+  <div class="card">
+    <table>
+      <tr><th>场景</th><th>形态</th><th>尺寸</th><th>现状</th></tr>
+      <tr><td>画布右下角桌宠</td><td>Q版</td><td>高 196px</td><td>✅ 已上线（点击 = Agent 入口）</td></tr>
+      <tr><td>Agent 面板入口</td><td>Q版</td><td>同左</td><td>✅ 点击桌宠打开</td></tr>
+      <tr><td>关于页</td><td>主形象</td><td>96×144</td><td>✅ 本次新增</td></tr>
+      <tr><td>启动页 / 欢迎页</td><td>主形象</td><td>待定</td><td>⏳ 建议</td></tr>
+      <tr><td>系统托盘</td><td>Q版头像</td><td>32×32</td><td>⏳ 建议</td></tr>
+    </table>
+  </div>
+
+  <div class="sub" style="margin-top:34px">规范单一事实源：<code>docs/design/拾岚形象规范.md</code> · 代码：<code>@shiguang/libtv/src/mascot/</code> · 素材：<code>assets/mascot/</code></div>
+
+<script>
+  var pet = document.getElementById("pet");
+  var frames = document.getElementById("frames");
+  var bubble = document.getElementById("bubble");
+
+  var STATUS = {
+    idle:     { bubble: null,        rim: "#f7a061" },
+    thinking: { bubble: "正在生成…", rim: "#7ea6ff" },
+    awaiting: { bubble: "这步要我继续吗？", rim: "#f97316" },
+    success:  { bubble: "好啦",       rim: "#57c7a2" },
+    error:    { bubble: "出错了",     rim: "#d98282" },
+    sleepy:   { bubble: "呼…",        rim: "#c98a5e" }
+  };
+
+  var current = "idle";
+
+  function applyState(s) {
+    current = s;
+    var cfg = STATUS[s];
+    pet.setAttribute("data-state", s === "sleepy" ? "idle" : s);
+    if (s === "sleepy") { pet.setAttribute("data-sleepy", "1"); } else { pet.removeAttribute("data-sleepy"); }
+    pet.style.setProperty("--rim", cfg.rim);
+    frames.classList.toggle("is-cheer", s === "success");
+    frames.classList.remove("is-blink");
+    if (cfg.bubble) {
+      bubble.style.display = "";
+      bubble.textContent = cfg.bubble;
+      bubble.style.borderColor = cfg.rim + "77";
+    } else {
+      bubble.style.display = "none";
+    }
+    document.querySelectorAll("#btns button").forEach(function (b) {
+      b.classList.toggle("on", b.getAttribute("data-s") === s);
+    });
+  }
+
+  document.getElementById("btns").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    applyState(btn.getAttribute("data-s"));
+  });
+
+  /* 眨眼：2.2~5.5s 随机，180ms —— 与 mascotMotion.nextBlinkGap 同分布 */
+  function blinkLoop() {
+    var gap = 2200 + Math.random() * 3300;
+    setTimeout(function () {
+      if (current !== "success") {
+        frames.classList.add("is-blink");
+        setTimeout(function () { frames.classList.remove("is-blink"); }, 180);
+      }
+      blinkLoop();
+    }, gap);
+  }
+  blinkLoop();
+
+  /* 待机小动作：4~9s 一次（歪头 / 轻摇 / 抖耳）—— 与 pickAmbientKind 同分布 */
+  function ambientLoop() {
+    var gap = 4000 + Math.random() * 5000;
+    setTimeout(function () {
+      if (current === "idle") {
+        var r = Math.random();
+        var kind = r < 0.45 ? "tilt" : (r < 0.8 ? "sway" : "perk");
+        frames.classList.remove("anim-tilt", "anim-sway", "anim-perk");
+        void frames.offsetWidth;
+        frames.classList.add("anim-" + kind);
+      }
+      ambientLoop();
+    }, gap);
+  }
+  ambientLoop();
+
+  /* 好奇：指针在 160px 内时朝指针轻倾 <=2° */
+  document.addEventListener("pointermove", function (e) {
+    var box = pet.getBoundingClientRect();
+    var dx = e.clientX - (box.left + box.width / 2);
+    var dy = e.clientY - (box.top + box.height / 2);
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var deg = 0;
+    if (dist < 160 && dist > 0) {
+      var falloff = 1 - dist / 160;
+      deg = (dx > 0 ? 1 : -1) * 2 * falloff;
+    }
+    pet.querySelector(".pet-curious").style.setProperty("--curious", deg.toFixed(2) + "deg");
+  });
+</script>
+</body>
+</html>

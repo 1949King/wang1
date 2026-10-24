@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "guardvibe": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "guardvibe"
+      ],
+      "env": {
+        "START_MCP_TIMEOUT_MS": "60000",
+        "RUN_MCP_TIMEOUT_MS": "60000"
+      }
+    }
+  }
+}
