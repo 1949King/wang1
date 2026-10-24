@@ -1,5 +1,34 @@
 # 拾光剪影 — 变更日志
 
+## 画布自愈 + 设置导航修复（2026-10-25，授权解冻 stage3d-core）
+
+> 用户截图：① AI 画布黑屏「画布页面加载失败（请点刷新或启动画布）」；② 点设置弹「导航中无模块「settings」」。
+
+### 根因
+
+| # | 根因 | 证据 |
+|---|---|---|
+| 1 | WebView 加载失败只重试 1 次，随后仅提示用户手点；服务本身能起 | 单独调 `ensure_started()` 返回「画布已在运行: http://127.0.0.1:3011」 |
+| 2 | `settings` 是 `nav_hidden=True`，但事件路径 `_on_module_activated` 先查导航栏 ⇒ 必弹「导航中无模块」 | `main_window.py::has_module` 只认 `_buttons`；V4.43.11 只修了 ⚙ 直连路径 |
+
+### 修复
+
+- **画布自愈**（`character_management_module.py::_on_web_load_finished`，冻结区已授权解冻）：
+  失败时先探 `canvas_runtime.is_ready()`：为假 ⇒ 自动 `_on_start_canvas()`（成功经 `_after_start` 重载，不弹模态框）；
+  为真 ⇒ 最多 3 次退避重试（600/1200/1800ms）。
+- **设置导航**（`main_window.py::_on_module_activated`）：`target == "settings"` 在导航检查**之前**委托 `_show_settings()`。
+
+### 冻结区
+
+- 用户授权解冻 **stage3d-core**；仅改 1 个符号，**锁数不变 106**；
+- `frozen_zones.hashes.json` 经 `frozen_zone_guard.py --update` 重算（`frozen_zones.json` 未变）。
+
+### 验证
+
+- 行为级 3 例（真调 `_on_web_load_finished`：未起→自动启动 / 就绪→退避重试 / 超 3 次→停）+ 源码级 3 例；
+- `frozen_zone_guard` OK（106 locks）；
+- pytest **2026 passed**；`run_all_checks` **109 项全绿**。
+
 ## 本地模型可见性：模型管理补「本地模型」页 + Wan 落盘判定修正（2026-10-25）
 
 > 用户反馈：模型管理里看不到已下载的本地模型（尤其视频）；Wan 明明下好了，画布还显示「需下载」。

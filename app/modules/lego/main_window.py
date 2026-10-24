@@ -1357,6 +1357,14 @@ class MainWindow(QMainWindow):
         if target == "plugins":
             target = "extensions"
 
+        # 2026-10-25 修：settings 自 V4.43.2 起 nav_hidden（不在导航栏），
+        # 但「首页工具格 / 用户菜单 → 设置」仍会发 target=settings。
+        # 旧逻辑走「导航栏必须存在」检查 ⇒ 弹「导航中无模块「settings」」且不打开。
+        # 正解：委托给 _show_settings()（官方模块加载路径，不依赖导航栏）。
+        if target == "settings":
+            self._show_settings()
+            return
+
         registry = get_registry()
         if not registry.is_enabled(target):
             self.show_status(f"模块「{target}」未启用，请在设置 → 功能开关中打开", "#f97316")
@@ -1426,7 +1434,9 @@ class MainWindow(QMainWindow):
         """
         try:
             from . import session_state as ss
-            if not self._settings.value(ss.SETTING_KEY_RESUME_SESSION, True, type=bool):
+            # ★ V4.46.19 默认改为 False（用户裁定：启动首屏必须是首页，不被上次会话拉走）。
+            #   想用「跳回上次」的用户在 设置→偏好→启动恢复 里自行打开。
+            if not self._settings.value(ss.SETTING_KEY_RESUME_SESSION, False, type=bool):
                 return  # 开关关闭：只留存档，用户自己点进去时能看到
             data = ss.load_last_session()
             mod = str(data.get("module") or "")

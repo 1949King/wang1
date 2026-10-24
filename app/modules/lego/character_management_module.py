@@ -1264,12 +1264,33 @@ class CharacterManagementModule(BaseModule):
             self._set_status(f"画布已就绪 {url}" if url else "画布已就绪")
             logger.info("canvas page loadFinished ok url=%s", url)
             return
+        # 2026-10-25（用户授权解冻 stage3d-core）：页面打不开最常见原因是
+        # **画布静态服务没起**（3011 无监听）——此前只提示「点刷新/启动画布」，
+        # 用户看到的就是白屏 + 一句报错。现在先探 is_ready()：不在就先自动启动，
+        # 成功后经 _after_start 自动重新加载；真起不来才把原因写状态栏。
+        try:
+            from app.core.canvas_runtime import get_canvas_runtime
+        except ImportError:
+            from core.canvas_runtime import get_canvas_runtime  # type: ignore
+        try:
+            _rt = get_canvas_runtime()
+        except Exception:
+            _rt = None
+        if _rt is not None and not _rt.is_ready():
+            self._canvas_load_retries = 0
+            logger.warning("canvas service not ready ⇒ auto start then reload (url=%s)", url)
+            self._set_status("画布服务未启动，正在自动启动…")
+            self._on_start_canvas()
+            # 自动路径不弹模态框（失败原因已写状态栏，用户可再点「启动画布」）
+            self._manual_canvas_start = False
+            return
         retries = int(getattr(self, "_canvas_load_retries", 0) or 0)
-        if retries < 1 and url and self._web is not None:
+        if retries < 3 and url and self._web is not None:
             self._canvas_load_retries = retries + 1
-            self._set_status(f"画布加载失败，正在重试… {url}")
-            logger.warning("canvas page loadFinished FAIL, retrying once url=%s", url)
-            QTimer.singleShot(600, lambda u=url: self._retry_load_canvas(u))
+            self._set_status(f"画布加载失败，正在重试（{retries + 1}/3）… {url}")
+            logger.warning("canvas page loadFinished FAIL, retry %d/3 url=%s",
+                           retries + 1, url)
+            QTimer.singleShot(600 * (retries + 1), lambda u=url: self._retry_load_canvas(u))
             return
         self._set_status(f"画布页面加载失败（请点「刷新」或「启动画布」） {url}")
         logger.warning("canvas page loadFinished FAIL url=%s", url)

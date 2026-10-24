@@ -58,7 +58,7 @@
     "file:vendor/packages/libtv/src/stage3dGlUtils.ts": "2444d299d378559e",
     "file:vendor/packages/libtv/src/stage3dControlNet.ts": "016494545f3963b8",
     "file:app/core/canvas_runtime.py": "44212eb2c892ab88",
-    "file:app/modules/lego/character_management_module.py": "083e9b5490f7b247",
+    "file:app/modules/lego/character_management_module.py": "aed7825b9a9a9592",
     "file:scripts/export_vinchau_glb.py": "8935e0bfc63ba9bf",
     "file:vendor/packages/libtv/src/magnetic/CardStack.ts": "1b7e9cc6f6ea20f9",
     "file:vendor/packages/libtv/src/magnetic/FloatingToolbar.tsx": "608da791f374270c",
