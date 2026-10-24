@@ -349,23 +349,47 @@ class VideoGenEngine:
 
     @staticmethod
     def local_dir(model_id: str) -> str:
-        """该模型在本地的落盘目录（可预测；不下载）。"""
+        """该模型在本地的落盘目录（可预测；不下载）。
+
+        ★ 2026-10-25 修：Wan 系在 ModelScope 有 **diffusers 变体**仓库名
+        （`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`），M5 真机验收下的就是它。
+        注册表写的是模型本体名，直接拼目录会把「已下载」误判成「未下载」
+        ⇒ 这里按 本体名 → `-Diffusers` → `-diffusers` 依次找**已存在的目录**，
+        都没有才返回本体名（让 is_downloaded 如实 False）。
+        """
         from app.core.neural_engine import get_neural_engine
 
         spec = VIDEO_MODELS.get(model_id) or {}
         repo = spec.get("repo") or model_id
-        return get_neural_engine().repo_local_dir(repo)
+        engine = get_neural_engine()
+        nominal = engine.repo_local_dir(repo)
+        if os.path.isdir(nominal):
+            return nominal
+        for suffix in ("-Diffusers", "-diffusers"):
+            cand = engine.repo_local_dir(repo + suffix)
+            if os.path.isdir(cand):
+                logger.info("[video_gen] %s 命中 diffusers 变体目录：%s", model_id, cand)
+                return cand
+        return nominal
 
     @staticmethod
     def is_downloaded(model_id: str) -> bool:
-        """判断是否已落盘：要求 `model_index.json` 与 unet 权重都在。"""
+        """判断是否已落盘：`model_index.json` + 主网络权重。
+
+        ★ 2026-10-25 修：SVD 的主网络目录是 `unet/`，但 **Wan 系用 `transformer/`**
+        （WanPipeline 的 DiT 叫 transformer）⇒ 旧实现只认 unet，把真下好的 Wan 判成
+        「未下载」。现在 unet / transformer 二者其一有 safetensors 即算落盘。
+        """
         d = VideoGenEngine.local_dir(model_id)
         if not os.path.isfile(os.path.join(d, "model_index.json")):
             return False
-        unet = os.path.join(d, "unet")
-        if not os.path.isdir(unet):
-            return False
-        return any(n.endswith(".safetensors") for n in os.listdir(unet))
+        for net in ("unet", "transformer"):
+            nd = os.path.join(d, net)
+            if os.path.isdir(nd) and any(
+                    n.endswith(".safetensors") for n in os.listdir(nd)):
+                return True
+        # 单文件一体化权重（如社区整合包）也认
+        return any(n.endswith(".safetensors") for n in os.listdir(d))
 
     @staticmethod
     def downloaded_bytes(model_id: str) -> int:

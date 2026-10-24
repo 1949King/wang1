@@ -240,6 +240,11 @@ class ModelManagementModule(QWidget):
 
         # 网关统计 tab：token 消耗 / 成本 / 成功率 / 缓存命中 / 异常告警
         from .gateway_stats_panel import GatewayStatsPanel
+        # 本地模型（2026-10-25）：模型广场只覆盖云端 provider + Ollama 对话；
+        # 本地扩散引擎（SD/SVD/Wan）此前在 UI 上完全不可见，补一页如实清单。
+        from .local_models_panel import LocalModelsPanel
+
+        self._main_tabs.addTab(LocalModelsPanel(), "🗂 本地模型")
         self._main_tabs.addTab(GatewayStatsPanel(), "📊 网关统计")
 
         layout.addWidget(self._main_tabs)

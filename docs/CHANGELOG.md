@@ -1,5 +1,36 @@
 # 拾光剪影 — 变更日志
 
+## 本地模型可见性：模型管理补「本地模型」页 + Wan 落盘判定修正（2026-10-25）
+
+> 用户反馈：模型管理里看不到已下载的本地模型（尤其视频）；Wan 明明下好了，画布还显示「需下载」。
+
+### 三个根因（实测）
+
+| # | 根因 | 证据 |
+|---|---|---|
+| 1 | 模型管理只有「模型广场 / 网关统计」两个页签，本地扩散引擎无入口 | `model_management.py` 两处 addTab；`modelscope_client.list_local_models()` **零调用者** |
+| 2 | `video_gen.is_downloaded` 只认 `unet/`，Wan 用 `transformer/` | 磁盘 `Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer/*.safetensors`，无 `unet/` |
+| 3 | 注册表 repo 是本体名，磁盘是 `-Diffusers` 变体目录 | `local_dir()` 拼 `Wan-AI_Wan2.1-T2V-1.3B` ≠ 实际目录 |
+
+### 修复
+
+- 新增 `neural/local_models_view.py`：图像 + 视频注册表 + 仅登记族统一清单（已下载/验证态分列）；
+- 新增 `modules/lego/local_models_panel.py`：「🗂 本地模型」页（表格 + 刷新 + 打开模型目录），挂进模型管理；
+- `video_gen.local_dir()`：本体名 → `-Diffusers` → `-diffusers` 依次找已存在目录；
+- `video_gen.is_downloaded()`：`unet` | `transformer` 任一有 safetensors（含根目录单文件权重）。
+
+### 实测
+
+- 本地模型页：**10 项 · 已下载 4（sd15/sdxl/svd/wan21）· 已验证 5 行**；
+- 画布视频下拉：Wan2.1 下载态由 False → **True**（SVD 保持 True）；
+- 测试：`test_local_models_view.py` **5 例**（含 offscreen Qt 冒烟）+ `test_video_model_layout.py` **4 例**；
+- pytest **2018 passed** · `run_all_checks` **109 项全绿** · ruff 0。
+
+### 口径提醒
+
+- 「已下载」≠「已验证」；
+- 「模型广场」里的 **Ollama 是对话服务**，与本地生图/生视频引擎不是一类，别混看。
+
 ## fp8 验证受阻（诚实记录）+ 量化路径可测化 + 引擎链被真消费（2026-10-25）
 
 > 「开始」的目标是 fp8 真机验证。实测**网络阻断**：pypi 镜像 10061 拒绝连接、系统无代理、
