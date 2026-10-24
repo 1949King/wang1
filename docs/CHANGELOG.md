@@ -1,5 +1,33 @@
 # 拾光剪影 — 变更日志
 
+## 引擎链化 + 质量总闸 —— planner 输出引擎级链，滑块升级为算力/质量双旋钮（2026-10-25）
+
+> 此前 plan() 只给 `chain: [local, cloud]`（位置级），不告诉调用方本地那一跳是谁；
+> 质量档也只能由节点自己给。本轮把两件事都补上。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 引擎链 | `plan()` 新增 `engines: [{order, kind, engine, family, model, accelerators}]`；显式通道 / 不支持能力 / 常规三条返回都带 |
+| 质量驱动族 | `_arch_of(capability, quality)`：image fine/cinema ⇒ sdxl，draft/standard ⇒ sd15；`_local_model_for` 只从已下载里选 |
+| 质量总闸 | `app/core/ai/quality_gate.py`（draft/standard/fine/cinema + `data/quality_gate.json`）；`POST /host/execution-bias {quality}` 写、`/host/execution-status` 读 |
+| 兜底口径 | generate-image / local-image-generate / 能力 / hybrid_dispatch 在请求缺 quality 时读总闸；节点显式值优先 |
+| 画布 | 「算力」胶囊新增质量 select；试算显示引擎链（本地:sdxl-t2i → 云端） |
+| 测试 | `test_engine_chain.py` **4 例** + `test_quality_gate.py` **3 例** |
+
+### 验证（全部实跑）
+
+- pytest：**2004 passed**（新增 7 例）
+- vitest：**626 用例全绿**；tsc **37 = 既有基线**
+- `run_all_checks`：**109 项全绿**（SIZE 修复：capability_handlers 1999 行）
+- `ruff`：新/改文件 0 违规
+
+### 踩到的坑
+
+- `test_device_portability` 的 `_arch_of` monkeypatch 是单参 lambda，新签名带 quality ⇒ 已同步为 `(cap, quality="")`；
+- `capability_handlers.py` 一度 2002 行超守卫 ⇒ 压缩 3 行回 1999。
+
 ## fp8 精度接线 —— 设备画像 → 引擎量化，不可用时诚实回落（2026-10-25）
 
 > 此前 fp8 只存在于设备画像/后端注册表的声明里，引擎 `quant` 恒 fp16 ⇒ 声明与执行脱节。

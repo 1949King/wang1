@@ -1617,12 +1617,13 @@ class CanvasPostRoutesMixin:
         from app.core.ai.draw_ledger import normalize_seed
 
         seed_used, _seed_explicit = normalize_seed(body.get("seed"))
-        # 质量档/preset 透传（仅自研栈接受 preset；主选栈由纯函数层探测后跳过）
         from app.core.ai import local_image_plan as LP
+        from app.core.ai.quality_gate import get_quality as _get_quality
 
         kw = LP.generate_kwargs(
             backend=eng, model_id=model_id,
-            quality=str(body.get("quality") or ""), preset=str(body.get("preset") or ""),
+            quality=_get_quality(str(body.get("quality") or "")),
+            preset=str(body.get("preset") or ""),
             prompt=str(body.get("prompt") or ""), negative_prompt=str(body.get("negative_prompt") or ""),
             image_path=image_path, width=int(body.get("width") or 0),
             height=int(body.get("height") or 0), seed=seed_used,

@@ -23,7 +23,21 @@ type ExecStatus = {
   engine?: { engine?: string; available?: boolean };
 };
 
-type Plan = { route?: string; chain?: string[]; reasons?: string[] };
+type PlanEngine = {
+  order?: number;
+  kind?: string;
+  engine?: string;
+  family?: string;
+  model?: string;
+};
+
+type Plan = {
+  route?: string;
+  chain?: string[];
+  reasons?: string[];
+  engines?: PlanEngine[];
+  quality?: string;
+};
 
 type EnginesSummary = {
   total?: number;
@@ -37,6 +51,8 @@ export default function ExecutionBiasChip() {
   const [status, setStatus] = useState<ExecStatus | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [engines, setEngines] = useState<EnginesSummary | null>(null);
+  /** 质量总闸（draft/standard/fine/cinema） */
+  const [quality, setQuality] = useState("standard");
   const [msg, setMsg] = useState("");
 
   const refresh = useCallback(async () => {
@@ -49,6 +65,7 @@ export default function ExecutionBiasChip() {
       if (data && data.ok) {
         setStatus(data as ExecStatus);
         setBias(Number(data.bias ?? 50));
+        if (typeof data.quality === "string" && data.quality) setQuality(data.quality);
       }
       // 引擎注册表（W1）：只回显计数，详情走 /host/engines 或 usage report
       const eng = await eRes.json();
@@ -81,10 +98,32 @@ export default function ExecutionBiasChip() {
     }
   }, []);
 
+  /** 质量总闸：与算力偏好同一端点（{quality}），四个档位 */
+  const saveQuality = useCallback(async (q: string) => {
+    setQuality(q);
+    try {
+      const res = await fetch(BRIDGE + "/host/execution-bias", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ quality: q }),
+      });
+      const data = await res.json();
+      if (data && data.ok) {
+        setMsg("质量档已保存：" + q);
+      } else {
+        setMsg(String((data && data.message) || "质量档保存失败"));
+      }
+    } catch {
+      setMsg("质量档保存失败：无法连接本地服务");
+    }
+  }, []);
+
   const preview = useCallback(async () => {
     try {
       const res = await fetch(
-        BRIDGE + "/host/execution-plan?capability=video&has_reference=1",
+        BRIDGE +
+          "/host/execution-plan?capability=video&has_reference=1&quality=" +
+          encodeURIComponent(quality),
         { headers: authHeaders(), cache: "no-store" },
       );
       const data = await res.json();
@@ -128,6 +167,20 @@ export default function ExecutionBiasChip() {
             />
             <span className="exec-chip__side">云端</span>
           </div>
+          <div className="exec-chip__row">
+            <span className="exec-chip__side">质量</span>
+            <select
+              className="exec-chip__quality"
+              value={quality}
+              onChange={(e) => void saveQuality(e.target.value)}
+              title="全局质量总闸：请求没写 quality 时由它兜底"
+            >
+              <option value="draft">draft · 草稿</option>
+              <option value="standard">standard · 标准</option>
+              <option value="fine">fine · 精细</option>
+              <option value="cinema">cinema · 影院</option>
+            </select>
+          </div>
           <div className="exec-chip__hint">{biasModeHint(bias)}</div>
           <div className="exec-chip__meta">
             本地引擎 {status?.engine?.engine || "—"} · 云端{" "}
@@ -146,6 +199,12 @@ export default function ExecutionBiasChip() {
           {plan ? (
             <div className="exec-chip__plan">
               视频：{plan.route || "?"} · {(plan.chain || []).join(" → ") || "无可用路径"}
+              {plan.engines && plan.engines.length
+                ? " ｜ " +
+                  plan.engines
+                    .map((e) => (e.kind === "local" ? "本地:" + (e.model || e.engine) : "云端"))
+                    .join(" → ")
+                : ""}
               {plan.reasons && plan.reasons.length ? "（" + plan.reasons[plan.reasons.length - 1] + "）" : ""}
             </div>
           ) : null}
@@ -171,6 +230,8 @@ const CSS = [
   ".exec-chip__preview { padding: 5px 8px; border-radius: 7px; border: 1px solid #2a3342; background: #172033; color: #d6dde8; cursor: pointer; font-size: 11px; }",
   ".exec-chip__plan, .exec-chip__msg { font-size: 11px; color: #9aa4b2; line-height: 1.5; }",
   ".exec-chip__engines { font-size: 11px; color: #7f8fa6; line-height: 1.5; }",
+  ".exec-chip__quality { flex: 1; padding: 4px 6px; border-radius: 7px; border: 1px solid #2a3342; background: #0e141c; color: #d6dde8; font-size: 11px; }",
+  "html[data-theme='light'] .exec-chip__quality { border-color: #cdd5e3; background: #ffffff; color: #172033; }",
   "html[data-theme='light'] .exec-chip__btn { border-color: #cdd5e3; background: #ffffff; color: #172033; }",
   "html[data-theme='light'] .exec-chip__panel { border-color: #cdd5e3; background: #ffffff; }",
   "html[data-theme='light'] .exec-chip__hint, html[data-theme='light'] .exec-chip__meta { color: #6b7790; }",

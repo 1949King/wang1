@@ -195,7 +195,7 @@ def test_planner_unknown_arch_falls_back_to_legacy(monkeypatch, fake_device, tel
     assert BR.available_ids(model_arch="totally-unknown-arch") == []
     # 真正触发兜底分支（测试名承诺的行为）：假架构 ⇒ 必须退回 legacy 探测。
     # 此前只断言「不抛」，兜底路径从未被执行过 —— spy 装了不查就是证据。
-    monkeypatch.setattr(EP, "_arch_of", lambda cap: "totally-unknown-arch")
+    monkeypatch.setattr(EP, "_arch_of", lambda cap, quality="": "totally-unknown-arch")
     r3 = EP._engine_probe(capability="image")
     assert called["n"] >= 1, "未登记架构必须走 legacy 兜底（「我没登记」≠「本机做不到」）"
     assert isinstance(r3.get("available"), bool)

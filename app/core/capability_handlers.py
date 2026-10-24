@@ -216,14 +216,13 @@ class CanvasCapabilityHandlers:
         seed_used, _seed_explicit = normalize_seed(p.get("seed"))
         model_id = str(p.get("model_id") or "sd15-t2i")
         from app.core.ai import local_image_plan as LP
-
+        from app.core.ai.quality_gate import get_quality as _get_quality
         _prec = str(p.get("precision") or "").strip()
         if _prec and hasattr(sel["backend"], "request_precision"):
             sel["backend"].request_precision(_prec)
-
         kw = LP.generate_kwargs(
             backend=sel["backend"], model_id=model_id,
-            quality=str(p.get("quality") or ""), preset=str(p.get("preset") or ""),
+            quality=_get_quality(str(p.get("quality") or "")), preset=str(p.get("preset") or ""),
             prompt=str(p.get("prompt") or ""), negative_prompt=str(p.get("negative_prompt") or ""),
             image_path=str(p.get("image_path") or ""), width=int(p.get("width") or 0),
             height=int(p.get("height") or 0), seed=seed_used,

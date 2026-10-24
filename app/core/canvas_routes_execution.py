@@ -58,17 +58,25 @@ class CanvasExecutionRoutesMixin:
             return
         try:
             from app.core.ai.compute_bias import get_bias
+            from app.core.ai.quality_gate import get_gate
 
             b = get_bias()
+            g = get_gate()
+            if "quality" in body:
+                # 质量总闸（draft/standard/fine/cinema）与算力偏好并列
+                if not g.set(body.get("quality")):
+                    self._json(400, {"ok": False,
+                                     "message": "quality 必须是 draft/standard/fine/cinema"})
+                    return
             if "bias" not in body:
                 # 只读回显：便于前端打开面板时同步当前值
-                self._json(200, {"ok": True, **b.status()})
+                self._json(200, {"ok": True, **b.status(), **g.status()})
                 return
             ok = b.set(int(body.get("bias")))
             if not ok:
                 self._json(400, {"ok": False, "message": "bias 必须是 0-100 的整数"})
                 return
-            self._json(200, {"ok": True, **b.status()})
+            self._json(200, {"ok": True, **b.status(), **g.status()})
         except Exception as e:
             logger.debug("[/host/execution-bias] 失败", exc_info=True)
             self._json(500, {"ok": False, "message": f"算力偏好设置失败: {e}"})
@@ -104,6 +112,7 @@ class CanvasExecutionRoutesMixin:
             has_ref = (qs.get("has_reference") or [""])[0] in ("1", "true", "True")
             self._json(200, {"ok": True, "plan": plan(
                 capability=cap, has_reference=has_ref,
+                quality=(qs.get("quality") or [""])[0],
                 explicit_channel=(qs.get("channel_id") or [""])[0])})
         except Exception as e:
             logger.debug("[/host/execution-plan] 失败", exc_info=True)

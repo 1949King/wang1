@@ -48,16 +48,22 @@ _SUPPORTED = {"image", "video", "audio", "music"}
 _LOCAL_PROMPT_ONLY = {"image"}
 
 
-def _arch_of(capability: str) -> str:
-    """能力 → 模型架构（用于后端注册表与遥测维度）。"""
+#: 偏「高质量」的画布档位 ⇒ 图像族走 SDXL（2026-10-25 质量总闸接线）
+_HQ_QUALITIES = {"fine", "cinema"}
+
+
+def _arch_of(capability: str, quality: str = "") -> str:
+    """能力 + 质量档 → 模型架构（用于后端注册表与遥测维度）。
+
+    图像：fine/cinema ⇒ sdxl，其余 ⇒ sd15（draft/standard 用 512² 更快）；
+    视频：SVD（wan 族由 model_family.resolve 走，不在本层默认）。
+    """
     cap = (capability or "").lower()
     if cap == "video":
         return "svd"
-    try:
-        hint = _local_model_hint()
-    except Exception:
-        hint = "sd15-t2i"
-    return "sdxl" if "sdxl" in hint else "sd15"
+    if str(quality or "").strip().lower() in _HQ_QUALITIES:
+        return "sdxl"
+    return "sd15"
 
 
 def _legacy_engine_probe() -> Dict[str, Any]:
@@ -91,7 +97,7 @@ def _legacy_engine_probe() -> Dict[str, Any]:
     }
 
 
-def _engine_probe(capability: str = "image") -> Dict[str, Any]:
+def _engine_probe(capability: str = "image", quality: str = "") -> Dict[str, Any]:
     """选本地引擎：设备画像 → 后端注册表 → 实测遥测（EPLB 映射）。
 
     返回（兼容旧键 + 新增键）：
@@ -101,7 +107,7 @@ def _engine_probe(capability: str = "image") -> Dict[str, Any]:
     · 一个后端都不在册 ⇒ available=False（换设备装不上时，上层自然走云端）。
     """
     reasons: List[str] = []
-    arch = _arch_of(capability)
+    arch = _arch_of(capability, quality)
     prof: Dict[str, Any] = {}
     try:
         from app.core.neural import device_profile as DP
@@ -261,12 +267,49 @@ def _local_model_hint() -> str:
     return "sd15-t2i"
 
 
+def _local_model_for(arch: str) -> str:
+    """按族给本地模型 id（只从已下载的里选；都没下载时给该族默认，由引擎如实报缺权重）。"""
+    if arch == "svd":
+        return "svd-xt-i2v"
+    if arch == "wan":
+        return "wan-t2v-1.3b"
+    default = "sdxl-t2i" if arch == "sdxl" else "sd15-t2i"
+    try:
+        from app.core.neural import diffusers_image as d
+
+        have = {m["id"] for m in d.available_models()
+                if d.DiffusersImageEngine.is_downloaded(m["id"])}
+    except Exception:
+        have = set()
+    if arch == "sdxl" and "sdxl-t2i" in have:
+        return "sdxl-t2i"
+    if "sd15-t2i" in have:
+        return "sd15-t2i"
+    return default
+
+
+def _engines_for(chain: List[str], *, engine: str, arch: str,
+                 accelerators: List[str]) -> List[Dict[str, Any]]:
+    """把 local/cloud 链展开成**引擎级**步骤（R9 可解释：每一步是谁、哪个模型）。"""
+    out: List[Dict[str, Any]] = []
+    for i, hop in enumerate(chain):
+        if hop == "local":
+            out.append({"order": i + 1, "kind": "local", "engine": engine or "",
+                        "family": arch, "model": _local_model_for(arch),
+                        "accelerators": list(accelerators or [])})
+        else:
+            out.append({"order": i + 1, "kind": "cloud", "engine": "cloud",
+                        "family": "", "model": "", "accelerators": []})
+    return out
+
+
 def plan(
     *,
     capability: str = "image",
     has_reference: bool = False,
     explicit_channel: str = "",
     urgency: str = "",
+    quality: str = "",
 ) -> Dict[str, Any]:
     """产出本次执行的调度计划（纯决策）。调用方按 `chain` 依次尝试即可。
 
@@ -279,6 +322,16 @@ def plan(
     reasons: List[str] = []
     cap = (capability or "image").strip().lower()
 
+    # ── 质量总闸（2026-10-25）：显式 quality 优先；空/非法 ⇒ 读全局闸 ──
+    q = str(quality or "").strip().lower()
+    try:
+        from app.core.ai.quality_gate import get_quality
+
+        q = get_quality(q)
+    except Exception:
+        logger.debug("[execution_planner] 质量总闸不可用", exc_info=True)
+        q = q or "standard"
+
     # ── 快照 ──
     bias, mode = 50, "engine"
     try:
@@ -288,7 +341,8 @@ def plan(
         mode = bias_mode(bias)
     except Exception:
         logger.debug("[execution_planner] 偏好读取失败，按默认 engine", exc_info=True)
-    eng = _engine_probe(cap)
+    arch = _arch_of(cap, q)
+    eng = _engine_probe(cap, q)
     hw = _hw_probe()
     lam = _budget_lambda()
     cloud_ok = _cloud_available()
@@ -304,12 +358,18 @@ def plan(
     if cid:
         is_local = cid.startswith("local/")
         reasons.append(f"调用方显式指定 {cid!r} ⇒ 按选择执行（本层不改道）")
+        exp_eng = eng.get("engine", "") if is_local else ""
+        exp_arch = arch if is_local else ""
+        exp_chain = ["local"] if is_local else ["cloud"]
         return {
             "ok": True,
             "route": "local" if is_local else "cloud",
-            "engine": eng.get("engine", "") if is_local else "",
-            "chain": ["local"] if is_local else ["cloud"],
-            "model_hint": _local_model_hint() if is_local else "",
+            "engine": exp_eng,
+            "chain": exp_chain,
+            "engines": _engines_for(exp_chain, engine=exp_eng, arch=exp_arch,
+                                    accelerators=eng.get("accelerators", [])),
+            "quality": q,
+            "model_hint": _local_model_for(exp_arch) if is_local else "",
             "reasons": reasons,
             "bias": bias,
             "mode": mode,
@@ -329,6 +389,8 @@ def plan(
             "route": "cloud",
             "engine": "",
             "chain": ["cloud"],
+            "engines": _engines_for(["cloud"], engine="", arch="", accelerators=[]),
+            "quality": q,
             "model_hint": "",
             "reasons": reasons,
             "bias": bias,
@@ -389,7 +451,10 @@ def plan(
         "route": route,
         "engine": eng.get("engine", ""),
         "chain": chain,
-        "model_hint": _local_model_hint() if "local" in chain else "",
+        "engines": _engines_for(chain, engine=eng.get("engine", ""), arch=arch,
+                                accelerators=eng.get("accelerators", [])),
+        "quality": q,
+        "model_hint": _local_model_for(arch) if "local" in chain else "",
         "reasons": reasons,
         "bias": bias,
         "mode": mode,
@@ -422,11 +487,22 @@ def status() -> Dict[str, Any]:
         "gpu": hw.get("gpu_name", ""),
         "budget_lambda": _budget_lambda(),
         "cloud_available": _cloud_available(),
+        "quality": _quality_now(),
         "local_prompt_only": sorted(_LOCAL_PROMPT_ONLY),
         # M4 入口合一：模型族注册表全量视图（族/验证态/权重/后端健康），
         # 画布与排障面板由此看到「哪些族真验过、哪些只是登记」。
         "families": _families_view(),
     }
+
+
+def _quality_now() -> str:
+    """当前质量总闸（失败按 standard，不阻断 status）。"""
+    try:
+        from app.core.ai.quality_gate import get_quality
+
+        return get_quality("")
+    except Exception:
+        return "standard"
 
 
 def _families_view() -> Dict[str, Any]:
