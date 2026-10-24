@@ -1597,6 +1597,10 @@ class CanvasPostRoutesMixin:
             return
 
         # ── generate：生成图像（t2i；给 image_path 则 i2i）──
+        # 2026-10-25：精度偏好（auto/fp16/fp8）；fp8 不可用时由引擎按策略回落/严格失败
+        _prec = str(body.get("precision") or "").strip()
+        if _prec and hasattr(eng, "request_precision"):
+            eng.request_precision(_prec)
         image_path = str(body.get("image_path") or "").strip()
         image_data = str(body.get("image") or "").strip()
         if not image_path and image_data:

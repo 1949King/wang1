@@ -259,6 +259,26 @@ class DiffusersImageEngine:
         # 用法感知显存策略状态：pending→(promoted | kept_offload | disabled)
         self._promote_state = "pending"
         self._promote_note = ""
+        # 精度策略（2026-10-25）："" = 默认 fp16；"fp8" 需 Ada/Hopper/Blackwell + torchao + ≥6GB
+        self._requested_precision = ""
+        self._precision = "fp16"
+        self._precision_reason = ""
+
+    def request_precision(self, value: str) -> str:
+        """设置本次加载/下次重载要用的精度；已加载且变化 ⇒ 先卸载（下次 generate 重载）。"""
+        from app.core.neural import quant_policy as _qp
+
+        req = _qp.normalize_requested(value)
+        if req != self._requested_precision:
+            self._requested_precision = req
+            if self._pipe is not None:
+                self.unload()
+        return req
+
+    def precision_status(self) -> Dict[str, Any]:
+        """当前精度快照（供 UI/Agent 判断能不能用 fast+fp8）。"""
+        return {"requested": self._requested_precision, "precision": self._precision,
+                "reason": self._precision_reason}
 
     # ── 能力探测（不加载模型）──────────────────────
 
@@ -482,6 +502,37 @@ class DiffusersImageEngine:
                 feature_extractor=None,
             )
 
+            # ★ 精度策略（2026-10-25 接线）：fp8 需 Ada+torchao+≥6GB；
+            #   不满足时默认回落 fp16 并带原因，严格模式（SHIGUANG_FP8_STRICT=1）直接失败。
+            from app.core.neural import quant_policy as _qp
+
+            _probe = _qp.probe_usable()
+            _strict = os.environ.get("SHIGUANG_FP8_STRICT") == "1"
+            _prec = _qp.resolve_precision(
+                requested=self._requested_precision or os.environ.get("SHIGUANG_FP8", ""),
+                usable_fp8=bool(_probe.get("usable_fp8")),
+                arch=str(_probe.get("arch") or ""),
+                vram_gb=float(_probe.get("vram_gb") or 0.0),
+                strict=_strict)
+            if not _prec.get("ok"):
+                return {"ok": False,
+                        "message": "精度要求无法满足：" + str(_prec.get("fallback") or "")}
+            self._precision = _prec["precision"]
+            self._precision_reason = _prec.get("fallback") or ""
+            if self._precision == "fp8":
+                try:
+                    from torchao.quantization import Float8WeightOnlyConfig, quantize_
+
+                    quantize_(pipe.unet, Float8WeightOnlyConfig())
+                    logger.info("[diffusers_image] fp8 权重只量化已应用（%s）", model_id)
+                except Exception as e:
+                    self._precision = "fp16"
+                    self._precision_reason = "fp8 量化失败，回落 fp16：%s: %s" % (
+                        type(e).__name__, e)
+                    if _strict:
+                        return {"ok": False, "message": self._precision_reason}
+                    logger.warning("[diffusers_image] %s", self._precision_reason)
+
             # ★ 显存策略收口（V4.40.24 W1）：图像无帧概念，frames=0；
             #   tuned 显式传入（勿惰性解析视频调优表 —— 那是给 SVD 的）。
             # ★ supported_modes=ACTIVE_MODES：声明本引擎四档全实现（含刀2 layer_cpu_offload
@@ -538,7 +589,9 @@ class DiffusersImageEngine:
             self._loaded_id = model_id
             logger.info("[diffusers_image] 已加载 %s（%s）· offload=%s",
                         model_id, spec["label"], self._offload)
-            return {"ok": True, "message": f"已加载 {spec['label']}（offload={self._offload}）"}
+            return {"ok": True,
+                    "message": f"已加载 {spec['label']}（offload={self._offload}"
+                               f" · precision={self._precision}）"}
         except Exception as e:
             logger.debug("[diffusers_image] load 失败", exc_info=True)
             self._pipe = None
@@ -564,6 +617,8 @@ class DiffusersImageEngine:
         self._lcm_lora = ""
         self._promote_state = "pending"      # 换模型后重新评估（模型不同，能不能整卡也不同）
         self._promote_note = ""
+        self._precision = "fp16"
+        self._precision_reason = ""
         gc.collect()
         try:
             import torch
@@ -667,6 +722,8 @@ class DiffusersImageEngine:
                     "steps": n_steps, "cfg": n_cfg,
                     "width": n_w, "height": n_h,
                     "memory_mode": mode_at_start,
+                    "precision": self._precision,
+                    "precision_reason": self._precision_reason,
                     "promote_after": self.promote_status()["state"],
                     "seconds_elapsed": round(elapsed, 1),
                     "message": f"生成完成：{out_path}（{n_steps} 步 · cfg {n_cfg} · {elapsed:.1f}s）"}

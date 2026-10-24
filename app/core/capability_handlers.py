@@ -217,6 +217,10 @@ class CanvasCapabilityHandlers:
         model_id = str(p.get("model_id") or "sd15-t2i")
         from app.core.ai import local_image_plan as LP
 
+        _prec = str(p.get("precision") or "").strip()
+        if _prec and hasattr(sel["backend"], "request_precision"):
+            sel["backend"].request_precision(_prec)
+
         kw = LP.generate_kwargs(
             backend=sel["backend"], model_id=model_id,
             quality=str(p.get("quality") or ""), preset=str(p.get("preset") or ""),

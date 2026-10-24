@@ -1,5 +1,26 @@
 # 拾光剪影 — 变更日志
 
+## fp8 精度接线 —— 设备画像 → 引擎量化，不可用时诚实回落（2026-10-25）
+
+> 此前 fp8 只存在于设备画像/后端注册表的声明里，引擎 `quant` 恒 fp16 ⇒ 声明与执行脱节。
+> 本轮把「判据 → 开关 → 量化 → 回落/严格失败」整条链接上，**不假装本机已验证 fp8**。
+
+### 交付
+
+| 层 | 内容 |
+|---|---|
+| 纯函数 | `app/core/neural/quant_policy.py`：`resolve_precision`（usable_fp8 + 显存≥6GB）、`normalize_requested`、`probe_usable`；严格模式 `ok=False` |
+| 引擎 | `diffusers_image`：`request_precision()` / `precision_status()`；`load()` 内 torchao `Float8WeightOnlyConfig` 量化 UNet；失败回落 fp16 并写 `precision_reason`；`generate()` 回传 `precision` |
+| 入口 | `/host/local-image-generate` 与能力 `canvas.local_generate_image` 接受 `precision` 参数 |
+| 基准 | `_verify/bench/bench_fp8_sdxl.py`（前置不满足打印 SKIP，退出 0） |
+| 测试 | `test_quant_policy.py` **6 例**（默认 fp16 / fp16 honor / fp8 三条件 / 严格模式 / 归一化 / 引擎 request_precision） |
+
+### 实测边界
+
+- 本机 RTX 4060（sm89）+ torch 2.6，**torchao 未安装** ⇒ `usable_fp8=False`；
+- bench 实跑输出：`SKIP 当前环境 fp8 不可用 ... {'arch': 'sm89', 'torchao': False}`；
+- 装好 `torchao` 后直接跑 bench 即可真机验证，无需改代码。
+
 ## 自研 diffusers 栈接线 —— 模型/质量档/参考图三处写死修掉（2026-10-25）
 
 > 背景：Skeleton 齐了但混合生成链路里有三处写死，导致自研栈「能跑但产品里不真用」。
