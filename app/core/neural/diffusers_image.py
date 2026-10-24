@@ -440,6 +440,21 @@ class DiffusersImageEngine:
                     "message": f"模型未下载。请先拉取（目标: {self.local_file(model_id)}）"}
         if self._pipe is not None and self._loaded_id == model_id:
             return {"ok": True, "message": "已加载"}
+        # ★ 内存礼貌（2026-10-24 实测，V4.46.10 常驻缓存的自付代价）：
+        #   本引擎即将加载数 GB 权重，先叫视频常驻缓存让位。实测 SVD 管线常驻占
+        #   CPU 内存 ~6.8GB，叠加 SDXL 后 SDXL 稳态 22.12s → 25.16s（+13.7%）；
+        #   两个引擎是各自独立的单例、互不知道对方，故由「即将占大内存的一方」主动清场。
+        try:
+            from app.core.local_video_pipe_cache import release_under_pressure
+
+            # 水位不猜固定值：本引擎知道自己要装多大的权重（注册表 size_gb × 1.15 + 1.2GB 余量），
+            # 可用内存低于「我要的量」就该让位 —— 否则等于让对方腾了地方还是不够。
+            _need = float((DIFFUSERS_IMAGE_MODELS.get(model_id) or {}).get("size_gb") or 0.0)
+            _floor = (_need * 1.15 + 1.2) if _need > 0 else None
+            release_under_pressure(reason="图像引擎加载 %s（需 %.1fGB）" % (model_id, _need),
+                                   floor_gb=_floor)
+        except Exception:  # stability-gate: allow-swallow（让位是优化不是正确性前提：视频缓存模块缺失/异常时，图像照常加载，最坏退回本次实测的 +13.7% 代价）
+            logger.debug("[diffusers_image] 视频缓存让位调用失败", exc_info=True)
         try:
             import torch
             # ★ 真 import 只发生在 load 内部（探测路径只 find_spec，组合场景崩纪律）

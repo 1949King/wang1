@@ -23,7 +23,7 @@ import logging
 import os
 import threading
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("AI短剧编辑器.core.local_video_pipe_cache")
 
@@ -61,6 +61,8 @@ def get_or_load(key: Tuple[str, str], loader: Callable[[], Any]) -> Tuple[Any, s
             _HITS.pop(old_key, None)
             logger.info("[video_pipe_cache] 淘汰旧管线 %s（上限 %d）", old_key, _MAX_PIPES)
             _dispose(old_pipe)
+            old_pipe = None
+            _gc_release()
         return pipe, "miss"
 
 
@@ -72,6 +74,8 @@ def evict(key: Tuple[str, str]) -> bool:
         if pipe is None:
             return False
         _dispose(pipe)
+        pipe = None  # 先断引用再 gc，否则收不掉（见 _gc_release）
+        _gc_release()
         return True
 
 
@@ -79,10 +83,13 @@ def clear() -> int:
     """清空全部缓存，返回释放数量（换卡/卸载/测试隔离用）。"""
     with _lock:
         n = len(_CACHE)
-        for pipe in _CACHE.values():
-            _dispose(pipe)
-        _CACHE.clear()
+        pipes = list(_CACHE.values())
+        _CACHE.clear()  # 先断 dict 引用
         _HITS.clear()
+        for p in pipes:
+            _dispose(p)
+        del pipes  # 再断列表引用
+        _gc_release()  # 最后统一回收
         return n
 
 
@@ -96,7 +103,10 @@ def status() -> Dict[str, Any]:
 
 
 def _dispose(pipe: Any) -> None:
-    """尽力释放一个 pipeline 占用的显存（best-effort，失败不外抛）。"""
+    """清显存缓存（不调 gc —— 见 _gc_release 的说明：调用方必须先断引用）。
+
+    形参 pipe 故意不使用：真正的引用在 dict / 调用方局部变量手里，在这里置 None 无意义。
+    """
     try:
         import torch
 
@@ -104,13 +114,103 @@ def _dispose(pipe: Any) -> None:
             torch.cuda.empty_cache()
     except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；释放是 best-effort，失败无后果）
         pass
+
+
+def _gc_release() -> None:
+    """在**所有引用都已断开之后**统一回收。
+
+    ★ 顺序很重要（2026-10-24 自查发现的自身 bug）：原先在 _dispose 里 gc.collect()，
+      但那时 dict 与调用方局部变量仍持有 pipeline ⇒ 收不掉 ⇒ 常驻内存不降。
+      正确做法：先把 dict 条目/局部引用全部丢弃，再调本函数。
+    """
     try:
         import gc
 
-        del pipe
         gc.collect()
     except Exception:  # stability-gate: allow-swallow（gc 回收是尽力而为，失败不影响正确性）
         pass
+
+
+def available_ram_gb() -> Optional[float]:
+    """跨平台可用内存（GB）；取不到返回 None。"""
+    try:
+        import psutil
+
+        return psutil.virtual_memory().available / 1024**3
+    except Exception:  # stability-gate: allow-swallow（psutil 未装是常态：项目不强制该依赖，下面 ctypes/proc 两条原生路径就是为它准备的降级链）
+        pass
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            st = _MEMORYSTATUSEX()
+            st.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return st.ullAvailPhys / 1024**3
+        else:
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024 / 1024**3
+    except (
+        Exception
+    ):  # stability-gate: allow-swallow（内存水位探测是 best-effort；取不到时调用方按保守处理）
+        return None
+    return None
+
+
+def release_under_pressure(reason: str = "", floor_gb: Optional[float] = None) -> int:
+    """内存吃紧时主动让位：全部淘汰并回收，返回释放条数。
+
+    ★ 为什么必须有（2026-10-24 实测，我自己引入的代价）：常驻管线把 offload 权重留在
+      CPU 内存，SVD 一条就占 ~6.8GB；而**图像引擎是另一个单例、不走本缓存**，两者叠加
+      会把 15GB 级机器压到可用 <2GB ⇒ 实测 SDXL 稳态 22.12s → 25.16s（+13.7%）。
+      所以「谁要加载大权重，先叫对方让位」，让常驻只在内存宽裕时生效。
+
+    floor_gb：可用内存低于此才释放；None ⇒ 读 SHIGUANG_RESIDENT_FLOOR_GB，默认 2.3
+      （≈15GB 机器的 15%）。**可用内存取不到时按释放处理**（宁可多 reload 一次，
+      不可把内存压爆）。
+    """
+    if floor_gb is None:
+        try:
+            floor_gb = float(os.environ.get("SHIGUANG_RESIDENT_FLOOR_GB", "2.3"))
+        except (TypeError, ValueError):
+            floor_gb = 2.3
+    avail = available_ram_gb()
+    if avail is not None and avail > floor_gb:
+        return 0
+    with _lock:
+        if not _CACHE:
+            return 0
+        n = len(_CACHE)
+        pipes = list(_CACHE.values())
+        _CACHE.clear()  # 先断 dict 引用
+        _HITS.clear()
+        for p in pipes:
+            _dispose(p)
+        del pipes  # 再断列表引用
+        _gc_release()  # 最后统一回收
+    logger.info(
+        "[video_pipe_cache] 内存压力让位：释放 %d 条（可用 %sGB ≤ 水位 %.1fGB）%s",
+        n,
+        ("%.2f" % avail) if avail is not None else "未知",
+        floor_gb,
+        ("· " + reason) if reason else "",
+    )
+    return n
 
 
 def cached_keys() -> List[Tuple[str, str]]:
