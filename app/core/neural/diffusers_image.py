@@ -617,9 +617,9 @@ class DiffusersImageEngine:
         ★ 2026-10-24 实测教训：SD1.5 整卡常驻 → unload → 同进程再 load SDXL，
           SDXL 会因**显存碎片**换页卡死（>22min）。所以卸载必须「先 gc 掉引用、
           再 synchronize、最后 empty_cache」，让 CUDA 真正回收整块显存。
+          该序列已收口为 `inference_cache.release_vram_sequence()`（单一真源），
+          此处只调它，勿在内联重排步骤。
         """
-        import gc
-
         self._pipe = None
         self._pipe_i2i = None
         self._loaded_id = ""
@@ -631,18 +631,15 @@ class DiffusersImageEngine:
         self._promote_note = ""
         self._precision = "fp16"
         self._precision_reason = ""
-        gc.collect()
+        # 文本编码输出缓存随引擎卸载清空（键含 model_id，重载同模型也只是 miss 重编码；
+        # 不清的代价 = 卸载后 GPU/CPU 上仍驻留编码张量，属于泄漏）
         try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                try:
-                    torch.cuda.ipc_collect()
-                except Exception:  # stability-gate: allow-swallow（IPC 回收是 best-effort：老版本 torch 无此 API / 无 IPC 句柄时失败无后果，不影响显存释放）
-                    pass
-        except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；best-effort 回收，失败无后果）
-            pass
+            from app.core.neural.inference_cache import encoder_cache, release_vram_sequence
+
+            encoder_cache().clear()
+            release_vram_sequence()
+        except Exception:  # stability-gate: allow-swallow（缓存清理/回收失败不影响引用已断的事实；最坏是晚一步释放）
+            logger.debug("[diffusers_image] unload 回收序列失败", exc_info=True)
 
     def generate(self, model_id: str, *, prompt: str = "",
                  negative_prompt: str = "", image_path: str = "",
@@ -688,31 +685,34 @@ class DiffusersImageEngine:
             #   且 cpu Generator 是 diffusers 可复现性的官方推荐。
             gen = torch.Generator("cpu").manual_seed(int(seed)) if seed else None
 
-            if image_path:
-                # i2i：AutoPipeline 共享 t2i 权重组件（零额外显存），懒建缓存
-                from PIL import Image as _PILImage
-                if self._pipe_i2i is None:
-                    from diffusers import AutoPipelineForImage2Image
-                    self._pipe_i2i = AutoPipelineForImage2Image.from_pipe(self._pipe)
-                image = self._pipe_i2i(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    image=_PILImage.open(image_path).convert("RGB"),
-                    strength=0.75,
-                    guidance_scale=n_cfg,
-                    num_inference_steps=n_steps,
-                    generator=gen,
-                ).images[0]
-            else:
-                image = self._pipe(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    guidance_scale=n_cfg,
-                    height=n_h,
-                    width=n_w,
-                    num_inference_steps=n_steps,
-                    generator=gen,
-                ).images[0]
+            # ★ P0-1 步缓存（DeepCache）：默认关，SHIGUANG_STEP_CACHE=deepcache 显式开。
+            #   attach 不激活、activate 后才跳步；finally detach 保证 block.forward
+            #   全还原——漏还原 = 下次 generate 双倍短路（挂载/还原一一对应是硬纪律）。
+            step_cache = self._maybe_attach_step_cache(spec, pre["preset"])
+            try:
+                if image_path:
+                    # i2i：AutoPipeline 共享 t2i 权重组件（零额外显存），懒建缓存
+                    from PIL import Image as _PILImage
+                    if self._pipe_i2i is None:
+                        from diffusers import AutoPipelineForImage2Image
+                        self._pipe_i2i = AutoPipelineForImage2Image.from_pipe(self._pipe)
+                    image = self._pipe_i2i(
+                        prompt=prompt,
+                        negative_prompt=negative_prompt,
+                        image=_PILImage.open(image_path).convert("RGB"),
+                        strength=0.75,
+                        guidance_scale=n_cfg,
+                        num_inference_steps=n_steps,
+                        generator=gen,
+                    ).images[0]
+                else:
+                    # t2i：优先走编码器输出缓存（P0-2，见 _t2i_image）；关闭/失败自动回退
+                    image, _enc_state = self._t2i_image(
+                        prompt=prompt, negative_prompt=negative_prompt, cfg=n_cfg,
+                        width=n_w, height=n_h, steps=n_steps, generator=gen,
+                        model_id=model_id, preset=pre["preset"])
+            finally:
+                self._detach_step_cache(step_cache)
 
             if not out_path:
                 out_path = os.path.join("短剧AI剪辑输出",
@@ -749,6 +749,139 @@ class DiffusersImageEngine:
                 return {"ok": False, "memory_mode": self._offload,
                         "message": "显存不足，已自动回退到 offload 模式，请再试一次"}
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
+
+    # ── t2i 编码器输出缓存（P0-2，app/core/neural/inference_cache.py）────────
+    def _t2i_image(self, *, prompt: str, negative_prompt: str, cfg: float,
+                   width: int, height: int, steps: int, generator: Any,
+                   model_id: str, preset: str) -> Tuple[Any, str]:
+        """t2i 出图：优先复用文本编码输出（同 prompt 二次起省掉整段 CLIP 编码）。
+
+        返回 ``(PIL.Image, cache_state)``，cache_state ∈
+        ``{"off", "hit", "miss", "fallback"}``（fallback = 缓存路径异常，
+        已诚实回退 prompt 原路径，**不影响出图**）。
+
+        纪律（与 inference_cache 模块一致）：
+          · 默认关：SHIGUANG_ENCODER_CACHE=1 才启用（零质量风险，浸泡后再议默认开）；
+          · 键含全部影响编码的变量（arch/model_id/prompt/negative/lora_set/max_length）
+            ——少一个字段就是「换 LoRA 出旧图」级 bug（make_cache_key docstring）；
+          · 任何一步失败 ⇒ 回退 prompt 原路径，宁慢不糊，绝不假装用过缓存。
+        """
+        cache_state = "off"
+        # 门控与缓存路径同链但**不用异常做控制流**：未开 ⇒ 原路径直出（off），
+        # 缓存路径任何异常 ⇒ 诚实回退（fallback）。except 块体仅含 pass 属吞异常
+        # （稳定性门禁红线），故 _EncoderCacheSkip 跳转模式已废除。
+        try:
+            from app.core.neural.inference_cache import (
+                cache_gate, encoder_cache, encode_prompt_embeds,
+                make_cache_key, pipe_call_with_embeds,
+            )
+
+            spec = DIFFUSERS_IMAGE_MODELS.get(model_id) or {}
+            arch = "sdxl" if str(spec.get("arch")) == "sdxl" else "sd15"
+            gate = cache_gate(arch=arch, preset=preset, component="encoder_cache")
+            if gate["ok"]:
+                cache = encoder_cache()
+                dev = getattr(self._pipe, "_execution_device", None)
+                tok = getattr(self._pipe, "tokenizer", None)
+                max_length = int(getattr(tok, "model_max_length", 0) or 77)
+                key = make_cache_key(arch=arch, model_id=model_id, prompt=prompt,
+                                     negative_prompt=negative_prompt,
+                                     lora_set=str(getattr(self, "_lcm_lora", "") or ""),
+                                     max_length=max_length)
+                embeds = cache.get(key, device=dev)
+                if embeds is not None:
+                    cache_state = "hit"
+                    logger.info("[diffusers_image] 编码器缓存命中 %s…（累计命中 %d 次）",
+                                key[:8], cache.stats()["hits"])
+                else:
+                    embeds, why = encode_prompt_embeds(
+                        self._pipe, arch=arch, prompt=prompt,
+                        negative_prompt=negative_prompt, do_cfg=float(cfg) > 1.0,
+                        device=dev)
+                    if embeds is None:
+                        raise RuntimeError("encode_prompt 失败：%s" % why)
+                    cache.put(key, embeds)
+                    cache_state = "miss"
+                    st = cache.stats()
+                    logger.info("[diffusers_image] 编码器缓存写入 %s…（%d 条 / %.1fMB）",
+                                key[:8], st["entries"], st["bytes"] / 1048576.0)
+                return pipe_call_with_embeds(
+                    self._pipe, arch=arch, embeds=embeds, guidance_scale=float(cfg),
+                    height=int(height), width=int(width),
+                    num_inference_steps=int(steps), generator=generator), cache_state
+            logger.debug("[diffusers_image] 编码器缓存未启用：%s",
+                         "；".join(gate["reasons"]))
+        except Exception:
+            logger.debug("[diffusers_image] 编码器缓存路径失败 ⇒ 回退 prompt 原路径",
+                         exc_info=True)
+            cache_state = "fallback"
+        return self._pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            guidance_scale=float(cfg),
+            height=int(height),
+            width=int(width),
+            num_inference_steps=int(steps),
+            generator=generator,
+        ).images[0], cache_state
+
+    # ── 步缓存挂载/摘除（P0-1，app/core/neural/inference_cache.py）──────────
+    def _maybe_attach_step_cache(self, spec: Dict[str, Any],
+                                 preset: str) -> Any:
+        """按门控结果挂步缓存并激活；未开/失败一律返回 None（生成路径零感知）。
+
+        池子设备跟随 CUDA 可用性（CPU 机器上池在 CPU，行为同构、可单测）。
+        """
+        try:
+            from app.core.neural.inference_cache import (
+                LowRankFeatureCache, StepFeatureCache, cache_gate, default_pool,
+            )
+
+            arch = str(spec.get("arch") or "")
+            gate = cache_gate(arch=arch, preset=preset, component="step_cache")
+            if not gate["ok"]:
+                logger.debug("[diffusers_image] 步缓存未启用：%s",
+                             "；".join(gate["reasons"]))
+                return None
+            p = gate["params"]
+            pool = None
+            if p["pool"]:
+                try:
+                    import torch
+
+                    pool = default_pool(device="cuda" if torch.cuda.is_available()
+                                        else "cpu")
+                except Exception:  # stability-gate: allow-swallow（池建不出 ⇒ 不用池，缓存照常）
+                    logger.debug("[diffusers_image] 缓存池创建失败（按无池继续）",
+                                 exc_info=True)
+            lowrank = (LowRankFeatureCache(p["lowrank"]) if p["lowrank"] > 0 else None)
+            sc = StepFeatureCache()
+            rep = sc.attach(self._pipe, arch=arch, interval=p["interval"],
+                            branch_id=p["branch_id"], pool=pool, lowrank=lowrank)
+            if not rep["ok"]:
+                logger.info("[diffusers_image] 步缓存挂载失败（按不启用继续）：%s",
+                            "；".join(rep["reasons"]))
+                return None
+            sc.activate()
+            logger.info("[diffusers_image] 步缓存已激活：%s", "；".join(rep["reasons"]))
+            return sc
+        except Exception:  # stability-gate: allow-swallow（缓存层任何异常都不得影响出图）
+            logger.debug("[diffusers_image] 步缓存挂载异常（按不启用处理）", exc_info=True)
+            return None
+
+    def _detach_step_cache(self, sc: Any) -> None:
+        """摘除步缓存并落遥测日志（detach 内部保证 forward 全还原 + 缓存全释放）。"""
+        if sc is None:
+            return
+        try:
+            st = sc.detach()
+            logger.info("[diffusers_image] 步缓存遥测：full=%d reuse=%d hits=%d "
+                        "fallback=%d skip=%.2f cached=%.1fMB",
+                        st["full_steps"], st["reuse_steps"], st["reuse_hits"],
+                        st["reuse_fallbacks"], st["skip_ratio"],
+                        st["cached_bytes"] / 1048576.0)
+        except Exception:  # stability-gate: allow-swallow（detach 失败最坏是缓存晚一步释放）
+            logger.debug("[diffusers_image] 步缓存 detach 异常", exc_info=True)
 
     # ── 遥测（EPLB 对应物）────────────────────────────────────────────
     def _record_telemetry(self, spec: Dict[str, Any], elapsed: float, ok: bool) -> None:

@@ -578,13 +578,69 @@ class VideoGenEngine:
                 VPC.evict(k)
             except Exception:  # stability-gate: allow-swallow（evict 失败最坏是缓存多留一条管线，下次 LRU/让位仍会收；卸载语义已在本侧完成）
                 logger.debug("[video_gen] 共享缓存 evict 失败", exc_info=True)
+        # 卸载序列收口（gc → synchronize → empty_cache）：evict 成功时内部已跑过一次，
+        # 此处是幂等收尾——evict 失败时本路径就是唯一回收点（self._pipe 引用已断）。
         try:
-            import torch
+            from app.core.neural.inference_cache import release_vram_sequence
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；best-effort 回收，失败无后果）
-            pass
+            release_vram_sequence()
+        except Exception:  # stability-gate: allow-swallow（回收失败最坏是显存晚一步释放，不影响引用已断的事实）
+            logger.debug("[video_gen] unload 回收序列失败", exc_info=True)
+
+    # ── 步缓存挂载/摘除（P0-1，app/core/neural/inference_cache.py）──────────
+    def _attach_step_cache(self, arch: str, quality: str) -> Any:
+        """按门控结果挂步缓存并激活；未开/失败一律返回 None（生成路径零感知）。
+
+        质量档位传**原始** quality（空串=默认档≈balanced，不在白名单 ⇒ 不开，
+        与「默认关、显式开」一致；未知档名同样不开——不猜用户意图）。
+        """
+        try:
+            from app.core.neural.inference_cache import (
+                LowRankFeatureCache, StepFeatureCache, cache_gate, default_pool,
+            )
+
+            gate = cache_gate(arch=arch, preset=quality, component="step_cache")
+            if not gate["ok"]:
+                logger.debug("[video_gen] 步缓存未启用：%s", "；".join(gate["reasons"]))
+                return None
+            p = gate["params"]
+            pool = None
+            if p["pool"]:
+                try:
+                    import torch
+
+                    pool = default_pool(device="cuda" if torch.cuda.is_available()
+                                        else "cpu")
+                except Exception:  # stability-gate: allow-swallow（池建不出 ⇒ 不用池，缓存照常）
+                    logger.debug("[video_gen] 缓存池创建失败（按无池继续）", exc_info=True)
+            lowrank = (LowRankFeatureCache(p["lowrank"]) if p["lowrank"] > 0 else None)
+            sc = StepFeatureCache()
+            rep = sc.attach(self._pipe, arch=arch, interval=p["interval"],
+                            branch_id=p["branch_id"], pool=pool, lowrank=lowrank)
+            if not rep["ok"]:
+                logger.info("[video_gen] 步缓存挂载失败（按不启用继续）：%s",
+                            "；".join(rep["reasons"]))
+                return None
+            sc.activate()
+            logger.info("[video_gen] 步缓存已激活：%s", "；".join(rep["reasons"]))
+            return sc
+        except Exception:  # stability-gate: allow-swallow（缓存层任何异常都不得影响出片）
+            logger.debug("[video_gen] 步缓存挂载异常（按不启用处理）", exc_info=True)
+            return None
+
+    def _detach_step_cache(self, sc: Any) -> None:
+        """摘除步缓存并落遥测日志（detach 内部保证 forward 全还原 + 缓存全释放）。"""
+        if sc is None:
+            return
+        try:
+            st = sc.detach()
+            logger.info("[video_gen] 步缓存遥测：full=%d reuse=%d hits=%d "
+                        "fallback=%d skip=%.2f cached=%.1fMB",
+                        st["full_steps"], st["reuse_steps"], st["reuse_hits"],
+                        st["reuse_fallbacks"], st["skip_ratio"],
+                        st["cached_bytes"] / 1048576.0)
+        except Exception:  # stability-gate: allow-swallow（detach 失败最坏是缓存晚一步释放）
+            logger.debug("[video_gen] 步缓存 detach 异常", exc_info=True)
 
     def generate(
         self,
@@ -662,21 +718,30 @@ class VideoGenEngine:
             }
             if seed:
                 kw["generator"] = torch.manual_seed(int(seed))
-            if image_path:
-                if not os.path.isfile(image_path):
-                    return {"ok": False, "message": f"输入图不存在: {image_path}"}
-                img = iio.imread(image_path)
-                if img.ndim == 2:
-                    img = np.stack([img] * 3, axis=-1)
-                # ★ diffusers 的 SVD 管道只接受 PIL.Image / torch.Tensor，
-                #   **不接受 numpy**（实测报 ValueError: `image` has to be of type ...）
-                from PIL import Image as _PILImage
+            # ★ P0-1 步缓存（DeepCache）：默认关，SHIGUANG_STEP_CACHE=deepcache 显式开。
+            #   arch 由 pipeline 类名推导（SVD ⇒ "svd"）；未来 Wan 等 DiT 不在白名单，
+            #   门控自动拒（DiT 的对应物是 diffusers 内置 FBCache，属后续探针，不冒充）。
+            _sc_arch = ("svd" if "StableVideoDiffusion"
+                        in str(spec.get("pipeline") or "") else "")
+            step_cache = self._attach_step_cache(_sc_arch, quality)
+            try:
+                if image_path:
+                    if not os.path.isfile(image_path):
+                        return {"ok": False, "message": f"输入图不存在: {image_path}"}
+                    img = iio.imread(image_path)
+                    if img.ndim == 2:
+                        img = np.stack([img] * 3, axis=-1)
+                    # ★ diffusers 的 SVD 管道只接受 PIL.Image / torch.Tensor，
+                    #   **不接受 numpy**（实测报 ValueError: `image` has to be of type ...）
+                    from PIL import Image as _PILImage
 
-                kw["image"] = _PILImage.fromarray(img[:, :, :3])
-                frames = self._pipe(**kw).frames[0]
-            else:
-                kw["prompt"] = prompt
-                frames = self._pipe(**kw).frames[0]
+                    kw["image"] = _PILImage.fromarray(img[:, :, :3])
+                    frames = self._pipe(**kw).frames[0]
+                else:
+                    kw["prompt"] = prompt
+                    frames = self._pipe(**kw).frames[0]
+            finally:
+                self._detach_step_cache(step_cache)
 
             if not out_path:
                 out_path = os.path.join("短剧AI剪辑输出", f"video_{model_id}_{int(seed)}.mp4")

@@ -60,9 +60,8 @@ def get_or_load(key: Tuple[str, str], loader: Callable[[], Any]) -> Tuple[Any, s
             old_key, old_pipe = _CACHE.popitem(last=False)
             _HITS.pop(old_key, None)
             logger.info("[video_pipe_cache] 淘汰旧管线 %s（上限 %d）", old_key, _MAX_PIPES)
-            _dispose(old_pipe)
-            old_pipe = None
-            _gc_release()
+            del old_pipe  # 先断引用再回收（顺序反了 gc 收不掉，2026-10-24 教训）
+            _release_vram()
         return pipe, "miss"
 
 
@@ -73,9 +72,8 @@ def evict(key: Tuple[str, str]) -> bool:
         _HITS.pop(key, None)
         if pipe is None:
             return False
-        _dispose(pipe)
-        pipe = None  # 先断引用再 gc，否则收不掉（见 _gc_release）
-        _gc_release()
+        pipe = None  # 先断引用再回收，否则 gc 收不掉（weakref 测试锁死该语义）
+        _release_vram()
         return True
 
 
@@ -83,13 +81,9 @@ def clear() -> int:
     """清空全部缓存，返回释放数量（换卡/卸载/测试隔离用）。"""
     with _lock:
         n = len(_CACHE)
-        pipes = list(_CACHE.values())
-        _CACHE.clear()  # 先断 dict 引用
+        _CACHE.clear()  # 断 dict 引用（无其他持有者 ⇒ refcount 归零，gc 必收）
         _HITS.clear()
-        for p in pipes:
-            _dispose(p)
-        del pipes  # 再断列表引用
-        _gc_release()  # 最后统一回收
+        _release_vram()  # gc → synchronize → empty_cache 收口
         return n
 
 
@@ -102,33 +96,23 @@ def status() -> Dict[str, Any]:
         return {"max_pipes": _MAX_PIPES, "cached": len(entries), "entries": entries}
 
 
-def _dispose(pipe: Any) -> None:
-    """清显存缓存（不调 gc —— 见 _gc_release 的说明：调用方必须先断引用）。
+def _release_vram() -> None:
+    """统一回收真源 ⇒ `app.core.neural.inference_cache.release_vram_sequence()`
+    （gc → synchronize → empty_cache，+ ipc_collect best-effort）。
 
-    形参 pipe 故意不使用：真正的引用在 dict / 调用方局部变量手里，在这里置 None 无意义。
+    ★ 2026-10-24 实测教训：SD1.5 整卡常驻 → unload → 同进程再 load SDXL，
+      显存碎片换页卡死 >22min。正确顺序 = 先 gc 掉引用、再 synchronize、
+      最后 empty_cache。此前本文件把该序列拆成两半且都错位：
+      `_dispose` 只调 empty_cache（引用未断时 = 空转）、`_gc_release` 只调
+      gc.collect（缺 sync/empty_cache）——现收口为单一调用，勿再拆。
+    调用方纪律不变：**先断全部引用，再调本函数**（weakref 测试锁死）。
     """
     try:
-        import torch
+        from app.core.neural.inference_cache import release_vram_sequence
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:  # stability-gate: allow-swallow（torch 未装/CUDA 不可用时无缓存可清；释放是 best-effort，失败无后果）
-        pass
-
-
-def _gc_release() -> None:
-    """在**所有引用都已断开之后**统一回收。
-
-    ★ 顺序很重要（2026-10-24 自查发现的自身 bug）：原先在 _dispose 里 gc.collect()，
-      但那时 dict 与调用方局部变量仍持有 pipeline ⇒ 收不掉 ⇒ 常驻内存不降。
-      正确做法：先把 dict 条目/局部引用全部丢弃，再调本函数。
-    """
-    try:
-        import gc
-
-        gc.collect()
-    except Exception:  # stability-gate: allow-swallow（gc 回收是尽力而为，失败不影响正确性）
-        pass
+        release_vram_sequence()
+    except Exception:  # stability-gate: allow-swallow（回收失败最坏是显存晚一步释放，不影响正确性）
+        logger.debug("[video_pipe_cache] 显存回收序列失败", exc_info=True)
 
 
 def available_ram_gb() -> Optional[float]:
@@ -196,13 +180,9 @@ def release_under_pressure(reason: str = "", floor_gb: Optional[float] = None) -
         if not _CACHE:
             return 0
         n = len(_CACHE)
-        pipes = list(_CACHE.values())
         _CACHE.clear()  # 先断 dict 引用
         _HITS.clear()
-        for p in pipes:
-            _dispose(p)
-        del pipes  # 再断列表引用
-        _gc_release()  # 最后统一回收
+        _release_vram()  # 最后统一回收（gc → sync → empty_cache 收口）
     logger.info(
         "[video_pipe_cache] 内存压力让位：释放 %d 条（可用 %sGB ≤ 水位 %.1fGB）%s",
         n,

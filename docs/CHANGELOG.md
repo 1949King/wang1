@@ -1,5 +1,53 @@
 # 拾光剪影 — 变更日志
 
+## P0 推理缓存三件套：DeepCache / MLA / 前缀缓存理念移植进自研 diffusers 栈（V4.47.0 · 2026-10-25）
+
+> 设计依据：`docs/_reports/2026-10-24-DeepSeek推理理念移植至diffusers栈设计方案.md`。
+> 把 DeepSeek 三项推理理念（MLA 低秩压缩 / PagedAttention 块池与前缀缓存 / MoE 按需卸载）
+> 落到扩散栈，全部收敛在单一新文件，主引擎只做薄接线。
+
+### 落地内容（`app/core/neural/inference_cache.py`，五组件）
+
+1. **StepFeatureCache（P0-1，DeepCache 移植）**：up_blocks 实例级 forward 包裹 + 步间特征缓存，
+   interval/branch_id 可调；第 1 步必全量 ⇒ 误差不跨缓存周期累积；detach 全还原
+   （漏一个 = 下次 generate 双倍短路，单测锁死）。
+2. **LowRankFeatureCache（MLA 移植，设计稿 §10）**：缓存特征低秩（svd_lowrank）+ 重建。
+   **实测修正设计稿**：真实 U-Net 尾部有 GroupNorm（conv_norm_out），秩投影过不了归一化 ⇒
+   吸收式折叠只对 `conv_norm_out is None` 变体生效；真实 SD/SDXL/SVD 走「压缩存储 + 复用步
+   一次重建」，零解压税留给无 norm 结构。
+3. **EncoderOutputCache（前缀缓存对应物）**：文本编码输出 LRU 双闸（条数 + 字节），键含
+   arch/model_id/prompt/negative/lora_set/max_length（少一个字段 = 换 LoRA 出旧图级 bug）；
+   VRAM 感知驻留（宽裕驻 GPU、吃紧驻 CPU）。
+4. **VramBlockPool**：固定块 size-class 池 + 字节账 + 零拷贝 view 往返。
+5. **release_vram_sequence**：卸载序列单一真源（先断引用 → gc → synchronize → empty_cache →
+   ipc best-effort），治 2026-10-22 实测的 SD1.5→SDXL 重载碎片卡死 >22min。
+
+### 接线（薄层，主文件只做调用）
+
+- `diffusers_image.py`：新增 `_t2i_image` 四态 off/hit/miss/fallback；unload 收口
+  release_vram_sequence + encoder_cache().clear()；**门控不用异常做控制流**（稳定性门禁
+  红线：except 块体仅含 pass 属吞异常，`_EncoderCacheSkip` 跳转模式已废除）；
+- `video_gen.py`：`_attach_step_cache` / `_detach_step_cache` 门控挂载 + 遥测日志；
+- `local_video_pipe_cache.py`：`_dispose`/`_gc_release` 双真源拆错位（引用未断时
+  empty_cache 空转）收口为 `_release_vram` → release_vram_sequence。
+
+### 门控纪律（cache_gate）
+
+默认关、显式开（`SHIGUANG_STEP_CACHE=deepcache` / `SHIGUANG_ENCODER_CACHE=1`）；
+arch 白名单 sd15/sdxl/svd（wan 等 DiT 不进——FBCache 是另一条探针，不冒充）；
+final/best 档永不开；任何一步失败诚实回退原路径，宁慢不糊，绝不假装用过缓存。
+
+### 验证与边界
+
+- `app/tests/test_inference_cache.py` **45/45 passed**（无 GPU 依赖：假 UNet / 假 pipe /
+  CPU 张量；反例纪律——每个「必须拒绝」的分支都有断言，门禁不是永远绿的摆设）；
+- ruff 五文件全绿 · precommit 14 道全过 · stability 251/251 无新增 · frozen 区零涉及
+  （app/core/neural 不在冻结区，新文件无登记负担）；
+- **真机标定未做**：SDXL offload 模式下步缓存净收益、编码器缓存耗时差、低秩三档画质对比
+  属下一轮（n≥3 + 反例 + 回退路径，标准 6），验证前默认关不变；
+- 生效面诚实说明：diffsynth_engine 0.7.0 在装 ⇒ 日常生成默认走主引擎，本套件服务
+  builtin 兜底段与显式选自研（execution_decider「自研」switch）。
+
 ## 画布黑屏真凶：WebEngine 预检空 argv 误判（V4.46.26 · 2026-10-25）
 
 > 用户截图：AI 画布区一片黑，只有一行「画布页面加载失败（请点「刷新」或「启动画布」）」，
