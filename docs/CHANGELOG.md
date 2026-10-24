@@ -1,5 +1,49 @@
 # 拾光剪影 — 变更日志
 
+## 统一推理引擎 M1 · 模型族注册表（V4.46.14，2026-10-24）
+
+> 用户拍板：「把三条线合并成一条，做支持市面已有视频/大模型/多模态模型的统一引擎」。本刀交付路线的 **M1（协议层）**：设计稿 + `model_family.py` + 10 例测试 + 守卫入册（108→109）。
+
+### ① 侦察修正：不是三条线，是四条线（全部 file:line 实测）
+
+| # | 线 | 入口 | 状态 |
+|---|---|---|---|
+| ① | `neural/diffsynth_image` | `resolve_local_image_engine()` 主选 | 生产在用 |
+| ② | `neural/diffusers_image` | 同上备选 + hybrid_dispatch 本地腿 | 生产在用 |
+| ③ | `local_video_infer` | `canvas_aigc.py:1438` 后端注册表 | 手写 7 族，**仅 svd 真机跑过** |
+| ④ | `neural/video_gen` | `canvas_routes_local_video.py:47` | SVD·diffsynth 通道，TUNED 实测表 |
+
+病根：SVD 在 ③④ 各一份实现（双轨漂移）；③ 的 6 个未验证族在 UI「看起来可选」；选路逻辑三处重复；能力宣称无准入校验。
+
+### ② 新模块 `app/core/neural/model_family.py`（协议层单一真源）
+
+`ModelFamilySpec` 声明表（9 族）+ `resolve()`：族→后端裁定 = 声明 ∩ 后端健康（find_spec 级）∩ 权重在盘（惰性探测）。协议级承诺：
+
+- **SVD 唯一归属 ④ video_gen**（TUNED 真源；③ 的 `_infer_svd` 记为历史双轨，M3 归一）；
+- **验证三态** verified/unverified/blocked——对齐 engine_registry 的 library-only 法条：unverified 不得进默认可选；
+- **native_fps 上收** V4.46.11/12 实测纪律（svd=7、wan=16、ltx=25、minimax=24）；
+- **查无族 ⇒ ok=False + 「先登记」原因**——svd 漏登记误杀视频路径那类「查无=判死」错误从此是显式结论；
+- 与 backend_registry（后端健康）/ engine_registry（观测视图）分工写明，字段正交不硬合。
+
+### ③ 守卫 `_verify/check_model_family.py` 入册（8 项含 3 自检）
+
+A 后端 id AST 可解析 · B native_fps 与执行代码 num_frames 系数自洽 · C 默认可选纯净 · D 反例自检（拼错/不自洽必抓、正例放行）。
+
+### ④ 本轮实测否决清单（写进设计稿 §5，防反复重议）
+
+- **FP8/torchao**：装 0.7.0 实测 **0/743 Linear 被量化**、权重 4.78→4.78GB、白耗 228s；且源码注明 matmul 以原精度计算 ⇒ 对 SDXL 死路。**已卸载**（防 `usable.fp8` 误报，环境完好）。
+- **C++ 重构**：profiler 实测 **GPU kernel 占墙钟 97.6%**（983.8ms/1008ms），CPU self 大头是 `.item()` 同步等待（换语言省不掉）⇒ 收益上限 <5%，否决。
+- **DeepCache 官方包**：SD1.5 **2.22×**（2.75→1.24s，与官方 2.3× 吻合）；SDXL+offload 仅 **1.27×**（热噪声内）。U-Net 专属 ⇒ 对通用引擎目标泛化性低，缓做。
+- **TeaCache**：官方支持列表无 SDXL/SD1.5（DiT 专用），排除维持。
+
+### ⑤ 设计稿与路线
+
+`docs/_reports/2026-10-24-统一推理引擎架构设计稿.md`：M1 协议层（本刀）→ M2 后端收编 → M3 SVD 归一（动生产路径，带遥测回退）→ M4 入口合一 → M5 新模型验收。每阶段独立可交付、旧签名全程不变。
+
+### 验证
+
+新增 10 例全过；守卫 8 项全绿；全量 pytest **1967 passed**；`run_all_checks` **109 项全绿**；`frozen_zone_guard` 106 锁；ruff 棘轮零新增；DOCNUM 同步（接手速查卡/零基础 108→109）。
+
 ## 视频常驻缓存的跨引擎内存礼貌（让位 + 引用顺序修正）（V4.46.13，2026-10-24）
 
 > 用户选「先 B 再 E」。B = 给其余视频族接常驻复用。动手前的前置检查发现 **V4.46.10 我自己引入的常驻缓存有真实代价**，所以本刀先修代价，再谈铺开。

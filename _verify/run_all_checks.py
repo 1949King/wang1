@@ -282,6 +282,10 @@ CHECKS = [
     #    （SVD 帧格式崩、fps 写死 24 致时长压缩 3.4×），根因都是真编码链路没被覆盖。
     ("VIDEOCHAIN", "_verify/check_local_video_encode_chain.py",
      "本地视频编码链路：帧数↔fps 自洽 + 真产物断言 + 守卫自检"),
+    # ── 统一引擎 M1 · 模型族注册表（2026-10-24）──
+    #   「查无=判死」类错误（svd 漏登记曾误杀视频本地路径）从此在提交前被 AST 抓住。
+    ("MODELFAMILY", "_verify/check_model_family.py",
+     "模型族注册表：后端可解析 / fps 与执行代码自洽 / 默认可选纯净 / 守卫自检"),
     # ── 文档数字一致性（2026-10-20）──
     ("DOCNUM", "_verify/check_doc_numbers.py",
      "文档数字：无过时数字/端点=实测/能力=目录/体检项数=CHECKS"),
