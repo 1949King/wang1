@@ -2,7 +2,7 @@
 
 ## 一、北极星与缺口
 - 活路径 =「剪辑精剪 + AI 画布」。设计文档已是**生产链视角**（S0 选题→S1 剧本→S2 分镜美术→S3 生成→S4 剪辑→S5 成片 + G 治理横切，17 章），核心工具 = **阶段契约**（输入/输出/责任人/验收/失败语义，填不满=缺口）。
-- 🔴 2026-10-19 重估：**抽卡闭环已落地**（draw_orchestrator 179 + gen_critic 320 + draw_book 321 + score_book 278 + draw_ledger 188）；**编剧生产端非空白**（script_writer 99 + editing_script_generator 396 + storyboard_memory 209，缺长篇体系；drama_understanding_engine 2160 是消费类）。**现行真缺口**：① S2 母版层（无 AssetMaster）② G 治理闸门（有分无闸）③ S1 长篇体系 ④ S3 偏好回流 ⑤ S0 立意卡。
+- 🔴 2026-10-19 重估：**抽卡闭环已落地**（draw_orchestrator 179 + gen_critic 320 + draw_book 321 + score_book 278 + draw_ledger 188）；**编剧生产端非空白**（script_writer 99 + editing_script_generator 396 + storyboard_memory 209，缺长篇体系；drama_understanding_engine 2160 是消费类）。**现行真缺口**（2026-10-23 全库实测复核，四条线并行深挖）：① S2 缺 D2 接线——`asset_master.py` 213 行纯模型已落（D1 ✅ 2026-10-20，master+variant+继承+stale）但生产代码零 import；② G 缺接线+零并发写保护——`aesthetic_gate.py` 176 行（E1 ✅）零生产调用方，全库无 revision/409/ETag/乐观锁（写入口靠 `glue/policies.py:122-146` TIMELINE_WRITE_ENTRYPOINTS 登记册+`check_timeline_write_surface.py` 棘轮收敛；`agent_policy.py:185-189 can_auto_retry` 无运行时调用方，「写不重试」靠机制缺失）；③ S1 长篇（`script_doc.py` 269 行纯模型，缺 UI/存储/分集生成）；④ S3 参数回灌（回流已到提示词层 `guard_pipeline.py:166-185` best_combo 增益/负面词，`draw_book.recommend()` 的 best_seed 无生产消费方）；⑤ S0 立意卡接线（`idea_card.py` 176 行纯模型）。
 - LibTV（liblib.tv）对标 7 项已于 V4.43.19 完成。画布外观走 `data/canvas_appearance.json` + `GET /host/canvas-settings`（别用 QSettings）。
 
 ## 二、核心不变量
