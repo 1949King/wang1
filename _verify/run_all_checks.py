@@ -72,6 +72,7 @@ CHECKS = [
     ("PROMPT", "_verify/check_character_prompt.py", "字段流向"),
     ("MEMMODEL", "_verify/check_memory_model.py", "记忆衰减模型"),
     ("MEMSTR", "_verify/check_memory_strength.py", "记忆强度机制"),
+    ("INFCACHE", "_verify/check_inference_cache.py", "P0 推理缓存三件套（结构不变量）"),
     ("BRAINROUTE", "_verify/check_brain_routing.py", "大脑路由（学习回路）"),
     ("WRITECAP", "_verify/check_editor_write_capabilities.py", "Agent 写能力门槛 ≥8"),
     ("AGENTMAP", "_verify/check_agent_action_mapping.py", "Agent 动作表一致性"),

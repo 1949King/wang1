@@ -1,5 +1,94 @@
 # 拾光剪影 — 变更日志
 
+## 显存预算模型 + 准入预测表 + 缓存标定台（V4.47.0 续 · 2026-10-25）
+
+> 用户命题：「8GB 机 + AI 模拟」把 P0 三项的开发与标定做完；用显存预算模型算出
+> 12/16/24GB 各档的准入预测，输出 estimated 档位表——让用户在 12GB 卡上至少知道
+> 「引擎预计能干什么」。本条 = 该命题的交付与首轮真机标定。
+
+### 显存预算模型（`app/core/neural/vram_budget.py`，新文件 340 行）
+
+- 与 `memory_policy.pick_memory_policy` **分层不重叠**：policy 回答「这台卡该用哪档」
+  （现场探测驱动）；本模块回答「哪些模型/分辨率进得来、哪档最优」（预算预测）。
+- 准入判据：`required ≤ tier × headroom(mode)`，headroom 与 policy 同源
+  （whole_gpu 0.85 / offload 系 0.95）；required 公式
+  `base × (1-act_share + act_share×面积比) + per_frame × frames`（分辨率只缩放激活份）。
+- 9 配置 × 4 档位准入总表（sd15 512²/768² · sdxl 768²/1024²/1280² · svd 14f/25f ·
+  wan21/wan22 14f），每行带 basis 三值（measured 带文件:行号 / estimated 必带「需标定」/
+  registered 只准出现在 Wan）——**不许混用**。
+- 关键结论（8GB 机）：sd15 全档 / sdxl≤1280² / svd≤14f 准入；wan 仅 sequential；
+  12GB 解锁 svd 25 帧 + wan model_offload；sdxl@1280²@8GB model_offload 贴线
+  （5.21×(0.2+0.8×1.5625)=7.55 ≤ 7.6，余量仅 0.05GB）。
+- 交叉一致性两不变量（`test_vram_budget.py` 36 格矩阵全绿）：A 行覆盖（policy 选的模式
+  预算表必须有行）；B 有依据必准入（policy 有 floor 实测依据时预算必须准入）；
+  floor=None 双方闭嘴。
+- **诚实外推两处**：Wan per_frame 全档 0.0（无依据不计——照抄 SVD 的 0.31 会造出
+  「policy 判可行、预算表判不可行」的自相矛盾）；SVD sequential 行 estimated
+  （policy 分支 2b 会选它，预算表不能查无此档）。
+- 已知分歧有意保留并文档化：sd15 预算最优 whole_gpu（4.34GB/3.08s 实测）vs 引擎实跑
+  model_offload（policy 无 sd15 登记 ⇒ 保守默认）；不许直接登记 prefer_mode——
+  policy 分支 0 不看档位，4GB 小卡必炸。
+
+### 测试与报告
+
+- `app/tests/test_vram_budget.py` **81/81**（公式 / 边界 / first_s tiebreak / 36 格矩阵 /
+  反漂移 / 诚实契约：estimated⇒需标定、measured⇒文件:行号、registered 只准在 Wan）。
+- 报告 `docs/_reports/2026-10-25-显存预算模型与档位准入预测.md` 由模型渲染
+  （`.workbuddy/tmp/gen_vram_budget_report.py`，内部断言防手写结论与表格打架）；
+  §6 列 7 个标定缺口，含最结构性缺口：**policy 分辨率盲区**（policy 只收
+  (model_id, frames)，1536²@8GB 预算不过但 policy 按 1024² floor 放行）。
+
+### 结构不变量守卫 + 真机标定台（Task 7 收尾）
+
+- `_verify/check_inference_cache.py`（INFCACHE，已注册 run_all_checks）：沙箱安全
+  （标准库 + AST，不 import app）——五组件公开件在册 / cache_gate 档位矩阵+反例 /
+  make_cache_key 六字段敏感性 / 卸载序列三处收口+单一定义 / generate 的
+  attach↔finally-detach 成对 / 行数棘轮 1080。**每个 AST 检查配反例自检**
+  （喂必然违规的最小源码，检查器必须报错）——防永远绿的摆设。
+- `scripts/bench_p0_cache.py` + `docs/_reports/2026-10-25-P0推理缓存真机标定协议.md`：
+  n≥3 / 同 seed / 全新引擎实例（防 _maybe_promote 污染）/ 失败即记录不编数字 /
+  回填双侧同改（只改预算表不改 _MEASURED ⇒ 反漂移红 = 棘轮在工作）。
+
+### 首轮真机标定结果（RTX 4060 Laptop 8GB，2026-10-25）
+
+| 项 | 结果 | 验收 | 判定 |
+|----|------|------|------|
+| VramBlockPool 5 循环 | 0.177s · hit_rate 0.80 · live=0 | <60s 且命中 | **通过** |
+| 编码器缓存记账 | 8/8 命中 · LRU 灌 9 条淘汰 2 | 8 命中+超闸淘汰 | **通过** |
+| DeepCache sd15@fast | 提速 **1.36×**（3.0s→2.2s 中位） | ≥1.15× 且 PSNR≥30dB | **提速过、画质不过** |
+| 步缓存开销 sd15@512 | **0.0104 GB**（4 块真实前向 hook） | 与登记值偏差 <20% | **通过（登记值同时改正）** |
+| 步缓存开销 sdxl@1024 | **0.0391 GB**（3 块） | 同上 | **通过** |
+| 步缓存开销 svd@576×1024/14f | **0.0934 GB**（4 块 ×4 latent 帧） | 同上 | **通过** |
+
+DeepCache 画质结论（噪声地板已建：同 seed 三次 baseline 互相 PSNR=inf，
+CUDA 非确定性不影响判定）：默认 interval=3/branch_id=0 在 8 步下与 baseline 的
+偏差 **13.75dB**（三对逐对同值，确定性偏差），远超 30dB 草稿红线 ⇒
+**「默认关、显式开」被首轮标定正面验证**；开放前须调 branch_id>0 或 interval≥4。
+lowrank sweep 与 overhead 实测见 `.workbuddy/tmp/bench_p0_cache_*.json`。
+
+### 步缓存开销：登记公式三处错被真机标定逮出（estimated → measured）
+
+`vram_budget.step_cache_overhead_gb` 的 `_ARCH` 表是**算错的**，标定三连击：
+
+1. **空间档位错位一级**——旧式按 `latent>>(n-1-i)` 推 up_block 输出空间，真值是
+   `latent >> max(0, n-2-i)`（SD1.5 实测 [16,32,64,64]@512 vs 旧推 [8,16,32,64]）
+   ⇒ 低估 2.34×；
+2. **SDXL 写了不存在的结构**——旧表 4 块 + 2560 通道；本机权重 config 实测
+   `block_out_channels=[320,640,1280]` ⇒ **3 块**，up 输出 (1280,640,320)；
+3. **视频乘错轴**——乘的是 **latent 帧数**（输出帧 /4+1）不是输出帧数 ⇒ 旧值高估 3.5×。
+
+改正后登记值 0.010 / 0.039 / 0.093 与实测偏差 **3.8% / 0.2% / 0.4%**；
+双侧同改：`_ARCH` + 视频帧语义 + docstring 实测值 · `test_vram_budget.py`
+金标准（80→**81** 项，新增「视频乘 latent 帧」断言）· 预算报告 §4 表格 + 错因说明。
+
+标定台自身也踩了四道坎（都按失败回落、没编数字）：fp32 输入喂 fp16 UNet ⇒
+dtype mismatch（dtype/device 必须跟参数走）· SDXL `add_embedding` 是
+`TimestepEmbedding` 且输入 = concat(text, time) ⇒ pooled = in_features − 6×2×half_dim
+· SVD `added_time_ids` 是 **3 个**不是 6、`encoder_hidden_states` 是 (B,1,cad) ·
+SVD up_block 输出是**展平后**的 (B*F,C,H,W)，首维 4 是真实帧数据不能当 batch 剔掉。
+另：首轮 `overhead` 曾把「前向抓形状失败」落成 **0.0000GB** 冒充测量值 ⇒
+改为失败即 exit 1 诚实失败（不编数字纪律的第一次实战）。
+
 ## P0 推理缓存三件套：DeepCache / MLA / 前缀缓存理念移植进自研 diffusers 栈（V4.47.0 · 2026-10-25）
 
 > 设计依据：`docs/_reports/2026-10-24-DeepSeek推理理念移植至diffusers栈设计方案.md`。
