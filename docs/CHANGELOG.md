@@ -1,5 +1,48 @@
 # 拾光剪影 — 变更日志
 
+## 画布模块内置「本地模型」入口 + 面板下载（2026-10-25）
+
+> 用户：本地模型放到画布模块的模型管理里，切模块去拉太麻烦；主模块页签保持不变。
+
+### 交付
+
+- AI 画布「⋯ 更多」→ **本地模型（已下载 / 下载）** 弹窗，复用 `LocalModelsPanel`（与模型管理页签同源）；
+- 面板新增 **「下载选中」**：视频走 `video_gen.pull()`、图像走 `diffusers_image.pull()`，
+  **后台线程 + 进度回显**，完成自动刷新；失败原因原样回显；
+- 主模块「模型管理」页签**未改动**（按用户要求）。
+
+### 验证
+
+- 新增测试 2 例（画布菜单入口同源 / 面板下载按钮与后台线程）；
+- pytest **2030 passed**；`run_all_checks` **109 项全绿**；`frozen_zone_guard` OK（106 锁）。
+
+## QtWebEngine 版本错配 → 画布浏览器兜底（2026-10-25）
+
+> 现象：AI 画布永久黑屏，`loadFinished FAIL, retry 3/3`。重试/自动拉起都跑了，但每次加载都失败。
+
+### 根因（实测）
+
+- `QtWebEngineWidgets` 在 QApplication 之后导入 ⇒ 进程 fail-fast `0xC0000409`；提前导入后首次导航仍崩；
+- **版本混装**：PyQt6/Qt 6.10.2 vs PyQt6-WebEngine 6.10.0（Qt6Core.dll 6.10.2 / Qt6WebEngineCore.dll 6.10.0）；
+- 本机无匹配轮子、网络阻断 ⇒ 依赖侧短期修不了。
+
+### 兜底
+
+- `_verify/probe_webengine.py`：子进程预检（导入→建 view→加载 data: URL），exit 0 才算可用；
+- `main_qt6.py`：预检失败 ⇒ 置 `SHIGUANG_NO_WEBENGINE=1`（成功结果按版本缓存，装好依赖自动恢复）；
+- `character_management_module._ensure_web_view`（冻结区，已授权）：置位时短路 ⇒ `_load_canvas` 走
+  既有 `webbrowser.open(url)` ⇒ 画布在系统浏览器里照常可用。
+
+### 真正的修复（等网络）
+
+`pip install "PyQt6-WebEngine==6.10.2" "PyQt6-WebEngine-Qt6==6.10.2"`，然后重启即可（失败不缓存）。
+
+### 验证
+
+- 预检实跑：exit `-1073740791`（确认本机 WebEngine 不可用）；
+- 测试 4 例（主程序预检接线 / 预检脚本 / 短路 / 浏览器兜底）；
+- `frozen_zone_guard` OK（106 锁）。
+
 ## 画布自愈 + 设置导航修复（2026-10-25，授权解冻 stage3d-core）
 
 > 用户截图：① AI 画布黑屏「画布页面加载失败（请点刷新或启动画布）」；② 点设置弹「导航中无模块「settings」」。

@@ -740,6 +740,12 @@ class CharacterManagementModule(BaseModule):
 
         menu.addSeparator()
         self._act_sync = menu.addAction("同步模型池")
+        # 2026-10-25（用户要求）：本地模型放进画布模块，不必切到「模型管理」模块。
+        # 复用同一份 LocalModelsPanel（已下载 / 下载 / 打开目录），主模块页签保持不变。
+        self._act_local_models = menu.addAction("本地模型（已下载 / 下载）")
+        self._act_local_models.setToolTip(
+            "列出本机已下载的生图/生视频模型（SD1.5/SDXL/SVD/Wan），可直接下载缺失项")
+        self._act_local_models.triggered.connect(lambda _=False: self._on_open_local_models())
         self._act_sync.triggered.connect(lambda _=False: self._on_sync_models())
         self._act_reload = menu.addAction("刷新画布")
         self._act_reload.triggered.connect(lambda _=False: self._on_reload())
@@ -1011,6 +1017,38 @@ class CharacterManagementModule(BaseModule):
                 self._set_status(f"Agent 未连接（可忽略）: {short}")
                 logger.info("canvas-agent 连接失败（非致命）: %s", msg[:200])
 
+    def _on_open_local_models(self):
+        """打开「本地模型」弹窗（2026-10-25）。
+
+        为什么放在画布模块：用户要在画布这边直接看/拉本地权重，不想切模块找入口。
+        内容与「模型管理 → 本地模型」页签同源（LocalModelsPanel），不另写一份。
+        """
+        dlg = getattr(self, "_local_models_dlg", None)
+        if dlg is not None:
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        try:
+            from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+
+            from .local_models_panel import LocalModelsPanel
+        except Exception as e:
+            self._set_status(f"本地模型面板不可用：{e}")
+            return
+        box = QDialog(self)
+        box.setWindowTitle("本地模型（已下载 / 下载）")
+        box.resize(1000, 640)
+        lay = QVBoxLayout(box)
+        lay.addWidget(LocalModelsPanel(box))
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=box)
+        btn_close = btns.button(QDialogButtonBox.StandardButton.Close)
+        if btn_close is not None:
+            btn_close.clicked.connect(box.close)
+        lay.addWidget(btns)
+        box.finished.connect(lambda *_: setattr(self, "_local_models_dlg", None))
+        self._local_models_dlg = box
+        box.show()
+
     def _on_sync_models(self):
         self._sync_models_to_canvas(force_reload=True)
 
@@ -1039,6 +1077,13 @@ class CharacterManagementModule(BaseModule):
 
     def _ensure_web_view(self) -> bool:
         """首次需要加载页面时再创建 QWebEngineView（进模块只出壳）。"""
+        if os.environ.get("SHIGUANG_NO_WEBENGINE") == "1":
+            # 2026-10-25（授权解冻）：本机 PyQt6 6.10.2 + WebEngine 6.10.0 混装 ⇒ 渲染必崩。
+            # 由 main_qt6 子进程预检置位；这里短路返回 False，_load_canvas 会落到
+            # webbrowser.open(url)（画布在系统浏览器里照常可用，不再是黑屏）。
+            self._set_status("本机 QtWebEngine 不可用 ⇒ 正在用系统浏览器打开画布…")
+            logger.warning("QtWebEngine disabled by probe ⇒ open canvas in system browser")
+            return False
         if self._web is not None:
             return True
         if not WEBENGINE_AVAILABLE:

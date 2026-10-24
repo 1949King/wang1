@@ -41,6 +41,65 @@ if "--no-sandbox" not in _webengine_flags:
     )
 del _webengine_flags
 
+def _probe_webengine() -> bool:
+    """子进程预检 QtWebEngine 能否真正加载页面（2026-10-25）。
+
+    本机踩坑：PyQt6/Qt 6.10.2 与 PyQt6-WebEngine 6.10.0 混装 ⇒ 渲染进程
+    fail-fast（0xC0000409），连 data: URL 都崩，无法 try/except。
+    只能子进程试；失败则置 SHIGUANG_NO_WEBENGINE=1，画布改走系统浏览器。
+
+    成功结果按「PyQt6 + WebEngine 版本」缓存到 data/webengine_probe.json，
+    避免每次启动多等 2~5s；失败不缓存（装好依赖后下次启动自动重试）。
+    """
+    if os.environ.get("SHIGUANG_SKIP_WEBENGINE_PROBE") == "1":
+        return os.environ.get("SHIGUANG_NO_WEBENGINE") != "1"
+    try:
+        import subprocess
+        import sys as _sys
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ver = {"pyqt6": "", "webengine": ""}
+        try:
+            from importlib.metadata import version as _v
+
+            ver = {"pyqt6": _v("PyQt6"), "webengine": _v("PyQt6-WebEngine")}
+        except Exception:  # stability-gate: allow-swallow（读不到版本 ⇒ 不缓存，只多探一次，不影响启动）
+            pass
+        cache = os.path.join(root, "data", "webengine_probe.json")
+        if all(ver.values()):
+            try:
+                import json as _json
+
+                with open(cache, "r", encoding="utf-8") as f:
+                    got = _json.load(f) or {}
+                if got.get("key") == ver and got.get("ok") is True:
+                    return True
+            except Exception:  # stability-gate: allow-swallow（缓存损坏 ⇒ 重新预检，不影响启动）
+                pass
+        probe = os.path.join(root, "_verify", "probe_webengine.py")
+        if not os.path.isfile(probe):
+            return True
+        r = subprocess.run([_sys.executable, probe], timeout=30,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0:
+            try:
+                import json as _json
+
+                os.makedirs(os.path.dirname(cache), exist_ok=True)
+                with open(cache, "w", encoding="utf-8") as f:
+                    _json.dump({"key": ver, "ok": True}, f, ensure_ascii=False)
+            except Exception:  # stability-gate: allow-swallow（写缓存失败 ⇒ 下次重探，不影响启动）
+                pass
+            return True
+        return False
+    except Exception:
+        return False
+
+
+if not _probe_webengine():
+    os.environ["SHIGUANG_NO_WEBENGINE"] = "1"
+    print("[startup] QtWebEngine 不可用（版本错配/渲染进程崩溃）⇒ AI 画布将用系统浏览器打开")  # stability-gate: allow-print（启动诊断：预检失败必须让用户看见）
+
 import sys
 import json
 import time

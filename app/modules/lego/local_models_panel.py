@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import Any, Dict, List
 
 from PyQt6.QtCore import QUrl
@@ -64,6 +65,10 @@ class LocalModelsPanel(QWidget):
         btn_dir = QPushButton("打开模型目录")
         btn_dir.clicked.connect(self._open_dir)
         head.addWidget(btn_dir)
+        self._btn_pull = QPushButton("下载选中")
+        self._btn_pull.setToolTip("为选中的未下载模型拉取权重（长耗时，后台执行）")
+        self._btn_pull.clicked.connect(self._pull_selected)
+        head.addWidget(self._btn_pull)
         btn_ref = QPushButton("刷新")
         btn_ref.clicked.connect(self.refresh)
         head.addWidget(btn_ref)
@@ -116,6 +121,53 @@ class LocalModelsPanel(QWidget):
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch)
+
+    # ── 下载（in-process，不占 GUI 线程）───────────
+    def _selected_row(self):
+        idx = self._table.currentRow()
+        if idx < 0 or idx >= len(self._rows):
+            return None
+        return self._rows[idx]
+
+    def _pull_selected(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            self._summary.setText("请先在列表里选中一个模型")
+            return
+        if row.get("downloaded"):
+            self._summary.setText("该模型已下载：" + str(row.get("label")))
+            return
+        mid = str(row.get("id") or "")
+        cap = str(row.get("capability") or "")
+        self._btn_pull.setEnabled(False)
+        self._summary.setText("正在下载 %s …（体积大，请耐心等待）" % mid)
+
+        def progress(msg: str) -> None:
+            self._summary.setText(str(msg)[:160])
+
+        def work() -> None:
+            ok, msg = False, "未知错误"
+            try:
+                if cap == "video":
+                    from app.core.neural.video_gen import get_video_engine
+
+                    r = get_video_engine().pull(mid, progress_cb=progress)
+                else:
+                    from app.core.neural.diffusers_image import get_diffusers_image_engine
+
+                    r = get_diffusers_image_engine().pull(mid, progress_cb=progress)
+                ok = bool(r.get("ok"))
+                msg = str(r.get("message") or ("下载完成" if ok else "下载失败"))
+            except Exception as e:  # stability-gate: allow-swallow（失败原因回显 UI，不崩面板）
+                ok, msg = False, "%s: %s" % (type(e).__name__, e)
+            self._btn_pull.setEnabled(True)
+            self._summary.setText(("✅ " if ok else "❌ ") + msg[:200])
+            try:
+                self.refresh()
+            except Exception:
+                logger.debug("[LocalModelsPanel] 下载后刷新失败", exc_info=True)
+
+        threading.Thread(target=work, daemon=True, name="LocalModelPull").start()
 
     # ── 动作 ───────────────────────────────────────
     def _open_dir(self) -> None:
