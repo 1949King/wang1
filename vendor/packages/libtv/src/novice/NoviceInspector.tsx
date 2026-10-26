@@ -16,6 +16,7 @@
  * node-factory 类型定义中，前后端生成链路均无消费，属假设置。
  */
 
+import { describeImageSize } from "../imageSize";
 import { useEffect, useState } from "react";
 import { useCanvasStore } from "../store";
 import { breakdownStoryboard } from "../bridge";
@@ -447,6 +448,8 @@ export default function NoviceInspector() {
   const quality = (d.qualityTier as string) || "standard";
   // 画幅缺省 portrait（竖屏短剧）——与后端 DEFAULT_ASPECT 一致
   const aspect = (d.aspect as string) || "portrait";
+  // 分辨率档位（2026-10-27）：画质档决定长边上限，显示在此供用户预判耗时
+  const targetSize = describeImageSize(aspect, quality);
   // YuE 全曲生成字段（2026-09-28）：引擎缺省 suno（向后兼容旧节点）
   const engine = (d.engine as string) || "suno";
   const cot = (d.cot as string) || "full";
@@ -749,7 +752,7 @@ export default function NoviceInspector() {
 
       {GEN_WITH_QUALITY ? (
         <div className="nv-insp-field">
-          <label>画质</label>
+          <label>画质 <span className="nv-dim">· {targetSize}</span></label>
           <div className="nv-seg">
             {QUALITY_TIERS.map((q) => (
               <button

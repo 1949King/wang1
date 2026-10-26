@@ -132,7 +132,7 @@ def _local_image(*, prompt: str, size: str, seed: Any, reference_image: str,
                          .get("native_size") or 512)
         except Exception:
             logger.debug("[hybrid_dispatch] 本地模型探测失败，按 sd15/512", exc_info=True)
-        fw, fh = LP.fit_size(w, h, native)
+        fw, fh = LP.target_size(w, h, quality, local_model, native)
         preset = LP.resolve_preset(
             quality=quality, model_id=local_model,
             lcm_usable=LP.lcm_usable(backend),

@@ -220,12 +220,13 @@ class CanvasCapabilityHandlers:
         _prec = str(p.get("precision") or "").strip()
         if _prec and hasattr(sel["backend"], "request_precision"):
             sel["backend"].request_precision(_prec)
+        _qw, _qh = LP.target_size(int(p.get("width") or 0), int(p.get("height") or 0), _get_quality(str(p.get("quality") or "")), model_id)
         kw = LP.generate_kwargs(
             backend=sel["backend"], model_id=model_id,
             quality=_get_quality(str(p.get("quality") or "")), preset=str(p.get("preset") or ""),
             prompt=str(p.get("prompt") or ""), negative_prompt=str(p.get("negative_prompt") or ""),
-            image_path=str(p.get("image_path") or ""), width=int(p.get("width") or 0),
-            height=int(p.get("height") or 0), seed=seed_used,
+            image_path=str(p.get("image_path") or ""), width=_qw,
+            height=_qh, seed=seed_used,
             steps=int(p.get("steps") or 0), cfg=float(p.get("cfg") or 0.0))
         try:
             res = sel["backend"].generate(model_id, **kw)

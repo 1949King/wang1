@@ -1,3 +1,4 @@
+import { describeImageSize } from "./imageSize";
 import React, { createContext, memo, useContext, useRef, useState, type ReactNode } from "react";
 import { Handle, Position, type NodeProps, NodeResizer } from "@xyflow/react";
 import type { NodeData, NodeStatus } from "./store";
@@ -394,6 +395,8 @@ function DirectorL1Panel({ nodeId, d }: {
   ] as const;
 
   const currentQuality = d.qualityTier ?? "standard";
+  // 分辨率档位（2026-10-27）：与意图卡片/后端同口径（长边 ≤ 768/832/1024）
+  const currentSize = describeImageSize(String((d as { aspect?: string }).aspect || "1:1"), currentQuality);
   const currentMotion = d.motionStrength ?? 60;
   const currentConsistency = d.consistency ?? 75;
   const currentDuration = d.duration ?? 5;
@@ -401,7 +404,7 @@ function DirectorL1Panel({ nodeId, d }: {
   return (
     <div className="sg-l1-panel nodrag">
       <div className="sg-l1-row">
-        <span className="sg-l1-label">画质</span>
+        <span className="sg-l1-label">画质 · {currentSize}</span>
         <div className="sg-l1-seg">
           {qualityOptions.map((q) => (
             <button

@@ -1,5 +1,48 @@
 # 拾光剪影 — 变更日志
 
+## 分辨率档位总闸：qualityTier → 出图尺寸，落到每个节点与意图卡片（2026-10-27）
+
+### 需求
+
+把分辨率档位落实到**每一个画布节点和意图卡片**，并实测已下载模型。
+
+### 设计（单一真源）
+
+- 后端：`local_image_plan.max_side_for` / `target_size`（draft 768 · standard 832 · fine/cinema 1024，SD1.5 更小）
+- 三入口收口：`/host/local-image-generate`、`capability_handlers`、`hybrid_dispatch._local_image`；
+- 前端：`src/imageSize.ts`（`QUALITY_MAX_SIDE`/`estimateImageSize`/`describeImageSize`），
+  `localImage.ts` 用它算请求尺寸；节点 L1 面板、意图卡片摘要、NoviceInspector 画质行显示同一数值。
+
+### 档位矩阵实测（请求 1024² ⇒ 实际收口）
+
+| 模型 | 档位 | 尺寸 | 耗时 | 峰值 |
+|---|---|---|---|---|
+| sd15-t2i | standard | 512² | **1.8s** | 2.61GB |
+| sdxl-t2i | standard | 832² | **13.6s** | 5.52GB |
+| sdxl-t2i | fine | 1024² | 28.8s | 5.65GB |
+
+### 顺带修掉真缺陷：SDXL 的 LCM fast 是负收益
+
+- 实测 draft 原映射 fast(LCM)：**97.9s / 6.95GB**（换页）；standard(12 步 832²)：13.6s；
+- 修复：`_SDXL_FAST_PROFITABLE = False` ⇒ SDXL 恒不走 fast；SD1.5 保留；
+- 修复后 SDXL draft **97.9s → 19.4s（5×）**。
+
+### 视频侧实测（已下载 / 未下载）
+
+| 模型 | 权重 | 实测 |
+|---|---|---|
+| SVD svd-xt-i2v | ✅ | ✅ 61.8s / 5 帧 / 4.66GB / 可播 URL |
+| Wan2.1 wan21-t2v-1.3b | ✅ | ✅ 134.5s / 4.9GB（修复后） |
+| Wan2.2 wan22-ti2v-5b | ❌ 未下载 | — |
+| cogvideox/hunyuan/ltx/mochi/minimax_h3 | ❌ 无权重 | 未验证 |
+
+**修复**：`_infer_wan` 的 `if result.frames` 对 ndarray 做布尔判断会崩（diffusers 默认 `output_type="np"`）
+⇒ 改按形状分支；新增 3 例测试；修复后 Wan 首次跑通。
+### 验证
+
+- pytest `test_local_image_plan.py` 12 例 · vitest **641 passed** · tsc 37 基线（既有冻结区错误）；
+- 文档 §26。
+
 ## 8GB 硬墙实测：SDXL 分辨率曲线 2.1×；整卡与 LCM 均不可取（2026-10-27）
 
 ### 实测（SDXL / 20 步 / offload）

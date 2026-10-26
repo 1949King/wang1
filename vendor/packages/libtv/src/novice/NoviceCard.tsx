@@ -13,6 +13,7 @@
  * 仅在 data 上读取 intentDepth（可选，默认 2）用于胶囊显示。
  */
 
+import { describeImageSize } from "../imageSize";
 import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useCanvasStore } from "../store";
@@ -136,6 +137,8 @@ function metaOf(d: LooseData): string {
       cinema: "电影级",
     };
     parts.push(map[d.qualityTier] || d.qualityTier);
+    // 分辨率档位（2026-10-27）：让卡片直接显示这一档会出多大图
+    parts.push(describeImageSize(String(d.aspect || "1:1"), d.qualityTier));
   }
   // 生成器：模式 + 数量
   if (typeof d.mode === "string" && d.mode) parts.push(String(d.mode));

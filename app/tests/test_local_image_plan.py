@@ -40,9 +40,10 @@ def test_resolve_preset_maps_canvas_quality() -> None:
 
 
 def test_sdxl_fast_falls_back_to_high_without_lcm() -> None:
+    """2026-10-27 实测更新：SDXL 无论 LCM 是否可用都不走 fast（97.9s vs 13.6s 负收益）。"""
     assert LP.resolve_preset(quality="draft", model_id="sdxl-t2i", lcm_usable=False) == "high"
-    assert LP.resolve_preset(quality="draft", model_id="sdxl-t2i", lcm_usable=True) == "fast"
-    # SD1.5 的 fast 不依赖 LCM
+    assert LP.resolve_preset(quality="draft", model_id="sdxl-t2i", lcm_usable=True) == "high"
+    # SD1.5 的 fast 保留（8 步 1.5s 确实快）
     assert LP.resolve_preset(quality="draft", model_id="sd15-t2i", lcm_usable=False) == "fast"
 
 
@@ -254,3 +255,13 @@ def test_hybrid_local_image_plan_model_missing_falls_back(monkeypatch):
                           prefer_engine="diffsynth", model_id="sdxl-t2i")
     assert out and out["local_model"] == "sd15-t2i" and seen["model"] == "sd15-t2i"
     assert any("未下载" in r for r in reasons)
+
+
+def test_sdxl_draft_never_fast():
+    """2026-10-27 实测：SDXL 的 fast(LCM) 是负收益（97.9s vs 13.6s）⇒ 恒降 high。"""
+    from app.core.ai import local_image_plan as L
+
+    assert L.resolve_preset(quality="draft", model_id="sdxl-t2i", lcm_usable=True) == "high"
+    assert L.resolve_preset(quality="draft", model_id="sdxl-t2i", lcm_usable=False) == "high"
+    # SD1.5 保留 fast（8 步 1.5s 确实快）
+    assert L.resolve_preset(quality="draft", model_id="sd15-t2i", lcm_usable=True) == "fast"

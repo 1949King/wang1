@@ -1620,13 +1620,16 @@ class CanvasPostRoutesMixin:
         from app.core.ai import local_image_plan as LP
         from app.core.ai.quality_gate import get_quality as _get_quality
 
+        # 分辨率总闸（2026-10-27）：qualityTier → 长边上限（SDXL 832 / SD1.5 640 …）
+        _qw, _qh = LP.target_size(int(body.get("width") or 0), int(body.get("height") or 0),
+                                  _get_quality(str(body.get("quality") or "")), model_id)
         kw = LP.generate_kwargs(
             backend=eng, model_id=model_id,
             quality=_get_quality(str(body.get("quality") or "")),
             preset=str(body.get("preset") or ""),
             prompt=str(body.get("prompt") or ""), negative_prompt=str(body.get("negative_prompt") or ""),
-            image_path=image_path, width=int(body.get("width") or 0),
-            height=int(body.get("height") or 0), seed=seed_used,
+            image_path=image_path, width=_qw,
+            height=_qh, seed=seed_used,
             steps=int(body.get("steps") or 0), cfg=float(body.get("cfg") or 0.0),
             out_path=str(body.get("out_path") or ""))
         try:

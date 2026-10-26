@@ -29,26 +29,39 @@ QUALITY_TO_PRESET = {
     "cinema": "final",
 }
 
+# 画质档 → **长边上限**（2026-10-27 实测：SDXL 1024²=30.7s / 832²=16.4s / 768²=14.3s）
+# 语义：这是「出图分辨率总闸」，画布每个生成节点/意图卡片都靠 qualityTier 走这一条。
+QUALITY_MAX_SIDE_SDXL = {"draft": 768, "standard": 832, "fine": 1024, "cinema": 1024}
+QUALITY_MAX_SIDE_SD15 = {"draft": 512, "standard": 640, "fine": 768, "cinema": 768}
+
 # 偏「高质量」的档位：优先 SDXL
 _HQ = {"fine", "cinema"}
 
+# SDXL 的 fast 档（LCM-LoRA 8 步 cfg1）2026-10-27 本机实测是**负收益**：
+#   draft(768², LCM) = 97.9s / 峰值 6.95GB  vs  standard(832², 12 步) = 13.6s
+# 原因：LCM 让 cfg 降为 1 不省算力，但 LoRA 注入 + 峰值抬升触发显存换页。
+# ⇒ 即便 lcm 可用，SDXL 也不走 fast（只对 SD1.5 保留，那里 8 步 1.5s 确实快）。
+_SDXL_FAST_PROFITABLE = False
+
 
 def fit_size(width: int, height: int, native: int = 512,
-             step: int = 64, minimum: int = 256) -> Tuple[int, int]:
+             step: int = 64, minimum: int = 256, max_side: int = 0) -> Tuple[int, int]:
     """把任意宽高等比收进模型原生分辨率，并对齐 step（默认 64）。
 
     width<=0 或 height<=0 ⇒ 直接用原生方形（引擎默认行为）。
+    max_side>0 时以它为上限（画质档给出的长边总闸），否则用 native。
     """
     w, h = int(width or 0), int(height or 0)
     n = int(native or 512)
     if w <= 0 or h <= 0:
         return n, n
-    scale = min(1.0, n / float(max(w, h)))
+    limit = int(max_side) if int(max_side or 0) > 0 else n
+    scale = min(1.0, limit / float(max(w, h)))
     tw = max(minimum, int(round(w * scale / step)) * step)
     th = max(minimum, int(round(h * scale / step)) * step)
     # 收进原生上限（四舍五入可能越界一档）
-    tw = min(tw, n)
-    th = min(th, n)
+    tw = min(tw, limit)
+    th = min(th, limit)
     return tw, th
 
 
@@ -67,6 +80,24 @@ def pick_model(*, quality: str = "standard", width: int = 0, height: int = 0,
     if "sd15-t2i" in has:
         return "sd15-t2i"
     return "sd15-t2i"
+
+
+def max_side_for(quality: str = "standard", model_id: str = "") -> int:
+    """画质档 + 模型族 → 出图长边上限（单一真源，后端收口与前端预估共用口径）。"""
+    q = str(quality or "").strip().lower() or "standard"
+    table = QUALITY_MAX_SIDE_SDXL if str(model_id).startswith("sdxl") else QUALITY_MAX_SIDE_SD15
+    return int(table.get(q, table["standard"]))
+
+
+def target_size(width: int = 0, height: int = 0, quality: str = "standard",
+                model_id: str = "", native: int = 0) -> Tuple[int, int]:
+    """一站式计算「本次实际出图尺寸」：档位上限 + 等比 + 对齐 64。
+
+    画布节点/意图卡片只传 qualityTier 与画幅，具体像素由这里定（前端预估同口径）。
+    """
+    n = int(native or 0) or (1024 if str(model_id).startswith("sdxl") else 512)
+    limit = min(max_side_for(quality, model_id), n)
+    return fit_size(width, height, n, max_side=limit)
 
 
 def supports_preset(backend: Any) -> bool:
@@ -123,6 +154,8 @@ def resolve_preset(*, quality: str = "standard", model_id: str = "sd15-t2i",
     preset = QUALITY_TO_PRESET.get(str(quality or "").strip().lower(), "")
     if not preset:
         return ""
-    if preset == "fast" and str(model_id).startswith("sdxl") and not lcm_usable:
-        return "high"
+    if preset == "fast" and str(model_id).startswith("sdxl"):
+        # SDXL：LCM 可用与否都不走 fast（实测负收益，见 _SDXL_FAST_PROFITABLE）
+        if not lcm_usable or not _SDXL_FAST_PROFITABLE:
+            return "high"
     return preset

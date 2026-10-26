@@ -708,7 +708,17 @@ def _infer_wan(
             evict(key)
             logger.warning("[local_video_infer] Wan 生成 OOM，已淘汰常驻管线待重载")
         raise
-    frames = result.frames[0] if result.frames else []
+    # 2026-10-27 修复：Wan 的 diffusers 默认 output_type="np" ⇒ result.frames 是 **ndarray**，
+    # 直接 `if result.frames` 会抛 ValueError（truth value of an array is ambiguous）。按形状分支。
+    _fr = result.frames
+    if _fr is None:
+        frames = []
+    elif hasattr(_fr, "ndim"):          # numpy ndarray
+        frames = _fr[0] if _fr.ndim >= 4 else _fr
+    elif len(_fr):                        # List[List[PIL]]
+        frames = _fr[0]
+    else:
+        frames = []
     out = _save_video_frames(frames, out_dir, bridge_port, fps=_native_fps)
     if isinstance(out, dict):
         out["num_frames"] = n_frames
