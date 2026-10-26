@@ -1,5 +1,20 @@
 # 拾光剪影 — 变更日志
 
+## 低精度 kernel 实测：项目 venv(torch 2.6.0) 全部不可用；int4 需 torch>=2.14（2026-10-27）
+
+### 实测
+
+- `_weight_int8pack_mm` → **NotImplementedError**（CUDA 无实现）
+- `_convert_weight_to_int4pack` → **RuntimeError**（同因）
+- 基线 bf16 GEMM 4096² = **0.20ms** ⇒ 低精度收益在**显存/权重体积**，不在算力
+- 用户独立环境（torch 2.14.1+cu130）已打通原生 int4：-68.8% 权重、batch=1 5~7×、余弦 0.995
+
+### 口径修正 + 交付
+
+- 'hasattr 为 True ≠ 可用'：新增 `accel_status.torch_kernels()` **真调用**探测（含 fd2 静音）；
+- `scripts/accel_report.py` 增加「torch 自带低精度 kernel」段；
+- 决策：不为 int4 升级项目 torch（2.6→2.14 风险过大）；改走 UNet 整卡/拆分驻留（无新依赖）。
+
 ## 加速路线实测：整卡驻留 1.88×；cudagraphs 负收益记档；量化/TensorRT 依赖阻塞（2026-10-27）
 
 ### 实测（SD1.5 512² / 8 步）

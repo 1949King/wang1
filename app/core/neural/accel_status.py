@@ -23,6 +23,12 @@ logger = logging.getLogger("AI短剧编辑器.core.neural.accel_status")
 
 #: 本机实测过的收益（只有跑过才登记；键与 status() 对齐）
 _MEASURED: Dict[str, Dict[str, Any]] = {
+    "int8_aten_win": {"measured": True, "ok": False,
+                       "note": "2026-10-27 项目 venv(torch 2.6.0+cu124) 实测：aten::_weight_int8pack_mm 在 CUDA 上 NotImplementedError（Windows 轮子未编译该 kernel）"},
+    "int4_aten_win": {"measured": True, "ok": False,
+                       "note": "同族结论：int4 的 _convert_weight_to_int4pack/_weight_int4pack_mm 需 torch>=2.14 的 Windows 构建才有 kernel；项目 venv 2.6.0 不具备（用户已在 torch 2.14.1+cu130 独立环境打通原生 int4，跨环境不可直接复用）"},
+    "sdxl_split_residency": {"measured": False,
+                              "note": "待做：text encoders/VAE 留 CPU、UNet 整卡，目标 SDXL 1024² 稳态 25s→12~15s（无需新依赖）"},
     "sd15_fast_8step": {"measured": True, "note": "SD1.5 512² 8 步 1.55s（基线 20 步 3.6s）"},
     "cudagraphs": {"measured": True, "speedup": 0.33,
                    "note": "2026-10-27 实测：500ms/步 vs 基线 165ms/步 ⇒ 慢 3 倍，禁止启用"},
@@ -107,9 +113,57 @@ def status() -> Dict[str, Any]:
             "expected": "估算 1.2~1.4×（kernel 融合，工程量大、每次换模型要重编译）",
             "estimated": True,
         },
+        "torch_kernels": torch_kernels(),
         "measured": _MEASURED,
         "honesty": "estimated=True 的项均为行业经验区间，未在本机验证；实测过的以 measured 为准。",
     }
+
+
+def torch_kernels() -> Dict[str, Any]:
+    """探测 torch 自带低精度 GEMM kernel 在本机是否真能执行（只信真调用，不信 hasattr）。
+
+    2026-10-27 本项目实测：hasattr 为 True 但 CUDA 后端没注册实现 ⇒ NotImplementedError。
+    dispatcher 失败会往 fd2 打整张 backends 表，这里临时重定向到 devnull，避免污染画布日志。
+    """
+    res: Dict[str, Any] = {"available": False, "reason": "", "kernels": {}}
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            res["reason"] = "无 CUDA"
+            return res
+        res["available"] = True
+        w = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(1, 256, device="cuda", dtype=torch.bfloat16)
+        import os as _os
+
+        devnull = _os.open(_os.devnull, _os.O_WRONLY)
+        old = _os.dup(2)
+        try:
+            _os.dup2(devnull, 2)
+            for name in ("_weight_int8pack_mm", "_convert_weight_to_int4pack"):
+                fn = getattr(torch, name, None)
+                if fn is None:
+                    res["kernels"][name] = "missing"
+                    continue
+                try:
+                    if name == "_weight_int8pack_mm":
+                        amax = w.abs().amax(dim=1).clamp_min(1e-8)
+                        scale = amax / 127.0
+                        wq = torch.round(w / scale.unsqueeze(1)).clamp(-127, 127).to(torch.int8)
+                        fn(x, wq, scale)
+                    else:
+                        fn(torch.zeros(256, 32, device="cuda", dtype=torch.int32), 8)
+                    res["kernels"][name] = "ok"
+                except Exception as e:
+                    res["kernels"][name] = type(e).__name__
+        finally:
+            _os.dup2(old, 2)
+            _os.close(devnull)
+            _os.close(old)
+    except Exception as e:
+        res["reason"] = f"{type(e).__name__}: {e}"
+    return res
 
 
 def install_hint() -> Dict[str, str]:

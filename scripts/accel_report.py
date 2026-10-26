@@ -34,6 +34,11 @@ def main() -> int:
         m = it.get("measured")
         if m:
             print(f"  实测：speedup={m.get('speedup')} —— {m.get('note')}")
+    tk = st.get("torch_kernels") or {}
+    print("\n[torch 自带低精度 kernel]")
+    for k, v in (tk.get("kernels") or {}).items():
+        print(f"  {k}: {v}" + ("  ✅" if v == "ok" else "  ❌（该后端未编译）"))
+    print("  说明：hasattr 为 True 不代表能用；本项目实测 torch 2.6.0 Windows 轮子均不可执行。")
     print("\n" + st["honesty"])
     return 0
 
