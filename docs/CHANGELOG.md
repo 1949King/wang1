@@ -1,5 +1,18 @@
 # 拾光剪影 — 变更日志
 
+## 自研引擎实测：diffsynth 能用但慢 1.9×（2026-10-27）
+
+**能用**：diffsynth_engine 0.7.0 已装、决策器选它为主选、出图 ok。
+
+| 栈 | 首跑 | 稳态 | 峰值 |
+|---|---|---|---|
+| diffsynth（主选） | 16.39s | **2.76s** | 1.69GB |
+| diffusers（备选） | 8.93s | **1.45s** | 2.61GB |
+
+原因：diffsynth 缺 flash-attn / xformers / nunchaku（日志实测只有 SDPA），且 cpu_offload 每步换权重。
+
+建议：图像主选切回 diffusers；diffsynth 作低显存兜底；装 flash-attn 后重测。
+
 ## 视频常驻缓存：Wan 138.8s → 67.5s（2.06×）（2026-10-27）
 
 **根因**：`_infer_wan` 只 import `evict`，从未调用 `get_or_load` ⇒ 每次 `from_pretrained` 重建 27GB 管线。
