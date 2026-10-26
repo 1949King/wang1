@@ -353,13 +353,26 @@ class DiffsynthImageEngine:
             os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
             image.save(out_path)
             # 落画布 inbox（WebView 读不了本地路径，与 video_gen 同一机制）
-            from app.core.neural.video_gen import publish_to_inbox
+            from app.core.neural.video_gen import file_to_data_url, publish_to_inbox
             published = publish_to_inbox(out_path)
+            # 2026-10-27：落箱失败 ⇒ data URL 兜底（与 diffusers 引擎同口径）
+            _warnings: List[str] = []
+            _image_url = str(published.get("url") or "")
+            _data_url = ""
+            if not _image_url:
+                _data_url = file_to_data_url(out_path, "image/png")
+                if _data_url:
+                    _image_url = _data_url
+                    _warnings.append("画布 inbox 写入失败 ⇒ 已用内嵌 data URL 兜底（本次可显示，文件未入箱）")
+                else:
+                    _warnings.append("画布 inbox 写入失败且无法内嵌 ⇒ 请到 image_path 取文件")
             elapsed = _time.time() - t0
             return {"ok": True, "path": out_path,
                     "image_path": out_path,
-                    "image_url": published.get("url", ""),
+                    "image_url": _image_url,
+                    "image_data_url": _data_url,
                     "inbox_path": published.get("inbox_path", ""),
+                    "warnings": _warnings,
                     "steps": n_steps, "cfg": n_cfg,
                     "width": n_w, "height": n_h,
                     "seconds_elapsed": round(elapsed, 1),

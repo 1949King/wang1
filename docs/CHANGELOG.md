@@ -1,5 +1,26 @@
 # 拾光剪影 — 变更日志
 
+## 本地生图/生视频「跑完无产物」根因修复：落箱失败 → data URL 兜底（2026-10-27）
+
+> 用户反馈：AI 画布用本地模型，跑 60~70 秒后看不到图片/视频。
+
+### 根因（端到端实测）
+
+- 引擎成功出图（SD1.5 3.7s；SDXL 首次 ~89s / 稳态 ~24s = 用户看到的时长）；
+- 最后一步 `publish_to_inbox()` 抛 `PermissionError`（Python 写用户目录被系统策略拒）；
+- 该函数**静默返回 `{}`** ⇒ 引擎 ok=True 但 URL 为空 ⇒ 前端退化成相对路径 ⇒ 永远空白。
+
+### 修复
+
+- `publish_to_inbox` 失败改为 warning + `{"error": ...}`；
+- 新增 `file_to_data_url()`；三个引擎 URL 为空时用 data URL 填 `image_url`/`video_url` + `warnings`；
+- 批量出图逐张兜底；`image_data_url` 同步回传。
+
+### 验证
+
+- 新增测试 3 例（落箱失败报错 / data URL 上限 / 引擎兜底契约）；
+- 端到端复测：image_url 由空 ⇒ `data:image/png;base64,...`（710KB）+ warnings。
+
 ## 显存预算模型 + 准入预测表 + 缓存标定台（V4.47.0 续 · 2026-10-25）
 
 > 用户命题：「8GB 机 + AI 模拟」把 P0 三项的开发与标定做完；用显存预算模型算出

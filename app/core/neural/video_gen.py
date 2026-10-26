@@ -758,12 +758,22 @@ class VideoGenEngine:
             # 落箱失败不影响产物本身：video_path 仍然有效，只是前端播不了。
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t_gen0
+            _warnings: List[str] = []
+            _video_url = str(published.get("url") or "")
+            if not _video_url:
+                # 落箱失败 ⇒ data URL 兜底，保证前端拿到的永远是可播放串
+                _video_url = file_to_data_url(out_path, "video/mp4", max_mb=8.0)
+                if _video_url:
+                    _warnings.append("画布 inbox 写入失败 ⇒ 已用内嵌 data URL 兜底（本次可播，文件未入箱）")
+                else:
+                    _warnings.append("画布 inbox 写入失败且视频过大无法内嵌 ⇒ 请到 video_path 取文件")
             return {
                 "ok": True,
                 "path": out_path,
                 "frames": len(frames),
                 "video_path": out_path,
-                "video_url": published.get("url", ""),
+                "video_url": _video_url,
+                "warnings": _warnings,
                 "inbox_path": published.get("inbox_path", ""),
                 # 把实测参数与耗时一并回传：用户能直接看到快了多少
                 "steps": n_steps,
@@ -808,6 +818,27 @@ def write_data_url(data_url: str, dest_dir: str, name_hint: str = "input") -> Op
         return None
 
 
+def file_to_data_url(path: str, mime: str = "image/png", max_mb: float = 12.0) -> str:
+    """把本地产物转成 data URL —— 落箱失败时的**最后兜底**（WebView 可直接显示）。
+
+    为什么需要：inbox 目录不可写（权限/策略）时，前端只拿到空 URL 就是黑屏；
+    data URL 不依赖文件服务，图片/短视频都能直接渲染。超上限返回空（保护内存）。
+    """
+    try:
+        if not path or not os.path.isfile(path):
+            return ""
+        if os.path.getsize(path) > max_mb * 1024 * 1024:
+            return ""
+        import base64
+
+        with open(path, "rb") as f:
+            raw = f.read()
+        return f"data:{mime};base64,{base64.b64encode(raw).decode(chr(97) + chr(115) + chr(99) + chr(105) + chr(105))}"
+    except Exception:
+        logger.debug("[video_gen] data URL 兜底失败", exc_info=True)
+        return ""
+
+
 def publish_to_inbox(video_path: str, name: str = "") -> Dict[str, str]:
     """把生成的视频落到**画布 inbox**，返回 WebView 能播的 URL。
 
@@ -842,9 +873,10 @@ def publish_to_inbox(video_path: str, name: str = "") -> Dict[str, str]:
             "inbox_path": dest,
             "url": f"http://127.0.0.1:{int(DEFAULT_PORT)}/inbox_file/{quote(safe)}",
         }
-    except Exception:
-        logger.debug("[video_gen] 落画布 inbox 失败", exc_info=True)
-        return {}
+    except Exception as e:
+        # 2026-10-27：落箱失败必须可见（此前 debug 静默 ⇒ 前端拿空 URL 却显示“已完成”）
+        logger.warning("[video_gen] 落画布 inbox 失败：%s: %s", type(e).__name__, e)
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _to_uint8_array(frames) -> Any:

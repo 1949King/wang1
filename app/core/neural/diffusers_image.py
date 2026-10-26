@@ -720,17 +720,30 @@ class DiffusersImageEngine:
             os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
             image.save(out_path)
             # 落画布 inbox（WebView 读不了本地路径，与 video_gen 同一机制）
-            from app.core.neural.video_gen import publish_to_inbox
+            from app.core.neural.video_gen import file_to_data_url, publish_to_inbox
             mode_at_start = self._offload      # 本次实际执行用的模式（提升发生在这之后）
             published = publish_to_inbox(out_path)
+            # 2026-10-27：落箱失败（inbox 不可写）⇒ data URL 兜底，保证前端能显示
+            _warnings: List[str] = []
+            _image_url = str(published.get("url") or "")
+            _data_url = ""
+            if not _image_url:
+                _data_url = file_to_data_url(out_path, "image/png")
+                if _data_url:
+                    _image_url = _data_url
+                    _warnings.append("画布 inbox 写入失败 ⇒ 已用内嵌 data URL 兜底（本次可显示，文件未入箱）")
+                else:
+                    _warnings.append("画布 inbox 写入失败且无法内嵌 ⇒ 请到 image_path 取文件")
             elapsed = _time.time() - t0
             self._record_telemetry(spec, elapsed, ok=True)
             # ★ 首图已交付 ⇒ 尝试热提升到整卡（后续 -26%）；装不下自动留 offload。
             self._maybe_promote()
             return {"ok": True, "path": out_path,
                     "image_path": out_path,
-                    "image_url": published.get("url", ""),
+                    "image_url": _image_url,
+                    "image_data_url": _data_url,
                     "inbox_path": published.get("inbox_path", ""),
+                    "warnings": _warnings,
                     "steps": n_steps, "cfg": n_cfg,
                     "width": n_w, "height": n_h,
                     "memory_mode": mode_at_start,
@@ -1152,15 +1165,18 @@ class DiffusersImageEngine:
             )
             base = out_dir or os.path.join("短剧AI剪辑输出")
             os.makedirs(base, exist_ok=True)
-            from app.core.neural.video_gen import publish_to_inbox
+            from app.core.neural.video_gen import file_to_data_url, publish_to_inbox
 
             saved: List[Dict[str, Any]] = []
             for idx, img in enumerate(out.images[:n_img]):
                 p = os.path.join(base, f"batch_{model_id}_{int(seed)}_{idx}.png")
                 img.save(p)
                 pub = publish_to_inbox(p)
+                _iu = str(pub.get("url") or "")
+                if not _iu:
+                    _iu = file_to_data_url(p, "image/png")
                 saved.append({"path": p, "image_path": p,
-                              "image_url": pub.get("url", ""),
+                              "image_url": _iu,
                               "inbox_path": pub.get("inbox_path", "")})
             elapsed = _time.time() - t0
             self._record_telemetry(spec, elapsed, ok=True)
