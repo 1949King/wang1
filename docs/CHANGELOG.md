@@ -1,5 +1,19 @@
 # 拾光剪影 — 变更日志
 
+## 视频常驻缓存：Wan 138.8s → 67.5s（2.06×）（2026-10-27）
+
+**根因**：`_infer_wan` 只 import `evict`，从未调用 `get_or_load` ⇒ 每次 `from_pretrained` 重建 27GB 管线。
+
+**修复**：
+- pipeline 走 `local_video_pipe_cache.get_or_load`；
+- prompt embeds 走 LRU(4)（UMT5 分层编码几十秒，embeds 仅 ~4MB）
+
+**实测**：第一次 138.8s（加载+推理）→ 第二次 **67.5s**（缓存命中），提速 **2.06×**。
+
+**边界**：`max_pipes=1` ⇒ 8GB 只容一个视频 pipe，Wan/SVD 互斥；余下 67.5s 是纯推理。
+
+测试：新增 `test_wan_pipe_cache.py` 2 例（命中 / LRU 上限）。
+
 ## 分辨率档位总闸：qualityTier → 出图尺寸，落到每个节点与意图卡片（2026-10-27）
 
 ### 需求

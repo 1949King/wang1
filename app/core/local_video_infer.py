@@ -545,6 +545,29 @@ def _wan_div_size(size: str, div: int = 16) -> "tuple[int, int]":
     return max(div, (w // div) * div), max(div, (h // div) * div)
 
 
+_WAN_EMBEDS_CACHE = {}
+
+
+def _wan_embeds_cached(model_path: str, prompt: str, vram_gb: int):
+    """Cache Wan prompt embeddings (UMT5 layer-load encode costs tens of seconds).
+
+    2026-10-27: pipeline is cached now; the remaining per-call cost was re-encoding the
+    prompt (UMT5 loaded in layers then released). Embeds are tiny (~4MB bf16) => LRU(4).
+    """
+    import hashlib
+
+    key = (os.path.abspath(model_path), hashlib.sha1(str(prompt).encode("utf-8")).hexdigest())
+    hit = _WAN_EMBEDS_CACHE.get(key)
+    if hit is not None:
+        logger.info("[local_video_infer] wan embeds cache hit")
+        return hit
+    pe, ne = _encode_wan_prompts(model_path, prompt, _WAN_NEGATIVE_DEFAULT, vram_gb)
+    _WAN_EMBEDS_CACHE[key] = (pe, ne)
+    while len(_WAN_EMBEDS_CACHE) > 4:
+        _WAN_EMBEDS_CACHE.pop(next(iter(_WAN_EMBEDS_CACHE)))
+    return pe, ne
+
+
 def _encode_wan_prompts(
     model_path: str, prompt: str, negative: str, vram_gb: int, max_seq: int = 512
 ):
@@ -661,35 +684,40 @@ def _infer_wan(
 
     # ── Stage A：UMT5 分层加载编码 prompt，编完即释放（RAM 墙，见 _encode_wan_prompts）──
     try:
-        pe, ne = _encode_wan_prompts(model_path, prompt, _WAN_NEGATIVE_DEFAULT, vram_gb)
+        pe, ne = _wan_embeds_cached(model_path, prompt, vram_gb)
     except Exception as e:
         return {"ok": False, "message": f"Wan 文本编码失败: {type(e).__name__}: {e}"}
 
-    # ── Stage B：只载 transformer + vae（无编码器管线），embeds 直喂 ──
-    try:
-        vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
-        tr = WanTransformer3DModel.from_pretrained(
+    # ---- Stage B: load transformer+vae only; pipeline goes through process-level cache ----
+    # 2026-10-27: before this, every call rebuilt from_pretrained (27GB weights) => 134.5s each.
+    # Now local_video_pipe_cache.get_or_load keeps it resident: 2nd call only pays inference.
+    key = ("wan", os.path.abspath(model_path))
+    from app.core.local_video_pipe_cache import get_or_load
+
+    def _build_wan_pipe():
+        v = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
+        t = WanTransformer3DModel.from_pretrained(
             model_path, subfolder="transformer", torch_dtype=dtype
         )
-        sch = UniPCMultistepScheduler.from_pretrained(model_path, subfolder="scheduler")
-        pipe = WanPipeline(
-            transformer=tr, text_encoder=None, tokenizer=None, vae=vae, scheduler=sch
-        )
+        s = UniPCMultistepScheduler.from_pretrained(model_path, subfolder="scheduler")
+        obj = WanPipeline(transformer=t, text_encoder=None, tokenizer=None, vae=v, scheduler=s)
+        try:
+            obj.enable_model_cpu_offload()
+        except Exception:
+            logger.debug("wan cpu offload unavailable -> device", exc_info=True)
+            obj.to(device)
+        try:
+            obj.enable_vae_slicing()
+        except Exception:
+            logger.debug("wan vae slicing unavailable", exc_info=True)
+        return obj
+
+    try:
+        pipe, _cache_state = get_or_load(key, _build_wan_pipe)
+        logger.info("[local_video_infer] wan pipe cache=%s", _cache_state)
     except Exception as e:
-        return {"ok": False, "message": f"Wan 模型加载失败: {type(e).__name__}: {e}"}
-
-    try:
-        pipe.enable_model_cpu_offload()
-    except Exception:
-        logger.debug("cpu offload 不可用，直接上卡", exc_info=True)
-        pipe.to(device)
-    try:
-        pipe.enable_vae_slicing()
-    except Exception:
-        logger.debug("忽略异常（原为 pass）: local_video_infer.py", exc_info=True)
-
+        return {"ok": False, "message": "Wan model load failed: %s: %s" % (type(e).__name__, e)}
     n_steps = int(steps) if steps is not None else 20  # 20 步 = M5 实测可用档
-    key = ("wan", os.path.abspath(model_path))
     try:
         result = pipe(
             prompt_embeds=pe.unsqueeze(0).to(dtype).to(device),
