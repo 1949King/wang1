@@ -1,5 +1,25 @@
 # 拾光剪影 — 变更日志
 
+## 引擎注册表补齐调度/资源层 + 明确「自研 vs 三方」边界（2026-10-27）
+
+### 登记补齐（56 → 66 条，族不变 9 个）
+
+此前的调度/资源层**整层 0 登记**，本次补 10 条：
+execution_decider / hybrid_dispatch / inference_cache / vram_budget / quant_policy /
+accel_status / model_family / local_video_infer / comfy_provider / canvas_aigc。
+
+角色按真实状态标注：`quant_policy`=fallback（本机无 kernel 不生效）、
+`comfy_provider`=**library-only**（画布无 ComfyUI 生成入口，不得宣称可用）。
+
+### 口径修正（文档 §28）
+
+画布推理链上**没有自研生成算法**，自研的是「选栈 + 省显存 + 缓存 + 编排」；
+内核全是三方（Diffusers / DiffSynth / ONNX / OpenCV / ComfyUI / 云 API）。
+对外只能称「AI 原生交付 + 推理编排能力」，**不得称「自研推理引擎」**。
+
+实证：diffsynth 稳态 2.76s 输给 diffusers 1.45s（其加速后端全未安装）——
+决定快慢的是选栈与资源策略，不是内核归属。
+
 ## 自研引擎实测：diffsynth 能用但慢 1.9×（2026-10-27）
 
 **能用**：diffsynth_engine 0.7.0 已装、决策器选它为主选、出图 ok。
