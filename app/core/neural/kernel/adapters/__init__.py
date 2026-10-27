@@ -12,6 +12,7 @@ from app.core.neural.kernel.adapters.base import (
 )
 from app.core.neural.kernel.adapters.sd15 import SD15Adapter
 from app.core.neural.kernel.adapters.sdxl import SDXLAdapter
+from app.core.neural.kernel.adapters.svd import SVDAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -20,4 +21,5 @@ __all__ = [
     "UnverifiedAdapter",
     "SD15Adapter",
     "SDXLAdapter",
+    "SVDAdapter",
 ]

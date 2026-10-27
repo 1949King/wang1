@@ -140,7 +140,7 @@ class SD15Adapter(BaseAdapter):
         }
 
     # ── 解码 ──────────────────────────────────────────────────
-    def decode(self, latents: Any) -> Any:
+    def decode(self, latents: Any, state: Any = None) -> Any:
         dec = self.bag.require("vae")
         scaling = float(getattr(dec.config, "scaling_factor", 0.18215))
         image = dec.decode(latents / scaling, return_dict=False)[0]

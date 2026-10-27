@@ -154,3 +154,72 @@ def test_add_noise_falls_back_visibly(caplog):
 
     assert float(out.flatten()[0]) == 1.0
     assert any("add_noise" in r.message for r in caplog.records), "退路必须可见"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 视频族（rank=5）：make_frames
+# ══════════════════════════════════════════════════════════════════
+
+def test_make_frames_matches_upstream_randn_bitwise():
+    """同 seed 同形状 ⇒ 与上游 `randn_tensor` **逐位**相同。
+
+    视频族的第一门同样是"初始 latents 比特一致"，而不是"帧数对得上就行"。
+    形状写错（比如帧维放 dim=0）在上游也能跑通 —— 只是每一帧都是别的帧的噪声。
+    """
+    from diffusers.utils.torch_utils import randn_tensor
+
+    ref = randn_tensor((1, 7, 4, 32, 32), generator=_cpu_gen(5), device="cpu",
+                       dtype=torch.float32)
+    ours = LAT.make_frames(batch=1, frames=7, channels=4, height=256, width=256,
+                           latent_scale=8, generator=_cpu_gen(5), device="cpu",
+                           dtype=torch.float32, init_noise_sigma=1.0)
+    assert torch.equal(ref, ours), "视频族初始 latents 必须比特一致"
+
+
+def test_make_frames_frame_dim_is_dim_one():
+    """帧维在 **dim=1**：`(batch, frames, channels, h, w)`。
+
+    这是上游 `prepare_latents` 的形状。写成 `(frames, batch, ...)` 不会报错，
+    只会在"拼图像条件"时把 batch 维和帧维搞反 —— 出的是别的视频，不是坏视频。
+    """
+    out = LAT.make_frames(batch=2, frames=5, channels=4, height=256, width=320,
+                          latent_scale=8, generator=_cpu_gen(0), device="cpu",
+                          dtype=torch.float32)
+    assert tuple(out.shape) == (2, 5, 4, 32, 40)
+
+
+def test_make_frames_channels_is_noise_half_not_in_channels():
+    """通道数必须由调用方给成 `in_channels // 2`。
+
+    SVD UNet 是 8 通道（4 噪声 + 4 图像条件），噪声只占一半。
+    这里钉的是"工具不擅自加维度"：给它 8 就出 8，给它 4 就出 4，
+    除以 2 的责任在 adapter（判据只写一处，见 `BaseAdapter.init_latents`）。
+    """
+    four = LAT.make_frames(batch=1, frames=2, channels=4, height=128, width=128,
+                           latent_scale=8, generator=_cpu_gen(0), device="cpu",
+                           dtype=torch.float32)
+    assert four.shape[2] == 4
+
+
+def test_make_frames_applies_sigma_exactly_once():
+    """`init_noise_sigma != 1` 时**只乘一次**。
+
+    调用点再乘一次 ⇒ 噪声强度翻倍，成片"糊成一片"且**不报错**。
+    所以这里用 sigma=2.0 做定点断言：值必须是原来的 2 倍，不是 4 倍。
+    """
+    one = LAT.make_frames(batch=1, frames=3, channels=4, height=128, width=128,
+                          latent_scale=8, generator=_cpu_gen(7), device="cpu",
+                          dtype=torch.float32, init_noise_sigma=1.0)
+    two = LAT.make_frames(batch=1, frames=3, channels=4, height=128, width=128,
+                          latent_scale=8, generator=_cpu_gen(7), device="cpu",
+                          dtype=torch.float32, init_noise_sigma=2.0)
+    assert torch.allclose(two, one * 2.0, rtol=0, atol=0)
+
+
+def test_make_frames_given_latents_not_resampled():
+    """给了 latents 就只搬设备 —— 链式续生 / i2v 已编码图时不能再抽一次噪声。"""
+    given = torch.full((1, 4, 4, 8, 8), 0.25)
+    out = LAT.make_frames(batch=1, frames=4, channels=4, height=64, width=64,
+                          latent_scale=8, generator=_cpu_gen(0), device="cpu",
+                          dtype=torch.float32, init_noise_sigma=2.0, latents=given)
+    assert torch.allclose(out, torch.full((1, 4, 4, 8, 8), 0.5))

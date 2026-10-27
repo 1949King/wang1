@@ -193,7 +193,7 @@ def _check_runtime_contracts(evidence_override=None) -> list:
     bad = []
     try:
         from app.core.neural.kernel import engine as K
-        from app.core.neural.kernel.contracts import BASE_PARITY_FIELDS, VERIFIED
+        from app.core.neural.kernel.contracts import VERIFIED, baseline_for
     except Exception as e:                    # pragma: no cover
         return ["无法 import 内核（%s: %s）" % (type(e).__name__, e)]
 
@@ -211,7 +211,11 @@ def _check_runtime_contracts(evidence_override=None) -> list:
         ad = K.adapter_for(fam)
         for v in ad.caps.violations():
             bad.append("④：族 %s 的 caps 不自洽 —— %s" % (fam, v))
-        missing = ad.parity.missing(BASE_PARITY_FIELDS)
+        # 基线按**族的潜变量阶数**取：视频族（rank=5）的条件/引导/解码语义与图像族
+        # 没有重叠，用图像清单校验它等于要求适配器填一堆无意义的键，
+        # 最后必然是"为了过守卫填个 True" —— 那比没有守卫更糟。
+        baseline = baseline_for(ad.caps)
+        missing = ad.parity.missing(baseline)
         if missing:
             bad.append("④：族 %s 的 parity 漏填 %s（新族准入必须先填完，规范 §5.2）"
                        % (fam, ", ".join(missing)))
@@ -322,10 +326,26 @@ def main() -> int:
             print("  ✗ ⑤ 自证失败：%s" % e)
             ok = False
 
+        # ⑥ 视频族基线按阶数分派：给一个 rank=5 但只填了**图像**清单的适配器
+        #    ⇒ 必须报"漏填 noise_aug_before_vae"等视频专属项。
+        #    这条防的是"基线分派写错、视频族被按图像清单校验"的假绿。
+        try:
+            from app.core.neural.kernel import engine as K
+
+            orig_cls = K._ADAPTERS.get("sd15")
+            K._ADAPTERS["sd15"] = lambda: _VideoCapsImageParityAdapter()
+            got = _check_runtime_contracts(evidence_override={})
+            if orig_cls is not None:
+                K._ADAPTERS["sd15"] = orig_cls
+            _case("⑥ 视频族漏填视频基线", got, "noise_aug_before_vae")
+        except Exception as e:
+            print("  ✗ ⑥ 自证失败：%s" % e)
+            ok = False
+
         if not ok:
             print("  ✗ 自证未通过 —— 有判据是摆设")
             return 1
-        print("  ✓ 五条判据全部真会红（非摆设）")
+        print("  ✓ 六条判据全部真会红（非摆设）")
 
     if bad:
         print("\n✗ 内核契约守卫未通过：")
@@ -365,6 +385,28 @@ class _VerifiedNoEvidenceAdapter:
         self.family = "sd15"
         self.caps = dataclasses.replace(caps, verified=VERIFIED)
         self.parity = base.parity
+
+
+class _VideoCapsImageParityAdapter:
+    """自证专用：caps 是视频族（rank=5），parity 却只填了图像清单。
+
+    基线分派若写成"永远用 BASE_PARITY_FIELDS"，这个适配器会被判绿 ——
+    而它的 `noise_aug_before_vae`（随机数消耗顺序）根本没验过。
+    这条反例专门盯住那种假绿。
+    """
+
+    def __init__(self) -> None:
+        import dataclasses
+
+        from app.core.neural.kernel.adapters.sd15 import SD15Adapter
+        from app.core.neural.kernel.contracts import AdapterCaps
+
+        base = SD15Adapter()
+        self.family = "sd15"
+        self.caps = dataclasses.replace(
+            AdapterCaps(cfg_mode="none", cfg_batch_multiplier=1),
+            latent_rank=5, vae_decode="chunked_temporal")
+        self.parity = base.parity        # 只有图像族那些键
 
 
 if __name__ == "__main__":

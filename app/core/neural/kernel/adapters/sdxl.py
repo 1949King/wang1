@@ -199,7 +199,7 @@ class SDXLAdapter(BaseAdapter):
         }
 
     # ── 解码（含 upcast / latents_mean 两个分支）───────────────
-    def decode(self, latents: Any) -> Any:
+    def decode(self, latents: Any, state: Any = None) -> Any:
         import torch
 
         dec = self.bag.require("vae")

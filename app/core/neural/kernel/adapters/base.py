@@ -55,11 +55,17 @@ class ComponentBag:
 
     @classmethod
     def from_pipe(cls, pipe: Any, extras: Optional[Dict[str, Any]] = None) -> "ComponentBag":
-        """按**上游组件名**取值，再由 adapter 用中性 key 注册。"""
+        """按**上游组件名**取值，再由 adapter 用中性 key 注册。
+
+        `image_encoder` / `video_processor` 是视频族（SVD）才有的：
+        条件来自 CLIP **视觉**编码器而不是文本编码器，输入图预处理要用上游的
+        `VideoProcessor`（它的 resize 插值方式决定了条件张量，自己写会漂）。
+        白名单**只增不改**：多取到 None 就跳过，对图像族零影响。
+        """
         parts: Dict[str, Any] = {}
         for name in ("unet", "transformer", "vae", "text_encoder", "text_encoder_2",
                      "tokenizer", "tokenizer_2", "scheduler", "image_processor",
-                     "feature_extractor"):
+                     "feature_extractor", "image_encoder", "video_processor"):
             obj = getattr(pipe, name, None)
             if obj is not None:
                 parts[name] = obj
@@ -190,36 +196,67 @@ class BaseAdapter:
         return self.validate_caps()
 
     # ── 条件编码（子类实现）────────────────────────────────────
-    def encode(self, req: GenRequest, do_guidance: bool = True) -> Any:
+    def encode(self, req: GenRequest, do_guidance: bool = True,
+               generator: Any = None) -> Any:
         """条件编码。返回 adapter 私有的 cond 对象（内核不解释其结构）。
 
         `do_guidance` 由引擎按"cfg > 1 且模型支持"算好再传进来 ——
         adapter 不重复判定一次，避免两处判据漂移（判据只能有一个真源）。
+
+        `generator` 为什么在编码阶段就要给：视频族（SVD）的输入图在进 VAE **之前**
+        要先加噪声增广（`image + noise_aug * noise`），而那组噪声来自**同一个** generator，
+        并且**先于**初始潜变量被抽取。编码若拿不到 generator，随机数消耗顺序就错位一位，
+        初始 latents 与 stock 不再比特一致 —— 这种错只表现为"图不一样"，不报错。
         """
         raise NotImplementedError
 
     # ── 时间轴 ────────────────────────────────────────────────
     def make_timesteps(self, req: GenRequest, cond: Any,
-                       scheduler: Any = None) -> Tuple[Any, int]:
-        """默认：按步数建表，i2i 按 strength 截尾。子类可覆盖（视频族要按 fps）。"""
+                       scheduler: Any = None, steps: Optional[int] = None) -> Tuple[Any, int]:
+        """默认：按步数建表，i2i 按 strength 截尾。子类可覆盖（视频族要按 fps）。
+
+        `steps` 由引擎算好再传（`req.steps` 为 0 时它已经替成了调度器默认值）：
+        adapter 不知道"默认几步"这种策略，也不该知道。
+        """
         sch = scheduler or (self.bag.require("scheduler") if self.bag else None)
+        n = int(steps) if steps else int(req.steps or 1)
         strength = float(req.strength) if (req.is_i2i() and req.strength) else 1.0
         return SCHED.build_timesteps(
-            sch, req.steps or 1,
-            device=self._device(), strength=strength)
+            sch, n, device=self._device(), strength=strength)
 
     # ── 初始潜变量 ────────────────────────────────────────────
     def init_latents(self, req: GenRequest, cond: Any, generator: Any = None,
                      scheduler: Any = None) -> Any:
+        """初始潜变量。按 `caps.latent_rank` 分两路：4 维（图像）/ 5 维（视频）。
+
+        **通道数取 `in_channels` 的语义在视频族不同**：SVD 的 UNet 是 8 通道
+        （4 噪声 + 4 图像条件），噪声只占一半 ⇒ 必须取 `in_channels // 2`。
+        这里由 `latent_rank` 决定除以几，判据只写在这一处。
+        """
         net = self.bag.require(self._net_key()) if self.bag else None
-        channels = int(getattr(getattr(net, "config", None), "in_channels", 4))
+        in_ch = int(getattr(getattr(net, "config", None), "in_channels", 4))
         sch = scheduler or (self.bag.require("scheduler") if self.bag else None)
         sigma = 1.0
         if self.caps.latent_scale == "init_noise_sigma":
             sigma = SCHED.init_noise_sigma(sch)
+
+        if int(self.caps.latent_rank) == 5:
+            frames = max(2, int(req.frames or 0))
+            return LAT.make_frames(
+                batch=max(1, int(req.batch)),
+                frames=frames,
+                channels=max(1, in_ch // 2),
+                height=req.height, width=req.width,
+                latent_scale=self._latent_scale(),
+                generator=generator,
+                device=self._device(),
+                dtype=self._dtype(),
+                init_noise_sigma=sigma,
+            )
+
         return LAT.make(
             batch=max(1, int(req.batch)),
-            channels=channels,
+            channels=in_ch,
             height=req.height, width=req.width,
             latent_scale=self._latent_scale(),
             generator=generator,
@@ -256,13 +293,31 @@ class BaseAdapter:
             rescale=state.guidance_rescale,
         )
 
+    def step_extra_kwargs(self, generator: Any = None) -> Dict[str, Any]:
+        """`scheduler.step()` 的可选参数。默认按签名探测传 `eta` / `generator`。
+
+        为什么要可覆盖：视频族（SVD）上游 `step(noise_pred, t, latents)` **什么都不传**。
+        Euler 的 `step` 签名里虽然有 `generator`，但 `s_churn=0` 时它根本不会被用到，
+        所以传不传结果相同 —— 但"结果相同"不该靠运气，靠的是与上游一致的调用形态。
+        """
+        return SCHED.extra_step_kwargs(self._scheduler(), generator=generator)
+
+    def _scheduler(self) -> Any:
+        return self.bag.require("scheduler") if self.bag else None
+
     def step(self, noise: Any, t: Any, prepared: PreparedStep, state: RunState) -> Any:
         sch = self.bag.require("scheduler")
         return sch.step(noise, t, prepared.raw, return_dict=False,
                         **state.extra_step_kwargs)[0]
 
     # ── 解码（子类实现）──────────────────────────────────────
-    def decode(self, latents: Any) -> Any:
+    def decode(self, latents: Any, state: Any = None) -> Any:
+        """解码成最终产物（图像族 = PIL；视频族 = list[PIL]）。
+
+        `state` 为什么可选传进来：视频族的分块解码大小是"策略算完的实现参数"，
+        寄存在 `RunState.decode_chunk` 上（见该字段文档）。图像族不需要，
+        但**必须接受这个参数**（多态签名），否则引擎没法统一调用。
+        """
         raise NotImplementedError
 
     # ── 缓存键 ────────────────────────────────────────────────

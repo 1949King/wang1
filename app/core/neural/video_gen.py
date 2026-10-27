@@ -152,6 +152,16 @@ MOTION_PRESETS: Dict[str, int] = {
 _CFG_MIN = 1.0
 _CFG_MAX = 3.0
 
+#: SVD 的出图尺寸（上游 `__call__` 的签名默认值 576×1024）。
+#:
+#: 为什么提到模块级常量：内核路径与 stock 路径**必须用同一组值**，
+#: 而 stock 之前是靠"不传参数 ⇒ 用签名默认"拿到的。两条路各自推一次尺寸，
+#: 迟早有一边推出 768×768（`unet.config.sample_size × vae_scale_factor`），
+#: 然后 PSNR 对不上、画面却都"正常" —— 这是最难查的那类偏差。
+#: 显式传值把"用多少"变成一处可见的常量。
+_HEIGHT = 576
+_WIDTH = 1024
+
 TUNED: Dict[str, Dict[str, Any]] = {
     "svd-xt-i2v": {
         "steps": QUALITY_PRESETS["balanced"],  # 14
@@ -642,6 +652,103 @@ class VideoGenEngine:
         except Exception:  # stability-gate: allow-swallow（detach 失败最坏是缓存晚一步释放）
             logger.debug("[video_gen] 步缓存 detach 异常", exc_info=True)
 
+    def _run_with_kernel(
+        self,
+        *,
+        spec: Dict[str, Any],
+        arch: str,
+        kw: Dict[str, Any],
+        image_path: str,
+        n_frames: int,
+        n_steps: int,
+        n_mb: int,
+        fps: int,
+        chunk: int,
+        width: int,
+        height: int,
+        generator: Any = None,
+        seed: int = 0,
+    ) -> Any:
+        """优先走内核；拒绝/失败则回退 stock，并**把原因带回回执**。
+
+        返回 `(frames, kernel_report_dict, warnings)`。
+
+        ## 为什么必须回退而不是直接报错
+
+        内核是新增路径（`SHIGUANG_KERNEL` 默认 `off`）。它拒绝时（族未验收、缺组件、
+        契约不符）正确的行为是"退回已验收的上游"，而不是让用户的生成失败。
+        但**静默**回退是缺陷：所以 `rejected_reason` 一律写进 `kernel` 字段，
+        调用方/前端能看见"这次没用内核，因为……"。
+
+        ## 三态默认值
+
+        `off`（默认）⇒ 内核直接拒绝，本函数原样调用 stock，行为与 P3 之前一致；
+        `on` ⇒ 内核失败才回退；`shadow` ⇒ 内核照跑但只用来比 PSNR，返回 stock 结果
+        （本函数对 shadow 的处理与 on 相同，因为回执里本来就有两边的口径；
+        shadow 的线上价值在图像族，视频族的对照跑在 `bench_kernel_parity.py` 里）。
+        """
+        report: Dict[str, Any] = {}
+        warnings: List[str] = []
+        if not arch:
+            # 非 SVD 的 pipeline（未来 Wan 等）尚无内核 adapter：不硬塞
+            return self._pipe(**kw).frames[0], report, warnings
+
+        # ★ 先存 generator 状态：内核一旦"跑了几步才失败"，这个 generator 已经被
+        #   `encode()`（噪声增广）与 `init_latents()`（初始潜变量）消耗过。
+        #   如果不还原就回退 stock，用户拿到的片子与"干净跑一次 stock"**不一样** ——
+        #   而回执里只写着"回退了"，没人会想到噪声序列已经被动过。
+        gen_state = None
+        if generator is not None:
+            try:
+                gen_state = generator.get_state()
+            except Exception:  # stability-gate: allow-swallow（取不到状态就不还原，退化为旧行为）
+                logger.debug("[video_gen] 取不到 generator 状态，回退后噪声序列可能已偏移")
+
+        try:
+            from app.core.neural.kernel import engine as KERNEL
+            from app.core.neural.kernel.contracts import GenRequest
+
+            req = GenRequest(
+                family=arch,
+                model_id=str(spec.get("repo") or arch),
+                image_path=image_path,
+                width=int(width), height=int(height),
+                steps=int(n_steps),
+                # SVD 的引导是 (min, max) 两个标量；这里与 kw 里的两个同源
+                cfg=float(kw.get("max_guidance_scale") or 1.0),
+                cfg_min=float(kw.get("min_guidance_scale") or 1.0),
+                seed=int(seed),
+                frames=int(n_frames), fps=int(fps),
+                motion_bucket_id=int(n_mb),
+                noise_aug_strength=float(kw.get("noise_aug_strength") or 0.0),
+                batch=1,
+            )
+            res = KERNEL.run(
+                pipe=self._pipe, req=req, generator=generator,
+                # chunk 是**显存策略**算出来的实现参数，不进请求、经 RunState 传给 adapter
+                decode_chunk=int(chunk),
+            )
+            report = res["report"].to_dict()
+            warnings = list(res.get("warnings") or [])
+            if res.get("ok") and res.get("frames"):
+                return res["frames"], report, warnings
+            logger.info("[video_gen] 内核未接管（%s），回退上游 pipe",
+                        report.get("rejected_reason") or res.get("message"))
+        except Exception as e:  # stability-gate: allow-swallow（接线异常必须降级为回退上游，而不是让生成失败）
+            logger.debug("[video_gen] 内核接线异常", exc_info=True)
+            report = {"used": False, "family": arch,
+                      "rejected_reason": "内核接线异常：%s: %s" % (type(e).__name__, e)}
+
+        if gen_state is not None:
+            # 回退前把随机数状态拨回起点：这样"内核没接管"与"根本没开内核"
+            # 得到的是**同一段视频**（同 seed 可复现是硬要求，不能因为走了另一条路就变）。
+            try:
+                generator.set_state(gen_state)
+            except Exception:  # stability-gate: allow-swallow（还原失败只影响确定性，不影响出片）
+                logger.debug("[video_gen] generator 状态还原失败", exc_info=True)
+
+        return self._pipe(**kw).frames[0], report, warnings
+
     def generate(
         self,
         model_id: str,
@@ -715,6 +822,17 @@ class VideoGenEngine:
                 # 运动幅度：漫剧素材取 calm(80) 明显更稳（实测）
                 "motion_bucket_id": n_mb,
                 "noise_aug_strength": float(tun.get("noise_aug_strength", 0.02)),
+                # ★ fps 必须显式传（原先没传 ⇒ 管道恒用签名默认 7）。
+                #   SVD 的 UNet 是按 `fps-1` 微调的，而 `n_frames` 又是按调用方的 fps 算的，
+                #   不传就出现"按 10fps 取帧数、按 7fps 做条件、按 10fps 编码成片"的三方不一致。
+                #   默认 fps=7 时与改动前**完全等价**（7-1 仍是 6），只有非默认 fps 才变。
+                "fps": int(fps),
+                # ★ 尺寸也必须显式传：内核与 stock 两条路必须用同一组值。
+                #   原先没传 ⇒ stock 用签名默认 576×1024，而内核若按
+                #   `unet.config.sample_size * vae_scale_factor` 推会算成 768×768，
+                #   两条路尺寸不同就没法比 PSNR（而画面看起来都"正常"）。
+                "width": int(_WIDTH),
+                "height": int(_HEIGHT),
             }
             if seed:
                 kw["generator"] = torch.manual_seed(int(seed))
@@ -724,6 +842,8 @@ class VideoGenEngine:
             _sc_arch = ("svd" if "StableVideoDiffusion"
                         in str(spec.get("pipeline") or "") else "")
             step_cache = self._attach_step_cache(_sc_arch, quality)
+            _kernel_report: Dict[str, Any] = {}
+            _kernel_warnings: List[str] = []
             try:
                 if image_path:
                     if not os.path.isfile(image_path):
@@ -736,7 +856,13 @@ class VideoGenEngine:
                     from PIL import Image as _PILImage
 
                     kw["image"] = _PILImage.fromarray(img[:, :, :3])
-                    frames = self._pipe(**kw).frames[0]
+                    frames, _kernel_report, _kernel_warnings = self._run_with_kernel(
+                        spec=spec, arch=_sc_arch, kw=kw,
+                        image_path=image_path, n_frames=n_frames, n_steps=n_steps,
+                        n_mb=n_mb, fps=int(fps), chunk=_chunk,
+                        width=int(_WIDTH), height=int(_HEIGHT),
+                        generator=kw.get("generator"), seed=int(seed),
+                    )
                 else:
                     kw["prompt"] = prompt
                     frames = self._pipe(**kw).frames[0]
@@ -759,6 +885,7 @@ class VideoGenEngine:
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t_gen0
             _warnings: List[str] = []
+            _warnings.extend(_kernel_warnings)
             _video_url = str(published.get("url") or "")
             if not _video_url:
                 # 落箱失败 ⇒ data URL 兜底，保证前端拿到的永远是可播放串
@@ -775,6 +902,8 @@ class VideoGenEngine:
                 "video_url": _video_url,
                 "warnings": _warnings,
                 "inbox_path": published.get("inbox_path", ""),
+                # 循环归属与内核回执（`used=False` 时必有 rejected_reason）
+                "kernel": _kernel_report,
                 # 把实测参数与耗时一并回传：用户能直接看到快了多少
                 "steps": n_steps,
                 "motion_bucket_id": n_mb,

@@ -136,8 +136,12 @@ ENGINES: Tuple[EngineSpec, ...] = (
        deps=("torch", "diffusers"), device="cuda", telemetry="svd",
        # load() 只有 model / sequential 两个分支（502-510），whole_gpu 是实测危险路径
        quant="fp16", offload_tiers=("model_offload", "sequential_offload"),
-       verified="verified", loop_owner="upstream",
-       note="两档 offload；whole_gpu 实测 WDDM 分页卡死 >600s，故不声明该档"),
+       # ★ 2026-10-28 P3：循环归内核（`SHIGUANG_KERNEL=on` 生效，默认回退 pipe）。
+       #   四门实测：逐帧 PSNR=inf / 逐 step max|Δ|=0 / 1.014× / 1.000×（门槛 1.10），
+       #   证据见 `docs/knowledge/kernel_evidence.json`。
+       verified="verified", loop_owner="shiguang",
+       note="两档 offload；whole_gpu 实测 WDDM 分页卡死 >600s，故不声明该档；"
+            "i2v 循环归内核（默认回退 pipe）"),
     _e(id="infra.memory_policy", family="inference", capability="infra",
        module="app/core/neural/memory_policy.py", role=ROLE_FALLBACK,
        note="显存策略（装不下不硬上）"),

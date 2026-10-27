@@ -85,6 +85,41 @@ def _randn(shape: tuple, generator: Any, device: Any, dtype: Any) -> Any:
     return out.to(device)
 
 
+def make_frames(
+    *,
+    batch: int,
+    frames: int,
+    channels: int,
+    height: int,
+    width: int,
+    latent_scale: int,
+    generator: Any,
+    device: Any,
+    dtype: Any,
+    init_noise_sigma: float = 1.0,
+    latents: Any = None,
+) -> Any:
+    """造视频族的初始潜变量，形状 `(batch, frames, channels, h//s, w//s)`。
+
+    ## 三个与图像族不同的地方（每个都能让"张量门"直接红）
+
+    1. **多一维**：帧维在 dim=1（不是 dim=0）。上游 `prepare_latents` 就是这个顺序，
+       写成 `(frames, batch, ...)` 不会报错，只会在拼条件时错位。
+    2. **通道数取 `in_channels // 2`**：SVD 的 UNet 是 8 通道（噪声 4 + 图像条件 4），
+       所以噪声只有 4 通道。用 `in_channels` 当通道数会造出 8 通道噪声，前向直接崩。
+    3. **sigma 只乘一次**：`prepare_latents` 内部乘 `init_noise_sigma`。
+       在调用点再乘一次 ⇒ 噪声强度翻倍，出图是"糊成一片"，且不报错。
+    """
+    h, w = latent_hw(height, width, latent_scale)
+    shape = (int(batch), int(frames), int(channels), h, w)
+
+    if latents is not None:
+        out = latents.to(device)
+    else:
+        out = _randn(shape, generator, device, dtype)
+    return out * float(init_noise_sigma)
+
+
 def add_noise(latents: Any, noise: Any, timestep: Any, scheduler: Any) -> Any:
     """按调度器的加噪公式加噪（i2i / SVD `noise_aug` 用）。
 

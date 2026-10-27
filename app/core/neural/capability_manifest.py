@@ -61,7 +61,9 @@ FAMILY_ENGINE: Dict[str, str] = {
 #:   pipe 腿（`diffusers_image.py` 直调 `pipe()`）是默认与回退，
 #:   kernel 腿（`kernel/loop.py`）在 `SHIGUANG_KERNEL=on` 时接管。
 #: 两腿都标 verified，因为两腿都实测过（四门判据见 `docs/knowledge/kernel_evidence.json`）。
-#: svd / wan 仍只有一腿（P3 才做），故不在此列 —— 列了就是预告，不是事实。
+#: 2026-10-28 P3 加入 svd：视频族同样两腿（`video_gen.generate` 直调 `pipe()` 为默认与回退），
+#:   四门实测见台账（逐帧 PSNR=inf / Δ=0 / 1.014× / 1.000×，门槛 1.10）。
+#: wan 仍只有一腿（无 adapter），故不在此列 —— 列了就是预告，不是事实。
 TWO_LEGS: Tuple[Dict[str, Any], ...] = (
     {
         "engine_id": "image.diffusers",
@@ -89,6 +91,21 @@ TWO_LEGS: Tuple[Dict[str, Any], ...] = (
         "kernel_leg": {
             "module": "app/core/neural/kernel/loop.py",
             "adapter": "app/core/neural/kernel/adapters/sdxl.py",
+            "verified": VERIFIED,
+            "gate": "SHIGUANG_KERNEL=on",
+        },
+    },
+    {
+        "engine_id": "video.svd",
+        "family": "svd",
+        "pipe_leg": {
+            "module": "app/core/neural/video_gen.py",
+            "verified": VERIFIED,
+            "role": "default+fallback",
+        },
+        "kernel_leg": {
+            "module": "app/core/neural/kernel/loop.py",
+            "adapter": "app/core/neural/kernel/adapters/svd.py",
             "verified": VERIFIED,
             "gate": "SHIGUANG_KERNEL=on",
         },

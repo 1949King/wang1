@@ -47,6 +47,18 @@ def test_gen_request_defaults_are_neutral():
     assert req.batch == 1 and req.frames == 0
 
 
+def test_gen_request_cfg_min_defaults_to_zero():
+    """`cfg_min` 是 1.2 新增的**可选**字段。
+
+    默认必须是 0.0 而不是复用 `cfg`：SVD 的引导是 (min, max) 两个标量，
+    图像族只有一个。把它默认成 `cfg` 会让图像族凭空多出"逐帧引导"语义，
+    而真正需要它的视频族又分不清"用户给了 0"和"用户没给"。
+    """
+    req = C.GenRequest(family="sd15", model_id="m", cfg=7.0)
+    assert req.cfg_min == 0.0
+    assert req.cfg == 7.0
+
+
 # ══════════════════════════════════════════════════════════════════
 # AdapterCaps.violations
 # ══════════════════════════════════════════════════════════════════
@@ -183,5 +195,55 @@ def test_denoise_output_defaults():
 
 
 def test_contract_version_is_pinned():
-    """版本号变化必须在 CHANGELOG 有迁移说明；测试先拦住"悄悄改"。"""
-    assert C.CONTRACT_VERSION == "1.1"
+    """版本号变化必须在 CHANGELOG 有迁移说明；测试先拦住"悄悄改"。
+
+    1.1 → 1.2（MINOR，**向后兼容**）：新增 `GenRequest.cfg_min`（带默认 0.0）
+    与 `VIDEO_PARITY_FIELDS` / `baseline_for()`，仅有增量、无字段改名或语义变更，
+    所以旧适配器（sd15/sdxl）不改一行仍在契约内。
+    """
+    assert C.CONTRACT_VERSION == "1.2"
+
+
+# ══════════════════════════════════════════════════════════════════
+# parity 基线分派（1.2 新增）
+# ══════════════════════════════════════════════════════════════════
+
+def test_baseline_for_dispatches_by_latent_rank():
+    """按阶数分派，**不按族名** —— 新族填完 caps 就自动落到正确清单。
+
+    按族名分派的话，每加一个族都要回来改这个函数；漏改的表现是
+    "守卫按图像清单校验视频族"，于是 `noise_aug_before_vae` 这类关键项从未被要求填。
+    """
+    img = C.AdapterCaps(latent_rank=4, cfg_mode="cat", cfg_batch_multiplier=2)
+    vid = C.AdapterCaps(latent_rank=5, vae_decode="chunked_temporal")
+    assert C.baseline_for(img) == C.BASE_PARITY_FIELDS
+    assert C.baseline_for(vid) == C.VIDEO_PARITY_FIELDS
+    assert C.baseline_for(img) != C.baseline_for(vid)
+
+
+def test_video_baseline_is_not_a_superset_of_image_baseline():
+    """视频清单**不能**是图像清单的超集，否则会逼出"为过守卫填个 True"。
+
+    视频族没有文本、没有 clip_skip、没有 timestep_cond，
+    把这三项塞进视频清单等于要求适配器填一堆"对 SVD 无意义"的字段。
+    """
+    img_only = set(C.BASE_PARITY_FIELDS) - set(C.VIDEO_PARITY_FIELDS)
+    assert {"clip_skip", "timestep_cond", "encode_delegate"} <= img_only
+
+
+def test_video_baseline_covers_every_silent_failure_point():
+    """11 项**每一项都对应一个"漏了不报错、只出错视频"的语义**，逐项钉住。
+
+    这不是"完整性洁癖"：这些名字同时是 `adapters/svd.py` 里 parity 字典的键，
+    少一项就少一条验收判据，而缺判据的失败模式恰好是静默的。
+    """
+    need = {
+        "noise_aug_before_vae",        # 随机数消耗顺序错位
+        "uncond_repr",                 # 无条件支写成"空文本"而非全零张量
+        "image_latent_concat_dim",     # 拼错维度：不崩，画质掉
+        "added_time_ids_order",        # 先 repeat 再 cat（与 SDXL 相反）
+        "guidance_shape",              # 逐帧标量写成单标量
+        "decode_chunked",              # 一次性解 14 帧 → 炸显存
+    }
+    assert need <= set(C.VIDEO_PARITY_FIELDS)
+

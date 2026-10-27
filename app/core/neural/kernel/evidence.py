@@ -115,8 +115,13 @@ def record(family: str, data: Dict[str, Any], *, script: str = "") -> str:
     entry["script"] = script or entry.get("script", "")
     entry["machine"] = entry.get("machine") or _machine()
     hist = fam.get("history") or []
-    hist.append({k: entry.get(k) for k in ("measured_at", "psnr_min_db", "latency_ratio",
-                                           "vram_ratio", "tensor_max_delta", "script")})
+    # 历史条目要能回答"这次比上次好在哪/差在哪"，所以按**判据**投影，不整条拷贝。
+    # 视频族的 `frames_match` / `cancelled_ok` 必须进历史：否则"帧数对不上"这种事
+    # 只留在被下一次覆盖的顶层字段里，翻历史时看不见它曾经红过。
+    hist.append({k: entry.get(k) for k in (
+        "measured_at", "kind", "psnr_min_db", "frame_psnr_min_db", "latency_ratio",
+        "vram_ratio", "tensor_max_delta", "frames_match", "cancelled_ok",
+        "passed", "script")})
     fam.update(entry)
     fam["history"] = hist[-20:]
     p = path()
@@ -163,8 +168,12 @@ def summary() -> Dict[str, Any]:
         "path": EVIDENCE_PATH,
         "families": {
             fam: {
+                "kind": rec.get("kind"),
                 "measured_at": rec.get("measured_at"),
                 "psnr_min_db": rec.get("psnr_min_db"),
+                "frame_psnr_min_db": rec.get("frame_psnr_min_db"),
+                "frames_match": rec.get("frames_match"),
+                "cancelled_ok": rec.get("cancelled_ok"),
                 "tensor_max_delta": rec.get("tensor_max_delta"),
                 "latency_ratio": rec.get("latency_ratio"),
                 "vram_ratio": rec.get("vram_ratio"),

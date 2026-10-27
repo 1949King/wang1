@@ -185,21 +185,21 @@ def test_duplicate_registration_is_flagged(monkeypatch):
 # ─────────────────── ⑤ K5 覆盖率口径 ───────────────────
 
 
-def test_coverage_is_honest_two_of_four_after_p2():
-    """P2 落地 sd15/sdxl ⇒ K5 = 2/4（此前是 0/4，这条断言按设计"到期升级"）。
+def test_coverage_is_honest_three_of_four_after_p3():
+    """P3 落地 svd ⇒ K5 = 3/4（这条断言按设计"到期升级"：P0 时是 0/4，P2 时改成 2/4）。
 
     为什么它会随阶段变化：K5 分子是「loop_owner=shiguang 且 verified」，
-    P2 之前内核不存在，任何非零都是撒谎；P2 之后两族真的四门验收通过，
-    还停在 0/4 就变成"明明做了却报没做"—— 两种偏差一样有害。
+    内核没写时任何非零都是撒谎；真验收通过后还停在旧数字，就变成
+    "明明做了却报没做" —— 两种偏差一样有害。
 
-    剩下 2 族（svd / wan）必须仍在 pending 里：视频内核是 P3 的事，
-    这里不许因为图像通了就顺手把它们算进来。
+    剩下 1 族（wan）必须仍在 pending 里：wan 无 adapter、也没权重可实测，
+    这里不许因为 SD 系通了就顺手把它算进来（"先做可行性实测再定"）。
     """
     cov = CM.coverage()
     assert cov["target"] == list(CM.TARGET_FAMILIES)
-    assert cov["ratio"] == "2/4"
-    assert sorted(cov["owned"]) == ["sd15", "sdxl"]
-    assert sorted(p["family"] for p in cov["pending"]) == ["svd", "wan"]
+    assert cov["ratio"] == "3/4"
+    assert sorted(cov["owned"]) == ["sd15", "sdxl", "svd"]
+    assert sorted(p["family"] for p in cov["pending"]) == ["wan"]
 
 
 def test_coverage_counts_only_shiguang_and_verified(monkeypatch):
@@ -215,20 +215,35 @@ def test_coverage_counts_only_shiguang_and_verified(monkeypatch):
         rows = orig()
         return [dict(r, **patch.get(r["id"], {})) for r in rows]
 
+    # 现在有**两个**承载引擎（image.diffusers → sd15/sdxl，video.svd → svd），
+    # 所以负例必须把两个都改掉；只改一个会剩下另一个"真·owned"，断言就变成空话。
     # 方向一：把 loop_owner 退回 upstream
-    monkeypatch.setattr(CM, "registrations", lambda: _rows(
-        **{"image.diffusers": {"loop_owner": "upstream"}}))
+    monkeypatch.setattr(CM, "registrations", lambda: _rows(**{
+        "image.diffusers": {"loop_owner": "upstream"},
+        "video.svd": {"loop_owner": "upstream"},
+    }))
     assert CM.coverage()["owned"] == []
 
     # 方向二：loop_owner 保持 shiguang，但把 verified 降级
-    monkeypatch.setattr(CM, "registrations", lambda: _rows(
-        **{"image.diffusers": {"verified": "unverified"}}))
+    monkeypatch.setattr(CM, "registrations", lambda: _rows(**{
+        "image.diffusers": {"verified": "unverified"},
+        "video.svd": {"verified": "unverified"},
+    }))
     assert CM.coverage()["owned"] == []
 
-    # 反证：两条件都成立时必须算进来（否则前两条断言可能是"恒为空"的假绿）
-    monkeypatch.setattr(CM, "registrations", lambda: _rows(
-        **{"image.diffusers": {"loop_owner": "shiguang", "verified": "verified"}}))
+    # 方向三：只降一个 ⇒ 另一个仍然算（证明"两条件同时成立"是逐引擎判的，
+    # 不是全局开关；同时也证明前面两条不是因为"恒为空"而通过）
+    monkeypatch.setattr(CM, "registrations", lambda: _rows(**{
+        "video.svd": {"verified": "unverified"},
+    }))
     assert sorted(CM.coverage()["owned"]) == ["sd15", "sdxl"]
+
+    # 反证：两条件都成立时必须算进来
+    monkeypatch.setattr(CM, "registrations", lambda: _rows(**{
+        "image.diffusers": {"loop_owner": "shiguang", "verified": "verified"},
+        "video.svd": {"loop_owner": "shiguang", "verified": "verified"},
+    }))
+    assert sorted(CM.coverage()["owned"]) == ["sd15", "sdxl", "svd"]
 
 
 def test_target_families_exist_in_model_family():
@@ -265,9 +280,9 @@ def test_manifest_does_not_leak_private_registry_internals():
 
 
 def test_describe_is_human_readable_and_reports_k5():
-    """P2 之后 K5 是 2/4（sd15/sdxl 已接管循环），违约仍必须 0 条。"""
+    """P3 之后 K5 是 3/4（sd15/sdxl/svd 已接管循环），违约仍必须 0 条。"""
     text = CM.describe()
-    assert "K5 覆盖率 2/4" in text
+    assert "K5 覆盖率 3/4" in text
     assert "违约 0 条" in text
 
 
@@ -276,9 +291,9 @@ def test_manifest_shape_is_stable():
     for k in ("engines_n", "by_verified", "by_loop_owner", "coverage",
               "two_legs", "violations", "engines"):
         assert k in m
-    # P2 之后 sd15/sdxl 确实两腿并存（pipe 默认 + kernel 接管），声明位必须如实列出；
-    # 视频族仍只有一腿，漏进来就是预告而不是事实。
-    assert sorted(leg["family"] for leg in m["two_legs"]) == ["sd15", "sdxl"]
+    # P2/P3 之后 sd15/sdxl/svd 确实两腿并存（pipe 默认 + kernel 接管），声明位必须如实列出；
+    # wan 仍只有一腿，漏进来就是预告而不是事实。
+    assert sorted(leg["family"] for leg in m["two_legs"]) == ["sd15", "sdxl", "svd"]
 
 
 def test_registry_entry_points_delegate():
@@ -291,8 +306,9 @@ def test_registry_entry_points_delegate():
                                  "video.local_video_infer", "image.diffsynth"])
 def test_key_engines_step_cache_and_owner(eid):
     rec = {r["id"]: r for r in CM.registrations()}[eid]
-    # P2：图像族的循环已由 kernel/loop.py 接管（SHIGUANG_KERNEL=on 生效）；
-    # 视频族仍在 pipe/第三方 __call__ 里，不许跟着改。
-    expect = "shiguang" if eid == "image.diffusers" else "upstream"
+    # P2 图像族 / P3 视频族 SVD 的循环已由 kernel/loop.py 接管（SHIGUANG_KERNEL=on 生效）；
+    # diffsynth 与 local_video_infer 仍是第三方 __call__，不许跟着改。
+    # 步缓存仍只在图像族挂（SVD 的 DeepCache 是另一套，未在本轮范围）。
+    expect = "shiguang" if eid in ("image.diffusers", "video.svd") else "upstream"
     assert rec["loop_owner"] == expect, "loop_owner 与内核落地情况不符"
     assert rec["step_cache"] is (eid == "image.diffusers")

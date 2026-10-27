@@ -92,6 +92,84 @@
           "script": "scripts/bench_kernel_parity.py"
         }
       ]
+    },
+    "svd": {
+      "kind": "video",
+      "psnr_min_db": null,
+      "psnr_inf": true,
+      "tensor_max_delta": 0.0,
+      "initial_latents_identical": true,
+      "latency_ratio": 1.0137,
+      "vram_ratio": 1.0003,
+      "vram_limit": 1.1,
+      "steps": 14,
+      "size": [
+        512,
+        288
+      ],
+      "seeds": [
+        3,
+        42,
+        777
+      ],
+      "n": 3,
+      "passed": true,
+      "stock_backend": "diffusers=0.40.0",
+      "frame_psnr_min_db": null,
+      "frames": 6,
+      "frames_match": true,
+      "frame_psnr_mean_db": null,
+      "cancelled_ok": true,
+      "decode_chunk": 1,
+      "fps": 7,
+      "motion_bucket_id": 80,
+      "noise_aug_strength": 0.02,
+      "cfg_min": 1.0,
+      "cfg_max": 3.0,
+      "measured_at": "2026-10-28T06:53:35",
+      "script": "scripts/bench_kernel_parity.py",
+      "machine": "NVIDIA GeForce RTX 4060 Laptop GPU / torch 2.6.0+cu124 / cuda 12.4",
+      "history": [
+        {
+          "measured_at": "2026-10-28T06:42:17",
+          "kind": "video",
+          "psnr_min_db": null,
+          "frame_psnr_min_db": null,
+          "latency_ratio": 1.0557,
+          "vram_ratio": 1.0,
+          "tensor_max_delta": 0.0,
+          "frames_match": true,
+          "cancelled_ok": true,
+          "passed": false,
+          "script": "scripts/bench_kernel_parity.py"
+        },
+        {
+          "measured_at": "2026-10-28T06:48:04",
+          "kind": "video",
+          "psnr_min_db": null,
+          "frame_psnr_min_db": null,
+          "latency_ratio": 1.0511,
+          "vram_ratio": 1.0,
+          "tensor_max_delta": 0.0,
+          "frames_match": true,
+          "cancelled_ok": true,
+          "passed": false,
+          "script": "scripts/bench_kernel_parity.py"
+        },
+        {
+          "measured_at": "2026-10-28T06:53:35",
+          "kind": "video",
+          "psnr_min_db": null,
+          "frame_psnr_min_db": null,
+          "latency_ratio": 1.0137,
+          "vram_ratio": 1.0003,
+          "tensor_max_delta": 0.0,
+          "frames_match": true,
+          "cancelled_ok": true,
+          "passed": true,
+          "script": "scripts/bench_kernel_parity.py"
+        }
+      ]
     }
   }
 }

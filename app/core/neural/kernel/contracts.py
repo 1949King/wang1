@@ -25,7 +25,10 @@ from typing import Any, Dict, List, Tuple
 #: 契约版本。规范 §4.1。
 #: 1.0 → 1.1（2026-10-28）：新增可选字段 `GenRequest.batch` 与
 #:   `KernelReport.breakdown` 的两个键，属 MINOR，不写迁移。
-CONTRACT_VERSION = "1.1"
+#: 1.1 → 1.2（2026-10-28 P3）：新增可选字段 `GenRequest.cfg_min`（SVD 族的逐帧引导下界）
+#:   与 `RunState.decode_chunk`（视频族分块解码大小，由调用方策略算好塞进来），
+#:   属 MINOR；旧调用方不传即为 0，图像族完全不读它。
+CONTRACT_VERSION = "1.2"
 
 #: 内核自身的 loop_owner 值（三态见规范 §6.1）
 LOOP_SHIGUANG = "shiguang"
@@ -60,6 +63,9 @@ class GenRequest:
     height: int = 0
     steps: int = 0
     cfg: float = 0.0
+    #: **下界引导**。SVD 族的引导是「逐帧从 min 线性插值到 max」，不是单一标量；
+    #: 图像族忽略本字段（它们的 `cfg` 就是唯一值）。
+    cfg_min: float = 0.0
     seed: int = 0
     preset: str = ""
     strength: float = 0.0
@@ -109,6 +115,36 @@ BASE_PARITY_FIELDS: Tuple[str, ...] = (
     "vae_scale_before_decode",
     "decode_postprocess",
 )
+
+#: 视频族（`latent_rank=5`、图生视频）的 parity 基线。
+#:
+#: **不是图像基线的子集，也不能复用**：视频族的条件来源、引导形状、解码方式全都不一样，
+#: 沿用图像清单会逼人填一堆"对 SVD 无意义"的字段（如 `clip_skip`），
+#: 最后必然是"为了过守卫填个 True"—— 那比没有守卫更糟。
+#:
+#: 每一项都对应一个"漏了不报错、只出错视频"的具体语义（见 `adapters/svd.py` 文档表）。
+VIDEO_PARITY_FIELDS: Tuple[str, ...] = (
+    "scale_model_input",            # 先 scale 再拼图像 latent（顺序反了能跑、画质掉）
+    "init_noise_sigma_once",        # prepare_latents 内部乘一次 sigma
+    "cfg_order",                    # (uncond, cond) 的 chunk 顺序
+    "randn_source",                 # randn_tensor，保证同 seed 可复现
+    "noise_aug_before_vae",         # 输入图先加噪再进 VAE，且**先于 latents 消耗随机数**
+    "uncond_repr",                  # 无条件支是全零张量，不是"空文本编码"
+    "image_latent_concat_dim",      # 图像条件拼在通道维（4+4=8）
+    "added_time_ids_order",         # 先 repeat 再 cat（与 SDXL 的 cat 再 repeat 相反）
+    "guidance_shape",               # 逐帧标量（frames 维），不是单个标量
+    "decode_chunked",               # 分块解码 + reshape/permute
+    "decode_postprocess",           # video_processor.postprocess_video
+)
+
+
+def baseline_for(caps: "AdapterCaps") -> Tuple[str, ...]:
+    """按族的潜变量阶数取 parity 基线。
+
+    为什么按 `latent_rank` 而不是按族名：族名会越来越多，阶数只有"图像/视频"两种，
+    按阶数分派时新族一填 caps 就自动落到正确的清单上，不需要回来改这个函数。
+    """
+    return VIDEO_PARITY_FIELDS if int(caps.latent_rank) == 5 else BASE_PARITY_FIELDS
 
 
 @dataclass(frozen=True)
@@ -212,6 +248,13 @@ class RunState:
     ctx: Any = None
     #: 本次实际步数（供结果回报；与 len(timesteps) 可能因调度器 order 不同）
     steps: int = 0
+    #: 视频族分块解码大小（0 = 不传，由 adapter 取上游默认 = 全部帧）。
+    #:
+    #: 为什么放在 RunState 而不是 `GenRequest`：`GenRequest` 只放"请求事实"，
+    #: 而 chunk 是**显存策略算出来的实现参数**（本机 8GB 实测必须 =1，
+    #: 见 `video_gen.py` 顶部实测表）。放进请求会让"同 seed 同 prompt"因策略变化而不可复现。
+    #: 调用方（`video_gen.generate`）算好后经 `engine.run(decode_chunk=...)` 传进来。
+    decode_chunk: int = 0
 
 
 # ══════════════════════════════════════════════════════════════════

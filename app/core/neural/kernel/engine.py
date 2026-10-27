@@ -39,10 +39,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.core.neural.kernel import grad_mode as GRAD
 from app.core.neural.kernel import loop as LOOP
-from app.core.neural.kernel import schedule as SCHED
 from app.core.neural.kernel.adapters.base import BaseAdapter, ComponentBag, UnverifiedAdapter
 from app.core.neural.kernel.adapters.sd15 import SD15Adapter
 from app.core.neural.kernel.adapters.sdxl import SDXLAdapter
+from app.core.neural.kernel.adapters.svd import SVDAdapter
 from app.core.neural.kernel.contracts import (
     CONTRACT_VERSION, LOOP_SHIGUANG, GenRequest, KernelReport, RunState, VERIFIED,
 )
@@ -61,6 +61,7 @@ _MODES = (MODE_OFF, MODE_ON, MODE_SHADOW)
 _ADAPTERS: Dict[str, Callable[[], BaseAdapter]] = {
     "sd15": SD15Adapter,
     "sdxl": SDXLAdapter,
+    "svd": SVDAdapter,
 }
 
 
@@ -117,13 +118,23 @@ def run(
     hooks: Any = None,
     adapter: Optional[BaseAdapter] = None,
     measure_vram: bool = True,
+    decode_chunk: int = 0,
 ) -> Dict[str, Any]:
     """跑一次内核生成。
 
+    `decode_chunk`：视频族分块解码大小（0 = 由 adapter 取上游默认）。
+    **由调用方按自己的显存策略算好后传进来**，引擎不猜 —— 理由见
+    `RunState.decode_chunk` 的文档（实现参数不进请求，但必须有人负责算）。
+
     返回::
 
-        {"ok": bool, "image": PIL|None, "report": KernelReport,
+        {"ok": bool, "image": PIL|None, "frames": list[PIL]|None, "report": KernelReport,
          "breakdown": dict, "cancelled": bool, "message": str, "warnings": [...]}
+
+    `image` 与 `frames` **按族二选一**（由 `caps.latent_rank` 决定）：
+    图像族给 `image`，视频族给 `frames`。两个都留着的代价是调用方要判断
+    "哪个不是 None"，但那比"往 `image` 里塞一个 list[PIL]"诚实 —— 后者会让
+    所有 `if res["image"]` 的图像调用方拿到一个不能 `.save()` 的东西。
 
     **永不抛异常**：所有失败都变成 `ok=False` + `report.rejected_reason`。
     调用方（`diffusers_image.generate`）据此回退到 pipe 路径。
@@ -168,15 +179,19 @@ def run(
 
         # 5) 条件编码
         #    推理态：文本编码器权重带梯度，不关图的话 embeds 会带一张图进循环。
+        #    generator 也要传：视频族的输入图噪声增广**先于**初始潜变量消耗随机数，
+        #    编码拿不到它，随机数顺序就错一位（初始 latents 不再比特一致，且不报错）。
         with GRAD.inference():
-            cond = ad.encode(req, do_guidance)
+            cond = ad.encode(req, do_guidance, generator=generator)
         ins.lap("encode")
 
         # 6) 时间轴
+        #    ★ 走 adapter 的 `make_timesteps`，**不在这里自己调 SCHED**：
+        #    视频族必须"忽略 strength 截尾"（SVD 没有 strength 语义，它靠 `noise_aug_strength`
+        #    控制与原图的关系）。引擎若自己算 strength，i2v 请求一旦带上 strength
+        #    就会把 25 步悄悄截成 3 步 —— 出片是全噪，且不报错。
         steps_req = int(req.steps) if req.steps else _default_steps(bag)
-        timesteps, n_eff = SCHED.build_timesteps(
-            bag.require("scheduler"), steps_req, device=ad._device(),
-            strength=(float(req.strength) if req.is_i2i() and req.strength else 1.0))
+        timesteps, n_eff = ad.make_timesteps(req, cond, steps=steps_req)
 
         # 7) 初始潜变量
         latents = ad.init_latents(req, cond, generator=generator,
@@ -187,11 +202,12 @@ def run(
             timesteps=timesteps, latents=latents,
             cfg_scale=float(req.cfg or 1.0), do_guidance=do_guidance,
             guidance_rescale=0.0,
-            extra_step_kwargs=SCHED.extra_step_kwargs(
-                bag.require("scheduler"), generator=generator),
+            # 由 adapter 决定传什么：SVD 上游 step 什么都不传（见 step_extra_kwargs 文档）
+            extra_step_kwargs=ad.step_extra_kwargs(generator=generator),
             latent_scale=ad._latent_scale(),
             ctx=cond,
             steps=n_eff,
+            decode_chunk=int(decode_chunk or 0),
         )
 
         hook = hooks if hooks is not None else NullHooks()
@@ -202,7 +218,7 @@ def run(
             rep.used = True
             rep.steps = out.step_count
             rep.breakdown = ins.breakdown().to_dict()
-            return {"ok": False, "image": None, "report": rep,
+            return {"ok": False, "image": None, "frames": None, "report": rep,
                     "breakdown": rep.breakdown, "cancelled": True,
                     "message": "已取消（完成 %d/%d 步）" % (out.step_count, n_eff),
                     "warnings": warnings}
@@ -210,9 +226,9 @@ def run(
         # 9) 解码
         #    推理态：**必须**。VAE 权重带梯度 ⇒ 不关图时出图带 requires_grad，
         #    而 `image_processor.postprocess` 内部 `numpy()` 会直接抛
-        #    "Can't call numpy() on Tensor that requires grad"。
+        #    "Can't call tensor.numpy() on Tensor that requires grad"。
         with GRAD.inference():
-            image = ad.decode(out.latents)
+            media = ad.decode(out.latents, state=out.state)
         ins.lap("decode")
 
         rep.used = True
@@ -221,7 +237,9 @@ def run(
         rep.breakdown = ins.breakdown().to_dict()
         if ad.notes:
             warnings.extend(ad.notes)
-        return {"ok": True, "image": image, "report": rep,
+        is_video = int(ad.caps.latent_rank) == 5
+        return {"ok": True, "image": None if is_video else media,
+                "frames": media if is_video else None, "report": rep,
                 "breakdown": rep.breakdown, "cancelled": False,
                 "message": "内核生成完成（%d 步）" % out.step_count,
                 "warnings": warnings}
@@ -233,8 +251,10 @@ def run(
 
 
 def _fail(rep: KernelReport, message: str) -> Dict[str, Any]:
-    return {"ok": False, "image": None, "report": rep, "breakdown": {},
-            "cancelled": False, "message": message, "warnings": []}
+    # `frames` 必须与 `image` 一起出现在**每个**返回分支里：
+    # 视频调用方只读 `res["frames"]`，少一个键就从"内核拒绝、回退上游"变成 KeyError。
+    return {"ok": False, "image": None, "frames": None, "report": rep,
+            "breakdown": {}, "cancelled": False, "message": message, "warnings": []}
 
 
 def _do_guidance(req: GenRequest, bag: ComponentBag) -> bool:

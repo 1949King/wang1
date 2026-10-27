@@ -1,5 +1,57 @@
 # 拾光剪影 — 变更日志
 
+## P3 · 视频去噪内核交付（SVD 逐帧比特一致，2026-10-28）
+
+**结论**：`kernel/loop.py` 接管了 SVD 图生视频的去噪循环，与 stock `pipe()` **逐帧比特级一致**
+（每帧 PSNR = `inf`、逐 step `max|Δ| = 0`、初始 latents 比特一致**含噪声增广的随机数消耗顺序**）。
+K5 覆盖率 2/4 → **3/4**。开关默认 `SHIGUANG_KERNEL=off`，现网行为不变；拒绝/失败一律回退 pipe
+并把原因写进 `result["kernel"]["rejected_reason"]`。
+
+真机实测（`scripts/bench_kernel_parity.py`，512×288 · 6 帧 · 14 步 · 3 seed · 交错 3 轮**逐轮换序**）：
+
+| 项 | 结果 |
+|---|---|
+| 初始 latents | **比特一致**（`max|Δ|=0`，含"先抽噪声增广再抽 latents"的顺序） |
+| 逐 step `max\|Δ\|` | **0.000e+00** |
+| 逐帧 PSNR | **inf**（6 帧全等，帧数一致） |
+| 时延比 | 1.014×（持平档；>1.03 不通过） |
+| 显存比 | 1.000×（视频门 1.10） |
+| 中断门 | 第 0 步前取消 ⇒ `cancelled=True`、`frames=None`、`completed=1 步` |
+
+**新增**：`kernel/adapters/svd.py`、`app/tests/test_kernel_svd.py`（36 项）、
+`app/tests/test_video_gen_kernel_wiring.py`（5 项）、契约 1.1 → **1.2**（`GenRequest.cfg_min`、
+`RunState.decode_chunk`、`VIDEO_PARITY_FIELDS` + `baseline_for()`）、
+`latents.make_frames()`（5 维）、`bench` 视频四门、守卫 ⑱ 第 ⑥ 条反例（视频族按阶数取基线）。
+`video_gen.generate()` 加内核接线（**薄接线**：只多一个 `_run_with_kernel` 与回执里的 `kernel` 字段）。
+
+**SVD 与图像族的 11 处实质差异**（每一处漏了都**不报错、只出错视频**，逐条写进 `ParityContract`）：
+无条件支是**全零张量**而非空文本 / 引导是**逐帧 linspace(min,max)** 而非单标量 /
+输入图**先进噪声增广再进 VAE** 且**先于初始 latents 消耗随机数** / VAE 编码用 `latent_dist.mode()`
+且**不乘 scaling_factor** / 图像条件沿**通道维** `dim=2` 拼成 8 通道 / latents 是 5 维且噪声只占
+`in_channels//2` / `added_time_ids=[fps-1, motion_bucket, noise_aug]` **先 repeat 再 cat**（与 SDXL 相反）/
+`fps` 传的是 `fps-1` / 按 `decode_chunk_size` **分块**解码再 `reshape+permute` /
+`SVD 无 strength 语义`（时间轴恒跑满）/ `scale_model_input` 在拼条件之**前**。
+
+**落地时被实测抓出的三个缺陷**（都属"不报错、只出错结果"，各配单测 + 反例自证）：
+
+1. **VAE 编码产物没转回条件 dtype** ⇒ UNet 第一层 `mat1 and mat2 must have the same dtype,
+   but got Float and Half`（上游 `:524` 有一行 `.to(image_embeddings.dtype)`，漏了必炸；
+   离线替身 VAE 现在刻意返回不同 dtype，把这条钉成**离线可复现**）；
+2. **回退时没还原 generator 状态** ⇒ 内核算到一半失败再回退 stock，同 seed 得到的片子与
+   "干净跑一次 stock"不同（随机数序列已被消耗）。现在回退前 `set_state` 拨回起点；
+3. **bench 的速度量法有位置偏差** ⇒ 只做 A/B/A/B 时内核永远排在每组第二位，恒定吃到上一个
+   13s 负载的降频。实测同一份代码得到 1.032× / 1.042× / 1.051× / 1.056×（几乎与步数无关），
+   逐轮换序后为 0.979× / 1.014× / 1.002×。**这条同样修正了 P2 图像族的历史读数**
+   （1.015× / 1.028× 同样含此偏差，方向是对内核不利）。
+
+**另外两条环境级发现**（写下来免得下次重踩）：
+
+- 1024×576 × 14 帧在 8GB 卡上会顶到 **7.9/8.0GB**（VAE fp32 编码叠加常驻模型），UNet 单步从
+  4.5s 掉到 20s+ —— 这是 **stock 路径本身**的显存特性，不是内核差距。验收因此在 512×288 上完成，
+  证据里如实记录 `size=[512,288]`。
+- 被强杀的 bench 进程会短暂留下 CUDA 上下文；连续重启前要确认 `nvidia-smi` 显存回落，
+  否则新进程从一开始就在共享显存里跑（表现为"卡在第一步不动"，GPU 却 100%）。
+
 ## P2 · 图像去噪内核交付（sd15 + sdxl 比特级一致，2026-10-28）
 
 **结论**：`kernel/loop.py` 接管了 SD1.5 / SDXL 的去噪循环，两族与 stock `pipe()` **比特级一致**
