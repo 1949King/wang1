@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DX-OS 调查报告 · Infinite-Canvas 源码解析与可借鉴设计</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 80px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #1f2937; background: #f6f8fb; line-height: 1.75; font-size: 15px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+  header { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); color: #f1f5f9; padding: 44px 0 38px; margin-bottom: 32px; }
+  header .wrap { max-width: 1080px; }
+  header h1 { margin: 0 0 10px; font-size: 27px; letter-spacing: .5px; }
+  header .sub { color: #94a3b8; font-size: 14px; }
+  header .meta { margin-top: 18px; font-size: 13px; color: #b6c4d8; display: flex; gap: 22px; flex-wrap: wrap; }
+
+  h2 { font-size: 21px; margin: 42px 0 6px; padding-left: 12px; border-left: 4px solid #2563eb; line-height: 1.35; }
+  h2 .n { color: #2563eb; font-weight: 800; margin-right: 6px; }
+  h3 { font-size: 16.5px; margin: 28px 0 8px; color: #0f172a; }
+  h4 { font-size: 15px; margin: 18px 0 6px; color: #334155; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: #eef2f7; color: #b91c1c; padding: 1px 5px; border-radius: 3px; font-size: 13px;
+  }
+  pre {
+    background: #0f172a; color: #d6e4f7; padding: 14px 16px; border-radius: 8px;
+    overflow-x: auto; font-size: 12.8px; line-height: 1.6; margin: 10px 0;
+    font-family: "JetBrains Mono", Consolas, monospace;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  pre .c { color: #64748b; }
+  pre .k { color: #7dd3fc; }
+  pre .s { color: #86efac; }
+
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  .verdict { background: #fff; border-left: 5px solid #2563eb; border-radius: 8px; padding: 20px 22px; margin: 22px 0 8px; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+  .verdict h3 { margin-top: 0; font-size: 17px; }
+  .verdict ol { margin: 10px 0 0; padding-left: 20px; }
+  .verdict li { margin: 7px 0; }
+
+  .warn { background: #fff7ed; border-left: 5px solid #ea580c; border-radius: 8px; padding: 16px 20px; margin: 16px 0; }
+  .warn h4 { margin-top: 0; color: #9a3412; }
+  .ok { background: #f0fdf4; border-left: 5px solid #16a34a; border-radius: 8px; padding: 16px 20px; margin: 16px 0; }
+  .ok h4 { margin-top: 0; color: #15803d; }
+  .info { background: #eff6ff; border-left: 5px solid #2563eb; border-radius: 8px; padding: 16px 20px; margin: 16px 0; }
+  .info h4 { margin-top: 0; color: #1d4ed8; }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; background: #fff; }
+  th, td { border: 1px solid #e2e8f0; padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; color: #0f172a; }
+  tr:nth-child(even) td { background: #fafbfd; }
+
+  .tag { display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 10px; font-weight: 600; vertical-align: middle; }
+  .t-red { background: #fee2e2; color: #b91c1c; }
+  .t-green { background: #dcfce7; color: #15803d; }
+  .t-blue { background: #dbeafe; color: #1d4ed8; }
+  .t-amber { background: #fef3c7; color: #a16207; }
+  .t-gray { background: #e5e7eb; color: #4b5563; }
+
+  .score { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0; }
+  .score div { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; min-width: 150px; }
+  .score b { display: block; font-size: 22px; color: #2563eb; }
+
+  .layers { margin: 16px 0; }
+  .layer { border: 1px solid #dbe3ee; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+  .layer .lh { background: #eef3fa; padding: 7px 14px; font-weight: 700; font-size: 13.5px; color: #1e3a5f; }
+  .layer .lb { padding: 10px 14px; font-size: 13.5px; background: #fff; }
+
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; font-size: 13px; }
+  .flow span { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 11px; }
+  .flow em { color: #94a3b8; font-style: normal; }
+
+  .cmp { font-size: 13.5px; }
+  .cmp td:first-child { width: 30%; }
+
+  footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid #dbe3ee; color: #64748b; font-size: 12.8px; }
+  .files { font-size: 12.5px; color: #475569; background: #fff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>DX-OS 调查报告 · 开源源码解析与可借鉴设计</h1>
+    <div class="sub">从「下载官网安装包解包」转为「读同源开源实现」—— 附实测证据与逐条落地建议</div>
+    <div class="meta">
+      <span>调查日期：2026-10-25</span>
+      <span>分析对象：hero8152/Infinite-Canvas（DX-OS 开源前身）</span>
+      <span>代码规模实测：main.py 19,038 行 / 时间线 4,111 行</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ 0. 结论 ============ -->
+<div class="verdict">
+  <h3>先给结论（三句话）</h3>
+  <ol>
+    <li><b>dx-os.com 上没有可下载的客户端安装包。</b>网站是个空壳 SPA，全部路径都返回同一个 636 字节 HTML；前端 JS 里只有「管理后台上传 App 包」的接口（<code>/v1/admin/marketplace/uploads/app-package</code>），没有任何 <code>.exe/.msi/.dmg</code> 字样、没有 release 地址、没有下载 CDN。官网自己写明「<b>产品概念预览 · 系统软件与企业部署能力规划中</b>」。所以「下了再解包」这件事<b>没有对象可做</b>。</li>
+    <li><b>就算有包，我也不建议走解包这条路。</b>DX-OS 是闭源商业产品（订阅制），其 LICENSE 明确「禁止商业用途」「二次开发必须开源并注明来源」。反编译提取业务代码属侵权风险，收益（几百行看不懂的混淆代码）远低于代价。</li>
+    <li><b>真正该读的东西已经读到了：它的开源前身 <code>hero8152/Infinite-Canvas</code>（3,156★ / 622 fork），DX-OS 就是它的延续版本。</b>我把 19,038 行后端 + 4,111 行时间线 + 9.9 万字符画布逐段读了，下面给你 <b>11 条可直接落地的设计</b>，其中 3 条正好补上你自己记录在案的缺口。</li>
+  </ol>
+</div>
+
+<!-- ============ 1. 事实核查 ============ -->
+<h2><span class="n">1</span>事实核查：官网到底有没有包</h2>
+
+<p>你说「www.dx-os.com 是目前实际的下载地址」。我按这个地址实测了一遍，结果如下。</p>
+
+<h3>1.1 站点结构实测</h3>
+<table>
+  <tr><th style="width:26%">探测目标</th><th style="width:14%">结果</th><th>说明</th></tr>
+  <tr><td><code>https://dx-os.com</code></td><td>200 / <b>636 字节</b></td><td>只有一个 SPA 空壳：<code>&lt;div id="app"&gt;&lt;/div&gt;</code> + 一个 JS bundle</td></tr>
+  <tr><td><code>/download</code></td><td>200 / 636 字节</td><td><b>和首页一模一样</b> —— 说明路由在前端，服务端不区分</td></tr>
+  <tr><td><code>/pricing</code></td><td>200 / 636 字节</td><td>同上。订阅方案页也是 SPA 渲染</td></tr>
+  <tr><td><code>/sitemap.xml</code></td><td>200 / 636 字节</td><td>返回的不是 XML 而是 HTML ⇒ 无静态站点地图</td></tr>
+  <tr><td><code>/api/releases</code>、<code>/api/download/latest</code></td><td>000 / 200 + HTML 壳</td><td>不存在这些后端接口，全部被兜底成首页</td></tr>
+</table>
+
+<p>站点的 <code>&lt;meta&gt;</code> 确实写着「DX-OS 官方网站、<b>软件下载</b>与账号服务」，所以你说「这是下载地址」不是空穴来风 —— 但页面上的下载按钮/链接在当前版本里<b>不存在</b>。</p>
+
+<h3>1.2 前端 JS 里挖到的全部接口</h3>
+<p>我把官网的 <code>index-B_2hRKud.js</code>（约 634KB）逐段扫了一遍，所有 API 路径只有这些：</p>
+<pre><code><span class="c">// 管理后台：上传 App 安装包（注意是 upload，不是 download）</span>
+<span class="s">"/v1/admin/marketplace/uploads/app-package"</span>
+<span class="s">"/v1/admin/marketplace/uploads/app-package/multipart/${id}"</span>
+<span class="s">"/v1/admin"</span>   <span class="s">"/admin-gate"</span>
+
+<span class="c">// 认证与其人机验证</span>
+<span class="s">"/v1/auth/verification-profile"</span>
+<span class="s">"/v1/auth/fallback-captcha/challenge"</span>
+<span class="s">"https://challenges.cloudflare.com/turnstile/v0/api.js"</span>
+
+<span class="c">// 唯一出现的扩展名判断 —— 用于校验「上传的是 ZIP App 包」</span>
+/\.zip$/i   →  <span class="s">"请选择非空 ZIP 安装包。"</span></code></pre>
+<p><b>没有一处和「下载客户端」有关</b>：没有 <code>.exe</code> / <code>.msi</code> / <code>.dmg</code> / <code>.appimage</code>，没有对象存储或 CDN 域名，没有版本发布清单接口。</p>
+
+<h3>1.3 官网自己的说法</h3>
+<div class="warn">
+  <h4>官网首页原文（架构区顶部小字）</h4>
+  <p style="margin:0">「<b>产品概念预览 · 系统软件与企业部署能力规划中</b>」；底部 CTA 是「<b>查看订阅方案</b>」，不是「下载」。</p>
+  <p style="margin:8px 0 0">→ 这意味着：<b>DX-OS 目前处于「概念展示 + 商务洽谈」阶段，没有面向公众的安装包。</b>你可能需要企业联系/开白名单才能拿到试用。</p>
+</div>
+
+<!-- ============ 2. 血缘 ============ -->
+<h2><span class="n">2</span>血缘关系：DX-OS 就是 Infinite-Canvas 的续作</h2>
+
+<p>这不是我推测的，开源仓库里有三处硬证据：</p>
+
+<table>
+  <tr><th style="width:22%">证据</th><th>原文</th></tr>
+  <tr>
+    <td>README 顶部公告</td>
+    <td>「2026/08/28：<b>此项目已停更，全新版本请前往：www.DX-OS.com 下载</b>。」</td>
+  </tr>
+  <tr>
+    <td>仓库内素材</td>
+    <td><code>static/images/</code> 目录里直接放着 <code><b>dx-os-logo.svg</b></code> —— 官网的 logo 就存在开源仓库里</td>
+  </tr>
+  <tr>
+    <td>功能描述一致</td>
+    <td>README 列的「无限画布 / 一键分层 / 多人协同 / 共享画布 / ComfyUI / Skills / MCP / Agent 多智能体」= 官网架构图的四层（模型接入 → Agent 内核 → App 层 → 部门协作），<b>逐项对得上</b></td>
+  </tr>
+</table>
+
+<div class="info">
+  <h4>这决定了你该怎么用</h4>
+  <p style="margin:0">DX-OS 的商业增量主要在三块：<b>App 商店 + 权限体系 + 部门/额度治理</b>。而「画布 / 时间线 / ComfyUI 桥接 / 多 Provider 网关」这些<b>技术底座，开源版全都有，而且能读</b>。你要学的设计 <b>90% 在开源版里</b>，剩下 10% 是企业治理层，对你当前阶段（单机 + 个人创作）没有价值。</p>
+</div>
+
+<h3>2.1 授权红线（必读）</h3>
+<div class="warn">
+  <h4>Infinite-Canvas 的 LICENSE 原文</h4>
+  <pre style="margin:10px 0"><code>禁止商业用途 / Commercial use is prohibited.
+
+* 可以自己使用和公司使用，禁止用于任何形式的修改封装成商业产品，商用须取得授权。
+* 根据代码二次开发的软件必须保持开源并注明来源作者。</code></pre>
+  <p style="margin:10px 0 0"><b>翻译成你能直接执行的三条：</b></p>
+  <ul style="margin:8px 0 0">
+    <li><span class="tag t-green">可以</span> 读它的代码、理解它的设计、自己重写实现（换一种写法表达同一思路，不算抄代码）。</li>
+    <li><span class="tag t-green">可以</span> 自己用、公司内部用。</li>
+    <li><span class="tag t-red">不可以</span> 把它的代码文件（哪怕改改名、删删注释）搬进「拾光剪影」—— 一旦你将来要商用/卖，这就是侵权。</li>
+    <li><span class="tag t-red">不可以</span> 复制粘贴大段实现后闭源发布（它要求衍生作品必须保持开源并署名）。</li>
+  </ul>
+</div>
+
+<!-- ============ 3. 读了什么 ============ -->
+<h2><span class="n">3</span>我实际读了什么（可复核）</h2>
+
+<div class="files">
+  <b>已下载并逐段阅读（本地留存于 <code>.workbuddy/tmp/dxos_read/</code>）：</b><br>
+  · <code>main.py</code> —— <b>19,038 行 / 880,740 字节</b>（FastAPI 单文件后端，全部业务）<br>
+  · <code>static/js/ltx-director-timeline.js</code> —— <b>4,111 行 / 149,978 字节</b>（按帧分段的时间轴编辑器）<br>
+  · <code>static/js/canvas.js</code> —— <b>约 9.9 万字符</b>（无限画布核心：节点/连线/撤销/协同）<br>
+  · <code>requirements.txt</code>、<code>static/vendor/MANIFEST.md</code>、<code>LICENSE</code>、<code>README.md</code>、完整目录树<br>
+  · 前端页面清单：<code>canvas.html</code> / <code>smart-canvas.html</code> / <code>canvas-list.html</code> / <code>asset-manager.html</code> / <code>api-settings.html</code> / <code>comfyui-settings.html</code><br>
+  · ComfyUI 工作流：<code>LTXDirectorv2-API.json</code> / <code>MiniMax_H3.json</code> / <code>Z-Image.json</code> / <code>Flux2-Klein.json</code> / <code>upscale.json</code> + 对应 <code>*.config.json</code>
+</div>
+
+<p>顺手说个能让你安心的数据点：它的后端依赖极简，只有 <b>7 个包</b> —— <code>fastapi / uvicorn / requests / pydantic / python-multipart / httpx / pillow</code>。没有 ORM、没有 Redis、没有 Celery，数据全用 JSON 文件存。这跟你「单机 + 轻依赖」的取向是一致的。</p>
+
+<!-- ============ 4. 架构 ============ -->
+<h2><span class="n">4</span>Infinite-Canvas 架构解析</h2>
+
+<h3>4.1 分层与真相源</h3>
+
+<div class="layers">
+  <div class="layer">
+    <div class="lh">① 前端：6 个独立 HTML 页 + 原生 JS（无框架、无构建）</div>
+    <div class="lb">
+      <code>canvas.html</code>（无限画布编辑器）· <code>smart-canvas.html</code>（智能画布，另一套）· <code>canvas-list.html</code>（画布选择页，已从编辑器拆出去）· <code>asset-manager.html</code>（资产库）· <code>api-settings.html</code>（平台/模型）· <code>comfyui-settings.html</code>（工作流）<br>
+      <span class="tag t-gray">依赖</span> 全部 vendored 到 <code>static/vendor/</code>：tailwind CDN 镜像、lucide 图标、three 0.160、9 个字体文件 —— <b>离线可用，不依赖 CDN</b>
+    </div>
+  </div>
+  <div class="layer">
+    <div class="lh">② 后端：单个 FastAPI 文件 + uvicorn（端口 3000 硬编码）</div>
+    <div class="lb">
+      约 130 个路由：<code>/api/providers*</code> · <code>/api/workflows*</code> · <code>/api/canvas*-tasks</code> · <code>/api/canvases*</code> · <code>/api/asset-library*</code> · <code>/api/local-assets*</code> · <code>/api/prompt-libraries*</code> · <code>/api/shared-folders*</code> · <code>/ws/stats</code>
+    </div>
+  </div>
+  <div class="layer">
+    <div class="lh">③ AI 网关：8 种协议 + 5 种请求模式（这是它最值钱的一层）</div>
+    <div class="lb">
+      <code>SUPPORTED_PROVIDER_PROTOCOLS = {openai, apimart, gemini, gemini-cli, volcengine, runninghub, jimeng, codex}</code><br>
+      统一抽象成 <code>normalize_provider()</code> 的单一结构：<code>{id, base_url, protocol, image_request_mode, image_models, chat_models, video_models, ...}</code>；<b>未知协议自动降级为 openai</b>；CLI 类协议（codex / gemini-cli / 即梦）<code>base_url = ""</code>
+    </div>
+  </div>
+  <div class="layer">
+    <div class="lh">④ 本地推理：ComfyUI 多实例 + 负载均衡 + 输入图跨实例同步</div>
+    <div class="lb">
+      <code>COMFYUI_INSTANCES</code>（逗号分隔多地址）· <code>BACKEND_LOCAL_LOAD</code>（每实例在跑数）· 提交前检查目标实例有没有输入图，没有就从别的实例拉过来再上传
+    </div>
+  </div>
+  <div class="layer">
+    <div class="lh">⑤ 存储：全部 JSON 文件（无数据库）</div>
+    <div class="lb">
+      <code>data/canvases/</code>（每画布一文件）· <code>data/asset_library.json</code> · <code>data/prompt_libraries.json</code> · <code>data/api_providers.json</code> · <code>history.json</code> · <code>API/.env</code>（密钥）<br>
+      配套 7 把细粒度锁：<code>QUEUE_LOCK / HISTORY_LOCK / CANVAS_LOCK / GLOBAL_CONFIG_LOCK / CONVERSATION_LOCK / CANVAS_TASK_LOCK / RUNNINGHUB_WORKFLOW_LOCK</code>
+    </div>
+  </div>
+</div>
+
+<h3>4.2 一次「生成」的完整链路（ComfyUI 路径）</h3>
+<div class="flow">
+  <span>前端点生成</span><em>→</em>
+  <span>POST /api/generate</span><em>→</em>
+  <span>入 QUEUE 拿排队号</span><em>→</em>
+  <span>reserve_best_backend() 选实例</span><em>→</em>
+  <span>跨实例同步输入图</span><em>→</em>
+  <span>读 workflow JSON</span><em>→</em>
+  <span>覆盖 prompt/尺寸/seed + params</span><em>→</em>
+  <span>POST /prompt 拿 prompt_id</span><em>→</em>
+  <span>轮询 /history（最多 1800 次 × 1s）</span><em>→</em>
+  <span>按 class_type 过滤产物后下载</span>
+</div>
+
+<!-- ============ 5. 借鉴点 ============ -->
+<h2><span class="n">5</span>11 条可借鉴设计（按对你的价值排序）</h2>
+
+<p>每条固定三段：<b>它怎么做 → 你的现状 → 怎么落地</b>。前 3 条我标了 <span class="tag t-red">命中你的已知缺口</span>。</p>
+
+<!-- 1 -->
+<div class="card">
+  <h3>① 画布保存的「版本号 + 409 冲突」协议 <span class="tag t-red">补你的 G 缺口</span></h3>
+  <p><b>它怎么做：</b>保存时把「我基于哪个版本改的」一起提交，服务端版本不一致就返回 409，由前端决定是「覆盖」还是「接受远端」。</p>
+  <pre><code><span class="c">// canvas.js → saveCanvas()</span>
+body: JSON.stringify({
+  title, icon, nodes, connections, viewport,
+  client_id: CLIENT_ID,
+  <span class="k">base_updated_at</span>: Number(lastCanvasUpdatedAt || canvas.updated_at || 0)   <span class="c">// ← 关键</span>
+})
+
+<span class="k">if (res.status === 409)</span> {
+  const remote = data.detail?.canvas || data.canvas;
+  <span class="k">if (localCanvasDirty || saveCanvasAgain)</span> {        <span class="c">// 本地还有没存完的改动</span>
+    lastCanvasUpdatedAt = remote.updated_at;            <span class="c">// 更新基线后重试</span>
+    saveCanvasAgain = true;
+    return;
+  }
+  <span class="k">if (remote)</span> applyRemoteCanvasData(remote);           <span class="c">// 否则接受远端，放弃本地</span>
+  return;
+}</code></pre>
+  <p><b>你的现状：</b>全库无 revision / 409 / ETag / 乐观锁 —— 这是你自己审计记下的缺口。写入口靠 <code>glue/policies.py</code> 的 <code>TIMELINE_WRITE_ENTRYPOINTS</code> 登记册 + 棘轮收敛来「事后约束」，而 <code>agent_policy.py:185</code> 的 <code>can_auto_retry</code> 无运行时调用方，等于「写不重试」只靠机制缺失。</p>
+  <p><b>怎么落地：</b>给 <code>EditorModule._clips</code> 的每条写入路径加一个 <code>revision</code>（整数或 <code>updated_at</code> 毫秒）。序列化快照时带 <code>base_revision</code>；保存时版本不匹配返回 409 + 当前快照。前端（<code>store.ts</code>）照它这套三分支处理。这套做法<b>比 CRDT 便宜两个数量级</b>，而你当前是单机，根本不需要 CRDT。</p>
+</div>
+
+<!-- 2 -->
+<div class="card">
+  <h3>② workflow + config.json 配对：任意 ComfyUI 工作流变「带表单的节点」 <span class="tag t-red">补你的 S2/ComfyUI 接线</span></h3>
+  <p><b>它怎么做：</b>一个工作流 = 两个文件。`.json` 是 ComfyUI 原生 API 格式；`.config.json` 描述「哪些参数可调、映射到哪个节点的哪个输入」，前端据此生成表单，用户填完 → 后端把值写回工作流 → 走通用生成管线。</p>
+  <pre><code><span class="c">// main.py:18963  PUT /api/workflows/{name}/config</span>
+<span class="c">// main.py:18990  POST /api/workflows/{name}/run</span>
+params = {}
+<span class="k">for</span> field <span class="k">in</span> payload.config.fields:
+    <span class="k">if</span> <span class="k">not</span> field.node <span class="k">or</span> <span class="k">not</span> field.input: <span class="k">continue</span>
+    <span class="k">if</span> field.id <span class="k">in</span> payload.fields:
+        value = payload.fields[field.id]
+        <span class="c"># 按 field.type 做类型转换：number/slider → int|float；boolean → bool</span>
+        <span class="c"># dropdown 里像数字的字符串（"1024"/"0.8"）也自动转</span>
+        params.setdefault(field.node, {})[field.input] = value
+
+<span class="c"># main.py:18233 然后把 params 覆盖进工作流</span>
+<span class="k">for</span> node_id, node_inputs <span class="k">in</span> req.params.items():
+    <span class="k">if</span> node_id <span class="k">in</span> workflow:
+        <span class="k">for</span> input_name, value <span class="k">in</span> node_inputs.items():
+            <span class="k">if</span> value <span class="k">is</span> <span class="k">None</span>:
+                workflow[node_id][<span class="s">"inputs"</span>].pop(input_name, <span class="k">None</span>)   <span class="c"># None = 删掉这个输入</span>
+            <span class="k">else</span>:
+                workflow[node_id][<span class="s">"inputs"</span>][input_name] = value</code></pre>
+  <p><b>你的现状：</b>ComfyUI 有 <code>ComfyClient</code>（8188），但工作流是写死在代码里的，换一个工作流就要改代码。这跟你「阶段契约」的设计思想（输入/输出/责任人/验收/失败语义）其实是同一个东西 —— 只是它把契约<b>数据化</b>了。</p>
+  <p><b>怎么落地：</b><code>data/comfy_workflows/</code> 下放 <code>xxx.json</code> + <code>xxx.config.json</code>，<code>config.json</code> 的 <code>fields[]</code> 结构 = 你的「阶段契约」的可执行化。收益：<b>新增一个工作流零代码</b>，只需写一份 config。这条直接补你 S2/S3 缺的接线。</p>
+</div>
+
+<!-- 3 -->
+<div class="card">
+  <h3>③ 参数表单由后端 schema 下发 <span class="tag t-red">你的既有原则「派生值后端下发」的极致版</span></h3>
+  <p><b>它怎么做：</b>后端根据「引擎 + 平台 + 模型」返回这份参数表定义，前端不写死任何参数，只按 <code>type</code> 通用渲染。</p>
+  <pre><code><span class="c">// main.py:14595  build_image_param_fields(engine, provider, model)</span>
+size_field = {
+  <span class="s">"key"</span>: <span class="s">"size"</span>, <span class="s">"type"</span>: <span class="s">"size"</span>, <span class="s">"label"</span>: <span class="s">"尺寸"</span>,
+  <span class="s">"ratios"</span>: IMAGE_PARAM_RATIOS,        <span class="c"># 1:1 / 3:4 / 16:9 / 9:16 …</span>
+  <span class="s">"resolutions"</span>: image_resolutions,   <span class="c"># 1k/2k/4k，gpt-image-2 还多一个 auto</span>
+  <span class="s">"default"</span>: {<span class="s">"ratio"</span>: <span class="s">"1:1"</span>, <span class="s">"resolution"</span>: <span class="s">"1k"</span>},
+}
+count_field = {<span class="s">"key"</span>:<span class="s">"n"</span>, <span class="s">"type"</span>:<span class="s">"int"</span>, <span class="s">"control"</span>:<span class="s">"chips"</span>, <span class="s">"options"</span>:[1,2,3,4]}
+refs_field  = {<span class="s">"key"</span>:<span class="s">"reference_images"</span>, <span class="s">"type"</span>:<span class="s">"refs"</span>, <span class="s">"max"</span>:20}
+<span class="c">// 注意它还会给 notice 类型字段（"参数按所选工作流动态加载（开发中）"）</span></code></pre>
+  <p><b>你的现状：</b><code>GeneratePanel.tsx</code> 的参数（画幅/数量/质量）是硬编码在组件里的。上次我改 <code>localImage.ts</code> 时还得手写 aspect → width/height 的映射表。</p>
+  <p><b>怎么落地：</b>加 <code>GET /host/image-params?engine=&amp;model=</code>，返回同样的 <code>fields[]</code>；<code>GeneratePanel</code> 改成「遍历 fields 按 type 渲染」。好处：云端和本地模型参数差异（本地 SVD 要首帧、Wan2.1 不要）不用在组件里堆 <code>if</code>。</p>
+</div>
+
+<!-- 4 -->
+<div class="card">
+  <h3>④ 远端轮询 + 脏标记，用 2500ms 轮询做多人协同</h3>
+  <p><b>它怎么做：</b>定时只拉「元数据」（<code>/api/canvases/{id}/meta</code>，不是整张画布），发现远端版本更新才拉全量。而且应用远端前先检查本地状态，防止把用户正在编辑的内容冲掉。</p>
+  <pre><code><span class="k">function</span> applyRemoteCanvasData(remote) {
+  <span class="c">// 本地有未保存改动 / 正在保存 → 推迟 1 秒再来，不覆盖用户输入</span>
+  <span class="k">if</span> (localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain) {
+    clearTimeout(remoteSyncTimer);
+    remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
+    <span class="k">return</span>;
+  }
+  applyingRemoteCanvas = <span class="k">true</span>;   <span class="c">// 标记「正在应用远端」→ scheduleSave 直接跳过</span>
+  <span class="k">try</span> { ... } <span class="k">finally</span> { applyingRemoteCanvas = <span class="k">false</span>; }
+}
+<span class="k">function</span> checkRemoteCanvasVersion() {
+  <span class="k">if</span> (document.hidden) <span class="k">return</span>;        <span class="c">// 页面不可见就停止轮询，不浪费请求</span>
+  <span class="k">if</span> (remoteUpdatedAt &gt; lastCanvasUpdatedAt) await syncRemoteCanvasNow();
+}
+startCanvasRemotePolling();  <span class="c">// setInterval(checkRemoteCanvasVersion, 2500)</span></code></pre>
+  <p><b>对你：</b>你的画布 ↔ 宿主（<code>bridge.ts</code> → <code>POST /host/*</code>）是单端，暂时不需要。但如果你要做「画布 + 剪辑模块同时开着」的状态同步，这套「meta 轮询 + 脏标记让路」是最小成本方案。<b>关键细节：它只轮询 meta，不轮询全量</b>。</p>
+</div>
+
+<!-- 5 -->
+<div class="card">
+  <h3>⑤ 按帧分段的时间轴：滚动编辑 + 推挤物理 + 快照重算</h3>
+  <p><b>它怎么做：</b><code>ltx-director-timeline.js</code>（4,111 行）是一个专用的画布内时间轴，数据模型极简 —— 两个数组，没有 track 对象：</p>
+  <pre><code>this.timeline = { segments: [], audioSegments: [] };
+
+<span class="c">// 图像/文字段：{id, start(帧), length(帧), prompt, type:image|text, guideStrength, imageFile}</span>
+<span class="c">// 音频段：    {id, start, length, trimStart, audioDurationFrames, waveformPeaks[200]}</span>
+<span class="c">// 「轨道」不是对象，就是用两个数组隐式表达；「镜头」== segment</span></code></pre>
+  <p>四个必抄的交互细节：</p>
+  <table class="cmp">
+    <tr><th>机制</th><th>它怎么实现</th><th>为什么重要</th></tr>
+    <tr>
+      <td><b>拖拽快照重算</b></td>
+      <td><code>_dragInitialTimeline</code> 存拖拽起点的<b>深拷贝</b>，每次 mousemove 都从快照重算，<b>绝不累加增量</b></td>
+      <td>避免浮点累加漂移 —— 拖 100 次位置不准是剪辑工具最常见的隐蔽 bug</td>
+    </tr>
+    <tr>
+      <td><b>滚动编辑<br>(Rolling Edit)</b></td>
+      <td>拖两段接缝：左段变长、右段变短，<b>总长不变</b>；带物理约束（右段头部最多回退到 <code>trimStart</code>）</td>
+      <td>专业剪辑软件标准操作，比你单独拖左右边缘快得多</td>
+    </tr>
+    <tr>
+      <td><b>推挤物理</b></td>
+      <td><code>_applyCenterDragPhysics()</code>：拖动整段时，后面的段被自动推开，不重叠</td>
+      <td>避免「拖到一半发现被挡住，还得先挪开别的」</td>
+    </tr>
+    <tr>
+      <td><b>时长只增不减</b></td>
+      <td><code>growTimelineIfNeeded()</code> 只在需要时增长；<code>getVisualDurationFrames() = 最远端 × 1.30</code></td>
+      <td>×1.30 是视觉留白，让用户能把段拖出当前时长之外；只增不减防止误操作把时长缩到 0</td>
+    </tr>
+  </table>
+  <p>还有个反常识的点值得你记：它<b>不用 <code>ResizeObserver</code></b>，而是用 <code>requestAnimationFrame</code> 轮询 <code>checkResize()</code>，注释写「比 ResizeObserver 更可靠」—— 因为画布缩放时 ResizeObserver 回调时机不稳。</p>
+  <p><b>对你：</b>你的剪辑时间线真相源是 <code>EditorModule._clips</code>，音画纠偏 ~280ms 在冻结区。上面「快照重算」和「×1.30 视觉留白」这两条是纯逻辑，可以独立验收益，不碰冻结区。</p>
+</div>
+
+<!-- 6 -->
+<div class="card">
+  <h3>⑥ 缩略图分级加载：只给「选中 + 放大到 0.86 倍以上」的图加载高清</h3>
+  <pre><code><span class="c">// canvas.js</span>
+const CANVAS_HIGH_RES_ZOOM_THRESHOLD = 0.86;   <span class="c">// 缩放低于这个值 → 永远只显示缩略图</span>
+const CANVAS_SELECTED_HIGH_RES_DELAY = 320;    <span class="c">// 延迟 320ms 再加载，避免拖动时反复触发</span>
+const CANVAS_SELECTED_HIGH_RES_LOADED = new Set();   <span class="c">// 已加载缓存</span>
+
+<span class="c">// HTML 里同时挂三份地址，切换时不发新请求：</span>
+&lt;img loading=<span class="s">"lazy"</span> decoding=<span class="s">"async"</span>
+     src=<span class="s">".../缩略图"</span>
+     data-preview-src=<span class="s">".../缩略图"</span>
+     data-original-src=<span class="s">".../原图"</span>&gt;
+
+<span class="c">// 服务端提供按宽度出图：GET /api/media-preview?w=512&amp;url=...</span></code></pre>
+  <p><b>对你：</b>你的画布有 3D + 大量图片节点，素材库图片多时容易卡。这套「三地址 + 阈值 + 延迟 + 缓存 Set」是零依赖的前端优化，不需要改服务端结构（加一个按宽度出图的端点即可）。</p>
+</div>
+
+<!-- 7 -->
+<div class="card">
+  <h3>⑦ 静态资源版本号注入（正好是你今天踩的坑）</h3>
+  <pre><code><span class="c">// main.py  static_html_response()</span>
+<span class="c">// 给每个 HTML 里的 /static/**.js|css 拼上 ?v=版本号.文件mtime</span>
+<span class="c">// 启动时 sync_static_html_versions() 批量刷新所有 static/*.html 里的版本号</span>
+<span class="c">// 结果：每次发版浏览器必然拿新文件，不会「页面是新的、chunk 是旧的」</span></code></pre>
+  <div class="ok">
+    <h4>这条和你今天的故障是同一个问题</h4>
+    <p style="margin:0">今天画布崩掉的原因是 <b>dist 换代后，旧页面还在引用已不存在的 hashed chunk</b>。它用「每次启动把版本号写进 HTML 的 <code>?v=</code>」解决了同一类问题 —— 成本极低，不需要构建期算 hash 注入。你已经加了 <code>chunkLoadGuard</code> 兜底，再加这层就是双保险。</p>
+  </div>
+</div>
+
+<!-- 8 -->
+<div class="card">
+  <h3>⑧ 高频轮询接口的日志静默</h3>
+  <pre><code><span class="c">// main.py:48-70</span>
+QUIET_ACCESS_PATHS = {<span class="s">"/api/queue_status"</span>, <span class="s">"/api/canvases"</span>, <span class="s">"/api/canvases/trash"</span>}
+QUIET_ACCESS_PREFIXES = (<span class="s">"/api/canvases/"</span>,)
+
+<span class="k">class</span> QuietAccessLogFilter(logging.Filter):
+    <span class="k">def</span> filter(self, record):
+        <span class="c"># 这些路径 + 状态码 &lt; 400 → 不打日志</span>
+        <span class="k">return</span> <span class="k">False</span>
+logging.getLogger(<span class="s">"uvicorn.access"</span>).addFilter(QuietAccessLogFilter())</code></pre>
+  <p><b>对你：</b>跟你今天做的「客户端断连从 ERROR 降为 debug」是同一件事的两面 —— 它治「轮询刷屏」，你治「取消请求刷屏」。可以合并成一个 <code>log_filters.py</code>。</p>
+</div>
+
+<!-- 9 -->
+<div class="card">
+  <h3>⑨ 多 ComfyUI 实例负载均衡 + 输入图跨实例同步</h3>
+  <pre><code>COMFYUI_INSTANCES = [s.strip() for s <span class="k">in</span> os.getenv(<span class="s">"COMFYUI_INSTANCES"</span>, <span class="s">"127.0.0.1:8188"</span>).split(<span class="s">","</span>)]
+BACKEND_LOCAL_LOAD = {addr: 0 <span class="k">for</span> addr <span class="k">in</span> COMFYUI_INSTANCES}
+
+<span class="c"># 提交前：目标实例有没有这张输入图？没有就从别的实例 /view 拉过来再上传</span>
+<span class="k">for</span> image_name <span class="k">in</span> required_images:
+    resp = requests.get(f<span class="s">"http://{target_backend}/view?filename={quote(image_name)}"</span>, stream=<span class="k">True</span>, timeout=0.5)
+    <span class="k">if</span> resp.status_code != 200:
+        <span class="c"># 从其它实例抓原图 → POST 到目标实例 /upload/image</span></code></pre>
+  <p><b>对你：</b>你现在单实例 8188，看似无用。但如果你将来「4060 跑小模型 + 云端跑大模型」，或者换机迁移，这个「输入图跟着任务走」的逻辑会救命 —— 否则新实例上全是「找不到输入文件」。</p>
+</div>
+
+<!-- 10 -->
+<div class="card">
+  <h3>⑩ 第三方依赖本地化 + MANIFEST 记账</h3>
+  <pre><code><span class="c">// static/vendor/MANIFEST.md —— 每个文件都写清「镜像自哪个 CDN、什么版本」</span>
+js/tailwindcss-cdn.js        ← https://cdn.tailwindcss.com
+js/lucide.js                 ← https://unpkg.com/lucide@latest
+js/three-0.160.0.module.js   ← https://unpkg.com/three@0.160.0/build/three.module.js
+css/fonts.css                ← 9 个 @font-face
+fonts/inter-1..5.ttf         ← Inter 300/400/500/600/800</code></pre>
+  <p><b>对你：</b>你的画布用 Vite 打包（three 走 npm），这条主要是<b>记账习惯</b>值得学 —— 你 <code>vendor/</code> 下已经有 libtv / shiguang-canvas / AI-Canvas-tauri 三套，加一份 MANIFEST 说明「谁是真源、谁是同步副本、版本多少」能减少你自己记忆负担。</p>
+</div>
+
+<!-- 11 -->
+<div class="card">
+  <h3>⑪ 自更新（双源 + 自重启）+ 一个容易忽略的 WS 坑</h3>
+  <pre><code><span class="c">// 双源：GitHub 与 ModelScope 各有一套 url（版本/更新说明/文件树）</span>
+GITHUB_VERSION_URL   = <span class="s">"https://raw.githubusercontent.com/.../VERSION"</span>
+MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + <span class="s">"VERSION"</span>
+<span class="c">// 走不通就换源；下载 → 暂存 → schedule_self_restart()</span>
+
+<span class="c">// main.py:19032 —— 这个坑很实战：</span>
+uvicorn.run(app, host=<span class="s">"0.0.0.0"</span>, port=3000,
+            <span class="k">ws_ping_interval</span>=<span class="k">None</span>, <span class="k">ws_ping_timeout</span>=<span class="k">None</span>)
+<span class="c">// 注释原文：部分客户端（如 PS UXP 面板）不会自动回 pong，</span>
+<span class="c">// 默认 20s ping/20s 超时会把这些连接每隔一会儿踢掉造成「频繁断连」。</span></code></pre>
+  <p><b>对你：</b>你的 Agent 通道是 SSE（<code>make_agent_event</code> + <code>broadcast_agent_event</code>），不走 WS ping，这个坑暂时不适用。但「自更新双源」如果你以后要发版给用户，值得抄 —— 尤其国内单源经常挂。</p>
+</div>
+
+<!-- ============ 6. 反面教材 ============ -->
+<h2><span class="n">6</span>四处别学的地方（同样是收获）</h2>
+
+<table>
+  <tr><th style="width:20%">问题</th><th style="width:36%">它怎么做的</th><th>你为什么不能学</th></tr>
+  <tr>
+    <td><b>单文件 19,038 行</b></td>
+    <td><code>main.py</code> 一个文件装完所有后端：路由、provider、ComfyUI、队列、资产库、自更新</td>
+    <td>你正被这件事咬 —— <code>extensions_module.py</code> 只是 <b>2,230 行</b>就触了 2000 行红线，我为此刚把 20 行抽成独立文件。1.9 万行单文件会让任何改动都无法定位</td>
+  </tr>
+  <tr>
+    <td><b>同步阻塞轮询</b></td>
+    <td>提交后 <code>for i in range(1800): sleep(1)</code> 轮询 <code>/history</code>，最长挂 30 分钟</td>
+    <td>你的 <code>draw_orchestrator</code> + <code>gen_critic</code> + <code>score_book</code> 是异步任务化设计，<b>比它先进</b>。别倒退</td>
+  </tr>
+  <tr>
+    <td><b>QUEUE 只是排队显示</b></td>
+    <td><code>QUEUE</code> 列表只用来回答「你排第几」（<code>/api/queue_status</code>），<b>没有真正的 worker 循环</b>，靠 FastAPI 线程池并发</td>
+    <td>这意味着并发数不可控。你的抽卡闭环有明确的编排器，别把队列降级成装饰品</td>
+  </tr>
+  <tr>
+    <td><b>硬编码节点 id</b></td>
+    <td><code>main.py:18214</code> 起：<code>workflow["23"]["inputs"]["text"] = prompt</code>、<code>workflow["144"]</code> 宽高、<code>workflow["22"]</code> seed…</td>
+    <td>这只对「内置默认工作流」有效，用户换一个工作流就静默失效。它自己在后面又补了通用 <code>params</code> 覆盖 —— 说明作者也意识到前面那段是临时补丁。<b>你要做就直接做通用版</b></td>
+  </tr>
+</table>
+
+<!-- ============ 7. 下一步 ============ -->
+<h2><span class="n">7</span>如果你要继续：三种可选动作</h2>
+
+<table>
+  <tr><th style="width:10%">选项</th><th style="width:30%">做法</th><th>适合什么情况</th></tr>
+  <tr>
+    <td><span class="tag t-green">A</span></td>
+    <td><b>先把 ①②③ 落进拾光剪影</b>（版本号+409、workflow+config、参数 schema 下发）</td>
+    <td>推荐。三条都对着你自己的已知缺口，且都是纯新增、不碰冻结区，收益立刻可验</td>
+  </tr>
+  <tr>
+    <td><span class="tag t-blue">B</span></td>
+    <td><b>要 DX-OS 本体 → 走商务通道</b>：官网只有订阅方案，没有公开包。要试用只能联系他们；即使拿到，也建议只当「产品体验」看，不做逆向</td>
+    <td>你确实想评估它作为竞品。注意：<b>企业局域网部署 + 订阅制</b>，个人用不划算</td>
+  </tr>
+  <tr>
+    <td><span class="tag t-amber">C</span></td>
+    <td><b>再挖开源版其它模块</b>：<code>smart-canvas.js</code>（智能画布，与经典画布是两套）、<code>asset-manager</code>、<code>photoshop-asset-connector</code>（PS 直连画布）、<code>chrome-local-asset-importer</code>（采集插件）</td>
+    <td>你在做素材入库/采集时。这几个模块我只扫了结构，没细读，需要的话可以继续</td>
+  </tr>
+</table>
+
+<div class="info">
+  <h4>一句话总结</h4>
+  <p style="margin:0">你要的不是「DX-OS 的代码」，而是「一个跑了两年、3 千星的同类产品是怎么解决我这些问题的」。这个答案在开源版里，而且它<b>比 DX-OS 更适合你学</b> —— 因为你能看见全部实现，而 DX-OS 只会给你一个装好的黑盒。</p>
+</div>
+
+<footer>
+  <p><b>证据留存：</b><code>.workbuddy/tmp/dxos_read/</code>（main.py 19,038 行、ltx-director-timeline.js 4,111 行、官网 site.js、探测结果）</p>
+  <p><b>数据来源：</b>GitHub API（dxos/dxos · hero8152/Infinite-Canvas）、dx-os.com 实测探测、raw.gitcode.com 镜像拉取源码</p>
+  <p><b>免责：</b>本报告只做架构与设计层面的解读，不含任何从闭源产品提取的代码。Infinite-Canvas 遵循其 LICENSE（禁止商用、衍生须开源署名），落地时请自行重写实现。</p>
+</footer>
+
+</div>
+</body>
+</html>
