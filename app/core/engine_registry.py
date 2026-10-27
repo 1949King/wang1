@@ -61,7 +61,22 @@ FAMILIES: Dict[str, str] = {
 
 @dataclass(frozen=True)
 class EngineSpec:
-    """一个引擎模块的登记项。"""
+    """一个引擎模块的登记项。
+
+    前 9 个字段是观测面（W1 原有），后 5 个是**能力契约**（P0 · 2026-10-28 新增）：
+    它们回答的是自主可控最要紧的那一问 —— 「这个引擎自己持有什么能力，
+    哪一部分还是别人在跑」。此前这些信息只存在于注释散文里，无机器可读真源。
+
+    **全部带默认值 ⇒ 既有 66 条登记零改动**（P0 门槛之一）。
+    默认值的语义是**「不声明」而不是「支持」**：
+      · ``quant=""``            不适用/未声明。推理引擎（capability=image|video）必须显式声明；
+      · ``offload_tiers=()``    一个档都没声明（非推理引擎，或该引擎尚未接档位决策）；
+      · ``step_cache=False``    没有步级特征缓存；
+      · ``verified=unverified`` 未真机验证过 —— 这是**唯一诚实的默认**；
+      · ``loop_owner=upstream`` for 循环在第三方 ``__call__`` 里跑。
+    谁要把它改成 ``shiguang``/``verified``，必须同时有内核模块与台账证据，
+    否则 :func:`app.core.neural.capability_manifest.violations` 会报红。
+    """
 
     id: str
     family: str
@@ -72,6 +87,12 @@ class EngineSpec:
     device: str = ""
     telemetry: str = ""               # 遥测里的 engine 名；空 = 未埋点
     note: str = ""
+    # ── 能力契约（P0 · 5 字段）──────────────────────────────────────
+    quant: str = ""                   # fp16 / fp8 / int8wo…；必须过 quant_descriptor 准入
+    offload_tiers: Tuple[str, ...] = ()   # memory_policy 档名；只能填已实现档
+    step_cache: bool = False          # 是否带步级特征缓存（inference_cache.StepFeatureCache）
+    verified: str = "unverified"      # verified / unverified / blocked（复用 model_family 三态）
+    loop_owner: str = "upstream"      # shiguang（本仓库拥有循环）/ upstream（第三方 __call__）
 
 
 def _e(**kw: Any) -> EngineSpec:
@@ -91,13 +112,32 @@ ENGINES: Tuple[EngineSpec, ...] = (
        note="n≥3 才选栈的证据账本"),
     _e(id="image.diffusers", family="inference", capability="image",
        module="app/core/neural/diffusers_image.py", role=ROLE_PRIMARY,
-       deps=("torch", "diffusers"), device="cuda", telemetry="diffusers"),
+       deps=("torch", "diffusers"), device="cuda", telemetry="diffusers",
+       # 四档全实现（load() 有 four-way 分支：573/579/583 + 584 直上卡）
+       quant="fp16", offload_tiers=("whole_gpu", "model_offload",
+                                    "sequential_offload", "layer_cpu_offload"),
+       step_cache=True, verified="verified", loop_owner="shiguang",
+       # 2026-10-28 P2：sd15/sdxl 的循环已由 kernel/loop.py 接管（四门实测：
+       #   sd15 PSNR=inf/Δ=0/时延 1.015×/显存 1.000×；sdxl PSNR=inf/Δ=0/1.028×/0.969×）。
+       # 但**默认关**（SHIGUANG_KERNEL=off）⇒ 现网仍走 pipe 腿；两腿并存见
+       # capability_manifest.TWO_LEGS。这条 note 必须写清门的位置，否则 loop_owner
+       # 会读成"已经在跑内核"。
+       note="四档显存策略全实现 + 步缓存；sd15/sdxl 循环归内核（SHIGUANG_KERNEL=on 生效，默认回退 pipe）"),
     _e(id="image.diffsynth", family="inference", capability="image",
        module="app/core/neural/diffsynth_image.py", role=ROLE_PRIMARY,
-       deps=("torch",), device="cuda", telemetry="diffsynth"),
+       # ★ 2026-10-28 修正：此前 deps 只写 torch ⇒ 包缺失时 health 仍报 ready（假绿）。
+       #   真实 import 名是 diffsynth_engine（:262/:274），不是 pip 名 diffsynth。
+       deps=("torch", "diffsynth_engine"), device="cuda", telemetry="diffsynth",
+       # DiffSynth 自有 cpu_offload（权重驻留 RAM），不是 accelerate 三档 ⇒ 不声明档位
+       quant="fp16", verified="verified", loop_owner="upstream",
+       note="自有 cpu_offload 机制，不走 memory_policy 档位（policy 仅作观测）"),
     _e(id="video.svd", family="inference", capability="video",
        module="app/core/neural/video_gen.py", role=ROLE_PRIMARY,
-       deps=("torch", "diffusers"), device="cuda", telemetry="svd"),
+       deps=("torch", "diffusers"), device="cuda", telemetry="svd",
+       # load() 只有 model / sequential 两个分支（502-510），whole_gpu 是实测危险路径
+       quant="fp16", offload_tiers=("model_offload", "sequential_offload"),
+       verified="verified", loop_owner="upstream",
+       note="两档 offload；whole_gpu 实测 WDDM 分页卡死 >600s，故不声明该档"),
     _e(id="infra.memory_policy", family="inference", capability="infra",
        module="app/core/neural/memory_policy.py", role=ROLE_FALLBACK,
        note="显存策略（装不下不硬上）"),
@@ -146,7 +186,11 @@ ENGINES: Tuple[EngineSpec, ...] = (
     _e(id="video.local_video_infer", family="inference", capability="video",
        module="app/core/local_video_infer.py", role=ROLE_PRIMARY,
        deps=("torch", "diffusers"), device="cuda", telemetry="wan",
-       note="Wan/CogVideoX 等本地推理壳（内核 diffusers）；含管线+embeds 常驻缓存"),
+       # 全库只有 enable_model_cpu_offload（409/705/788/837/885），无 sequential/whole_gpu
+       quant="fp16", offload_tiers=("model_offload",),
+       verified="unverified", loop_owner="upstream",
+       note="Wan/CogVideoX 等本地推理壳（内核 diffusers）；只有 model offload 一档；"
+            "wan 未真机验证 ⇒ unverified（不得当默认可选）"),
     _e(id="image.comfy_provider", family="inference", capability="image",
        module="app/core/ai/comfy_provider.py", role=ROLE_LIBRARY,
        note="ComfyUI 进程生命周期与结果保存；**未接画布生成**（引擎本体是 GPL 三方）"),
@@ -226,6 +270,7 @@ ENGINES: Tuple[EngineSpec, ...] = (
        module="app/core/ai/whisper_asr.py", role=ROLE_PRIMARY),
     _e(id="music.yue", family="audio", capability="music",
        module="app/core/ai/yue_music.py", role=ROLE_DISABLED,
+       verified="blocked",
        note="本机跑不动 ⇒ 诚实失败，不假音频"),
 
     # ── 族 6 · 剪辑智能 ────────────────────────────────────────────
@@ -369,3 +414,22 @@ def idle_engines() -> List[Dict[str, Any]]:
         if u is not None and int(u.get("calls") or 0) == 0:
             out.append(engine_view(e, usage))
     return out
+
+
+# ── 能力视图（P0 · 2026-10-28）────────────────────────────────────
+def capabilities() -> Dict[str, Any]:
+    """把 5 个能力字段合并成清单视图 + K5 覆盖率 + 违约清单。
+
+    实现全部委托给 `neural/capability_manifest`，**本模块不重复判定逻辑** ——
+    两处各写一份判定，迟早漂成两套真相。此处只做「注册表视角的入口」。
+    """
+    from app.core.neural import capability_manifest as CM
+
+    return CM.manifest()
+
+
+def contract_violations() -> List[str]:
+    """能力契约违约清单（空 = 干净）。守卫脚本与测试共用。"""
+    from app.core.neural import capability_manifest as CM
+
+    return CM.violations()

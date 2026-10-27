@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# 拾光剪影 · 提交前卡点（可入库版本，14 道）
+# 拾光剪影 · 提交前卡点（可入库版本，19 道）
 #
 # 本文件是**唯一真相源**；.git/hooks/pre-commit 只是一层 3 行 shim 调它。
 # 为什么要把 hook 内容搬进仓库（2026-10-09）：
@@ -239,10 +239,45 @@ echo "── ⑬ 画布 selector 反模式（防 React #185 无限重渲染白�
 # 纯文本扫描、毫秒级、无项目依赖，故与冻结区守卫一样常跑（不随暂存内容跳过）。
 "$PY" _verify/check_canvas_selectors.py || fail=1
 
+echo "── ⑭ 引擎能力契约（P0 · 66 条登记必须有 5 个能力字段且取值合法）"
+# 2026-10-28 补（自主可控 P0）。这 5 个字段是「引擎自主可控」唯一机器可读证词：
+#   quant / offload_tiers / step_cache / verified / loop_owner。
+# 它们一旦可以随手填，capability_manifest 的 K5 覆盖率就成了自欺 ——
+# 报 3/4 而实际 0/4 比不报更糟。故填错必须当场红灯。
+# 自证：python _verify/check_capability_contracts.py --selfcheck（注入违约验证「能拦」）
+"$PY" _verify/check_capability_contracts.py || fail=1
+
+echo "── ⑮ 显存账本不变量（5 分项口径：分项不可相加当峰值）"
+# 2026-10-28 补。vram_ledger 是「省了多少显存」这句话的唯一依据，
+# 口径错则所有量化/缓存/卸载收益数字系统性偏差，而且错得很像对的。
+# 反例自证：python _verify/check_vram_ledger.py --selfcheck
+"$PY" _verify/check_vram_ledger.py || fail=1
+
+echo "── ⑯ 能力声明诚实性（声明 verified/主选 就必须真能跑）"
+# 2026-10-28 补。查「模块在 ≠ 能跑」：缺依赖却标 verified 是最常见的假绿。
+# 反例自证：python _verify/check_capability_honesty.py --selfcheck
+"$PY" _verify/check_capability_honesty.py || fail=1
+
+echo "── ⑰ 推理栈钉版（diffusers/transformers 等必须 == ，且与实际安装一致）"
+# 2026-10-28 补（架构文档 §9 第 1 条：此前 requirements.txt 连 diffusers/torch 都没有，
+# 「钉版」只是口头，换机重装必漂）。三条判据：必须钉且用 `==` / 两份清单不许打架 /
+# 装着的 == 钉的。第三条最要紧：不一致就意味着**文档说 A、机器跑 B**。
+# 合法的升级路径是「升级 → 重跑验收 → 改 pin 一起提交」，不是静默漂移。
+# 反例自证：python _verify/check_inference_pins.py --selfcheck（三条判据各造一个反例）
+"$PY" _verify/check_inference_pins.py || fail=1
+
+echo "── ⑱ 内核硬线（H1 循环不知族名 / H2 适配器不自写步进 / H3 顶层不 import torch）"
+# 2026-10-28 补（P2 图像内核）。三条硬线全是"改坏了也不报错"的规矩：
+# loop.py 里写一句 `if family == "sdxl"` 照样出图，只是 C3（上游可替换）当场失效 ——
+# 而失效只有下次换上游才会痛。判据④⑤把「新族准入」也一起盯：
+# caps 自洽 + parity 基线填完 + 声明 verified 必须有 passed=true 的证据。
+# 反例自证：python _verify/check_kernel_contract.py --selfcheck（五条各造一个反例）
+"$PY" _verify/check_kernel_contract.py || fail=1
+
 if [ "$fail" -ne 0 ]; then
     echo ""
     echo "✗ 提交前卡点未通过，请修复后重试（紧急跳过：git commit --no-verify）"
     exit 1
 fi
-echo "✓ 提交前卡点全部通过（14 道）"
+echo "✓ 提交前卡点全部通过（19 道）"
 exit 0

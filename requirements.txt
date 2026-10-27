@@ -1,8 +1,17 @@
 # 拾光剪影 — 根依赖清单（与 app/requirements.txt 对齐）
 # 推荐一键安装: powershell -ExecutionPolicy Bypass -File scripts\setup_deps.ps1
 #
-# PyTorch CUDA 请单独安装，避免被 CPU 源覆盖:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# ★ 钉版纪律（2026-10-28）：AI 推理栈全部写 **精确版本 ==**，
+#   数值 = 本项目真机实测通过的版本（RTX 4060 Laptop 8GB / Windows）。
+#   为什么必须钉：`memory_policy` 的标定档案 key 里含 torch 的 major.minor
+#   （`calibration.make_key`），torch 一升档，旧档案自动失效并重标 —— 这没问题；
+#   有问题的是**没记录升过什么**，于是「上个月还能跑」变成无法复现的传说。
+#   改任何一条 pin 前请先跑 `_verify/check_inference_pins.py`，
+#   它会告诉你「装着的版本」与「钉的版本」差在哪。
+#
+# PyTorch CUDA 请用精确版本 + CUDA 源单独安装（避免被默认 CPU 源覆盖）:
+#   pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 ^
+#       --index-url https://download.pytorch.org/whl/cu124
 #
 # Whisper 模型镜像（国内）:
 #   set HF_ENDPOINT=https://hf-mirror.com
@@ -21,9 +30,23 @@ opencv-python-headless>=4.8.0
 # AI / 字幕 / OCR
 faster-whisper>=1.0.0
 easyocr>=1.7.0
-transformers>=4.30.0
+transformers==5.14.1
 onnxruntime>=1.14.0
-# torch / torchvision / torchaudio → 见上方 CUDA 安装命令
+# torch / torchvision / torchaudio → 见上方精确版 CUDA 安装命令
+
+# ── AI 推理栈（钉版；diffusers 主栈 + DiffSynth 备栈）──────────────────
+# 实测组合（2026-10-27 retest）：diffusers 0.40.0 + accelerate 1.15.0 +
+# safetensors 0.8.0 + transformers 5.14.1 + diffsynth_engine 0.7.0。
+# ⚠️ torch 不在此处 —— 它必须走 cu124 源，见文件头。
+# ⚠️ diffsynth_engine 的 pip 名是 `diffsynth-engine`，import 名是 `diffsynth_engine`。
+diffusers==0.40.0
+accelerate==1.15.0
+safetensors==0.8.0
+# DiffSynth 备栈（正式版停在 0.7.0，见 docs/design/推理引擎架构设计.md D3）
+diffsynth-engine==0.7.0
+
+# 量化（可选）：fp8/int8 走 torchao；不装则 quant_policy 如实降级为 fp16
+# torchao==0.16.0
 
 # UI
 PyQt6>=6.6.0

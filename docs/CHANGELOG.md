@@ -1,5 +1,34 @@
 # 拾光剪影 — 变更日志
 
+## P2 · 图像去噪内核交付（sd15 + sdxl 比特级一致，2026-10-28）
+
+**结论**：`kernel/loop.py` 接管了 SD1.5 / SDXL 的去噪循环，两族与 stock `pipe()` **比特级一致**
+（逐 step `max|Δ| = 0`、出图 PSNR = `inf`），时延持平、显存不增。K5 覆盖率 0/4 → **2/4**。
+开关默认 `SHIGUANG_KERNEL=off`，现网行为完全不变；失败一律回退 pipe 并写 `rejected_reason`。
+
+真机实测（`scripts/bench_kernel_parity.py`，20 步 × 3 seed 交错 A/B）：
+
+| 族 | 初始 latents | 逐 step `max\|Δ\|` | PSNR | 时延比 | 显存比 |
+|---|---|---|---|---|---|
+| sd15 | 比特一致 | 0.000e+00 | inf | 1.015×（持平档） | 1.000× |
+| sdxl | 比特一致 | 0.000e+00 | inf | 1.028×（持平档） | 0.969× |
+
+**新增**：`app/core/neural/kernel/`（契约/调度/CFG/潜变量/循环/钩子/打点/推理态/证据/引擎 + 两族适配器）、
+6 个测试文件 115 项、守卫 ⑱ `_verify/check_kernel_contract.py`（五判据全自证）、
+验收脚本 `scripts/bench_kernel_parity.py`、证据台账 `docs/knowledge/kernel_evidence.json`。
+
+**落地时被实测抓出的四个缺陷**（都属"不报错、只出错结果"，各配单测）：
+
+1. `validate()` 在 `bind()` 之前就查组件袋 ⇒ 内核**永远拒绝**（拆成 caps 体检 / 绑定后体检两段）；
+2. 自写循环漏了推理态 ⇒ 显存按步数翻倍、解码处 `numpy()` 直接抛（统一收进 `grad_mode.py`）；
+3. 执行设备取 `next(params).device`，在 `offload=model` 下拿到 **cpu** ⇒ 错误炸在 `scheduler.step`
+   （改问上游 `_execution_device`；**只跑 SD1.5 时完全不显形**，因为它是 `whole_gpu`）；
+4. 空负向提示词被改写成 `None`，SDXL 上实测差 `max|Δ|≈854`、PSNR 掉到 23dB（改为逐字透传）。
+
+**顺带修的既有缺陷**：`Hooks.finished()` 用 `len(events)` 当总步数，`collect_steps=False` 时恒为空
+⇒ 完成时进度报 `1/1`（界面会"走完又跳回"）；`build_timesteps()` 在 `strength` 极小时截出空表
+⇒ 一步不跑却按成功返回（出图是全噪）。
+
 ## 自研推理引擎路线图（文档 §29，2026-10-28）
 
 **结论**：不从 0；以现有两个为基础，按 L4→L3→L2→L1 四层逐步下沉。

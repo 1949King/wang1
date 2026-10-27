@@ -56,6 +56,36 @@ class OllamaModel:
 
 
 @dataclass
+class OllamaLoadedModel:
+    """**已加载**（驻留显存/内存）的模型信息。
+
+    与 `OllamaModel` 的区别是回答不同问题：
+      · `OllamaModel`   ← `/api/tags`：磁盘上装了哪些（可以很多个，不占显存）
+      · `OllamaLoadedModel` ← `/api/ps`：现在哪些真的占着显存（通常 0~2 个）
+
+    字段:
+      size_bytes: 该模型整体占用（字节）
+      size_vram_bytes: Ollama **自报**的显存占用（字节）。
+        ⚠️ 2026-10-28 实测低估真实占用约 0.7GB（CUDA 上下文不自报），
+        故不可直接当作"卸载能腾出多少"，见 `ps()` docstring。
+      expires_at: 空闲卸载时刻（keep_alive 到期时间）
+    """
+    name: str
+    size_bytes: int = 0
+    size_vram_bytes: int = 0
+    expires_at: str = ""
+    digest: str = ""
+
+    @property
+    def size_gb(self) -> float:
+        return round(self.size_bytes / 1024 ** 3, 2)
+
+    @property
+    def size_vram_gb(self) -> float:
+        return round(self.size_vram_bytes / 1024 ** 3, 2)
+
+
+@dataclass
 class OllamaConfig:
     """Ollama 连接配置
 
@@ -79,9 +109,10 @@ class OllamaClient:
     通过 HTTP REST API 与本地 Ollama 服务通信。
 
     核心 API 端点：
-      GET  /api/tags       → 列出已安装模型
+      GET  /api/tags       → 列出已安装模型（装着哪些）
+      GET  /api/ps         → 列出**已加载**模型（现在占着哪些；2026-10-28 补）
       POST /api/pull       → 拉取模型
-      POST /api/generate   → 文本生成
+      POST /api/generate   → 文本生成（keep_alive=0 即卸载）
       POST /api/chat       → 对话
       POST /api/embeddings → 文本嵌入
       DELETE /api/delete   → 删除模型
@@ -793,6 +824,117 @@ class OllamaClient:
             logger.error(f"获取模型信息失败: {e}")
             return None
     
+    def ps(self) -> List['OllamaLoadedModel']:
+        """列出**当前已加载进显存/内存**的模型（GET /api/ps）。
+
+        `list_models()`（/api/tags）回答的是「装了哪些」，
+        本方法回答的是「现在占着哪些」—— 两者完全不同：装着 ≠ 加载着。
+        资源仲裁要的是后者：只有加载中的模型才能被卸载腾地方。
+
+        2026-10-28 实测（RTX 4060 Laptop 8GB）：
+          · 未加载任何模型 → `/api/ps` 返回 `{"models": []}`（不是 404）；
+          · 加载 qwen3.5:4b 后 → `size_vram=2.92GB`，
+            但 nvidia-smi 实测差值 **3.62GB** ⇒ **自报值低估约 0.7GB**
+            （CUDA 上下文 + 运行时开销不自报）。
+            所以调用方**不要**把 `size_vram` 当成"能腾出多少"，
+            见 `resource_broker` 的 `CUDA_CTX_OVERHEAD_GB` 与"实测 delta 覆盖估算"。
+
+        返回：
+          已加载模型列表；服务不可用/异常时返回空列表（不抛）。
+        """
+        if not self.is_available():
+            return []
+        try:
+            session = requests.Session()
+            session.trust_env = False   # 关键：不走系统 HTTP_PROXY/HTTPS_PROXY
+            response = session.get(f"{self.base_url}/api/ps", timeout=8)
+            session.close()
+
+            if response.status_code != 200:
+                logger.warning(f"Ollama /api/ps 返回 HTTP {response.status_code}")
+                return []
+
+            out: List[OllamaLoadedModel] = []
+            for item in (response.json() or {}).get("models") or []:
+                out.append(OllamaLoadedModel(
+                    name=item.get("name") or item.get("model") or "",
+                    size_bytes=int(item.get("size") or 0),
+                    size_vram_bytes=int(item.get("size_vram") or 0),
+                    expires_at=item.get("expires_at") or "",
+                    digest=item.get("digest") or "",
+                ))
+            return out
+
+        except Exception as e:  # stability-gate: allow-swallow（ps 是资源仲裁的探测动作：查不到就当"不知道"，绝不能因为探测失败阻断生成）
+            logger.debug(f"获取已加载模型失败（按未加载处理）: {e}")
+            return []
+
+    def unload(self, model_name: Optional[str] = None) -> Dict[str, Any]:
+        """卸载已加载模型，立刻释放其占用的显存。
+
+        `model_name=None` ⇒ 卸载**全部**已加载模型（生图前清场用）。
+
+        原理：向 `/api/generate` 发一个 `keep_alive: 0` 的空请求，
+        Ollama 会把该模型从内存/显存中卸载。
+
+        ★ 2026-10-28 实测：卸载是**同步**的 —— HTTP 返回耗时 5.67ms，
+          返回时 `/api/ps` 已为空、nvidia-smi 已回落到基线
+          （6599MiB → 2897MiB 加载 → 6585MiB 卸载）。
+          故本方法不需要轮询等待，但**仍做一次 ps() 复核**：
+          复核失败只记 warning，不改判定 —— 复核是证词，不是前提。
+
+        返回：
+          {"ok": bool, "unloaded": [模型名...], "failed": [模型名...],
+           "remaining": [仍加载中的模型名...], "message": str}
+          **永不抛异常**：卸载是优化，不是正确性前提。
+        """
+        if not self.is_available():
+            return {"ok": False, "unloaded": [], "failed": [],
+                    "remaining": [], "message": "Ollama 服务不可用"}
+
+        loaded = self.ps()
+        targets = [m.name for m in loaded] if model_name is None else [model_name]
+        if not targets:
+            return {"ok": True, "unloaded": [], "failed": [],
+                    "remaining": [], "message": "无已加载模型（本就不占显存）"}
+
+        unloaded: List[str] = []
+        failed: List[str] = []
+        for name in targets:
+            try:
+                session = requests.Session()
+                session.trust_env = False
+                response = session.post(
+                    f"{self.base_url}/api/generate",
+                    json={"model": name, "keep_alive": 0, "stream": False},
+                    timeout=30,
+                )
+                session.close()
+                if response.status_code == 200:
+                    unloaded.append(name)
+                else:
+                    failed.append(name)
+                    logger.warning(
+                        f"卸载 {name} 失败: HTTP {response.status_code}"
+                    )
+            except Exception as e:  # stability-gate: allow-swallow（单个模型卸载失败不应中断其余模型的卸载，整体结果在返回值里如实上报）
+                failed.append(name)
+                logger.warning(f"卸载 {name} 异常: {e}")
+
+        remaining = [m.name for m in self.ps()]
+        return {
+            "ok": not failed and not remaining,
+            "unloaded": unloaded,
+            "failed": failed,
+            "remaining": remaining,
+            "message": (
+                "已卸载 %d 个%s" % (
+                    len(unloaded),
+                    "" if not remaining else "，仍有 %d 个加载中" % len(remaining),
+                )
+            ) if unloaded else "没有模型被卸载",
+        }
+
     def start_ollama_server(self) -> bool:
         """尝试启动 Ollama 服务"""
         try:

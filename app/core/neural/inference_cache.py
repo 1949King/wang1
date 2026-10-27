@@ -454,6 +454,11 @@ class LowRankFeatureCache:
 
     ★ 结构性保险（设计稿 §10.3）：每 cache_interval 步全量刷新 ⇒ 低秩误差
     **不跨周期累积**，上界 = 单次近似误差。
+
+    ★ ``energy`` 遥测口径（2026-10-25 修正）：= **top-r 通道子空间保留的
+    谱能量占比** = Σ_{i<r} λ_i / trace(G)，取值 (0,1]。
+    旧口径 `sum(S[:r])/sum(S)` 因 svd_lowrank 只返回 r 个奇异值而恒等于 1.0
+    （遥测失效）——修正细节见 ``calibrate()`` 内注释。
     """
 
     _MAX_GRAM_SAMPLES = 8
@@ -535,11 +540,25 @@ class LowRankFeatureCache:
             import torch
 
             r = max(1, int(round(self._C * self._ratio)))
-            U, S, _V = torch.svd_lowrank(self._gram, q=min(r, self._C))
-            sv = torch.clamp(S, min=0.0)
-            total = float(sv.sum())
-            self._energy = round(float(sv[:r].sum()) / total, 4) if total > 0 else 0.0
-            self._U = U[:, :r].contiguous()
+            # ★ 2026-10-25 修正「energy 恒等 1.0」：
+            #   旧口径 sum(S[:r])/sum(S) —— svd_lowrank(G, q=r) **只返回 r 个
+            #   奇异值** ⇒ sum(S[:r]) 与 sum(S) 恒等 ⇒ energy 永远是 1.0，
+            #   遥测变成「永远绿的摆设」，标定台的 energy ≥0.99 验收形同虚设。
+            #
+            #   改用 **eigh**：Gram 是对称半正定矩阵 ⇒ 特征值即谱能量、
+            #   特征向量即精确的 top-r 通道子空间（svd_lowrank 是随机化近似，
+            #   谱与子空间都带偏差——实测 C=8/r=4 时 energy 偏 2.4%）。
+            #   代价可忽略：1280 通道 Gram 的 eigh 实测 0.076s（校准只跑一次）。
+            eigs, eigvecs = torch.linalg.eigh(self._gram)   # 升序
+            # 降序化：eigh 给的是升序 ⇒ 必须**同时**翻转特征向量列序，
+            # 否则 eigvecs[:, :r] 取到的是最小能量方向（投影结果完全错，
+            # 2026-10-25 实测 err=1.0）。
+            eigs = torch.flip(eigs, dims=[0]).clamp(min=0.0)          # 降序 + 截负
+            eigvecs = torch.flip(eigvecs, dims=[1])                   # 同序的列
+            total = float(eigs.sum().item())
+            self._energy = (round(float(eigs[:r].sum().item()) / total, 4)
+                            if total > 0 else 0.0)
+            self._U = eigvecs[:, :r].contiguous()
             self._rank = r
             self._calibrated = True
             self._calibrated_at = self._n_samples

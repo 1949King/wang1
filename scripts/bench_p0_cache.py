@@ -140,7 +140,7 @@ def cmd_list() -> int:
         ("deepcache", "DeepCache 墙钟 + PSNR（sd15/sdxl/svd）", "GPU + 权重",
          "墙钟提速 ≥1.15× 且 PSNR ≥ 30dB（草稿档）"),
         ("lowrank", "低秩 rank sweep 0.125/0.25/0.5", "GPU + 权重",
-         "energy ≥ 0.99 且 PSNR ≥ 25dB"),
+         "PSNR ≥ 25dB；energy 记录但不设阈值（旧口径恒 1.0 已废）"),
         ("overhead", "step_cache_overhead 实测替换 estimated", "GPU + 权重",
          "与 vram_budget 登记值偏差 < 20%"),
     ]
@@ -353,7 +353,8 @@ def cmd_lowrank(model_id: str, ratios, n: int, steps: int, preset: str) -> int:
         print("  ratio=%.3f：原始 %s · 中位 %.1fs · PSNR %.2f dB"
               % (ratio, [round(x, 1) for x in times], _median(times), psnr))
     ok = bool(rows) and all(r["psnr_db"] >= 25.0 for r in rows)
-    print("低秩 sweep 验收（energy 见遥测日志；PSNR ≥25dB）：%s"
+    print("低秩 sweep 验收（PSNR ≥25dB；energy 口径 2026-10-25 已修为"
+          "top-r 谱能量占比，旧口径恒 1.0 故不设阈值）：%s"
           % ("通过" if ok else "未过（记录备查）"))
     _dump("lowrank_%s" % model_id, {"model_id": model_id, "steps": steps,
                                     "preset": preset, "rows": rows,

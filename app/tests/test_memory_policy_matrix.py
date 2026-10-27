@@ -52,6 +52,19 @@ def _pick(model_id, *, frames=0, tier=8, supported=None, tuned=None,
                               tuned=tuned, registered_vram_gb=reg)
 
 
+@pytest.fixture(autouse=True)
+def _no_calibration_archive(monkeypatch):
+    """★ 本文件锁的是**档位矩阵规则**，档案必须钉死为空。
+
+    `data/calibration.json` 是开发机标定产物（有无取决于跑没跑过标定），
+    留着它会让同一份代码在「标定过的机器/CI」上给出不同档位 —— 那不是矩阵变了，
+    是测试不自洽。档案优先级与安全闸由 `test_memory_policy_calibration.py` 专测。
+    """
+    monkeypatch.setattr(
+        MP, "_calibration_lookup",
+        lambda *a, **k: (None, None, "测试：矩阵用例，档案钉死为空"))
+
+
 @pytest.fixture()
 def _no_real_probe(monkeypatch):
     """默认把真探测打回 None（无 CUDA 语义），防测试机真卡泄漏进决策。"""
@@ -308,7 +321,21 @@ class TestPolicyContract:
             assert pol["mode"] in MP.ACTIVE_MODES
 
     def test_real_probe_returns_something_or_none(self):
-        """真机探测契约：有卡返回合理 dict，无卡返回 None（都不许炸）。"""
+        """真机探测契约：有卡返回合理 dict，无卡返回 None（都不许炸）。
+
+        ★ 2026-10-28 扩契约（P1.5）：返回里多了 `torch_free_gb` / `smi_free_gb`
+          两个原始读数 —— 因为 `free_gb` 已改为两者较小值，必须保留原始值才能诊断
+          「两个读数差多少」（实测 WDDM 下 torch 对别的进程占用无感，差可达 4GB+）。
+          故这里从"键集合完全相等"改成"必需键都在 + free_gb 不大于任一原始读数"，
+          后者才是这次改动真正要锁的语义。
+        """
         v = probe_vram()
-        assert v is None or (set(v) == {"free_gb", "total_gb"}
-                             and 0 < v["total_gb"] < 1024)
+        assert v is None or (
+            {"free_gb", "total_gb"} <= set(v)
+            and 0 < v["total_gb"] < 1024
+        )
+        if v is not None:
+            for k in ("torch_free_gb", "smi_free_gb"):
+                if v.get(k) is not None:
+                    assert v["free_gb"] <= v[k] + 1e-9, (
+                        "free_gb 必须是保守值，不得大于 %s" % k)

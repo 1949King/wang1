@@ -304,6 +304,21 @@ def timed_generate(eng: Any, tap: LogTap, *, model_id: str, prompt: str,
     rec["contaminated"] = foreign_sm >= thr_sm
     if r.get("ok") and os.path.isfile(out_path):
         rec["sha"] = sha256_file(out_path)
+    # 卡死检测：Windows WDDM 在显存被撑爆时会**无声换页**到系统内存 ⇒
+    # 表现为 util 100% 但单步 236s（正常 12s）。这不是"慢"，是废了，必须中止。
+    # 判据用**相对值**（对比本进程此前样本中位数）：固定阈值会漏掉 84s vs 15s
+    # 这种 5× 卡顿（实测它污染了中位数，把 -4.7% 算成 -72.2%）。
+    base = WALL_BASELINE.get(model_id, 30.0)
+    prev = _WALL_SAMPLES[-3:]
+    ref = med(prev) if len(prev) >= 2 else None
+    if (ref is not None and wall > ref * 2.5 and wall > 45.0) or (
+            ref is None and wall > base * STALL_FACTOR):
+        rec["stalled"] = True
+        raise RuntimeError(
+            "出图卡死判定：%s 单张 %.1fs（参照中位 %s / 基线 %.0fs）"
+            "⇒ 显存被撑爆，WDDM 换页，数据不可用"
+            % (model_id, wall, ("%.1fs" % ref) if ref is not None else "无", base))
+    _WALL_SAMPLES.append(wall)
     return rec
 
 
@@ -569,6 +584,11 @@ def gpu_usable(phase: str) -> Dict[str, Any]:
 # ⇒ 每次出图前查余量，见底就干净退场（rc=4），不做假数据。
 VRAM_HEADROOM_MIN_GB = 1.0
 
+# 卡死判定基线（正常单张墙钟秒数，超 4 倍即判 WDDM 换页卡死）
+WALL_BASELINE = {"sdxl-t2i": 30.0, "sd15-t2i": 10.0}
+STALL_FACTOR = 4.0
+_WALL_SAMPLES: List[float] = []   # 本进程已出图的墙钟样本（卡死判定的相对参照）
+
 
 def assert_vram_headroom(phase: str) -> Dict[str, Any]:
     snap = gpu_snapshot()
@@ -718,10 +738,21 @@ def cmd_step(args: argparse.Namespace) -> int:
     # 预热（不计时）：SDXL fast 首跑触发 LCM-LoRA 装卸（~1-2min），必须挡在正赛外
     n_warm = 2 if (args.preset == "fast" and args.model == "sdxl-t2i") else 1
     for i in range(n_warm):
+        # 预热也要守卫：它同样会走 offload 搬模块，显存被抢时一样会**无报错挂死**
+        # （2026-10-25 实测：预热卡在 0/8 步、util 41%、free 1.5GB，7 分钟无进展）。
+        assert_vram_headroom("预热(%s)" % args.model)
+        t_w = time.time()
         r = eng.generate(args.model, prompt=PROMPTS[0], negative_prompt=NEG,
                          seed=SEED, preset=args.preset,
                          out_path=os.path.join(bench_dir, "warm%d.png" % i))
-        print("[bench] warmup %d ok=%s mode=%s" % (i, r.get("ok"), r.get("memory_mode")))
+        w_wall = time.time() - t_w
+        base = WALL_BASELINE.get(args.model, 30.0)
+        if w_wall > base * STALL_FACTOR:
+            raise RuntimeError(
+                "预热卡死判定：%s 预热单张 %.1fs > 基线 %.0fs×%d（显存被撑爆 ⇒ "
+                "WDDM 换页）" % (args.model, w_wall, base, STALL_FACTOR))
+        print("[bench] warmup %d ok=%s mode=%s wall=%.1fs" % (
+            i, r.get("ok"), r.get("memory_mode"), w_wall))
 
     arms: Dict[str, List[Dict[str, Any]]] = {"off": [], "on": []}
     for rep in range(args.n):

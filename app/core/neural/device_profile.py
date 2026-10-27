@@ -195,13 +195,26 @@ def probe(*, force: bool = False, use_cache: bool = True) -> Dict[str, Any]:
         "diffsynth": bool(prof["libs"].get("diffsynth_engine")),
         "diffusers": bool(prof["libs"].get("diffusers")),
     }
-    if not force and not inj:
+    # ★ 2026-10-28 实测教训：**探测失败的结果不得写缓存**。
+    #   此前在无 torch 的环境（managed python）里跑过一次 probe()，把
+    #     {"name": "CUDA 探测失败", "vram_gb": 0.0,
+    #      "reason": ["CUDA 探测异常 ModuleNotFoundError: No module named 'torch'"]}
+    #   固化进了 data/device_profile.json。之后所有调用都读到 0GB ⇒
+    #   calibration.admit() 永久拒绝、memory_policy 档位决策全错，
+    #   而且 force=True 也不会自动修复它（force 分支本身不写缓存）。
+    #   判据：只有真探到设备（vram_gb > 0）才值得缓存；CPU 机与探测失败
+    #   每次重探的代价只是几次 import 检查，不必缓存。
+    cacheable = float(prof.get("vram_gb") or 0) > 0
+    if not force and not inj and cacheable:
         try:
             os.makedirs(os.path.dirname(_CACHE), exist_ok=True)
             with open(_CACHE, "w", encoding="utf-8") as f:
                 json.dump(prof, f, ensure_ascii=False, indent=1)
         except Exception:
             logger.debug("[device_profile] 缓存写入失败（不阻断）", exc_info=True)
+    elif not cacheable:
+        logger.debug("[device_profile] 未探到设备（vram=0），本轮不写缓存：%s",
+                     (prof.get("reason") or [""])[0])
     return prof
 
 

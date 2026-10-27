@@ -490,6 +490,30 @@ class DiffusersImageEngine:
                                    floor_gb=_floor)
         except Exception:  # stability-gate: allow-swallow（让位是优化不是正确性前提：视频缓存模块缺失/异常时，图像照常加载，最坏退回本次实测的 +13.7% 代价）
             logger.debug("[diffusers_image] 视频缓存让位调用失败", exc_info=True)
+        # ★ 显存侧让位（P1 · 2026-10-28）：上面那段管的是**内存**（视频常驻缓存把
+        #   offload 权重留在了 CPU），这一段管**显存** —— 未加载的 LLM 会整块占着显卡。
+        #   实测（RTX 4060 8GB，qwen3.5:4b）：加载 LLM 后可用显存 6.41GB → 2.75GB，
+        #   SDXL 要 5.21GB ⇒ **不让位就必然挤爆**。
+        #   需求值取实测拟合表（memory_policy.estimate_floor_gb），不是拍一个常量：
+        #   SDXL model_offload 实测 5.21GB，SD1.5 无拟合数据则退回注册表 vram_gb=3.0。
+        try:
+            from app.core.neural.memory_policy import (
+                MODE_MODEL_OFFLOAD, estimate_floor_gb,
+            )
+            from app.core.neural.resource_broker import POOL_VRAM, ensure_capacity
+
+            _spec_now = DIFFUSERS_IMAGE_MODELS.get(model_id) or {}
+            _need_vram = (estimate_floor_gb(model_id, 0, MODE_MODEL_OFFLOAD)
+                          or _spec_now.get("vram_gb"))
+            if _need_vram:
+                _dec = ensure_capacity(
+                    float(_need_vram), pool=POOL_VRAM,
+                    reason="图像引擎加载 %s（需 %.2fGB）" % (model_id, float(_need_vram)))
+                if not _dec.ok:
+                    # 不阻断：让位失败最坏就是照旧挤，比"因为腾不出地方就不出图"好
+                    logger.warning("[diffusers_image] 显存让位后仍不足：%s", _dec.note)
+        except Exception:  # stability-gate: allow-swallow（仲裁层任何异常都不影响加载：它只负责提前清场，不是加载的前提）
+            logger.debug("[diffusers_image] 显存仲裁调用失败", exc_info=True)
         try:
             import torch
             # ★ 真 import 只发生在 load 内部（探测路径只 find_spec，组合场景崩纪律）
@@ -557,6 +581,10 @@ class DiffusersImageEngine:
                                      "offload": True}
             if spec.get("prefer_mode"):
                 tuned["prefer_mode"] = spec["prefer_mode"]
+            # ⚠️ 这里**不传 width/height**：`load()` 阶段还不知道本次出图尺寸
+            #   （尺寸是 `generate()` 才定的），而 offload 必须在 load 时就装好。
+            #   标定档案因此走「同模型下取峰值最大那条」的保守兜底 ——
+            #   见 `calibration.lookup()` 的宽松匹配说明（用最坏情况决策，宁慢勿炸）。
             pol = pick_memory_policy(
                 model_id, frames=0,
                 params_b=float(spec["params"].rstrip("B")),
@@ -688,6 +716,9 @@ class DiffusersImageEngine:
             # ★ P0-1 步缓存（DeepCache）：默认关，SHIGUANG_STEP_CACHE=deepcache 显式开。
             #   attach 不激活、activate 后才跳步；finally detach 保证 block.forward
             #   全还原——漏还原 = 下次 generate 双倍短路（挂载/还原一一对应是硬纪律）。
+            # ★ P2：内核回执（规范 §4.5）。无论走不走内核都必须有这一格 ——
+            #   "没用内核"要有原因，"用了"要有分段账，不许缺席。
+            _kernel_report: Dict[str, Any] = {}
             step_cache = self._maybe_attach_step_cache(spec, pre["preset"])
             try:
                 if image_path:
@@ -706,11 +737,19 @@ class DiffusersImageEngine:
                         generator=gen,
                     ).images[0]
                 else:
-                    # t2i：优先走编码器输出缓存（P0-2，见 _t2i_image）；关闭/失败自动回退
-                    image, _enc_state = self._t2i_image(
-                        prompt=prompt, negative_prompt=negative_prompt, cfg=n_cfg,
-                        width=n_w, height=n_h, steps=n_steps, generator=gen,
-                        model_id=model_id, preset=pre["preset"])
+                    # ★ P2 内核（2026-10-28）：默认 off；on/shadow 时才多一次尝试。
+                    #   返回 image=None 表示"内核没用上"，此时照原路径走 ——
+                    #   **静默回退是缺陷**，所以 _kernel_report 里一定带原因。
+                    image, _kernel_report = self._t2i_via_kernel(
+                        model_id=model_id, spec=spec, prompt=prompt,
+                        negative_prompt=negative_prompt, width=n_w, height=n_h,
+                        steps=n_steps, cfg=n_cfg, generator=gen)
+                    if image is None:
+                        # 原路径：优先走编码器输出缓存（P0-2，见 _t2i_image）；关闭/失败自动回退
+                        image, _enc_state = self._t2i_image(
+                            prompt=prompt, negative_prompt=negative_prompt, cfg=n_cfg,
+                            width=n_w, height=n_h, steps=n_steps, generator=gen,
+                            model_id=model_id, preset=pre["preset"])
             finally:
                 self._detach_step_cache(step_cache)
 
@@ -750,6 +789,7 @@ class DiffusersImageEngine:
                     "precision": self._precision,
                     "precision_reason": self._precision_reason,
                     "promote_after": self.promote_status()["state"],
+                    "kernel": _kernel_report,
                     "seconds_elapsed": round(elapsed, 1),
                     "message": f"生成完成：{out_path}（{n_steps} 步 · cfg {n_cfg} · {elapsed:.1f}s）"}
         except Exception as e:
@@ -762,6 +802,70 @@ class DiffusersImageEngine:
                 return {"ok": False, "memory_mode": self._offload,
                         "message": "显存不足，已自动回退到 offload 模式，请再试一次"}
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
+
+    # ── P2 自研去噪执行内核（app/core/neural/kernel/，默认 off）──────────────
+    def _t2i_via_kernel(self, *, model_id: str, spec: Dict[str, Any], prompt: str,
+                        negative_prompt: str, width: int, height: int,
+                        steps: int, cfg: float, generator: Any):
+        """尝试用自研内核出图，返回 `(image | None, kernel_report)`。
+
+        三态语义（规范 §8）：
+          · `off`    → `(None, 带原因的回执)`，调用方走原 pipe 路径；
+          · `on`     → 内核成功返回图；失败返回 `(None, 带原因)`，仍走原路径；
+          · `shadow` → 两条都跑、算 PSNR 记日志，返回内核结果（内核失败则用参照图）。
+
+        **为什么失败只 return None 而不是抛**：内核是新增路径，任何异常都应当
+        退化成"这次用旧路径"，而不是让用户这次出不了图。原因会被写进回执，
+        所以也不是静默降级。
+        """
+        try:
+            from app.core.neural.kernel import engine as _K
+        except Exception as e:  # stability-gate: allow-swallow（内核模块缺失 ⇒ 照旧用 pipe，原因写进回执）
+            return None, {"used": False, "loop_owner": "upstream", "steps": 0,
+                          "rejected_reason": "内核模块不可用：%s: %s"
+                                             % (type(e).__name__, e)}
+
+        _mode = _K.mode()
+        if _mode == "off":
+            return None, {"used": False, "loop_owner": "upstream", "steps": 0,
+                          "rejected_reason": "SHIGUANG_KERNEL=off（默认）"}
+
+        family = str(spec.get("arch") or "")
+        req = _K.GenRequest(
+            family=family, model_id=model_id, prompt=prompt,
+            negative_prompt=negative_prompt or "",
+            width=int(width), height=int(height),
+            steps=int(steps), cfg=float(cfg),
+            precision=str(self._precision or "fp16"),
+        )
+        res = _K.run(pipe=self._pipe, req=req, generator=generator)
+        rep = res["report"].to_dict()
+        image = res.get("image")
+
+        if _mode == "shadow":
+            # 参照图：同一 seed / 同步数，只用来量化差多少，不改对外行为
+            try:
+                ref, _ = self._t2i_image(
+                    prompt=prompt, negative_prompt=negative_prompt, cfg=cfg,
+                    width=width, height=height, steps=steps, generator=generator,
+                    model_id=model_id, preset="")
+            except Exception:
+                ref = None
+                logger.debug("[diffusers_image] shadow 参照路径失败", exc_info=True)
+            if image is not None and ref is not None:
+                try:
+                    from app.core.neural.kernel.evidence import psnr as _psnr
+
+                    logger.info("[diffusers_image] 内核 shadow family=%s PSNR=%.2fdB",
+                                family, _psnr(image, ref))
+                except Exception:  # stability-gate: allow-swallow（PSNR 只是证据：算不出不影响出图）
+                    logger.debug("[diffusers_image] shadow PSNR 计算失败", exc_info=True)
+            if image is None:
+                image = ref
+
+        if image is None:
+            logger.info("[diffusers_image] 未使用内核：%s", rep.get("rejected_reason"))
+        return image, rep
 
     # ── t2i 编码器输出缓存（P0-2，app/core/neural/inference_cache.py）────────
     def _t2i_image(self, *, prompt: str, negative_prompt: str, cfg: float,

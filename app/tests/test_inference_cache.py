@@ -223,6 +223,52 @@ class TestLowRankFeatureCache:
         # 4/8 秩对随机数据 ~0.5：下界 0 证「真压缩了」，上界 0.7 证「没发散」
         assert 0.0 < err < 0.7, err
 
+    def test_energy_is_not_identically_one(self):
+        """★ energy 遥测必须**随秩变化**，恒等 1.0 的口径是失效遥测。
+
+        回归背景（2026-10-25）：旧口径 `sum(S[:r])/sum(S)`，而
+        `svd_lowrank(G, q=r)` 只返回 r 个奇异值 ⇒ 分子分母恒等 ⇒ energy
+        永远是 1.0，标定台的「energy ≥ 0.99」验收变成永远绿的摆设。
+        修正后 energy = Σ_{i<r} λ_i / trace(G)（full-rank 谱能量占比）。
+
+        本测试用**满秩**随机输入（秩亏输入下新旧口径都是 1.0 ⇒ 抓不到 bug）：
+          · 秩 r=C/2 ⇒ 保留部分能量 ⇒ energy 必须 < 1
+          · 秩越大 ⇒ 保留能量单调不减 ⇒ 能量曲线必须真的动
+        """
+        torch.manual_seed(2)
+        h = torch.randn(1, C, H, W)
+        energies = []
+        for ratio in (0.125, 0.25, 0.5, 0.9):
+            lr = LowRankFeatureCache(rank_ratio=ratio)
+            for _ in range(3):
+                lr.add_sample(h)
+            rep = lr.calibrate()
+            assert rep["ok"], rep
+            energies.append(rep["energy"])
+        # 满秩随机输入：任何 r < C 的子空间都丢能量 ⇒ 第一个必须 < 1
+        assert energies[0] < 1.0, energies
+        # 单调不减（保留方向越多 ⇒ 能量占比越高）
+        assert energies == sorted(energies), energies
+        # 保留能量占比落在合理区间（满秩随机谱衰减平缓，不该是 0 或 1）
+        assert all(0.0 < e <= 1.0 for e in energies), energies
+
+    def test_energy_matches_manual_spectrum(self):
+        """energy 口径对账：与手工算的 top-r 谱能量占比一致（口径不被悄悄改）。"""
+        torch.manual_seed(3)
+        h = torch.randn(1, C, H, W)
+        lr = LowRankFeatureCache(rank_ratio=0.5)
+        for _ in range(3):
+            lr.add_sample(h)
+        rep = lr.calibrate()
+        assert rep["ok"], rep
+        # 手工：Gram 的完整特征谱（对称半正定 ⇒ 特征值=奇异值）
+        x = h.reshape(-1, C, H * W)[0].to(torch.float32)
+        gram = x @ x.t()
+        eigs = torch.linalg.eigvalsh(gram).flip(0).clamp(min=0.0)
+        r = C // 2
+        expect = float(eigs[:r].sum() / eigs.sum())
+        assert rep["energy"] == pytest.approx(expect, abs=0.02), (rep, expect)
+
     def test_calibrate_idempotent_and_insufficient(self):
         """样本不足 ⇒ 不校准（ok=False 留痕）；已校准 ⇒ 幂等跳过。"""
         lr = LowRankFeatureCache()

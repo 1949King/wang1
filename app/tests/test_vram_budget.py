@@ -50,6 +50,19 @@ _BASIS_OK = {"measured", "estimated", "registered"}
 
 
 @pytest.fixture(autouse=True)
+def _no_calibration_archive(monkeypatch):
+    """★ 本文件是**预算表 × 规则决策**的交叉锁，档案必须钉死为空。
+
+    标定档案会把 sd15 从 model_offload 改判到实测最优档（正是下方「已知分歧」的
+    收敛方向），留着它就让交叉锁变成「有时通过有时不通过」。档案接线专测在
+    `test_memory_policy_calibration.py`。
+    """
+    monkeypatch.setattr(
+        MP, "_calibration_lookup",
+        lambda *a, **k: (None, None, "测试：预算交叉锁，档案钉死为空"))
+
+
+@pytest.fixture(autouse=True)
 def _no_real_probe(monkeypatch):
     """双保险：即使未来代码漏注入显存，也不许真探测泄漏进决策。"""
     monkeypatch.setattr(MP, "probe_vram", lambda: None)

@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "families": {
+    "sd15": {
+      "psnr_min_db": null,
+      "psnr_inf": true,
+      "tensor_max_delta": 0.0,
+      "initial_latents_identical": true,
+      "latency_ratio": 1.0145,
+      "vram_ratio": 1.0,
+      "steps": 20,
+      "size": [
+        512,
+        512
+      ],
+      "seeds": [
+        3,
+        42,
+        777
+      ],
+      "n": 2,
+      "passed": true,
+      "stock_backend": "diffusers=0.40.0",
+      "measured_at": "2026-10-28T05:07:29",
+      "script": "scripts/bench_kernel_parity.py",
+      "machine": "NVIDIA GeForce RTX 4060 Laptop GPU / torch 2.6.0+cu124 / cuda 12.4",
+      "history": [
+        {
+          "measured_at": "2026-10-28T04:58:30",
+          "psnr_min_db": null,
+          "latency_ratio": 1.0092,
+          "vram_ratio": 1.0,
+          "tensor_max_delta": 0.0,
+          "script": "scripts/bench_kernel_parity.py"
+        },
+        {
+          "measured_at": "2026-10-28T05:07:29",
+          "psnr_min_db": null,
+          "latency_ratio": 1.0145,
+          "vram_ratio": 1.0,
+          "tensor_max_delta": 0.0,
+          "script": "scripts/bench_kernel_parity.py"
+        }
+      ]
+    },
+    "sdxl": {
+      "psnr_min_db": null,
+      "psnr_inf": true,
+      "tensor_max_delta": 0.0,
+      "initial_latents_identical": true,
+      "latency_ratio": 1.0282,
+      "vram_ratio": 0.9693,
+      "steps": 20,
+      "size": [
+        1024,
+        1024
+      ],
+      "seeds": [
+        3,
+        42,
+        777
+      ],
+      "n": 3,
+      "passed": true,
+      "stock_backend": "diffusers=0.40.0",
+      "measured_at": "2026-10-28T05:22:09",
+      "script": "scripts/bench_kernel_parity.py",
+      "machine": "NVIDIA GeForce RTX 4060 Laptop GPU / torch 2.6.0+cu124 / cuda 12.4",
+      "history": [
+        {
+          "measured_at": "2026-10-28T05:01:30",
+          "psnr_min_db": 0.0,
+          "latency_ratio": 99.0,
+          "vram_ratio": 99.0,
+          "tensor_max_delta": 0.0,
+          "script": "scripts/bench_kernel_parity.py"
+        },
+        {
+          "measured_at": "2026-10-28T05:12:41",
+          "psnr_min_db": 22.787,
+          "latency_ratio": 1.0335,
+          "vram_ratio": 0.9693,
+          "tensor_max_delta": 2.79150390625,
+          "script": "scripts/bench_kernel_parity.py"
+        },
+        {
+          "measured_at": "2026-10-28T05:22:09",
+          "psnr_min_db": null,
+          "latency_ratio": 1.0282,
+          "vram_ratio": 0.9693,
+          "tensor_max_delta": 0.0,
+          "script": "scripts/bench_kernel_parity.py"
+        }
+      ]
+    }
+  }
+}

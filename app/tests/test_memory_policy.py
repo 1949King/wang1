@@ -26,6 +26,21 @@ def _pick(mid, frames=0, free=6.0, total=8.0, **kw):
         mid, frames=frames, free_vram_gb=free, total_vram_gb=total, **kw)
 
 
+@pytest.fixture(autouse=True)
+def _no_calibration_archive(monkeypatch):
+    """★ 本文件测的是**规则语义**，不是档案命中 —— 把档案钉死为空。
+
+    `data/calibration.json` 是开发机真跑出来的产物：跑过标定的机器有、CI 上没有。
+    不钉死它，同一份代码在两种机器上会给出不同结论 —— 那不是规则变了，
+    是测试不自洽（也正是「历史实测 ≠ 当前环境」这条闸门存在的理由）。
+    档案接线本身由 `test_memory_policy_calibration.py` 专测。
+    """
+    monkeypatch.setattr(
+        MP, "_calibration_lookup",
+        lambda *a, **k: (None, None, "测试：规则语义用例，档案钉死为空"))
+
+
+
 # ─────────────────── ① 实测基线（2026-10-01 本机数字）───────────────────
 
 def test_floor_estimate_matches_measured_offload():

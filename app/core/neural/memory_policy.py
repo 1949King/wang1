@@ -50,6 +50,24 @@ policy 决策「该用哪档」，但**只有调用方知道自己实现了哪�
 分支，造成「决策与执行不符」的语义漂移（违反诚实原则）。
 刀2 起 ``diffusers_image`` 显式传 ``supported_modes=ACTIVE_MODES`` 声明四档全实现。
 
+自适应标定档案（2026-10-28 新增，分支 -1）
+==========================================
+``calibration.py`` 会在本机真跑四档、记账到 ``data/calibration.json``（一个 JSON 文件）。
+``pick_memory_policy()`` 现在**先查档案**，命中且过闸就用它，而不是走水位线规则：
+
+  顺序 -1  标定档案        这台机器真跑、真记账        ← 最可信
+  顺序  0  调优表 prefer_mode  人工写死的四档对比结论
+  顺序1-2  水位线规则      通用设计意图（0.85 / 0.95 / 0.60）
+
+「实测优先」不等于「实测盲目」，两道闸必须过：
+  ① ``peak_gb > free_gb``        ⇒ 别的进程占了显存就降级（历史 ≠ 现在）
+  ② whole_gpu 再验 15% 余量      ⇒ 历史峰值只说明「当时刚好没炸」
+
+四条**明确不用**档案的边界：``frames > 0``（档案无帧数维度）、档位不在
+ACTIVE_MODES、档位不在 supported_modes、``peak_gb <= 0``。
+模块缺失或查询异常一律降级走规则 —— 标定是增强，不是前置依赖（D-A3）。
+``use_calibration=False`` 可整体关掉（bench / 四档对比 / 排障）。
+
 实测基线（2026-10-01，本机 RTX 4060 Laptop 8GB）
 ================================================
 SVD-xt-i2v（14 步 / chunk=1）：
@@ -77,7 +95,10 @@ SVD-xt-i2v（14 步 / chunk=1）：
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+import subprocess
+import time
+from dataclasses import replace
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +155,22 @@ def probe_vram() -> Optional[Dict[str, float]]:
 
     纪律与 `video_gen.is_available()` 相同：**绝不 import diffusers**；
     torch 也只在确认存在后才 import（find_spec 纯查文件，零副作用）。
+
+    ★ 2026-10-28 改：`free_gb` 取 **torch 与 nvidia-smi 两个读数里更小的那个**。
+      原因是实测出来的（RTX 4060 Laptop 8GB / Windows WDDM）：
+
+        | 时点 | torch `mem_get_info()` | nvidia-smi |
+        |---|---|---|
+        | 空载 | 6.94GB | 6.40GB |
+        | Ollama 加载 qwen3.5:4b 后（实占 3.66GB） | **6.94GB（一点没动）** | 2.74GB |
+
+      torch 的读数**对本进程之外的显存占用基本无感**，而偏乐观恰好是危险方向：
+      以为够 ⇒ 不让别的进程让位 ⇒ 真加载时挤爆。这台机器上挤爆的表现不是 OOM，
+      而是 **WDDM 换页**（2026-10-25 实测 68.9s/步、可用 327MB）—— 不报错、只慢 50 倍，
+      比 OOM 更难发现。所以判据必须取保守值。
+
+      两个原始读数都保留在返回里（`torch_free_gb` / `smi_free_gb`），
+      便于诊断"差多少"，也便于测试锁住"确实取了较小值"。
     """
     import importlib.util as _u
     if _u.find_spec("torch") is None:
@@ -143,11 +180,54 @@ def probe_vram() -> Optional[Dict[str, float]]:
         if not torch.cuda.is_available():
             return None
         free_b, total_b = torch.cuda.mem_get_info()
-        return {"free_gb": round(free_b / (1024 ** 3), 2),
-                "total_gb": round(total_b / (1024 ** 3), 2)}
+        torch_gb = round(free_b / (1024 ** 3), 2)
+        smi_gb = nvidia_smi_free_gb()
+        free_gb = torch_gb if smi_gb is None else min(torch_gb, float(smi_gb))
+        return {"free_gb": round(float(free_gb), 2),
+                "total_gb": round(total_b / (1024 ** 3), 2),
+                "torch_free_gb": torch_gb,
+                "smi_free_gb": smi_gb}
     except Exception:
         logger.debug("[memory_policy] 显存探测失败", exc_info=True)
         return None
+
+
+#: nvidia-smi 读数的缓存时长（秒）。每次决策起一个 subprocess（~150ms）太贵；
+#: 而显存格局不会在 1s 内反复变化，真有变化下一个窗口就能看到。
+_SMI_TTL_S = 1.0
+_smi_cache: Dict[str, Any] = {"t": -1e9, "v": None}
+
+
+def nvidia_smi_free_gb(force: bool = False) -> Optional[float]:
+    """nvidia-smi 视角的可用显存（GB）；不可用（非 NVIDIA / 未装驱动 / 超时）返回 None。
+
+    为什么不能只用 torch：见 `probe_vram()` docstring 里的实测表 ——
+    torch 在 WDDM 下对别的进程占用无感，必须有一个"外部视角"来兜底。
+
+    非 NVIDIA 环境（如 MUSA）返回 None，`probe_vram` 会退回 torch 单读数，
+    这不是失败，是**如实降级**：不假装有两个读数。
+    """
+    now = time.monotonic()
+    if not force and (now - float(_smi_cache["t"])) < _SMI_TTL_S:
+        return _smi_cache["v"]
+
+    val: Optional[float] = None
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, timeout=4,
+        )
+        if out.returncode == 0:
+            lines = (out.stdout or b"").decode("utf-8", "ignore").strip().splitlines()
+            if lines:
+                # 多卡取第一张：与本项目单卡假设一致；取不到就是 None，不猜
+                val = round(float(lines[0].strip()) / 1024, 2)
+    except Exception:  # stability-gate: allow-swallow（nvidia-smi 缺失/超时是常态：退回 torch 单读数并记 smi_free_gb=None）
+        logger.debug("[memory_policy] nvidia-smi 探测失败（按不可用处理）", exc_info=True)
+
+    _smi_cache["t"] = now
+    _smi_cache["v"] = val
+    return val
 
 
 def estimate_floor_gb(model_id: str, frames: int, mode: str,
@@ -185,13 +265,109 @@ def _resolve_tuned(model_id: str, tuned: Optional[Dict[str, Any]]) -> Dict[str, 
         return {"steps": 25, "decode_chunk_size": 2, "offload": True}
 
 
+def _calibration_lookup(model_id: str, width: int, height: int, frames: int,
+                        free_gb: Optional[float],
+                        total_gb: Optional[float],
+                        modes: tuple) -> Tuple[Optional[str], Optional[Any], str]:
+    """查自适应标定档案，返回 ``(mode, entry, reason)``；无命中 mode 为 None。
+
+    设计要点
+    --------
+    · **实测优先于规则**：标定是本机真跑出来的，比任何水位线规则都准。
+    · **但绝不盲用**：档案是历史结论，当前显存可能已被别的进程占走，
+      所以必须过「安全闸」——档案记录的占用要放得进**当前空闲**。
+    · **任何异常都降级为无命中**：标定是增强，不是前置依赖（D-A3 精神），
+      档案坏了不能把档位决策搞挂。
+    · **reasons 永不为空**：无论命中与否都返回一句人话，决策必须可见（R9）。
+    """
+    # ── 已知边界：档案没有「帧数」维度 ────────────────────────────
+    # 标定条目记录的是「某模型在某分辨率下的峰值」，视频的显存随帧数线性增长
+    # （SVD 实测 ≈0.31GB/帧），拿一次 5 帧的档案去决策 25 帧会**严重低估**。
+    # 所以在视频内核算子落地前，这里**明确不用档案**——诚实失败，不猜。
+    if int(frames) > 0:
+        return None, None, (
+            f"视频路径（{int(frames)} 帧）：标定档案尚无帧数维度 ⇒ "
+            f"走规则决策（宁慢勿炸）")
+
+    try:
+        from app.core.neural import calibration as CAL
+        from app.core.neural import device_profile as DP
+    except Exception:
+        return None, None, "标定模块不可用 ⇒ 跳过档案"
+
+    try:
+        store = CAL.default_store()
+        prof = DP.probe()
+        hit = CAL.lookup(store, prof, model_id, width, height)
+    except Exception:
+        logger.debug("[memory_policy] 标定档案查询失败", exc_info=True)
+        return None, None, "标定档案查询失败 ⇒ 跳过（不影响决策）"
+
+    if hit is None:
+        return None, None, "无匹配标定档案 ⇒ 走规则决策"
+
+    key, entry = hit
+    mode = str(getattr(entry, "mode", "") or "")
+    raw_peak = float(getattr(entry, "peak_gb", 0.0) or 0.0)
+    # ★ 分辨率换算：档案可能是 512² 探针测的，本次要出 1024² 就按外推系数放大，
+    #   否则安全闸判的是「当时那个尺寸」，不是「这次这个尺寸」（低估 ⇒ 撞 OOM）。
+    #   拿不到尺寸/非数字 res_class 时原样返回（不编比例）。
+    try:
+        peak = float(CAL.peak_for_resolution(entry, key, width, height))
+    except Exception:
+        peak = raw_peak
+    peak_note = "" if abs(peak - raw_peak) < 1e-6 else (
+        f"（{raw_peak:.2f}GB @探针分辨率 → {peak:.2f}GB @本次 {max(int(width or 0), int(height or 0))}px，"
+        f"外推系数 {CAL.EXTRAPOLATE_COEF_4X} 换算）")
+
+    if mode not in ACTIVE_MODES:
+        return None, entry, (
+            f"档案 {key} 的档位 {mode} 不在 ACTIVE_MODES ⇒ 忽略")
+    if mode not in modes:
+        return None, entry, (
+            f"档案 {key} 建议 {mode}，但引擎未声明支持该档 ⇒ 忽略")
+    if peak <= 0:
+        return None, entry, f"档案 {key} 无有效 peak_gb ⇒ 忽略（不拿 0 当依据）"
+
+    # ★ 安全闸 1：历史实测 ≠ 当前可用（别的进程可能已占走显存）
+    if free_gb is not None and peak > float(free_gb):
+        return None, entry, (
+            f"档案 {key} 需 {peak:.2f}GB{peak_note}，但当前空闲仅 "
+            f"{float(free_gb):.2f}GB ⇒ **降级走规则决策**（不盲用历史结论）")
+
+    # ★ 安全闸 2：whole_gpu 永远保留 15% 余量（与分支 1 同一条线）
+    # 历史实测峰值是「当时刚好没炸」，不是「还有余量」；WDDM 分页的代价是
+    # >600s 卡死（SVD 10 帧实测），所以即使档案说 whole_gpu 也要复验余量。
+    if mode == MODE_WHOLE_GPU:
+        if total_gb is None:
+            return None, entry, (
+                f"档案 {key} 建议 whole_gpu，但总显存未知 ⇒ 无法复验 15% 余量，"
+                f"保守改走规则决策")
+        if peak > float(total_gb) * _WHOLE_GPU_HEADROOM:
+            return None, entry, (
+                f"档案 {key} 建议 whole_gpu，但峰值 {peak:.2f}GB{peak_note} > 总显存 "
+                f"{float(total_gb):.2f}GB × {_WHOLE_GPU_HEADROOM}（15% 余量线）"
+                f" ⇒ 降级走规则决策")
+
+    # 命中时把**换算后**的峰值带回 entry：调用方拿 `peak_gb` 当 floor_gb 用，
+    # 那个数字必须是「本次尺寸的估计」而不是「探针尺寸的实测」。
+    eff_entry = entry if abs(peak - raw_peak) < 1e-6 else replace(entry, peak_gb=peak)
+    return mode, eff_entry, (
+        f"★ 标定档案命中 {key}：{mode}，本机实测峰值 {raw_peak:.2f}GB{peak_note} / "
+        f"{float(getattr(entry, 'seconds', 0.0) or 0.0):.2f}s"
+        f"（source={getattr(entry, 'source', '?')}，"
+        f"verdict={getattr(entry, 'verdict', '?')}）⇒ 采用（实测优先于水位线规则）")
+
+
 def pick_memory_policy(model_id: str, frames: int = 0,
                        free_vram_gb: Optional[float] = None,
                        total_vram_gb: Optional[float] = None,
                        params_b: Optional[float] = None,
                        tuned: Optional[Dict[str, Any]] = None,
                        registered_vram_gb: Optional[float] = None,
-                       supported_modes: Optional[tuple] = None) -> Dict[str, Any]:
+                       supported_modes: Optional[tuple] = None,
+                       width: int = 0, height: int = 0,
+                       use_calibration: bool = True) -> Dict[str, Any]:
     """为一次加载/生成**决定**显存策略。纯函数，无副作用，可独立测试。
 
     参数
@@ -207,6 +383,12 @@ def pick_memory_policy(model_id: str, frames: int = 0,
                         None ⇒ 兼容旧行为（只返回 _LEGACY_MODES 三档），
                         layer_cpu_offload 只给显式声明支持它的引擎
                         （见模块 docstring「能力声明」节）。
+    width / height      本次出图/出帧尺寸（像素）。**只给标定档案查表用**：
+                        档案按 ``res_class`` 分桶，0 ⇒ 走「取同模型最大峰值」的
+                        保守兜底（见 `calibration.lookup`）。
+    use_calibration     ★ 是否查自适应标定档案（2026-10-28 新增，默认 True）。
+                        False ⇒ 完全走规则决策 —— 给 bench / 四档对比 / 排障用，
+                        也保证「关掉增强也能跑」这条纪律可被测试验证。
 
     返回
     ----
@@ -243,6 +425,23 @@ def pick_memory_policy(model_id: str, frames: int = 0,
 
     chunk = int(tun.get("decode_chunk_size", 2))
     quant = str(tun.get("quant", "fp16"))
+
+    # ── 分支 -1：自适应标定档案（2026-10-28，**实测优先于一切规则**）──────
+    # 为什么排在最前：分支 0 的 prefer_mode 是**人工写死的**四档对比结论，
+    # 通用性靠注释保证；而标定档案是**这台机器**真跑出来、真记账的。
+    # 机器换了/驱动换了/别的进程占了显存，档案会被安全闸拦下并自动降级，
+    # 所以「实测优先」不会变成「实测盲目」。
+    # 关闭开关：use_calibration=False（bench 脚本、四档对比、故障排查用）。
+    if use_calibration:
+        cal_mode, cal_entry, cal_reason = _calibration_lookup(
+            model_id, width, height, fr, free_gb, total_gb, modes)
+        reasons.append(cal_reason)
+        if cal_mode:
+            # floor 用**实测峰值**，比 estimate_floor_gb 的拟合外推更硬
+            return _policy(cal_mode, chunk, quant,
+                           round(float(cal_entry.peak_gb), 2), vram, reasons)
+    else:
+        reasons.append("调用方显式关闭标定档案（use_calibration=False）⇒ 走规则决策")
 
     # ── 分支 0：调优表**实测指定** prefer_mode（刀2 新增，SDXL 四档实测产物）──
     # 依据必须写在调优表/注册表注释里（四档对比数字），不许凭空指定。

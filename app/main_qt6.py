@@ -360,6 +360,14 @@ class DependencyChecker:
         "pynvml": "pynvml",
         # 离线注音字典（2026-09-25）：缺失时 agent 注音能力诚实降级不报错
         "pypinyin": "pypinyin",
+        # 本地推理栈（2026-10-28 补）：这三个缺了图像/视频生成整条链路直接不可用，
+        # 但**不该阻塞启动**（无 GPU 的机器仍能剪辑/配音）。
+        # 此前这张表里没有它们 ⇒ 新机装完「依赖检查全绿」，出图却静默不可用。
+        "diffusers": "diffusers",
+        "accelerate": "accelerate",
+        "safetensors": "safetensors",
+        "diffsynth-engine": "diffsynth_engine",
+        "torchao": "torchao",
     }
     
     # 严格模式：置 1 时退化为「真导入」探测（排查环境问题时才用）
