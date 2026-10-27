@@ -21,7 +21,6 @@ import {
   expandCharacterMentions,
   ensureTauriBridgeCredentials,
   fetchPrefs,
-  generateImageViaHost,
   generateVideoViaHost,
   generateAudioViaHost,
   generateTextViaHost,
@@ -31,31 +30,20 @@ import {
   imagesToStillVideos,
   inpaintViaHost,
   installInjectScript,
-  listImageModels,
-  listVideoModels,
-  listAudioModels,
-  listMusicModels,
-  listChatModels,
   sendBlobToEditor,
   syncModelPool,
   waitForVideoPostprocess,
   type BridgePrefs,
   type CanvasAssetRef,
-  type ImageModelOption,
-  type VideoModelOption,
-  type AudioModelOption,
-  type MusicModelOption,
   type BatchStatusResult,
 } from "./bridge";
 // Wave 0 #13：入轨编排抽到独立文件（App.tsx 已1999/2000 顶格，只减不增）
 // + 批量快通道：后端 /host/batch-to-timeline 已完整实现但前端零调用。
 import { ingestNodes, nodeImageUrl, nodeLink } from "./editorIngress";
 import { pickDoneIndices } from "./hostBatchOps";
-import {
-  generateVideoUnified,
-  listLocalVideoModels,
-  mergeLocalVideoModels,
-} from "./localVideo";
+import { generateVideoUnified } from "./localVideo";
+import { generateImageUnified } from "./localImage";
+import { refreshGenerationModels, useGenerationModelStore } from "./generationModels";
 import { generateMusicForNode } from "./canvasMusic";
 import { primeAgentPolicy } from "./agentPolicy";
 import { runGraphWithConfirm } from "./canvasRun";
@@ -225,17 +213,23 @@ export default function App() {
   const [lastBatchSegments, setLastBatchSegments] = useState<
     BatchStatusResult["segments"] | undefined
   >(undefined);
-  const [imageModels, setImageModels] = useState<ImageModelOption[]>([]);
-  const [videoModels, setVideoModels] = useState<VideoModelOption[]>([]);
-  const [audioModels, setAudioModels] = useState<AudioModelOption[]>([]);
-  const [musicModels, setMusicModels] = useState<MusicModelOption[]>([]);
-  const [chatModelKeys, setChatModelKeys] = useState<string[]>([]);
-  const [selectedModelKey, setSelectedModelKey] = useState("");
-  const [compareModelKey, setCompareModelKey] = useState("");
-  const [selectedVideoModelKey, setSelectedVideoModelKey] = useState("");
-  const [compareVideoModelKey, setCompareVideoModelKey] = useState("");
-  const [selectedAudioModelKey, setSelectedAudioModelKey] = useState("");
-  const [selectedMusicModelKey, setSelectedMusicModelKey] = useState("");
+  const imageModels = useGenerationModelStore((s) => s.imageModels);
+  const videoModels = useGenerationModelStore((s) => s.videoModels);
+  const audioModels = useGenerationModelStore((s) => s.audioModels);
+  const musicModels = useGenerationModelStore((s) => s.musicModels);
+  const chatModelKeys = useGenerationModelStore((s) => s.chatModelKeys);
+  const selectedModelKey = useGenerationModelStore((s) => s.selectedModelKey);
+  const compareModelKey = useGenerationModelStore((s) => s.compareModelKey);
+  const selectedVideoModelKey = useGenerationModelStore((s) => s.selectedVideoModelKey);
+  const compareVideoModelKey = useGenerationModelStore((s) => s.compareVideoModelKey);
+  const selectedAudioModelKey = useGenerationModelStore((s) => s.selectedAudioModelKey);
+  const selectedMusicModelKey = useGenerationModelStore((s) => s.selectedMusicModelKey);
+  const setSelectedModelKey = useGenerationModelStore((s) => s.setSelectedModelKey);
+  const setCompareModelKey = useGenerationModelStore((s) => s.setCompareModelKey);
+  const setSelectedVideoModelKey = useGenerationModelStore((s) => s.setSelectedVideoModelKey);
+  const setCompareVideoModelKey = useGenerationModelStore((s) => s.setCompareVideoModelKey);
+  const setSelectedAudioModelKey = useGenerationModelStore((s) => s.setSelectedAudioModelKey);
+  const setSelectedMusicModelKey = useGenerationModelStore((s) => s.setSelectedMusicModelKey);
   const [generating, setGenerating] = useState(false);
   const [breaking, setBreaking] = useState(false);
   const [templates, setTemplates] = useState(() => listTemplates());
@@ -245,84 +239,16 @@ export default function App() {
   const genAbortRef = useRef<AbortController | null>(null);
   const batchGenAbortRef = useRef<AbortController | null>(null);
 
-  const pickDefaultKey = (
-    models: ImageModelOption[],
-    def: string,
-    current: string,
-    setter: (k: string) => void,
-  ) => {
-    if (current) return;
-    if (def && def.includes("::")) {
-      const [cid, ...rest] = def.split("::");
-      const model = rest.join("::");
-      const hit = models.find((m) => m.channel_id === cid && m.model === model);
-      if (hit) {
-        setter(`${hit.channel_id}::${hit.model}`);
-        return;
-      }
-    }
-    if (models[0]) setter(`${models[0].channel_id}::${models[0].model}`);
-  };
-
-  const pickCompareKey = (
-    models: ImageModelOption[],
-    primaryKey: string,
-    current: string,
-    setter: (k: string) => void,
-  ) => {
-    if (current) return;
-    const alt = models.find((m) => `${m.channel_id}::${m.model}` !== primaryKey);
-    if (alt) setter(`${alt.channel_id}::${alt.model}`);
-    else if (models[1]) setter(`${models[1].channel_id}::${models[1].model}`);
-  };
-
   const refreshModels = useCallback(async () => {
-    const [img, vid, aud, mus, chat, localVid] = await Promise.all([
-      listImageModels(),
-      listVideoModels(),
-      listAudioModels(),
-      listMusicModels(),
-      listChatModels(),
-      // 本机（diffusers）视频模型 —— 与云端并列展示，通道 id 固定为 "local"。
-      // 只读探测：不下载权重、不加载模型（慢的是生成，不是列清单）。
-      listLocalVideoModels(),
-    ]);
-    setImageModels(img.models);
-    // 云端 + **本机**模型合并展示（标注体积/已下未下/显存内存需求，细节见 localVideo.ts）
-    setVideoModels(mergeLocalVideoModels(vid.models, localVid));
-    setAudioModels(aud.models);
-    setMusicModels(mus.models);
-    const chatKeys: string[] = [];
-    for (const p of chat.providers || []) {
-      if (!p.configured) continue;
-      for (const m of p.models || []) {
-        chatKeys.push(`${p.id}::${m}`);
-      }
-    }
-    setChatModelKeys(chatKeys);
-    pickDefaultKey(img.models, img.default, selectedModelKey, setSelectedModelKey);
-    pickDefaultKey(vid.models, vid.default, selectedVideoModelKey, setSelectedVideoModelKey);
-    pickDefaultKey(aud.models, aud.default, selectedAudioModelKey, setSelectedAudioModelKey);
-    pickDefaultKey(mus.models, mus.default, selectedMusicModelKey, setSelectedMusicModelKey);
-    pickCompareKey(img.models, selectedModelKey, compareModelKey, setCompareModelKey);
-    pickCompareKey(vid.models, selectedVideoModelKey, compareVideoModelKey, setCompareVideoModelKey);
-    const warns = [...(img.warnings || []), ...(vid.warnings || []), ...(aud.warnings || []), ...(mus.warnings || [])];
-    if (!img.models.length && warns[0]) {
-      setStatus(warns[0]);
-    } else if (img.active_provider_label) {
+    const summary = await refreshGenerationModels();
+    if (!summary.imageCount && summary.warnings[0]) {
+      setStatus(summary.warnings[0]);
+    } else if (summary.activeProviderLabel) {
       setStatus(
-        `模型池：生图 ${img.models.length} · 生视频 ${vid.models.length} · TTS ${aud.models.length} · 音乐 ${mus.models.length} · 激活 ${img.active_provider_label}`,
+        `模型池：生图 ${summary.imageCount} · 生视频 ${summary.videoCount} · 激活 ${summary.activeProviderLabel}`,
       );
     }
-  }, [
-    selectedModelKey,
-    selectedVideoModelKey,
-    selectedAudioModelKey,
-    selectedMusicModelKey,
-    compareModelKey,
-    compareVideoModelKey,
-    setStatus,
-  ]);
+  }, [setStatus]);
 
   useEffect(() => {
     // Tauri 桌面模式：先从 Rust 端拿到 Python 后端凭据（token / URL）写入 window，
@@ -482,10 +408,9 @@ export default function App() {
         const parsed = opts?.model?.includes("::")
           ? resolveModel(opts.model)
           : resolveModel(selectedModelKey);
-        const res = await generateImageViaHost({
+        const res = await generateImageUnified({
+          parsed,
           prompt,
-          model: parsed.model,
-          channel_id: parsed.channel_id,
           n: opts?.count || 1,
           size: opts?.size,
           reference_image: opts?.references?.[0] || "",
@@ -625,17 +550,15 @@ export default function App() {
         });
         return { ok: true, message: "已写入提示词节点（文本模式不走云端）" };
       }
-      const { channel_id, model } = resolveModel(selectedModelKey);
       const { prompt: fullPrompt, assetRef } = buildPromptFor(node, {
         ...data,
         kind: "image",
         title: data.title,
         prompt: data.prompt,
       } as NodeData);
-      const res = await generateImageViaHost({
+      const res = await generateImageUnified({
+        parsed: resolveModel(selectedModelKey),
         prompt: fullPrompt || data.prompt || "竖屏漫剧",
-        model,
-        channel_id,
         n: count,
         reference_image: assetRef || "",
         awaitOpts,
@@ -766,11 +689,9 @@ export default function App() {
       return { ok: false, message: res.message || "生视频失败（未写入假结果）" };
     }
 
-    const { channel_id, model } = resolveModel(selectedModelKey);
-    const res = await generateImageViaHost({
+    const res = await generateImageUnified({
+      parsed: resolveModel(selectedModelKey),
       prompt: fullPrompt || "竖屏漫剧分镜",
-      model,
-      channel_id,
       // size 不传：交后端按 quality + aspect 推导（默认竖屏短剧 9:16）
       aspect: (data as any).aspect || "",
       reference_image,
@@ -822,11 +743,9 @@ export default function App() {
       reference_image = data.firstFrameUrl || "";
     }
     if (!reference_image && assetRef) reference_image = assetRef;
-    const { channel_id, model } = resolveModel(modelKey);
-    const res = await generateImageViaHost({
+    const res = await generateImageUnified({
+      parsed: resolveModel(modelKey),
       prompt: `${fullPrompt}${promptSuffix ? `；${promptSuffix}` : ""}` || "竖屏漫剧分镜",
-      model,
-      channel_id,
       // size 不传：交后端按 quality + aspect 推导（默认竖屏短剧 9:16）
       aspect: (data as any).aspect || "",
       reference_image,

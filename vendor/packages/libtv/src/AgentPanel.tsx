@@ -23,11 +23,14 @@ import {
   fetchTimelineSnapshot,
   type AgentEventEnvelope,
   type ChatModelProvider,
+  type ImageModelOption,
   type ProjectTool,
 } from "./bridge";
 import { useCanvasStore, type NodeData } from "./store";
 import { nextFreeSlot } from "./canvasSlot";
 import ConfirmDialog from "./ConfirmDialog";
+import ExecutionBiasChip from "./ExecutionBiasChip";
+import { refreshGenerationModels, useGenerationModelStore } from "./generationModels";
 import "./agentPanel.css";
 import {
   decideCanvasTool,
@@ -80,6 +83,50 @@ const QUICK = [
   { id: "tools", label: "工具", text: "/tools" },
 ] as const;
 
+/** 生图/生视频模型行：本地与云端共用同一份 generationModels store。 */
+function GenerationModelRows({
+  title,
+  models,
+  selectedKey,
+  onSelect,
+  empty,
+}: {
+  title: string;
+  models: ImageModelOption[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+  empty: string;
+}) {
+  return (
+    <>
+      <div className="section-title" style={{ marginTop: 10 }}>
+        {title}（{models.length}）
+      </div>
+      {models.length === 0 ? (
+        <p className="muted" style={{ fontSize: 11 }}>{empty}</p>
+      ) : (
+        models.map((m) => {
+          const key = `${m.channel_id}::${m.model}`;
+          return (
+            <div className="sg-tool-row" key={key}>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ fontSize: 11 }}>{m.label}</strong>
+              </div>
+              <button
+                type="button"
+                className={`btn${selectedKey === key ? " primary" : ""}`}
+                onClick={() => onSelect(key)}
+              >
+                {selectedKey === key ? "已选" : "选用"}
+              </button>
+            </div>
+          );
+        })
+      )}
+    </>
+  );
+}
+
 function sessionId(): string {
   const k = "shiguang-canvas:agent-session-id";
   try {
@@ -120,6 +167,17 @@ export default function AgentPanel({
   const [modelKey, setModelKey] = useState<string>(() => {
     try { return localStorage.getItem("shiguang-canvas:agent-model") || ""; } catch { return ""; }
   });
+  // 生图/生视频模型与算力偏好共用 App 的 generationModels store（面板不再只列对话模型）
+  const genImageModels = useGenerationModelStore((s) => s.imageModels);
+  const genVideoModels = useGenerationModelStore((s) => s.videoModels);
+  const genSelectedImageKey = useGenerationModelStore((s) => s.selectedModelKey);
+  const genSelectedVideoKey = useGenerationModelStore((s) => s.selectedVideoModelKey);
+  const setGenImageKey = useGenerationModelStore((s) => s.setSelectedModelKey);
+  const setGenVideoKey = useGenerationModelStore((s) => s.setSelectedVideoModelKey);
+  const localImageModels = genImageModels.filter((m) => m.channel_id === "local");
+  const cloudImageModels = genImageModels.filter((m) => m.channel_id !== "local");
+  const localVideoModels = genVideoModels.filter((m) => m.channel_id === "local");
+  const cloudVideoModels = genVideoModels.filter((m) => m.channel_id !== "local");
   const [tools, setTools] = useState<ProjectTool[]>([]);
   const [toolFilter, setToolFilter] = useState("");
   const [attaches, setAttaches] = useState<Attach[]>([]);
@@ -746,7 +804,7 @@ export default function AgentPanel({
   };
 
   const refreshModels = async () => {
-    const res = await listChatModels();
+    const [res] = await Promise.all([listChatModels(), refreshGenerationModels()]);
     const list = res.providers || [];
     setProviders(list);
     const stored = modelKey;
@@ -1419,9 +1477,9 @@ export default function AgentPanel({
       {tab === "models" ? (
         <div className="sg-agent-scroll">
           <p className="muted" style={{ fontSize: 11 }}>
-            与「模型管理」同源。生图/生视频用顶栏 AIGC；此处管对话 Agent。
+            本地与云端模型已合并在这里：先选生成模型，再用下方算力滑块决定本地／云端优先级。
           </p>
-          <div className="btn-row" style={{ marginBottom: 8 }}>
+          <div className="btn-row" style={{ marginBottom: 4 }}>
             <button
               type="button"
               className="btn teal"
@@ -1434,11 +1492,60 @@ export default function AgentPanel({
                 setStatus(msg);
               }}
             >
-              同步 AIGC
+              同步模型池
             </button>
             <button type="button" className="btn" onClick={() => void refreshModels()}>
               刷新
             </button>
+          </div>
+
+          <GenerationModelRows
+            title="本地生图"
+            models={localImageModels}
+            selectedKey={genSelectedImageKey}
+            onSelect={setGenImageKey}
+            empty="未发现本地生图模型；请看启动日志中的 torch / 模型目录提示"
+          />
+          <GenerationModelRows
+            title="本地生视频"
+            models={localVideoModels}
+            selectedKey={genSelectedVideoKey}
+            onSelect={setGenVideoKey}
+            empty="未发现本地视频模型"
+          />
+
+          <div className="section-title" style={{ marginTop: 12 }}>
+            本地 / 云端算力
+          </div>
+          <ExecutionBiasChip embedded />
+
+          <details className="sg-tool-group">
+            <summary>
+              <span className="sg-tool-group-title">云端 / 自动生成模型</span>
+              <span className="sg-tool-group-count">
+                {cloudImageModels.length} 图 · {cloudVideoModels.length} 视频
+              </span>
+            </summary>
+            <div className="sg-tool-group-body">
+              <GenerationModelRows
+                title="云端生图"
+                models={cloudImageModels}
+                selectedKey={genSelectedImageKey}
+                onSelect={setGenImageKey}
+                empty="云端图像渠道未配置"
+              />
+              <GenerationModelRows
+                title="云端 / 自动生视频"
+                models={cloudVideoModels}
+                selectedKey={genSelectedVideoKey}
+                onSelect={setGenVideoKey}
+                empty="云端视频渠道未配置"
+              />
+            </div>
+          </details>
+
+          <div className="section-title" style={{ marginTop: 12 }}>
+            对话 Agent 模型
           </div>
           {providers.map((p) => (
             <div key={p.id} className="sg-tool-row">

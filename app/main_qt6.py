@@ -136,6 +136,15 @@ if not _probe_webengine():
     print("[startup] QtWebEngine 不可用（版本错配/渲染进程崩溃）⇒ AI 画布将用系统浏览器打开")  # stability-gate: allow-print（启动诊断：预检失败必须让用户看见）
     print("[startup] 若确信 WebEngine 正常，可设 SHIGUANG_FORCE_WEBENGINE=1 跳过预检")  # stability-gate: allow-print（自救开关必须让用户看见）
 
+# 2026-10-25 深夜根因修复：QtWebEngineWidgets 必须在 QApplication 之前导入，
+# 否则 App 里懒加载（QApplication 之后）会让首次导航静默失败：
+#   loadFinished ok=False、page_url 为空、HTTP 200 明明可达（实测 data/canvas_load.log）。
+# 预检通过（子进程已证可用）才早导入；失败走浏览器兜底，不冒崩溃风险。
+if os.environ.get("SHIGUANG_NO_WEBENGINE") != "1":
+    try:
+        from PyQt6 import QtWebEngineWidgets  # noqa: F401  必须早于 QApplication
+    except Exception:  # stability-gate: allow-swallow（导入失败 ⇒ 走浏览器兜底）
+        pass
 import sys
 import json
 import time
@@ -1119,6 +1128,22 @@ class Application:
             mw.activateWindow()  # type: ignore[reportAttributeAccessIssue]
             _tick("window shown")
 
+            if os.environ.get("SHIGUANG_AUTO_CANVAS") == "1":
+                # 诊断开关（2026-10-25）：启动后自动打开 AI 画布，便于抓画布加载现场
+                try:
+                    from PyQt6.QtCore import QTimer
+
+                    _m = getattr(mw, "_modules", {}).get("characters")
+                    if _m is not None:
+                        # 懒加载模块的 instance 此时为空，_activate_module 会静默无效；
+                        # switch_to_module 才会走 _on_module_selected → 真正加载。
+                        QTimer.singleShot(
+                            int(os.environ.get("SHIGUANG_AUTO_CANVAS_DELAY", "2500")),
+                            lambda: mw.switch_to_module("characters"),
+                        )
+                        print("[diag] SHIGUANG_AUTO_CANVAS ⇒ 自动打开 AI 画布")  # stability-gate: allow-print（诊断开关）
+                except Exception:  # stability-gate: allow-swallow（诊断开关不得影响启动）
+                    pass
             # 启动后环境自检（延迟执行，避免阻塞启动；仅在缺失关键依赖时提示）
             self._schedule_startup_check(mw)
 

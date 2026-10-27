@@ -1,0 +1,15 @@
+/* 画布浮层布局补丁（CanvasShell/styles.css 属冻结区，改动集中在这里）
+ *
+ * 用户实测：右下角 ReactFlow MiniMap 与底部 dock 的缩放条叠在一起，
+ * 互相挡住信息。把 MiniMap 抬到底部 dock 上方，dock 独占最底一行。
+ */
+.react-flow__minimap {
+  bottom: 64px !important;
+  right: 12px !important;
+}
+
+@media (max-height: 620px) {
+  .react-flow__minimap {
+    bottom: 58px !important;
+  }
+}

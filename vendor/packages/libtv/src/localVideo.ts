@@ -39,6 +39,9 @@ export const LOCAL_CHANNEL_ID = "local";
 /** 「自动」通道：不手选模型，交给执行层（/host/execution-plan）裁定本地/云端顺序。 */
 export const AUTO_CHANNEL_ID = "auto";
 
+/** 纯文生视频的本地模型（没有首帧也能跑；其余本机模型按图生视频处理）。 */
+const TEXT_ONLY_LOCAL_VIDEO = new Set(["wan21-t2v-1.3b"]);
+
 export type VideoChainHop = "local" | "cloud";
 
 /**
@@ -151,11 +154,14 @@ export function mergeLocalVideoModels(
   const opts: VideoModelOption[] = (local.models || []).map((m) => {
     const has = (local.downloaded || []).includes(m.id);
     const size = has ? "已下载" : `需下载 ${m.download_gb}GB`;
+    const modes = (m.modes || [])
+      .map((mode) => (mode === "t2v" ? "文生视频" : mode === "i2v" ? "图生视频" : mode))
+      .join("/");
     return {
       channel_id: LOCAL_CHANNEL_ID,
       channel_name: "本地",
       model: m.id,
-      label: `本地 · ${m.label} · ${m.params} · ${size} · 需 ${m.vram_gb}GB 显存 / ${m.ram_gb}GB 内存`,
+      label: `本地 · ${m.label} · ${modes ? `${modes} · ` : ""}${m.params} · ${size} · 需 ${m.vram_gb}GB 显存 / ${m.ram_gb}GB 内存`,
     };
   });
   const auto: VideoModelOption = {
@@ -326,10 +332,10 @@ export async function generateVideoUnified(opts: {
 
   // ── 本机模型（diffusers）──
   if (channel_id === LOCAL_CHANNEL_ID) {
-    if (!opts.referenceImage) {
+    if (!opts.referenceImage && !TEXT_ONLY_LOCAL_VIDEO.has(model)) {
       return {
         ok: false,
-        message: "本地视频模型是**图生视频**，请先给该节点配一张首帧图（或挂一张参考图）",
+        message: "该本地视频模型需要首帧图，请先给节点配一张首帧图（Wan 2.1 T2V 可直接文生视频）",
         video_url: "",
         video_path: "",
       };

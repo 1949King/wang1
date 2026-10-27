@@ -10,7 +10,7 @@
  * 所以把契约钉在这里性价比最高。
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { generateVideoLocalViaHost, listLocalVideoModels } from "./localVideo";
+import { generateVideoLocalViaHost, generateVideoUnified, listLocalVideoModels } from "./localVideo";
 
 function jsonRes(obj: unknown) {
   return { ok: true, status: 200, json: async () => obj } as unknown as Response;
@@ -69,6 +69,41 @@ describe("listLocalVideoModels：本地模型注册表（只读）", () => {
     expect(r.models).toEqual([]);
     expect(r.available).toBe(false);
     expect(r.unavailable_reason).toContain("无法连接");
+  });
+});
+
+describe("generateVideoUnified：本地视频能力边界", () => {
+  it("Wan2.1 T2V 无首帧也能走本地文生视频", async () => {
+    let body: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: any) => {
+      body = JSON.parse(init.body);
+      return jsonRes({ ok: true, video_url: "/inbox_file/wan21.mp4" });
+    }));
+    const res = await generateVideoUnified({
+      parsed: { channel_id: "local", model: "wan21-t2v-1.3b" },
+      prompt: "夜色中的霓虹街道，镜头缓慢推进",
+      referenceImage: "",
+      duration: 2,
+      quality: "standard",
+    });
+    expect(body.model_id).toBe("wan21-t2v-1.3b");
+    expect(body.image).toBe("");
+    expect(res.ok).toBe(true);
+  });
+
+  it("SVD 缺首帧时诚实失败，不发无效请求", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await generateVideoUnified({
+      parsed: { channel_id: "local", model: "svd-xt-i2v" },
+      prompt: "test",
+      referenceImage: "",
+      duration: 2,
+      quality: "standard",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("首帧");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

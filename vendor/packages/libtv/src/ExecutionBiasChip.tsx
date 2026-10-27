@@ -45,8 +45,10 @@ type EnginesSummary = {
   by_health?: Record<string, number>;
 };
 
-export default function ExecutionBiasChip() {
-  const [open, setOpen] = useState(false);
+export default function ExecutionBiasChip({ embedded = false }: { embedded?: boolean } = {}) {
+  // 内嵌在 Agent 里时默认展开，用户一眼能看到本地/云端滑块；
+  // 独立胶囊仍保持收起，避免遮挡画布。
+  const [open, setOpen] = useState(embedded);
   const [bias, setBias] = useState(50);
   const [status, setStatus] = useState<ExecStatus | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -139,7 +141,7 @@ export default function ExecutionBiasChip() {
   }, []);
 
   return (
-    <div className="exec-chip">
+    <div className={embedded ? "exec-chip exec-chip--embedded" : "exec-chip"}>
       <button
         type="button"
         className="exec-chip__btn"
@@ -218,7 +220,10 @@ export default function ExecutionBiasChip() {
 
 const CSS = [
   ".exec-chip { position: fixed; left: 16px; bottom: 16px; z-index: 60; font-size: 12px; color: #d6dde8; }",
+  ".exec-chip--embedded { position: static; left: auto; bottom: auto; width: 100%; }",
   ".exec-chip__btn { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid #2a3342; background: rgba(16,22,32,.92); color: inherit; cursor: pointer; }",
+  ".exec-chip--embedded .exec-chip__btn { width: 100%; justify-content: space-between; }",
+  ".exec-chip--embedded .exec-chip__panel { position: static; left: auto; bottom: auto; width: auto; margin-top: 8px; box-sizing: border-box; }",
   ".exec-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: #6c9fff; }",
   ".exec-chip__dot[data-mode='本地优先'] { background: #4ade80; }",
   ".exec-chip__dot[data-mode='云端优先'] { background: #fbbf24; }",

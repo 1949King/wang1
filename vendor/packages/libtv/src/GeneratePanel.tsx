@@ -8,47 +8,18 @@
  * 对比 + 对比视频）+ 6 个生成按钮（生成选中 / 双模型对比 / 多角度预览 / 批量 /
  * 运行到此处 / 中断）+ 3 个入轨按钮（入轨 / 全部入轨 / 同步模型池）。
  *
- * 自包含原则（V4.41.20 纪律）：
- *  - 模型列表自己 fetch（与 CanvasShell 拉的是同一后端端点，无竞态——同一 key 共享）；
- *  - selected key 读 localStorage（与 CanvasShell 共用 key `shiguang-canvas:model:*`，
- *    改完两边都更新，行为一致）；
- *  - 9 个生成/入轨 callback 通过 generateActions store 注入（App.tsx 注入实现，
- *    避免 App→CanvasShell→Overlays→Panel 4 层 props 污染）。
+ * 模型列表与选择状态统一放在 generationModels store（App.tsx 与浮窗共用）：
+ * 面板改了选中模型，真实生成立即使用同一 key；模型池同步也会同时刷新两边。
+ * 9 个生成/入轨 callback 仍通过 generateActions store 注入，避免多层 props。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { useCanvasStore, type NodeData } from "./store";
-import {
-  listImageModels,
-  listVideoModels,
-  listAudioModels,
-  type ImageModelOption,
-} from "./bridge";
 import { isGenerateActionsReady, useGenerateActionsStore } from "./generateActions";
+import { MODEL_STORAGE_KEYS, useGenerationModelStore } from "./generationModels";
 import { useWindowPanel } from "./hooks/useWindowPanel";
 import ModelSelector from "./components/canvas/ModelSelector";
 import "./generatePanel.css";
-
-const KEY_IMAGE = "shiguang-canvas:model:image";
-const KEY_VIDEO = "shiguang-canvas:model:video";
-const KEY_COMPARE = "shiguang-canvas:model:compare";
-const KEY_COMPARE_VIDEO = "shiguang-canvas:model:compare-video";
-
-const readLS = (k: string) => {
-  try {
-    return localStorage.getItem(k) || "";
-  } catch {
-    return "";
-  }
-};
-const writeLS = (k: string, v: string) => {
-  try {
-    if (v) localStorage.setItem(k, v);
-    else localStorage.removeItem(k);
-  } catch {
-    /* ignore */
-  }
-};
 
 export default function GeneratePanel({ onClose }: { onClose: () => void }) {
   const win = useWindowPanel("generate");
@@ -62,34 +33,18 @@ export default function GeneratePanel({ onClose }: { onClose: () => void }) {
   const actions = useGenerateActionsStore((s) => s.actions);
   const ready = isGenerateActionsReady(actions);
 
-  /* 模型列表（自拉，与 CanvasShell 共享同一后端） */
-  const [imageModels, setImageModels] = useState<ImageModelOption[]>([]);
-  const [videoModels, setVideoModels] = useState<ImageModelOption[]>([]);
-  const [audioModels, setAudioModels] = useState<ImageModelOption[]>([]);
-  useEffect(() => {
-    let alive = true;
-    Promise.all([listImageModels(), listVideoModels(), listAudioModels()])
-      .then(([img, vid, aud]) => {
-        if (!alive) return;
-        setImageModels(img.models || []);
-        setVideoModels(vid.models || []);
-        setAudioModels(aud.models || []);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /* 4 个 key（自管 + localStorage 共享 key） */
-  const [selectedModelKey, setSelectedModelKey] = useState(() => readLS(KEY_IMAGE));
-  const [selectedVideoModelKey, setSelectedVideoModelKey] = useState(() => readLS(KEY_VIDEO));
-  const [compareModelKey, setCompareModelKey] = useState(() => readLS(KEY_COMPARE));
-  const [compareVideoModelKey, setCompareVideoModelKey] = useState(() => readLS(KEY_COMPARE_VIDEO));
-  useEffect(() => writeLS(KEY_IMAGE, selectedModelKey), [selectedModelKey]);
-  useEffect(() => writeLS(KEY_VIDEO, selectedVideoModelKey), [selectedVideoModelKey]);
-  useEffect(() => writeLS(KEY_COMPARE, compareModelKey), [compareModelKey]);
-  useEffect(() => writeLS(KEY_COMPARE_VIDEO, compareVideoModelKey), [compareVideoModelKey]);
+  /* 模型列表与选择状态：与 App 真实生成共用同一个 store */
+  const imageModels = useGenerationModelStore((s) => s.imageModels);
+  const videoModels = useGenerationModelStore((s) => s.videoModels);
+  const audioModels = useGenerationModelStore((s) => s.audioModels);
+  const selectedModelKey = useGenerationModelStore((s) => s.selectedModelKey);
+  const selectedVideoModelKey = useGenerationModelStore((s) => s.selectedVideoModelKey);
+  const compareModelKey = useGenerationModelStore((s) => s.compareModelKey);
+  const compareVideoModelKey = useGenerationModelStore((s) => s.compareVideoModelKey);
+  const setSelectedModelKey = useGenerationModelStore((s) => s.setSelectedModelKey);
+  const setSelectedVideoModelKey = useGenerationModelStore((s) => s.setSelectedVideoModelKey);
+  const setCompareModelKey = useGenerationModelStore((s) => s.setCompareModelKey);
+  const setCompareVideoModelKey = useGenerationModelStore((s) => s.setCompareVideoModelKey);
 
   const primaryBtnLabel = useMemo(() => {
     if (generating) return "生成中…";
@@ -143,7 +98,7 @@ export default function GeneratePanel({ onClose }: { onClose: () => void }) {
             onChange={setSelectedModelKey}
             placeholder={imageModels.length === 0 ? "请先同步模型池" : "选择生图模型"}
             disabled={imageModels.length === 0}
-            persistKey={KEY_IMAGE}
+            persistKey={MODEL_STORAGE_KEYS.image}
           />
         </div>
         <div className="field">
@@ -154,7 +109,7 @@ export default function GeneratePanel({ onClose }: { onClose: () => void }) {
             onChange={setSelectedVideoModelKey}
             placeholder={videoModels.length === 0 ? "无视频模型" : "选择视频模型"}
             disabled={videoModels.length === 0}
-            persistKey={KEY_VIDEO}
+            persistKey={MODEL_STORAGE_KEYS.video}
           />
         </div>
         <div className="field">

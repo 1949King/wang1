@@ -2,10 +2,10 @@
  * generateActionsInjector.ts — V4.41.20 把 9 个生成/入轨回调注入 store 的 hook。
  *
  * 设计：
- *  - App.tsx 里这 9 个 onGenerate/onBatchGenerate/... 都是 const 声明（每次 render
- *    同一引用），所以挂载时注入一次即可，后续不必重注入；
+ *  - 9 个回调随 App render 重建（模型 key 等状态在闭包里），因此依赖变化必须
+ *    重新注入；只挂载时注入一次会一直调用首次 render 的旧闭包。
  *  - 9 个参数直接传（不用对象），让 App.tsx 那侧 1 行调用，省行数；
- *  - store 端用 setActions 写一次，后续无需再触发——订阅者读 store 拿到稳定引用。
+ *  - store 更新只通知浮窗订阅者，不会反向触发 App，因此不会形成渲染环。
  */
 import { useEffect } from "react";
 import { useGenerateActionsStore } from "./generateActions";
@@ -33,7 +33,16 @@ export function useInjectGenerateActions(
       onSendAllToEditor,
       onSyncModels,
     });
-    // 9 个 callback 在 App.tsx 都是 const，同一引用；挂载时一次性注入
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // 回调闭包包含选中模型/节点等状态，必须随引用变化重新注入
+  }, [
+    onGenerate,
+    onCompareGenerate,
+    onMultiAngleGenerate,
+    onBatchGenerate,
+    runToHere,
+    onAbortBatch,
+    onSendToEditor,
+    onSendAllToEditor,
+    onSyncModels,
+  ]);
 }
