@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -99,6 +100,38 @@ def vendor_web_dir() -> Path:
 
 def vendor_dist_dir() -> Path:
     return vendor_web_dir() / "dist"
+
+
+_ENTRY_SRC_RE = re.compile(r"""<script[^>]+\bsrc\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def dist_integrity_problem(dist: Optional[Path] = None) -> Optional[str]:
+    """校验 dist 产物完整性，返回问题描述（``None`` = 完整）。
+
+    🔴 只检查 ``index.html`` 存在是不够的（2026-10-25 实测翻车）：
+    运行期 dist 被重建/搬走后，``index.html`` 可能是旧的、``assets/*.js`` 已换名，
+    此时静态服务照样「启动成功」，但页面一加载所有 chunk 全 404 ⇒ 白屏、
+    ``Failed to fetch dynamically imported module``、App 崩溃后画布进程退出。
+    这里额外校验 index.html 里引用的本地入口脚本真实存在。
+    """
+    d = Path(dist) if dist is not None else vendor_dist_dir()
+    index = d / "index.html"
+    if not index.is_file():
+        return f"{index} 不存在"
+    try:
+        html = index.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return f"{index} 无法读取: {e}"
+    for src in _ENTRY_SRC_RE.findall(html):
+        if src.startswith(("http://", "https://", "//", "data:")):
+            continue  # 外链（如 inject.js 由 bridge 服务提供）不校验
+        rel = src[2:] if src.startswith("./") else src.lstrip("/")
+        rel = rel.split("?", 1)[0].split("#", 1)[0]
+        if not rel:
+            continue
+        if not (d / rel).is_file():
+            return f"index.html 引用的入口脚本缺失: {rel}"
+    return None
 
 
 def vendor_tauri_dir() -> Path:
@@ -183,7 +216,25 @@ def http_probe(url: str, timeout: float = 1.5) -> bool:
 
 
 class _SPAHandler(SimpleHTTPRequestHandler):
-    """SPA：缺文件时回退 index.html；prompts/、models/ 可回退 public/ 目录（dist 未重建时仍能读离线资源）。"""
+    """SPA：页面路由回退 index.html；静态资源缺失必须真 404。
+
+    🔴 定案 2026-10-25：**带扩展名的资源路径不做 SPA 兜底**。
+    之前所有缺失路径一律改写成 ``/index.html``，于是前端拿到 **200 + HTML**：
+    ``import('./ImageStudio-xxx.js')`` 报 ``Unexpected token '<'``、CSS 被当样式表
+    解析失败、GLB 解析成乱码——真实原因（dist 产物缺失/不一致）被完全掩盖，
+    表现为「插件坏了」「模型加载失败」等一堆假故障。
+    现在资源缺失返回 404 + text/plain 说明，产物问题一眼可见。
+    """
+
+    # 代表「真实文件」的扩展名：缺失 = 产物缺失，只能 404，不能兜底成 HTML
+    _ASSET_SUFFIXES = (
+        ".js", ".mjs", ".cjs", ".css", ".json", ".map", ".wasm",
+        ".glb", ".gltf", ".bin", ".hdr", ".exr", ".ktx2", ".drc",
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico", ".bmp",
+        ".woff", ".woff2", ".ttf", ".otf", ".eot",
+        ".mp4", ".webm", ".mp3", ".wav", ".ogg",
+        ".txt", ".xml", ".csv",
+    )
 
     def __init__(self, *args, directory: str = "", public_root: str = "", **kwargs):
         self.public_root = public_root
@@ -219,11 +270,50 @@ class _SPAHandler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=3600")
         super().end_headers()
 
+    def _is_asset_path(self, path: str) -> bool:
+        return path.lower().endswith(self._ASSET_SUFFIXES)
+
+    def _send_plain(self, code: int, text: str) -> None:
+        body = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            try:
+                self.wfile.write(body)
+            except OSError:
+                logger.debug("canvas-static write failed", exc_info=True)
+
     def do_GET(self):  # noqa: N802
         # 去掉 query
         path = self.path.split("?", 1)[0]
         local = self.translate_path(path)
         if path != "/" and not os.path.isfile(local) and not os.path.isdir(local):
+            if self._is_asset_path(path):
+                # 资源缺失：真 404，禁止返回 HTML（否则前端报 Unexpected token '<'）
+                # favicon 是浏览器自动请求的、不属于构建产物，降为 debug 免刷告警
+                if path.endswith("/favicon.ico"):
+                    logger.debug("canvas favicon missing: %s", path)
+                else:
+                    logger.warning("canvas asset missing: %s (dist=%s)", path, self.directory)
+                self._send_plain(
+                    404,
+                    f"canvas asset missing: {path}\n"
+                    "画布静态产物与当前页面不一致（dist 可能被移动、重建或清理过）。\n"
+                    "修复：cd vendor/shiguang-canvas && npm run build，然后刷新画布。\n",
+                )
+                return
+            if not os.path.isfile(os.path.join(self.directory, "index.html")):
+                # 连 index.html 都没有 = dist 被整个移走
+                logger.error("canvas dist missing: %s", self.directory)
+                self._send_plain(
+                    503,
+                    "画布构建产物缺失（dist/index.html 不存在）。\n"
+                    "修复：cd vendor/shiguang-canvas && npm run build，然后重新点「启动画布」。\n",
+                )
+                return
             self.path = "/index.html"
         return super().do_GET()
 
@@ -258,6 +348,7 @@ class CanvasRuntime:
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._http_thread: Optional[threading.Thread] = None
         self._mode: str = ""  # static | vite | external | tauri-binary | tauri-dev
+        self._dist_problem: Optional[str] = None  # dist 完整性问题的最近一次原因
         self._active_port: int = port
         # bridge token / URL：engine=tauri 时通过环境变量注入子进程；
         # engine=shiguang 时不使用，保持原 inject.js 注入路径
@@ -288,6 +379,15 @@ class CanvasRuntime:
                 self._mode = "external"
                 return True
             return False
+        # 自己起的 static 服务：dist 可能在运行期被重建/搬走（产物换代）。
+        # 只探 HTTP 会误判「就绪」——index.html 还在但 assets 已换名，页面必白屏，
+        # 且 App 里动态 import 失败会把整个画布炸掉（2026-10-25 实证）。
+        if self._httpd is not None:
+            problem = dist_integrity_problem()
+            if problem is not None:
+                self._dist_problem = problem
+                logger.warning("canvas static 服务仍在，但 dist 已损坏: %s", problem)
+                return False
         if self._port_serves_canvas(self._active_port):
             return True
         # 外部可能已在 3000 起了 dev
@@ -379,10 +479,35 @@ class CanvasRuntime:
         except Exception as e:
             return False, f"启动 Tauri 开发模式异常: {e}"
 
+    def _stop_static(self) -> None:
+        """只停静态服务（不动 vite 子进程）。
+
+        ``shutdown()`` 之后必须 ``server_close()`` 才真正释放监听端口，
+        否则 DIST 换代后重建会撞「端口被占用」。
+        """
+        if self._httpd is None:
+            return
+        try:
+            self._httpd.shutdown()
+        except Exception:
+            logger.debug("static shutdown failed", exc_info=True)
+        try:
+            self._httpd.server_close()
+        except Exception:
+            logger.debug("static server_close failed", exc_info=True)
+        self._httpd = None
+        self._http_thread = None
+
     def _start_static_server(self) -> tuple[bool, str]:
         dist = vendor_dist_dir()
-        if not (dist / "index.html").is_file():
-            return False, "无 dist"
+        self._dist_problem = dist_integrity_problem(dist)
+        if self._dist_problem is not None:
+            # dist 坏了而旧静态服务还在跑：必须关掉。否则它一直对着已失效的目录
+            # 服务（页面能返回、chunk 全 404），且端口被占，无法重建（2026-10-25）。
+            if self._httpd is not None:
+                logger.warning("dist 已损坏，关闭旧静态服务以便重建: %s", self._dist_problem)
+                self._stop_static()
+            return False, f"无 dist（{self._dist_problem}）"
         if self._httpd is not None:
             self._active_port = self.static_port
             self._mode = "static"
@@ -524,10 +649,13 @@ class CanvasRuntime:
             return True, msg
 
         # 2) 无 dist：提示并拉 vite（可随后后台 build）
+        #    把 dist 缺失的具体原因带进报错：只说「画布进程已退出」会把
+        #    「产物被搬走」误诊成「Node/npm 装坏了」（2026-10-25 实际翻车）。
+        dist_note = f"\n（dist 状态：{self._dist_problem}）" if self._dist_problem else ""
         node_modules = web / "node_modules"
         if not node_modules.is_dir():
             hint = "cd vendor/shiguang-canvas && npm install && npm run build"
-            return False, f"画布依赖未安装。请先运行:\n  {hint}"
+            return False, f"画布依赖未安装。请先运行:\n  {hint}{dist_note}"
 
         progress("首次需启动 Vite（约 10–30 秒）…")
         if self._proc is None or self._proc.poll() is not None:
@@ -545,7 +673,10 @@ class CanvasRuntime:
                 self._kick_background_build()
                 return True, f"画布已启动: {self.url}"
             if self._proc and self._proc.poll() is not None:
-                return False, "画布进程已退出，请检查 Node/npm 与 vendor 依赖"
+                return False, (
+                    "画布进程已退出，请检查 Node/npm 与 vendor 依赖"
+                    f"{dist_note}"
+                )
             now = time.time()
             if now - last_tick >= 2.0:
                 left = int(deadline - now)
@@ -560,9 +691,12 @@ class CanvasRuntime:
         )
 
     def _kick_background_build(self) -> None:
-        """后台 build dist，下次启动秒开。"""
-        dist = vendor_dist_dir() / "index.html"
-        if dist.is_file():
+        """后台 build dist，下次启动秒开。
+
+        触发条件用 ``dist_integrity_problem`` 而非「index.html 是否存在」：
+        入口脚本缺失时 index.html 仍在，单看它会永远跳过重建 ⇒ dist 一直坏着。
+        """
+        if dist_integrity_problem() is None:
             return
         web = vendor_web_dir()
         npm = shutil_which("npm")
@@ -583,7 +717,11 @@ class CanvasRuntime:
                     timeout=300,
                     creationflags=creationflags,
                 )
-                logger.info("background vite build done: %s", dist.is_file())
+                problem = dist_integrity_problem()
+                logger.info(
+                    "background vite build done: %s",
+                    "ok" if problem is None else f"still broken - {problem}",
+                )
             except Exception as e:
                 logger.warning("background build failed: %s", e)
 
@@ -624,13 +762,7 @@ class CanvasRuntime:
             logger.debug("mark_tauri_closed exception: %s", exc)
 
     def stop(self) -> None:
-        if self._httpd is not None:
-            try:
-                self._httpd.shutdown()
-            except Exception:
-                pass
-            self._httpd = None
-        self._http_thread = None
+        self._stop_static()
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.terminate()

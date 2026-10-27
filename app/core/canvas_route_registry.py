@@ -67,6 +67,11 @@ def dispatch_table(handler: Any, table: Dict[str, str], path: str, **kw) -> bool
         return False
     try:
         fn(**kw)
+    except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+        # 客户端主动断开是**常态**，不是接口故障：组件卸载、切 tab、StrictMode 双调用
+        # 都会让浏览器取消在途请求。此前统一记成「路由处理失败」+ 再写一次 500，
+        # 结果是每次开画布都刷几条 ERROR 噪音，真故障被淹没（2026-10-25 排查实证）。
+        logger.debug("[%s] 客户端已断开，丢弃响应: %s", path, exc)
     except Exception as exc:  # 桥接层统一兜底，避免连接崩掉
         logger.exception("[%s] 路由处理失败", path)
         try:

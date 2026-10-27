@@ -427,7 +427,19 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
         self.send_header("Content-Length", str(len(body)))
         self._cors()
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
+
+    def _write_body(self, body: bytes) -> None:
+        """写响应体；客户端已断开时静默丢弃。
+
+        浏览器取消在途请求（组件卸载 / 切页 / StrictMode 双调用）会让这里抛
+        ``ConnectionAbortedError``，冒泡上去会被记成「路由处理失败」+ 再写一次
+        500（必然再失败），把真故障淹在噪音里（2026-10-25 排查实证）。
+        """
+        try:
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+            logger.debug("响应写失败，客户端已断开: %s", exc)
 
     def _bytes(self, code: int, body: bytes, content_type: str, *, cache: bool = False) -> None:
         self.send_response(code)
@@ -437,7 +449,7 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             self.send_header("Cache-Control", "public, max-age=86400")
         self._cors()
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)

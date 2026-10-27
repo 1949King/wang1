@@ -151,12 +151,22 @@ def _check_builds(failures: list) -> None:
     env["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
     vendor_dir = os.path.join(ROOT, "vendor")
     cmds = [
-        ("web 宿主 vite build", "pnpm --filter shiguang-canvas run build"),
+        # 🔴 2026-10-25 定案：**必须构建到独立 outDir**，不得让门禁碰宿主 dist。
+        # 这两条 build 默认 emptyOutDir=true 会清空 vendor/shiguang-canvas/dist；
+        # `run_all_checks.py` 默认执行本项 ⇒ 画布正在运行时（:3011 有监听）跑一次门禁，
+        # 就在用户眼皮底下把产物抽走 ⇒ 页面所有 hashed chunk 404 ⇒ App 动态 import 抛错
+        # ⇒ 整页崩溃 ⇒ 宿主报「画布进程已退出」。这才是「运行期 dist 被搬走」的真凶
+        # （此前误判为外部构建进程/人为 mv；dist 消失只是症状，本脚本才是原因）。
+        # 构建到 dist.check 还有副作用好处：目录不存在时 emptyDir 无需删除任何文件，
+        # 顺带绕开沙箱 safe-delete 对 rmSync 的拦截（该拦截曾让本项长期假失败）。
+        ("web 宿主 vite build",
+         "pnpm --filter shiguang-canvas exec vite build --outDir dist.check --emptyOutDir"),
         # tauri 的 build 脚本含 tsc -b（存量 4 错=§2c.5 基线），构建门禁只验打包链路
         # 2026-10-19 修：filter 曾写成大写 AI-Canvas-tauri，而包名是小写 ai-canvas-tauri
         # ⇒ pnpm「No projects matched」但退出码 0 ⇒ 本项长期空跑假绿（门禁摆设）。
         # 修后首次真跑即暴露 safe-delete 环境问题（见 CHANGELOG 2026-10-19 条目）。
-        ("tauri 宿主 vite build", "pnpm --filter ai-canvas-tauri exec vite build"),
+        ("tauri 宿主 vite build",
+         "pnpm --filter ai-canvas-tauri exec vite build --outDir dist.check --emptyOutDir"),
     ]
     for label, cmd in cmds:
         r = subprocess.run(cmd, cwd=vendor_dir, env=env, shell=True,
