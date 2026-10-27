@@ -19,22 +19,19 @@
 
 import json
 import os
-import time
 import logging
-from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QScrollArea, QFrame, QMessageBox, QFileDialog,
-    QDialog, QLineEdit, QComboBox, QListWidget, QListWidgetItem, QGroupBox,
-    QTextEdit, QCheckBox, QSpinBox, QFormLayout, QSplitter,
-    QToolButton, QMenu,
+    QDialog, QLineEdit, QListWidget, QListWidgetItem, QGroupBox,
+    QTextEdit, QFormLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from .base_module import BaseModule
+from .mcp_preset_autoconnect import auto_connect_blender_preset
 
 logger = logging.getLogger("AI短剧编辑器.extensions")
 
@@ -623,6 +620,19 @@ class ExtensionsModule(BaseModule):
             presets_layout.addWidget(preset_card)
 
         layout.addWidget(presets_group)
+
+        # ★ V4.46.19（用户需求「系统应该默认配置 Blender MCP 服务」）：
+        #   首次进入 MCP 页时自动连接 Blender 预设（幂等：本会话已尝试过就不重复；
+        #   连接结果如实进「已连接」列表或状态栏，失败不弹窗打断——只是默认帮你连）。
+        if not getattr(self, "_blender_autoconnect_done", False):
+            self._blender_autoconnect_done = True
+            try:
+                from PyQt6.QtCore import QTimer as _QTimer
+
+                # 稍等页面布局完成再连，避免抢首帧
+                _QTimer.singleShot(600, self._auto_connect_blender_preset)
+            except Exception:
+                logger.debug("Blender 自动连接挂载失败（忽略）", exc_info=True)
 
         # 已连接 MCP 列表
         connected_group = QGroupBox("已连接 MCP 服务")
@@ -2075,11 +2085,22 @@ class ExtensionsModule(BaseModule):
             else:
                 error = self._mcp_client.last_error or "未知错误"
                 self._set_status(f"连接失败: {error}")
-                from PyQt6.QtWidgets import QMessageBox as QMB
-                QMB.warning(self, "连接失败", f"无法连接到「{config['name']}」:\n{error}")
+                # ★ 自动连接（Blender 默认配置）失败时不弹窗打断——只在状态栏如实说；
+                #   用户手动点击连接才弹详细错误。
+                if not preset.get("_auto"):
+                    from PyQt6.QtWidgets import QMessageBox as QMB
+                    QMB.warning(self, "连接失败", f"无法连接到「{config['name']}」:\n{error}")
 
         thread = threading.Thread(target=do_connect, daemon=True)
         thread.start()
+
+    def _auto_connect_blender_preset(self):
+        """默认配置 Blender MCP（用户需求，V4.46.19）：首次进 MCP 页自动连接。
+
+        实现已抽到 ``mcp_preset_autoconnect.py``（单文件规模守卫要求）；
+        幂等由调用方 ``_blender_autoconnect_done`` 保证。
+        """
+        auto_connect_blender_preset(self)
 
     def _manual_connect_mcp(self):
         """手动连接 MCP Server"""
@@ -2147,7 +2168,6 @@ class ExtensionsModule(BaseModule):
     def _install_extension_from_file(self, file_path: str):
         """从文件安装拓展"""
         try:
-            from app.core.extension_base import Extension, register_extension
 
             # 这里可以实现动态加载插件
             # 简化版本：直接注册为插件类型
