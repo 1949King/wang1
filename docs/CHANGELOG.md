@@ -1,5 +1,20 @@
 # 拾光剪影 — 变更日志
 
+## Wan 自研去噪内核适配（K5 3/4 → 补最后一族，2026-10-30）
+
+- 新增 `kernel/adapters/wan.py`：两次前向 CFG / 5D latents / UniPC+set_begin_index(0) / per-channel mean·std 解码；
+- `engine.run(..., extras=None)`：支持族专属组件袋信息（Wan 需 model_path），默认 None 对既有三族零影响；
+- `_verify/bench_wan_kernel_parity.py`：同 seed/embeds 对照上游，输出逐帧 PSNR；
+- 单测 5 例（契约自洽 / 形状公式 / 双拒绝路径 / embeds 升维 / 帧转换）。
+
+**踩坑记录**：
+1. `latent_rank=5` 强制 `vae_decode=chunked_temporal`（已实现分块解码）；
+2. H3：adapters 不允许顶层 import torch；
+3. `ComponentBag` 的 extras 合并进 parts，无 `bag.extras` 属性（写错会让 model_path 永远为空）；
+4. 8GB 卡跑 parity 必须 `enable_model_cpu_offload()`，`pipe.to(cuda)` 会换页卡死。
+
+**状态**：契约守卫通过；wan 仍标 `unverified`，parity 通过后才升。
+
 ## P3 · 视频去噪内核交付（SVD 逐帧比特一致，2026-10-28）
 
 **结论**：`kernel/loop.py` 接管了 SVD 图生视频的去噪循环，与 stock `pipe()` **逐帧比特级一致**

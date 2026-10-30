@@ -43,6 +43,7 @@ from app.core.neural.kernel.adapters.base import BaseAdapter, ComponentBag, Unve
 from app.core.neural.kernel.adapters.sd15 import SD15Adapter
 from app.core.neural.kernel.adapters.sdxl import SDXLAdapter
 from app.core.neural.kernel.adapters.svd import SVDAdapter
+from app.core.neural.kernel.adapters.wan import WanAdapter
 from app.core.neural.kernel.contracts import (
     CONTRACT_VERSION, LOOP_SHIGUANG, GenRequest, KernelReport, RunState, VERIFIED,
 )
@@ -62,6 +63,7 @@ _ADAPTERS: Dict[str, Callable[[], BaseAdapter]] = {
     "sd15": SD15Adapter,
     "sdxl": SDXLAdapter,
     "svd": SVDAdapter,
+    "wan": WanAdapter,
 }
 
 
@@ -119,6 +121,9 @@ def run(
     adapter: Optional[BaseAdapter] = None,
     measure_vram: bool = True,
     decode_chunk: int = 0,
+    #: 组件袋附加信息（族专属：Wan 需要 model_path 定位 UMT5 权重）。
+    #: 默认 None ⇒ 行为与既有族完全一致（向后兼容）。
+    extras: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """跑一次内核生成。
 
@@ -167,6 +172,7 @@ def run(
         # 3) 绑定组件袋
         bag = ComponentBag.from_pipe(pipe, extras={
             "scheduler": getattr(pipe, "scheduler", None),
+            **dict(extras or {}),
         })
         ad.bind(bag)
         bad = ad.validate()
