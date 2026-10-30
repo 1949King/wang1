@@ -5,6 +5,10 @@
 结果写 data/wan_kernel_parity.json。
 """
 import json, os, sys, time
+
+# 内核默认 off；wan 尚未 verified => 两个开关都要显式打开（契约要求「未验收不接管」）
+os.environ["SHIGUANG_KERNEL"] = "on"
+os.environ["SHIGUANG_KERNEL_ALLOW_UNVERIFIED"] = "1"
 sys.path.insert(0, r"D:\拾光剪影")
 import torch
 

@@ -112,6 +112,32 @@ class WanAdapter(BaseAdapter):
             bad.append("该 Wan 权重 expand_timesteps=True（Wan2.2 形态），本适配器只支持 Wan2.1")
         return bad
 
+    def _net_key(self) -> str:
+        """基类默认返回 "unet"（图像族）；Wan 是 transformer。
+
+        不 override 的后果（2026-10-30 实测）：`_dtype()` 找不到 net ⇒ 回退 float32，
+        而 transformer 权重是 bf16 ⇒ "Input type (float) and bias type (BFloat16)"。
+        """
+        return self._NET
+
+
+    def _dtype(self) -> Any:
+        """按**多数权重**的 dtype 判定网络精度，而不是基类的 `next(iter(parameters()))`。
+
+        2026-10-30 实测：Wan transformer 里存在 float32 参数（norm/rope 类），
+        基类取"第一个参数"会返回 float32 ⇒ embeds/latents 全被转成 float32，
+        前向立刻报 "Input type (float) and bias type (BFloat16)"。
+        """
+        net = self.bag.require(self._NET) if self.bag is not None else None
+        if net is not None:
+            from collections import Counter
+
+            counts = Counter(p.dtype for p in net.parameters())
+            if counts:
+                return counts.most_common(1)[0][0]
+        return super()._dtype()
+
+
     def _model_path(self) -> str:
         # 注意：ComponentBag.from_pipe 把 extras **合并进 parts**，没有独立 extras 属性。
         # 早期写成 getattr(bag, "extras") 会让 model_path 永远为空 ⇒ 每次都被 validate 拒绝。

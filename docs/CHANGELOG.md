@@ -1,5 +1,12 @@
 # 拾光剪影 — 变更日志
 
+## Wan 内核 parity 首轮：跑通但 PSNR 8.03dB（不达标，保持 unverified）（2026-10-30）
+
+- 内核可跑通：20 步 / 17 帧 / 265.2 s / 无异常；
+- **parity PSNR 8.03 dB（门槛 40 dB）⇒ 按纪律保持 `unverified`，内核继续回退上游**；
+- 本轮修掉 4 个真 bug：`cfg_scale` 字段名 / H3 顶层 torch / `bag.extras` 不存在 / `_dtype()` 取到 float32 参数；
+- 下一轮：改用**逐 step `max|Δ|`** 对照定位（第0步偏=latents；中段发散=scheduler；仅引导=CFG）。
+
 ## Wan 自研去噪内核适配（K5 3/4 → 补最后一族，2026-10-30）
 
 - 新增 `kernel/adapters/wan.py`：两次前向 CFG / 5D latents / UniPC+set_begin_index(0) / per-channel mean·std 解码；
