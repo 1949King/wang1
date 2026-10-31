@@ -943,41 +943,64 @@ export default function App() {
   };
 
   const onGenerate = async () => {
-    if (!selected || !selectedData) {
-      setStatus("请先选中镜头/图片/视频/生成器/音频/导演台/动画/数字人节点");
-      return;
+    // 兜底（2026-10-31）：Agent 输入框有焦点、或刚点过画布空白处时 selected 为空。
+    // 此前这里直接 return + 一句状态栏提示，用户只感到「点了没反应」——
+    // Agent 侧还会回一句「已触发生成选中节点」，实际没触发（说假话）。
+    // 现在自动挑一个可生成节点（镜头 > 图片 > 视频 > 生成器 > 其它），并如实告知选了谁。
+    let targetNode = selected;
+    let targetData = selectedData;
+    if (!targetNode || !targetData) {
+      const order = [
+        "shot", "image", "video", "generator", "audio",
+        "music", "director", "animation", "panorama", "digitalHuman",
+      ];
+      const cand = useCanvasStore
+        .getState()
+        .nodes.filter((n) => order.includes((n.data as NodeData).kind))
+        .sort(
+          (a, b) =>
+            order.indexOf((a.data as NodeData).kind) - order.indexOf((b.data as NodeData).kind),
+        )[0];
+      if (!cand) {
+        setStatus("画布上没有可生成的节点：先加一个镜头 / 图片 / 视频节点");
+        return;
+      }
+      targetNode = cand;
+      targetData = cand.data as NodeData;
+      useCanvasStore.getState().setSelected(cand.id);
+      setStatus(`已自动选中「${(targetData as { title?: string }).title || cand.id}」，开始生成…`);
     }
     if (
-      selectedData.kind !== "shot" &&
-      selectedData.kind !== "image" &&
-      selectedData.kind !== "video" &&
-      selectedData.kind !== "generator" &&
-      selectedData.kind !== "audio" &&
-      selectedData.kind !== "music" &&
-      selectedData.kind !== "director" &&
-      selectedData.kind !== "animation" &&
-      selectedData.kind !== "panorama" &&
-      selectedData.kind !== "digitalHuman"
+      targetData.kind !== "shot" &&
+      targetData.kind !== "image" &&
+      targetData.kind !== "video" &&
+      targetData.kind !== "generator" &&
+      targetData.kind !== "audio" &&
+      targetData.kind !== "music" &&
+      targetData.kind !== "director" &&
+      targetData.kind !== "animation" &&
+      targetData.kind !== "panorama" &&
+      targetData.kind !== "digitalHuman"
     ) {
       setStatus("当前节点不支持生成");
       return;
     }
-    useCanvasStore.getState().updateNodeData(selected.id, {
+    useCanvasStore.getState().updateNodeData(targetNode.id, {
       status: "generating",
       progress: 0,
       errorMessage: "",
     });
     setGenerating(true);
     setStatus(
-      selectedData.kind === "video"
+      targetData.kind === "video"
         ? "正在调用 AIGC 生视频（可能需要 1–3 分钟）…"
         : "正在调用 AIGC…",
     );
     const ctrl = new AbortController();
     genAbortRef.current = ctrl;
-    const nodeId = selected.id;
+    const nodeId = targetNode.id;
     try {
-      const { ok, message } = await generateForNode(selected, selectedData, {
+      const { ok, message } = await generateForNode(targetNode, targetData, {
         signal: ctrl.signal,
         onProgress: (job) => {
           // 如实上报：progress 为 null 表示上游没有真实进度信号，
@@ -1544,7 +1567,7 @@ export default function App() {
   }, []);
 
   return (
-    <NodeActionsContext.Provider value={{ retryNode }}>
+    <NodeActionsContext.Provider value={{ retryNode, generateNode: retryNode }}>
     <CanvasShell
       viewMode={viewMode}
       setViewMode={setViewMode}

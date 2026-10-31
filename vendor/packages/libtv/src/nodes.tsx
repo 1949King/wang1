@@ -3,13 +3,35 @@ import React, { createContext, memo, useContext, useRef, useState, type ReactNod
 import { Handle, Position, type NodeProps, NodeResizer } from "@xyflow/react";
 import type { NodeData, NodeStatus } from "./store";
 import { useCanvasStore } from "./store";
+// 节点内「生成」按钮样式（独立文件：styles.css 在冻结区，不该为一个小按钮动它）
+import "./nodeActions.css";
 
-/** 节点全局动作上下文 — 由 App.tsx 注入 retryNode 等方法，节点组件通过它触发生成/重试 */
+/** 节点全局动作上下文 — 由 App.tsx 注入，节点组件通过它触发生成/重试 */
 export const NodeActionsContext = createContext<{
   /** 重试指定节点（内部会自动 select + 调 generateForNode） */
   retryNode?: (nodeId: string) => void;
+  /** 对指定节点发起生成 —— 与 retryNode 同一实现，语义用于「首次生成」按钮。
+   *  存在的意义：生成不再依赖画布全局 selected，用户在节点内填完词可直接点按钮。 */
+  generateNode?: (nodeId: string) => void;
 }>({});
 const useNodeActions = () => useContext(NodeActionsContext);
+
+/**
+ * 支持「一键生成」的节点类型 —— 与 App.tsx 的 onGenerate 白名单保持同口径。
+ * 不在此列的节点（剧本 / 提示词 / 文本 / 编组 / 配置）不显示生成按钮。
+ */
+const GENERATABLE_KINDS = new Set([
+  "shot",
+  "image",
+  "video",
+  "generator",
+  "audio",
+  "music",
+  "director",
+  "animation",
+  "panorama",
+  "digitalHuman",
+]);
 
 /**
  * 节点浅比较：仅比较影响视觉输出的 selected / data / dragging，
@@ -100,10 +122,10 @@ const NODE_HINT_KEY = "sg-canvas-hints-seen";
 
 /** 每种节点类型的新手提示文案 */
 const HINT_MAP: Record<string, string> = {
-  shot: "💡 镜头节点：填写 Prompt → 点底部「生成选中」开始生图/生视频",
+  shot: "💡 镜头节点：填写 Prompt → 点卡片下方「✦ 生成」开始生图/生视频",
   script: "💡 剧本节点：写剧本大纲 → 按 Enter 自动拆成分镜镜头节点",
   prompt: "💡 提示词节点：写风格/氛围 → 连到镜头节点自动附加到 Prompt",
-  image: "💡 图片节点：拖入参考图 / 点「生成选中」生成参考图",
+  image: "💡 图片节点：拖入参考图 → 点卡片下方「✦ 生成」出图",
   video: "💡 视频节点：拖入参考视频 → 或导入视频片段",
   text: "💡 文本节点：可存复用提示词、角色台词、说明文字",
   config: "💡 生成配置：设模型/张数/风格，连到多个镜头节点生效",
@@ -238,7 +260,14 @@ function EditableText({
   );
 }
 
-/** 通用 Shell — 带状态 badge + 首次使用提示条 + 失败重试按钮 */
+/**
+ * 通用 Shell — 带状态 badge + 首次使用提示条 + 失败重试按钮 + **节点内生成按钮**。
+ *
+ * 生成按钮（2026-10-31 加）：此前生成入口只在顶栏 ☰ 菜单与浮动面板里，且要求
+ * 「先选中节点」，而节点内提示却写「点底部生成选中」⇒ 用户照着找必然找不到。
+ * 这里把入口放回节点本身：按钮自带 nodeId，不依赖画布全局 selected，
+ * 放卡 → 填词 → 点按钮即可生成。仅在 `GENERATABLE_KINDS` 显示，generating 时禁用。
+ */
 function Shell({
   nodeId,
   selected,
@@ -261,9 +290,11 @@ function Shell({
   const hint = HINT_MAP[kind];
   const { seen, markSeen } = useNodeHintSeen(kind);
   const showHint = hint && !seen;
-  const { retryNode } = useNodeActions();
+  const { retryNode, generateNode } = useNodeActions();
 
   const canRetry = status === "failed" && !!retryNode;
+  const generating = status === "generating";
+  const canGenerate = GENERATABLE_KINDS.has(kind) && !!generateNode;
 
   return (
     <div className={`sg-node ${kind}${selected ? " selected" : ""}`}>
@@ -306,6 +337,29 @@ function Shell({
         </div>
       ) : null}
       <div className="body">{children}</div>
+      {canGenerate ? (
+        <div className="sg-node-actions">
+          <button
+            type="button"
+            className="sg-gen-btn"
+            disabled={generating}
+            title={generating ? "正在生成…" : "对此节点生成（不需要先选中节点）"}
+            onClick={(e) => {
+              e.stopPropagation();
+              generateNode!(nodeId);
+            }}
+          >
+            {generating ? (
+              <span className="sg-gen-label">
+                <span className="sg-gen-dot" />
+                生成中…
+              </span>
+            ) : (
+              "✦ 生成"
+            )}
+          </button>
+        </div>
+      ) : null}
       <Handle type="source" position={Position.Right} />
     </div>
   );

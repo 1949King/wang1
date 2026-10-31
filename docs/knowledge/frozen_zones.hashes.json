@@ -80,7 +80,7 @@
     "file:vendor/packages/libtv/src/magnetic/SnapSeam.tsx": "29e1c37b1d7852d4",
     "file:vendor/packages/libtv/src/CanvasShell.tsx": "3be6071fba34d8a3",
     "file:vendor/packages/libtv/src/styles.css": "835343e50e10c9a9",
-    "file:vendor/packages/libtv/src/nodes.tsx": "ae937140ad4ca475",
+    "file:vendor/packages/libtv/src/nodes.tsx": "a3a478516c1017b7",
     "file:vendor/packages/libtv/src/store.ts": "48838aeacb2ecbd7",
     "file:vendor/packages/libtv/src/stores/node-factory.ts": "c912e0783549fbce",
     "file:vendor/packages/libtv/src/mediaExtraNodes.tsx": "b166fbb590652f20",

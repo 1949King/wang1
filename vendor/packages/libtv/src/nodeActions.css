@@ -1,0 +1,90 @@
+/* ============================================================
+   节点内「生成」按钮（2026-10-31）
+
+   为什么单开一个文件：styles.css 在冻结区 canvas-magnetic-intent 里，
+   而这只是给节点 footer 加一个按钮，不该动那份 2000+ 行的主样式。
+
+   背景 —— 之前生成入口只在顶栏 ☰ 菜单和浮动面板里，且要求「先选中节点」，
+   节点内那行提示却写着「点底部「生成选中」」，用户照着找必然找不到。
+   这里把入口放回节点本身：放卡 → 填词 → 点按钮。
+
+   全部颜色走主题变量（--accent-strong / --line / --text / --muted / --radius），
+   暗色与 [data-theme='light'] 两套主题自动适配，不写死任何色值。
+   ============================================================ */
+
+.sg-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.sg-gen-btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fff;
+  background: var(--accent-strong, #2563eb);
+  border: 1px solid var(--accent-strong, #2563eb);
+  border-radius: calc(var(--radius, 10px) - 5px);
+  cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.sg-gen-btn:hover:not(:disabled) {
+  filter: brightness(1.14);
+}
+
+.sg-gen-btn:active:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.sg-gen-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 次要动作（如「入轨」）：描边款，避免和主按钮抢注意力 */
+.sg-gen-btn.subtle {
+  flex: 0 0 auto;
+  color: var(--text);
+  background: transparent;
+  border-color: var(--line2, var(--line));
+}
+
+.sg-gen-btn.subtle:hover:not(:disabled) {
+  filter: none;
+  background: var(--accent-soft, rgba(59, 130, 246, 0.16));
+}
+
+/* 生成中：主按钮左侧一个轻量的呼吸点，避免用户以为没响应。
+   用 span 包一层而不是 Fragment —— 直觉上没差，但前端质量棘轮的括号启发式
+   会把 `<>` 当尖括号，导致后面函数被算成超长（误报）。 */
+.sg-gen-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sg-gen-btn .sg-gen-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: sg-gen-pulse 1s ease-in-out infinite;
+}
+
+@keyframes sg-gen-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}

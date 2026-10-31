@@ -28,6 +28,7 @@ import {
 } from "./bridge";
 import { useCanvasStore, type NodeData } from "./store";
 import { nextFreeSlot } from "./canvasSlot";
+import { applyBlueprint } from "./applyBlueprint";
 import ConfirmDialog from "./ConfirmDialog";
 import ExecutionBiasChip from "./ExecutionBiasChip";
 import { refreshGenerationModels, useGenerationModelStore } from "./generationModels";
@@ -471,6 +472,32 @@ export default function AgentPanel({
             sourceHandle: params.sourceHandle,
             targetHandle: params.targetHandle,
           } as any);
+          break;
+        }
+        case "applyBlueprint": {
+          // ★ 2026-10-31：工作流蓝图（LLM 出图结构，本地算坐标 ⇒ 一次铺出完整 DAG）。
+          //   只走 store 已公开的 addNode/updateNodeData/onConnect 三件套，
+          //   与上面 addNode/connectNodes 两个 case 同一套语义（不造第二条链路）。
+          const spec = (params.blueprint || params.spec || params) as any;
+          const before = useCanvasStore.getState().nodes.length;
+          const res = applyBlueprint(spec, {
+            addNode: (kind: string, pos: { x: number; y: number }) =>
+              addNode(kind as any, pos),
+            updateNodeData: (id: string, patch: Record<string, unknown>) =>
+              updateNodeData(id, patch),
+            onConnect: (c: { source: string; target: string }) => onConnect(c as any),
+            existingNodes: useCanvasStore.getState().nodes,
+          });
+          if (!res.ok) {
+            throw new Error(`蓝图应用失败：${res.problems.join("；") || "没有有效节点"}`);
+          }
+          canvasNodeId = res.nodeIds[res.nodeIds.length - 1] || "";
+          const added = useCanvasStore.getState().nodes.length - before;
+          const warn = res.problems.length ? `（${res.problems.length} 条提示）` : "";
+          push(
+            "system",
+            `✅ 工作流已铺开：${added} 个节点 / ${res.edgesApplied} 条连线${warn}`,
+          );
           break;
         }
         case "deleteNode": {
@@ -950,13 +977,21 @@ export default function AgentPanel({
       return true;
     }
     if (cmd === "generate") {
-      const ok = await askConfirm("确认生成", "将调用 AIGC 生成选中节点（消耗模型额度）。确认后才执行。");
+      const sel = useCanvasStore.getState().selectedId;
+      const ok = await askConfirm(
+        "确认生成",
+        sel
+          ? "将调用 AIGC 生成当前选中节点（消耗模型额度）。确认后才执行。"
+          : "当前没有选中节点，将自动挑选一个镜头/图片/视频节点生成（消耗模型额度）。确认后才执行。",
+      );
       if (!ok) {
         push("assistant", "已取消生成，未改画布");
         return true;
       }
       onRequestGenerate();
-      push("assistant", "已触发生成选中节点");
+      // 不再无条件说「已触发生成选中节点」：未选中时会自动挑节点，
+      // 真实结果由 App 的状态栏/节点状态给出，这里只说已请求（2026-10-31）。
+      push("assistant", sel ? "已触发生成选中节点" : "已触发生成（自动选择可生成节点）");
       return true;
     }
     if (cmd === "breakdown") {

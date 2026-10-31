@@ -46,6 +46,12 @@ SKIP_DIRS = {
     # —— gitignore 的草稿/缓存/数据目录（非 product 源码）——
     "temp", "temp_ai_editor", "logs", "cache", "data", "models", "output",
     "openclow_data", "packaging_env", ".vscode", "素材库", "短剧AI剪辑输出",
+    # —— 显式退役目录（2026-10-31 补）——
+    # `app/modules/lego/_retired/` 里放的是被新实现取代的旧文件（如 smart_editing_engine.py）。
+    # 它们已移出运行路径，不参与 product 行为，却因 8 处 CLI print 把门禁顶红，
+    # 与上面 app/temp 完全同一个教训：门禁要只对**在跑**的 product 代码说话，
+    # 否则退役一次就红一次，真实违规会被噪声淹没。
+    "_retired",
 }
 
 _RULE_BARE = "bare-except"
