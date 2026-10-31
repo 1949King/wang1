@@ -149,6 +149,35 @@ _ap_code = _strip_comments(_ap_src)
 check(not re.search(r"Math\.random\s*\(", _layout_code), "布局引擎不含随机调用（确定性坐标）")
 check(not re.search(r"Math\.random\s*\(", _ap_code), "落图模块不含随机调用")
 check(not re.search(r"Date\.now\s*\(", _layout_code), "布局引擎不含时间戳（确定性坐标）")
+
+# ── G. 后端合成兜底（模型不吐蓝图时也要有完整流程）────────────────────────
+print("[G] 后端合成兜底（模型只给计划 ⇒ 照样铺出完整流程）")
+check(hasattr(cb, "ensure_workflow_blueprint"), "canvas_blueprint 暴露 ensure_workflow_blueprint")
+check(hasattr(cb, "synthesize_workflow_blueprint"), "canvas_blueprint 暴露 synthesize_workflow_blueprint")
+check("ensure_workflow_blueprint" in _host_src,
+      "project_agent_host 调用 ensure_workflow_blueprint（兜底层在链路上）")
+# 合成结果必须**一次铺出整条链**（用户抱怨的核心：只能出 1~3 张卡）
+_synth = cb.synthesize_workflow_blueprint("帮我做一集 60 秒的竖屏漫剧，从剧本到成片")
+check(bool(_synth), "命中「完整流程」的需求能合成出蓝图")
+if _synth:
+    _snodes = _synth["blueprint"]["nodes"]
+    _sedges = _synth["blueprint"]["edges"]
+    check(len(_snodes) >= 5, f"合成出 {len(_snodes)} 个节点（≥5，不是 1~3 张卡）")
+    check(len(_sedges) >= 3, f"合成出 {len(_sedges)} 条连线（≥3）")
+    _skinds = {n["kind"] for n in _snodes}
+    _unknown = sorted(_skinds - kinds)
+    check(not _unknown, f"合成节点 kind 全在目录（越界：{_unknown[:3]}）")
+    _no_prompt = [n["kind"] for n in _snodes if not (n.get("prompt") or "").strip()]
+    check(not _no_prompt, f"合成节点都带提示词正文（缺：{_no_prompt[:3]}）")
+# 单步需求不得乱铺（不臆造端点）
+check(cb.synthesize_workflow_blueprint("帮我生张图") is None, "单步需求不合成（不乱铺）")
+# 提示词必须和真实审批机制一致：确认由系统弹框，模型不必等用户点头
+from app.core.agent_policy import mode_prompt_block
+
+_collab = mode_prompt_block("collaborative")
+check("等用户确认" not in _collab,
+      "协作模式段不再要求模型「等用户确认」（那正是只出计划的根因）")
+check("不要在文字里停下来等用户点头" in _collab, "协作模式段明说：说明与指令同批输出")
 print()
 if _failures:
     print(f"❌ 蓝图目录 + 接线守卫失败 {len(_failures)} 项：")

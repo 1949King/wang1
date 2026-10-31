@@ -68,3 +68,40 @@
 - **副库 tsc 假绿陷阱**：`tsconfig.json` 是 project references（files: []）恒报 0 错 ⇒ 用 `tsc -p tsconfig.app.json --noEmit`。副库 vitest v4 不接受 `--reporter=basic`。
 - 画布测试：不能引用包外相对路径（`?raw` 会解析到 vendor/app/）；vitest 是 node 环境无 jsdom ⇒ useEffect 逻辑零覆盖，须抽纯函数；`include` 只收 `*.test.ts`。
 - Agent 触达前端唯一通道 = `make_agent_event()` + `broadcast_agent_event()`（SSE），前端 `subscribeAgentEvents` 消费。
+
+## 七、Agent 编排原语：工作流蓝图（2026-10-31，画布 0.3.34，提交 d948138）
+- 🔴 **画布 Agent 的编排原语 = 蓝图（blueprint）**，不是一条条 addNode：
+  `app/core/canvas_blueprint.py`（后端：归一化+校验+标准流程补全+LLM 输出规范）
+  ↔ 前端 `blueprintLayout.ts`（分层拓扑布局）+ `applyBlueprint.ts`（一次落图）
+  ↔ `AgentPanel.tsx` 的 `case "applyBlueprint"`。action 已入 `agent_action_registry`。
+- **蓝图 schema 里没有 x/y**（AiDiagram 语义放置模式）⇒ 坐标一律本地算；布局引擎零新依赖
+  （本仓 dagre/elkjs/d3-force 零命中）。落图只走 store 已公开三件套
+  `addNode/updateNodeData/onConnect` ⇒ **不造第二条链路**，`store.ts` 冻结区零改动。
+- 🔴 **标准链必须过端口类型校验**：`shotlist` 只吃 `video`/`grid`，**不吃 `image`**
+  ⇒ 「镜头→分镜表」类型上是断的。**终点不同 ⇒ 路径不同**（`CANONICAL_PATHS` 7 条）：
+  「到分镜表」走宫格路径（不塞视频生成），「到成片」走全生产链。
+- 🔴 **冻结区 `canvas-magnetic-intent` 含 `canvasVersion.ts` + `NodePalette.tsx`**
+  ⇒ 改画布版本号（该区不变量明确许可的「三件套」）或调色板后**必须 `--update` 重新上锁**。
+- 🔴 **沙箱 `safe-bin` 的 pnpm 垫片用 SQLite 记账，DB 打不开 ⇒ `[ERROR] unable to open
+  database file`** ⇒ `check_canvas_dual_repo.py` 构建门禁**必红（环境层，非代码）**；
+  用真 pnpm 直跑（`cmd //c "pnpm --filter … exec vite build --outDir dist.check"`，
+  且**先 `mv` 走旧 dist.check**，否则 safe-delete 垫片拦删除）可验真构建。
+- **主程序 `app/version.py` 与画布版本刻意不同步**；主版本线被并行线占用时**不抢号**。
+
+## 八、Agent「模型不吐指令」的根因与兜底（2026-10-31）
+- 🔴 **提示词必须和真实审批机制对齐**。协作模式段原写「改画布前先给计划，**等用户确认**」，
+  但审批实际在**策略引擎 + 前端确认框**（`agent_policy.decide()` → `require_approval`
+  → `AgentPanel.tsx` 的 `askConfirm`，前端消费后端下发的策略表）
+  ⇒ 模型在文字里等确认 = **多余**，且直接导致「只吐计划不吐 JSON ⇒ 画布空的」。
+  修法：协作段改成「确认由系统弹框，**不要在文字里停下来等用户点头**，说明与指令同批输出」。
+- 🔴 **赌模型会听话 = 赌**。后端必须有兜底层：`canvas_blueprint.ensure_workflow_blueprint()`
+  —— 模型已给蓝图就保留（模型提示词更好）；只给零散 `addNode` 就**丢掉零散动作**换整张链
+  （零散动作正是「杂乱」的来源）；只给文字计划（`tools=[]`）就按标准路径**合成整张链**。
+  触发条件保守：命中「完整流程」信号 **或** 需求里点了 ≥2 个不同环节；单步需求**绝不铺**；
+  Plan 模式（只读）不合成。
+- 🔴 **system 提示段序 = 注意力预算**：角色 → 模式 → **契约（蓝图段）** → 动作清单（附录）。
+  18 个 action 的长清单必须排最后，否则「注意力稀释」；且契约里要有「信息不全也要先铺全」
+  的硬规则，否则模型会反问要素材、只给计划。
+- **真机验证方法**（别只做模拟输出）：用 `app.core.project_agent_host._build_canvas_fast_messages()`
+  构造与真实链路同源的提示 → POST 本机 Ollama `/api/chat` → `parse_canvas_tools`
+  → `normalize_canvas_tools` → `ensure_workflow_blueprint`。本机 `qwen3.5:4b` 可用。

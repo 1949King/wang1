@@ -280,14 +280,17 @@ def _build_canvas_fast_messages(
     # ★ 2026-10-31：注入「工作流蓝图」段 —— 这是把 Agent 从「参考助手」升级成
     #   「编排器」的关键：告诉它**完整流程该长什么样**（节点目录 + 标准链 +
     #   蓝图 JSON 契约），否则它只能一条条发 addNode ⇒ 只能出 1~3 张卡。
+    # ★ 段序 = 小模型的注意力预算：角色 → 模式 → **蓝图契约** → 动作清单（附录）。
+    #   蓝图契约必须排在动作清单**之前**：动作清单有 18 个 action，是典型的
+    #   「长列表稀释」——放最后会让模型只记住 action 名、记不住「一次铺整张图」。
     system = (
         "你是拾光剪影「导演台画布」助手（Agent-IM）。"
         "用简短中文直接回答分镜、提示词、站位、生图/生视频建议。"
-        "默认 2～6 句；除非用户明确要求长文或完整脚本。"
+        "默认 2～6 句（要铺完整工作流时不限句数）；除非用户明确要求长文或完整脚本。"
         "若上下文里有选中节点/参考视频，优先围绕它们给可执行建议。"
         + mode_prompt_block(agent_mode)
-        + canvas_tools_prompt_block(agent_mode)
         + blueprint_prompt_block()
+        + canvas_tools_prompt_block(agent_mode)
     )
     user = message.strip()
     if canvas_context:
@@ -507,20 +510,33 @@ def project_agent_chat(
     #   干三件事：① 校验 kind/边（类型不兼容、悬空、成环一律剔除并如实报告）；
     #   ② 用户要完整流程时按标准链补齐缺失环节（解决「只能出 1~3 张卡」）；
     #   ③ 把处理结果写进回复，让用户知道补了什么、丢了什么。
+    # ★ 2026-10-31（真机实测后补）：`ensure_workflow_blueprint` 是**兜底层** ——
+    #   实测本机 qwen3.5:4b 在真实提示下只吐「执行计划 + 反问要剧本」，
+    #   `parse_canvas_tools` 解析出 tools=[] ⇒ 画布一个节点都不会有。
+    #   所以「模型没给蓝图、但需求要完整流程」时由**后端合成整张图**，
+    #   保证用户永远拿得到一整套规整工作流（提示词是骨架，可继续让 Agent 细化）。
     blueprint_reports: List[Dict[str, Any]] = []
     blueprint_note = ""
-    if canvas_tools:
-        try:
-            from app.core.canvas_blueprint import describe_report, normalize_canvas_tools
+    try:
+        from app.core.canvas_blueprint import (
+            describe_report,
+            ensure_workflow_blueprint,
+            normalize_canvas_tools,
+        )
 
-            canvas_tools, blueprint_reports = normalize_canvas_tools(
+        canvas_tools, blueprint_reports = normalize_canvas_tools(
+            canvas_tools, user_message=message
+        )
+        if amode != MODE_PLAN:
+            canvas_tools, synth_reports, _synth_info = ensure_workflow_blueprint(
                 canvas_tools, user_message=message
             )
-            if blueprint_reports:
-                lines = [describe_report(r) for r in blueprint_reports]
-                blueprint_note = "[工作流蓝图] " + "；".join(lines)
-        except Exception as e:
-            logger.warning("normalize blueprint: %s", e)
+            blueprint_reports.extend(synth_reports)
+        if blueprint_reports:
+            lines = [describe_report(r) for r in blueprint_reports]
+            blueprint_note = "[工作流蓝图] " + "；".join(lines)
+    except Exception as e:
+        logger.warning("normalize blueprint: %s", e)
 
     # 仅完整剪辑路径 + 已绑定 editor 时尝试解析落轨指令
     if path == "editor" and editor is not None and apply:

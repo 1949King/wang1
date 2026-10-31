@@ -350,3 +350,121 @@ def test_blueprint_has_no_coordinate_fields():
     })
     for n in spec["nodes"]:
         assert "x" not in n and "y" not in n
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 后端合成兜底（2026-10-31 真机实测：qwen3.5:4b 真实往返只吐「执行计划」）
+# ═══════════════════════════════════════════════════════════════════════════
+def test_synthesize_workflow_from_full_flow_request():
+    """用户要「一整套流程」⇒ 后端能自己铺出完整标准链。"""
+    s = cb.synthesize_workflow_blueprint("帮我做一集 60 秒的竖屏漫剧")
+    assert s, "命中「做一集」却没合成"
+    assert s["ceiling"] == "codeVideo"
+    spec = s["blueprint"]
+    kinds = [n["kind"] for n in spec["nodes"]]
+    assert kinds == list(cb.CANONICAL_PATHS["codeVideo"]), kinds
+    assert len(spec["edges"]) == len(spec["nodes"]) - 1
+    # 每个节点都要有真提示词（不能是空 / TODO）
+    for n in spec["nodes"]:
+        p = (n.get("prompt") or "").strip()
+        assert p, n
+        assert "TODO" not in p and "待填" not in p, n
+
+
+def test_synthesize_not_for_single_step_request():
+    """单步需求 ⇒ 绝不乱铺（不臆造端点）。"""
+    for text in ("帮我生张图", "这张图好看", "第 3 个镜头写个提示词"):
+        assert cb.synthesize_workflow_blueprint(text) is None, text
+
+
+def test_synthesize_two_scope_kinds_counts_as_a_chain():
+    """需求里点了 2 个不同环节 ⇒ 判为一条链（终点取最深）。"""
+    s = cb.synthesize_workflow_blueprint("帮我把剧本拆成分镜，然后生成视频")
+    assert s, "两个环节应当判成链"
+    assert s["ceiling"] == "video"
+    kinds = [n["kind"] for n in s["blueprint"]["nodes"]]
+    assert kinds == list(cb.CANONICAL_PATHS["video"]), kinds
+
+
+def test_synthesized_prompt_carries_user_requirement():
+    """提示词必须**带着用户原话**（这是用户点名的诉求）。"""
+    s = cb.synthesize_workflow_blueprint("帮我做一集 60 秒的竖屏漫剧，二次元风格")
+    assert s
+    prompts = " ".join(n["prompt"] for n in s["blueprint"]["nodes"])
+    assert "60 秒" in prompts
+    assert "竖屏漫剧" in prompts
+    assert "二次元" in prompts
+
+
+def test_synthesized_edges_are_type_compatible():
+    """合成出来的边必须能真的连上（过端口类型校验）。"""
+    s = cb.synthesize_workflow_blueprint("帮我搭一条从剧本到成片的完整工作流")
+    assert s
+    by_key = {n["key"]: n["kind"] for n in s["blueprint"]["nodes"]}
+    for e in s["blueprint"]["edges"]:
+        v = can_connect(by_key[e["from"]], by_key[e["to"]])
+        assert v.get("ok"), (e, v.get("reason"))
+
+
+def test_ensure_workflow_synthesizes_when_model_gives_nothing():
+    """模型只给文字计划（tools=[]）⇒ 后端兜底照样铺出整张图。"""
+    tools, reports, info = cb.ensure_workflow_blueprint(
+        [], user_message="帮我做一集 60 秒的竖屏漫剧，从剧本到成片")
+    assert info["synthesized"] is True
+    assert [t["action"] for t in tools] == ["applyBlueprint"]
+    spec = tools[0]["params"]["blueprint"]
+    assert len(spec["nodes"]) == 7
+    assert len(spec["edges"]) == 6
+    assert reports and reports[0]["synthesized"] is True
+
+
+def test_ensure_workflow_replaces_scattered_add_nodes():
+    """模型给的零散建节点动作 ⇒ 被整张蓝图替换（这正是「杂乱」的来源）。"""
+    tools, reports, info = cb.ensure_workflow_blueprint(
+        [
+            {"action": "addNode", "params": {"kind": "script", "title": "剧本"}},
+            {"action": "addNode", "params": {"kind": "shot", "title": "镜头"}},
+            {"action": "connectNodes", "params": {"source": "a", "target": "b"}},
+            {"action": "queryNodes", "params": {}},
+        ],
+        user_message="帮我做一集漫剧",
+    )
+    assert info["synthesized"] is True
+    assert [t["action"] for t in tools] == ["queryNodes", "applyBlueprint"]
+    assert info["dropped_actions"] == ["addNode", "addNode", "connectNodes"]
+    # 如实报告：替换了几条
+    assert "替换了 3 条零散画布指令" in cb.describe_report(reports[0])
+
+
+def test_ensure_workflow_keeps_model_blueprint():
+    """模型自己给了蓝图 ⇒ 原样保留（模型的提示词比模板好）。"""
+    mine = [{
+        "action": "applyBlueprint",
+        "params": {"blueprint": {
+            "goal": "g", "mode": "workflow",
+            "nodes": [{"key": "n1", "kind": "script", "title": "剧本", "prompt": "写个剧本"}],
+            "edges": [],
+        }},
+    }]
+    tools, reports, info = cb.ensure_workflow_blueprint(
+        mine, user_message="帮我做一集漫剧")
+    assert info["synthesized"] is False
+    assert reports == []
+    assert tools[0]["params"]["blueprint"]["nodes"][0]["prompt"] == "写个剧本"
+
+
+def test_prompt_blocks_align_with_approval_flow():
+    """提示词必须和真实审批机制一致：确认由系统弹框，模型不必等用户点头。"""
+    from app.core.agent_policy import canvas_tools_prompt_block, mode_prompt_block
+
+    collab = mode_prompt_block("collaborative")
+    assert "等用户确认" not in collab, "协作模式仍让模型停下来等确认 ⇒ 用户抱怨复发"
+    assert "不要在文字里停下来等用户点头" in collab
+
+    tools_block = canvas_tools_prompt_block("collaborative")
+    assert "applyBlueprint" in tools_block
+
+    bp = cb.blueprint_prompt_block()
+    assert "必须输出下面这条 applyBlueprint JSON" in bp
+    assert "信息不全也要先把结构铺全" in bp
+    assert "禁止输出 x/y 坐标" in bp

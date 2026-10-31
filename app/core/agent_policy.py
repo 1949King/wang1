@@ -275,7 +275,9 @@ def mode_prompt_block(mode: Optional[str] = None) -> str:
         )
     return (
         "\n[Agent 模式 · 协作 B]\n"
-        "只读查询可直接做；改时间线/画布/生成媒体前先给出计划，等用户确认。"
+        "只读查询可直接做。改时间线/画布/生成媒体**由系统弹确认框**，"
+        "所以**不要在文字里停下来等用户点头**——"
+        "把中文说明和对应指令**同批输出**，用户点确认后系统才会落地。\n"
         "删除类用 ripple_delete_range / remove_clip，系统会二次确认。\n"
     )
 
@@ -297,7 +299,8 @@ def canvas_tools_prompt_block(mode: Optional[str] = None) -> str:
         "要给剧本做多角色配音（逐句按角色选音色 → 合成配音 → 时长反推镜头 → 配音轨落时间线）时用 dubOrchestrate，"
         "携带完整剧本（可选 characters 传角色音色绑定）："
         '{"action":"dubOrchestrate","params":{"script":"完整剧本文本"}}。'
-        "**用户要「一整套流程 / 完整工作流 / 从剧本到成片」时，必须用 applyBlueprint 一次铺出整张图，"
+        "**用户要「一整套流程 / 完整工作流 / 从剧本到成片 / 把节点串起来」时，必须用 applyBlueprint 一次铺出整张图，"
         "不要只发一两条 addNode**（蓝图格式与节点目录见 [工作流蓝图] 段）。"
+        "说明与 JSON 同批输出：先写一句中文说明，紧接着给出 JSON，不要停在「等您确认」。\n"
         "不要编造未列出的 action。\n"
     )

@@ -145,10 +145,12 @@ _SCOPE_MARKERS: Tuple[Tuple[str, str], ...] = (
     ("上线", "codeVideo"), ("渲染成片", "codeVideo"),
     ("分镜表", "shotlist"), ("剪辑", "shotlist"), ("时间线", "shotlist"),
     ("生视频", "video"), ("视频片段", "video"), ("动起来", "video"),
-    ("做成视频", "video"),
+    ("做成视频", "video"), ("生成视频", "video"), ("做视频", "video"),
+    ("出视频", "video"), ("拍视频", "video"), ("转成视频", "video"),
     ("生图", "image"), ("出图", "image"), ("生成图片", "image"),
-    ("分镜", "shot"), ("镜头脚本", "shot"),
-    ("写剧本", "script"),
+    ("生图片", "image"), ("生成图", "image"),
+    ("分镜", "shot"), ("镜头脚本", "shot"), ("拆分镜", "shot"),
+    ("写剧本", "script"), ("写脚本", "script"), ("编剧本", "script"),
 )
 
 
@@ -369,6 +371,233 @@ def _complete_canonical_path(
         have.add(ek)
 
     return out_nodes, out_edges, inserted
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 后端合成（模型没吐蓝图时的兜底）——「整图合成」
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 为什么必须有这一层（2026-10-31 真机实测）：
+#   本机 Ollama（qwen3.5:4b）在 3501 字符 system 提示下真实往返，输出的是
+#   「**执行计划** + 反问用户要剧本」，`parse_canvas_tools` 解析出 tools=[]。
+#   ⇒ 光靠提示词赌模型会吐蓝图 = 赌小模型会听话；而用户的诉求是
+#   「输入需求 ⇒ 拿到一整套规整工作流」，这条**必须由后端兜底保证**，
+#   不能随模型心情波动。
+#
+# 触发条件（保守：宁可不多铺，也不乱铺）：
+#   ① 需求命中「完整流程」类词（_WORKFLOW_MARKERS）⇒ 按终点合成；
+#   ② 需求里点了**≥2 个不同环节**（同时说「分镜」和「视频」）⇒ 那是一条链；
+#   单步需求（"帮我生张图"）⇒ 不合成。
+#
+# 合成时让位：模型零散的建图类动作会被**丢弃**（它们会在画布上另起一套
+# 散点节点，正是用户抱怨的「杂乱」）⇒ 换成一条规整链。如实报告丢了什么。
+
+# 合成时会被蓝图**替换掉**的动作（会另起散点节点 / 依赖主链节点 id）
+_BLUEPRINT_SUPERSEDE_ACTIONS = frozenset({
+    "addNode", "updateNode", "connectNodes", "deleteNode",
+    "duplicateNode", "groupNodes", "breakdown", "fillStoryboardCell",
+    "runGenerate", "setNodeImage", "importImage",
+})
+
+# 需求里命中的**环节**（去重后的 scope kind），用来判断「是不是一条链」
+def _matched_scope_kinds(text: str) -> List[str]:
+    t = str(text or "")
+    out: List[str] = []
+    for kw, kind in _SCOPE_MARKERS:
+        if kw in t and kind not in out:
+            out.append(kind)
+    return out
+
+
+# 时长（"60 秒" / "3 分钟"）—— 用户给了就带进提示词，没给就不编
+_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(秒|分钟|分|s\b)")
+
+
+def _extract_duration(text: str) -> str:
+    m = _DURATION_RE.search(str(text or ""))
+    if not m:
+        return ""
+    num, unit = m.group(1), m.group(2)
+    if unit.startswith("分"):
+        return f"{num} 分钟"
+    return f"{num} 秒"
+
+
+# 风格词表 —— 只在需求里**确实出现**时引用，不猜、不臆造
+_STYLE_HINTS: Tuple[str, ...] = (
+    "二次元", "日漫", "国漫", "赛璐璐", "厚涂", "写实", "真人", "实拍",
+    "赛博朋克", "蒸汽朋克", "古风", "国风", "水彩", "油画", "国画",
+    "3D", "皮克斯", "迪士尼", "治愈", "悬疑", "科幻", "末世", "蒸汽",
+    "校园", "都市", "古装", "民国", "黑白", "彩色", "冷色", "暖色",
+)
+
+
+def _extract_style(text: str) -> str:
+    t = str(text or "")
+    hits = [w for w in _STYLE_HINTS if w in t]
+    return "、".join(hits[:3])
+
+
+def _extract_requirement(text: str) -> str:
+    """把用户原话压成一行「创作依据」（不加工、不改写，只裁剪）。"""
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(raw) > 400:
+        raw = raw[:400] + "…"
+    return raw
+
+
+# 各阶段的**提示词骨架**（后端合成兜底时用；LLM 自己写的提示词永远优先）
+_STAGE_PROMPT_TEMPLATES: Dict[str, str] = {
+    "script": (
+        "创作依据（用户原话）：{req}\n"
+        "任务：把上面这条需求扩写成可直接拍摄的剧本 —— 开场钩子 → 主要冲突 → 结尾悬念；"
+        "每场写清地点/时间/人物/动作/台词。{duration}"
+    ),
+    "directorCard": (
+        "依据剧本与需求「{req}」产出导演卡：角色设定、场景设定、镜头语言规范、情绪基调；{style}。"
+    ),
+    "shot": (
+        "依据导演卡与剧本逐镜拆解：镜号 / 景别 / 机位 / 画面内容 / 台词 / 时长 / 转场；"
+        "覆盖剧本每一场，{duration}"
+    ),
+    "image": (
+        "为每个镜头写一条画面提示词：{style}；角色形象、光影、构图保持全片一致；"
+        "每镜写清主体 + 动作 + 环境 + 景别关键词（需求：{req}）"
+    ),
+    "video": (
+        "把每张画面转成动态片段：动作过程 + 镜头运动 + 时长与分镜对齐；角色一致性不变"
+    ),
+    "storyboard": (
+        "把镜头列表排成宫格分镜表：每格 = 缩略图 + 镜号 + 一句话内容"
+    ),
+    "shotlist": (
+        "汇总分镜表：镜号 / 景别 / 时长 / 画面提示词 / 素材状态，导出可执行清单"
+    ),
+    "codeVideo": (
+        "按分镜表与素材时长拼接成片：转场、配音、字幕、BGM；{duration}；导出成片"
+    ),
+}
+
+
+def _synth_node_prompt(kind: str, *, req: str, style: str, duration: str) -> str:
+    tpl = _STAGE_PROMPT_TEMPLATES.get(kind, "")
+    if not tpl:
+        return _AUTO_INTENT.get(kind, f"补齐「{_stage_label(kind)}」环节")
+    text = tpl.format(
+        req=req or "（用户未给细节，按通用漫剧生产补齐）",
+        style=(f"{style}风格" if style else "风格沿用需求"),
+        duration=(f"时长约 {duration}" if duration else ""),
+    )
+    return re.sub(r"[；;]\s*[；;]", "；", text).replace("；。", "。").strip()
+
+
+def synthesize_workflow_blueprint(user_message: str) -> Optional[Dict[str, Any]]:
+    """模型没给蓝图、但用户要完整流程时，后端按标准路径**合成整张图**。
+
+    返回 ``{"blueprint": spec, "ceiling": kind, "reason": str}``；
+    不该合成时返回 ``None``（单步需求绝不乱铺）。
+
+    ⚠️ 合成的提示词是**骨架**（用用户原话 + 阶段任务拼出来），
+       不是模型写的成品 —— 报告里如实标 ``synthesized=True``。
+    """
+    text = str(user_message or "")
+    if not text.strip():
+        return None
+
+    matched = _matched_scope_kinds(text)
+    workflow_hit = any(m in text for m in _WORKFLOW_MARKERS)
+    if not workflow_hit and len(matched) < 2:
+        return None
+
+    ceiling = detect_ceiling(text) or "codeVideo"
+    path = CANONICAL_PATHS.get(ceiling)
+    if not path or len(path) < 2:
+        return None
+
+    req = _extract_requirement(text)
+    style = _extract_style(text)
+    duration = _extract_duration(text)
+
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, str]] = []
+    for i, kind in enumerate(path, start=1):
+        key = f"n{i}"
+        nodes.append({
+            "key": key,
+            "kind": kind,
+            "title": _stage_label(kind),
+            "prompt": _synth_node_prompt(kind, req=req, style=style, duration=duration),
+            "intent": _AUTO_INTENT.get(kind, f"补齐「{_stage_label(kind)}」环节"),
+            "data": {"auto": True, "auto_stage": kind},
+        })
+        if i > 1:
+            edges.append({"from": f"n{i - 1}", "to": key})
+
+    spec = {
+        "goal": req,
+        "mode": "workflow",
+        "nodes": nodes,
+        "edges": edges,
+    }
+    reason = (
+        f"需求命中「完整流程」信号，终点判为「{_stage_label(ceiling)}」"
+        if workflow_hit else
+        f"需求里点了 {len(matched)} 个不同环节（{'、'.join(matched)}），判为一条链，"
+        f"终点「{_stage_label(ceiling)}」"
+    )
+    return {"blueprint": spec, "ceiling": ceiling, "reason": reason}
+
+
+def ensure_workflow_blueprint(
+    tools: List[Dict[str, Any]],
+    *,
+    user_message: str = "",
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """确保「用户要完整流程」时**一定有一张蓝图**可落。
+
+    三种情形：
+      ① 模型已给 applyBlueprint ⇒ 原样返回（模型的提示词更好）；
+      ② 模型只给零散 addNode ⇒ **丢弃零散动作** + 合成整张链；
+      ③ 模型只给文字计划（tools=[]）⇒ 合成整张链。
+
+    返回 ``(tools, reports, info)``；``info["synthesized"]`` 为真表示
+    本次是后端兜底合成的（回复里要如实说明）。
+    """
+    out = list(tools or [])
+    for item in out:
+        if isinstance(item, dict) and str(item.get("action") or "") == "applyBlueprint":
+            return out, [], {"synthesized": False}
+
+    synth = synthesize_workflow_blueprint(user_message)
+    if not synth:
+        return out, [], {"synthesized": False}
+
+    kept: List[Dict[str, Any]] = []
+    dropped: List[str] = []
+    for item in out:
+        action = str(item.get("action") or "") if isinstance(item, dict) else ""
+        if action in _BLUEPRINT_SUPERSEDE_ACTIONS:
+            dropped.append(action)
+            continue
+        kept.append(item)
+
+    spec, report = normalize_blueprint(synth["blueprint"], user_message=user_message)
+    report["synthesized"] = True
+    report["ceiling"] = synth["ceiling"]
+    report["dropped_actions"] = dropped
+    if not report.get("ok"):
+        return out, [], {"synthesized": False}
+
+    kept.append({"action": "applyBlueprint", "params": {"blueprint": spec}})
+    info = {
+        "synthesized": True,
+        "ceiling": synth["ceiling"],
+        "reason": synth["reason"],
+        "node_count": report.get("node_count", 0),
+        "edge_count": report.get("edge_count", 0),
+        "dropped_actions": dropped,
+    }
+    return kept, [report], info
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -597,7 +826,8 @@ def blueprint_prompt_block() -> str:
     return (
         "\n[工作流蓝图 · 编排原语]\n"
         "当用户要「一整套流程 / 完整工作流 / 从剧本到成片 / 把节点串起来」时，"
-        "**不要**只发一两条 addNode —— 必须发一条 applyBlueprint，一次铺出整张图。\n"
+        "**必须输出下面这条 applyBlueprint JSON，一次铺出整张图**；"
+        "只写「执行计划」而不给 JSON = 没完成任务。\n"
         "格式（追加在中文说明后面）：\n"
         '{"canvas_tools":[{"action":"applyBlueprint","params":{"blueprint":{'
         '"goal":"这条流程要产出什么","mode":"workflow",'
@@ -611,7 +841,10 @@ def blueprint_prompt_block() -> str:
         "你只管图结构；\n"
         "  4. 边的两端必须类型兼容（见下表），且**不得成环**；\n"
         "  5. 用户要完整流程时把 mode 设为 workflow；只做单步操作时**不要**发蓝图，"
-        "直接发 addNode。\n"
+        "直接发 addNode；\n"
+        "  6. **信息不全也要先把结构铺全**：用户还没给剧本/素材时，"
+        "照样按标准路径把环节一次给全，prompt 写成创作方向（不许空着），"
+        "缺的东西在中文说明里问一次即可。\n"
         "可用节点（kind（中文名）：接受 → 产出）：\n"
         f"{kinds_block}\n"
         "标准流程阶段：\n"
@@ -673,10 +906,16 @@ def describe_report(report: Dict[str, Any]) -> str:
     n = int(report.get("node_count") or 0)
     e = int(report.get("edge_count") or 0)
     if n:
-        bits.append(f"{n} 个节点 / {e} 条连线")
+        if report.get("synthesized"):
+            bits.append(f"已按标准流程铺出 {n} 个环节 / {e} 条连线")
+        else:
+            bits.append(f"{n} 个节点 / {e} 条连线")
     ins = report.get("inserted") or []
-    if ins:
+    if ins and not report.get("synthesized"):
         bits.append(f"按标准流程补了 {len(ins)} 个环节")
+    dropped = report.get("dropped_actions") or []
+    if dropped:
+        bits.append(f"替换了 {len(dropped)} 条零散画布指令")
     problems = report.get("problems") or []
     if problems:
         bits.append(f"{len(problems)} 条校验提示")
