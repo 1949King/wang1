@@ -1,5 +1,20 @@
 # 拾光剪影 — 变更日志
 
+## 团队协作后端：独立 Team Hub + 局域网发现（2026-10-31）
+
+解决「打包版只能一个人用」：新增独立团队服务，只同步画布文档与交接，
+**绝不把 canvas_server（127.0.0.1:18765，可跑 GPU/读写文件）暴露到局域网**。
+
+- app/core/team_hub.py：SQLite + 文件存储；版本 / 认领锁（TTL）/ 交接单；
+- app/core/team_server.py：0.0.0.0:18770，Bearer 令牌（库存 sha256），CORS 放开但鉴权不省；
+- app/core/team_discovery.py：UDP 45123 beacon 广播 + DISCOVER 单播应答（双向兜底广播抑制）；
+- engine_registry 登记 team.hub / team.server。
+
+**纪律**：冲突返回 409 + 作者名，画布图绝不自动 merge；锁 600s 过期防死锁；令牌只存哈希。
+
+**实测**：0.0.0.0:18799 + 局域网地址走完 join→create→pull→push→409→423→交接→UDP 发现。
+测试 11 例（HTTP 端到端 + 真实 UDP 回环）。
+
 ## Wan 内核 parity 首轮：跑通但 PSNR 8.03dB（不达标，保持 unverified）（2026-10-30）
 
 - 内核可跑通：20 步 / 17 帧 / 265.2 s / 无异常；

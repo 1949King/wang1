@@ -3,9 +3,14 @@
 
 为什么要有它（诊断结论，写进来免得后人重查）：
   · 全库有 ~55 个引擎模块，但「在册（有人 import）」不等于「可用（用户到得了）」。
-    实测：`smart_editing_engine` 零生产调用；`super_resolution` / `face_restore` /
-    `style_transfer` / `background_replace` 有后端调用、**画布没有入口**；
-    画布右键「智能剪辑」发的 `smart_edit` 动作**没有 handler**（死按钮）。
+    实测：画布右键「智能剪辑」发的 `smart_edit` 动作没有 handler（死按钮）。
+    ~~`super_resolution` / `face_restore` / `style_transfer` / `background_replace`
+    画布没有入口~~ **2026-10-29 收口**：四件套经 /host/canvas-enhance 意图层
+    全部接到画布（Agent 能力 canvas.ai_upscale / ai_matte / ai_face_restore /
+    ai_style），role 升 primary。
+    ~~`smart_editing_engine` 零生产调用~~ **2026-10-31 处置**：全库普查确认
+    0 import / 0 测试 / 不在冻结区，git mv 至 `app/modules/lego/_retired/`
+    留档 30 天后删除（W1 纪律），登记行移除。
   · 这些状态此前没有任何一张表能回答「谁在用、谁空着、谁只是库内能力」。
 
 四档角色（`role`）—— 验收口径：
@@ -150,17 +155,17 @@ ENGINES: Tuple[EngineSpec, ...] = (
     _e(id="infra.diffsynth_compat", family="inference", capability="infra",
        module="app/core/neural/diffsynth_compat.py", role=ROLE_FALLBACK),
     _e(id="effect.style_transfer", family="inference", capability="image_effect",
-       module="app/core/neural/style_transfer.py", role=ROLE_LIBRARY,
-       note="后端有调用、画布无入口（W2 接 /host/effect）"),
+       module="app/core/neural/style_transfer.py", role=ROLE_PRIMARY,
+       note="画布入口 canvas.ai_style（/host/canvas-enhance 意图 style，2026-10-29 接线）"),
     _e(id="effect.super_resolution", family="inference", capability="image_effect",
-       module="app/core/neural/super_resolution.py", role=ROLE_LIBRARY,
-       note="同上"),
+       module="app/core/neural/super_resolution.py", role=ROLE_PRIMARY,
+       note="画布入口 canvas.ai_upscale（/host/canvas-enhance 意图 sharpen）"),
     _e(id="effect.face_restore", family="inference", capability="image_effect",
-       module="app/core/neural/face_restore.py", role=ROLE_LIBRARY,
-       note="同上"),
+       module="app/core/neural/face_restore.py", role=ROLE_PRIMARY,
+       note="画布入口 canvas.ai_face_restore（意图 face，2026-10-29 接线）+ 画质档后处理"),
     _e(id="effect.background_replace", family="inference", capability="image_effect",
-       module="app/core/neural/background_replace.py", role=ROLE_LIBRARY,
-       note="同上"),
+       module="app/core/neural/background_replace.py", role=ROLE_PRIMARY,
+       note="画布入口 canvas.ai_matte（意图 cutout）"),
     _e(id="effect.inpainting", family="inference", capability="image_effect",
        module="app/core/neural/inpainting.py", role=ROLE_PRIMARY,
        note="/host/inpaint + /host/repair-image 已接"),
@@ -198,6 +203,12 @@ ENGINES: Tuple[EngineSpec, ...] = (
     _e(id="image.comfy_provider", family="inference", capability="image",
        module="app/core/ai/comfy_provider.py", role=ROLE_LIBRARY,
        note="ComfyUI 进程生命周期与结果保存；**未接画布生成**（引擎本体是 GPL 三方）"),
+    _e(id="team.hub", family="agent", capability="collaborate",
+       module="app/core/team_hub.py", role=ROLE_PRIMARY,
+       note="团队协作中枢（SQLite 版本/认领/交接）；独立于 canvas_server，只同步文档"),
+    _e(id="team.server", family="agent", capability="collaborate",
+       module="app/core/team_server.py", role=ROLE_PRIMARY,
+       note="团队服务端 0.0.0.0:18770 + 局域网 UDP 发现（仅文档端点，不暴露 canvas 能力）"),
     _e(id="canvas.canvas_aigc", family="agent", capability="orchestrate",
        module="app/core/canvas_aigc.py", role=ROLE_PRIMARY,
        note="画布 AIGC 调度（127KB，三方内核的编排入口）"),
@@ -280,9 +291,11 @@ ENGINES: Tuple[EngineSpec, ...] = (
     # ── 族 6 · 剪辑智能 ────────────────────────────────────────────
     _e(id="edit.professional", family="smart_edit", capability="edit",
        module="app/modules/lego/professional_video_engine.py", role=ROLE_PRIMARY),
-    _e(id="smart_edit.engine", family="smart_edit", capability="smart_edit",
-       module="app/modules/lego/smart_editing_engine.py", role=ROLE_RETIRED,
-       note="零生产调用；画布 smart_edit 按钮无 handler；待并入/删除"),
+    # smart_edit.engine（smart_editing_engine.py）2026-10-31 处置完毕：
+    #   全库普查 0 生产 import / 0 测试引用 / 不在冻结区 / 独有资产仅
+    #   EMOTION_TRANSITION_MAP（情绪转场映射，无可行替换、也无入口）；
+    #   git mv 到 app/modules/lego/_retired/ 留档 30 天后删除（W1 纪律）。
+    #   登记行随之移除（retired 行的任务就是「清掉自己」）。
     _e(id="smart_edit.viral", family="smart_edit", capability="smart_edit",
        module="app/modules/lego/viral_optimization_engine.py", role=ROLE_FALLBACK,
        note="agent_workflow / editor_ai_tools 在用"),
