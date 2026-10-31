@@ -1,5 +1,35 @@
 # 拾光剪影 — 变更日志
 
+## Breeze TTS 2 接入适配（外部服务形态）（2026-10-31）
+
+新增 `app/core/ai/breeze_tts_client.py`，并挂到 `voice_generator` 引擎链的**最前面**。
+
+- **为什么是外部服务而不是本地推理**：官方只提供 Linux + CUDA 运行时（requirements 含
+  flash-attn，Docker 镜像默认按 H100/Hopper sm90 编译），eager 推理需 **7.7 GiB** 显存、
+  官方推荐 12GB 卡起。本机是 Windows + RTX 4060 Laptop **8 GiB**（实测空闲 6.1 GiB），
+  既装不上也跑不动。与 ComfyUI 同范式：**重运行时放外部进程，本仓库只做 HTTP 客户端**。
+- 服务端（在有 Linux + 12GB 卡的机器上）：
+  `python -m breeze_infer.api BreezeBlue/breeze-tts-2 --host 0.0.0.0 --port 7860`
+- 客户端：`POST /v1/audio/speech`（multipart），收 24kHz mono s16le PCM 流 → float32；
+  与声线采样率不一致时走 ffmpeg 管道重采样（与 Piper 那条同一手法）。
+- **三种模式自动选**：只有 `instruction` = Voice Design；`ref_audio`+`ref_text` = Voice Clone；
+  两者都给 = Voice Direction。项目的 `VoiceProfile`（性别/年龄/风格）+ `request.emotion`
+  经 `build_instruction()` 拼成中文自然语言指令。
+- **默认关闭**：`SHIGUANG_BREEZE_TTS_URL` 为空时**完全不探测、不发请求**（零开销、零行为变化），
+  显式配置后才启用。参考音走 `SHIGUANG_BREEZE_TTS_REF_AUDIO` / `..._REF_TEXT`
+  （全局参考音 —— 项目还没有「每个声线一份参考音」的数据结构，故不做假映射）。
+- **诚实失败**：服务不可达 / 非 200 / 空音频 / 重采样失败 ⇒ 返回 None，
+  回退 Coqui → Piper → gTTS → edge-tts，**绝不返回假音频**（同 YuE / Piper 纪律）。
+
+🔴 **授权红线**：代码 Apache 2.0，但**模型权重、衍生模型与自托管输出仅限研究与
+非商业用途**；商用输出须走 BreezeBlue 托管平台。当前为个人/研究用途，
+若将来商用需先解决授权。
+
+**验证**：新增 `app/tests/test_breeze_tts.py` 17 例（默认关闭不发请求 · 指令拼接含未知枚举忽略 ·
+PCM 空/奇数长度/满幅值边界 · HTTP 200、非 200、空音频、网络异常四条路径全回 None）·
+配音相关回归 40 passed · DUBVERIFY 门禁绿 · stability 242 项无新增 · SIZE 通过
+（`voice_generator` 940 行）。
+
 ## 团队协作前端：顶栏「👥 团队」+ 四段面板（2026-10-31）
 
 - `teamClient.ts`：host 面（本机管理）与 team 面（团队服务）**两套鉴权分开**，不共用 base；

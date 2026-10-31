@@ -358,6 +358,82 @@ class AIVoiceGenerator:
                     error_message=str(e)
                 )
     
+    def _try_breeze_tts(self, request: "VoiceGenerationRequest",
+                        voice_profile: "VoiceProfile") -> Optional[np.ndarray]:
+        """Breeze TTS 2（外部服务）合成；未启用 / 服务不在返回 None（诚实跳过）。
+
+        为什么走外部服务：官方运行时是 Linux + CUDA（依赖 flash-attn，Docker 按
+        sm90 编译），eager 需 ~7.7 GiB 显存、官方推荐 12GB 卡；本机 Windows + 8GB
+        既装不了也跑不动。与 ComfyUI 同范式：重运行时放外部进程，这里只做客户端。
+
+        三种模式由参数自动选（见 breeze_tts_client.synthesize）：
+        - 有参考音频 + 文稿 → Voice Clone / Direction；
+          项目还没有「每个声线一份参考音」的数据结构，故用环境变量配的全局参考音；
+        - 否则 → Voice Design（用声线的性别/年龄/风格/情绪拼成自然语言指令造音色）。
+
+        采样率：Breeze 固定输出 24kHz s16le，需转成声线要求的 sample_rate。
+        走 ffmpeg 管道（与 Piper 那条一致），不额外引入重采样依赖。
+        **重采样失败就返回 None**，不返回采样率不符的音频（那会整体变调）。
+        """
+        try:
+            from app.core.ai import breeze_tts_client as breeze
+        except Exception:
+            logger.debug("[VoiceGenerator] Breeze 客户端导入失败", exc_info=True)
+            return None
+
+        if not breeze.breeze_tts_enabled():
+            logger.debug("[VoiceGenerator] Breeze 未配置（%s），跳过", breeze.ENV_URL)
+            return None
+
+        instruction = breeze.build_instruction(
+            gender=getattr(voice_profile.gender, "value", ""),
+            age=getattr(voice_profile.age, "value", ""),
+            style=getattr(voice_profile.style, "value", ""),
+            description=voice_profile.description or "",
+            emotion=request.emotion or "",
+        )
+        ref_audio = (os.environ.get("SHIGUANG_BREEZE_TTS_REF_AUDIO", "") or "").strip()
+        ref_text = (os.environ.get("SHIGUANG_BREEZE_TTS_REF_TEXT", "") or "").strip()
+
+        got = breeze.synthesize(
+            request.text,
+            instruction=instruction,
+            ref_audio_path=ref_audio,
+            ref_text=ref_text if ref_audio else "",
+        )
+        if not got:
+            return None
+        pcm, src_rate = got
+
+        audio = breeze.pcm_to_float32(pcm)
+        if audio is None:
+            return None
+        if src_rate == int(voice_profile.sample_rate):
+            return audio
+
+        try:
+            import subprocess
+            import sys
+
+            no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            proc = subprocess.run(
+                ["ffmpeg", "-y",
+                 "-f", "s16le", "-ar", str(src_rate), "-ac", "1", "-i", "pipe:0",
+                 "-f", "f32le", "-acodec", "pcm_f32le",
+                 "-ar", str(int(voice_profile.sample_rate)), "-ac", "1", "pipe:1"],
+                input=pcm, capture_output=True, timeout=120, creationflags=no_window,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                return np.frombuffer(proc.stdout, dtype=np.float32)
+            logger.warning("[VoiceGenerator] Breeze 重采样失败 rc=%s", proc.returncode)
+        except FileNotFoundError:
+            logger.warning(
+                "[VoiceGenerator] ffmpeg 缺失，Breeze 音频无法重采样到 %s Hz（%d 字节已合成）",
+                voice_profile.sample_rate, len(pcm))
+        except Exception as e:
+            logger.warning("[VoiceGenerator] Breeze 重采样异常: %s", e)
+        return None
+
     def _try_piper_tts(self, text: str, sample_rate: int) -> Optional[np.ndarray]:
         """本地 Piper 合成；模型/引擎不可用返回 None（诚实跳过，不报错）。
 
@@ -414,7 +490,7 @@ class AIVoiceGenerator:
 
     def _generate_tts_audio(self, request: VoiceGenerationRequest,
                              voice_profile: VoiceProfile) -> Optional[np.ndarray]:
-        """真实 TTS 语音生成 - 优先 Coqui → Piper(本地) → gTTS → edge-tts。
+        """真实 TTS 语音生成 - 优先 Breeze TTS 2(外部服务) → Coqui → Piper(本地) → gTTS → edge-tts。
 
         Returns:
             一维 float32 音频；**所有引擎都不可用时返回 None**（诚实失败）。
@@ -426,6 +502,12 @@ class AIVoiceGenerator:
         duration_sec = max(1.0, text_length * 0.15)
         # 每次调用先复位「本次是否用了占位音」，避免上一轮的状态串味
         self._last_tts_was_placeholder = False
+
+        # 优先 Breeze TTS 2（3B、支持语音设计/克隆/导演；需外部服务，Linux + 12GB 卡）。
+        # 未配置 SHIGUANG_BREEZE_TTS_URL 或服务不在 ⇒ 返回 None，静默回退下面这条本地链。
+        audio = self._try_breeze_tts(request, voice_profile)
+        if audio is not None:
+            return audio
 
         # 尝试 Coqui TTS（质量最高）
         try:
