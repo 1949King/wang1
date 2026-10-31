@@ -1,5 +1,16 @@
 # 拾光剪影 — 变更日志
 
+## 团队协作前端：顶栏「👥 团队」+ 四段面板（2026-10-31）
+
+- `teamClient.ts`：host 面（本机管理）与 team 面（团队服务）**两套鉴权分开**，不共用 base；
+- `TeamPanel.tsx`：本机服务 / 连接（扫描+手填） / 共享项目（拉取·上传到此·认领·释放·交接） / 收件箱（接手）；
+- `teamTopBar.tsx` + 挂到 `WorkspaceCanvasMenus`：**CanvasShell 零改动**（它已贴体积守卫容差）；
+- 后端补 `canvas_routes_team.py`：`/host/team/{status,start,stop,discover}`（仅 127.0.0.1）；
+- 纪律：拉取二次确认；冲突/锁显示「谁改的/谁占着」；上传当前画布=新建项目；接手=ack+拉取+自动认领。
+
+**验证**：vitest 4 例（teamClient）+ 前端全量 665 passed + tsc 37 基线；门禁除 GUARD 外全绿
+（GUARD 红来自并行线未提交的 `NodePalette.tsx`，非本次改动）。
+
 ## 团队协作后端：独立 Team Hub + 局域网发现（2026-10-31）
 
 解决「打包版只能一个人用」：新增独立团队服务，只同步画布文档与交接，

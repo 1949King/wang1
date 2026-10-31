@@ -123,6 +123,7 @@ from app.core.canvas_routes_digital_human import CanvasDigitalHumanRoutesMixin
 # 2026-10-23 执行层（混合算力）端点：status / bias / plan（canvas_routes_post.py 已 1,982 行）。
 from app.core.canvas_routes_execution import CanvasExecutionRoutesMixin
 from app.core.canvas_routes_local_video import CanvasLocalVideoRoutesMixin
+from app.core.canvas_routes_team import CanvasTeamRoutesMixin
 from app.core.canvas_http_file import serve_file as _serve_file
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
@@ -388,7 +389,7 @@ def _read_local_prompt_json(source_id: str) -> Any:
 # 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, CanvasDigitalHumanRoutesMixin, CanvasExecutionRoutesMixin, CanvasLocalVideoRoutesMixin, BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, CanvasDigitalHumanRoutesMixin, CanvasExecutionRoutesMixin, CanvasLocalVideoRoutesMixin, CanvasTeamRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:

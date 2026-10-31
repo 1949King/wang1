@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useCanvasStore } from "./store";
+import { TeamTopBarButton } from "./teamTopBar";
 
 type MenuKind = "workspace" | "canvas" | "template" | null;
 
@@ -60,6 +61,7 @@ export default function WorkspaceCanvasMenus() {
 
   return (
     <div className="libtv-dd-group" ref={wrapRef}>
+      <TeamTopBarButton />
       <div className="libtv-dd-wrap">
         <button
           type="button"
