@@ -184,3 +184,53 @@ def test_probe_returns_false_when_unreachable(monkeypatch):
 
     monkeypatch.setattr(requests, "get", boom)
     assert breeze.probe_service() is False
+
+
+# ── 5. 与声音克隆的联动（2026-11-01 补的遗漏）────────────────
+
+def _block_local_clone_engines(monkeypatch):
+    """屏蔽 cosyvoice / indextts，确保测试真的走 Breeze 分支（本机若装了会假绿）。"""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name in ("cosyvoice", "indextts"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def test_clone_available_true_via_breeze(monkeypatch):
+    """Breeze 服务在跑 ⇒ 声音克隆必须被认作可用。
+
+    漏掉这条会造成假阴性：服务明明起着，preflight 却报「缺少本地声音克隆引擎」，
+    用户被引导去装 CosyVoice —— 而 Breeze 本身支持 Voice Clone。
+    """
+    from app.core.ai import voice_clone
+
+    _block_local_clone_engines(monkeypatch)
+    monkeypatch.setenv(breeze.ENV_URL, "http://127.0.0.1:7860")
+    monkeypatch.setattr(breeze, "probe_service", lambda *a, **k: True)
+    assert voice_clone.clone_available() is True
+
+
+def test_clone_available_false_when_breeze_unreachable(monkeypatch):
+    from app.core.ai import voice_clone
+
+    _block_local_clone_engines(monkeypatch)
+    monkeypatch.setenv(breeze.ENV_URL, "http://127.0.0.1:7860")
+    monkeypatch.setattr(breeze, "probe_service", lambda *a, **k: False)
+    assert voice_clone.clone_available() is False
+
+
+def test_clone_unavailable_reason_mentions_breeze(monkeypatch):
+    """不可用时给用户的提示必须包含 Breeze 这条路，否则用户只知道装 CosyVoice。"""
+    from app.core.ai import voice_clone
+
+    _block_local_clone_engines(monkeypatch)
+    monkeypatch.delenv(breeze.ENV_URL, raising=False)
+    reason = voice_clone.clone_unavailable_reason()
+    assert "Breeze" in reason
+    assert "SHIGUANG_BREEZE_TTS_URL" in reason

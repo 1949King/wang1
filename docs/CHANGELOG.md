@@ -25,8 +25,21 @@
 非商业用途**；商用输出须走 BreezeBlue 托管平台。当前为个人/研究用途，
 若将来商用需先解决授权。
 
-**验证**：新增 `app/tests/test_breeze_tts.py` 17 例（默认关闭不发请求 · 指令拼接含未知枚举忽略 ·
-PCM 空/奇数长度/满幅值边界 · HTTP 200、非 200、空音频、网络异常四条路径全回 None）·
+**补漏（2026-11-01，首版只接了合成主链，漏了克隆探测）**：
+- `voice_clone.clone_available()` 原来只探测 `cosyvoice` / `indextts`，**不含 Breeze** ——
+  会造出假阴性：服务明明起着，`redub_orchestrator` 的 preflight 却报「缺少本地声音克隆引擎」，
+  并引导用户去装 CosyVoice（而 Breeze 本身就支持 Voice Clone）。现已纳入探测
+  （已配置 `URL` 且服务可达即视为可用）。
+- `clone_unavailable_reason()` 文案改为给出**两条路**（本地引擎 / Breeze 外部服务 + 启动命令）。
+- 全引擎失败日志的清单补上 Breeze，并追加一条「可用 Breeze 提升音质」的提示 ——
+  否则用户排查时看到的仍是「Coqui/Piper/gTTS/edge-tts」，会以为 Breeze 没接。
+- 已知未优化：长台词 `guard=True` 分段合成会发 **N 次单条请求**；Breeze 有
+  `/v1/audio/speech/batch`（≤128 条）可合并，但需先确认其 batch 响应能否给出分段边界
+  （否则无法逐段对齐字幕/镜头），故未接。
+
+**验证**：新增 `app/tests/test_breeze_tts.py` 20 例（默认关闭不发请求 · 指令拼接含未知枚举忽略 ·
+PCM 空/奇数长度/满幅值边界 · HTTP 200、非 200、空音频、网络异常四条路径全回 None ·
+**克隆联动 3 例**：服务可达 ⇒ clone_available 为真、不可达为假、提示文案含 Breeze 这条路）·
 配音相关回归 40 passed · DUBVERIFY 门禁绿 · stability 242 项无新增 · SIZE 通过
 （`voice_generator` 940 行）。
 

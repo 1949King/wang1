@@ -98,13 +98,27 @@ def character_voice_id(character: Dict[str, Any]) -> Optional[str]:
 # ── 声音克隆：契约 + 诚实失败 ─────────────────────────────────────
 
 def clone_available() -> bool:
-    """克隆引擎是否可 import（**只检测依赖，不下载模型**）。"""
+    """克隆引擎是否可用（**只检测依赖与服务，不下载模型**）。
+
+    两条通路：
+    1. 本地引擎：`cosyvoice` / `indextts` 能 import；
+    2. **Breeze TTS 2 外部服务**（2026-11-01 补）：本机 8GB 跑不了它的 7.7GiB
+       本地推理，故走 HTTP 服务；已配置 `SHIGUANG_BREEZE_TTS_URL` 且服务可达即视为可用。
+       漏掉这条会出现「服务明明在跑，系统却说缺少克隆引擎」的假阴性。
+    """
     for mod in ("cosyvoice", "indextts"):
         try:
             __import__(mod)
             return True
         except Exception:
             continue
+    try:
+        from app.core.ai import breeze_tts_client
+
+        if breeze_tts_client.breeze_tts_enabled() and breeze_tts_client.probe_service():
+            return True
+    except Exception:
+        logger.debug("[voice_clone] Breeze 服务探测失败（按不可用处理）", exc_info=True)
     return False
 
 
@@ -112,8 +126,11 @@ def clone_unavailable_reason() -> str:
     """诚实报告为什么不能克隆（给用户看的话）。"""
     if clone_available():
         return "克隆引擎已安装，但模型可能未下载；首次克隆会拉取模型（GB 级），请保证网络与磁盘。"
-    return ("缺少本地声音克隆引擎（CosyVoice2 / IndexTTS-2）。"
-            "安装后即可从参考音频克隆角色音色。"
+    return ("缺少可用的声音克隆引擎，二选一：\n"
+            "① 本地引擎 CosyVoice2 / IndexTTS-2（装后即用）；\n"
+            "② Breeze TTS 2 外部服务 —— 在 Linux + ≥12GB 显存的机器上跑\n"
+            "   `python -m breeze_infer.api BreezeBlue/breeze-tts-2 --port 7860`，\n"
+            "   本机设 SHIGUANG_BREEZE_TTS_URL 指向它。\n"
             "在装好之前，本功能**诚实降级**为枚举声线，不会冒充克隆结果。")
 
 

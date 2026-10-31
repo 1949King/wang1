@@ -591,10 +591,13 @@ class AIVoiceGenerator:
         # 且调用链会把它标成 is_placeholder=True。
         logger.warning(
             "[VoiceGenerator] 所有真实 TTS 引擎均不可用"
-            "（Coqui/Piper/gTTS/edge-tts）text=%r", text[:40])
+            "（Breeze/Coqui/Piper/gTTS/edge-tts）text=%r", text[:40])
         logger.info(
             "[VoiceGenerator] 离线配音可配置 Piper：pip install piper-tts，"
             "并设置 %s 指向中文 .onnx 模型（如 zh_CN-huayan-medium）", ENV_PIPER_MODEL)
+        logger.info(
+            "[VoiceGenerator] 想要更高音质/克隆，可在 Linux + ≥12GB 显存机器上跑 Breeze TTS 2，"
+            "再设 SHIGUANG_BREEZE_TTS_URL 指向它（本机 8GB 显存跑不动其 7.7GiB 本地推理）")
         if not allow_placeholder_tts():
             logger.error(
                 "[VoiceGenerator] 诚实失败：不返回假音频。"
