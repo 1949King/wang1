@@ -105,3 +105,9 @@
 - **真机验证方法**（别只做模拟输出）：用 `app.core.project_agent_host._build_canvas_fast_messages()`
   构造与真实链路同源的提示 → POST 本机 Ollama `/api/chat` → `parse_canvas_tools`
   → `normalize_canvas_tools` → `ensure_workflow_blueprint`。本机 `qwen3.5:4b` 可用。
+- 🔴 **后端补的环节也要带真提示词**：模型只给 1 张卡时，补出来的 6 张才是用户看得见的部分
+  ⇒ 「补齐环节」与「合成整张图」**共用同一套提示词骨架**（`canvas_blueprint._STAGE_PROMPT_TEMPLATES`
+  / `_synth_node_prompt`，一个出口不分叉）；提示词要带得上需求里的时长 / 风格
+  （风格词**只在需求里确实出现时**才引用，不猜）。
+- 🔴 **别让「正常操作」混进 `problems`**：`problems` 只放真问题；「按标准流程补齐 N 个环节」
+  塞进去会被 `describe_report` 重复算成「校验提示」⇒ 走 `inserted` 字段。
