@@ -223,13 +223,117 @@ def _stage_label(kind: str) -> str:
     return kind
 
 
-def _make_auto_node(kind: str, goal: str) -> Dict[str, Any]:
-    """构造一个「Agent 按标准流程补上」的节点（标 auto + 人话说明）。"""
+# ── 提示词骨架（后端补环节 / 合成整图时共用）────────────────────────────
+# 需求里命中的**环节**（去重后的 scope kind），用来判断「是不是一条链」
+def _matched_scope_kinds(text: str) -> List[str]:
+    t = str(text or "")
+    out: List[str] = []
+    for kw, kind in _SCOPE_MARKERS:
+        if kw in t and kind not in out:
+            out.append(kind)
+    return out
+
+
+# 时长（"60 秒" / "3 分钟"）—— 用户给了就带进提示词，没给就不编
+_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(秒|分钟|分|s\b)")
+
+
+def _extract_duration(text: str) -> str:
+    m = _DURATION_RE.search(str(text or ""))
+    if not m:
+        return ""
+    num, unit = m.group(1), m.group(2)
+    if unit.startswith("分"):
+        return f"{num} 分钟"
+    return f"{num} 秒"
+
+
+# 风格词表 —— 只在需求里**确实出现**时引用，不猜、不臆造
+_STYLE_HINTS: Tuple[str, ...] = (
+    "二次元", "日漫", "国漫", "赛璐璐", "厚涂", "写实", "真人", "实拍",
+    "赛博朋克", "蒸汽朋克", "古风", "国风", "水彩", "油画", "国画",
+    "3D", "皮克斯", "迪士尼", "治愈", "悬疑", "科幻", "末世", "蒸汽",
+    "校园", "都市", "古装", "民国", "黑白", "彩色", "冷色", "暖色",
+)
+
+
+def _extract_style(text: str) -> str:
+    t = str(text or "")
+    hits = [w for w in _STYLE_HINTS if w in t]
+    return "、".join(hits[:3])
+
+
+def _extract_requirement(text: str) -> str:
+    """把用户原话压成一行「创作依据」（不加工、不改写，只裁剪）。"""
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(raw) > 400:
+        raw = raw[:400] + "…"
+    return raw
+
+
+# 各阶段的**提示词骨架**。
+# 谁用：① 后端补齐缺失环节（`_make_auto_node`）；② 后端合成整张图。
+# ⚠️ 模型自己写的提示词永远优先 —— 这张表只是**兜底**，不是唯一真相。
+_STAGE_PROMPT_TEMPLATES: Dict[str, str] = {
+    "script": (
+        "创作依据：{req}\n"
+        "任务：把上面这条需求扩写成可直接拍摄的剧本 —— 开场钩子 → 主要冲突 → 结尾悬念；"
+        "每场写清地点/时间/人物/动作/台词。{duration}"
+    ),
+    "directorCard": (
+        "依据剧本与需求「{req}」产出导演卡：角色设定、场景设定、镜头语言规范、情绪基调；{style}。"
+    ),
+    "shot": (
+        "依据导演卡与剧本逐镜拆解：镜号 / 景别 / 机位 / 画面内容 / 台词 / 时长 / 转场；"
+        "覆盖剧本每一场，{duration}"
+    ),
+    "image": (
+        "为每个镜头写一条画面提示词：{style}；角色形象、光影、构图保持全片一致；"
+        "每镜写清主体 + 动作 + 环境 + 景别关键词（需求：{req}）"
+    ),
+    "video": (
+        "把每张画面转成动态片段：动作过程 + 镜头运动 + 时长与分镜对齐；角色一致性不变"
+    ),
+    "storyboard": (
+        "把镜头列表排成宫格分镜表：每格 = 缩略图 + 镜号 + 一句话内容"
+    ),
+    "shotlist": (
+        "汇总分镜表：镜号 / 景别 / 时长 / 画面提示词 / 素材状态，导出可执行清单"
+    ),
+    "codeVideo": (
+        "按分镜表与素材时长拼接成片：转场、配音、字幕、BGM；{duration}；导出成片"
+    ),
+}
+
+
+def _synth_node_prompt(kind: str, *, req: str, style: str, duration: str) -> str:
+    tpl = _STAGE_PROMPT_TEMPLATES.get(kind, "")
+    if not tpl:
+        return _AUTO_INTENT.get(kind, f"补齐「{_stage_label(kind)}」环节")
+    text = tpl.format(
+        req=req or "（用户未给细节，按通用漫剧生产补齐）",
+        style=(f"{style}风格" if style else "风格沿用需求"),
+        duration=(f"时长约 {duration}" if duration else ""),
+    )
+    return re.sub(r"[；;]\s*[；;]", "；", text).replace("；。", "。").strip()
+
+
+def _make_auto_node(kind: str, goal: str, user_message: str = "") -> Dict[str, Any]:
+    """构造一个「Agent 按标准流程补上」的节点（标 auto + 人话说明）。
+
+    ⚠️ 提示词用**同一套骨架模板**（`_synth_node_prompt`）—— 和「合成整张图」
+    走同一个出口 ⇒ 用户点名的「要生成提示词」这条诉求，后端补的环节也带真提示词，
+    不是「把剧本拆成分镜：xx」这种一句话梗概。
+    """
     label = _stage_label(kind)
     base = (goal or "").strip()
-    body = _AUTO_INTENT.get(kind, f"补齐「{label}」环节")
-    if base:
-        body = f"{body}：{base}"
+    ctx = f"{user_message} {goal}".strip()
+    body = _synth_node_prompt(
+        kind,
+        req=base or user_message,
+        style=_extract_style(ctx),
+        duration=_extract_duration(ctx),
+    )
     return {
         "key": "",
         "kind": kind,
@@ -288,6 +392,7 @@ def _complete_canonical_path(
     edges: List[Dict[str, str]],
     goal: str,
     ceiling: str,
+    user_message: str = "",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], List[str]]:
     """沿**终点对应的标准路径**补齐缺失环节。
 
@@ -326,7 +431,7 @@ def _complete_canonical_path(
         return out_nodes, out_edges, inserted
     used = set(kind_by_key)
     for kind in need:
-        node = _make_auto_node(kind, goal)
+        node = _make_auto_node(kind, goal, user_message)
         key = _unique_key(f"auto_{kind}", used)
         used.add(key)
         node["key"] = key
@@ -398,97 +503,6 @@ _BLUEPRINT_SUPERSEDE_ACTIONS = frozenset({
     "duplicateNode", "groupNodes", "breakdown", "fillStoryboardCell",
     "runGenerate", "setNodeImage", "importImage",
 })
-
-# 需求里命中的**环节**（去重后的 scope kind），用来判断「是不是一条链」
-def _matched_scope_kinds(text: str) -> List[str]:
-    t = str(text or "")
-    out: List[str] = []
-    for kw, kind in _SCOPE_MARKERS:
-        if kw in t and kind not in out:
-            out.append(kind)
-    return out
-
-
-# 时长（"60 秒" / "3 分钟"）—— 用户给了就带进提示词，没给就不编
-_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(秒|分钟|分|s\b)")
-
-
-def _extract_duration(text: str) -> str:
-    m = _DURATION_RE.search(str(text or ""))
-    if not m:
-        return ""
-    num, unit = m.group(1), m.group(2)
-    if unit.startswith("分"):
-        return f"{num} 分钟"
-    return f"{num} 秒"
-
-
-# 风格词表 —— 只在需求里**确实出现**时引用，不猜、不臆造
-_STYLE_HINTS: Tuple[str, ...] = (
-    "二次元", "日漫", "国漫", "赛璐璐", "厚涂", "写实", "真人", "实拍",
-    "赛博朋克", "蒸汽朋克", "古风", "国风", "水彩", "油画", "国画",
-    "3D", "皮克斯", "迪士尼", "治愈", "悬疑", "科幻", "末世", "蒸汽",
-    "校园", "都市", "古装", "民国", "黑白", "彩色", "冷色", "暖色",
-)
-
-
-def _extract_style(text: str) -> str:
-    t = str(text or "")
-    hits = [w for w in _STYLE_HINTS if w in t]
-    return "、".join(hits[:3])
-
-
-def _extract_requirement(text: str) -> str:
-    """把用户原话压成一行「创作依据」（不加工、不改写，只裁剪）。"""
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) > 400:
-        raw = raw[:400] + "…"
-    return raw
-
-
-# 各阶段的**提示词骨架**（后端合成兜底时用；LLM 自己写的提示词永远优先）
-_STAGE_PROMPT_TEMPLATES: Dict[str, str] = {
-    "script": (
-        "创作依据（用户原话）：{req}\n"
-        "任务：把上面这条需求扩写成可直接拍摄的剧本 —— 开场钩子 → 主要冲突 → 结尾悬念；"
-        "每场写清地点/时间/人物/动作/台词。{duration}"
-    ),
-    "directorCard": (
-        "依据剧本与需求「{req}」产出导演卡：角色设定、场景设定、镜头语言规范、情绪基调；{style}。"
-    ),
-    "shot": (
-        "依据导演卡与剧本逐镜拆解：镜号 / 景别 / 机位 / 画面内容 / 台词 / 时长 / 转场；"
-        "覆盖剧本每一场，{duration}"
-    ),
-    "image": (
-        "为每个镜头写一条画面提示词：{style}；角色形象、光影、构图保持全片一致；"
-        "每镜写清主体 + 动作 + 环境 + 景别关键词（需求：{req}）"
-    ),
-    "video": (
-        "把每张画面转成动态片段：动作过程 + 镜头运动 + 时长与分镜对齐；角色一致性不变"
-    ),
-    "storyboard": (
-        "把镜头列表排成宫格分镜表：每格 = 缩略图 + 镜号 + 一句话内容"
-    ),
-    "shotlist": (
-        "汇总分镜表：镜号 / 景别 / 时长 / 画面提示词 / 素材状态，导出可执行清单"
-    ),
-    "codeVideo": (
-        "按分镜表与素材时长拼接成片：转场、配音、字幕、BGM；{duration}；导出成片"
-    ),
-}
-
-
-def _synth_node_prompt(kind: str, *, req: str, style: str, duration: str) -> str:
-    tpl = _STAGE_PROMPT_TEMPLATES.get(kind, "")
-    if not tpl:
-        return _AUTO_INTENT.get(kind, f"补齐「{_stage_label(kind)}」环节")
-    text = tpl.format(
-        req=req or "（用户未给细节，按通用漫剧生产补齐）",
-        style=(f"{style}风格" if style else "风格沿用需求"),
-        duration=(f"时长约 {duration}" if duration else ""),
-    )
-    return re.sub(r"[；;]\s*[；;]", "；", text).replace("；。", "。").strip()
 
 
 def synthesize_workflow_blueprint(user_message: str) -> Optional[Dict[str, Any]]:
@@ -775,11 +789,10 @@ def normalize_blueprint(
         text = f"{user_message} {spec.get('goal') or ''}"
         ceiling = detect_ceiling(text) or "codeVideo"
         nodes, edges, inserted = _complete_canonical_path(
-            nodes, edges, spec.get("goal") or user_message, ceiling)
+            nodes, edges, spec.get("goal") or user_message, ceiling,
+            user_message=user_message)
         if inserted:
             report["inserted"] = inserted
-            report["problems"].append(
-                f"按标准流程补齐 {len(inserted)} 个必要环节：{'、'.join(inserted)}")
         kind_by_key = {n["key"]: n["kind"] for n in nodes}
         # 补出来的边也要过一遍类型校验
         edges = _clean_edges(edges, kind_by_key, report)

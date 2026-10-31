@@ -468,3 +468,27 @@ def test_prompt_blocks_align_with_approval_flow():
     assert "必须输出下面这条 applyBlueprint JSON" in bp
     assert "信息不全也要先把结构铺全" in bp
     assert "禁止输出 x/y 坐标" in bp
+
+
+def test_auto_completed_nodes_carry_real_prompts():
+    """后端补齐的环节也必须带**带需求的真提示词**（不是一句梗概）。
+
+    用户的原话是「不能根据需求生成提示词」⇒ 补出来的环节也算数。
+    """
+    spec, report = cb.normalize_blueprint(
+        {"nodes": [{"key": "n1", "kind": "script", "title": "剧本", "prompt": "第一场"}],
+         "edges": []},
+        user_message="帮我做一集 60 秒的竖屏漫剧，从剧本到成片",
+    )
+    assert len(spec["nodes"]) >= 5
+    for n in spec["nodes"]:
+        p = (n.get("prompt") or "").strip()
+        assert p, n
+        assert "TODO" not in p and "待填" not in p, n
+    # 补出来的那些节点要带得上「60 秒」这个需求细节
+    auto_prompts = " ".join(
+        n["prompt"] for n in spec["nodes"] if (n.get("data") or {}).get("auto"))
+    assert "60 秒" in auto_prompts, auto_prompts
+    # 「补齐环节」是**正常操作**，不该被算成「校验提示」
+    assert not any("补齐" in p for p in report["problems"]), report["problems"]
+    assert report["inserted"], report
