@@ -85,7 +85,7 @@
     "file:vendor/packages/libtv/src/stores/node-factory.ts": "c912e0783549fbce",
     "file:vendor/packages/libtv/src/mediaExtraNodes.tsx": "b166fbb590652f20",
     "file:vendor/packages/libtv/src/registerBuiltinNodes.ts": "4c2c29f804d01a23",
-    "file:vendor/packages/libtv/src/NodePalette.tsx": "31e99ed4403db35c",
+    "file:vendor/packages/libtv/src/NodePalette.tsx": "e546382aab26d7cf",
     "file:vendor/packages/libtv/src/components/canvas/CanvasEmptyState.tsx": "7c411ff078495c06",
     "file:vendor/packages/libtv/src/novice/types.ts": "c3fc25eb2d23b512",
     "file:vendor/packages/libtv/src/novice/NoviceCard.tsx": "a0eb3f42000aa7c9",

@@ -40,6 +40,7 @@ export const NODE_PALETTE: PaletteItem[] = [
   { type: "image", label: "图片", keywords: "image 图片 图", hint: "图片资产节点", category: "media" },
   { type: "video", label: "视频", keywords: "video 视频 运镜 参考", hint: "视频生成 / 可上传参考片段", category: "media" },
   { type: "audio", label: "音频", keywords: "audio 音频 配音", hint: "音频节点", category: "media" },
+  { type: "music", label: "音乐", keywords: "music 音乐 BGM 配乐 yuE suno", hint: "音乐节点（Suno / YuE 乐）", category: "media" },
   { type: "source", label: "源文件", keywords: "source 源文件 本地 上传", hint: "本地图/视频/音频/文本", category: "media" },
   // ── 生成 ─────────────────────────────────────────────
   { type: "generator", label: "生成器", keywords: "generator 生成", hint: "汇聚上游批量生成", category: "generate" },
