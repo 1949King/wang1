@@ -271,6 +271,13 @@ CHECKS = [
     # ── 画布意图胶囊目录 + CodeVideoSpec 前端镜像（2026-10-20）──
     ("CANVASCAPS", "_verify/check_canvas_capsule_catalog.py",
      "胶囊目录：能力id在册/节点kind存在/契约常量同源/7阶段覆盖"),
+    # ── 工作流蓝图目录 + 接线（2026-10-31）──
+    #    为什么必须入册：本轮要解决「Agent 只会摆 1~3 张随机卡片」。
+    #    守卫锁四件会悄悄退化的事：目录漂移（ports↔palette 双向）、
+    #    标准链类型不合法（shotlist 只吃 video/grid 这类坑）、
+    #    接线变摆设（模块写了但没人调用）、LLM 开始输出像素坐标。
+    ("BLUEPRINT", "_verify/check_canvas_blueprint_catalog.py",
+     "工作流蓝图：节点目录双向对账/标准链类型合法/applyBlueprint在册/接线在册/禁像素坐标"),
     # ── 捏脸枚举镜像漂移基线棘轮（2026-10-20，V4.46.2）──
     # faceParams.ts 白名单 ↔ canvas_bridge._FACE_*_LABELS：存量 8 项已登记基线
     # （补全需解冻 stage3d-core），任何**新增**漂移/镜像越权立即报警。

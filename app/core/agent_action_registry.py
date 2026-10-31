@@ -126,6 +126,11 @@ _CANVAS_ACTION_ROWS: Tuple[Tuple[str, str, str, str], ...] = (
     ("applyStoryboard", "safe", "canvas_write", "应用分镜表"),
     ("storyboardBreakdown", "safe", "canvas_write", "breakdown 别名"),
     ("canvas_breakdown", "safe", "canvas_write", "breakdown 别名"),
+    # 工作流蓝图（2026-10-31）：Agent 的「编排器」原语。
+    # 一次产出整张 DAG（多节点 + 多连线）而不是一条条 addNode；
+    # 坐标由前端本地拓扑引擎算（LLM 不出像素）⇒ 摆放天然规整。
+    ("applyBlueprint", "safe", "canvas_write",
+     "应用工作流蓝图：一次铺出完整流程（多节点 + 连线 + 拓扑布局）"),
     # 文本 → 3D 粗模（仅机位档）：自然语言/剧本 → 机位+运镜计划 → 应用到 3D 导演台。
     # 复用既有「文本→分镜→机位」后端通道与既有 applyStage3dCameraPlan 消费端，不新增 3D 通道。
     ("stage3dTextPlan", "safe", "canvas_write", "文本 → 3D 机位：自然语言/剧本 → 机位+运镜计划并应用到 3D 导演台"),

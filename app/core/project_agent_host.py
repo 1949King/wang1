@@ -270,11 +270,16 @@ def _build_canvas_fast_messages(
 ) -> List[Dict[str, str]]:
     """画布 Agent 轻量提示：system + 历史对话 + 当前 user，不拉时间线/拓展清单。"""
     from app.core.agent_policy import canvas_tools_prompt_block, mode_prompt_block
+    from app.core.canvas_blueprint import blueprint_prompt_block
 
     # 注：画布 fast 路径的 canvas_tools 经 dispatch_canvas_tools **推给前端**
     # executeRemoteTask 执行（node-level camelCase action），不走后端 dispatcher。
     # 因此这里只列「前端本地 action」，不注入后端 capability_id（否则前端不认 ⇒ 无回执）。
     # 后端全能力可达见剪辑面板路径（ai_agent_panel._apply_agent_commands_to_editor）。
+    #
+    # ★ 2026-10-31：注入「工作流蓝图」段 —— 这是把 Agent 从「参考助手」升级成
+    #   「编排器」的关键：告诉它**完整流程该长什么样**（节点目录 + 标准链 +
+    #   蓝图 JSON 契约），否则它只能一条条发 addNode ⇒ 只能出 1~3 张卡。
     system = (
         "你是拾光剪影「导演台画布」助手（Agent-IM）。"
         "用简短中文直接回答分镜、提示词、站位、生图/生视频建议。"
@@ -282,6 +287,7 @@ def _build_canvas_fast_messages(
         "若上下文里有选中节点/参考视频，优先围绕它们给可执行建议。"
         + mode_prompt_block(agent_mode)
         + canvas_tools_prompt_block(agent_mode)
+        + blueprint_prompt_block()
     )
     user = message.strip()
     if canvas_context:
@@ -497,6 +503,25 @@ def project_agent_chat(
     except Exception as e:
         logger.warning("parse canvas tools: %s", e)
 
+    # ★ 2026-10-31：蓝图归一化（在推给画布之前做，别让脏图落到画布上）。
+    #   干三件事：① 校验 kind/边（类型不兼容、悬空、成环一律剔除并如实报告）；
+    #   ② 用户要完整流程时按标准链补齐缺失环节（解决「只能出 1~3 张卡」）；
+    #   ③ 把处理结果写进回复，让用户知道补了什么、丢了什么。
+    blueprint_reports: List[Dict[str, Any]] = []
+    blueprint_note = ""
+    if canvas_tools:
+        try:
+            from app.core.canvas_blueprint import describe_report, normalize_canvas_tools
+
+            canvas_tools, blueprint_reports = normalize_canvas_tools(
+                canvas_tools, user_message=message
+            )
+            if blueprint_reports:
+                lines = [describe_report(r) for r in blueprint_reports]
+                blueprint_note = "[工作流蓝图] " + "；".join(lines)
+        except Exception as e:
+            logger.warning("normalize blueprint: %s", e)
+
     # 仅完整剪辑路径 + 已绑定 editor 时尝试解析落轨指令
     if path == "editor" and editor is not None and apply:
 
@@ -532,6 +557,9 @@ def project_agent_chat(
                 "stream_id": sid,
                 "path": path,
             }
+
+    if blueprint_note:
+        reply = (reply + "\n\n" + blueprint_note).strip()
 
     push_to_canvas(
         "chat.done",

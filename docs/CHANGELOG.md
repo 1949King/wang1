@@ -1,5 +1,68 @@
 # 拾光剪影 — 变更日志
 
+## 功能 · 工作流蓝图：Agent 从「参考助手」升级为「编排器」（2026-10-31，画布 0.3.34）
+
+**用户实锤的原问题**：「用户输入需求之后，AI 画布不能根据用户输入的需求生成提示词，
+然后去调动里面的节点跟意图胶囊卡片去组成一个完整的工作流程，而是只能调出一到两张
+或者是三张节点或意图卡片，但不能完整地去组出来一套完整的工作流程，并且就是只是
+随意放置，不是很规整，很杂乱的那种放置。」
+
+**三个病根（都定位到文件:行号）**
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| 只能出 1~3 张卡 | 画布 Agent 走 `canvas_fast` 快路径，system prompt 只列 17 个前端 action（`project_agent_host.py:274-285` + `agent_policy.py:283-301` 硬编码），**没有「完整流程」的输出形态** | 新原语 **applyBlueprint**：LLM 一次产出整张图 |
+| 不生成提示词 | 快路径提示里从没要求「每张卡写 prompt」 | 蓝图契约硬规则：每张卡必须有 title + **真提示词正文** |
+| 放置杂乱 | `store.addNode` 无坐标时 `Math.random()` 撒点（`store.ts:888-891`，冻结区不可改） | 坐标改由**本地拓扑引擎**算（LLM 不出像素） |
+
+**新原语：蓝图（Blueprint）**
+
+```json
+{"canvas_tools":[{"action":"applyBlueprint","params":{"blueprint":{
+  "goal":"做一集 60 秒漫剧","mode":"workflow",
+  "nodes":[{"key":"n1","kind":"script","title":"剧本","prompt":"第一场：主角推门进入"}],
+  "edges":[{"from":"n1","to":"n2"}]}}}]}
+```
+
+- **后端** `app/core/canvas_blueprint.py`（新）：蓝图归一化与校验（未知 kind / 悬空边 /
+  类型不兼容的边 / 自环一律剔除**并如实报告**）+ 标准流程补全 + 给 LLM 的输出规范。
+- **前端** `vendor/packages/libtv/src/blueprintLayout.ts`（新）：分层拓扑布局引擎；
+  `applyBlueprint.ts`（新）：一次落图（建节点 → 写 data → 连线，只走 store 已公开的
+  `addNode` / `updateNodeData` / `onConnect` 三件套，不造第二条链路）。
+
+**三条开源启发与落法**
+
+1. **ComfyUI：图是一等公民** —— LLM 直接产出 graph JSON ⇒ 蓝图是一等契约，
+   后端归一化 + 前端一次落图，执行器吃图。
+2. **React Flow + Dagre：拓扑 → 自动坐标** —— 布局由图结构算出来 ⇒ 自研分层布局
+   （Kahn 最长路径分层 + 重心法层内排序 + 纵向居中），**零新依赖**（本仓无
+   dagre/elkjs/d3-force，且体积守卫严格）。
+3. **AiDiagram：LLM 永不输出像素坐标，只输出语义放置元数据** ⇒ 蓝图 schema 里
+   **没有 x/y**；坐标一律本地算 ⇒ 布局可换而不用重问 LLM，且对模型输出波动健壮。
+
+**标准流程补全（解决「只能出 1~3 张卡」）**
+
+- 需求里判定**流程终点**（成片 / 分镜表 / 视频 / 生图 / 分镜 / 剧本）；
+  判不出但用户明确要「完整流程」⇒ 终点 = 全生产链。
+- 沿**该终点的标准路径**补齐缺失环节；终点不同路径不同（「到分镜表」不该硬塞
+  一段视频生成 ⇒ 走宫格路径；「到成片」生图/生视频是漫剧本体 ⇒ 走全生产链）。
+- **每条标准边都过端口类型校验**（`can_connect`）—— 踩出来的坑：`shotlist` 只接受
+  video/grid、**不吃 image** ⇒「镜头 → 分镜表」类型上是断的，不能进标准链。
+- 补出来的节点标 `auto=true` + 人话说明，**并在回复里如实告知补了几张**；
+  单步需求（"给我一张图"）**完全不补**，不臆造端点。
+
+**实测（端到端）**：LLM 只给 2 张卡（script + shot）⇒ 后端补成 **7 节点 / 6 连线**
+的完整链（script→directorCard→shot→image→video→shotlist→codeVideo）⇒ 前端布局
+**7 层、x 从 80 步进到 1880（步长 300）、零问题**。
+
+**新增守卫** `_verify/check_canvas_blueprint_catalog.py`（已入册 `run_all_checks.py`）：
+节点目录双向对账（ports.ts ↔ NodePalette.tsx）/ 标准路径类型合法 / `applyBlueprint`
+在 action 注册表 / 前后端接线在册 / **禁止像素坐标**。
+
+**版本**：画布 0.3.33 → **0.3.34**；主程序 `app/version.py` **不动**（主版本线当前由
+并行线 V4.49.x 占用且 `version.py` 已滞后，非本刀引入，勿在此抢号）。
+
+
 ## Breeze TTS 2 接入适配（外部服务形态）（2026-10-31）
 
 新增 `app/core/ai/breeze_tts_client.py`，并挂到 `voice_generator` 引擎链的**最前面**。

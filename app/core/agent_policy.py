@@ -289,7 +289,7 @@ def canvas_tools_prompt_block(mode: Optional[str] = None) -> str:
         '{"canvas_tools":[{"action":"addNode","params":{"kind":"shot","title":"镜头"}}]}。'
         "允许 action：queryNodes,selectNode,addNode,updateNode,connectNodes,deleteNode,"
         "duplicateNode,groupNodes,runGenerate,undo,redo,setNodeImage,importImage,"
-        "breakdown,fillStoryboardCell,stage3dTextPlan,dubOrchestrate。"
+        "breakdown,fillStoryboardCell,stage3dTextPlan,dubOrchestrate,applyBlueprint。"
         "收到剧本文本并需要拆解为分镜时，必须用 breakdown 并携带剧本："
         '{"action":"breakdown","params":{"script":"完整剧本文本"}}。'
         "要把一段自然语言/文字变成 3D 导演台机位（粗模摆位）时用 stage3dTextPlan，携带文本："
@@ -297,5 +297,7 @@ def canvas_tools_prompt_block(mode: Optional[str] = None) -> str:
         "要给剧本做多角色配音（逐句按角色选音色 → 合成配音 → 时长反推镜头 → 配音轨落时间线）时用 dubOrchestrate，"
         "携带完整剧本（可选 characters 传角色音色绑定）："
         '{"action":"dubOrchestrate","params":{"script":"完整剧本文本"}}。'
+        "**用户要「一整套流程 / 完整工作流 / 从剧本到成片」时，必须用 applyBlueprint 一次铺出整张图，"
+        "不要只发一两条 addNode**（蓝图格式与节点目录见 [工作流蓝图] 段）。"
         "不要编造未列出的 action。\n"
     )
