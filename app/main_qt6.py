@@ -136,6 +136,24 @@ if not _probe_webengine():
     print("[startup] QtWebEngine 不可用（版本错配/渲染进程崩溃）⇒ AI 画布将用系统浏览器打开")  # stability-gate: allow-print（启动诊断：预检失败必须让用户看见）
     print("[startup] 若确信 WebEngine 正常，可设 SHIGUANG_FORCE_WEBENGINE=1 跳过预检")  # stability-gate: allow-print（自救开关必须让用户看见）
 
+# ── 2026-11-01 段错误根因修复：**推理栈必须早于 QtWebEngine 导入** ──────────
+# 实测（EXIT=139 SIGSEGV，无 traceback）：
+#   · 先 Qt 后 diffusers  ⇒ 崩在 `from diffusers import StableDiffusionPipeline` 这一行；
+#   · 先 diffusers 后 Qt  ⇒ diffusers 出图 2.1s / diffsynth 出图 4.2s，均正常。
+# 原因是 Windows 的 DLL 加载顺序冲突（Chromium 的 ICU/OpenSSL/ffmpeg 与
+# torch/transformers 的同名库互斥）；先加载 torch 侧，Chromium 会让路。
+# 关闭开关：SHIGUANG_PRELOAD_INFER=0（排查用；关掉后本地出图大概率段错误）。
+if os.environ.get("SHIGUANG_PRELOAD_INFER", "1") != "0":
+    try:
+        import torch  # noqa: F401  先占住 CUDA/OpenMP 侧 DLL
+        import diffusers  # noqa: F401  再占 tokenizers/safetensors 侧
+        from diffusers import StableDiffusionPipeline  # noqa: F401  这条正是崩溃点，必须在此成功
+        import transformers  # noqa: F401
+        _startup_mark("[startup] 推理栈预载完成（torch/diffusers/transformers，早于 QtWebEngine）")
+    except Exception as _e:  # stability-gate: allow-swallow（预载失败不得阻止应用启动；出图时会如实报错）
+        _startup_mark(f"[startup] 推理栈预载失败（本地出图可能段错误）：{type(_e).__name__}: {_e}")
+
+# 2026-10-25 深夜根因修复：QtWebEngineWidgets 必须在 QApplication 之前导入，
 # 2026-10-25 深夜根因修复：QtWebEngineWidgets 必须在 QApplication 之前导入，
 # 否则 App 里懒加载（QApplication 之后）会让首次导航静默失败：
 #   loadFinished ok=False、page_url 为空、HTTP 200 明明可达（实测 data/canvas_load.log）。

@@ -1,5 +1,21 @@
 # 拾光剪影 — 变更日志
 
+## 修复应用内本地出图 SIGSEGV（DLL 加载顺序）：推理栈必须早于 QtWebEngine（2026-11-01）
+
+**现象**：点生成后应用直接消失（退出码 139 = SIGSEGV，无 traceback）。
+
+**根因**：Windows DLL 加载顺序冲突 —— QtWebEngine（Chromium 的 ICU/OpenSSL/ffmpeg）先加载后，
+`from diffusers import StableDiffusionPipeline` 这一步段错误。
+取证：Qt 先起 → 崩在 S4（该 import 行）；单独跑引擎正常；`torch.cuda` 在 Qt 里正常（排除 CUDA 冲突）。
+反向验证：先 diffusers 后 Qt ⇒ diffusers 2.1s / diffsynth 4.2s 均正常出图。
+
+**修复**：`main_qt6.py` 在导入 `PyQt6.QtWebEngineWidgets` 之前预载 torch/diffusers/transformers；
+失败不阻塞启动（写入 data/startup.log），逃生开关 `SHIGUANG_PRELOAD_INFER=0`。
+
+**验证**：运行中实例内 `POST /host/local-image-generate` 两套引擎均 ok:true + PNG，进程存活。
+
+文档 §33
+
 ## 修复「模型已选却报没有可用的 AIGC 生图渠道」+ 云端无渠道自动回落本地（2026-11-01）
 
 **根因**：该文案只存在于云端函数 `generate_image_openai_compatible` ⇒ 生成走了云端分支；
