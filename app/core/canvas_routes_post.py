@@ -1904,6 +1904,43 @@ class CanvasPostRoutesMixin:
         self._json(code, res)
         return
 
+    # ── POST /host/person-card/preview：人物卡 → 英文提示词（2026-11-01 · C 项）──
+    # 为什么放后端：词典与排序规则只有一份（prompt_template），前端自己抄一遍必然漂移。
+    # 面板据此显示「真正送进模型的那句话」，用户就不会觉得是黑盒。
+    @_route_post("/host/person-card/preview")
+    def _p_host_person_card_preview(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        try:
+            from app.core.ai import negative_presets as NP
+            from app.core.ai import prompt_template as PT
+
+            card = body.get("person_card") if isinstance(body.get("person_card"), dict) else None
+            genre = str(body.get("genre") or "")
+            free = str(body.get("free_text") or "").strip()
+            prompt = PT.render_prompt(card, extra=free)
+            # 分档必须看**中文原值**：渲染后是英文（hanfu/ancient architecture），
+            # 关键词表是中文，拿英文去猜永远落到默认档（实测 bug）。
+            _zh = " ".join(str(v) for v in (card or {}).values()) + " " + free
+            self._json(200, {
+                "ok": True,
+                "prompt": prompt,
+                "genre": genre or NP.guess_genre(_zh),
+                "negative": NP.build_negatives(prompt=free or prompt, genre=genre),
+                "fields": PT.normalize_card(card),
+            })
+        except Exception:
+            logger.exception("[/host/person-card/preview] 失败")
+            self._json(500, {"ok": False, "message": "人物卡预览失败"})
+
+
     @_route_post("/host/redub-execute")
     def _p_host_redub_execute(self, parsed, raw: bytes, ctype: str) -> None:
         """一键换词重配：编排 T1+T2+T3（引擎未装时诚实降级/失败，不冒充）。"""

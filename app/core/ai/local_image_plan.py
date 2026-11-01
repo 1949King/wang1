@@ -179,8 +179,12 @@ def generate_kwargs(*, backend: Any, model_id: str, quality: str = "",
     try:
         from app.core.ai import negative_presets as _NP
 
+        # 分档看中文原值：卡里写「汉服」但自由文本为空时，也要能判成 ancient
+        _zh_hint = _raw
+        if isinstance(person_card, dict):
+            _zh_hint = (_zh_hint + " " + " ".join(str(v) for v in person_card.values())).strip()
         kw["negative_prompt"] = _NP.build_negatives(
-            prompt=_raw, genre=genre,
+            prompt=_zh_hint, genre=genre,
             user_negative=str(kw.get("negative_prompt") or ""),
             extra=_neg_extra,
         )

@@ -1,5 +1,21 @@
 # 拾光剪影 — 变更日志
 
+## C 项 UI：画布「🧑 人物卡」面板（2026-11-01）
+
+**新增**：`personCard.ts`（类型+枚举+默认卡 store）/ `PersonCardPanel.tsx`（字段/预览/应用）/
+`personCardTopBar.tsx`（顶栏入口，挂 WorkspaceCanvasMenus）/ `personCardPanel.css`；
+后端 `POST /host/person-card/preview`（人物卡 → 英文提示词 + 负向 + 分档）。
+
+**两条设计决定**：① 英文预览走**后端**（前端自拼必然与 prompt_template 漂移）；
+② 人物卡存**独立 store**（store.ts 属冻结区，且人物卡本质是生成参数）。
+
+**应用范围**：节点卡 > 默认卡 > 不传（全空不传，避免盖掉自由文本提示词）。
+
+**修掉的 bug**：题材分档此前拿**渲染后的英文**去猜（关键词表是中文）⇒ 古装卡永远判成默认档；
+改为**用中文原值猜档**（卡内值 + 自由文本），前后端两处同修。
+
+**验证**：preview 端点运行中实测通过；前端 671 passed（+4 personCard）；tsc 37 基线；dist 已重建。
+
 ## B/C 项：分档负向词库 + 人物卡提示词模板（2026-11-01）
 
 **B · 分档负向词库**（`negative_presets.py`）：base + 5 个题材档（short_drama/ancient/office/anime/product），

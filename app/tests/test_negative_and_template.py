@@ -83,3 +83,25 @@ def test_render_prompt_translates_unknown_chinese(monkeypatch):
     out = T.render_prompt({"gender": "女生", "pose": "侧身回眸"})
     assert "侧身回眸" not in out
     assert "young woman" in out
+
+
+def test_card_chinese_decides_genre():
+    """人物卡里写「汉服」但没自由文本 ⇒ 仍应判为古装档（不能拿渲染后的英文去猜）。"""
+    from app.core.ai import local_image_plan as LP
+
+    class _Eng:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, model_id, **kw):
+            self.calls.append(kw)
+            return {"ok": True}
+
+        def request_precision(self, *a, **k):
+            return None
+
+    eng = _Eng()
+    kw = LP.generate_kwargs(backend=eng, model_id="sd15-t2i", quality="standard",
+                            prompt="", person_card={"outfit": "汉服", "setting": "古建筑"},
+                            genre="")
+    assert "modern clothing" in kw["negative_prompt"]     # ancient 档专属词

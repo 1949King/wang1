@@ -102,7 +102,9 @@ export function mergeLocalImageModels(
 type ImageRequest = Omit<Parameters<typeof generateImageViaHost>[0], "model" | "channel_id">;
 
 /** 本地图像生成请求；模型未下载时后端返回诚实错误，不在前端伪造成功。 */
-export async function generateImageLocalViaHost(opts: ImageRequest & { model: string }): Promise<{
+export async function generateImageLocalViaHost(
+  opts: ImageRequest & { model: string; person_card?: Record<string, string>; genre?: string },
+): Promise<{
   ok: boolean;
   message?: string;
   image_data_url?: string;
@@ -131,6 +133,10 @@ export async function generateImageLocalViaHost(opts: ImageRequest & { model: st
         image: opts.reference_image || "",
         quality: opts.quality || "standard",
         seed: opts.seed ?? 0,
+        // C 项：人物卡（后端按固定顺序拼英文提示词，优先于自由文本）
+        person_card: opts.person_card || undefined,
+        // B 项：题材分档（负向词库）；空则由后端按提示词猜
+        genre: opts.genre || "",
         ...size,
       }),
     });
@@ -151,7 +157,11 @@ export async function generateImageLocalViaHost(opts: ImageRequest & { model: st
 
 /** 云端/本地统一入口，调用方只负责提供 channel_id::model。 */
 export async function generateImageUnified(
-  opts: ImageRequest & { parsed: { channel_id: string; model: string } },
+  opts: ImageRequest & {
+    parsed: { channel_id: string; model: string };
+    person_card?: Record<string, string>;
+    genre?: string;
+  },
 ): Promise<Awaited<ReturnType<typeof generateImageViaHost>>> {
   const { parsed, ...request } = opts;
   if (parsed.channel_id !== LOCAL_CHANNEL_ID) {

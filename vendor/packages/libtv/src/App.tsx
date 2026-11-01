@@ -55,6 +55,7 @@ import { buildCameraPromptBlock, multiAngleBatch, type AnglePreset } from "./sho
 import { applyActiveAestheticToPrompt } from "./aestheticPresets";
 import type { PromptItem } from "./promptLibrary";
 import { buildWorkflowSkill, downloadWorkflowSkill, readWorkflowSkillFile, skillToProjectBundle } from "./workflowSkill";
+import { effectiveCard } from "./personCard";
 
 const Stage3D = lazy(() => import("./Stage3D"));
 
@@ -558,6 +559,10 @@ export default function App() {
       } as NodeData);
       const res = await generateImageUnified({
         parsed: resolveModel(selectedModelKey),
+        // C 项：节点卡优先，其次默认卡；空卡不传（不干扰自由文本提示词）
+        person_card: Object.keys(effectiveCard((data as { personCard?: Record<string, string> }).personCard)).length
+          ? effectiveCard((data as { personCard?: Record<string, string> }).personCard)
+          : undefined,
         prompt: fullPrompt || data.prompt || "竖屏漫剧",
         n: count,
         reference_image: assetRef || "",
@@ -691,6 +696,11 @@ export default function App() {
 
     const res = await generateImageUnified({
       parsed: resolveModel(selectedModelKey),
+      // C 项：见上方注释（节点卡 > 默认卡 > 不传）
+      person_card: (() => {
+        const card = effectiveCard((data as { personCard?: Record<string, string> }).personCard);
+        return Object.keys(card).length ? card : undefined;
+      })(),
       prompt: fullPrompt || "竖屏漫剧分镜",
       // size 不传：交后端按 quality + aspect 推导（默认竖屏短剧 9:16）
       aspect: (data as any).aspect || "",
@@ -1522,6 +1532,19 @@ export default function App() {
   );
 
   /** 节点一键重试 — 由 NodeActionsContext 注入给各节点组件的 Shell */
+  // 🔴 2026-11-01 修（用户实锤「Agent 面板选了本地 SD1.5，节点点生成却报
+  //   「没有可用的 AIGC 生图渠道」」）：
+  //   `retryNode` 是 `useCallback([])` —— 保留空依赖是为了让引用稳定
+  //   （否则 NodeActionsContext 的 value 每帧都换 ⇒ 画布上每个节点全量重渲染）。
+  //   但空依赖的代价是它**永远抱着首次渲染时的 `generateForNode` 闭包**，
+  //   而那个闭包里 `selectedModelKey` / `videoModels` 全是**首渲染快照**。
+  //   于是：用户在 Agent 面板点「选用 本地·SD1.5」→ store 更新、按钮变「已选」，
+  //   但节点内「✦ 生成」仍用旧闭包（channel_id 为空）⇒ 走云端
+  //   ⇒ 报「没有可用的 AIGC 生图渠道」。本地模型明明已下载，用户只会以为渠道没配。
+  //   修法：用 ref 持有最新实现，`retryNode` 本身仍保持稳定引用。
+  const generateForNodeRef = useRef(generateForNode);
+  generateForNodeRef.current = generateForNode;
+
   const retryNode = useCallback(async (nodeId: string) => {
     const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
     if (!node) {
@@ -1547,7 +1570,7 @@ export default function App() {
     setGenerating(true);
     setStatus(`重试生成：${(data as { title?: string }).title || nodeId}…`);
     try {
-      const { ok, message } = await generateForNode(node, data);
+      const { ok, message } = await generateForNodeRef.current(node, data);
       useCanvasStore.getState().updateNodeData(nodeId, {
         status: ok ? "success" : "failed",
         progress: ok ? 100 : 0,
@@ -1566,8 +1589,16 @@ export default function App() {
     }
   }, []);
 
+  // 节点动作上下文：value 必须**引用稳定**。此前写成行内 `{{ retryNode, generateNode }}`，
+  // 每次 App 渲染（status / generating 变化极频繁）都会造一个新对象 ⇒ Context 消费者
+  // 全量重渲染 ⇒ 画布上几十个节点跟着重画。retryNode 本身已是稳定引用，固定即可。
+  const nodeActionsValue = useMemo(
+    () => ({ retryNode, generateNode: retryNode }),
+    [retryNode],
+  );
+
   return (
-    <NodeActionsContext.Provider value={{ retryNode, generateNode: retryNode }}>
+    <NodeActionsContext.Provider value={nodeActionsValue}>
     <CanvasShell
       viewMode={viewMode}
       setViewMode={setViewMode}
