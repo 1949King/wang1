@@ -155,7 +155,25 @@ export async function generateImageUnified(
 ): Promise<Awaited<ReturnType<typeof generateImageViaHost>>> {
   const { parsed, ...request } = opts;
   if (parsed.channel_id !== LOCAL_CHANNEL_ID) {
-    return generateImageViaHost({ ...request, model: parsed.model, channel_id: parsed.channel_id });
+    const cloud = await generateImageViaHost({ ...request, model: parsed.model, channel_id: parsed.channel_id });
+    // 2026-11-01：云端"没有可用渠道"时不把用户卡死在墙上 —— 本机能出图就自动改走本地，
+    // 并**如实说明**换了路（项目禁止静默降级，所以消息里必须出现原因）。
+    // 触发场景（实测）：密钥库写盘失败 ⇒ deepseek 等渠道按未配置处理，
+    // 但 selectedModelKey 仍停在云端条目 ⇒ 每次点「生成」都撞同一堵墙。
+    if (!cloud.ok && (cloud as { fallback_placeholder?: boolean }).fallback_placeholder) {
+      const local = await generateImageLocalViaHost({ ...request, model: "" });
+      if (local.ok) {
+        return {
+          ...local,
+          message: `云端渠道不可用（${cloud.message || "未配置 Key"}）⇒ 已自动改用**本地引擎**。${local.message || ""}`,
+        };
+      }
+      return {
+        ...cloud,
+        message: `${cloud.message || "云端渠道不可用"}；本地引擎也失败：${local.message || "未知原因"}`,
+      };
+    }
+    return cloud;
   }
   const count = Math.max(1, Math.min(4, request.n || 1));
   if (count === 1) return generateImageLocalViaHost({ ...request, model: parsed.model });
