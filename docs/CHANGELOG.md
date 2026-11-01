@@ -1,5 +1,22 @@
 # 拾光剪影 — 变更日志
 
+## 角色库（多角色）：复用既有 CharacterStore + 路由抽 mixin（2026-11-01）
+
+**不新建存储**：复用 `character_management_module.CharacterStore`（library.json + CHARACTER_FIELD_SCHEMA），
+新增桥接层 `app/core/ai/character_library.py`（归一化 / 映射 / 在角色记录里持久化 person_card）。
+
+**路由**抽成 `CanvasDrawPlanRoutesMixin`（canvas_routes_draw_plan.py，135 行）：
+person-card/preview + characters/list|save|delete —— 因为加到 canvas_routes_post.py 会超 2000 行 SIZE 门禁，
+按 canvas_routes_team.py 的先例抽 mixin（主文件回到 1928 行）。
+
+**面板**新增「角色库」段：选角色→载入、输入名→保存、删除（二次确认）、不可写时红条提示。
+
+**诚实性修复**：`writable()` 不再信 `os.access`（实测误报 True），改为真写探针文件；
+保存失败返回明确原因，不假报成功。
+
+**验证**：后端 7 例（临时库路径）+ 前端 671 passed + 端点 114 / 体检 112 文档同步；
+运行中实例实测 list ok、save 因本会话写盘限制如实失败。
+
 ## C 项 UI：画布「🧑 人物卡」面板（2026-11-01）
 
 **新增**：`personCard.ts`（类型+枚举+默认卡 store）/ `PersonCardPanel.tsx`（字段/预览/应用）/

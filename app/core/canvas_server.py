@@ -124,6 +124,7 @@ from app.core.canvas_routes_digital_human import CanvasDigitalHumanRoutesMixin
 from app.core.canvas_routes_execution import CanvasExecutionRoutesMixin
 from app.core.canvas_routes_local_video import CanvasLocalVideoRoutesMixin
 from app.core.canvas_routes_team import CanvasTeamRoutesMixin
+from app.core.canvas_routes_draw_plan import CanvasDrawPlanRoutesMixin
 from app.core.canvas_http_file import serve_file as _serve_file
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
@@ -389,7 +390,7 @@ def _read_local_prompt_json(source_id: str) -> Any:
 # 路由表本体与装饰器已下沉到 `app/core/canvas_route_registry.py`（顶部 import）。
 
 
-class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, CanvasDigitalHumanRoutesMixin, CanvasExecutionRoutesMixin, CanvasLocalVideoRoutesMixin, CanvasTeamRoutesMixin, BaseHTTPRequestHandler):
+class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoutesMixin, CanvasRoughCutRoutesMixin, CanvasCodeVideoRoutesMixin, CanvasDigitalHumanRoutesMixin, CanvasExecutionRoutesMixin, CanvasLocalVideoRoutesMixin, CanvasTeamRoutesMixin, CanvasDrawPlanRoutesMixin, BaseHTTPRequestHandler):
     server_version = "ShiguangCanvasBridge/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
@@ -950,7 +951,15 @@ class _BridgeHandler(CanvasGetRoutesMixin, CanvasPostRoutesMixin, CanvasDubRoute
             aspect = str(kwargs.get("aspect") or "") or DEFAULT_ASPECT
             size = str(kwargs.get("size") or "") or translate_quality(quality, CAPABILITY_IMAGE, aspect)["size"]
             report.stage("await_provider", "等待模型返回图像")
-            res = generate_image_openai_compatible(
+            # 🔴 2026-11-01 修：此前这里直接调 `generate_image_openai_compatible`（**纯云端**），
+            #   而同步端点 `POST /host/generate-image` 早在 2026-10-23 就接了混合调度
+            #   （`generate_image_hybrid`）。前端默认走**异步任务化**（submit + 轮询），
+            #   于是「算力滑块拉到本地 / 本地 SD 已下载」时照样只走云端
+            #   ⇒ 报「没有可用的 AIGC 生图渠道」，本地模型形同不存在。
+            #   异步端点必须与同步端点**同一实现**，否则「保真搬运」会静默丢掉功能。
+            from app.core.ai.hybrid_dispatch import generate_image_hybrid
+
+            res = generate_image_hybrid(
                 prompt=str(kwargs.get("prompt") or ""),
                 model=str(kwargs.get("model") or ""),
                 size=size,

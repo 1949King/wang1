@@ -17,6 +17,15 @@ import { useCanvasStore } from "./store";
 import "./personCardPanel.css";
 
 type Preview = { prompt: string; negative: string; genre: string };
+type Character = {
+  id: string;
+  name: string;
+  gender?: string;
+  age_range?: string;
+  card: PersonCard;
+  hint?: string;
+  has_card?: boolean;
+};
 
 export function PersonCardPanel({ onClose }: { onClose?: () => void }) {
   const card = usePersonCardStore((s) => s.card);
@@ -33,10 +42,107 @@ export function PersonCardPanel({ onClose }: { onClose?: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState("");
+  // 角色库（复用后端 CharacterStore，不另建存储）
+  const [chars, setChars] = useState<Character[]>([]);
+  const [charId, setCharId] = useState("");
+  const [charName, setCharName] = useState("");
+  const [storeWritable, setStoreWritable] = useState(true);
+  const [storePath, setStorePath] = useState("");
 
   const nodeCard = (selectedData?.personCard || {}) as PersonCard;
   const editing: PersonCard = hasCard(nodeCard) ? nodeCard : card;
   const targetLabel = hasCard(nodeCard) ? "当前节点" : "默认卡（所有节点共用）";
+
+  const refreshChars = useCallback(async () => {
+    try {
+      const res = await fetch(BRIDGE + "/host/characters/list", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: "{}",
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        setChars(Array.isArray(data.characters) ? data.characters : []);
+        setStoreWritable(Boolean(data.writable));
+        setStorePath(String(data.store_path || ""));
+      }
+    } catch {
+      /* 列表失败不阻塞——面板其余功能仍可用 */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshChars();
+  }, [refreshChars]);
+
+  const selectedChar = chars.find((c) => c.id === charId);
+
+  const loadChar = () => {
+    if (!selectedChar) {
+      setLine("先选一个角色");
+      return;
+    }
+    const card = selectedChar.card || {};
+    if (hasCard(nodeCard) && selectedId) {
+      updateNodeData(selectedId, { personCard: card });
+      setLine(`已把「${selectedChar.name}」写到当前节点`);
+    } else {
+      replace(card);
+      setLine(`已载入「${selectedChar.name}」${selectedChar.hint ? "（外貌片段随生成一起翻译）" : ""}`);
+    }
+    setCharName(selectedChar.name);
+  };
+
+  const saveChar = async () => {
+    const name = charName.trim() || selectedChar?.name || "";
+    if (!name) {
+      setLine("填个角色名再保存");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(BRIDGE + "/host/characters/save", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ id: charId || undefined, name, person_card: editing }),
+      });
+      const data = await res.json();
+      setLine(String(data?.message || (data?.ok ? "已保存" : "保存失败")));
+      if (data?.ok) {
+        setCharId(String(data.id || ""));
+        await refreshChars();
+      }
+    } catch (e) {
+      setLine("保存请求失败：" + String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const delChar = async () => {
+    if (!charId) {
+      setLine("先选一个角色");
+      return;
+    }
+    if (!window.confirm(`删除角色「${selectedChar?.name || charId}」？此操作不可撤销`)) return;
+    setBusy(true);
+    try {
+      const res = await fetch(BRIDGE + "/host/characters/delete", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ id: charId }),
+      });
+      const data = await res.json();
+      setLine(String(data?.message || "删除失败"));
+      if (data?.ok) {
+        setCharId("");
+        setCharName("");
+        await refreshChars();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // 预览（防抖 350ms；空卡不请求，避免无意义后端调用）
   useEffect(() => {
@@ -139,6 +245,27 @@ export function PersonCardPanel({ onClose }: { onClose?: () => void }) {
         {selectedId ? null : (
           <button type="button" onClick={() => { void replace(editing); setLine("已设为默认卡"); }}>设为默认</button>
         )}
+      </div>
+
+      <div className="sg-pc-chars">
+        <div className="sg-pc-chars-title">角色库（复用项目既有角色存储）</div>
+        {storePath && !storeWritable ? (
+          <div className="sg-pc-warn">角色库目录不可写：{storePath}（保存会失败，请检查权限）</div>
+        ) : null}
+        <div className="sg-pc-chars-row">
+          <select value={charId} onChange={(e) => { setCharId(e.target.value); setCharName(chars.find((c) => c.id === e.target.value)?.name || ""); }}>
+            <option value="">（选择角色）</option>
+            {chars.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.has_card ? "" : "（仅有基础信息）"}</option>
+            ))}
+          </select>
+          <button type="button" disabled={busy || !charId} onClick={loadChar}>载入</button>
+        </div>
+        <div className="sg-pc-chars-row">
+          <input value={charName} onChange={(e) => setCharName(e.target.value)} placeholder="角色名（保存为新角色/更新当前）" />
+          <button type="button" disabled={busy} onClick={() => void saveChar()}>保存</button>
+          <button type="button" disabled={busy || !charId} onClick={() => void delChar()}>删除</button>
+        </div>
       </div>
 
       <div className="sg-pc-preview">
