@@ -1626,6 +1626,9 @@ class CanvasPostRoutesMixin:
         _prompt_in = str(body.get("prompt") or "")
         kw = LP.generate_kwargs(
             backend=eng, model_id=model_id,
+            # C 项：人物卡（结构化字段拼英文提示词）+ B 项：题材分档（负向词库）
+            person_card=(body.get("person_card") if isinstance(body.get("person_card"), dict) else None),
+            genre=str(body.get("genre") or ""),
             quality=_get_quality(str(body.get("quality") or "")),
             preset=str(body.get("preset") or ""),
             prompt=str(body.get("prompt") or ""), negative_prompt=str(body.get("negative_prompt") or ""),

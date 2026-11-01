@@ -134,36 +134,59 @@ def preset_for(*, backend: Any, model_id: str, quality: str = "",
 
 
 def generate_kwargs(*, backend: Any, model_id: str, quality: str = "",
-                    preset: str = "", **base: Any) -> dict:
-    """组装 engine.generate 的关键字参数：只有非 None 的基础项 + 按能力追加 preset。
+                    preset: str = "", person_card: Optional[dict] = None,
+                    genre: str = "", **base: Any) -> dict:
+    """组装 engine.generate 的关键字参数：非 None 的基础项 + 按能力追加 preset。
 
-    2026-11-01：**中文提示词在这里翻成英文**。
-    SD1.5/SDXL 的文本编码器是 CLIP（英文语料），中文进去只剩零散 token ——
-    实测「黑色长直发女生捧马克杯在文创店」出图是一张空店铺（人没出现）。
-    放在这个唯一漏斗里，路由与能力处理器都自动受益，不必各改一遍；
-    翻译失败保留原文（不阻塞生成），原因由 prompt_bridge 记日志。
+    2026-11-01 在这里统一做三件事（本地生图**唯一漏斗**，路由/能力处理器都自动受益）：
+
+    ① **中文 ⇒ 英文**（CLIP 只认英文；失败保留原文，不阻塞生成）；
+    ② **人种锚定**（SD 底座先验偏西方，不锚就全是美式脸；用户写欧美则尊重）；
+    ③ **分档负向词库**（古装压现代服饰、短剧压欧美脸/塑料感…）。
+
+    `person_card`（C 项）：人物卡字段按固定顺序拼英文提示词，优先于自由文本。
+    `genre`：题材分档（负向词库用）；缺省按提示词猜。
     """
     kw = {k: v for k, v in base.items() if v is not None}
-    _raw = kw.get("prompt")
-    if isinstance(_raw, str) and _raw.strip():
-        try:
-            from app.core.ai import prompt_bridge as _PB
+    _raw = str(kw.get("prompt") or "").strip()
+    _neg_extra: list = []
+    try:
+        from app.core.ai import prompt_bridge as _PB
 
-            # ① 中文 ⇒ 英文（CLIP 只认英文；失败保留原文）
-            _used, _info = _PB.prepare_for_local(_raw)
-            if _info.get("translated") and _used:
-                kw["prompt"] = _used
-            # ② 人种锚定（2026-11-01）：SD 底座先验偏西方，中文「年轻女生」翻完没有地域线索
-            #    ⇒ 出图全是美式脸。默认锚东亚（短剧定位），用户写了欧美则尊重。
-            #    英文提示词同样要锚，所以这一步**不在翻译分支内**。
-            _biased, _neg_extra = _PB.apply_face_bias(str(kw.get("prompt") or ""), _raw)
-            if _biased:
-                kw["prompt"] = _biased
-            if _neg_extra:
-                _cur_neg = str(kw.get("negative_prompt") or "").strip()
-                kw["negative_prompt"] = (_cur_neg + ", " + _neg_extra).strip(", ") if _cur_neg else _neg_extra
-        except Exception:
-            logger.debug("[local_image_plan] 提示词预处理跳过", exc_info=True)
+        # ① 中文 ⇒ 英文
+        _used, _info = _PB.prepare_for_local(_raw)
+        if _info.get("translated") and _used:
+            kw["prompt"] = _used
+        _en_after_tr = str(kw.get("prompt") or "")
+
+        # ③ C 项：人物卡优先（结构化真源），自由文本仅作尾部补充
+        from app.core.ai import prompt_template as _PT
+
+        if _PT.has_card(person_card):
+            kw["prompt"] = _PT.render_prompt(person_card, extra=_en_after_tr if _raw else "")
+            _en_after_tr = str(kw.get("prompt") or "")
+
+        # ② 人种锚定（英文提示词同样要锚，不只翻译路径）
+        _biased, _neg_face = _PB.apply_face_bias(_en_after_tr, _raw)
+        if _biased:
+            kw["prompt"] = _biased
+        if _neg_face:
+            _neg_extra.append(_neg_face)
+    except Exception:
+        logger.debug("[local_image_plan] 提示词预处理跳过", exc_info=True)
+
+    # ③ 分档负向词库（用户自带 negative 永远保留并排在最前）
+    try:
+        from app.core.ai import negative_presets as _NP
+
+        kw["negative_prompt"] = _NP.build_negatives(
+            prompt=_raw, genre=genre,
+            user_negative=str(kw.get("negative_prompt") or ""),
+            extra=_neg_extra,
+        )
+    except Exception:
+        logger.debug("[local_image_plan] 负向词库跳过", exc_info=True)
+
     p = preset_for(backend=backend, model_id=model_id, quality=quality, preset=preset)
     if p:
         kw["preset"] = p
