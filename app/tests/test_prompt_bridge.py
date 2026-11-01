@@ -79,3 +79,39 @@ def test_translate_rejects_cjk_output(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _Resp())
     monkeypatch.setattr(PB, "_pick_model", lambda: "fake:model")
     assert PB.translate("一位女生") == ""
+
+
+# ── 人种锚定（2026-11-01）──────────────────────────────────
+def test_face_bias_default_east_asian(monkeypatch):
+    """默认锚东亚：SD 底座先验偏西方，不锚就全是美式脸。"""
+    monkeypatch.delenv("SHIGUANG_FACE_BIAS", raising=False)
+    p, neg = PB.apply_face_bias("young woman with black hair", "一位年轻女生")
+    assert p.startswith("East Asian, ")
+    assert "caucasian" in neg
+
+
+def test_face_bias_respects_west_request(monkeypatch):
+    """用户明确要欧美 ⇒ 不锚、不加负向（尊重用户）。"""
+    monkeypatch.delenv("SHIGUANG_FACE_BIAS", raising=False)
+    p, neg = PB.apply_face_bias("young woman", "欧美风格的白人女生")
+    assert p == "young woman" and neg == ""
+
+
+def test_face_bias_no_duplicate_tokens(monkeypatch):
+    """英文里已有 chinese/asian ⇒ 不叠词，但仍补负向。"""
+    monkeypatch.delenv("SHIGUANG_FACE_BIAS", raising=False)
+    p, neg = PB.apply_face_bias("chinese girl in hanfu", "汉服女生")
+    assert p == "chinese girl in hanfu"
+    assert "caucasian" in neg
+
+
+def test_face_bias_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("SHIGUANG_FACE_BIAS", "none")
+    p, neg = PB.apply_face_bias("young woman", "一位女生")
+    assert (p, neg) == ("young woman", "")
+
+
+def test_detect_face_bias_markers():
+    assert PB.detect_face_bias("中国古风少女") == "east"
+    assert PB.detect_face_bias("欧美金发女郎") == "west"
+    assert PB.detect_face_bias("一位女生") == ""

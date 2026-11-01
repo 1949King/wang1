@@ -143,6 +143,56 @@ def translate(text: str, *, model: str = "", timeout: Optional[float] = None) ->
         return ""
 
 
+# ── 人种锚定（2026-11-01）──────────────────────────────────────────
+# 为什么需要：SD1.5/SDXL 的底座先验来自 LAION 英文图文对，人像**默认偏西方面孔**；
+# 中文「年轻女生」翻成 young woman 后没有任何地域线索 ⇒ 模型回落到先验（实测全是美式脸）。
+# 本项目是中文短剧 ⇒ **默认锚定东亚面孔**；用户明确写欧美/西方时尊重用户。
+
+_WEST_MARKERS = ("欧美", "西方", "白人", "外国", "金发", "碧眼", "混血", "俄式", "法式")
+_EAST_MARKERS = ("中国", "亚洲", "东方", "东亚", "中式", "汉服", "古风", "国风",
+                 "日系", "韩系", "古装", "旗袍", "唐装", "民国")
+#: 英文侧已显式写了地域就不重复注入（避免 "East Asian chinese girl" 这种叠词）
+_EN_EAST = ("east asian", "asian", "chinese", "japanese", "korean", "chinese girl")
+
+
+def face_bias_mode() -> str:
+    """人种锚定模式：`east_asian`（默认）/ `none`（关闭，完全交给模型先验）。"""
+    raw = str(os.environ.get("SHIGUANG_FACE_BIAS", "east_asian")).strip().lower()
+    return raw if raw in ("east_asian", "none") else "east_asian"
+
+
+def detect_face_bias(text: str) -> str:
+    """从**中文原文**判断用户想要哪类面孔：`west` / `east` / ``（未表态）。"""
+    src = str(text or "")
+    if any(m in src for m in _WEST_MARKERS):
+        return "west"
+    if any(m in src for m in _EAST_MARKERS):
+        return "east"
+    return ""
+
+
+def apply_face_bias(en_prompt: str, zh_original: str) -> Tuple[str, str]:
+    """给英文提示词补地域锚 + 返回要追加的负向词。
+
+    返回 `(prompt, negative_extra)`；negative_extra 为空表示不动负向。
+    规则：
+      · 关闭 / 用户写了欧美 ⇒ 原样返回（尊重用户）；
+      · 英文里已有 asian/chinese… ⇒ 只补负向（不叠词）；
+      · 其余 ⇒ 句首加 "East Asian"（靠前的 token 权重高）+ 负向压 western。
+    """
+    src = str(en_prompt or "").strip()
+    if not src or face_bias_mode() == "none":
+        return src, ""
+    want = detect_face_bias(zh_original) or "east"
+    if want == "west":
+        return src, ""
+    neg = "western, caucasian, american, european face"
+    low = src.lower()
+    if any(k in low for k in _EN_EAST):
+        return src, neg
+    return "East Asian, " + src, neg
+
+
 def cached_out(text: str) -> str:
     """已翻译过就返回英文（供调用方回报 `prompt_used`）；没翻过返回空串。"""
     return _CACHE.get(hashlib.sha1(str(text or "").encode("utf-8")).hexdigest(), "")

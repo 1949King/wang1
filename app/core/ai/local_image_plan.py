@@ -149,11 +149,21 @@ def generate_kwargs(*, backend: Any, model_id: str, quality: str = "",
         try:
             from app.core.ai import prompt_bridge as _PB
 
+            # ① 中文 ⇒ 英文（CLIP 只认英文；失败保留原文）
             _used, _info = _PB.prepare_for_local(_raw)
             if _info.get("translated") and _used:
                 kw["prompt"] = _used
+            # ② 人种锚定（2026-11-01）：SD 底座先验偏西方，中文「年轻女生」翻完没有地域线索
+            #    ⇒ 出图全是美式脸。默认锚东亚（短剧定位），用户写了欧美则尊重。
+            #    英文提示词同样要锚，所以这一步**不在翻译分支内**。
+            _biased, _neg_extra = _PB.apply_face_bias(str(kw.get("prompt") or ""), _raw)
+            if _biased:
+                kw["prompt"] = _biased
+            if _neg_extra:
+                _cur_neg = str(kw.get("negative_prompt") or "").strip()
+                kw["negative_prompt"] = (_cur_neg + ", " + _neg_extra).strip(", ") if _cur_neg else _neg_extra
         except Exception:
-            logger.debug("[local_image_plan] 提示词翻译跳过", exc_info=True)
+            logger.debug("[local_image_plan] 提示词预处理跳过", exc_info=True)
     p = preset_for(backend=backend, model_id=model_id, quality=quality, preset=preset)
     if p:
         kw["preset"] = p
