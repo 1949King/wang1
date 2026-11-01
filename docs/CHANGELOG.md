@@ -1,5 +1,18 @@
 # 拾光剪影 — 变更日志
 
+## 修复长提示词「人物消失」：翻译校验太粗暴（2026-11-01）
+
+**真因**：prompt_bridge 校验 `has_cjk(out) ⇒ 整段作废`；长提示词模型输出常带几个中文词，
+于是整段被丢弃 ⇒ 回退原始中文进 CLIP ⇒ 只剩空场景、人没了（日志可见"翻译结果不可用，保留原文"）。
+
+**修复**：① sanitize_en() 按逗号剔中文片段、保留英文（英文<3 词才放弃）；
+② num_predict 260→420（截断也会触发误判）；③ cap_words() 按逗号截到 38 词（CLIP 静默截尾改主动截）。
+
+**实测**：用户原句（200+字）修复前空店铺 → 修复后东亚女生+黑长直+手捧杯+米色衬衫。
+仍存差距：背景货架丢失/单手持杯 = SD1.5 512² 能力上限。
+
+测试：test_prompt_bridge 新增 4 例（清洗/纯中文/截断/长度受控），相关 33 passed。
+
 ## 角色库（多角色）：复用既有 CharacterStore + 路由抽 mixin（2026-11-01）
 
 **不新建存储**：复用 `character_management_module.CharacterStore`（library.json + CHARACTER_FIELD_SCHEMA），

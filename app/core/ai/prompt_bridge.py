@@ -102,6 +102,21 @@ def _pick_model() -> str:
         return ""
 
 
+def sanitize_en(text: str) -> str:
+    """从翻译输出里**剔掉中文片段、保留英文**（而不是整段丢弃）。
+
+    为什么不能整段丢（2026-11-01 实测踩坑）：
+    用户那句 200+ 字的长提示词，模型输出末尾带了几个中文词（"+空气刘海"之类），
+    旧逻辑"含中文 ⇒ 整段作废" ⇒ 回退成原始中文 ⇒ CLIP 只画出"空店铺"，
+    **人物完全消失**。丢一句坏掉的部分，好过丢掉整段好的。
+    """
+    raw = str(text or "").replace("\n", ",")
+    keep = [seg.strip() for seg in raw.split(",") if seg.strip() and not has_cjk(seg)]
+    out = ", ".join(keep).strip().strip(",")
+    # 英文太少（<3 词）说明这段输出基本没用，宁可不要
+    return out if len(out.split()) >= 3 else ""
+
+
 def translate(text: str, *, model: str = "", timeout: Optional[float] = None) -> str:
     """调用本机 Ollama 翻译。失败返回空串（调用方据此保留原文）。"""
     src = str(text or "").strip()
@@ -117,7 +132,7 @@ def translate(text: str, *, model: str = "", timeout: Optional[float] = None) ->
         "stream": False,
         # qwen3.x 是混合推理模型：不关 think 的话 response 可能是空的（实测踩过）
         "think": False,
-        "options": {"temperature": 0.2, "num_predict": 260},
+        "options": {"temperature": 0.2, "num_predict": 420},
     }
     try:
         import json
@@ -132,11 +147,17 @@ def translate(text: str, *, model: str = "", timeout: Optional[float] = None) ->
         t0 = time.time()
         with urllib.request.urlopen(req, timeout=timeout or _timeout()) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
-        out = str(data.get("response") or "").strip().strip('"').strip()
-        if not out or has_cjk(out):
-            logger.warning("[prompt_bridge] 翻译结果不可用（空串或仍含中文），保留原文")
+        raw_out = str(data.get("response") or "").strip().strip('"').strip()
+        if not raw_out:
+            logger.warning("[prompt_bridge] 翻译结果为空，保留原文")
             return ""
-        logger.info("[prompt_bridge] 翻译完成 %.1fs：%s", time.time() - t0, out[:80])
+        # 纯英文：直接用；含中文：先清洗掉中文片段（保留英文），不要整段丢
+        out = raw_out if not has_cjk(raw_out) else sanitize_en(raw_out)
+        if not out:
+            logger.warning("[prompt_bridge] 翻译结果清洗后无有效英文，保留原文")
+            return ""
+        logger.info("[prompt_bridge] 翻译完成 %.1fs（%s）：%s", time.time() - t0,
+                    "原样" if out == raw_out else "已剔除中文片段", out[:80])
         return out
     except Exception as e:  # stability-gate: allow-swallow（翻译失败必须回落到原文）
         logger.warning("[prompt_bridge] 翻译失败（保留原文）：%s: %s", type(e).__name__, e)
@@ -198,6 +219,28 @@ def cached_out(text: str) -> str:
     return _CACHE.get(hashlib.sha1(str(text or "").encode("utf-8")).hexdigest(), "")
 
 
+#: 英文提示词词数上限（CLIP 上下文 77 token，38 词是实测安全线）
+MAX_EN_WORDS = 38
+
+
+def cap_words(text: str, max_words: int = MAX_EN_WORDS) -> str:
+    """按逗号边界截到 max_words 词以内。
+
+    超了不会报错，CLIP 会**静默截断**（尾部关键词直接消失）——
+    与其让模型随机丢，不如我们按"重要性排序"的逗号段落明确地丢。
+    """
+    parts = [p.strip() for p in str(text or "").split(",") if p.strip()]
+    kept: list = []
+    count = 0
+    for part in parts:
+        n = len(part.split())
+        if count + n > max_words and kept:
+            break
+        kept.append(part)
+        count += n
+    return ", ".join(kept)
+
+
 def prepare_for_local(prompt: str) -> Tuple[str, Dict[str, Any]]:
     """本地生图前处理：中文 ⇒ 英文。
 
@@ -225,6 +268,7 @@ def prepare_for_local(prompt: str) -> Tuple[str, Dict[str, Any]]:
     if not out:
         info["reason"] = "翻译失败（Ollama 不可用/超时/输出异常）"
         return src, info
+    out = cap_words(out)
     _CACHE[key] = out
     while len(_CACHE) > CACHE_MAX:
         _CACHE.pop(next(iter(_CACHE)))

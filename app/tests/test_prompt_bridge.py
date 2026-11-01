@@ -115,3 +115,33 @@ def test_detect_face_bias_markers():
     assert PB.detect_face_bias("中国古风少女") == "east"
     assert PB.detect_face_bias("欧美金发女郎") == "west"
     assert PB.detect_face_bias("一位女生") == ""
+
+
+def test_sanitize_drops_chinese_segments():
+    """含中文片段时只剔掉那几段，保留英文 —— 旧逻辑整段丢弃导致"人物消失"。"""
+    out = PB.sanitize_en("young woman, black long straight hair, 空气刘海, holding mug, cozy shop")
+    assert "young woman" in out and "holding mug" in out
+    assert "空气刘海" not in out
+    assert out == "young woman, black long straight hair, holding mug, cozy shop"
+
+
+def test_sanitize_returns_empty_when_mostly_chinese():
+    assert PB.sanitize_en("一位女生, 站在店铺, ok") == ""   # 英文不足 3 词 ⇒ 宁可不翻
+
+
+def test_cap_words_by_comma_boundary():
+    """超长翻译按逗号边界截断（CLIP 会静默截尾，我们主动截才有确定性）。"""
+    long = "young woman, black hair, mug, cream shirt, shop, warm light, cozy, photorealistic, cinematic"
+    out = PB.cap_words(long, max_words=8)
+    assert len(out.split()) <= 8
+    assert out.startswith("young woman")   # 主体不被丢
+
+
+def test_prepare_caps_translated_length(monkeypatch):
+    monkeypatch.setenv("SHIGUANG_PROMPT_TRANSLATE", "1")
+    PB._CACHE.clear()
+    long_en = ", ".join(["word"] * 60)
+    monkeypatch.setattr(PB, "translate", lambda *a, **k: long_en)
+    used, info = PB.prepare_for_local("一位女生")
+    assert info["translated"] is True
+    assert len(used.split()) <= PB.MAX_EN_WORDS
