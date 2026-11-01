@@ -1623,6 +1623,7 @@ class CanvasPostRoutesMixin:
         # 分辨率总闸（2026-10-27）：qualityTier → 长边上限（SDXL 832 / SD1.5 640 …）
         _qw, _qh = LP.target_size(int(body.get("width") or 0), int(body.get("height") or 0),
                                   _get_quality(str(body.get("quality") or "")), model_id)
+        _prompt_in = str(body.get("prompt") or "")
         kw = LP.generate_kwargs(
             backend=eng, model_id=model_id,
             quality=_get_quality(str(body.get("quality") or "")),
@@ -1643,6 +1644,18 @@ class CanvasPostRoutesMixin:
         res["engine_is_fallback"] = sel.get("is_fallback", False)
         res["engine_reasons"] = sel.get("reasons", [])
         res["preset"] = kw.get("preset", "")
+        # 2026-11-01：中文提示词会被翻成英文再送模型（SD1.5/SDXL 的 CLIP 只认英文）——
+        # 如实回报，用户能核对"送进模型的到底是什么"。
+        try:
+            from app.core.ai import prompt_bridge as _PB2
+
+            _en = _PB2.cached_out(_prompt_in)
+            if _en:
+                res["prompt_original"] = _prompt_in
+                res["prompt_used"] = _en
+                res["prompt_translated"] = True
+        except Exception:
+            logger.debug("[/host/local-image-generate] 回报翻译信息失败", exc_info=True)
         if res.get("ok"):
             # P0b：本地生图收尾入闭环（代理分 + draw_book 账本 + 推荐回传）。
             # 接线层内部吞异常，入账失败绝不影响生成结果。

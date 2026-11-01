@@ -135,8 +135,25 @@ def preset_for(*, backend: Any, model_id: str, quality: str = "",
 
 def generate_kwargs(*, backend: Any, model_id: str, quality: str = "",
                     preset: str = "", **base: Any) -> dict:
-    """组装 engine.generate 的关键字参数：只有非 None 的基础项 + 按能力追加 preset。"""
+    """组装 engine.generate 的关键字参数：只有非 None 的基础项 + 按能力追加 preset。
+
+    2026-11-01：**中文提示词在这里翻成英文**。
+    SD1.5/SDXL 的文本编码器是 CLIP（英文语料），中文进去只剩零散 token ——
+    实测「黑色长直发女生捧马克杯在文创店」出图是一张空店铺（人没出现）。
+    放在这个唯一漏斗里，路由与能力处理器都自动受益，不必各改一遍；
+    翻译失败保留原文（不阻塞生成），原因由 prompt_bridge 记日志。
+    """
     kw = {k: v for k, v in base.items() if v is not None}
+    _raw = kw.get("prompt")
+    if isinstance(_raw, str) and _raw.strip():
+        try:
+            from app.core.ai import prompt_bridge as _PB
+
+            _used, _info = _PB.prepare_for_local(_raw)
+            if _info.get("translated") and _used:
+                kw["prompt"] = _used
+        except Exception:
+            logger.debug("[local_image_plan] 提示词翻译跳过", exc_info=True)
     p = preset_for(backend=backend, model_id=model_id, quality=quality, preset=preset)
     if p:
         kw["preset"] = p
