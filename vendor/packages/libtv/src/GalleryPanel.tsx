@@ -14,11 +14,16 @@
  * 视频用 posterUrl（首帧）做缩略图。
  */
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
+import { assetFromGallery } from "./assetFromOutputs";
+import { useContextMenu } from "./hooks/useContextMenu";
+import { addAsset } from "./localLibrary";
 import { useCanvasStore } from "./store";
 import { useWindowPanel } from "./hooks/useWindowPanel";
 
 import "./gallery.css";
+import "./ctxmenu.css";
 
 interface GalleryItem {
   id: string;
@@ -26,6 +31,8 @@ interface GalleryItem {
   title: string;
   thumb: string;
   isVideo: boolean;
+  /** 生成时用的提示词（右键「加入我的资产」要带上，空则不带） */
+  prompt: string;
 }
 
 type GalleryFilter = "all" | "image" | "video";
@@ -43,6 +50,15 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<GalleryFilter>("all");
   /** lightbox 正在查看的产物索引（基于 filtered 列表）；null = 关闭 */
   const [zoomIdx, setZoomIdx] = useState<number | null>(null);
+  /** 右键菜单：把缩略图对应的产物收进「我的资产」 */
+  const menu = useContextMenu<GalleryItem>();
+  const [flash, setFlash] = useState("");
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = window.setTimeout(() => setFlash(""), 1800);
+    return () => window.clearTimeout(t);
+  }, [flash]);
 
   const items = useMemo<GalleryItem[]>(() => {
     const out: GalleryItem[] = [];
@@ -61,6 +77,7 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
         title: str(d.label) || str(d.prompt).slice(0, 30) || (kind === "video" ? "视频" : "图片"),
         thumb,
         isVideo: kind === "video",
+        prompt: str(d.prompt),
       });
     }
     // 新生成的排前面（节点数组顺序 = 添加顺序，倒序 = 最新在上）
@@ -94,13 +111,24 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
 
   const zoomItem = zoomIdx !== null ? filtered[zoomIdx] : null;
 
+  /** 右键「加入我的资产」：映射失败就不存，并在头部说清原因。 */
+  const saveToAssets = (it: GalleryItem) => {
+    const draft = assetFromGallery(it);
+    if (!draft) {
+      setFlash("这一条没有可存的产物");
+      return;
+    }
+    addAsset(draft);
+    setFlash(`已加入我的资产：${draft.title}`);
+  };
+
   return (
     <div className="oh-panel sg-gallery" data-pinned="0"
          ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
       <header className="oh-head" onPointerDown={win.startDrag}>
         <span className="oh-title">图库</span>
         <span className="oh-count">
-          共 {items.length} 个产物{filter !== "all" ? ` · 当前 ${filtered.length}` : ""}
+          {flash || `共 ${items.length} 个产物${filter !== "all" ? ` · 当前 ${filtered.length}` : ""}`}
         </span>
         <span className="oh-spacer" />
         <button type="button" className="oh-min" onClick={win.minimize} title="最小化到任务栏">
@@ -147,7 +175,8 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
                 type="button"
                 className={`sg-gallery-cell${selectedId === it.id ? " on" : ""}`}
                 onClick={() => setSelected(it.id)}
-                title={`${it.isVideo ? "视频" : "图片"}：${it.title}\n（点击选中对应节点 · ⤢ 放大查看）`}
+                onContextMenu={(ev) => menu.open(ev, it)}
+                title={`${it.isVideo ? "视频" : "图片"}：${it.title}\n（点击选中对应节点 · ⤢ 放大查看 · 右键加入我的资产）`}
               >
                 <span className="sg-gallery-thumb">
                   <img src={it.thumb} alt="" loading="lazy" draggable={false} />
@@ -211,6 +240,47 @@ export default function GalleryPanel({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       ) : null}
+
+      {/* 右键菜单 portal 到 body：面板在 CSS 模式下带 translateX(-50%)，
+          挂里面会把 clientX 当成相对面板的坐标，菜单会飘出去 */}
+      {menu.state
+        ? createPortal(
+            <div
+              className="sg-ctxmenu"
+              style={{ left: menu.state.x, top: menu.state.y }}
+              role="menu"
+              onPointerDown={(ev) => ev.stopPropagation()}
+              onContextMenu={(ev) => ev.preventDefault()}
+            >
+              <button
+                type="button"
+                className="sg-ctxmenu-item"
+                disabled={!assetFromGallery(menu.state.target)}
+                title="收进「我的资产」，之后在资产页按类型/语义找得到"
+                onClick={() => {
+                  saveToAssets(menu.state!.target);
+                  menu.close();
+                }}
+              >
+                <span className="sg-ctxmenu-ico" aria-hidden>★</span>
+                加入我的资产
+              </button>
+              <div className="sg-ctxmenu-sep" />
+              <button
+                type="button"
+                className="sg-ctxmenu-item"
+                onClick={() => {
+                  setSelected(menu.state!.target.id);
+                  menu.close();
+                }}
+              >
+                <span className="sg-ctxmenu-ico" aria-hidden>◎</span>
+                选中该节点
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

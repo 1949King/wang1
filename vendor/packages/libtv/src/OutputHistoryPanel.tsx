@@ -13,7 +13,11 @@
  *  · 空状态明说"开始第一次生成后会自动记录"，不假装有数据。
  */
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
+import { assetFromHistory, whyNotSaveable } from "./assetFromOutputs";
+import { useContextMenu } from "./hooks/useContextMenu";
+import { addAsset } from "./localLibrary";
 import {
   CATEGORY_LABEL,
   collectHistory,
@@ -21,10 +25,12 @@ import {
   filterHistory,
   recipeOf,
   type HistoryCategory,
+  type HistoryEntry,
 } from "./outputHistory";
 import { useCanvasStore } from "./store";
 import { useWindowPanel } from "./hooks/useWindowPanel";
 import "./outputHistory.css";
+import "./ctxmenu.css";
 
 const PIN_KEY = "shiguang-canvas:output-history:pinned";
 
@@ -42,6 +48,15 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
     }
   });
   const [copied, setCopied] = useState("");
+  /** 右键菜单状态（2026-11-02 用户要求：右键把生成结果收进「我的资产」）。 */
+  const menu = useContextMenu<HistoryEntry>();
+  const [flash, setFlash] = useState("");
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = window.setTimeout(() => setFlash(""), 1800);
+    return () => window.clearTimeout(t);
+  }, [flash]);
 
   useEffect(() => {
     try {
@@ -68,6 +83,21 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
     }
   };
 
+  /**
+   * 右键「加入我的资产」。
+   * 映射失败（文本/音频/无产物）就**不存**并说明原因 —— 宁可什么都不做，
+   * 也不在资产库里留一张点开是破图的卡片。
+   */
+  const saveToAssets = (e: HistoryEntry) => {
+    const draft = assetFromHistory(e);
+    if (!draft) {
+      setFlash(whyNotSaveable(e.category, e.assetUrl) || "这一条存不了");
+      return;
+    }
+    addAsset(draft);
+    setFlash(`已加入我的资产：${draft.title}`);
+  };
+
   const tabs: Array<[HistoryCategory | "all", string]> = [
     ["all", "全部"],
     ["text", CATEGORY_LABEL.text],
@@ -81,7 +111,7 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
          ref={win.panelRef} style={win.style} onPointerDown={win.focusPanel}>
       <header className="oh-head" onPointerDown={win.startDrag}>
         <span className="oh-title">输出历史</span>
-        <span className="oh-count">共 {counts.all} 条</span>
+        <span className="oh-count">{flash || `共 ${counts.all} 条`}</span>
         <span className="oh-spacer" />
         <label className="oh-pin" title="固定面板：勾选后下次打开画布自动显示">
           <input
@@ -130,7 +160,11 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
       ) : (
         <ul className="oh-list">
           {rows.map((e) => (
-            <li key={e.id} className="oh-row">
+            <li
+              key={e.id}
+              className="oh-row"
+              onContextMenu={(ev) => menu.open(ev, e)}
+            >
               <div className="oh-thumb">
                 {e.category === "image" && e.assetUrl ? (
                   <img src={e.assetUrl} alt="" loading="lazy" />
@@ -182,6 +216,63 @@ export default function OutputHistoryPanel({ onClose }: { onClose: () => void })
           ))}
         </ul>
       )}
+
+      {/* 右键菜单：portal 到 body —— 面板有 transform，挂里面会让 clientX 变成相对面板的坐标 */}
+      {menu.state
+        ? createPortal(
+            <div
+              className="sg-ctxmenu"
+              style={{ left: menu.state.x, top: menu.state.y }}
+              role="menu"
+              onPointerDown={(ev) => ev.stopPropagation()}
+              onContextMenu={(ev) => ev.preventDefault()}
+            >
+              <button
+                type="button"
+                className="sg-ctxmenu-item"
+                disabled={!assetFromHistory(menu.state.target)}
+                title="收进「我的资产」，之后在首页的资产页按类型/语义找得到"
+                onClick={() => {
+                  saveToAssets(menu.state!.target);
+                  menu.close();
+                }}
+              >
+                <span className="sg-ctxmenu-ico" aria-hidden>★</span>
+                加入我的资产
+              </button>
+              {!assetFromHistory(menu.state.target) ? (
+                <div className="sg-ctxmenu-why">
+                  {whyNotSaveable(menu.state.target.category, menu.state.target.assetUrl)}
+                </div>
+              ) : null}
+              <div className="sg-ctxmenu-sep" />
+              <button
+                type="button"
+                className="sg-ctxmenu-item"
+                onClick={() => {
+                  setSelected(menu.state!.target.id);
+                  menu.close();
+                  onClose();
+                }}
+              >
+                <span className="sg-ctxmenu-ico" aria-hidden>◎</span>
+                定位到该节点
+              </button>
+              <button
+                type="button"
+                className="sg-ctxmenu-item"
+                onClick={() => {
+                  void copyRecipe(recipeOf(menu.state!.target));
+                  menu.close();
+                }}
+              >
+                <span className="sg-ctxmenu-ico" aria-hidden>⧉</span>
+                复制配方（提示词 + 种子 + 模型）
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
