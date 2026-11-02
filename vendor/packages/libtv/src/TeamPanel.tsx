@@ -32,6 +32,7 @@ import {
   teamCred,
   teamDeleteAsset,
   teamDiscover,
+  teamFindByCode,
   teamHandoff,
   teamHostStart,
   teamHostStatus,
@@ -44,6 +45,8 @@ import {
   teamListProjects,
   teamMaterialize,
   teamMembers,
+  teamPair,
+  teamPairing,
   teamPull,
   teamPush,
   teamRelease,
@@ -51,6 +54,7 @@ import {
   localRevOf,
   setLocalRev,
   teamDiff,
+  type TeamPairingInfo,
 } from "./teamClient";
 import {
   applyMediaIndex,
@@ -99,6 +103,23 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [sync, setSync] = useState<string>("");
   /** 正在内联预览的附件 sha256（点开条目时设置，空串=收起）。 */
   const [preview, setPreview] = useState<string>("");
+  /** 主机侧刚生成（或复用）的配对码；null = 还没点过。 */
+  const [pair, setPair] = useState<TeamPairingInfo | null>(null);
+  /** 同事侧输入框里的 6 位码。 */
+  const [codeIn, setCodeIn] = useState<string>("");
+  /** 倒计时用的"现在"（秒）。只在有码时每秒跳一次。 */
+  const [now, setNow] = useState<number>(0);
+
+  // 码只在 120 秒内有效，秒数必须自己走 —— 否则面板停在那儿显示「120 秒有效」，
+  // 人以为永远有效，念晚了同事就白试一次。
+  const pairEnd = pair?.expires_at || 0;
+  useEffect(() => {
+    if (!pairEnd) return;
+    setNow(Date.now() / 1000);
+    const t = window.setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => window.clearInterval(t);
+  }, [pairEnd]);
+  const pairLeft = pairEnd ? Math.max(0, Math.ceil(pairEnd - (now || pairEnd))) : 0;
 
   const say = (kind: "ok" | "err" | "info", text: string) => setLine({ kind, text });
   const fail = (e: unknown) => {
@@ -257,6 +278,9 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     try {
       const st = await teamHostStart({ name: "拾光剪影团队" });
       setHost(st);
+      // 服务起来后顺手把地址填进 ②：下一步多半就是「加入自己」——
+      // 不填的话人得从上面那行里手抄一遍 IP，抄错就得到一句网络错误。
+      if (!cred && st.running && st.address) setAddress(st.address);
       say("ok", st.running ? `团队服务已启动：${st.address}` : "启动失败");
     } catch (e) {
       fail(e);
@@ -312,6 +336,70 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       } else {
         fail(e);
       }
+      void refreshHost();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /**
+   * 主机侧：出一张配对码给身边的同事。
+   *
+   * 生成码要**本机身份**（`created_by`），所以还没加入团队时会拿到 401 —— 那种
+   * 情况不翻译成"令牌无效"，直接说下一步该点哪（面板语言纪律）。
+   */
+  const makePairing = async () => {
+    setBusy("pairing");
+    try {
+      const p = await teamPairing();
+      setNow(Date.now() / 1000);
+      setPair(p);
+      if (!p.expires_at) say("err", p.message || "暂时生不出配对码，等一秒再点一次");
+      else say("ok", p.reused ? `配对码还是 ${p.code}（上次那张没过期，接着用）` : `配对码 ${p.code}，念给同事听`);
+    } catch (e) {
+      if (e instanceof TeamError && e.code === "unauthorized") {
+        say("err", "先把这台机器自己也加进团队（② 里点「加入」），才轮得到你发码给同事");
+        if (host?.address) setAddress(host.address);
+      } else {
+        fail(e);
+      }
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /**
+   * 同事侧：码 → 地址 → 令牌，一步到位。
+   *
+   * 分成两步是**必须的**：浏览器发不出 UDP 广播，地址只能由本机桥去问（`find-code`）。
+   * 找到之后立刻 setAddress，这样即使下一步换令牌失败，人也能在地址栏里看到
+   * 到底连的是哪台机器 —— 不至于"没反应"。
+   */
+  const joinByCode = async () => {
+    const c = codeIn.trim();
+    if (!/^\d{4,10}$/.test(c)) {
+      say("err", "配对码是主机面板上那 6 位数字，检查一下再输");
+      return;
+    }
+    setBusy("paircode");
+    say("info", "正在用配对码在局域网里找主机…");
+    try {
+      const found = await teamFindByCode(c);
+      if (!found.address) {
+        say("err", found.message || "没找到持有这个配对码的电脑");
+        return;
+      }
+      setAddress(found.address);
+      say("info", `找到「${found.name || "主机"}」${found.address}，正在加入…`);
+      const cc = await teamPair(c, name || "同事", found.address);
+      setCred(cc);
+      setAddress(cc.address);
+      setCodeIn("");
+      say("ok", `已用配对码加入：${cc.name}`);
+      await refreshTeam();
+    } catch (e) {
+      // 码用过 / 过期 / 试太多次 —— 后端的 message 都能照着做，原样显示
+      fail(e);
       void refreshHost();
     } finally {
       setBusy("");
@@ -643,11 +731,50 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             <span className="sg-team-dim">启动后把地址发给同事；只需一台机器当服务器</span>
           </div>
         )}
+        {/* 配对码：把「念一串 IP」换成「念 6 个数字」 */}
+        {host?.running ? (
+          <div className="sg-team-pair">
+            <div className="sg-team-row">
+              <button type="button" disabled={busy === "pairing"} onClick={() => void makePairing()}>
+                {busy === "pairing" ? "生成中…" : pair ? "重新出码" : "让同事加入（出 6 位码）"}
+              </button>
+              <span className="sg-team-dim">
+                {pair?.code
+                  ? (pairLeft > 0 ? `${pairLeft} 秒内有效 · 只能用一次` : "已失效，重新出码")
+                  : "不用念 IP —— 给他 6 位数字就行"}
+              </span>
+            </div>
+            {pair?.code ? (
+              <div className="sg-team-code">
+                <b className={pairLeft > 0 ? "" : "dead"}>{pair.code}</b>
+                {pair.qr && pairLeft > 0 ? <img src={pair.qr} alt="配对二维码" /> : null}
+                <span className="sg-team-dim">
+                  同事在 ② 里填这 6 位数字；手机扫二维码能看到地址，方便转发到他电脑。
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       {/* 2. 连接 */}
       <section className="sg-team-sec">
         <h4>② 我连别人的团队</h4>
+        {/* 首选这条路：一张 6 位码换地址，不必问对方 IP */}
+        <div className="sg-team-row">
+          <input
+            value={codeIn}
+            onChange={(e) => setCodeIn(e.target.value.replace(/\D/g, "").slice(0, 10))}
+            placeholder="主机给的 6 位配对码"
+            inputMode="numeric"
+            spellCheck={false}
+            style={{ width: 156 }}
+          />
+          <button type="button" disabled={busy === "paircode"} onClick={() => void joinByCode()}>
+            {busy === "paircode" ? "查找中…" : "用配对码加入"}
+          </button>
+          <span className="sg-team-dim">2 分钟内有效、只能用一次</span>
+        </div>
         <div className="sg-team-row">
           <button type="button" disabled={busy === "scan"} onClick={() => void scan()}>
             {busy === "scan" ? "扫描中…" : "扫描局域网"}

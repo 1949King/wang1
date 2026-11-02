@@ -10,6 +10,7 @@
 | `POST /host/team/inbox-map`| 剪辑器 clip.path（本地绝对路径）→ 画布能 fetch 的 `/inbox_file/…` |
 | `POST /host/team/materialize`| 团队附件 → 本机素材库（同事真要接着剪时间线时用） |
 | `POST /host/team/poster`   | 本机视频抽一帧当封面（附件列表缩略图） |
+| `POST /host/team/find-code`| 只凭 6 位配对码找主机地址（浏览器发不了 UDP） |
 
 ## 为什么这些端点必须走 canvas_server（127.0.0.1）
 
@@ -400,3 +401,47 @@ class CanvasTeamRoutesMixin:
 
         self._json(200, {"ok": True, "at": at, "width": width, "bytes": len(jpeg),
                          "data_url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")})
+
+    @_route_post("/host/team/find-code")
+    def _p_host_team_find_code(self, parsed, raw: bytes, ctype: str) -> None:
+        """只凭 6 位配对码找主机地址 —— 同事不必知道任何 IP。
+
+        ## 为什么必须由后端做
+
+        浏览器发不出 UDP 广播（没有 raw socket）。「码替地址」这件事的全部价值就在
+        广播询问 + 单播应答，所以只能落在本机桥这一层。
+
+        ## 为什么不是「问了就有回复」
+
+        只有**真的持有这张有效码**的机器才应答（`Beacon.pair_alive` → `Hub.pairing_alive`）。
+        无效码一律沉默 ⇒ 穷举既慢又拿不到任何反馈。这里找不到就如实回 `server: null`，
+        并给一句能照做的话，绝不假装「网络问题，稍后再试」。
+        """
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        code = str((body or {}).get("code") or "").strip()
+        if not re.fullmatch(r"\d{4,10}", code):
+            self._json(400, {"ok": False, "code": "bad_code",
+                             "message": "配对码是 6 位数字，检查一下再输"})
+            return
+        try:
+            from app.core.team_discovery import find_by_code
+
+            found = find_by_code(code, timeout=2.5)
+        except Exception as e:
+            logger.exception("[/host/team/find-code] 查询失败")
+            self._json(500, {"ok": False, "code": "discovery_failed",
+                             "message": "局域网查询失败：%s" % _friendly(e)})
+            return
+        if not found:
+            self._json(200, {"ok": True, "server": None,
+                             "message": "没找到持有这个配对码的电脑。可能原因：码已过期 / 两台机器不在同一网段 / 对方禁止了广播——让对方把地址发给你，直接填上面那一栏"})
+            return
+        self._json(200, {"ok": True, "server": found})

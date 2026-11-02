@@ -534,3 +534,93 @@ def test_asset_http_owner_and_poster(tmp_path):
         assert bad["ok"] is True and bad["poster"] == ""
     finally:
         srv.stop()
+
+
+# ── 配对码（2026-11-02）────────────────────────────────
+#
+# 这套东西替掉「手填 IP」。它自己的安全边界必须锁死：
+# 一次性（用过即废）、120 秒寿命、复用未过期的码（同一台机器连点两次不该出两个号）。
+def test_pairing_reused_while_alive(hub):
+    host = hub.register_member("主机")
+    first = hub.create_pairing(host["member_id"])
+    again = hub.create_pairing(host["member_id"])
+    assert first["reused"] is False and again["reused"] is True
+    assert first["code"] == again["code"]
+    assert len(first["code"]) == 6 and first["code"].isdigit()
+    # 换个成员要换号：码是「谁发的」，不能借用别人的
+    other = hub.register_member("另一位")
+    assert hub.create_pairing(other["member_id"])["code"] != first["code"]
+
+
+def test_pairing_claim_is_one_shot(hub):
+    host = hub.register_member("主机")
+    code = hub.create_pairing(host["member_id"])["code"]
+    assert hub.pairing_alive(code) is True
+
+    got = hub.pairing_claim(code, "m_guest")
+    assert got["code"] == code and got["created_by"] == host["member_id"]
+    # 兑换即作废：同一张码不许换第二个成员
+    assert hub.pairing_alive(code) is False
+    with pytest.raises(TeamError) as ei:
+        hub.pairing_claim(code, "m_other")
+    assert ei.value.code == "code_used"
+
+
+def test_pairing_expired_and_unknown(hub, monkeypatch):
+    host = hub.register_member("主机")
+    code = hub.create_pairing(host["member_id"])["code"]
+
+    with pytest.raises(TeamError) as bad:
+        hub.pairing_claim("000000")
+    assert bad.value.code == "bad_code"
+
+    # 把时钟推过 TTL（create_pairing 内部会把 ttl 下限夹到 30 秒，所以只能拨表）
+    from app.core import team_hub as H
+
+    later = H._now() + H.PAIR_TTL + 1
+    monkeypatch.setattr(H, "_now", lambda: later)
+    assert hub.pairing_alive(code) is False
+    with pytest.raises(TeamError) as gone:
+        hub.pairing_claim(code)
+    assert gone.value.code == "code_expired"
+
+
+def test_pair_http_needs_no_token_but_only_once(tmp_path):
+    """`/team/pair` 是**唯一**不需要令牌的团队端点 —— 它就是拿码换令牌的那一条。"""
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, host = _req(base, "/team/join", {"name": "主机"})
+        code, p = _req(base, "/team/pairing", {}, host["token"])
+        assert code == 200 and len(p["code"]) == 6
+        assert p["address"].startswith("http://") and "/pair?code=" in p["pair_url"]
+        assert p["qr"].startswith("data:image/png;base64,")
+        assert p["expires_at"] > 0
+
+        # 手机落地页：能看到地址和码，且明确说码还有效
+        page = urllib.request.urlopen(base + "/pair?code=" + p["code"], timeout=10).read().decode()
+        assert "配对码有效" in page and p["code"] in page
+
+        # 刷新面板不该换号：还没过期就原样复用（否则刚念出去的码会白费）
+        code, back = _req(base, "/team/pairing", token=host["token"])
+        assert code == 200 and back["code"] == p["code"] and back["reused"] is True
+
+        # 无令牌兑换成功，拿到的是一个能用的令牌
+        code, joined = _req(base, "/team/pair", {"code": p["code"], "name": "同事B"})
+        assert code == 200 and joined["paired"] is True
+        assert srv.hub.auth(joined["token"])["name"] == "同事B"
+
+        # 第二个人拿同一张码再来 ⇒ 拒（一次性）
+        code, dup = _req(base, "/team/pair", {"code": p["code"], "name": "同事C"})
+        assert code >= 400 and dup["code"] == "code_used"
+
+        # 手机落地页此时要如实说失效了（地址照旧有用）
+        page2 = urllib.request.urlopen(base + "/pair?code=" + p["code"], timeout=10).read().decode()
+        assert "已失效" in page2
+
+        # 码作废之后再要：必须给新号，不能把用过的号再发出去
+        code, fresh = _req(base, "/team/pairing", token=host["token"])
+        assert code == 200 and fresh["code"] and fresh["code"] != p["code"] and fresh["reused"] is False
+    finally:
+        srv.stop()

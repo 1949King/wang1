@@ -225,3 +225,146 @@ describe("teamClient · 视频封面走本机桥", () => {
     await expect(m.teamPoster("/editor_file/x.mp4")).resolves.toBe("");
   });
 });
+
+/**
+ * 2026-11-02 · 配对码 / 二维码
+ *
+ * 这套东西替掉的是「手填 IP」—— 它自己的坑必须锁住：
+ *   · 找主机**只能**走本机桥（浏览器发不出 UDP 广播），不能打同事的服务器；
+ *   · 换令牌那一条**必须不带 Authorization**（它就是拿码换令牌的那一条）；
+ *   · 换失败不许把已有凭据冲掉（人还在团队里，只是这次码打错了）。
+ */
+describe("teamClient · 配对码", () => {
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  type Call = { url: string; init?: RequestInit };
+
+  function stubSeq(impl: (url: string, init?: RequestInit) => unknown) {
+    const calls: Call[] = [];
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(
+      async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return impl(String(url), init);
+      },
+    ) as unknown as typeof fetch;
+    return calls;
+  }
+
+  function headersOf(c: Call): Record<string, string> {
+    return (c.init?.headers || {}) as Record<string, string>;
+  }
+
+  it("find-code 走本机桥，找到就把地址归一化回来", async () => {
+    const calls = stubSeq(() => ({
+      ok: true,
+      json: async () => ({ ok: true, server: { name: "老王的工作站", address: "http://192.168.1.4:18770/", port: 18770, host: "192.168.1.4" } }),
+    }));
+
+    const m = await loadModule();
+    const found = await m.teamFindByCode("229140");
+
+    expect(found.address).toBe("http://192.168.1.4:18770");
+    expect(found.name).toBe("老王的工作站");
+    // 🔴 必须是本机桥：走 teamCall 就等于把 host token 发给同事的机器
+    expect(calls[0].url).toContain("127.0.0.1:18765/host/team/find-code");
+    // 本机桥认的是 X-Shiguang-Token，团队服务认的是 Bearer —— 两套不能互换。
+    // 只断言"带了这个头"：node 环境里桥令牌本身是空串，值不可断言。
+    expect("X-Shiguang-Token" in headersOf(calls[0])).toBe(true);
+    expect(headersOf(calls[0]).Authorization).toBeUndefined();
+  });
+
+  it("find-code 没找到 ⇒ 地址空串 + 后端那句话原样带回（不抛）", async () => {
+    stubSeq(() => ({
+      ok: true,
+      json: async () => ({ ok: true, server: null, message: "没找到持有这个配对码的电脑。可能原因：码已过期" }),
+    }));
+
+    const m = await loadModule();
+    const found = await m.teamFindByCode("229140");
+
+    expect(found.address).toBe("");
+    expect(found.message).toContain("码已过期");
+  });
+
+  it("码格式不对立刻报 bad_code，一个请求都不发", async () => {
+    const calls = stubSeq(() => ({ ok: true, json: async () => ({}) }));
+
+    const m = await loadModule();
+    await expect(m.teamFindByCode("12ab")).rejects.toMatchObject({ code: "bad_code" });
+    expect(calls.length).toBe(0);
+  });
+
+  it("pair 打 /team/pair 且**不带** Authorization，成功后凭据落盘", async () => {
+    const { store } = installFakes();
+    const calls = stubSeq(() => ({
+      ok: true,
+      json: async () => ({ ok: true, member_id: "m_9", name: "李四", token: "tok9", paired: true }),
+    }));
+
+    const m = await loadModule();
+    const cred = await m.teamPair("229140", "李四", "192.168.1.4:18770");
+
+    expect(cred.address).toBe("http://192.168.1.4:18770");
+    expect(cred.token).toBe("tok9");
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/pair");
+    expect(calls[0].init?.method).toBe("POST");
+    // 这一条是「用码换令牌」，带上旧令牌只会让语义混乱
+    expect(headersOf(calls[0]).Authorization).toBeUndefined();
+    expect(m.teamCred()?.member_id).toBe("m_9");
+    expect(store.size).toBeGreaterThan(0);
+  });
+
+  it("码已用过 ⇒ 抛 code_used，且不把已有凭据冲掉", async () => {
+    installFakes();
+    const m0 = await loadModule();
+    stubSeq(() => ({
+      ok: true,
+      json: async () => ({ ok: true, member_id: "m_1", name: "张三", token: "tok" }),
+    }));
+    await m0.teamJoin("192.168.1.4:18770", "张三");
+
+    stubSeq(() => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ ok: false, code: "code_used", message: "这个配对码已经用过了，让同事再点一次「让同事加入」" }),
+    }));
+
+    const m = await loadModule();
+    await expect(m.teamPair("229140", "李四", "192.168.1.4:18770")).rejects.toMatchObject({ code: "code_used" });
+    // 人本来就在团队里，只是这次码打错了 —— 凭据不能被清掉
+    expect(m.teamCred()?.token).toBe("tok");
+  });
+
+  it("pairing 打 /team/pairing（带令牌），回码 + 二维码 + 到期时间", async () => {
+    installFakes();
+    const m0 = await loadModule();
+    stubSeq(() => ({
+      ok: true,
+      json: async () => ({ ok: true, member_id: "m_1", name: "张三", token: "tok" }),
+    }));
+    await m0.teamJoin("192.168.1.4:18770", "张三");
+
+    const calls = stubSeq(() => ({
+      ok: true,
+      json: async () => ({
+        ok: true, code: "229140", ttl: 120, expires_at: 1700000000, reused: false,
+        address: "http://192.168.1.4:18770",
+        pair_url: "http://192.168.1.4:18770/pair?code=229140",
+        qr: "data:image/png;base64,AAAA",
+      }),
+    }));
+
+    const m = await loadModule();
+    const p = await m.teamPairing();
+
+    expect(p.code).toBe("229140");
+    expect(p.qr.startsWith("data:image/png;base64,")).toBe(true);
+    expect(p.expires_at).toBeGreaterThan(0);
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/pairing");
+    expect(headersOf(calls[0]).Authorization).toBe("Bearer tok");
+  });
+});

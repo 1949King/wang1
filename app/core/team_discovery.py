@@ -26,13 +26,16 @@ import re
 import socket
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 APP_TAG = "shiguang-team"
 DISCOVER_PORT = 45123
 DISCOVER_MAGIC = "SHIGUANG_DISCOVER"
+#: 配对码查询前缀（`SHIGUANG_PAIR:482913`）：同事只知道 6 位码、不知道 IP 时用。
+#: 收到后**只有持有这张有效码的机器才回复** —— 无效码一律沉默，等于让穷举既慢又无反馈。
+PAIR_MAGIC_PREFIX = "SHIGUANG_PAIR:"
 BEACON_INTERVAL = 2.0
 
 #: Windows 套接字错误码 → 能照着做的下一步。
@@ -111,11 +114,14 @@ def _broadcast_addrs() -> List[str]:
 class Beacon:
     """服务端：周期性广播 + 应答 DISCOVER。"""
 
-    def __init__(self, name: str, port: int, host: str = "", interval: float = BEACON_INTERVAL) -> None:
+    def __init__(self, name: str, port: int, host: str = "", interval: float = BEACON_INTERVAL,
+                 pair_alive: Optional[Callable[[str], bool]] = None) -> None:
         self.name = name
         self.port = port
         self.host = host
         self.interval = interval
+        #: 配对码校验回调（由 Hub 提供）。没给就只应答 DISCOVER，不理配对请求。
+        self.pair_alive = pair_alive
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._sock: Optional[socket.socket] = None
@@ -196,11 +202,26 @@ class Beacon:
                     continue
                 except Exception:  # stability-gate: allow-swallow（收包异常不终止 beacon）
                     continue
-                if raw.strip()[:32] == DISCOVER_MAGIC.encode():
+                text = raw.strip()[:32].decode("ascii", "ignore")
+                if text == DISCOVER_MAGIC:
                     try:
                         listener.sendto(payload, peer)   # 单播回复：穿透广播抑制
                     except Exception:  # stability-gate: allow-swallow（回复失败等下一次）
                         continue
+                    continue
+                # 配对码查询：只有「我这儿真有这张有效码」才出声
+                code = decode_pair_request(raw)
+                if code and self.pair_alive is not None:
+                    try:
+                        ok = bool(self.pair_alive(code))
+                    except Exception:  # stability-gate: allow-swallow（校验失败按无效处理，别回错包）
+                        logger.debug("[team.discovery] 配对码校验异常 code=%s", code, exc_info=True)
+                        ok = False
+                    if ok:
+                        try:
+                            listener.sendto(payload, peer)
+                        except Exception:  # stability-gate: allow-swallow（回复失败等下一次）
+                            continue
         finally:
             self._close_listener()
 
@@ -255,3 +276,66 @@ def scan(timeout: float = 2.0) -> List[Dict[str, Any]]:
     finally:
         sock.close()
     return list(found.values())
+
+
+def decode_pair_request(raw: bytes) -> Optional[str]:
+    """从报文里解出配对码；不是配对请求 / 格式不对一律 `None`。
+
+    纯函数：不碰网络，便于在测试里喂反例（空包、别的软件的包、超长码）。
+    """
+    text = raw.decode("ascii", "ignore").strip() if isinstance(raw, (bytes, bytearray)) else ""
+    if not text.startswith(PAIR_MAGIC_PREFIX):
+        return None
+    code = text[len(PAIR_MAGIC_PREFIX):].strip()
+    return code if re.fullmatch(r"\d{4,10}", code) else None
+
+
+def find_by_code(code: str, timeout: float = 2.5) -> Optional[Dict[str, Any]]:
+    """**只凭 6 位配对码**找主机 —— 同事不需要知道任何 IP。
+
+    这就是「多屏协同」里那一步：码替地址。广播出去后，只有真的持有这张有效码的
+    机器会单播应答（`Beacon` 里的 `pair_alive` 回调），其余全部沉默。
+
+    返回与 `scan()` 同一形状的字典（含 `address` / `peer`），找不到回 `None`。
+    """
+    clean = str(code or "").strip()
+    if not re.fullmatch(r"\d{4,10}", clean):
+        return None
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(0.4)
+    try:
+        try:
+            sock.bind(("", 0))
+        except Exception:  # stability-gate: allow-swallow（绑定失败仍可尝试发送）
+            logger.debug("[team.discovery] 配对查询 bind 失败", exc_info=True)
+        msg = (PAIR_MAGIC_PREFIX + clean).encode()
+        sent = 0
+        for addr in _broadcast_addrs():
+            try:
+                sock.sendto(msg, (addr, DISCOVER_PORT))
+                sent += 1
+            except Exception:  # stability-gate: allow-swallow（某网段不可达就跳过）
+                continue
+        if not sent:
+            logger.warning("[team.discovery] 配对查询无处可发（没有可用广播地址）")
+            return None
+        deadline = time.time() + max(0.6, float(timeout))
+        while time.time() < deadline:
+            try:
+                raw, peer = sock.recvfrom(1024)
+            except socket.timeout:
+                continue
+            except Exception:  # stability-gate: allow-swallow（收包异常继续等）
+                continue
+            info = decode_payload(raw)
+            if info is None:
+                continue
+            ip = info.get("host") or peer[0]
+            info["address"] = "http://%s:%d" % (ip, info["port"])
+            info["peer"] = peer[0]
+            return info
+        return None
+    finally:
+        sock.close()

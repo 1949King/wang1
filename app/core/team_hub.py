@@ -60,6 +60,12 @@ MAX_ASSET_NAME = 120
 #: 认领默认 TTL（秒）
 DEFAULT_CLAIM_TTL = 600
 
+#: 配对码有效期（秒）。**2 分钟**是刻意选的：念一串 6 位数给对方、对方输完，
+#: 通常 15~30 秒；给太长等于给暴力枚举留窗口，给太短会当场过期。
+PAIR_TTL = 120
+#: 配对码位数（纯数字，首位不为 0 ⇒ 100 万以内 90 万种组合）
+PAIR_LEN = 6
+
 #: 附件扩展名白名单（**不信任客户端给的后缀**，宁可落 `.bin` 也不让 `..%2f` 之类穿透目录）
 _ASSET_EXTS = frozenset([
     ".mp4", ".webm", ".mov", ".mkv", ".m4v",
@@ -305,6 +311,16 @@ class Hub:
                     created_at REAL NOT NULL,
                     PRIMARY KEY (project_id, sha256)
                 );
+                -- 配对码（2026-11-02）：把「地址 + 凭据」压成 6 位数字，
+                -- 同事不必再手填 http://192.168.x.x:18770（多屏协同那套思路）
+                CREATE TABLE IF NOT EXISTS pairing (
+                    code TEXT PRIMARY KEY,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    used_at REAL NOT NULL DEFAULT 0,
+                    used_by TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
             self._migrate_asset_columns(conn)
@@ -326,13 +342,18 @@ class Hub:
             conn.execute("ALTER TABLE asset ADD COLUMN poster TEXT NOT NULL DEFAULT ''")
 
     # ── 成员 ────────────────────────────────────────────
-    def register_member(self, name: str, role: str = "editor") -> Dict[str, Any]:
-        """登记成员并返回**明文令牌**（只此一次，库里存哈希）。"""
+    def register_member(self, name: str, role: str = "editor", member_id: str = "") -> Dict[str, Any]:
+        """登记成员并返回**明文令牌**（只此一次，库里存哈希）。
+
+        `member_id` 可外部指定：配对流程要先「作废配对码（同时记下谁用的）」再
+        「注册成员」，没有 ID 就记不了 `used_by`；反过来先注册后作废，则坏码会
+        留下一串幽灵成员。所以让调用方预生成 ID，顺序就顺了。
+        """
         clean = str(name or "").strip()[:MAX_NAME]
         if not clean:
             raise TeamError("bad_name", "成员名不能为空")
         token = secrets.token_urlsafe(32)
-        mid = "m_" + secrets.token_hex(8)
+        mid = str(member_id or "").strip() or ("m_" + secrets.token_hex(8))
         with self._lock, self._conn() as conn:
             conn.execute(
                 "INSERT INTO member (id, name, role, token_hash, created_at) VALUES (?,?,?,?,?)",
@@ -353,6 +374,81 @@ class Hub:
         with self._lock, self._conn() as conn:
             rows = conn.execute("SELECT id, name, role, created_at FROM member ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
+
+    # ── 配对码（2026-11-02）───────────────────────────────
+    #
+    # 借「多屏协同」的思路：把**地址 + 凭据**压成一串 6 位数。
+    # 同事不用再手填 `http://192.168.1.4:18770` —— 那是整个加入流程里唯一
+    # 真正需要「技术知识」的一步，而它恰好最容易出错（IP 变了、少打一位、
+    # 用了 127.0.0.1）。
+    #
+    # 三条纪律：
+    #   ① **一次性**：兑换即作废（`used_at`），截图发群里也顶多被用一次；
+    #   ② **短命**：120 秒，够念给同事，不够暴力枚举（6 位 = 90 万组合，
+    #      配合服务层的失败限速，穷举不现实）；
+    #   ③ **可复用同一张**：同一个人连着点两次不该换号 —— 用户念到一半、
+    #      或者同事正要输，码变了就是白念。
+    def create_pairing(self, member_id: str, ttl: float = PAIR_TTL) -> Dict[str, Any]:
+        """生成（或复用）一张配对码。返回 `{code, expires_at, ttl, reused}`。"""
+        now = _now()
+        span = max(30.0, float(ttl or PAIR_TTL))
+        with self._lock, self._conn() as conn:
+            # 顺手清掉一天前的死码，别让这张表无限长
+            conn.execute("DELETE FROM pairing WHERE expires_at < ?", (now - 86400,))
+            row = conn.execute(
+                "SELECT code, expires_at FROM pairing WHERE created_by = ?"
+                " AND used_at = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+                (member_id, now),
+            ).fetchone()
+            if row is not None:
+                return {"code": row["code"], "expires_at": float(row["expires_at"]),
+                        "ttl": int(row["expires_at"] - now), "reused": True}
+            for _ in range(32):
+                code = str(secrets.randbelow(900000) + 100000)
+                try:
+                    conn.execute(
+                        "INSERT INTO pairing (code, created_by, created_at, expires_at)"
+                        " VALUES (?,?,?,?)", (code, member_id, now, now + span),
+                    )
+                    return {"code": code, "expires_at": now + span,
+                            "ttl": int(span), "reused": False}
+                except sqlite3.IntegrityError:
+                    continue        # 撞上别人正在用的码，换一个（概率 1/90 万，真撞过就重试）
+        raise TeamError("pair_busy", "生成配对码失败：连续撞号，稍等一秒再点一次")
+
+    def pairing_alive(self, code: str) -> bool:
+        """这张码还能用吗（未过期、未使用）。**只读**：不该在这条路径上作废它。"""
+        clean = str(code or "").strip()
+        if not clean:
+            return False
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM pairing WHERE code = ? AND used_at = 0 AND expires_at > ?",
+                (clean, _now()),
+            ).fetchone()
+        return row is not None
+
+    def pairing_claim(self, code: str, member_id: str = "") -> Dict[str, Any]:
+        """兑换配对码：**校验通过就立刻作废**（一次性），返回码的元信息。
+
+        作废与校验放在同一条 UPDATE 的 WHERE 里做不了（sqlite 的 rowcount 判定
+        在并发下不够直观），这里在同一把锁 + 同一事务内「先查后改」，够安全。
+        """
+        clean = str(code or "").strip()
+        now = _now()
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
+            if row is None:
+                raise TeamError("bad_code", "配对码不对：是 6 位数字，核对一下再输")
+            if float(row["used_at"] or 0) > 0:
+                raise TeamError("code_used", "这个配对码已经用过了，让同事再点一次「让同事加入」")
+            if float(row["expires_at"]) <= now:
+                raise TeamError("code_expired", "配对码过期了（只有 %d 分钟），让同事重新生成一个"
+                                % (PAIR_TTL // 60))
+            conn.execute("UPDATE pairing SET used_at = ?, used_by = ? WHERE code = ?",
+                         (now, member_id, clean))
+        return {"code": clean, "created_by": row["created_by"],
+                "expires_at": float(row["expires_at"])}
 
     # ── 项目 / 版本 ─────────────────────────────────────
     def _project_row(self, project_id: str) -> sqlite3.Row:

@@ -48,14 +48,17 @@ import json
 import logging
 import os
 import re
+import secrets
 import socket
 import tempfile
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.core.team_discovery import Beacon
+from app.core.team_qr import qr_png_data_uri
 from app.core.team_hub import (ConflictError, Hub, LockedError, MAX_ASSET_BYTES,
                                TeamError)
 
@@ -69,13 +72,74 @@ MAX_ASSET_BODY = MAX_ASSET_BYTES + (1 << 20)
 #: 流式落盘的读块大小（64KB：8GB 机器上 512MB 也不会一次进内存）
 _CHUNK = 64 * 1024
 SERVER_NAME = "shiguang-team-hub"
-SERVER_VERSION = "2"
+#: 3 = 加了配对码（让同事用 6 位数加入，不必知道 IP）
+SERVER_VERSION = "3"
 #: 允许从附件名里挑 `kind` 的取值
 _ASSET_KINDS = frozenset(["image", "video", "audio", "text", "file"])
+
+# ── 配对码失败限速（2026-11-02）────────────────────────────
+#
+# 6 位码只有 90 万种组合。**不限速的话，局域网里一台机器一小时就能穷举完**
+# （18770 是明文 HTTP，没有 TLS 层限速）。策略与常见做法一致：同一来源 IP
+# 60 秒内失败 10 次就冷处理 60 秒 —— 穷举需要几十年，而打错一两次的人毫无感觉。
+_PAIR_FAIL_WINDOW = 60.0
+_PAIR_FAIL_MAX = 10
+_PAIR_FAILS: Dict[str, list] = {}
+_PAIR_LOCK = threading.Lock()
+
+
+def _pair_wait_seconds(ip: str) -> float:
+    """还要等多少秒才能再试（0 = 现在就可以）。"""
+    now = time.time()
+    with _PAIR_LOCK:
+        hits = [t for t in _PAIR_FAILS.get(str(ip), []) if now - t < _PAIR_FAIL_WINDOW]
+        if hits:
+            _PAIR_FAILS[str(ip)] = hits
+        else:
+            _PAIR_FAILS.pop(str(ip), None)
+    if len(hits) < _PAIR_FAIL_MAX:
+        return 0.0
+    return max(0.0, _PAIR_FAIL_WINDOW - (now - hits[0]))
+
+
+def _pair_strike(ip: str) -> None:
+    """记一次失败尝试。"""
+    now = time.time()
+    with _PAIR_LOCK:
+        hits = [t for t in _PAIR_FAILS.get(str(ip), []) if now - t < _PAIR_FAIL_WINDOW]
+        hits.append(now)
+        _PAIR_FAILS[str(ip)] = hits
+
+
+def _pair_clear(ip: str) -> None:
+    with _PAIR_LOCK:
+        _PAIR_FAILS.pop(str(ip), None)
+
 
 
 def _json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _pairing_payload(handler: Any, row: Dict[str, Any]) -> Dict[str, Any]:
+    """配对码的对外形状：码 + 剩余秒数 + 本机地址 + 二维码（手机可扫）。
+
+    二维码里编的是 `http://<本机内网IP>:<端口>/pair?code=…`，扫码后是一个能
+    复制地址的极简页面 —— 「把地址递给别人」才是二维码在这里的唯一用途。
+    """
+    port = int(getattr(getattr(handler, "server", None), "server_port", 0) or 0)
+    ip = TeamServer.lan_ip()
+    address = ("http://%s:%d" % (ip, port)) if (ip and port) else ""
+    pair_url = (address + "/pair?code=" + str(row.get("code") or "")) if address else ""
+    return {
+        "code": str(row.get("code") or ""),
+        "ttl": int(row.get("ttl") or 0),
+        "expires_at": float(row.get("expires_at") or 0),
+        "reused": bool(row.get("reused")),
+        "address": address,
+        "pair_url": pair_url,
+        "qr": qr_png_data_uri(pair_url) if pair_url else "",
+    }
 
 
 class _TeamHandler(BaseHTTPRequestHandler):
@@ -95,6 +159,82 @@ class _TeamHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _pair_page(self) -> None:
+        """手机扫码后看到的页面：**只做一件事 —— 让地址可复制**。
+
+        手机上没有画布，扫完不可能「直接在手机上加入团队」。所以这一页不做假的
+        「加入」按钮，只把 `http://ip:port` 和 6 位码摆出来，方便复制发回电脑。
+        码已过期也照常显示地址（地址永远有用），并如实说码失效了。
+        """
+        from html import escape as _esc
+
+        q = parse_qs(urlparse(self.path).query)
+        code = str((q.get("code") or [""])[0]).strip()
+        port = int(getattr(getattr(self, "server", None), "server_port", 0) or 0)
+        ip = TeamServer.lan_ip()
+        address = ("http://%s:%d" % (ip, port)) if (ip and port) else ""
+        alive = bool(code) and self.hub.pairing_alive(code)
+        badge = ("<p class=ok>配对码有效，2 分钟内可用一次</p>" if alive
+                 else "<p class=bad>这个配对码已失效（用过或过期）—— 让同事在面板上重新生成</p>")
+        html = """<!doctype html><html lang=zh-CN><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>拾光剪影 · 加入团队</title>
+<style>
+ body{margin:0;padding:24px 18px;background:#16181e;color:#e9ecf1;
+      font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+ h1{font-size:17px;margin:0 0 14px}
+ .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+       border-radius:12px;padding:14px;margin-bottom:14px}
+ .lbl{color:#8b93a3;font-size:12px;margin-bottom:6px}
+ code{display:block;font:15px/1.6 ui-monospace,Consolas,monospace;
+      color:#9ed0ff;word-break:break-all;user-select:all}
+ .code{font-size:30px;letter-spacing:6px;color:#ffd59a;font-weight:700}
+ button{margin-top:10px;padding:8px 14px;border-radius:8px;font-size:14px;
+        border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#e9ecf1}
+ .ok{color:#8fe0b4;font-size:13px;margin:8px 0 0}
+ .bad{color:#ffa9a9;font-size:13px;margin:8px 0 0}
+ .tip{color:#7f8798;font-size:12.5px;line-height:1.75}
+</style>
+<h1>加入「%(name)s」</h1>
+<div class=card>
+  <div class=lbl>团队地址（在电脑上的拾光剪影里填这个）</div>
+  <code id=addr>%(addr)s</code>
+  <button onclick="copyAddr()">复制地址</button>
+</div>
+<div class=card>
+  <div class=lbl>配对码</div>
+  <code class=code>%(code)s</code>
+  %(badge)s
+</div>
+<p class=tip>电脑上：画布左侧点 👥 → ② 段「我连别人的团队」→ 把上面 6 位数输进去 →
+点「用配对码加入」，不用填地址。</p>
+<script>
+function copyAddr(){
+  var t=document.getElementById('addr').textContent.trim(), ok=false;
+  try{ if(navigator.clipboard){ navigator.clipboard.writeText(t); ok=true; } }catch(e){}
+  if(!ok){
+    var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta);
+    ta.select(); try{ document.execCommand('copy'); ok=true; }catch(e){}
+    document.body.removeChild(ta);
+  }
+  var b=event.target; b.textContent = ok ? '已复制' : '长按上面的地址手动复制';
+}
+</script></html>""" % {"name": _esc(str(self.beacon_name or "团队")),
+                        "addr": _esc(address or "（这台机器没有可用的内网地址）"),
+                        "code": _esc(code or "——"),
+                        "badge": badge}
+        self._send_html(200, html)
+
+    def _send_html(self, status: int, html: str) -> None:
+        """极简 HTML 响应（只给手机扫码后的那一页用）。"""
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -346,6 +486,22 @@ class _TeamHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "service": SERVER_NAME, "name": self.beacon_name,
                              "version": SERVER_VERSION, **hub.stats()})
             return
+        if path == "/pair":
+            self._pair_page()
+            return
+        if path == "/team/pairing":
+            me = self._member()
+            row = None
+            try:
+                row = hub.create_pairing(me["id"])       # 有未过期的就原样复用
+            except TeamError:
+                row = None
+            if row is None:
+                self._send(200, {"ok": True, "code": "", "ttl": 0,
+                                 "message": "暂时生不出配对码，稍后再点"})
+                return
+            self._send(200, {"ok": True, **_pairing_payload(self, row)})
+            return
         if path == "/team/members":
             self._member()
             self._send(200, {"ok": True, "members": hub.members()})
@@ -392,6 +548,38 @@ class _TeamHandler(BaseHTTPRequestHandler):
             data = self._body()
             info = hub.register_member(str(data.get("name") or ""), str(data.get("role") or "editor"))
             self._send(200, {"ok": True, **info})
+            return
+        if path == "/team/pairing":
+            me = self._member()
+            row = hub.create_pairing(me["id"])
+            self._send(200, {"ok": True, **_pairing_payload(self, row)})
+            return
+        if path == "/team/pair":
+            # 🔴 **这条不需要令牌** —— 它就是用令牌来换令牌的那一条。
+            # 安全边界：一次性码 + 120 秒寿命 + 同 IP 失败限速（见 _pair_wait_seconds）。
+            ip = str(self.client_address[0]) if self.client_address else ""
+            wait = _pair_wait_seconds(ip)
+            if wait > 0:
+                raise TeamError(
+                    "too_many",
+                    "配对失败次数太多了，%d 秒后再试（或直接让同事重新生成一个码）" % int(wait) + "",
+                )
+            data = self._body()
+            name = str(data.get("name") or "").strip()
+            code = str(data.get("code") or "").strip()
+            if not name:
+                raise TeamError("bad_name", "先填你的名字，同事才知道刚加进来的是谁")
+            if not code:
+                raise TeamError("bad_code", "配对码是 6 位数字，别空着")
+            mid = "m_" + secrets.token_hex(8)
+            try:
+                hub.pairing_claim(code, mid)        # 校验通过即作废（一次性）
+            except TeamError:
+                _pair_strike(ip)
+                raise
+            _pair_clear(ip)
+            info = hub.register_member(name, str(data.get("role") or "editor"), member_id=mid)
+            self._send(200, {"ok": True, **info, "paired": True})
             return
         if path == "/team/projects":
             me = self._member()
@@ -452,7 +640,9 @@ class TeamServer:
                                         name="TeamHub", daemon=True)
         self._thread.start()
         # 局域网自动发现：服务端一起广播，同事那边「扫描」即可看到
-        self._beacon = Beacon(self.name, self.port, self.lan_ip())
+        # 把「配对码是否还有效」交给 Hub 判：beacon 只在**真有这张码**时才应答
+        self._beacon = Beacon(self.name, self.port, self.lan_ip(),
+                              pair_alive=self.hub.pairing_alive)
         self._beacon.start()
         logger.info("[team] 服务已启动 http://%s:%d（本机 %s）",
                     self.host, self.port, self.lan_ip())

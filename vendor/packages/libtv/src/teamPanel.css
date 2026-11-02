@@ -75,6 +75,21 @@ html[data-theme='light'] .ic-shortcut-btn.on {
 .sg-team-addr { padding: 4px 8px; border-radius: 7px; background: rgba(86, 176, 255, 0.14); color: #9ed0ff; user-select: all; }
 .sg-team-dim { color: #7f8798; font-size: 11px; }
 
+/* 配对码（2026-11-02）：码要「一眼抄得下来」，所以字号大、字距宽、免选中 */
+.sg-team-pair { display: flex; flex-direction: column; gap: 6px; }
+.sg-team-code {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: 9px;
+  border: 1px solid rgba(255, 213, 154, 0.28); background: rgba(255, 213, 154, 0.08);
+}
+.sg-team-code b {
+  font: 700 22px/1.1 ui-monospace, Consolas, monospace;
+  letter-spacing: 5px; color: #ffd59a; user-select: all;
+}
+.sg-team-code b.dead { color: #7f8798; text-decoration: line-through; text-decoration-thickness: 1px; }
+.sg-team-code img { width: 78px; height: 78px; border-radius: 6px; background: #fff; padding: 3px; }
+.sg-team-code .sg-team-dim { flex: 1; min-width: 120px; line-height: 1.55; }
+
 .sg-team-list { display: flex; flex-direction: column; gap: 5px; }
 .sg-team-item {
   display: flex; flex-direction: column; gap: 5px; padding: 7px 9px; border-radius: 9px;
