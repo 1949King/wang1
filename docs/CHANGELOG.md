@@ -1,5 +1,39 @@
 # 拾光剪影 — 变更日志
 
+## 修 · 画布里视频是黑的：把它变成「首帧图 + 说人话」（2026-11-02，画布 0.3.42）
+
+做上一版附件缩略图时撞出来的真缺陷，比缩略图本身重要得多。
+
+**结论：画布用的 Qt WebEngine（pip 装的 PyQt6-WebEngine）没有 H.264/AAC 解码器。**
+真机探针（与画布同一内核）：
+
+| 探测项 | 结果 |
+|---|---|
+| `canPlayType('video/mp4; codecs="avc1.42E01E"')` | `""`（空串 = 不支持） |
+| `<video src="x.mp4" preload="metadata">` | `error.code = 4`（SRC_NOT_SUPPORTED），画面空白 |
+| `<video src="x.webm#t=0.1">` | `readyState = 4`、`currentTime = 0.1`，首帧正常画出 |
+
+而自家管线渲染的成片实测是 `h264 / avc1` ⇒ **画布里的成片节点、代码成片节点、素材节点
+本来一直是一块黑**，只是没人报过。换内核不现实（要自带 build），所以这一版做的是
+**别装作在播**：
+
+- 新增 `videoFallback.ts`（纯函数：`pickVideoPoster` 选替身封面，优先级
+  显式封面 > 首帧 > 尾帧；**跳过 `blob:`** —— 它只在当次会话有效，存下来就是死链）
+  + `videoUnplayable.tsx`（`useVideoBad()` + `<VideoUnplayable>`）。
+- 只有 `<video>` 的 `onError` 真触发才切换 —— **不做 `canPlayType` 预判**：
+  WebM 在这台机器上能播，一刀切会把能播的也拦掉。
+- 接进三处：`nodes.tsx` 视频节点（带首帧图）、`codeVideoNode.tsx` 代码成片、
+  `mediaExtraNodes.tsx` 素材节点（用 `imageUrl` 当封面）。
+- 文案统一一份（`videoFallback.ts`）：说清「内核没带 H.264，不是文件坏了，
+  剪辑器（系统播放器）能正常预览」，团队面板额外给一条下载出路。
+- 样式另开 `videoFallback.css`：`styles.css` 已冻结在 4004 行基线（只减不增）。
+- FAQ 补 Q16 + 修正 Q2 的「推荐 H.264」——那句话对**画布内预览**是错的。
+
+**验证**：tsc 37 = 基线、vitest 727 passed（+4 选图用例）、web 宿主 vite build 通过，
+并在产物里核对到 `assets/index-*.js` 含兜底文案、`assets/index-*.css` 含 `.sg-vbad`
+（防止组件没被引用被摇掉）。**尚未**做界面肉眼验收：需要在真机上打开画布拖一个
+mp4 节点看是否退回首帧 —— 这条留给人工。
+
 ## 完善 · 附件一眼认得出是哪个镜的（2026-11-02，画布 0.3.41）
 
 上一版素材能传了，但列表长这样：「成片.mp4 / 成片_v2.mp4 / a.mp4 / b.png」。

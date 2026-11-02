@@ -66,6 +66,7 @@ import {
   type MediaRef,
 } from "./teamAssets";
 import { formatTeamDiff } from "./teamDiffText";
+import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 import "./teamPanel.css";
 
 type Member = { id: string; name: string; role: string };
@@ -872,20 +873,16 @@ function AssetThumb({ url, posterUrl, kind, icon }: {
  *
  * 本机 Qt WebEngine 不带 H.264/AAC，而产品自己渲染的成片正是 h264 ⇒ 这是
  * 常态而非异常。用户看到黑框只会以为文件坏了、反复重传。
+ * 文案与节点侧共用（`videoFallback.ts`），这里只多给一条下载出路。
  */
 function VideoPreview({ url, name }: { url: string; name: string }) {
-  const [bad, setBad] = useState(false);
-  if (bad) {
+  const v = useVideoBad();
+  if (v.bad) {
     return (
-      <div className="sg-team-noframe">
-        <b>这台机器放不了这个 mp4 的画面</b>
-        <span>
-          画布内核（Qt WebEngine）没带 H.264 解码器，不是文件坏了。
-          剪辑器用的是系统播放器，那边能正常预览。
-        </span>
+      <VideoUnplayable>
         <a href={url} download={name}>下载「{name}」用系统播放器看</a>
-      </div>
+      </VideoUnplayable>
     );
   }
-  return <video src={url} controls preload="metadata" onError={() => setBad(true)} />;
+  return <video src={url} controls preload="metadata" onError={v.onError} />;
 }

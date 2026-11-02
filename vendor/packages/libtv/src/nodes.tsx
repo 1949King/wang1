@@ -3,6 +3,8 @@ import React, { createContext, memo, useContext, useRef, useState, type ReactNod
 import { Handle, Position, type NodeProps, NodeResizer } from "@xyflow/react";
 import type { NodeData, NodeStatus } from "./store";
 import { useCanvasStore } from "./store";
+import { pickVideoPoster } from "./videoFallback";
+import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 // 节点内「生成」按钮样式（独立文件：styles.css 在冻结区，不该为一个小按钮动它）
 import "./nodeActions.css";
 
@@ -520,6 +522,8 @@ function DirectorL1Panel({ nodeId, d }: {
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "video" }>;
   const stackCount = d.videos?.length || (d.videoUrl ? 1 : 0);
+  // 画布内核没有 H.264 ⇒ mp4 的 <video> 必然报错，退回首帧图 + 说清原因（见 videoFallback.ts）
+  const vbad = useVideoBad();
   return (
     <Shell
       nodeId={id}
@@ -529,10 +533,14 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
       status={d.status} progress={d.progress} errorMessage={d.errorMessage}
     >
       {d.videoUrl ? (
-        <div className="img-wrap">
-          <video src={d.videoUrl} muted playsInline controls />
-          <StackBadge count={stackCount} />
-        </div>
+        vbad.bad ? (
+          <VideoUnplayable poster={pickVideoPoster(d.posterUrl, d.firstFrameUrl, d.lastFrameUrl)} />
+        ) : (
+          <div className="img-wrap">
+            <video src={d.videoUrl} muted playsInline controls onError={vbad.onError} />
+            <StackBadge count={stackCount} />
+          </div>
+        )
       ) : d.posterUrl ? (
         <img src={d.posterUrl} alt="" />
       ) : (

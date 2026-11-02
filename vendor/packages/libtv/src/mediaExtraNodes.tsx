@@ -19,6 +19,7 @@ import {
 } from "./store";
 import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard, planStoryboardCameras } from "./bridge";
 import { runVideoEdit, type VideoEditChannel } from "./hostVideoEdit";
+import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -726,6 +727,8 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
   const [editEgress, setEditEgress] = useState(false);
   const [editing, setEditing] = useState(false);
   const editFileRef = useRef<HTMLInputElement>(null);
+  // 画布内核没带 H.264 ⇒ mp4 的 <video> 报 error.code=4，退回一帧图 + 说清原因
+  const vbad = useVideoBad();
 
   const accept =
     d.mediaType === "video"
@@ -847,9 +850,11 @@ export const SourceNode = memo(function SourceNode({ id, data, selected }: NodeP
           </div>
         ) : null}
         {d.mediaType === "video" && d.videoUrl ? (
-          <div className="img-wrap">
-            <video src={d.videoUrl} muted playsInline controls />
-          </div>
+          vbad.bad ? <VideoUnplayable poster={d.imageUrl} /> : (
+            <div className="img-wrap">
+              <video src={d.videoUrl} muted playsInline controls onError={vbad.onError} />
+            </div>
+          )
         ) : null}
         {d.mediaType === "video" ? (
           <div className="sg-source-edit">

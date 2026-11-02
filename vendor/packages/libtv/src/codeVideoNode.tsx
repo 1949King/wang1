@@ -12,6 +12,7 @@ import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, NodeResizer } from "@xyflow/react";
 import { useCanvasStore } from "./store";
 import "./codeVideoNode.css";
+import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 import { fetchPrefs, sendBlobToEditor } from "./bridge";
 import {
   getCodeVideoJob,
@@ -135,6 +136,7 @@ export const CodeVideoNode = memo(function CodeVideoNode({ id, data, selected }:
 
   const status = d.status || "idle";
   const percent = Math.max(0, Math.min(100, Number(d.percent || 0)));
+  const vbad = useVideoBad();
   return (
     <div className={`sg-node sg-code-video${selected ? " selected" : ""}`} onMouseDown={stop}>
       <NodeResizer minWidth={300} minHeight={260} isVisible={!!selected} />
@@ -186,7 +188,13 @@ export const CodeVideoNode = memo(function CodeVideoNode({ id, data, selected }:
         )}
         {d.videoUrl ? (
           <>
-            <video className="sg-cv-video" src={d.videoUrl} controls preload="metadata" />
+            {/* 画布内核没带 H.264 ⇒ mp4 的 <video> 报 error.code=4，退回一帧图 + 说清原因 */}
+            {vbad.bad ? (
+              <VideoUnplayable />
+            ) : (
+              <video className="sg-cv-video" src={d.videoUrl} controls preload="metadata"
+                     onError={vbad.onError} />
+            )}
             <button
               type="button"
               className="sg-node-mini-btn"
