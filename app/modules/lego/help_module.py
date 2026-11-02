@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget
 )
 import os
+import re
 import logging
 import webbrowser
 from app.version import __version__
@@ -151,24 +152,36 @@ class HelpModule(BaseModule):
         self._cl.addWidget(t)
 
     def _text(self, txt):
-        t = QLabel(txt)
+        t = QLabel(self._md_plain(txt))
         t.setStyleSheet("color:#aaa;font-size:11px;line-height:1.6;")
         t.setWordWrap(True)
         self._cl.addWidget(t)
 
+    @staticmethod
+    def _md_plain(txt) -> str:
+        """剥掉渲染器**不支持**的 Markdown 记号：`**粗体**` 与行内反引号。
+
+        🔴 2026-11-02 实机截图抓到两处漏出：`_bullet` 一直没剥粗体（普通段落剥了），
+        `_tip` / 行内代码则从没人处理 ⇒ 界面上直接显示 `**动手前先拉取**` 和 `http://...` 的反引号。
+        统一收在这里，新增 Markdown 记号时只改这一处。
+        """
+        s = re.sub(r"\*\*([^*]+)\*\*", r"\1", str(txt))
+        return re.sub(r"`([^`]+)`", r"\1", s)
+
     def _bullet(self, items):
         for item in items:
-            t = QLabel(f"• {item}")
+            t = QLabel(f"• {self._md_plain(item)}")
             t.setStyleSheet("color:#999;font-size:11px;padding-left:12px;line-height:1.5;")
             t.setWordWrap(True)
             self._cl.addWidget(t)
 
     def _tip(self, txt):
+        # 提示条也走 _md_plain：QLabel 是纯文本，星号/反引号会原样画出来
         tip = QFrame()
         tip.setStyleSheet("QFrame{background:#1a2a1a;border-left:3px solid #4caf50;border-radius:4px;}")
         tl = QVBoxLayout(tip)
         tl.setContentsMargins(10, 6, 10, 6)
-        lb = QLabel(f"💡 {txt}")
+        lb = QLabel(f"💡 {self._md_plain(txt)}")
         lb.setStyleSheet("color:#81c784;font-size:10px;")
         lb.setWordWrap(True)
         tl.addWidget(lb)
@@ -229,8 +242,7 @@ class HelpModule(BaseModule):
                 item = line.strip()[2:]
                 # 处理链接 [text](url)
                 item = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', item)
-                # 粗体标记：普通段落早就剥了，列表项以前漏剥 ⇒ 界面上直接显示 `**文字**`
-                item = re.sub(r'\*\*([^*]+)\*\*', r'\1', item)
+                # 粗体 / 行内反引号统一由 _md_plain 在 _bullet 里剥
                 bullets_buf.append(item)
 
             # 表格（简单处理为文本行）
