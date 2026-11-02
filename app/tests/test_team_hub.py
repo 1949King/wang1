@@ -235,6 +235,128 @@ def test_asset_missing_blob_reports_not_found(hub):
     assert ei.value.code == "not_found" and "丢失" in ei.value.message
 
 
+# ── 版本差异（2026-11-02）────────────────────────────────
+def _bundle_for_diff(title="片子"):
+    return {
+        "dramaTitle": title,
+        "nodes": [
+            {"id": "n1", "type": "shot", "data": {"title": "镜 01", "prompt": "a"}},
+            {"id": "n2", "type": "shot", "data": {"title": "镜 02", "prompt": "b"}},
+            {"id": "n3", "type": "script", "data": {"title": "剧本"}},
+        ],
+        "edges": [{"id": "e1", "source": "n1", "target": "n2"}],
+        "timeline": {"clips": [{"id": "c1", "path": "/a.mp4"}, {"id": "c2", "path": "/b.mp4"}]},
+    }
+
+
+def test_diff_bundle_counts_nodes_edges_timeline():
+    from app.core.team_hub import diff_bundle
+
+    old = _bundle_for_diff("旧名")
+    new = {
+        "dramaTitle": "新名",
+        "nodes": [
+            {"id": "n1", "type": "shot", "data": {"title": "镜 01", "prompt": "a"}},      # 没动
+            {"id": "n2", "type": "shot", "data": {"title": "镜 02", "prompt": "b2"}},     # 改了
+            {"id": "n4", "type": "video", "data": {"title": "镜 04"}},                    # 新增
+        ],
+        "edges": [
+            {"id": "e1", "source": "n1", "target": "n2"},
+            {"id": "e2", "source": "n2", "target": "n4"},
+        ],
+        "timeline": {"clips": [{"id": "c1", "path": "/a.mp4"}, {"id": "c3", "path": "/c.mp4"}]},
+    }
+    d = diff_bundle(old, new)
+    assert d["nodes"]["added"] == 1
+    assert d["nodes"]["removed"] == 1
+    assert d["nodes"]["changed"] == 1
+    assert d["nodes"]["added_titles"] == ["镜 04"]
+    assert d["nodes"]["removed_titles"] == ["剧本"]
+    assert d["nodes"]["changed_titles"] == ["镜 02"]
+    assert d["edges"] == {"added": 1, "removed": 0}
+    assert d["timeline"] == {"before": 2, "after": 2, "added": 1, "removed": 1, "changed": 0}
+    assert d["title"]["changed"] is True and d["title"]["before"] == "旧名"
+
+
+def test_diff_ignores_ui_noise():
+    """拖动 / 选中 / 测量值变化**不算**改内容 —— 否则一拉就是满屏假差异。"""
+    from app.core.team_hub import diff_bundle
+
+    old = {"nodes": [{"id": "n1", "position": {"x": 1, "y": 2}, "selected": False,
+                      "measured": {"width": 240}, "data": {"title": "A", "prompt": "p"}}]}
+    new = {"nodes": [{"id": "n1", "position": {"x": 99.5, "y": 8.25}, "selected": True,
+                      "measured": {"width": 241}, "data": {"title": "A", "prompt": "p"}}]}
+    assert diff_bundle(old, new)["nodes"]["changed"] == 0
+    # 内容真变了才算
+    new["nodes"][0]["data"]["prompt"] = "p2"
+    assert diff_bundle(old, new)["nodes"]["changed"] == 1
+
+
+def test_diff_empty_and_garbage_input():
+    from app.core.team_hub import diff_bundle
+
+    d = diff_bundle(_bundle_for_diff(), _bundle_for_diff())
+    assert d["nodes"] == {"added": 0, "removed": 0, "changed": 0,
+                          "added_titles": [], "removed_titles": [], "changed_titles": []}
+    # 任意垃圾输入不炸（服务端可能读到半截写坏的文件）
+    for bad in (None, {}, {"nodes": "not a list"}, {"nodes": [1, 2, None]}):
+        assert diff_bundle(bad, bad)["nodes"]["added"] == 0
+
+
+def test_hub_diff_between_revs(hub):
+    m = hub.register_member("张三")
+    pid = hub.create_project("片子", m["member_id"], _bundle_for_diff("v1"))["project_id"]
+    new = _bundle_for_diff("v2")
+    new["nodes"][1]["data"]["prompt"] = "改过了"
+    hub.push(pid, m["member_id"], new, base_rev=1)
+
+    d = hub.diff(pid, 1, 2)
+    assert d["from_rev"] == 1 and d["to_rev"] == 2 and d["revisions"] == 1
+    assert d["same"] is False and d["nodes"]["changed"] == 1
+
+    # 同版本 ⇒ same，不做无意义比较
+    same = hub.diff(pid, 2, 2)
+    assert same["same"] is True and same["revisions"] == 0
+
+    # 都不指定 ⇒ 自动取最近两版
+    auto = hub.diff(pid, 0, 0)
+    assert auto["from_rev"] == 1 and auto["to_rev"] == 2
+
+    # 只给 from ⇒ to 取最新
+    only_from = hub.diff(pid, 1, 0)
+    assert only_from["to_rev"] == 2
+
+    # 版本不存在 ⇒ 如实报
+    with pytest.raises(TeamError) as ei:
+        hub.diff(pid, 1, 99)
+    assert ei.value.code == "not_found"
+
+
+def test_diff_endpoint_rejects_bad_query(tmp_path):
+    """from/to 写坏了按「不指定」处理，不是 500 —— 别让人去猜服务端怎么了。"""
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, a = _req(base, "/team/join", {"name": "张三"})
+        _, created = _req(base, "/team/projects", {"name": "片", "bundle": _bundle_for_diff("v1")}, a["token"])
+        pid = created["project_id"]
+        hub = srv.hub
+        hub.push(pid, a["member_id"], _bundle_for_diff("v2"), base_rev=1)
+
+        code, d = _req(base, "/team/projects/%s/diff?from=1&to=2" % pid, token=a["token"])
+        assert code == 200 and d["title"]["changed"] is True and d["revisions"] == 1
+
+        code, bad = _req(base, "/team/projects/" + pid + "/diff?from=abc&to=xxx", token=a["token"])
+        assert code == 200 and bad["from_rev"] == 1 and bad["to_rev"] == 2
+
+        # 没令牌 ⇒ 401（差异里含节点标题，不能裸奔）
+        code, _ = _req(base, "/team/projects/%s/diff" % pid)
+        assert code == 401
+    finally:
+        srv.stop()
+
+
 def _raw_req(base, path, data=b"", token="", method="POST", headers=None):
     """原始请求：成功时能解析成 JSON 就回 dict，否则回 bytes（下载附件用）。"""
     req = urllib.request.Request(base + path, data=(data or None), method=method)

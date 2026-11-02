@@ -48,6 +48,9 @@ import {
   teamPush,
   teamRelease,
   teamUploadAsset,
+  localRevOf,
+  setLocalRev,
+  teamDiff,
 } from "./teamClient";
 import {
   applyMediaIndex,
@@ -62,6 +65,7 @@ import {
   writeMediaCache,
   type MediaRef,
 } from "./teamAssets";
+import { formatTeamDiff } from "./teamDiffText";
 import "./teamPanel.css";
 
 type Member = { id: string; name: string; role: string };
@@ -321,6 +325,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       // 再补一次：带时间线 + 已上传的素材（rev 1 → 2，中间只有几十毫秒）
       const prep = await prepareTeamBundle(res.project_id);
       const pushed = await teamPush(res.project_id, prep.bundle, res.rev, "补传时间线与素材");
+      setLocalRev(res.project_id, pushed.rev);
       setSelected(res.project_id);
       await refreshTeam();
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
@@ -342,6 +347,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     try {
       const prep = await prepareTeamBundle(projectId);
       const res = await teamPush(projectId, prep.bundle, p.rev, note || "更新画布");
+      setLocalRev(projectId, res.rev);
       await refreshTeam();
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
       say(prep.warnings.length ? "info" : "ok",
@@ -368,14 +374,39 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     return fixed;
   };
 
+  /**
+   * 拉取前先算差异 —— 「同事到底改了哪」。
+   *
+   * 多人协作最贵的错误不是冲突，是**盲目覆盖**：不知道对方改了 5 个节点就把自己
+   * 手上的版本盖掉，那一遍白改。所以先算一次摘要差异摆出来，再让人决定。
+   * 差异拿不到（老服务器没这端点 / 网络抖）**不拦拉取**，如实说明后继续问。
+   */
+  const confirmPull = async (projectId: string, title: string): Promise<boolean> => {
+    const myRev = localRevOf(projectId);
+    setBusy("diff");
+    setSync("正在对比版本…");
+    let preview = "";
+    try {
+      const d = await teamDiff(projectId, myRev, 0);
+      preview = "\n\n" + formatTeamDiff(d, myRev);
+    } catch (e) {
+      preview = "\n\n（拿不到差异摘要：" + (e instanceof Error ? e.message : String(e)) + "）";
+    } finally {
+      setSync("");
+      setBusy("");
+    }
+    return window.confirm(`拉取「${title}」会覆盖当前画布。${preview}\n\n继续？`);
+  };
+
   const pullFrom = async (projectId: string) => {
     const p = projects.find((x) => x.project_id === projectId);
     if (!p) return;
-    if (!window.confirm(`拉取「${p.name}」会覆盖当前画布，继续？`)) return;
+    if (!(await confirmPull(projectId, p.name))) return;
     setBusy("pull");
     try {
       const data = await teamPull(projectId);
       const fixed = loadPulled(data.bundle, p.name);
+      setLocalRev(projectId, data.rev);
       say("ok", `已拉取「${p.name}」rev ${data.rev}`);
       await offerTimelineImport(fixed);
     } catch (e) {
@@ -492,15 +523,14 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
 
   const accept = async (item: TeamHandoffItem) => {
     const p = projects.find((x) => x.project_id === item.project_id);
+    // 先问再 ack：反过来会在用户点「取消」时把交接单也确认掉了
+    if (!(await confirmPull(item.project_id, item.project_name || item.project_id))) return;
     setBusy("accept");
     try {
       await teamAck(item.handoff_id);
-      if (!window.confirm(`接手「${item.project_name}」会覆盖当前画布，继续？`)) {
-        await refreshTeam();
-        return;
-      }
       const data = await teamPull(item.project_id);
       const fixed = loadPulled(data.bundle, item.project_name);
+      setLocalRev(item.project_id, data.rev);
       await teamClaim(item.project_id);
       say("ok", `已接手「${p?.name || item.project_name}」`);
       await refreshTeam();

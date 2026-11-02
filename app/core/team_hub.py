@@ -105,6 +105,129 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(("shiguang-team:" + str(token)).encode("utf-8")).hexdigest()
 
 
+# ── 版本差异（纯函数 · 可单测）──────────────────────────────
+#: 节点里跟**内容**无关的 UI 状态。拖动/选中/重算测量值都不算「改了内容」——
+#: 尤其是 `position`：React Flow 在布局回写时会带浮点微差，算进去就是满屏假差异。
+_NODE_NOISE = frozenset([
+    "selected", "dragging", "measured", "width", "height",
+    "positionAbsolute", "position", "resizing",
+])
+
+
+def _node_payload(node: Any) -> str:
+    """节点里参与差异判定的部分（去掉 UI 状态，键序稳定 ⇒ 可直接比字符串）。"""
+    if not isinstance(node, dict):
+        return repr(node)
+    try:
+        clean = {k: v for k, v in node.items() if k not in _NODE_NOISE}
+        return json.dumps(clean, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        return repr(node)
+
+
+def _node_title(node: Any) -> str:
+    """给人看的节点名：优先 data.title，退到 type，最后「节点」。"""
+    if isinstance(node, dict):
+        data = node.get("data")
+        if isinstance(data, dict):
+            for k in ("title", "name", "label"):
+                v = data.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()[:40]
+        t = node.get("type")
+        if isinstance(t, str) and t.strip():
+            return t.strip()[:40]
+    return "节点"
+
+
+def _clips_of(bundle: Any) -> List[dict]:
+    if not isinstance(bundle, dict):
+        return []
+    tl = bundle.get("timeline")
+    if not isinstance(tl, dict):
+        return []
+    cs = tl.get("clips")
+    return [c for c in cs if isinstance(c, dict)] if isinstance(cs, list) else []
+
+
+def _clip_key(clip: Any) -> str:
+    """片段稳定主键：id 优先，path@start_time 兜底（与 project_snapshot 同口径）。"""
+    if not isinstance(clip, dict):
+        return ""
+    cid = clip.get("id")
+    if cid is not None and cid != "":
+        return "id:" + str(cid)
+    return "path:%s@%s" % (clip.get("path") or "", clip.get("start_time") or 0)
+
+
+def _clip_payload(clip: Any) -> str:
+    try:
+        return json.dumps(clip, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        return repr(clip)
+
+
+def _index_by(seq: Any, key_of) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if not isinstance(seq, list):
+        return out
+    for item in seq:
+        if not isinstance(item, dict):
+            continue
+        k = key_of(item)
+        if k:
+            out[k] = item
+    return out
+
+
+def diff_bundle(old: Any, new: Any) -> Dict[str, Any]:
+    """两份 bundle 的摘要差异 —— 回答「同事到底改了哪」。
+
+    只回**计数 + 少量标题**，不回整份内容：目的是让人一眼判断「要不要拉」，
+    真要逐字比就自己拉下来看。
+    """
+    o = old if isinstance(old, dict) else {}
+    n = new if isinstance(new, dict) else {}
+
+    on = _index_by(o.get("nodes"), lambda x: str(x.get("id") or ""))
+    nn = _index_by(n.get("nodes"), lambda x: str(x.get("id") or ""))
+    n_added = [k for k in nn if k not in on]
+    n_removed = [k for k in on if k not in nn]
+    n_changed = [k for k in nn if k in on and _node_payload(on[k]) != _node_payload(nn[k])]
+
+    oe = _index_by(o.get("edges"), lambda x: str(x.get("id") or ""))
+    ne = _index_by(n.get("edges"), lambda x: str(x.get("id") or ""))
+    e_added = [k for k in ne if k not in oe]
+    e_removed = [k for k in oe if k not in ne]
+
+    oc = _index_by(_clips_of(o), _clip_key)
+    nc = _index_by(_clips_of(n), _clip_key)
+    c_added = [k for k in nc if k not in oc]
+    c_removed = [k for k in oc if k not in nc]
+    c_changed = [k for k in nc if k in oc and _clip_payload(oc[k]) != _clip_payload(nc[k])]
+
+    def titles(keys: List[str], idx: Dict[str, Any], limit: int = 6) -> List[str]:
+        return [_node_title(idx[k]) for k in keys[:limit]]
+
+    title_o = str(o.get("dramaTitle") or "")
+    title_n = str(n.get("dramaTitle") or "")
+
+    return {
+        "nodes": {
+            "added": len(n_added), "removed": len(n_removed), "changed": len(n_changed),
+            "added_titles": titles(n_added, nn),
+            "removed_titles": titles(n_removed, on),
+            "changed_titles": titles(n_changed, nn),
+        },
+        "edges": {"added": len(e_added), "removed": len(e_removed)},
+        "timeline": {
+            "before": len(oc), "after": len(nc),
+            "added": len(c_added), "removed": len(c_removed), "changed": len(c_changed),
+        },
+        "title": {"before": title_o, "after": title_n, "changed": title_o != title_n},
+    }
+
+
 class Hub:
     """团队中枢。线程安全（所有写操作在同一把锁内）。"""
 
@@ -334,6 +457,46 @@ class Hub:
         return [{"rev": int(r["rev"]), "sha256": r["sha256"], "bytes": int(r["bytes"]),
                  "author": r["author_name"] or r["author_id"],
                  "message": r["message"], "created_at": float(r["created_at"])} for r in rows]
+
+    def _read_bundle(self, project_id: str, rev: int) -> Any:
+        path = self._bundle_path(project_id, rev)
+        if not os.path.isfile(path):
+            raise TeamError("not_found", "版本不存在：rev=%d" % int(rev))
+        with open(path, "rb") as f:
+            return json.loads(f.read().decode("utf-8"))
+
+    def diff(self, project_id: str, from_rev: int, to_rev: int) -> Dict[str, Any]:
+        """对比两个版本，给「同事到底改了哪」一个能读的答案。
+
+        为什么不让前端拉两个 bundle 自己比：一个含内嵌图的 bundle 几十 MB，
+        拉两遍只为看差异是浪费。这里在服务端读文件比对，只回摘要。
+        """
+        row = self._project_row(project_id)
+        latest = int(row["rev"])
+        a = int(from_rev or 0)
+        b = int(to_rev or 0)
+        # 0 = 不指定（界面默认走这条），不是「第 0 版」
+        if b <= 0:
+            b = latest
+        if a <= 0:
+            a = max(1, b - 1)
+        # 🔴 超范围的 rev **报错而不是悄悄夹到最新**：夹了会给出一份「看起来对、
+        # 其实不是你问的那两版」的差异，比报错难查得多。
+        if a < 1 or b < 1:
+            raise TeamError("not_found", "版本不存在：rev=%d" % (a if a < 1 else b))
+        if a > latest or b > latest:
+            raise TeamError("not_found", "版本不存在：rev %d（最新 rev %d）"
+                            % (a if a > latest else b, latest))
+        if a > b:
+            a, b = b, a      # 传反了不报错，交换即可
+        if a == b:
+            return {"project_id": project_id, "from_rev": a, "to_rev": b,
+                    "revisions": 0, "same": True, "nodes": {}, "edges": {},
+                    "timeline": {}, "title": {}}
+        return {"project_id": project_id, "revisions": b - a, "same": False,
+                **diff_bundle(self._read_bundle(project_id, a),
+                              self._read_bundle(project_id, b)),
+                "from_rev": a, "to_rev": b}
 
     # ── 认领（编辑锁）──────────────────────────────────
     def claim(self, project_id: str, member_id: str, ttl: int = DEFAULT_CLAIM_TTL) -> Dict[str, Any]:

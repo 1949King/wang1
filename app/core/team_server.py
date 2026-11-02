@@ -364,6 +364,20 @@ class _TeamHandler(BaseHTTPRequestHandler):
             self._member()
             self._send(200, {"ok": True, "versions": hub.versions(parts[3])})
             return
+        # /team/projects/{id}/diff?from=&to=
+        if len(parts) == 5 and parts[4] == "diff":
+            self._member()
+            q = parse_qs(urlparse(self.path).query)
+
+            def _rev(name: str) -> int:
+                try:
+                    return int((q.get(name) or ["0"])[0] or 0)
+                except (TypeError, ValueError):
+                    # 参数写坏了按「不指定」处理（自动取最近两版），别回 500 让人猜
+                    return 0
+
+            self._send(200, {"ok": True, **hub.diff(parts[3], _rev("from"), _rev("to"))})
+            return
         raise TeamError("not_found", "未知端点：%s" % path)
 
     def _route_post(self, path: str) -> None:

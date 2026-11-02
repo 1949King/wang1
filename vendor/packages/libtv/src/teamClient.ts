@@ -313,6 +313,67 @@ export function teamAck(handoffId: string): Promise<{ status: string }> {
   return teamCall("/team/inbox/" + encodeURIComponent(handoffId) + "/ack", { body: {} });
 }
 
+// ── 版本差异（「同事到底改了哪」）────────────────────
+
+/** 两份版本的摘要差异（与 `team_hub.diff_bundle` 对齐）。 */
+export type TeamDiff = {
+  project_id: string;
+  from_rev: number;
+  to_rev: number;
+  /** 落后几版 */
+  revisions: number;
+  same: boolean;
+  nodes?: {
+    added: number;
+    removed: number;
+    changed: number;
+    added_titles?: string[];
+    removed_titles?: string[];
+    changed_titles?: string[];
+  };
+  edges?: { added: number; removed: number };
+  timeline?: { before: number; after: number; added: number; removed: number; changed: number };
+  title?: { before: string; after: string; changed: boolean };
+};
+
+/** `from`/`to` 传 0 表示「不指定」：都传 0 服务端自动取最近两版。 */
+export function teamDiff(projectId: string, fromRev = 0, toRev = 0): Promise<TeamDiff> {
+  const qs: string[] = [];
+  if (fromRev) qs.push("from=" + fromRev);
+  if (toRev) qs.push("to=" + toRev);
+  return teamCall(
+    "/team/projects/" + encodeURIComponent(projectId) + "/diff" + (qs.length ? "?" + qs.join("&") : ""),
+  );
+}
+
+// ── 本地版本锚点 ────────────────────────────────────
+//
+// 不知道「我这份画布是基于服务器哪一版」就算不出差异。所以每次 push/pull/接手
+// 成功后记一笔。**不记录也不影响协作** —— 算不出差异时退化成「服务器 rev N，
+// 要不要拉」，只是不够具体。
+
+const LS_REV_PREFIX = "shiguang:team:rev:";
+
+export function localRevOf(projectId: string): number {
+  if (!projectId) return 0;
+  try {
+    const v = Number(window.localStorage.getItem(LS_REV_PREFIX + projectId) || 0);
+    return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function setLocalRev(projectId: string, rev: number): void {
+  if (!projectId || !Number.isFinite(rev) || rev <= 0) return;
+  try {
+    window.localStorage.setItem(LS_REV_PREFIX + projectId, String(Math.floor(rev)));
+  } catch (e) {
+    // 记不住只是下次算不出差异，不该拦住协作本身
+    console.warn("[team] 本地版本锚点写入失败:", e);
+  }
+}
+
 // ── 附件（视频 / 图片 / 音频 —— 2026-11-02）──────────
 //
 // 为什么不复用 `teamCall`：它强制 `Content-Type: application/json` 并
