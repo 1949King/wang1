@@ -326,6 +326,7 @@ class SettingsModule(BaseModule):
             ("🗑️", "缓存", "cache", self._create_cache_tab),
             ("🌐", "语言", "language", self._create_language_tab),
             ("🧩", "功能开关", "modules", self._create_module_toggle_tab),
+            ("👥", "团队协作", "team", self._create_team_tab),
             ("ℹ️", "关于", "about", self._create_about_tab),
         ]
         
@@ -433,7 +434,6 @@ class SettingsModule(BaseModule):
         layout.setSpacing(15)
         
         desc = QLabel("双击快捷键区域可以修改快捷键，按 Esc 取消修改")
-        desc
         layout.addWidget(desc)
         
         self._shortcut_table = QTableWidget()
@@ -2173,7 +2173,6 @@ class SettingsModule(BaseModule):
         layout.setSpacing(15)
 
         title = QLabel("🗑️ 缓存管理")
-        title
         layout.addWidget(title)
 
         desc = QLabel("清理临时文件、渲染缓存和AI模型缓存以释放磁盘空间")
@@ -2311,6 +2310,11 @@ class SettingsModule(BaseModule):
         QMessageBox.information(self, "完成", f"已清理 {cleared} 个缓存目录")
         self._estimate_cache_sizes()
 
+    def _create_team_tab(self) -> QWidget:
+        # 正文单独成文件：本文件已顶到单文件规模守卫（基线 2823 / 容差 30）
+        from app.modules.lego.settings_team_tab import build_team_tab
+        return build_team_tab(self)
+
     def _create_language_tab(self) -> QWidget:
         """语言切换标签页 - 使用下拉框，像正常软件一样"""
         widget = QWidget()
@@ -2319,7 +2323,6 @@ class SettingsModule(BaseModule):
         layout.setSpacing(20)
 
         title = QLabel("🌐 语言切换")
-        title
         layout.addWidget(title)
 
         desc = QLabel("选择界面显示语言，切换后即时生效")
@@ -2328,7 +2331,6 @@ class SettingsModule(BaseModule):
         layout.addWidget(desc)
 
         lang_group = QGroupBox("界面语言")
-        lang_group
         lang_layout = QFormLayout(lang_group)
         lang_layout.setSpacing(12)
 

@@ -97,11 +97,54 @@ export function teamLeave(): void {
 }
 
 // ── 内部：两种调用面 ────────────────────────────────
+
+/**
+ * Windows 套接字错误码 → 能照做的一句话。
+ *
+ * 🔴 2026-11-02 用户实机反馈：面板上只显示
+ * `[WinError 10038] 在一个非套接字上尝试了一个操作。` —— 使用者拿到这行字做不了任何事。
+ * 纪律：**技术细节进 console，界面只给下一步动作**（后端 `team_discovery` 同一套口径）。
+ */
+const WIN_HINTS: Record<string, string> = {
+  "10013": "权限不足：端口被系统策略或防火墙挡住，换端口或放行程序",
+  "10038": "套接字已关闭：团队服务刚被停掉，重新启动一次就好",
+  "10048": "端口已占用：这台机器上已有一个团队服务在跑（或换台机器当服务器）",
+  "10049": "地址不可用：IP 不在本机网段，检查地址里的 IP 段",
+  "10053": "连接被对方中断：对方服务刚停，重试一次",
+  "10060": "连接超时：两台机器不在同一网段，或被防火墙拦住",
+  "10061": "拒绝连接：对方没启动团队服务，或端口不是 18770",
+  "10065": "网络不可达：两台机器没连到同一台路由器",
+};
+
+/** 把 fetch 抛出来的东西翻成 TeamError（原始异常只进 console，不上界面）。 */
+function netError(addr: string, e: unknown, where: "host" | "team"): TeamError {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    console.warn(`[team] ${where} 调用失败：${addr}`, e);
+  } catch {
+    /* console 不可用时无需处理 */
+  }
+  const win = /\[WinError (\d+)\]/.exec(raw)?.[1];
+  const hint = win ? WIN_HINTS[win] : undefined;
+  if (hint) return new TeamError(`net_${win}`, `${hint}（WinError ${win}）`, { raw });
+  if (/Failed to fetch|NetworkError|Load failed|fetch failed/i.test(raw)) {
+    return new TeamError("net_down", where === "host"
+      ? "连不上本机画布桥（127.0.0.1:18765）：主程序可能刚重启，刷新画布再试一次"
+      : `连不上 ${addr}：确认对方已点「启动团队服务」、地址和端口填对（默认 18770）、两台机器连的是同一个 Wi-Fi`,
+      { raw });
+  }
+  return new TeamError("net_error", raw, { raw });
+}
+
 async function hostCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BRIDGE + path, {
-    ...init,
-    headers: { ...authHeaders(true), ...(init?.headers || {}) },
-  });
+  // 请求头在 try 之外算：`authHeaders()` 抛的是**本地装配错误**，不能被误报成「连不上桥」。
+  const headers = { ...authHeaders(true), ...(init?.headers || {}) };
+  let res: Response;
+  try {
+    res = await fetch(BRIDGE + path, { ...init, headers });
+  } catch (e) {
+    throw netError(BRIDGE, e, "host");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.ok === false) {
     throw new TeamError(String(data?.code || "host_" + res.status),
@@ -117,14 +160,19 @@ async function teamCall<T>(
   const address = normalizeAddress(opts.address || teamCred()?.address || teamAddress());
   if (!address) throw new TeamError("no_address", "还没填团队服务地址");
   const token = opts.token ?? teamCred()?.token ?? "";
-  const res = await fetch(address + path, {
-    method: opts.method || (opts.body ? "POST" : "GET"),
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: "Bearer " + token } : {}),
-    },
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(address + path, {
+      method: opts.method || (opts.body ? "POST" : "GET"),
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    });
+  } catch (e) {
+    throw netError(address, e, "team");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.ok === false) {
     throw new TeamError(String(data?.code || "team_" + res.status),

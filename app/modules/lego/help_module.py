@@ -87,6 +87,7 @@ class HelpModule(BaseModule):
             ("🤖", "模型广场", self._models),
             ("🎨", "AI画布", self._ai_canvas),
             ("🌐", "外部画布备选", self._canvas_alternatives),
+            ("👥", "团队协作", self._team),
             ("❓", "常见问题", self._faq),
         ]
         self._help_topics = topics  # 保存引用供搜索使用
@@ -228,6 +229,8 @@ class HelpModule(BaseModule):
                 item = line.strip()[2:]
                 # 处理链接 [text](url)
                 item = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', item)
+                # 粗体标记：普通段落早就剥了，列表项以前漏剥 ⇒ 界面上直接显示 `**文字**`
+                item = re.sub(r'\*\*([^*]+)\*\*', r'\1', item)
                 bullets_buf.append(item)
 
             # 表格（简单处理为文本行）
@@ -849,6 +852,19 @@ class HelpModule(BaseModule):
             return " ".join(texts)
         except Exception:
             return ""
+
+    def _team(self):
+        """团队协作（局域网多人改同一画布）—— 正文在 docs/help/team.md。
+
+        和 faq / quick_start / editor 同一套约定：正文写 Markdown，改文档不用改代码。
+        """
+        self._clear()
+        if self._load_markdown_topic("team"):
+            return
+        self._title("👥 团队协作")
+        self._text("正文文档缺失（docs/help/team.md）。可先在画布左侧 👥 面板里查看，"
+                   "「设置 → 团队协作」也有一份同样的说明。")
+        self._cl.addStretch()
 
     def _faq(self):
         self._clear()

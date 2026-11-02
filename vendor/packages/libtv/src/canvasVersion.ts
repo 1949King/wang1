@@ -19,13 +19,13 @@
  */
 
 /** 画布语义化版本（不带 v 前缀，便于与 package.json 对齐） */
-export const CANVAS_VERSION = "0.3.35";
+export const CANVAS_VERSION = "0.3.36";
 
 /** 画布版本显示串（带 v 前缀，供导航栏渲染） */
 export const CANVAS_VERSION_LABEL = `v${CANVAS_VERSION}`;
 
 /** 版本代号：跟随本版主题命名，便于口头指代 */
-export const CANVAS_VERSION_CODENAME = "团队入口上移常驻导航栏（任何视图都够得着）";
+export const CANVAS_VERSION_CODENAME = "团队面板报错说人话 + 设置/帮助双入口使用说明";
 
 /** 导航栏版本号的 tooltip 文案 */
 export const CANVAS_VERSION_TITLE = `拾光导演台 · ${CANVAS_VERSION_CODENAME}`;

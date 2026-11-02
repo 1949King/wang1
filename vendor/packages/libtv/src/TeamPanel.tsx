@@ -148,7 +148,15 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       say("ok", `已加入：${c.name}`);
       await refreshTeam();
     } catch (e) {
-      fail(e);
+      // 🔴 2026-11-02：首次使用最常见的卡点就在这里 —— 本机服务还没启动，
+      // 地址却填了自己（或同事）的机器，于是面板只丢一句网络错误，人不知道下一步点哪。
+      // 有 `host.running` 这个已知状态就要用上：把「该点 ①」直接写进错误行。
+      if (!host?.running && e instanceof TeamError && e.code.startsWith("net_")) {
+        say("err", `${e.message}；如果这台就是服务器，先点 ① 的「启动团队服务」再回来加入`);
+      } else {
+        fail(e);
+      }
+      void refreshHost();
     } finally {
       setBusy("");
     }

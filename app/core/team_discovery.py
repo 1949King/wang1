@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import socket
 import threading
 import time
@@ -33,6 +34,37 @@ APP_TAG = "shiguang-team"
 DISCOVER_PORT = 45123
 DISCOVER_MAGIC = "SHIGUANG_DISCOVER"
 BEACON_INTERVAL = 2.0
+
+#: Windows 套接字错误码 → 能照着做的下一步。
+#: 🔴 2026-11-02：用户实机对着面板只看到
+#: `[WinError 10038] 在一个非套接字上尝试了一个操作。` —— 错误码本身对使用者零信息量，
+#: 而且这是**唯一**会把原始 OSError 一路透到界面的地方（全库只有本模块碰 UDP/close）。
+#: 纪律：技术细节留在日志里，界面只给「该做什么」。
+_SOCK_HINTS: Dict[int, str] = {
+    10013: "权限不足：端口被系统策略或防火墙挡住，换端口或放行程序",
+    10038: "套接字已关闭：团队服务刚被停掉，重新启动一次就好",
+    10048: "端口已占用：这台机器上已有一个团队服务在跑（或换台机器当服务器）",
+    10049: "地址不可用：IP 不在本机网段，检查地址里的 IP 段",
+    10053: "连接被对方中断：对方服务刚停，重试一次",
+    10060: "连接超时：两台机器不在同一网段，或被防火墙拦住",
+    10061: "拒绝连接：对方没启动团队服务，或端口不是 18770",
+    10065: "网络不可达：两台机器没连到同一台路由器",
+}
+
+
+def friendly_socket_error(exc: BaseException) -> str:
+    """把套接字错误翻成一句能照做的话；原始错误码附在末尾，便于用户反馈。
+
+    非套接字错误（含 NotImplementedError 之类）原样返回，不吞信息。
+    """
+    win: Optional[int] = getattr(exc, "winerror", None)
+    if win is None:
+        m = re.search(r"\[WinError (\d+)\]", str(exc))
+        win = int(m.group(1)) if m else None
+    hint = _SOCK_HINTS.get(int(win)) if win is not None else None
+    if hint:
+        return "%s（WinError %s）" % (hint, win)
+    return str(exc)
 
 
 def encode_payload(name: str, port: int, host: str = "", ver: str = "1") -> bytes:
@@ -87,10 +119,16 @@ class Beacon:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._sock: Optional[socket.socket] = None
+        self._listener: Optional[socket.socket] = None
 
     def start(self) -> None:
         if self._thread is not None:
             return
+        # 🔴 2026-11-02 实锤 bug：stop() 会把 _stop 置位，start() 从来没清回来。
+        # 后果（本机实测 is_alive()=False）：**停止团队服务再重新启动后，beacon 线程刚起来就退出**，
+        # HTTP 服务照常能用、同事手填地址也能连，但「扫描局域网」永远扫不到这台机 ——
+        # 现象和「网络限制广播」一模一样，几乎不可能从界面归因。
+        self._stop.clear()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -98,11 +136,8 @@ class Beacon:
         self._thread = threading.Thread(target=self._loop, name="TeamBeacon", daemon=True)
         self._thread.start()
 
-    def _loop(self) -> None:
-        sock = self._sock
-        if sock is None:
-            return
-        # 监听 DISCOVER（用同一端口的另一个 socket，避免与发送互相干扰）
+    def _open_listener(self) -> Optional[socket.socket]:
+        """监听 DISCOVER（用独立 socket，避免与发送互相干扰）；端口被占则降级为只广播。"""
         listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.settimeout(0.5)
@@ -111,44 +146,78 @@ class Beacon:
         except Exception:  # stability-gate: allow-swallow（端口被占则只做被动广播，不中断服务）
             logger.warning("[team.discovery] 无法监听 %d（可能已被占用），降级为只广播", DISCOVER_PORT)
             listener.close()
-            listener = None  # type: ignore[assignment]
+            return None
+        self._listener = listener
+        return listener
 
-        payload = encode_payload(self.name, self.port, self.host)
-        last = 0.0
-        while not self._stop.is_set():
-            now = time.time()
-            if now - last >= self.interval:
-                last = now
-                for addr in _broadcast_addrs():
-                    try:
-                        sock.sendto(payload, (addr, DISCOVER_PORT))
-                    except Exception:  # stability-gate: allow-swallow（单播地址不可达就换下一个）
-                        continue
-            if listener is None:
-                self._stop.wait(0.5)
-                continue
-            try:
-                raw, peer = listener.recvfrom(1024)
-            except socket.timeout:
-                continue
-            except Exception:  # stability-gate: allow-swallow（收包异常不终止 beacon）
-                continue
-            if raw.strip()[:32] == DISCOVER_MAGIC.encode():
-                try:
-                    listener.sendto(payload, peer)   # 单播回复：穿透广播抑制
-                except Exception:  # stability-gate: allow-swallow（回复失败等下一次）
+    def _close_listener(self) -> None:
+        """关掉监听 socket 并摘掉引用（幂等）。
+
+        🔴 必须显式关：原先靠局部变量出作用域后 GC 收尾，导致
+        「停止 → 立刻启动」时 45123 偶尔还占着 ⇒ 新 beacon 静默降级成只广播。
+        """
+        listener, self._listener = self._listener, None
+        if listener is None:
+            return
+        try:
+            listener.close()
+        except OSError:  # stability-gate: allow-swallow（关闭失败不该打断停止流程）
+            logger.debug("[team.discovery] 关闭监听 socket 失败", exc_info=True)
+
+    def _loop(self) -> None:
+        sock = self._sock
+        if sock is None:
+            return
+        listener = self._open_listener()
+        try:
+            payload = encode_payload(self.name, self.port, self.host)
+            last = 0.0
+            while not self._stop.is_set():
+                now = time.time()
+                if now - last >= self.interval:
+                    last = now
+                    for addr in _broadcast_addrs():
+                        try:
+                            sock.sendto(payload, (addr, DISCOVER_PORT))
+                        except Exception:  # stability-gate: allow-swallow（单播地址不可达就换下一个）
+                            continue
+                if listener is None:
+                    self._stop.wait(0.5)
                     continue
+                try:
+                    raw, peer = listener.recvfrom(1024)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    # stop() 从别的线程关掉 listener 时这里会立刻抛（Windows 上是
+                    # WinError 10038）。这是**正常退出路径**，不是故障；循环头会看到 _stop 并结束。
+                    if self._stop.is_set():
+                        break
+                    continue
+                except Exception:  # stability-gate: allow-swallow（收包异常不终止 beacon）
+                    continue
+                if raw.strip()[:32] == DISCOVER_MAGIC.encode():
+                    try:
+                        listener.sendto(payload, peer)   # 单播回复：穿透广播抑制
+                    except Exception:  # stability-gate: allow-swallow（回复失败等下一次）
+                        continue
+        finally:
+            self._close_listener()
 
     def stop(self) -> None:
         self._stop.set()
+        # 先关 listener：recvfrom 有 0.5s 超时也能退出，但先关能让线程立刻返回，
+        # 也让 45123 尽早释放（否则立刻重启会降级成只广播）。
+        self._close_listener()
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
-        if self._sock is not None:
+        sock, self._sock = self._sock, None
+        if sock is not None:
             try:
-                self._sock.close()
-            finally:
-                self._sock = None
+                sock.close()
+            except OSError:  # stability-gate: allow-swallow（已被系统回收时 close 会抛，忽略）
+                logger.debug("[team.discovery] 关闭广播 socket 失败", exc_info=True)
 
 
 def scan(timeout: float = 2.0) -> List[Dict[str, Any]]:

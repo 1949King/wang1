@@ -16,6 +16,9 @@ function installFakes(): { store: Map<string, string> } {
     removeItem: (k) => store.delete(k),
   };
   (globalThis as unknown as { window: { localStorage: FakeLS } }).window = { localStorage: ls };
+  // bridge.ts 里 `bridgeToken()` 读的是**全局** localStorage（不是 window.localStorage），
+  // node 环境下不存在 ⇒ 不补这个桩，hostCall 会在装配请求头时就 ReferenceError。
+  (globalThis as unknown as { localStorage: FakeLS }).localStorage = ls;
   return { store };
 }
 
@@ -102,5 +105,67 @@ describe("teamClient · 团队调用与错误映射", () => {
     const m = await loadModule();
     await expect(m.teamListProjects()).rejects.toMatchObject({ code: "no_address" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-11-02 · 用户实机只看到 `[WinError 10038] 在一个非套接字上尝试了一个操作。`
+ * —— 原始错误码对使用者零信息量。这三条锁住「界面必须给人话 + 下一步动作」。
+ */
+describe("teamClient · 网络失败翻译成人话", () => {
+  /** 取断言用的拒绝原因：比 `.catch(e => e)` 干净 —— 后者会把成功返回类型并进联合类型。 */
+  async function rejection(p: Promise<unknown>): Promise<Error & { code: string }> {
+    try {
+      await p;
+    } catch (e) {
+      return e as Error & { code: string };
+    }
+    throw new Error("预期请求失败，但它成功了");
+  }
+
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  it("fetch 抛 Failed to fetch ⇒ net_down，且提示里说清「对方要先启动服务」", async () => {
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const m = await loadModule();
+    const err = await rejection(m.teamJoin("192.168.1.4:18770", "张三"));
+
+    expect(err.code).toBe("net_down");
+    expect(err.message).toContain("启动团队服务");
+    expect(err.message).toContain("18770");
+    // 原始英文异常不许上界面（只进 console）
+    expect(err.message).not.toContain("Failed to fetch");
+  });
+
+  it("[WinError 10061] 翻成「对方没启动团队服务」，并保留错误码便于反馈", async () => {
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => {
+      throw new Error("[WinError 10061] 由于目标计算机积极拒绝，无法连接。");
+    }) as unknown as typeof fetch;
+
+    const m = await loadModule();
+    const err = await rejection(m.teamJoin("192.168.1.4:18770", "张三"));
+
+    expect(err.code).toBe("net_10061");
+    expect(err.message).toContain("没启动团队服务");
+    expect(err.message).toContain("WinError 10061");
+  });
+
+  it("本机桥失败 ⇒ 指向 127.0.0.1:18765，不误导用户去查同事的网络", async () => {
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const m = await loadModule();
+    const err = await rejection(m.teamHostStatus());
+
+    expect(err.code).toBe("net_down");
+    expect(err.message).toContain("127.0.0.1:18765");
   });
 });

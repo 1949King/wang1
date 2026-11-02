@@ -38,6 +38,16 @@ def _cs():
     return canvas_server
 
 
+def _friendly(exc: BaseException) -> str:
+    """把套接字类异常翻成人话；翻译层坏掉时退回原始文本（绝不因此吞掉错误）。"""
+    try:
+        from app.core.team_discovery import friendly_socket_error
+
+        return friendly_socket_error(exc)
+    except Exception:  # stability-gate: allow-swallow（翻译失败不该让错误响应本身 500）
+        return str(exc)
+
+
 def _status_payload() -> Dict[str, Any]:
     srv = _SERVER
     # 单例存在 ≠ 正在跑：stop() 后 _httpd 会被置空，这里必须一起判
@@ -94,7 +104,7 @@ class CanvasTeamRoutesMixin:
             self._json(200, {"ok": True, **info, **_status_payload()})
         except Exception as e:
             logger.exception("[/host/team/start] 失败")
-            self._json(500, {"ok": False, "message": f"团队服务启动失败: {e}"})
+            self._json(500, {"ok": False, "message": f"团队服务启动失败：{_friendly(e)}"})
 
     @_route_post("/host/team/stop")
     def _p_host_team_stop(self, parsed, raw: bytes, ctype: str) -> None:
@@ -124,4 +134,5 @@ class CanvasTeamRoutesMixin:
             self._json(200, {"ok": True, "servers": found})
         except Exception as e:
             logger.exception("[/host/team/discover] 失败")
-            self._json(500, {"ok": False, "message": f"局域网扫描失败: {e}", "servers": []})
+            self._json(500, {"ok": False, "message": f"局域网扫描失败：{_friendly(e)}",
+                             "servers": []})
