@@ -1,4 +1,5 @@
 /** 顶栏导航 — 对齐 infinite-canvas 落地页信息架构 */
+import { TeamTopBarButton } from "./teamTopBar";
 import type { CanvasTheme, CanvasTier } from "./store";
 
 export type AppRoute =
@@ -95,6 +96,13 @@ export default function AppNav({
         ))}
       </div>
       <div className="ic-nav-right">
+        {/* 2026-11-02（用户授权解冻 canvas-magnetic-intent）：团队协作入口。
+            团队是「工作区级」能力，必须任何视图都够得着 —— 原先只挂在画布视图
+            第二条顶栏（`CanvasShell.tsx:929 showWorkspace = viewMode === "canvas"`），
+            而开机默认落在首页（`App.tsx:141-149`）⇒ 用户按默认路径打开完全看不到。
+            这里用 28px 图标按钮复用 `.ic-shortcut-btn` 的尺寸与主题变体；
+            面板本体 `TeamPanel` 仍是同一个，不做第二套。 */}
+        <TeamTopBarButton />
         {/* V4.41.23 快捷键参考（用户授权解冻 canvas-magnetic-intent）：图标 + Ctrl+Shift+K */}
         {onOpenShortcuts && (
           <button

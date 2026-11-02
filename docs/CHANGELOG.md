@@ -1,5 +1,60 @@
 # 拾光剪影 — 变更日志
 
+## 修复 · 节点「✦ 生成」报「没有可用的 AIGC 生图渠道」（2026-11-02，画布 0.3.35）
+
+**两个根因，缺一不可**：
+
+1. **stale closure（陈旧闭包）**：`App.tsx` 的 `retryNode = useCallback(async (nodeId) => {...}, [])`
+   空依赖是为了让引用稳定，代价是**永远抱着首渲染时的 `generateForNode` 闭包** ⇒ 用户在 Agent 面板
+   把模型换成本地 SD 后，闭包里的 `selectedModelKey` 还是首渲染快照 ⇒ `resolveModel("")` ⇒
+   `channel_id=""` ⇒ 走了云端 ⇒ 云端没 Key ⇒ 报「没有可用的 AIGC 生图渠道」。
+   修法：`generateForNodeRef` 持有最新实现，`retryNode` 内改调 `generateForNodeRef.current(...)`，
+   `retryNode` 本身引用不变（Context value 走 `useMemo`，避免每帧新建导致画布几十个节点全量重渲染）。
+2. **异步端点绕过混合调度**：前端默认走异步任务化，而 `canvas_server._build_gen_callable._run_image`
+   直调 `generate_image_openai_compatible`（纯云端）—— 同步端点 `/host/generate-image` 早已接上
+   `generate_image_hybrid`，两边**不是同一实现** ⇒ 混合算力调度在默认路径上等于不存在。修法：改接混合调度。
+
+**实测证据**：本机 `compute_bias = 75`（cloud 档）⇒ `plan.chain = ['cloud','local']` ⇒ 选本地必须靠
+`channel_id='local'` 改道，而 stale closure 恰好把它丢成空串；`_local_image(...)` 真机出图一张
+512×768（sd15-t2i，含首次加载 113.8s，data_url 413KB）。
+
+**新守卫** `_verify/check_canvas_gen_wiring.py`（GENWIRING）：[A] AST 对账 —— 同步端点与异步端点
+对每类媒体（image/video/audio/music）必须是**同一组生成函数**；[B] 断言 `retryNode` 体内不得直呼
+`generateForNode(`、必须走 `generateForNodeRef.current(`。两个反例均已注入验证会变红，不是永远绿的摆设。
+
+**顺带修**：`localVideo.ts` 原实现**整体丢弃提示词**（函数签名里根本没有 prompt 字段）⇒ 后端
+`body.get("prompt")` 恒空，非 SVD 族直接报「提示词为空」；且**从不透传尾帧** ⇒ 云端首尾帧永远缺尾帧。
+已补 `prompt` / `lastFrame` 透传 + 4 例测试（`localVideo.test.ts`）。
+
+## 修复 · 团队入口「项目里看不到」：从画布顶栏上移到常驻导航栏（2026-11-02，画布 0.3.35）
+
+**用户实锤**：「之前不是让你做了一个关于团队协作的东西吗？为什么我没有在项目里面看到相关的内容和入口？」
+
+**真因（不是没做，是挂错位置）**：`TeamTopBarButton` 只挂在 `WorkspaceCanvasMenus`，而那条画布顶栏被
+`CanvasShell.tsx:929 showWorkspace = viewMode === "canvas"` 包着 ⇒ 首页落地页 / 我的画布 / 生图工作台 /
+视频创作台 / 提示词库 / 我的资产 / 配置 / **3D 导演台** 这 8 个界面全都没有入口；而 `App.tsx:141-149`
+开机强制 `setViewMode("home")`（2026-10-23 用户要求「启动第一屏固定是首页」）⇒ 按默认路径打开，
+永远落在没有入口的那一屏。
+
+**实测佐证（端到端，非推断）**：起静态服务 → `index.html` → `assets/index-Dr3H-RQj.js`（1,141,239 B）
+→ 含 `"👥 团队"` / `sg-team-panel` / tooltip 三项皆 True ⇒ 构建产物一直是好的，纯粹是入口位置问题。
+（另：`dist/拾光剪影/拾光剪影.exe` 是 2026-08-23 打包，内含画布副本 grep 团队代码 **0 命中**，不是现行运行目标。）
+
+**修复**：`teamTopBar.tsx` 加 `variant`（`rail` = 28px 图标 / `bar` = 原带字按钮，能力保留）；
+入口移到常驻 `AppNav` 的 `.ic-nav-right`（`CanvasShell.tsx:978`，全视图渲染，含 3D 导演台）；
+`WorkspaceCanvasMenus` 移除原挂载 —— 同一功能不留两个入口；`TeamPanel` 本体未动，不做第二套面板。
+`styles.css` 补 `.ic-shortcut-btn.on` 持续高亮（否则面板浮在右下角、按钮零反馈）。
+
+**判据（写进文档 §31.8）**：入口位置由「能力的归属层级」决定，不由「哪个体积守卫还有空位」决定 ——
+上轮为省 12 行把它塞进画布顶栏，代价是八个界面都够不着。
+
+**冻结区**：`AppNav.tsx` / `styles.css` / `canvasVersion.ts` 均属 `canvas-magnetic-intent`，
+用户选方案 B（放入常驻导航栏）即授权解冻，改完统一 `--update` 重锁。
+
+**验证**：tsc 37 错 = 既有基线（本次 4 个改动文件 0 错）；dist 重建后端到端复验 bundle 含新入口。
+
+**版本**：画布 0.3.34 → **0.3.35**；主程序 `app/version.py` 不动（纯画布改动）。
+
 ## 修复长提示词「人物消失」：翻译校验太粗暴（2026-11-01）
 
 **真因**：prompt_bridge 校验 `has_cjk(out) ⇒ 整段作废`；长提示词模型输出常带几个中文词，

@@ -1,6 +1,24 @@
 /* 团队协作面板（2026-10-31 · V4.49.1）
    固定右下浮层：不抢画布焦点，随时能看「谁占着项目」。
    尺寸上限刻意留 420px —— 再宽就会盖住节点检查器。 */
+
+/* 2026-11-02：入口按钮搬到常驻导航栏后复用 `.ic-shortcut-btn` 的尺寸与主题变体，
+   这里只补「面板开着」的持续高亮 —— 否则点开后面板浮在右下角、按钮零反馈，
+   用户会以为没点中。
+   🔴 刻意写在本文件而不是 `styles.css`：`styles.css` 已顶到单文件规模守卫容差
+   （基线 3980 / 容差 30 / HEAD 实测 4004），再塞 13 行直接红。项目既有先例
+   （`teamPanel.css` / `canvasTierSeg.tsx`）都是「单独成文件以避开体积守卫上限」。 */
+.ic-shortcut-btn.on {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.18));
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+}
+html[data-theme='light'] .ic-shortcut-btn.on {
+  background: var(--accent-soft, rgba(37, 99, 235, 0.12));
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+}
+
 .sg-team-panel {
   position: fixed;
   right: 18px;

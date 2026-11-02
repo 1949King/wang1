@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useCanvasStore } from "./store";
-import { TeamTopBarButton } from "./teamTopBar";
 import { PersonCardTopBarButton } from "./personCardTopBar";
 
 type MenuKind = "workspace" | "canvas" | "template" | null;
@@ -62,7 +61,9 @@ export default function WorkspaceCanvasMenus() {
 
   return (
     <div className="libtv-dd-group" ref={wrapRef}>
-      <TeamTopBarButton />
+      {/* 团队入口已上移到常驻左侧导航栏（AppNav）——2026-11-02 用户要求：
+          它必须任何视图都够得着，不能只活在画布视图的这条顶栏里。
+          这里不再重复挂载，避免同一功能出现两个入口。 */}
       <PersonCardTopBarButton />
       <div className="libtv-dd-wrap">
         <button
