@@ -278,6 +278,14 @@ CHECKS = [
     #    接线变摆设（模块写了但没人调用）、LLM 开始输出像素坐标。
     ("BLUEPRINT", "_verify/check_canvas_blueprint_catalog.py",
      "工作流蓝图：节点目录双向对账/标准链类型合法/applyBlueprint在册/接线在册/禁像素坐标"),
+    # ── 画布生成链路（2026-11-01）──
+    #    为什么必须入册：用户实锤「Agent 面板选了本地 SD1.5，节点点生成却报
+    #    『没有可用的 AIGC 生图渠道』」。两个根因都没被任何测试覆盖：
+    #    ① 异步任务端点 `_run_image` 搬的是纯云端老函数，绕过 2026-10-23 接上的
+    #       混合调度（前端默认走异步 ⇒ 本地模型形同不存在）；
+    #    ② `retryNode` 用 useCallback([]) 抱着首渲染闭包，模型选择永远滞后。
+    ("GENWIRING", "_verify/check_canvas_gen_wiring.py",
+     "画布生成链路：同步↔异步同实现（AST 对账）+ 节点生成按钮不吃 stale 闭包"),
     # ── 捏脸枚举镜像漂移基线棘轮（2026-10-20，V4.46.2）──
     # faceParams.ts 白名单 ↔ canvas_bridge._FACE_*_LABELS：存量 8 项已登记基线
     # （补全需解冻 stage3d-core），任何**新增**漂移/镜像越权立即报警。

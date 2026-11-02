@@ -10,6 +10,7 @@
  * 所以把契约钉在这里性价比最高。
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { generateVideoLocalViaHost, generateVideoUnified, listLocalVideoModels } from "./localVideo";
 
 function jsonRes(obj: unknown) {
@@ -177,5 +178,73 @@ describe("generateVideoLocalViaHost：本地图生视频", () => {
     expect(body.model_id).toBe("");
     expect(body.seconds).toBe(1.5);   // 缺省 1.5 秒（本机生成慢，刻意短）
     expect(body.fps).toBe(7);
+  });
+});
+
+// ───────── 2026-11-01 修：本地视频丢提示词 / 尾帧全链路丢弃 ─────────
+// 用户实测反馈：「要么提示没有给出首尾帧图片，要么提示没有给出提示词」。
+// 真因不在用户：① generateVideoLocalViaHost 签名里根本没有 prompt ⇒ 后端
+// body.get("prompt") 恒空；② 画布早就能选尾帧（CanvasShell 的 onPick 写
+// lastFrameUrl），但生成请求从不带它 ⇒ 云端「首尾帧」永远只有首帧。
+
+describe("视频参数透传（回归锁）", () => {
+  it("本地请求体必须带 prompt 与 last_frame", async () => {
+    let body: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: any) => {
+      body = JSON.parse(init.body);
+      return jsonRes({ ok: true, frames: 1 });
+    }));
+
+    await generateVideoLocalViaHost({
+      image: "data:image/png;base64,AAAA",
+      prompt: "少女回眸，镜头缓慢推近",
+      lastFrame: "data:image/png;base64,BBBB",
+      model: "cogvideox-2b",
+    });
+
+    expect(body.prompt).toBe("少女回眸，镜头缓慢推近");
+    expect(body.last_frame).toBe("data:image/png;base64,BBBB");
+  });
+
+  it("未给提示词/尾帧时传空串而不是 undefined（后端按缺省处理）", async () => {
+    let body: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: any) => {
+      body = JSON.parse(init.body);
+      return jsonRes({ ok: true, frames: 1 });
+    }));
+
+    await generateVideoLocalViaHost({ image: "data:image/png;base64,AAAA" });
+
+    expect(body.prompt).toBe("");
+    expect(body.last_frame).toBe("");
+  });
+
+  it("本地分支（channel=local）把 prompt 透传给桥接层", async () => {
+    let body: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: any) => {
+      body = JSON.parse(init.body);
+      return jsonRes({ ok: true, frames: 1 });
+    }));
+
+    await generateVideoUnified({
+      parsed: { channel_id: "local", model: "cogvideox-2b" },
+      prompt: "雨夜街头，霓虹反光",
+      referenceImage: "data:image/png;base64,AAAA",
+      duration: 2,
+      quality: "standard",
+    });
+
+    expect(body.prompt).toBe("雨夜街头，霓虹反光");
+  });
+
+  it("云端分支必须能下发 first_frame/last_frame，且受 lastFrame 守卫", () => {
+    // 云端走 runGeneration 异步任务化（submit + 轮询），行为测试成本高；
+    // 这里锁结构：两个字段必须存在，且只在有尾帧时才进请求体
+    // ——「无尾帧的调用方逐键与改动前一致」是本次改动的硬约束。
+    const src = readFileSync(new URL("./localVideo.ts", import.meta.url), "utf8");
+    expect(src).toContain("first_frame: opts.referenceImage");
+    expect(src).toContain("last_frame: opts.lastFrame");
+    // 两处云端调用（自动链 / 直连）都必须带守卫
+    expect(src.match(/opts\.lastFrame\s*\n?\s*\?/g)?.length ?? 0).toBe(2);
   });
 });

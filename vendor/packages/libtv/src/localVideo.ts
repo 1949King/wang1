@@ -186,6 +186,12 @@ export function mergeLocalVideoModels(
  */
 export async function generateVideoLocalViaHost(opts: {
   image: string;
+  /** ★ 2026-11-01 修：原实现**整体丢弃提示词**（签名里根本没有）——
+   *  后端 `body.get("prompt")` 恒为空，非 SVD 族直接报「提示词为空」，
+   *  SVD 族虽不报错但运镜/内容完全不受提示词控制。 */
+  prompt?: string;
+  /** ★ 2026-11-01 修：尾帧原样透传（本地多数族不吃尾帧，由后端如实拒绝，前端不代判）。 */
+  lastFrame?: string;
   model?: string;
   seconds?: number;
   fps?: number;
@@ -206,6 +212,8 @@ export async function generateVideoLocalViaHost(opts: {
       body: JSON.stringify({
         action: "generate",
         image: opts.image,
+        prompt: opts.prompt || "",
+        last_frame: opts.lastFrame || "",
         model_id: opts.model || "",
         seconds: opts.seconds ?? 1.5,
         fps: opts.fps ?? 7,
@@ -240,6 +248,10 @@ export async function generateVideoUnified(opts: {
   parsed: { channel_id: string; model: string };
   prompt: string;
   referenceImage: string;
+  /** ★ 2026-11-01 修：尾帧（`node.data.lastFrameUrl`）。此前**从未下发**——
+   *  画布早就能选尾帧（CanvasShell 的 onPick 写 lastFrameUrl），但生成请求不带它，
+   *  所以云端「首尾帧」永远缺尾帧。 */
+  lastFrame?: string;
   duration: number;
   quality: string;
   size?: string;
@@ -276,6 +288,8 @@ export async function generateVideoUnified(opts: {
         tried.push("local");
         const lr = await generateVideoLocalViaHost({
           image: opts.referenceImage,
+          prompt: opts.prompt,
+          lastFrame: opts.lastFrame,
           model: opts.localModel || "",
           seconds: Math.max(1, Math.min(4, opts.duration || 2)),
           fps: 7,
@@ -303,6 +317,10 @@ export async function generateVideoUnified(opts: {
         duration: opts.duration,
         ...(opts.size ? { size: opts.size } : {}),
         reference_image: opts.referenceImage,
+        // 首尾帧只在**真有尾帧**时才下发：无尾帧的调用方逐键与改动前一致
+        ...(opts.lastFrame
+          ? { first_frame: opts.referenceImage, last_frame: opts.lastFrame }
+          : {}),
         quality: opts.quality,
         awaitOpts: opts.awaitOpts,
       });
@@ -342,6 +360,8 @@ export async function generateVideoUnified(opts: {
     }
     const lr = await generateVideoLocalViaHost({
       image: opts.referenceImage,
+      prompt: opts.prompt,
+      lastFrame: opts.lastFrame,
       model,
       // 本机生成很慢（实测约 13 秒/帧），时长收到 1~4 秒，别让用户误设 10 秒等半小时
       seconds: Math.max(1, Math.min(4, opts.duration || 2)),
@@ -364,6 +384,10 @@ export async function generateVideoUnified(opts: {
     duration: opts.duration,
     ...(opts.size ? { size: opts.size } : {}),
     reference_image: opts.referenceImage,
+    // 同上：无尾帧 ⇒ 不下发首尾帧字段，云端行为逐键不变
+    ...(opts.lastFrame
+      ? { first_frame: opts.referenceImage, last_frame: opts.lastFrame }
+      : {}),
     quality: opts.quality,
     awaitOpts: opts.awaitOpts,
   });

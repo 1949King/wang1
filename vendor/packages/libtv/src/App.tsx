@@ -530,6 +530,8 @@ export default function App() {
           prompt: data.prompt || bp.prompt,
           // 首帧：复用 buildPromptFor 解出的上游图（本机 SVD 是 i2v，缺图会如实报错）
           referenceImage: bp.assetRef || "",
+          // 生成器节点多数没有尾帧字段；有则一并下发
+          lastFrame: (data as { lastFrameUrl?: string }).lastFrameUrl || "",
           duration: 5,
           quality: "standard",
           awaitOpts,
@@ -681,6 +683,8 @@ export default function App() {
         parsed: resolveModel(selectedVideoModelKey),
         prompt: fullPrompt || "竖屏漫剧镜头，电影感运镜",
         referenceImage: reference_image,
+        // ★ 2026-11-01 修：尾帧此前填了也没用（从未下发），云端「首尾帧」因此永远缺尾帧
+        lastFrame: data.lastFrameUrl || "",
         duration,
         quality: data.qualityTier || "standard",
         size: "720x1280",
@@ -784,6 +788,7 @@ export default function App() {
       parsed: resolveModel(modelKey),
       prompt: fullPrompt || "竖屏漫剧镜头，电影感运镜",
       referenceImage: reference_image,
+      lastFrame: data.lastFrameUrl || "",
       duration,
       quality: data.qualityTier || "standard",
     });
