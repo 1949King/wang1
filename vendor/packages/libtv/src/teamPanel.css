@@ -88,3 +88,32 @@ html[data-theme='light'] .ic-shortcut-btn.on {
 .sg-team-item-actions button { padding: 3px 8px; font-size: 11px; }
 
 .sg-team-handoff { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
+/* ── ⑤ 素材与成片（2026-11-02）─────────────────────────────────
+   面板恒为深色浮层（`.sg-team-panel` 的 background 不随主题变），
+   所以这里不需要 `html[data-theme='light']` 变体。 */
+.sg-team-file { position: relative; display: inline-flex; align-items: center; }
+/* 原生 file input 的样式按平台各异，盖不住 ⇒ 透明铺满，视觉全由 span 决定 */
+.sg-team-file input[type="file"] {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; margin: 0; padding: 0;
+}
+.sg-team-file span {
+  padding: 5px 10px; border-radius: 7px; font-size: 11.5px; pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.07);
+}
+.sg-team-file:hover:not(.off) span { background: rgba(255, 255, 255, 0.14); }
+.sg-team-file.off span { opacity: 0.5; }
+.sg-team-file.off input { cursor: default; }
+.sg-team-asset { cursor: default; }
+.sg-team-asset .sg-team-item-main b { word-break: break-all; }
+.sg-team-preview { margin-top: 2px; }
+.sg-team-preview video,
+.sg-team-preview img {
+  display: block; width: 100%; max-height: 250px; border-radius: 8px;
+  background: #000; object-fit: contain;
+}
+.sg-team-preview audio { width: 100%; height: 32px; }
+.sg-team-preview a {
+  font-size: 11.5px; color: #9ed0ff; text-decoration: underline; word-break: break-all;
+}

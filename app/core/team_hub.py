@@ -17,6 +17,15 @@
 | `version` | 历史版本（bundle 存**文件**，DB 只存 sha256 —— 画布 bundle 带 data URL 能到几十 MB，塞进 SQLite 会拖死它） |
 | `claim` | 编辑锁（带过期，防止有人开着界面走了） |
 | `handoff` | 交接单（谁交给谁 / 留言 / 状态） |
+| `asset` | 附件登记（视频/图片/音频的字节存 `blobs/<sha256>.<ext>`，DB 只记元信息） |
+
+## 附件为什么单独一层（2026-11-02）
+
+bundle 是 JSON，媒体只能以两种形式进去：base64（1 张 512² 图 ≈ 300~500KB，
+200 张就撞 100MB 上限）或本地路径（`/inbox_file/x.mp4`，**同事机上不存在 ⇒ 404**）。
+所以大文件一律走 `asset`：字节按内容哈希独立存盘，bundle 里只留
+`mediaIndex: { "/inbox_file/x.mp4": "<sha256>" }` 这张映射表，同事端渲染时
+把本地路径改写成团队 URL。**同一份内容换台机器传两遍不会变成两份文件**（sha256 去重）。
 
 ## 三条纪律（与项目既有口径一致）
 
@@ -43,8 +52,21 @@ logger = logging.getLogger(__name__)
 MAX_NAME = 64
 #: 单个 bundle 的硬上限（100MB）：超过说明用户把视频塞进了 data URL，应走媒体库
 MAX_BUNDLE_BYTES = 100 * 1024 * 1024
+#: 单个附件的硬上限（512MB）：一条 1 分钟 1080p 成片约 50~200MB，够用；
+#: 再大说明该走网盘而不是团队服务（8GB 机器流式落盘也不能让它扛几个 G）
+MAX_ASSET_BYTES = 512 * 1024 * 1024
+#: 附件名长度上限
+MAX_ASSET_NAME = 120
 #: 认领默认 TTL（秒）
 DEFAULT_CLAIM_TTL = 600
+
+#: 附件扩展名白名单（**不信任客户端给的后缀**，宁可落 `.bin` 也不让 `..%2f` 之类穿透目录）
+_ASSET_EXTS = frozenset([
+    ".mp4", ".webm", ".mov", ".mkv", ".m4v",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac",
+    ".json", ".txt", ".md", ".srt", ".csv",
+])
 
 
 class TeamError(Exception):
@@ -89,7 +111,10 @@ class Hub:
     def __init__(self, root: str) -> None:
         self.root = os.path.abspath(root)
         self.projects_dir = os.path.join(self.root, "projects")
+        #: 附件字节库（按内容哈希命名，跨项目共享去重）
+        self.blobs_dir = os.path.join(self.root, "blobs")
         os.makedirs(self.projects_dir, exist_ok=True)
+        os.makedirs(self.blobs_dir, exist_ok=True)
         self.db_path = os.path.join(self.root, "team.db")
         self._lock = threading.RLock()
         self._init_db()
@@ -146,6 +171,17 @@ class Hub:
                     created_at REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_handoff_to ON handoff (to_id, status);
+                CREATE TABLE IF NOT EXISTS asset (
+                    project_id TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'file',
+                    mime TEXT NOT NULL DEFAULT '',
+                    bytes INTEGER NOT NULL,
+                    author_id TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (project_id, sha256)
+                );
                 """
             )
 
@@ -368,10 +404,143 @@ class Hub:
             conn.execute("UPDATE handoff SET status = 'accepted' WHERE id = ?", (handoff_id,))
         return {"handoff_id": handoff_id, "status": "accepted"}
 
+    # ── 附件（视频 / 图片 / 音频 / 剧本文件）───────────
+    @staticmethod
+    def _safe_ext(name: str) -> str:
+        """只从**白名单**取后缀：客户端给的名字不进路径，防目录穿透。"""
+        ext = os.path.splitext(str(name or ""))[1].lower()
+        return ext if ext in _ASSET_EXTS else ".bin"
+
+    def _asset_path(self, project_id: str, sha: str, name: str = "") -> str:
+        # 一个 sha 一种扩展名：首次落盘时定下，后续按同样规则算，不依赖调用方传 name
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT name FROM asset WHERE project_id = ? AND sha256 = ?", (project_id, sha)
+            ).fetchone()
+        ext = self._safe_ext(str(row["name"]) if row else name)
+        # blobs 全局共享（不含 project_id）：跨项目同一份素材只占一份盘
+        return os.path.join(self.blobs_dir, sha + ext)
+
+    def _upsert_asset(self, project_id: str, sha: str, name: str, kind: str,
+                      mime: str, size: int, member_id: str) -> Dict[str, Any]:
+        clean = str(name or "").strip()[:MAX_ASSET_NAME] or (sha[:12] + ".bin")
+        ts = _now()
+        with self._lock, self._conn() as conn:
+            has_project = conn.execute("SELECT 1 FROM project WHERE id = ?", (project_id,)).fetchone()
+            if has_project is None:
+                raise TeamError("not_found", "项目不存在：%s" % project_id)
+            conn.execute(
+                "INSERT INTO asset (project_id, sha256, name, kind, mime, bytes, author_id, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(project_id, sha256) DO UPDATE SET name = excluded.name,"
+                " kind = excluded.kind, mime = excluded.mime",
+                (project_id, sha, clean, str(kind or "file")[:16], str(mime or "")[:120],
+                 int(size), member_id, ts),
+            )
+        return {"sha256": sha, "name": clean, "kind": str(kind or "file")[:16],
+                "mime": str(mime or "")[:120], "bytes": int(size)}
+
+    def save_asset(self, project_id: str, member_id: str, name: str, data: bytes,
+                   kind: str = "file", mime: str = "") -> Dict[str, Any]:
+        """小文件路径（≤ 单测 / 截图）：整块进内存，落盘后登记。"""
+        raw = bytes(data or b"")
+        if not raw:
+            raise TeamError("bad_asset", "附件内容为空（0 字节不登记，免得同事点开是白屏）")
+        if len(raw) > MAX_ASSET_BYTES:
+            raise TeamError("too_large", "附件过大（%.0fMB > %dMB），成片请先压缩或走网盘"
+                            % (len(raw) / 1048576.0, MAX_ASSET_BYTES // 1048576))
+        sha = _sha256(raw)
+        path = self._asset_path(project_id, sha, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if not os.path.isfile(path):
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(raw)
+            os.replace(tmp, path)
+        return self._upsert_asset(project_id, sha, name, kind, mime, len(raw), member_id)
+
+    def commit_asset_file(self, project_id: str, member_id: str, name: str,
+                          tmp_path: str, sha: str, size: int,
+                          kind: str = "file", mime: str = "") -> Dict[str, Any]:
+        """生产路径：服务层**边收边写**到 tmp 后调这里收编（512MB 视频不进内存）。"""
+        if size <= 0:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                # 清理临时文件失败不该盖住真正的错误（0 字节），但也不能静默
+                logger.debug("[team] 临时文件清理失败 %s", tmp_path, exc_info=True)
+            raise TeamError("bad_asset", "附件内容为空（0 字节不登记）")
+        if size > MAX_ASSET_BYTES:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                logger.debug("[team] 临时文件清理失败 %s", tmp_path, exc_info=True)
+            raise TeamError("too_large", "附件过大（%.0fMB > %dMB），成片请先压缩或走网盘"
+                            % (size / 1048576.0, MAX_ASSET_BYTES // 1048576))
+        path = self._asset_path(project_id, sha, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.isfile(path):
+            os.remove(tmp_path)          # 内容已存在（跨机器重传），tmp 丢掉即可
+        else:
+            os.replace(tmp_path, path)
+        return self._upsert_asset(project_id, sha, name, kind, mime, size, member_id)
+
+    def list_assets(self, project_id: str) -> List[Dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT a.*, m.name AS author_name FROM asset a"
+                " LEFT JOIN member m ON m.id = a.author_id"
+                " WHERE a.project_id = ? ORDER BY a.created_at",
+                (project_id,),
+            ).fetchall()
+        return [{"sha256": r["sha256"], "name": r["name"], "kind": r["kind"],
+                 "mime": r["mime"], "bytes": int(r["bytes"]),
+                 "author": r["author_name"] or r["author_id"],
+                 "created_at": float(r["created_at"])} for r in rows]
+
+    def asset_path_of(self, project_id: str, sha: str) -> Tuple[str, Dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM asset WHERE project_id = ? AND sha256 = ?", (project_id, sha)
+            ).fetchone()
+        if row is None:
+            raise TeamError("not_found", "附件不存在：%s" % sha[:12])
+        path = os.path.join(self.blobs_dir, row["sha256"] + self._safe_ext(row["name"]))
+        if not os.path.isfile(path):
+            # 登记还在但文件没了（手删 blobs / 拷库没拷附件）⇒ 如实报，别回空字节
+            raise TeamError("not_found", "附件字节已丢失：%s（重传一次即可）" % row["name"])
+        return path, dict(row)
+
+    def delete_asset(self, project_id: str, sha: str) -> Dict[str, Any]:
+        """删登记；**全表无引用**才真删字节（另一个项目还挂着就不能删）。"""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT name FROM asset WHERE project_id = ? AND sha256 = ?", (project_id, sha)
+            ).fetchone()
+            if row is None:
+                raise TeamError("not_found", "附件不存在：%s" % sha[:12])
+            conn.execute("DELETE FROM asset WHERE project_id = ? AND sha256 = ?", (project_id, sha))
+            still = conn.execute("SELECT COUNT(*) AS n FROM asset WHERE sha256 = ?", (sha,)).fetchone()
+        removed = False
+        if int(still["n"] if still else 0) == 0:
+            path = os.path.join(self.blobs_dir, sha + self._safe_ext(row["name"]))
+            try:
+                os.remove(path)
+                removed = True
+            except FileNotFoundError:
+                removed = True
+            except OSError:
+                logger.debug("[team] 附件字节删除失败 %s", path, exc_info=True)
+        return {"sha256": sha, "removed": removed}
+
     # ── 健康 ────────────────────────────────────────────
     def stats(self) -> Dict[str, Any]:
         with self._lock, self._conn() as conn:
             projects = conn.execute("SELECT COUNT(*) AS n FROM project").fetchone()["n"]
             members = conn.execute("SELECT COUNT(*) AS n FROM member").fetchone()["n"]
             pending = conn.execute("SELECT COUNT(*) AS n FROM handoff WHERE status='pending'").fetchone()["n"]
-        return {"projects": int(projects), "members": int(members), "pending_handoffs": int(pending)}
+            assets = conn.execute("SELECT COUNT(*) AS n FROM asset").fetchone()["n"]
+            asset_bytes = conn.execute("SELECT COALESCE(SUM(bytes),0) AS n FROM asset").fetchone()["n"]
+        return {"projects": int(projects), "members": int(members),
+                "pending_handoffs": int(pending), "assets": int(assets),
+                "asset_bytes": int(asset_bytes)}

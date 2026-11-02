@@ -17,6 +17,17 @@
 `POST /team/join` 换取令牌（响应里只出现一次），之后所有请求带
 `Authorization: Bearer <token>`。令牌在库里只存 sha256。
 
+**附件字节流是例外**：`<video src="…">` / `<img src="…">` 带不了请求头，所以
+`GET /team/projects/{id}/assets/{sha}` 额外接受 `?token=` 查询参数 —— 代价是令牌
+会出现在 URL 里（浏览器历史 / 服务日志可见）。这是内网 + 一次性令牌 + 只读字节流
+的权衡，不适用密码类凭据；真要收紧就得上签名 URL（带过期时间），本轮不做。
+
+## 附件（2026-11-02）
+
+bundle 是 JSON，塞不下视频：base64 会让 100MB 上限在 200 张图内撞线，而本地路径
+（`/inbox_file/x.mp4`）到同事机上就是 404。所以**大文件走独立端点**，边收边写盘
+（512MB 视频不进内存），bundle 里只留 `mediaIndex` 映射。
+
 ## CORS
 
 画布页面来自 `http://127.0.0.1:18765`，而团队服务是另一个端口 ⇒ 跨域。
@@ -32,25 +43,35 @@ python -m app.core.team_server --host 0.0.0.0 --port 18770 --root data/team
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import re
 import socket
+import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Optional
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import parse_qs, unquote, urlparse
 
 from app.core.team_discovery import Beacon
-from app.core.team_hub import ConflictError, Hub, LockedError, TeamError
+from app.core.team_hub import (ConflictError, Hub, LockedError, MAX_ASSET_BYTES,
+                               TeamError)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 18770
 #: 单请求体上限（与 Hub 的 bundle 上限对齐，另留 5MB 给 JSON 包装）
 MAX_BODY = 105 * 1024 * 1024
+#: 附件请求体上限（Hub 会再校验一遍，这里拦是为了**不白收 512MB 再报错**）
+MAX_ASSET_BODY = MAX_ASSET_BYTES + (1 << 20)
+#: 流式落盘的读块大小（64KB：8GB 机器上 512MB 也不会一次进内存）
+_CHUNK = 64 * 1024
 SERVER_NAME = "shiguang-team-hub"
-SERVER_VERSION = "1"
+SERVER_VERSION = "2"
+#: 允许从附件名里挑 `kind` 的取值
+_ASSET_KINDS = frozenset(["image", "video", "audio", "text", "file"])
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -63,17 +84,69 @@ class _TeamHandler(BaseHTTPRequestHandler):
     beacon_name: str = "拾光剪影团队"
 
     # ── 基础响应 ────────────────────────────────────────
-    def _send(self, status: int, payload: Any) -> None:
+    def _send(self, status: int, payload: Any, extra: Optional[Dict[str, str]] = None) -> None:
         body = _json_bytes(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_file(self, path: str, mime: str, name: str = "") -> None:
+        """字节流响应，支持 `Range`（浏览器 `<video>` 要能拖进度条才不卡）。"""
+        size = os.path.getsize(path)
+        start, end = 0, size - 1
+        status = 200
+        rng = str(self.headers.get("Range") or "").strip()
+        if rng.startswith("bytes="):
+            m = re.match(r"bytes=(\d*)-(\d*)", rng)
+            if m and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else size - 1
+                else:                       # bytes=-N ⇒ 末尾 N 字节
+                    start = max(0, size - int(m.group(2) or 0))
+                if start >= size or start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", "bytes */%d" % size)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                end = min(end, size - 1)
+                status = 206
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", mime or "application/octet-stream")
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Expose-Headers", "Content-Range, Content-Length")
+        if name:
+            # 中文名要 percent-encode，裸 UTF-8 进 header 会让某些客户端解析失败
+            from urllib.parse import quote
+            self.send_header("Content-Disposition",
+                             "inline; filename*=UTF-8''%s" % quote(name))
+        self.end_headers()
+        with open(path, "rb") as f:
+            f.seek(start)
+            left = length
+            while left > 0:
+                chunk = f.read(min(_CHUNK, left))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    return              # 客户端拖动进度条会主动断开，属正常
+                left -= len(chunk)
 
     def _err(self, status: int, code: str, message: str = "", **extra: Any) -> None:
         self._send(status, {"ok": False, "code": code, "message": message or code, **extra})
@@ -97,6 +170,53 @@ class _TeamHandler(BaseHTTPRequestHandler):
             raise TeamError("bad_json", "请求体必须是对象")
         return data
 
+    def _tmp_dir(self) -> str:
+        """临时落点必须在 hub.root 底下 —— 跨盘 `os.replace` 会抛 EXDEV。"""
+        d = os.path.join(self.hub.root, "tmp")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _raw_to_tmp(self, limit: int) -> Tuple[str, str, int]:
+        """请求体**流式**写进临时文件，返回 (tmp 路径, sha256, 字节数)。
+
+        为什么不能 `self.rfile.read(length)`：512MB 成片一次性进内存，在 8GB 机器上
+        会直接触发换页、把整个服务拖死；而且中途断开时已经收的字节全白读。
+        """
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise TeamError("bad_asset", "附件内容为空（0 字节不登记）")
+        if length > limit:
+            # 在**读之前**就拒：否则等于白收几百兆再报错
+            raise TeamError("too_large", "附件过大（%.0fMB > %dMB），成片请先压缩或走网盘"
+                            % (length / 1048576.0, limit // 1048576))
+        fd, tmp = tempfile.mkstemp(prefix="asset_", suffix=".part", dir=self._tmp_dir())
+        digest = hashlib.sha256()
+        got = 0
+        try:
+            with os.fdopen(fd, "wb") as f:
+                while got < length:
+                    chunk = self.rfile.read(min(_CHUNK, length - got))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    digest.update(chunk)
+                    got += len(chunk)
+        except BaseException:
+            self._drop(tmp)
+            raise
+        if got != length:
+            self._drop(tmp)
+            raise TeamError("bad_asset", "上传中断（收到 %d / %d 字节），请重试一次"
+                            % (got, length))
+        return tmp, digest.hexdigest(), got
+
+    @staticmethod
+    def _drop(path: str) -> None:
+        try:
+            os.remove(path)
+        except OSError:
+            logger.debug("[team] 临时文件清理失败 %s", path, exc_info=True)
+
     def _token(self) -> str:
         auth = str(self.headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
@@ -110,11 +230,61 @@ class _TeamHandler(BaseHTTPRequestHandler):
         return m
 
     # ── 路由 ────────────────────────────────────────────
+    def _assets_route(self, method: str) -> bool:
+        """附件端点（二进制，不在 JSON 路由表里）。**返回 True = 已处理**。
+
+        | 方法 | 路径 | 作用 |
+        |---|---|---|
+        | GET    | `/team/projects/{id}/assets` | 列出附件元信息 |
+        | GET    | `/team/projects/{id}/assets/{sha}` | 取字节流（支持 Range） |
+        | POST   | `/team/projects/{id}/assets?name=&kind=` | 上传（body = 原始字节） |
+        | DELETE | `/team/projects/{id}/assets/{sha}` | 删登记（无引用才删字节） |
+
+        单独判断而**不并进 `_route_post` 的 `len(parts)==5` 分支**：那个分支会把
+        `assets` 当成 action 去解 JSON，二进制请求会被当坏 JSON 拒掉。
+        """
+        parts = urlparse(self.path).path.rstrip("/").split("/")
+        if (len(parts) not in (5, 6) or parts[1] != "team" or parts[2] != "projects"
+                or parts[4] != "assets"):
+            return False
+        pid = parts[3]
+        sha = unquote(parts[5]) if len(parts) == 6 else ""
+        if method == "GET":
+            self._member()
+            if not sha:
+                self._send(200, {"ok": True, "assets": self.hub.list_assets(pid)})
+            else:
+                path, row = self.hub.asset_path_of(pid, sha)
+                self._send_file(path, str(row["mime"]), str(row["name"]))
+            return True
+        if method == "POST":
+            me = self._member()
+            if sha:
+                raise TeamError("not_found", "上传请用 /assets（URL 末尾不带 sha）")
+            query = parse_qs(urlparse(self.path).query)
+            name = unquote(str((query.get("name") or [""])[0]))
+            kind = str((query.get("kind") or ["file"])[0] or "file")
+            tmp, digest, size = self._raw_to_tmp(MAX_ASSET_BODY)
+            res = self.hub.commit_asset_file(pid, me["id"], name, tmp, digest, size,
+                                             kind if kind in _ASSET_KINDS else "file",
+                                             str(self.headers.get("Content-Type") or ""))
+            self._send(200, {"ok": True, **res})
+            return True
+        if method == "DELETE":
+            self._member()
+            if not sha:
+                raise TeamError("not_found", "要删哪个附件？URL 末尾要带 sha256")
+            self._send(200, {"ok": True, **self.hub.delete_asset(pid, sha)})
+            return True
+        return False
+
     def do_OPTIONS(self) -> None:
         self._send(204, {})
 
     def do_GET(self) -> None:
         try:
+            if self._assets_route("GET"):
+                return
             self._route_get(urlparse(self.path).path.rstrip("/") or "/")
         except TeamError as e:
             self._err(self._status_of(e), e.code, e.message)
@@ -122,8 +292,21 @@ class _TeamHandler(BaseHTTPRequestHandler):
             logger.exception("[team] GET 失败")
             self._err(500, "internal", "服务端异常")
 
+    def do_DELETE(self) -> None:
+        try:
+            if self._assets_route("DELETE"):
+                return
+            raise TeamError("not_found", "未知端点：%s" % urlparse(self.path).path)
+        except TeamError as e:
+            self._err(self._status_of(e), e.code, e.message)
+        except Exception:
+            logger.exception("[team] DELETE 失败")
+            self._err(500, "internal", "服务端异常")
+
     def do_POST(self) -> None:
         try:
+            if self._assets_route("POST"):
+                return
             self._route_post(urlparse(self.path).path.rstrip("/") or "/")
         except TeamError as e:
             extra: Dict[str, Any] = {}

@@ -1,6 +1,6 @@
 {
   "name": "@shiguang/libtv",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "private": true,
   "type": "module",
   "description": "拾光导演台画布单一事实源（P0-1 抽包 Phase 1）——web/tauri 两宿主以依赖方式引用，禁止再复制源码",

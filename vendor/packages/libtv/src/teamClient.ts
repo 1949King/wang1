@@ -214,6 +214,20 @@ export async function teamDiscover(): Promise<DiscoveredServer[]> {
   return Array.isArray(data.servers) ? data.servers : [];
 }
 
+/**
+ * 剪辑器 `clip.path`（本地绝对路径）→ 画布能 fetch 的 `/inbox_file/…`。
+ *
+ * 只做路径换算、**不传字节**：`canvas_server` 有 30 秒请求上限，一条 200MB 成片
+ * 由后端代传必然超时；换算完交给前端同源直传才稳。`outside` 是不在素材库里的
+ * 路径（用户从别处拖进来的），界面上要如实说它们同步不了。
+ */
+export function teamInboxMap(paths: string[]): Promise<{ map: Record<string, string>; outside: string[] }> {
+  return hostCall<{ map?: Record<string, string>; outside?: string[] }>("/host/team/inbox-map", {
+    method: "POST",
+    body: JSON.stringify({ paths: Array.isArray(paths) ? paths.slice(0, 500) : [] }),
+  }).then((d) => ({ map: d.map || {}, outside: Array.isArray(d.outside) ? d.outside : [] }));
+}
+
 // ── 团队服务面 ──────────────────────────────────────
 export async function teamJoin(address: string, name: string, role = "editor"): Promise<TeamCred> {
   const addr = normalizeAddress(address);
@@ -278,4 +292,110 @@ export function teamInbox(): Promise<TeamHandoffItem[]> {
 
 export function teamAck(handoffId: string): Promise<{ status: string }> {
   return teamCall("/team/inbox/" + encodeURIComponent(handoffId) + "/ack", { body: {} });
+}
+
+// ── 附件（视频 / 图片 / 音频 —— 2026-11-02）──────────
+//
+// 为什么不复用 `teamCall`：它强制 `Content-Type: application/json` 并
+// `JSON.stringify(body)`。成片是几十上百 MB 的二进制，走 JSON 等于先 base64
+// 膨胀 33% 再一次性进内存 —— 8GB 机器会当场换页。所以附件单独两条通道：
+// 上传用 XHR（fetch 没有上传进度事件），下载拼 `<video src>` 能直连的 URL。
+
+/** 附件元信息（与 team_hub.list_assets 对齐）。 */
+export type TeamAsset = {
+  sha256: string;
+  name: string;
+  kind: string;
+  mime: string;
+  bytes: number;
+  author: string;
+  created_at: number;
+};
+
+/** 附件类型：只这几个值后端认，其余落 `file`。 */
+export type TeamAssetKind = "image" | "video" | "audio" | "text" | "file";
+
+/** 当前团队服务基址（`http://192.168.x.x:18770`）。没配或没加入时为空串。 */
+export function teamBaseUrl(): string {
+  return normalizeAddress(teamCred()?.address || teamAddress());
+}
+
+/**
+ * 拼一个**能直接塞进 `<video src>` / `<img src>` 的**附件地址。
+ *
+ * 为什么带 `?token=`：媒体元素发不了 `Authorization` 头。后端为此在字节流端点
+ * 上额外接受查询参数令牌（`team_server._token()`）。**代价是令牌会出现在 URL 里**
+ * ——内网 + 一次性成员令牌可以接受；密码类凭据绝不能这么走。
+ * 没加入团队时返回空串，调用方据此保留原 URL，不要拿空串去覆盖。
+ */
+export function teamAssetUrl(projectId: string, sha: string): string {
+  const base = teamBaseUrl();
+  const token = teamCred()?.token || "";
+  if (!base || !projectId || !sha) return "";
+  const q = token ? "?token=" + encodeURIComponent(token) : "";
+  return `${base}/team/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(sha)}${q}`;
+}
+
+export function teamListAssets(projectId: string): Promise<TeamAsset[]> {
+  return teamCall<{ assets: TeamAsset[] }>(
+    "/team/projects/" + encodeURIComponent(projectId) + "/assets",
+  ).then((d) => (Array.isArray(d.assets) ? d.assets : []));
+}
+
+export function teamDeleteAsset(projectId: string, sha: string): Promise<{ removed: boolean }> {
+  return teamCall("/team/projects/" + encodeURIComponent(projectId) + "/assets/" +
+    encodeURIComponent(sha), { method: "DELETE" });
+}
+
+/**
+ * 上传一个附件。**走 XHR** —— fetch 至今没有上传进度事件，几十 MB 的成片没有
+ * 进度反馈，使用者会以为界面卡死然后反复点击。
+ *
+ * 失败语义：抛 `TeamError`，code 至少包含 `too_large` / `bad_asset` / `net_*`，
+ * 中文 message 直接可显示（后端已翻译，`netError` 也翻译了连接类）。
+ */
+export function teamUploadAsset(
+  projectId: string,
+  blob: Blob,
+  name: string,
+  kind: TeamAssetKind,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<TeamAsset> {
+  const base = teamBaseUrl();
+  const token = teamCred()?.token || "";
+  if (!base) return Promise.reject(new TeamError("no_address", "还没加入团队，无法上传附件"));
+  if (!blob || blob.size <= 0) {
+    return Promise.reject(new TeamError("bad_asset", `「${name}」是空文件（0 字节），不传`));
+  }
+  const url = `${base}/team/projects/${encodeURIComponent(projectId)}/assets` +
+    `?name=${encodeURIComponent(name)}&kind=${encodeURIComponent(kind)}`;
+  return new Promise<TeamAsset>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    if (token) xhr.setRequestHeader("Authorization", "Bearer " + token);
+    // 显式给 mime：后端记下来，下载时原样回 Content-Type（否则 <video> 拒绝播）
+    xhr.setRequestHeader("Content-Type", blob.type || "application/octet-stream");
+    if (onProgress && xhr.upload) {
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) onProgress(ev.loaded, ev.total);
+      };
+    }
+    xhr.onload = () => {
+      let data: { ok?: boolean; code?: string; message?: string } & Partial<TeamAsset> = {};
+      try {
+        data = JSON.parse(xhr.responseText || "{}");
+      } catch {
+        /* 非 JSON 响应（网关 502 之类）已由状态码兜住 */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false && data.sha256) {
+        resolve(data as TeamAsset);
+      } else {
+        reject(new TeamError(String(data.code || "upload_" + xhr.status),
+          String(data.message || `上传「${name}」失败（HTTP ${xhr.status}）`), { status: xhr.status }));
+      }
+    };
+    xhr.onerror = () => reject(netError(base, new Error("Failed to fetch"), "team"));
+    xhr.onabort = () => reject(new TeamError("aborted", `已取消上传「${name}」`));
+    xhr.send(blob);
+  });
 }

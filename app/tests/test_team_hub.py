@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -167,5 +169,140 @@ def test_http_end_to_end(tmp_path):
         assert code == 200 and inbox["items"][0]["message"] == "第三卡改好了"
         code, _ = _req(base, "/team/projects/%s/claim" % pid, {"ttl": 60}, b["token"])
         assert code == 200
+    finally:
+        srv.stop()
+
+
+# ── 附件（视频 / 图片 / 音频 · 2026-11-02）──────────────
+def test_asset_save_dedup_and_delete(hub):
+    """同内容只落一份盘；删登记时**全表无引用**才真删字节。"""
+    m = hub.register_member("张三")
+    pid = hub.create_project("成片工程", m["member_id"], {"nodes": []})["project_id"]
+
+    a = hub.save_asset(pid, m["member_id"], "成片.mp4", b"x" * 2048, "video", "video/mp4")
+    b = hub.save_asset(pid, m["member_id"], "成片副本.mp4", b"x" * 2048, "video", "video/mp4")
+    assert a["sha256"] == b["sha256"]              # 内容哈希去重
+    assert len(os.listdir(hub.blobs_dir)) == 1     # 盘上只有一个文件
+    assert hub.stats()["assets"] == 1              # 同 (project, sha) 只一行
+
+    path, row = hub.asset_path_of(pid, a["sha256"])
+    assert os.path.getsize(path) == 2048 and row["mime"] == "video/mp4"
+
+    # 另一个项目也挂同一份 ⇒ 删掉其中一个不能把字节删了
+    pid2 = hub.create_project("另一个", m["member_id"], {"nodes": []})["project_id"]
+    hub.save_asset(pid2, m["member_id"], "成片.mp4", b"x" * 2048, "video", "video/mp4")
+    assert hub.delete_asset(pid, a["sha256"])["removed"] is False
+    assert len(os.listdir(hub.blobs_dir)) == 1
+    assert hub.delete_asset(pid2, a["sha256"])["removed"] is True
+    assert os.listdir(hub.blobs_dir) == []
+
+
+def test_asset_rejects_empty_oversize_and_traversal(hub, monkeypatch):
+    m = hub.register_member("张三")
+    pid = hub.create_project("工程", m["member_id"], {"nodes": []})["project_id"]
+
+    with pytest.raises(TeamError) as ei:
+        hub.save_asset(pid, m["member_id"], "空.mp4", b"", "video")
+    assert ei.value.code == "bad_asset"   # 0 字节不登记，免得同事点开是白屏
+
+    import app.core.team_hub as TH
+    monkeypatch.setattr(TH, "MAX_ASSET_BYTES", 16)
+    with pytest.raises(TeamError) as ei:
+        hub.save_asset(pid, m["member_id"], "大.mp4", b"x" * 100, "video")
+    assert ei.value.code == "too_large"
+    monkeypatch.undo()
+
+    # 目录穿透：名字里的 ../ 不进路径，且后缀只认白名单
+    bad = hub.save_asset(pid, m["member_id"], "../../../evil.sh", b"bad", "file")
+    path, _ = hub.asset_path_of(pid, bad["sha256"])
+    assert os.path.dirname(path) == hub.blobs_dir
+    assert path.endswith(".bin")           # .sh 不在白名单 ⇒ 落 .bin
+
+    with pytest.raises(TeamError) as ei:
+        hub.asset_path_of(pid, "f" * 64)
+    assert ei.value.code == "not_found"
+
+
+def test_asset_missing_blob_reports_not_found(hub):
+    """登记还在、字节被手删 ⇒ 如实报 404，绝不回空内容。"""
+    m = hub.register_member("张三")
+    pid = hub.create_project("工程", m["member_id"], {"nodes": []})["project_id"]
+    a = hub.save_asset(pid, m["member_id"], "a.png", b"img", "image", "image/png")
+    path, _ = hub.asset_path_of(pid, a["sha256"])
+    os.remove(path)
+    with pytest.raises(TeamError) as ei:
+        hub.asset_path_of(pid, a["sha256"])
+    assert ei.value.code == "not_found" and "丢失" in ei.value.message
+
+
+def _raw_req(base, path, data=b"", token="", method="POST", headers=None):
+    """原始请求：成功时能解析成 JSON 就回 dict，否则回 bytes（下载附件用）。"""
+    req = urllib.request.Request(base + path, data=(data or None), method=method)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            try:
+                return resp.status, json.loads(raw.decode()), dict(resp.headers)
+            except Exception:
+                return resp.status, raw, dict(resp.headers)
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            return e.code, json.loads(raw.decode()), dict(e.headers)
+        except Exception:
+            return e.code, raw, dict(e.headers)
+
+
+def test_asset_http_roundtrip(tmp_path):
+    """上传 → 列表 → 取字节（含 `?token=` 与 Range）→ 删除。"""
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, a = _req(base, "/team/join", {"name": "导演A"})
+        token = a["token"]
+        _, created = _req(base, "/team/projects", {"name": "成片", "bundle": {"nodes": []}}, token)
+        pid = created["project_id"]
+
+        payload = bytes(range(256)) * 8192        # 2MB 伪成片
+        code, up, _ = _raw_req(base, "/team/projects/%s/assets?name=%s&kind=video"
+                               % (pid, urllib.parse.quote("成片终版.mp4")), payload,
+                               token, headers={"Content-Type": "video/mp4"})
+        assert code == 200 and up["bytes"] == len(payload) and up["kind"] == "video"
+        sha = up["sha256"]
+
+        code, lst, _ = _raw_req(base, "/team/projects/%s/assets" % pid, method="GET", token=token)
+        assert code == 200 and lst["assets"][0]["name"] == "成片终版.mp4"
+
+        # `<video src>` 带不了请求头 ⇒ 必须支持 ?token=
+        code, body, hdrs = _raw_req(base, "/team/projects/%s/assets/%s?token=%s"
+                                    % (pid, sha, urllib.parse.quote(token)),
+                                    method="GET", headers={})
+        assert code == 200 and body == payload and hdrs["Content-Type"] == "video/mp4"
+
+        # Range：不 206 的话浏览器拖不动进度条
+        code, head, hdrs = _raw_req(base, "/team/projects/%s/assets/%s?token=%s"
+                                   % (pid, sha, urllib.parse.quote(token)),
+                                   method="GET", headers={"Range": "bytes=0-99"})
+        assert code == 206 and head == payload[:100]
+        assert hdrs["Content-Range"] == "bytes 0-99/%d" % len(payload)
+
+        # 空体 ⇒ 400 而不是悄悄存一个 0 字节附件
+        code, err, _ = _raw_req(base, "/team/projects/%s/assets?name=x.mp4" % pid, b"",
+                                token, headers={"Content-Type": "video/mp4"})
+        assert code == 400 and err["code"] == "bad_asset"
+
+        # 没令牌 ⇒ 401
+        code, _, _ = _raw_req(base, "/team/projects/%s/assets" % pid, method="GET")
+        assert code == 401
+
+        code, dele, _ = _raw_req(base, "/team/projects/%s/assets/%s" % (pid, sha),
+                                 method="DELETE", token=token)
+        assert code == 200 and dele["removed"] is True
+        assert os.listdir(srv.hub.blobs_dir) == []
     finally:
         srv.stop()

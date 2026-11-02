@@ -7,6 +7,7 @@
 | `POST /host/team/start`    | 启动本机团队服务（0.0.0.0:18770） |
 | `POST /host/team/stop`     | 停止 |
 | `GET  /host/team/discover` | 局域网扫描（UDP，只能由后端做——浏览器发不了 UDP） |
+| `POST /host/team/inbox-map`| 剪辑器 clip.path（本地绝对路径）→ 画布能 fetch 的 `/inbox_file/…` |
 
 ## 为什么这些端点必须走 canvas_server（127.0.0.1）
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from app.core.canvas_route_registry import _route_get, _route_post
@@ -136,3 +138,64 @@ class CanvasTeamRoutesMixin:
             logger.exception("[/host/team/discover] 失败")
             self._json(500, {"ok": False, "message": f"局域网扫描失败：{_friendly(e)}",
                              "servers": []})
+
+    @_route_post("/host/team/inbox-map")
+    def _p_host_team_inbox_map(self, parsed, raw: bytes, ctype: str) -> None:
+        """把剪辑器 `clip.path`（本地绝对路径）翻成画布能 fetch 的 `/inbox_file/…`。
+
+        ## 为什么只做「路径换算」而不是「后端代传」
+
+        时间线里的片段用绝对路径引用素材（`D:\\…\\inbox\\成片.mp4`），画布 JS
+        **无权 fetch 本地文件**，所以前端没法自己上传。看起来该由后端代读上传，
+        但 `canvas_server` 的请求有 **30 秒上限** —— 一条 200MB 成片必然超时，
+        留下半个文件。所以这里只回一张映射表（毫秒级），字节交给前端走
+        `/inbox_file/` 直传（同源、流式、无超时）。
+
+        不在 inbox 目录内的路径（用户从别处拖进来的视频）**如实列进 `outside`**，
+        由界面提示「这几条要手工挪进素材库」——绝不假装同步成功。
+        """
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        paths = body.get("paths") if isinstance(body, dict) else None
+        if not isinstance(paths, list):
+            self._json(400, {"ok": False, "message": "paths 必须是数组"})
+            return
+        try:
+            from app.core.canvas_bridge import canvas_inbox_dir
+
+            inbox = os.path.normcase(os.path.abspath(canvas_inbox_dir()))
+        except Exception:
+            logger.debug("[/host/team/inbox-map] 取 inbox 目录失败", exc_info=True)
+            self._json(500, {"ok": False, "message": "取不到画布素材目录（canvas_inbox_dir）"})
+            return
+        mapping: Dict[str, str] = {}
+        outside: list = []
+        for p in paths[:500]:
+            raw_path = str(p or "").strip()
+            if not raw_path:
+                continue
+            try:
+                abs_path = os.path.normcase(os.path.abspath(raw_path))
+            except Exception:
+                outside.append(raw_path)
+                continue
+            # 同一目录才算；用 commonpath 而非 startswith，避免 `inbox2` 冒充 `inbox`
+            try:
+                inside = os.path.commonpath([abs_path, inbox]) == inbox
+            except ValueError:      # 不同盘符：Windows 上 commonpath 会抛
+                inside = False
+            if not inside or not os.path.isfile(abs_path):
+                outside.append(raw_path)
+                continue
+            name = os.path.basename(abs_path)
+            from urllib.parse import quote
+
+            mapping[raw_path] = "/inbox_file/" + quote(name)
+        self._json(200, {"ok": True, "map": mapping, "outside": outside})
