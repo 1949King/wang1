@@ -845,6 +845,19 @@ class MainWindow(QMainWindow):
         self._header_settings_btn.clicked.connect(self._show_settings)
         top_layout.addWidget(self._header_settings_btn)
 
+        # 团队协作按钮 — 2026-11-02 用户要求「把团队入口放到『登录』那一排」：
+        # 团队面板本体在画布（TeamPanel），主程序这颗按钮只负责「切到画布 + 让它弹面板」，
+        # 不复制第二套面板。为什么带字而不是纯图标：上一轮把入口藏在画布视图第二条顶栏，
+        # 结果用户压根找不到 —— 这里宁可多占 72px 也要能一眼看见。
+        self._team_btn = QPushButton("👥 团队")
+        self._team_btn.setObjectName("headerBarTeamBtn")
+        self._team_btn.setFixedHeight(28)
+        self._team_btn.setFixedWidth(72)
+        self._team_btn.setToolTip("团队协作：启动服务 / 连接同事 / 上传画布 / 交接")
+        self._team_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._team_btn.clicked.connect(self._on_team_btn_clicked)
+        top_layout.addWidget(self._team_btn)
+
         # 用户中心按钮 — 已登录显示头像文字 / 未登录显示"登录"
         self._user_btn = QPushButton("登录")
         self._user_btn.setObjectName("primaryBtn")
@@ -1570,6 +1583,71 @@ class MainWindow(QMainWindow):
     def _on_user_btn_clicked(self):
         """用户中心按钮 — 弹面板"""
         self._popup_user_center()
+
+    def _on_team_btn_clicked(self):
+        """顶栏「👥 团队」—— 切到 AI 画布并弹出它的团队协调面板。
+
+        为什么不是「弹一个 Qt 原生团队面板」：团队面板（本机服务 / 连别人 / 共享项目 /
+        交接 / 收件箱）已经完整实现在画布里（`vendor/packages/libtv/src/TeamPanel.tsx`），
+        再写一套 = 两套状态机抢同一个 team hub，必然一边新一边旧。这里只做「跳转 + 唤起」。
+
+        为什么必须走 `_perform_module_load` 而不是 `switch_to_module`：后者只认导航栏里的
+        模块（`_nav_bar.select_module` 里 `if module_id in self._buttons`，否则静默不动），
+        而画布模块是懒加载的 —— 首次点击时它还没有实例。同样的坑在 `_show_settings`
+        里已经踩过并记录（V4.43.11「设置打不开」）。
+
+        唤起通道：画布在挂载时把 `window.__sgTeamOpen` 挂到 window 上，这里用
+        `runJavaScript` 探测它是否已是函数 —— 是才调用。**不能**用「发个事件就算完」：
+        `dispatchEvent` 在页面还没加载时也返回成功，用户只会得到「点了没反应」。
+        """
+        info = self._modules.get("characters")
+        if info is None:
+            logger.warning("团队协作：画布模块（characters）未注册")
+            self.show_status("团队协作不可用：画布模块未注册", "#ef4444")
+            return
+        if not info.instance:
+            self._perform_module_load("characters")
+        else:
+            self._activate_module("characters", info)
+        # 首次加载要起静态服务 + 拉 1MB+ bundle，就绪时间不确定 ⇒ 轮询探测（最多 20×500ms）
+        self._push_team_panel(attempt=0)
+
+    def _push_team_panel(self, attempt: int = 0):
+        """轮询探测画布是否已挂上 `window.__sgTeamOpen`，就绪即唤起团队面板。"""
+        from PyQt6.QtCore import QTimer
+
+        info = self._modules.get("characters")
+        web = getattr(getattr(info, "instance", None), "_web", None)
+        if web is None:
+            if attempt < 20:
+                QTimer.singleShot(500, lambda: self._push_team_panel(attempt + 1))
+            else:
+                logger.warning("团队协作：画布 webview 未就绪（%s 次探测）", attempt)
+                self.show_status("画布还没就绪，等画布打开后再点「👥 团队」", "#fbbf24")
+            return
+        try:
+            web.page().runJavaScript(
+                "typeof window.__sgTeamOpen === 'function'"
+                " ? (window.__sgTeamOpen(), 'ok') : 'pending'",
+                lambda res: self._on_team_panel_probe(res, attempt),
+            )
+        except Exception as e:
+            logger.debug("团队协作：唤起脚本下发失败: %s", e)
+            if attempt < 20:
+                QTimer.singleShot(500, lambda: self._push_team_panel(attempt + 1))
+
+    def _on_team_panel_probe(self, res, attempt: int):
+        """`runJavaScript` 回调：'ok' = 面板已唤起；'pending' = 画布还没加载完，继续等。"""
+        from PyQt6.QtCore import QTimer
+
+        if res == "ok":
+            self.show_status("已打开画布团队面板", "#14b8a6")
+            return
+        if attempt < 20:
+            QTimer.singleShot(500, lambda: self._push_team_panel(attempt + 1))
+            return
+        logger.warning("团队协作：20 次探测仍未就绪（画布脚本未挂载 __sgTeamOpen）")
+        self.show_status("画布还没就绪，等画布打开后再点「👥 团队」", "#fbbf24")
 
     def _get_user_center_panel(self):
         """懒加载用户中心面板单例"""

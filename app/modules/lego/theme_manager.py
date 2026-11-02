@@ -338,6 +338,27 @@ class ThemeManager:
         QPushButton[theme="{theme_name}"]#headerBarIconBtn:pressed {{
             background-color: {c['bg_tertiary']};
         }}
+        /* ── 顶栏「👥 团队」按钮（2026-11-02 新增）──
+           与上面三个图标按钮同手感，但**带文字**（字号 12px、左右内边距 10px）：
+           上一轮团队入口藏在画布视图第二条顶栏里，用户压根找不到 —— 这里宁可
+           多占一点宽度也要能一眼看见。用 objectName 走 QSS 而不是 setStyleSheet，
+           否则主题切换时会变成写死的颜色（项目既有红线）。 */
+        QPushButton[theme="{theme_name}"]#headerBarTeamBtn {{
+            background-color: transparent;
+            color: {c['text_primary']};
+            border: 1px solid {c['border_light']};
+            border-radius: 6px;
+            font-size: 12px;
+            padding: 0 4px;
+        }}
+        QPushButton[theme="{theme_name}"]#headerBarTeamBtn:hover {{
+            background-color: {c['bg_hover']};
+            color: {c['accent']};
+            border-color: {c['accent']};
+        }}
+        QPushButton[theme="{theme_name}"]#headerBarTeamBtn:pressed {{
+            background-color: {c['bg_tertiary']};
+        }}
         /* ── 通知中心下拉面板（V4.43.12 补全）──
            此前该面板用了 **17 个 objectName 但全局 QSS 一条都没写**：浅色主题下靠
            Qt 默认的「浅底黑字」勉强可读，**深色主题下直接不可用**（用户反馈

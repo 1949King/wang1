@@ -22,14 +22,32 @@
  *   现在只有「竖排导航栏图标」一种形态 —— 上轮那套带字的 `bar` 形态已删，
  *   因为挂载点唯一，留着就是无调用方的死分支。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { TeamPanel } from "./TeamPanel";
 
 const TITLE = "团队协作：启动服务 / 连接 / 上传画布 / 交接给同事";
 
+/** PyQt 主程序顶栏「👥 团队」经 QWebEngine `runJavaScript` 调用的全局钩子。 */
+type TeamOpenHook = { __sgTeamOpen?: () => void };
+
 export function TeamTopBarButton() {
   const [open, setOpen] = useState(false);
+
+  // 2026-11-02（用户要求「放到主程序顶栏『登录』那一排」）：
+  // PyQt 那颗按钮要能打开这个面板。通道刻意选「全局函数」而不是 window 事件 ——
+  // `runJavaScript("window.dispatchEvent(...)")` 在画布还没加载时**照样成功返回**，
+  // 结果是「点了没反应但也不报错」；而全局函数可以让 PyQt 先问
+  // `typeof window.__sgTeamOpen === 'function'`，拿到 true 才发，能如实告诉用户
+  // 「画布还没就绪」。
+  useEffect(() => {
+    const w = window as unknown as TeamOpenHook;
+    w.__sgTeamOpen = () => setOpen(true);
+    return () => {
+      delete w.__sgTeamOpen;
+    };
+  }, []);
+
   return (
     <>
       <button

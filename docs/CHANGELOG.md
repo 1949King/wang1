@@ -48,6 +48,15 @@
 **判据（写进文档 §31.8）**：入口位置由「能力的归属层级」决定，不由「哪个体积守卫还有空位」决定 ——
 上轮为省 12 行把它塞进画布顶栏，代价是八个界面都够不着。
 
+**追加（同日，用户指定「放到登录那一排」）**：主程序顶栏右侧 🔔 通知 / 🎨 主题 / ⚙ 设置 /
+👤 登录 这一排新增 **「👥 团队」**（`main_window.py`，objectName `headerBarTeamBtn`）。
+点它 = 切到画布模块（懒加载 ⇒ 首次点击走 `_perform_module_load`，不用会静默失败的
+`switch_to_module`）→ 轮询探测画布的 `window.__sgTeamOpen` → 唤起同一个 `TeamPanel`。
+**通道为什么不是 window 事件**：`runJavaScript("dispatchEvent(...)")` 在画布还没加载时
+照样返回成功 ⇒ 用户只会得到「点了没反应」；改成探测全局函数能拿到真实就绪状态，
+20×500ms 仍未就绪就如实提示「画布还没就绪」。样式走 QSS（`theme_manager.py` 新增
+`#headerBarTeamBtn` 三条规则），不用 setStyleSheet —— 否则切主题就变死色。
+
 **冻结区**：`AppNav.tsx` / `styles.css` / `canvasVersion.ts` 均属 `canvas-magnetic-intent`，
 用户选方案 B（放入常驻导航栏）即授权解冻，改完统一 `--update` 重锁。
 
