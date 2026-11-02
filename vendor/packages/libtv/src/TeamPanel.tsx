@@ -206,6 +206,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     // ④ 只传新增的
     const refs: MediaRef[] = collectMediaRefs(staged);
     let uploaded = 0;
+    let posters = 0;
     let index: Record<string, string> = {};
     if (refs.length) {
       let done = 0;
@@ -230,6 +231,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
         },
       );
       uploaded = res.uploaded;
+      posters = res.posters;
       index = res.map;
       if (res.failed.length) {
         warnings.push(
@@ -245,7 +247,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     const bundle = stripAssetTokens(applyMediaIndex(staged, projectId, index));
     return {
       bundle, warnings, clipCount: clips.length,
-      mediaCount: refs.length + reused, uploaded, reused,
+      mediaCount: refs.length + reused, uploaded, reused, posters,
     };
   };
 
@@ -331,7 +333,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
       say(prep.warnings.length ? "info" : "ok",
         `已上传「${title}」rev ${pushed.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，` +
-        `新传 ${prep.uploaded}、复用 ${prep.reused}）${tail}`);
+        `新传 ${prep.uploaded}、复用 ${prep.reused}${prep.posters ? `、封面 ${prep.posters}` : ""}）${tail}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -352,7 +354,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
       say(prep.warnings.length ? "info" : "ok",
         `已上传到「${p.name}」→ rev ${res.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，` +
-        `新传 ${prep.uploaded}、复用 ${prep.reused}）${tail}`);
+        `新传 ${prep.uploaded}、复用 ${prep.reused}${prep.posters ? `、封面 ${prep.posters}` : ""}）${tail}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -577,9 +579,13 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     }
     setBusy("asset");
     try {
+      // 归属取自画布上**当前选中的节点**：用户站在「镜 03」那条上点上传，
+      // 这条素材就该标成「来自 镜 03」。没有选中就留空，不瞎猜。
+      const owner = selectedNodeTitle();
       setSync(`上传 ${file.name}（${fmtBytes(file.size)}）…`);
-      const a = await teamUploadAsset(selected, file, file.name, kindOf(file.name) || "file");
-      say("ok", `已上传「${a.name}」（${fmtBytes(a.bytes)}），同事点「打开」就能看`);
+      const a = await teamUploadAsset(selected, file, file.name, kindOf(file.name) || "file",
+        undefined, { owner });
+      say("ok", `已上传「${a.name}」（${fmtBytes(a.bytes)}）${owner ? `，标注来自 ${owner}` : ""}`);
       await refreshAssets(selected);
     } catch (e) {
       fail(e);
@@ -765,18 +771,25 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
               <span>{selected ? (busy === "asset" ? "上传中…" : "选文件上传") : "先在 ③ 选个共享项目"}</span>
             </label>
             <button type="button" disabled={!selected} onClick={() => void refreshAssets(selected)}>刷新</button>
-            <span className="sg-team-dim">成片 mp4 / 图 / 音频都行，同事点「打开」就能看</span>
+            <span className="sg-team-dim">成片 mp4 / 图 / 音频都行；有封面的会显示缩略图</span>
           </div>
           {assets.length ? (
             <div className="sg-team-list">
               {assets.map((a) => {
                 const url = teamAssetUrl(selected, a.sha256);
                 const open = preview === a.sha256;
+                const posterUrl = a.poster ? teamAssetUrl(selected, a.poster) : "";
                 return (
                   <div key={a.sha256} className="sg-team-item sg-team-asset">
-                    <div className="sg-team-item-main">
-                      <b>{kindIcon(a.kind)} {a.name}</b>
-                      <span className="sg-team-dim">{fmtBytes(a.bytes)} · {a.author || "未知"}</span>
+                    <div className="sg-team-asset-row">
+                      <AssetThumb url={url} posterUrl={posterUrl} kind={a.kind} icon={kindIcon(a.kind)} />
+                      <div className="sg-team-item-main">
+                        <b>{a.name}</b>
+                        <span className="sg-team-dim">
+                          {kindIcon(a.kind)} {fmtBytes(a.bytes)} · {a.author || "未知"}
+                          {a.owner ? ` · 来自 ${a.owner}` : ""}
+                        </span>
+                      </div>
                     </div>
                     <div className="sg-team-item-actions">
                       <button type="button" onClick={() => setPreview(open ? "" : a.sha256)}>
@@ -787,7 +800,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                     {open ? (
                       <div className="sg-team-preview">
                         {!url ? <span className="sg-team-dim">还没加入团队，拿不到地址</span>
-                          : a.kind === "video" ? <video src={url} controls preload="metadata" />
+                          : a.kind === "video" ? <VideoPreview url={url} name={a.name} />
                             : a.kind === "image" ? <img src={url} alt={a.name} />
                               : a.kind === "audio" ? <audio src={url} controls />
                                 : <a href={url} download={a.name}>下载「{a.name}」</a>}
@@ -807,4 +820,72 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
 /** 附件类型的小图标（不引第三方图标库，纯字符）。 */
 function kindIcon(kind: string): string {
   return kind === "video" ? "🎬" : kind === "image" ? "🖼" : kind === "audio" ? "🎵" : kind === "text" ? "📄" : "📦";
+}
+
+/**
+ * 画布上当前选中节点的标题（`镜 03`），没有选中就是空串。
+ *
+ * 为什么不弹框让用户手填：上传这件事本来就发生在「我正在看某个镜」的上下文里，
+ * 让用户再打一遍字属于白问；真正不知道的时候（没选节点）留空比瞎猜安全。
+ */
+function selectedNodeTitle(): string {
+  try {
+    const bundle = useCanvasStore.getState().getProjectBundle() as { nodes?: Record<string, unknown>[] };
+    const nodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
+    const sel = nodes.find((n) => n && n.selected);
+    const data = (sel?.data || {}) as Record<string, unknown>;
+    for (const k of ["title", "label", "name"]) {
+      const v = data[k];
+      if (typeof v === "string" && v.trim()) return v.trim().slice(0, 40);
+    }
+  } catch {
+    /* 拿不到 store 就当没有归属，别让它拦住上传 */
+  }
+  return "";
+}
+
+/**
+ * 列表里的缩略图（52×30）。
+ *
+ * 优先级：**视频封面附件** → 图片本体 → 类型图标。
+ *
+ * 为什么视频必须靠上传时存下的封面：画布内核（Qt WebEngine）没有 H.264 解码器，
+ * `<video>` 对 mp4 直接 `error.code=4`，`#t=0.1` 片段定位、`canvas.drawImage`
+ * 也全都拿不到像素（实测 webm 正常、mp4 全黑）。所以这里绝不去「现场截帧」，
+ * 只用后端用 ffmpeg 抽好、随附件一起传上去的那张 JPEG。
+ */
+function AssetThumb({ url, posterUrl, kind, icon }: {
+  url: string; posterUrl: string; kind: string; icon: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  const src = posterUrl || (kind === "image" ? url : "");
+  if (!src || broken) return <span className="sg-team-thumb">{icon}</span>;
+  // loading=lazy：列表里十几张大图不必一次全拉；解码也丢给异步线程
+  return (
+    <img className="sg-team-thumb" src={src} alt="" loading="lazy" decoding="async"
+         onError={() => setBroken(true)} />
+  );
+}
+
+/**
+ * 视频预览：放不出来时**说清原因**，而不是留一块黑。
+ *
+ * 本机 Qt WebEngine 不带 H.264/AAC，而产品自己渲染的成片正是 h264 ⇒ 这是
+ * 常态而非异常。用户看到黑框只会以为文件坏了、反复重传。
+ */
+function VideoPreview({ url, name }: { url: string; name: string }) {
+  const [bad, setBad] = useState(false);
+  if (bad) {
+    return (
+      <div className="sg-team-noframe">
+        <b>这台机器放不了这个 mp4 的画面</b>
+        <span>
+          画布内核（Qt WebEngine）没带 H.264 解码器，不是文件坏了。
+          剪辑器用的是系统播放器，那边能正常预览。
+        </span>
+        <a href={url} download={name}>下载「{name}」用系统播放器看</a>
+      </div>
+    );
+  }
+  return <video src={url} controls preload="metadata" onError={() => setBad(true)} />;
 }

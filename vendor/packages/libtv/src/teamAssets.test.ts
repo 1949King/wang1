@@ -240,3 +240,151 @@ describe("teamAssets · 媒体索引缓存", () => {
     expect(m.readMediaCache("p_1")).toEqual({});
   });
 });
+
+/**
+ * 2026-11-02 · 归属与封面（第三刀）
+ *
+ * 列表里 8 个「成片.mp4 / a.mp4 / b.mp4」光看名字分不清，所以两件事必须对：
+ *   ① 归属：扫 bundle 时把**最近的 title/label** 带下来（同一份素材被多个节点
+ *      引用，保留第一个有归属的，别让后来的空值盖掉）；
+ *   ② 封面：视频**先传封面再传本体**，本体带 `poster=<sha>` —— 顺序反了就得再
+ *      发一次「更新」请求。
+ */
+describe("teamAssets · 归属与封面", () => {
+  const POSTER_SHA = "c".repeat(64);
+  const VIDEO_SHA = "d".repeat(64);
+
+  type Up = { name: string; kind: string; opts: { owner?: string; poster?: string } };
+
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock("./teamClient");
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  it("collectMediaRefs 把最近的 title/label 记成归属，且不被后来的空值覆盖", async () => {
+    vi.resetModules();
+    const ta = await import("./teamAssets");
+    const bundle = {
+      nodes: [
+        { id: "n1", type: "video", data: { title: "镜 03", videoUrl: "/inbox_file/a.mp4" } },
+        // 同一个文件的第二个引用方，没有 title ⇒ 不能把「镜 03」抹成空
+        { id: "n2", type: "video", data: { videoUrl: "/inbox_file/a.mp4" } },
+        { id: "n3", type: "image", data: { title: "镜 04", imageUrl: "data:image/png;base64," + "A".repeat(400000) } },
+      ],
+      timeline: { clips: [{ path: "/inbox_file/b.mp4", label: "镜 05" }] },
+    };
+    const refs = ta.collectMediaRefs(bundle);
+    const byUrl = (u: string) => refs.find((r) => r.url === u);
+    expect(byUrl("/inbox_file/a.mp4")?.owner).toBe("镜 03");
+    expect(byUrl("/inbox_file/b.mp4")?.owner).toBe("镜 05");
+    expect(refs.some((r) => r.owner === "镜 04")).toBe(true);
+  });
+
+  it("视频先传封面再传本体：本体带 poster sha 与归属", async () => {
+    const uploads: Up[] = [];
+    vi.resetModules();
+    vi.doMock("./teamClient", async (orig) => {
+      const real = await orig<typeof import("./teamClient")>();
+      return {
+        ...real,
+        teamPoster: async () => "data:image/jpeg;base64,QUJD",
+        teamUploadAsset: async (
+          _pid: string, _blob: Blob, name: string, kind: string,
+          _cb?: unknown, opts: { owner?: string; poster?: string } = {},
+        ) => {
+          uploads.push({ name, kind, opts });
+          return {
+            sha256: kind === "image" ? POSTER_SHA : VIDEO_SHA,
+            name, kind, mime: "", bytes: 3, author: "", created_at: 0,
+          };
+        },
+      };
+    });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1, 2, 3])]),
+    })) as unknown as typeof fetch;
+
+    const ta = await import("./teamAssets");
+    const res = await ta.uploadMediaRefs("p_1", [
+      { url: "/inbox_file/成片.mp4", kind: "video", name: "成片.mp4", owner: "镜 03" },
+    ]);
+
+    expect(uploads.map((u) => u.kind)).toEqual(["image", "video"]);
+    expect(uploads[0].name).toBe("成片.mp4.jpg");
+    expect(uploads[1].opts).toEqual({ owner: "镜 03", poster: POSTER_SHA });
+    expect(res.posters).toBe(1);
+    expect(res.map["/inbox_file/成片.mp4"]).toBe(VIDEO_SHA);
+  });
+
+  it("封面抽不出来 ⇒ 视频照传，只是没有封面", async () => {
+    const uploads: Up[] = [];
+    vi.resetModules();
+    vi.doMock("./teamClient", async (orig) => {
+      const real = await orig<typeof import("./teamClient")>();
+      return {
+        ...real,
+        teamPoster: async () => "",
+        teamUploadAsset: async (
+          _pid: string, _blob: Blob, name: string, kind: string,
+          _cb?: unknown, opts: { owner?: string; poster?: string } = {},
+        ) => {
+          uploads.push({ name, kind, opts });
+          return { sha256: VIDEO_SHA, name, kind, mime: "", bytes: 3, author: "", created_at: 0 };
+        },
+      };
+    });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1, 2, 3])]),
+    })) as unknown as typeof fetch;
+
+    const ta = await import("./teamAssets");
+    const res = await ta.uploadMediaRefs("p_1", [
+      { url: "/inbox_file/成片.mp4", kind: "video", name: "成片.mp4" },
+    ]);
+
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].kind).toBe("video");
+    expect(uploads[0].opts.poster).toBe("");
+    expect(res.posters).toBe(0);
+    expect(res.failed).toHaveLength(0);
+  });
+
+  it("data: 素材给不出本机路径 ⇒ 不去抽帧（后端读不到那段 base64 落地的文件）", async () => {
+    const asked: string[] = [];
+    const uploads: Up[] = [];
+    vi.resetModules();
+    vi.doMock("./teamClient", async (orig) => {
+      const real = await orig<typeof import("./teamClient")>();
+      return {
+        ...real,
+        teamPoster: async (p: string) => {
+          asked.push(p);
+          return "";
+        },
+        teamUploadAsset: async (
+          _pid: string, _blob: Blob, name: string, kind: string,
+          _cb?: unknown, opts: { owner?: string; poster?: string } = {},
+        ) => {
+          uploads.push({ name, kind, opts });
+          return { sha256: VIDEO_SHA, name, kind, mime: "", bytes: 3, author: "", created_at: 0 };
+        },
+      };
+    });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1, 2, 3])]),
+    })) as unknown as typeof fetch;
+
+    const ta = await import("./teamAssets");
+    await ta.uploadMediaRefs("p_1", [
+      { url: "data:video/mp4;base64," + "A".repeat(400000), kind: "video", name: "内联.mp4" },
+    ]);
+
+    expect(asked).toHaveLength(0);
+    expect(uploads).toHaveLength(1);
+  });
+});

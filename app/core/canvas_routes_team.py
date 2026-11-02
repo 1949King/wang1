@@ -9,6 +9,7 @@
 | `GET  /host/team/discover` | 局域网扫描（UDP，只能由后端做——浏览器发不了 UDP） |
 | `POST /host/team/inbox-map`| 剪辑器 clip.path（本地绝对路径）→ 画布能 fetch 的 `/inbox_file/…` |
 | `POST /host/team/materialize`| 团队附件 → 本机素材库（同事真要接着剪时间线时用） |
+| `POST /host/team/poster`   | 本机视频抽一帧当封面（附件列表缩略图） |
 
 ## 为什么这些端点必须走 canvas_server（127.0.0.1）
 
@@ -45,6 +46,16 @@ _MATERIALIZE_URL_RE = re.compile(
 
 #: 单文件下载上限（与 Hub 的 MAX_ASSET_BYTES 对齐）
 _MATERIALIZE_MAX = 512 * 1024 * 1024
+
+#: 抽帧只认画布自己的媒体路径：`/inbox_file/x.mp4`、`/editor_file/x.mp4`
+#: （可带 `http://127.0.0.1:端口` 前缀）。**不接受绝对路径** —— 否则这个端点
+#: 就成了「让 ffmpeg 读任意本机文件再回一张图」的探测工具。
+_POSTER_URL_RE = re.compile(
+    r"^(?:https?://127\.0\.0\.1(?::\d+)?)?/(inbox_file|editor_file)/([^/?#\\]+)$", re.I
+)
+
+#: 封面默认缩略宽度：列表里显示 44px 宽，320 已足够 retina，再大只是白占带宽
+_POSTER_WIDTH = 320
 
 
 def _cs():
@@ -299,3 +310,93 @@ class CanvasTeamRoutesMixin:
             return
         os.replace(tmp, dest)
         self._json(200, {"ok": True, "path": dest, "bytes": got})
+
+    @_route_post("/host/team/poster")
+    def _p_host_team_poster(self, parsed, raw: bytes, ctype: str) -> None:
+        """给本机视频抽一帧当封面，回 `data_url`（JPEG base64）。
+
+        ## 为什么必须是后端抽帧，不能让浏览器自己截
+
+        实测（QT WebEngine，与画布同一内核）：
+
+        | 探测 | 结果 |
+        |---|---|
+        | `canPlayType('video/mp4; codecs="avc1.42E01E"')` | `""`（不支持） |
+        | `<video src="x.mp4">` | `error.code = 4`（SRC_NOT_SUPPORTED） |
+        | `<video src="x.webm">` | 正常，`readyState = 4` |
+
+        pip 装的 PyQt6-WebEngine **不带 H.264/AAC**，而本产品自己渲染的成片正是
+        h264 ⇒ 浏览器里既放不出画面，`canvas.drawImage(video)` 也拿不到像素。
+        所以「前端截首帧」这条路对 mp4 根本不存在，只能回到 ffmpeg。
+
+        ## 边界
+
+        · 只认 `/inbox_file/` 与 `/editor_file/`（见 `_POSTER_URL_RE`），绝不接受
+          任意绝对路径；文件不存在如实回 `not_found`。
+        · 抽帧给了 20 秒上限：画布桥的请求本身有 30 秒硬上限，超了连接已被对端放弃。
+        · 抽不出来（无 ffmpeg / 编码怪 / 空文件）回 `ok=False` 并写明原因 ——
+          封面是锦上添花，不能让它拦住上传，但也不能假装成功。
+        """
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        src = str((body or {}).get("path") or "").strip()
+        m = _POSTER_URL_RE.match(src)
+        if not m:
+            self._json(400, {"ok": False, "code": "bad_path",
+                             "message": "只接受 /inbox_file/… 或 /editor_file/… 的路径"})
+            return
+        try:
+            at = float((body or {}).get("at", 0.35))
+        except (TypeError, ValueError):
+            at = 0.35
+        try:
+            width = int((body or {}).get("width") or _POSTER_WIDTH)
+        except (TypeError, ValueError):
+            width = _POSTER_WIDTH
+        # 夹到合理区间：太小看不清，太大 base64 撑爆 JSON 响应
+        at = min(max(at, 0.0), 600.0)
+        width = min(max(width, 96), 640)
+
+        try:
+            # 🔴 必须写成 `from app.core.canvas_bridge import …`（直接导子模块）：
+            # 写成 `from app.core import canvas_bridge` 时，只要 `app.core` 上已经有
+            # `canvas_bridge` 属性（真实模块被谁先 import 过），`_handle_fromlist`
+            # 就直接取属性、**绕过 sys.modules** ⇒ 测试里替不掉，还静默用真目录。
+            from app.core.canvas_bridge import _safe_filename, canvas_inbox_dir, canvas_outbox_dir
+
+            sub, name = m.group(1).lower(), _safe_filename(m.group(2))
+            base_dir = canvas_inbox_dir() if sub == "inbox_file" else canvas_outbox_dir()
+            fpath = os.path.join(base_dir, name)
+        except Exception as e:
+            logger.debug("[/host/team/poster] 解析路径失败 %s", src, exc_info=True)
+            self._json(200, {"ok": False, "code": "bad_path",
+                             "message": "定位不到本机文件：%s" % _friendly(e)})
+            return
+        if not os.path.isfile(fpath):
+            self._json(200, {"ok": False, "code": "not_found",
+                             "message": "本机没有这个文件（%s）" % name})
+            return
+        try:
+            from app.core.canvas_shot_vision import _grab_frame
+
+            jpeg = _grab_frame(fpath, at, width=width, timeout=20)
+        except Exception as e:
+            logger.debug("[/host/team/poster] 抽帧异常 %s", fpath, exc_info=True)
+            self._json(200, {"ok": False, "code": "frame_failed",
+                             "message": "抽帧失败：%s" % _friendly(e)})
+            return
+        if not jpeg:
+            self._json(200, {"ok": False, "code": "frame_failed",
+                             "message": "抽不出帧（没装 ffmpeg 或视频编码无法解码）"})
+            return
+        import base64
+
+        self._json(200, {"ok": True, "at": at, "width": width, "bytes": len(jpeg),
+                         "data_url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")})

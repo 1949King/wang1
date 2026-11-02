@@ -229,6 +229,31 @@ export function teamInboxMap(paths: string[]): Promise<{ map: Record<string, str
 }
 
 /**
+ * 让本机后端从视频里抽一帧当封面，返回 `data:image/jpeg;base64,…`（失败回空串）。
+ *
+ * ## 为什么不是浏览器自己截
+ *
+ * 画布跑在 Qt WebEngine 上，实测 `canPlayType('video/mp4; codecs="avc1.42E01E"')`
+ * 是空串、`<video>` 报 `error.code=4`（webm 正常）—— 这个内核**没有 H.264**，
+ * 而本产品渲染出来的成片就是 h264。所以 `video + canvas.drawImage` 那条路
+ * 对 mp4 不存在，只能回到本机的 ffmpeg。
+ *
+ * 失败一律回空串：封面是锦上添花，不能因为它抽不出来就把视频也传不上去。
+ */
+export async function teamPoster(path: string, at = 0.35): Promise<string> {
+  if (!path) return "";
+  try {
+    const d = await hostCall<{ data_url?: string }>("/host/team/poster", {
+      method: "POST",
+      body: JSON.stringify({ path, at }),
+    });
+    return String(d.data_url || "");
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 把一个团队附件下载到本机素材库，返回本地路径。
  *
  * **一次只传一个 URL**：`canvas_server` 有 30 秒请求上限，十来个片段叠在一个请求里
@@ -390,6 +415,10 @@ export type TeamAsset = {
   bytes: number;
   author: string;
   created_at: number;
+  /** 归属提示（「镜 03」「剧本」），空串表示不知道 —— 老附件没有这个信息 */
+  owner?: string;
+  /** 封面附件的 sha256（视频首帧），空串表示没有 */
+  poster?: string;
 };
 
 /** 附件类型：只这几个值后端认，其余落 `file`。 */
@@ -440,6 +469,7 @@ export function teamUploadAsset(
   name: string,
   kind: TeamAssetKind,
   onProgress?: (loaded: number, total: number) => void,
+  opts: { owner?: string; poster?: string } = {},
 ): Promise<TeamAsset> {
   const base = teamBaseUrl();
   const token = teamCred()?.token || "";
@@ -447,8 +477,11 @@ export function teamUploadAsset(
   if (!blob || blob.size <= 0) {
     return Promise.reject(new TeamError("bad_asset", `「${name}」是空文件（0 字节），不传`));
   }
-  const url = `${base}/team/projects/${encodeURIComponent(projectId)}/assets` +
+  let url = `${base}/team/projects/${encodeURIComponent(projectId)}/assets` +
     `?name=${encodeURIComponent(name)}&kind=${encodeURIComponent(kind)}`;
+  // 归属与封面都是可选的：没有就不拼参数，别传空串让服务端以为「就是要清空」
+  if (opts.owner) url += `&owner=${encodeURIComponent(opts.owner)}`;
+  if (opts.poster) url += `&poster=${encodeURIComponent(opts.poster)}`;
   return new Promise<TeamAsset>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url, true);

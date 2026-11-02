@@ -307,6 +307,23 @@ class Hub:
                 );
                 """
             )
+            self._migrate_asset_columns(conn)
+
+    @staticmethod
+    def _migrate_asset_columns(conn: sqlite3.Connection) -> None:
+        """给 `asset` 补后来才加的列（幂等）。
+
+        SQLite 没有 `ADD COLUMN IF NOT EXISTS`，所以先查 `PRAGMA table_info`。
+        老库升级后列值取默认值，不需要回填 —— 早期上传的附件本来就没这些信息，
+        编一个出来反而是假数据。
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(asset)").fetchall()}
+        #: 归属提示：来自哪个镜 / 哪个片段（`镜 03`），空串表示无从得知
+        if "owner" not in cols:
+            conn.execute("ALTER TABLE asset ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+        #: 封面附件的 sha256（视频首帧），空串表示没有
+        if "poster" not in cols:
+            conn.execute("ALTER TABLE asset ADD COLUMN poster TEXT NOT NULL DEFAULT ''")
 
     # ── 成员 ────────────────────────────────────────────
     def register_member(self, name: str, role: str = "editor") -> Dict[str, Any]:
@@ -585,26 +602,35 @@ class Hub:
         return os.path.join(self.blobs_dir, sha + ext)
 
     def _upsert_asset(self, project_id: str, sha: str, name: str, kind: str,
-                      mime: str, size: int, member_id: str) -> Dict[str, Any]:
+                      mime: str, size: int, member_id: str,
+                      owner: str = "", poster: str = "") -> Dict[str, Any]:
         clean = str(name or "").strip()[:MAX_ASSET_NAME] or (sha[:12] + ".bin")
+        clean_owner = str(owner or "").strip()[:MAX_ASSET_NAME]
+        clean_poster = str(poster or "").strip()[:64]
         ts = _now()
         with self._lock, self._conn() as conn:
             has_project = conn.execute("SELECT 1 FROM project WHERE id = ?", (project_id,)).fetchone()
             if has_project is None:
                 raise TeamError("not_found", "项目不存在：%s" % project_id)
+            # 空值不覆盖已记下的信息：同一份素材会被多个节点引用，后一次上传
+            # 往往没带 owner/poster，不该把前一次记的抹掉。
             conn.execute(
-                "INSERT INTO asset (project_id, sha256, name, kind, mime, bytes, author_id, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?)"
+                "INSERT INTO asset (project_id, sha256, name, kind, mime, bytes, author_id,"
+                " created_at, owner, poster) VALUES (?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(project_id, sha256) DO UPDATE SET name = excluded.name,"
-                " kind = excluded.kind, mime = excluded.mime",
+                " kind = excluded.kind, mime = excluded.mime,"
+                " owner = CASE WHEN excluded.owner != '' THEN excluded.owner ELSE asset.owner END,"
+                " poster = CASE WHEN excluded.poster != '' THEN excluded.poster ELSE asset.poster END",
                 (project_id, sha, clean, str(kind or "file")[:16], str(mime or "")[:120],
-                 int(size), member_id, ts),
+                 int(size), member_id, ts, clean_owner, clean_poster),
             )
         return {"sha256": sha, "name": clean, "kind": str(kind or "file")[:16],
-                "mime": str(mime or "")[:120], "bytes": int(size)}
+                "mime": str(mime or "")[:120], "bytes": int(size),
+                "owner": clean_owner, "poster": clean_poster}
 
     def save_asset(self, project_id: str, member_id: str, name: str, data: bytes,
-                   kind: str = "file", mime: str = "") -> Dict[str, Any]:
+                   kind: str = "file", mime: str = "",
+                   owner: str = "", poster: str = "") -> Dict[str, Any]:
         """小文件路径（≤ 单测 / 截图）：整块进内存，落盘后登记。"""
         raw = bytes(data or b"")
         if not raw:
@@ -620,11 +646,13 @@ class Hub:
             with open(tmp, "wb") as f:
                 f.write(raw)
             os.replace(tmp, path)
-        return self._upsert_asset(project_id, sha, name, kind, mime, len(raw), member_id)
+        return self._upsert_asset(project_id, sha, name, kind, mime, len(raw), member_id,
+                                  owner, poster)
 
     def commit_asset_file(self, project_id: str, member_id: str, name: str,
                           tmp_path: str, sha: str, size: int,
-                          kind: str = "file", mime: str = "") -> Dict[str, Any]:
+                          kind: str = "file", mime: str = "",
+                          owner: str = "", poster: str = "") -> Dict[str, Any]:
         """生产路径：服务层**边收边写**到 tmp 后调这里收编（512MB 视频不进内存）。"""
         if size <= 0:
             try:
@@ -646,20 +674,32 @@ class Hub:
             os.remove(tmp_path)          # 内容已存在（跨机器重传），tmp 丢掉即可
         else:
             os.replace(tmp_path, path)
-        return self._upsert_asset(project_id, sha, name, kind, mime, size, member_id)
+        return self._upsert_asset(project_id, sha, name, kind, mime, size, member_id,
+                                  owner, poster)
 
     def list_assets(self, project_id: str) -> List[Dict[str, Any]]:
+        """项目里的附件（**封面附件不列出来**）。
+
+        封面本身也是一张附件（这样同事那边也能拿到那张 JPEG），但它对用户没有
+        独立意义 —— 列出来只会变成「成片.mp4 / 成片.mp4.poster.jpg」两行，
+        把本来要解决的「分不清哪个是哪个」又变成「多了一倍的条目」。
+        规则：谁的 sha 被别的行 `poster` 引用，谁就不进列表（仍可按 sha 取字节）。
+        """
         with self._lock, self._conn() as conn:
             rows = conn.execute(
                 "SELECT a.*, m.name AS author_name FROM asset a"
                 " LEFT JOIN member m ON m.id = a.author_id"
-                " WHERE a.project_id = ? ORDER BY a.created_at",
-                (project_id,),
+                " WHERE a.project_id = ?"
+                "   AND a.sha256 NOT IN (SELECT poster FROM asset"
+                "                         WHERE project_id = ? AND poster != '')"
+                " ORDER BY a.created_at",
+                (project_id, project_id),
             ).fetchall()
         return [{"sha256": r["sha256"], "name": r["name"], "kind": r["kind"],
                  "mime": r["mime"], "bytes": int(r["bytes"]),
                  "author": r["author_name"] or r["author_id"],
-                 "created_at": float(r["created_at"])} for r in rows]
+                 "created_at": float(r["created_at"]),
+                 "owner": r["owner"] or "", "poster": r["poster"] or ""} for r in rows]
 
     def asset_path_of(self, project_id: str, sha: str) -> Tuple[str, Dict[str, Any]]:
         with self._lock, self._conn() as conn:

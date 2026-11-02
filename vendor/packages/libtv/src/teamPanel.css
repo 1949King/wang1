@@ -107,6 +107,24 @@ html[data-theme='light'] .ic-shortcut-btn.on {
 .sg-team-file.off input { cursor: default; }
 .sg-team-asset { cursor: default; }
 .sg-team-asset .sg-team-item-main b { word-break: break-all; }
+/* 缩略图那一行：图在左、名字在中、按钮单独一行（沿用 .sg-team-item 的纵向流） */
+.sg-team-asset-row { display: flex; align-items: center; gap: 8px; }
+.sg-team-asset-row .sg-team-item-main { flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+/* 52×30 ≈ 16:9 的小封面；没有封面时这块是图标底板，不是空白洞 */
+.sg-team-thumb {
+  flex: 0 0 auto; width: 52px; height: 30px; border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1);
+  object-fit: cover; display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+/* 「这台机器放不了 mp4」的说明块：说清原因 + 给一条出路（下载/剪辑器），
+   而不是留一块黑让用户以为文件坏了、反复重传。 */
+.sg-team-noframe {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); border: 1px dashed rgba(255, 255, 255, 0.18);
+  color: #b9c2d4; font-size: 11.5px; line-height: 1.55;
+}
+.sg-team-noframe b { color: #ffd59a; font-size: 11.5px; }
+.sg-team-noframe a { color: #9ed0ff; text-decoration: underline; }
 .sg-team-preview { margin-top: 2px; }
 .sg-team-preview video,
 .sg-team-preview img {

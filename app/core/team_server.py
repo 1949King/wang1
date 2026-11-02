@@ -264,10 +264,16 @@ class _TeamHandler(BaseHTTPRequestHandler):
             query = parse_qs(urlparse(self.path).query)
             name = unquote(str((query.get("name") or [""])[0]))
             kind = str((query.get("kind") or ["file"])[0] or "file")
+            # 归属提示（「镜 03」）与封面 sha：都是可选，缺了就不记 —— 别编默认值
+            owner = unquote(str((query.get("owner") or [""])[0]))
+            poster = str((query.get("poster") or [""])[0] or "")
+            if poster and not re.fullmatch(r"[a-f0-9]{64}", poster, re.I):
+                poster = ""          # 形不合法就当没给，不能把乱字符串写进库里
             tmp, digest, size = self._raw_to_tmp(MAX_ASSET_BODY)
             res = self.hub.commit_asset_file(pid, me["id"], name, tmp, digest, size,
                                              kind if kind in _ASSET_KINDS else "file",
-                                             str(self.headers.get("Content-Type") or ""))
+                                             str(self.headers.get("Content-Type") or ""),
+                                             owner=owner, poster=poster)
             self._send(200, {"ok": True, **res})
             return True
         if method == "DELETE":

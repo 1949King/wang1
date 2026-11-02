@@ -169,3 +169,59 @@ describe("teamClient · 网络失败翻译成人话", () => {
     expect(err.message).toContain("127.0.0.1:18765");
   });
 });
+
+/**
+ * 2026-11-02 · 封面抽帧（`teamPoster`）
+ *
+ * 这个函数**失败必须回空串**：封面是锦上添花，抽不出来不能连累视频本体上传。
+ * 并且它走的是本机桥（127.0.0.1:18765），不是同事的团队服务 —— 混了两边的
+ * 鉴权就变成「把 host token 发给同事的机器」。
+ */
+describe("teamClient · 视频封面走本机桥", () => {
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  function stubFetch(impl: (url: string) => unknown) {
+    const calls: string[] = [];
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async (url: string) => {
+      calls.push(String(url));
+      return impl(String(url));
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  it("成功时回 data_url，请求打到本机桥的 /host/team/poster", async () => {
+    const calls = stubFetch(() => ({
+      ok: true,
+      json: async () => ({ ok: true, data_url: "data:image/jpeg;base64,AAAA", bytes: 3 }),
+    }));
+
+    const m = await loadModule();
+    const url = await m.teamPoster("/inbox_file/成片.mp4");
+
+    expect(url).toBe("data:image/jpeg;base64,AAAA");
+    expect(calls[0]).toContain("127.0.0.1:18765/host/team/poster");
+  });
+
+  it("后端回 ok:false（没装 ffmpeg）⇒ 空串，不抛", async () => {
+    stubFetch(() => ({
+      ok: true,
+      json: async () => ({ ok: false, code: "frame_failed", message: "抽不出帧" }),
+    }));
+
+    const m = await loadModule();
+    await expect(m.teamPoster("/inbox_file/x.mp4")).resolves.toBe("");
+  });
+
+  it("桥连不上 ⇒ 也是空串（宁可没封面，不能把上传拦死）", async () => {
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const m = await loadModule();
+    await expect(m.teamPoster("/editor_file/x.mp4")).resolves.toBe("");
+  });
+});

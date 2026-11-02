@@ -68,7 +68,10 @@ for path in paths:
     _routes += re.findall(r"@_route_(?:get|post)\(\s*[\"']([^\"']+)", src)
 _unique = len(set(_routes))
 _tech = _read("docs/现行技术文档.md")
-check(f"{_unique} 唯一端点" in _tech, f"技术文档写明 {_unique} 唯一端点（实测 {_unique}）")
+# 「117 个唯一端点」与「117 唯一端点」都算对：中文里带量词才是正常写法，
+# 早先只认后者 ⇒ 文档写成「117 个唯一端点」就永远红（2026-11-02 修，长期假红）。
+check(any(f"{_unique} {tail}" in _tech for tail in ("唯一端点", "个唯一端点")),
+      f"技术文档写明 {_unique} 唯一端点（实测 {_unique}）")
 
 # ── C. 能力总数 = 能力目录实测 ──
 print("[C] 技术文档能力总数 ↔ 能力目录")

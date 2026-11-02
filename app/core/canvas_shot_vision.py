@@ -105,8 +105,11 @@ def _norm(value: Any, allowed: tuple, default: str) -> str:
     return default
 
 
-def _grab_frame(path: str, t: float, width: int = 256) -> Optional[bytes]:
+def _grab_frame(path: str, t: float, width: int = 256, timeout: float = 60.0) -> Optional[bytes]:
     """在 t 秒抽 1 帧 JPEG bytes（缩到 width 宽），失败返回 None。
+
+    `timeout` 可调：画布桥的请求有 30 秒硬上限（`canvas_server`），从那条路径进来
+    必须给更小的值，否则 ffmpeg 还没返回、连接已经被对端放弃了。
 
     ⚠️ **不复用** `canvas_aigc._extract_shot_frame`：它把临时帧写到 `%TEMP%`，
     本机 AV 锁 `%TEMP%` → ffmpeg 报「Permission denied」抽帧失败（实测踩过）。
@@ -137,7 +140,7 @@ def _grab_frame(path: str, t: float, width: int = 256) -> Optional[bytes]:
             "-frames:v", "1", "-vf", f"scale={int(width)}:-2", "-q:v", "4", out,
         ]
         r = subprocess.run(
-            cmd, capture_output=True, timeout=60,
+            cmd, capture_output=True, timeout=max(5.0, float(timeout)),
             creationflags=subprocess.CREATE_NO_WINDOW if _sys.platform == "win32" else 0,
         )
         if r.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:

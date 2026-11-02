@@ -235,6 +235,64 @@ def test_asset_missing_blob_reports_not_found(hub):
     assert ei.value.code == "not_found" and "丢失" in ei.value.message
 
 
+# ── 附件归属与封面（2026-11-02 · 第三刀）──────────────────
+def test_asset_owner_and_poster_roundtrip(hub):
+    """封面也是一张附件，但**不进列表**；归属 `镜 03` 随附件存下来。"""
+    m = hub.register_member("张三")
+    pid = hub.create_project("工程", m["member_id"], {"nodes": []})["project_id"]
+
+    poster = hub.save_asset(pid, m["member_id"], "成片.mp4.jpg", b"jpegbytes",
+                           "image", "image/jpeg", owner="镜 03")
+    vid = hub.save_asset(pid, m["member_id"], "成片.mp4", b"v" * 4096,
+                         "video", "video/mp4", owner="镜 03", poster=poster["sha256"])
+
+    rows = hub.list_assets(pid)
+    assert [r["sha256"] for r in rows] == [vid["sha256"]], "封面不该单独列成一行"
+    assert rows[0]["owner"] == "镜 03"
+    assert rows[0]["poster"] == poster["sha256"]
+    # 不列 ≠ 删掉：同事的缩略图还得按 sha 取到这张 JPEG
+    assert hub.asset_path_of(pid, poster["sha256"])[1]["name"] == "成片.mp4.jpg"
+
+
+def test_asset_empty_owner_does_not_wipe_existing(hub):
+    """同一份素材被多个节点引用：后一次没带归属，不能把前一次记的抹掉。"""
+    m = hub.register_member("张三")
+    pid = hub.create_project("工程", m["member_id"], {"nodes": []})["project_id"]
+
+    poster = hub.save_asset(pid, m["member_id"], "p.jpg", b"jpeg", "image", owner="镜 03")
+    hub.save_asset(pid, m["member_id"], "成片.mp4", b"v" * 64, "video",
+                   owner="镜 03", poster=poster["sha256"])
+    hub.save_asset(pid, m["member_id"], "成片.mp4", b"v" * 64, "video")   # 什么都没带
+
+    row = hub.list_assets(pid)[0]
+    assert row["owner"] == "镜 03" and row["poster"] == poster["sha256"]
+
+
+def test_asset_columns_migrated_on_old_db(tmp_path):
+    """老库（asset 表没有 owner/poster 列）打开时自动补列，且不丢已有附件。"""
+    import sqlite3
+
+    root = str(tmp_path / "team")
+    os.makedirs(root, exist_ok=True)
+    conn = sqlite3.connect(os.path.join(root, "team.db"))
+    conn.executescript(
+        "CREATE TABLE asset (project_id TEXT NOT NULL, sha256 TEXT NOT NULL,"
+        " name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'file',"
+        " mime TEXT NOT NULL DEFAULT '', bytes INTEGER NOT NULL,"
+        " author_id TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL,"
+        " PRIMARY KEY (project_id, sha256));"
+    )
+    conn.execute("INSERT INTO asset VALUES ('p_old','s_old','老附件.png','image','image/png',10,'',0)")
+    conn.commit()
+    conn.close()
+
+    hub2 = Hub(root)          # 打开即迁移
+    with sqlite3.connect(os.path.join(root, "team.db")) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(asset)").fetchall()}
+    assert {"owner", "poster"} <= cols
+    assert len(hub2.list_assets("p_old")) == 1, "补列不能把老数据弄丢"
+
+
 # ── 版本差异（2026-11-02）────────────────────────────────
 def _bundle_for_diff(title="片子"):
     return {
@@ -426,5 +484,53 @@ def test_asset_http_roundtrip(tmp_path):
                                  method="DELETE", token=token)
         assert code == 200 and dele["removed"] is True
         assert os.listdir(srv.hub.blobs_dir) == []
+    finally:
+        srv.stop()
+
+
+def test_asset_http_owner_and_poster(tmp_path):
+    """HTTP 层：`?owner=`（含中文，URL 编码）与 `?poster=` 落库；封面不进列表。
+
+    单独守一遍是因为这一层最容易漏：`parse_qs` 解出来的中文要 `unquote`、
+    poster 要正则校验、列表要过滤 —— 任何一步写错，前端拿到的就是空归属，
+    而界面上只表现为「没显示来自哪个镜」，静默得没人会发现。
+    """
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, a = _req(base, "/team/join", {"name": "导演A"})
+        token = a["token"]
+        _, created = _req(base, "/team/projects", {"name": "成片", "bundle": {"nodes": []}}, token)
+        pid = created["project_id"]
+        owner = urllib.parse.quote("镜 03")
+
+        _, poster, _h = _raw_req(
+            base, "/team/projects/%s/assets?name=p.jpg&kind=image&owner=%s" % (pid, owner),
+            b"jpegbytes", token, headers={"Content-Type": "image/jpeg"},
+        )
+        assert poster["ok"] is True and poster["owner"] == "镜 03"
+
+        _, vid, _h = _raw_req(
+            base,
+            "/team/projects/%s/assets?name=%s&kind=video&owner=%s&poster=%s"
+            % (pid, urllib.parse.quote("成片.mp4"), owner, poster["sha256"]),
+            b"v" * 4096, token, headers={"Content-Type": "video/mp4"},
+        )
+        assert vid["ok"] is True and vid["poster"] == poster["sha256"]
+
+        _, listed = _req(base, "/team/projects/%s/assets" % pid, None, token)
+        names = [x["name"] for x in listed["assets"]]
+        assert names == ["成片.mp4"], "封面不该出现在列表里"
+        assert listed["assets"][0]["owner"] == "镜 03"
+
+        # 非法 poster（不是 64 位 sha）当没给，不能写进库
+        _, bad, _h = _raw_req(
+            base,
+            "/team/projects/%s/assets?name=%s&kind=video&poster=not-a-sha"
+            % (pid, urllib.parse.quote("另一个.mp4")),
+            b"w" * 128, token, headers={"Content-Type": "video/mp4"},
+        )
+        assert bad["ok"] is True and bad["poster"] == ""
     finally:
         srv.stop()

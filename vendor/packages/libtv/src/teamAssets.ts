@@ -20,7 +20,7 @@
  * 3. **失败如实报**：某个文件传不上去（太大 / 404 / 网络断）就记进 `failed`，
  *    由调用方在界面上说清楚是哪一条，**绝不静默跳过让同事看空白**。
  */
-import { teamAssetUrl, teamUploadAsset, type TeamAssetKind } from "./teamClient";
+import { teamAssetUrl, teamPoster, teamUploadAsset, type TeamAssetKind } from "./teamClient";
 
 /** 一个待上传的媒体引用。 */
 export type MediaRef = {
@@ -29,6 +29,8 @@ export type MediaRef = {
   kind: TeamAssetKind;
   /** 上传时用的文件名（带正确后缀，后端据此定 mime 与扩展名） */
   name: string;
+  /** 归属提示（`镜 03`）：附件列表靠它说清「这条是哪个镜的产出」 */
+  owner?: string;
 };
 
 /** 判定「值得上传」的 data: 体积门槛：小图标内联即可，不必为它跑一次 HTTP。 */
@@ -147,31 +149,63 @@ export function mapStrings<T>(value: T, fn: (s: string) => string, depth = 0): T
 }
 
 /**
+ * 从节点 / 片段对象上读一个「人话名字」当归属（`镜 03`、`剧本`）。
+ *
+ * 只认 `title` / `label`（以及节点 `data` 里的 `name`）：**不认顶层的 `name`**，
+ * 时间线片段那个 `name` 通常是文件名（`成片.mp4`），照抄下来只是把附件名
+ * 重复一遍，对「这是哪个镜」毫无帮助。
+ */
+function labelOf(obj: Record<string, unknown>): string {
+  for (const k of ["title", "label"]) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 40);
+  }
+  const data = obj.data;
+  if (data && typeof data === "object") {
+    for (const k of ["title", "label", "name"]) {
+      const v = (data as Record<string, unknown>)[k];
+      if (typeof v === "string" && v.trim()) return v.trim().slice(0, 40);
+    }
+  }
+  return "";
+}
+
+/**
  * 收集 bundle 里所有**需要上传**的媒体引用（已去重）。
  *
  * 覆盖范围刻意大于节点字段白名单：`timeline.clips` 里的片段、`stage3d` 里的贴图
  * 都会扫到 —— 成片视频正是挂在时间线上的，只认节点字段会漏掉最重要的那一条。
+ *
+ * 每个引用顺手带上**归属**（最近的 title/label 祖先）：同一份素材被多个节点引用时
+ * 保留第一个有归属的，不让后来的空值把有用的信息盖掉。
  */
 export function collectMediaRefs(bundle: unknown): MediaRef[] {
-  const seen = new Set<string>();
+  const index = new Map<string, number>();
   const out: MediaRef[] = [];
-  const visit = (s: string, key?: string) => {
-    if (!shouldUpload(s) || seen.has(s)) return;
-    seen.add(s);
-    out.push({ url: s, kind: kindOf(s, key || ""), name: nameFor(s, key || "") });
+  const visit = (s: string, key: string, owner: string) => {
+    if (!shouldUpload(s)) return;
+    const hit = index.get(s);
+    if (hit !== undefined) {
+      if (!out[hit].owner && owner) out[hit].owner = owner;
+      return;
+    }
+    index.set(s, out.length);
+    out.push({ url: s, kind: kindOf(s, key), name: nameFor(s, key), owner });
   };
-  const walk = (v: unknown, depth = 0, key = "") => {
+  const walk = (v: unknown, depth = 0, key = "", owner = "") => {
     if (depth > 14) return;
     if (typeof v === "string") {
-      visit(v, key);
+      visit(v, key, owner);
       return;
     }
     if (Array.isArray(v)) {
-      v.forEach((x) => walk(x, depth + 1, key));
+      v.forEach((x) => walk(x, depth + 1, key, owner));
       return;
     }
     if (v && typeof v === "object") {
-      for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, depth + 1, k);
+      const obj = v as Record<string, unknown>;
+      const own = labelOf(obj) || owner;
+      for (const [k, x] of Object.entries(obj)) walk(x, depth + 1, k, own);
     }
   };
   walk(bundle);
@@ -184,6 +218,8 @@ export type UploadResult = {
   uploaded: number;
   /** 已经传过的（sha 命中，后端秒回） */
   reused: number;
+  /** 顺手生成并上传的封面张数（视频才有） */
+  posters: number;
   failed: Array<{ url: string; name: string; why: string }>;
 };
 
@@ -196,6 +232,35 @@ async function fetchBlob(url: string): Promise<Blob> {
   const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) throw new Error(`取不到文件（HTTP ${res.status}）`);
   return await res.blob();
+}
+
+/** 只有画布给得出本机路径的素材才能抽帧（`data:` / `blob:` 后端读不到）。 */
+const POSTER_SRC_RE = /^(?:https?:\/\/127\.0\.0\.1(?::\d+)?)?\/(?:inbox_file|editor_file)\//i;
+
+/**
+ * 给视频上传一张封面，返回封面附件的 sha256（失败回空串）。
+ *
+ * 顺序刻意是**先封面后本体**：视频那一行要带 `poster=<sha>` 才能让同事在列表里
+ * 一眼看到是哪条；等视频传完再补封面，就得再发一次「更新」请求。
+ *
+ * 抽帧在本机后端做（浏览器没有 H.264 解码器，见 `teamPoster` 注释）；封面这份
+ * 字节也照常进附件库，否则同事那边拿不到这张图。
+ * 封面行会被 Hub 的 `list_assets` 过滤掉（谁的 sha 被别人 `poster` 引用就不列），
+ * 所以列表不会变成「成片.mp4 / 成片.mp4.jpg」两倍长。
+ */
+async function uploadPosterFor(projectId: string, ref: MediaRef): Promise<string> {
+  if (!POSTER_SRC_RE.test(ref.url)) return "";
+  const dataUrl = await teamPoster(ref.url);
+  if (!dataUrl) return "";
+  try {
+    const blob = await fetchBlob(dataUrl);
+    const res = await teamUploadAsset(
+      projectId, blob, `${ref.name.slice(0, 100)}.jpg`, "image", undefined, { owner: ref.owner },
+    );
+    return res.sha256;
+  } catch {
+    return "";      // 封面失败绝不能连累视频本体
+  }
 }
 
 /**
@@ -214,17 +279,24 @@ export async function uploadMediaRefs(
   const failed: UploadResult["failed"] = [];
   let uploaded = 0;
   let reused = 0;
+  let posters = 0;
   for (let i = 0; i < refs.length; i++) {
     const ref = refs[i];
     onStep?.(i, refs.length, ref, "upload");
     try {
       const blob = await fetchBlob(ref.url);
+      let poster = "";
+      if (ref.kind === "video") {
+        poster = await uploadPosterFor(projectId, ref);
+        if (poster) posters++;
+      }
       const res = await teamUploadAsset(
         projectId,
         blob,
         ref.name,
         ref.kind,
         onBytes ? (loaded, total) => onBytes(loaded, total, ref) : undefined,
+        { owner: ref.owner, poster },
       );
       map[ref.url] = res.sha256;
       uploaded++;
@@ -237,7 +309,7 @@ export async function uploadMediaRefs(
       onStep?.(i + 1, refs.length, ref, "fail");
     }
   }
-  return { map, uploaded, reused, failed };
+  return { map, uploaded, reused, posters, failed };
 }
 
 /** 把 `map` 里的原始 URL 换成团队附件 URL（**不带 token**，push 用）。 */
