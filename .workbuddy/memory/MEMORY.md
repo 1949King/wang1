@@ -43,6 +43,8 @@
 - 🔴 **判断体积守卫会不会红，用 `git show HEAD:<file> | wc -l` 算 HEAD 行数**，别用工作区行数（工作区已含自己的改动）。`styles.css` HEAD 4004 / 基线 3980 / 容差 30 ⇒ 只剩 24 行余量，新样式另开文件（`teamPanel.css`）。
 - 🔴 **`docs/CHANGELOG.md` 现为 LF**（非历史记忆的 CRLF）；写入前先 `'\r\n' in raw` 判行尾再决定。`grep` 搜 emoji（astral 字符）会 0 命中 ⇒ 用 python 读文本断言，或搜中文侧证。
 - 🔴 **PyQt ↔ 画布唤起用「探测全局函数」不用 `dispatchEvent`**：后者在页面未加载时也返成功 ⇒ 点了没反应还不报错。画布侧挂 `window.__sgTeamOpen`，PyQt 侧 `runJavaScript` 拿 'ok'/'pending' 轮询。
+- 🔴 **`backdrop-filter`（及 filter/transform）的祖先会成为 `position:fixed` 后代的包含块**：团队面板挂进 `.ic-nav`（有 `backdrop-filter: blur(10px)`）后 `right:18px` 变成「距 64px 导航栏右边 18px」，420px 面板被推出屏幕只剩 46px 窄缝（用户原话「就这么小一个窗口」）。**浮动面板一律 `createPortal(..., document.body)`**。
+- 沙箱里**模拟鼠标点击打不进去**（`mouse_event` 无效果：点主题按钮也不变），GUI 交互只能让用户点；但窗口枚举 + PIL `ImageGrab` 截屏可用（`.venv312` 有 PIL），可以自证"窗口/按钮画出来了"。ps 里 `Start-Process` / `cmd start` / `.NET Process.Start` / `Add-Type` 全被安全策略拦，只能用 python `subprocess` 拉起。
 - `git status --porcelain --cached` **不是合法参数**（无 `--cached`）⇒ 用 `git diff --cached --name-only`。
 
 ## 五、验证与提交纪律

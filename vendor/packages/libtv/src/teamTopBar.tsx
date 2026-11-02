@@ -23,6 +23,7 @@
  *   因为挂载点唯一，留着就是无调用方的死分支。
  */
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { TeamPanel } from "./TeamPanel";
 
@@ -59,8 +60,17 @@ export function TeamTopBarButton() {
       >
         <span aria-hidden>👥</span>
       </button>
-      {/* 面板本体仍是同一个 TeamPanel（右下浮层），不做第二套 */}
-      {open ? <TeamPanel onClose={() => setOpen(false)} /> : null}
+      {/* 🔴 2026-11-02 用户实锤「就这么小一个窗口，你觉得谁能看到？」——
+          面板必须 portal 到 body，不能就地渲染在导航栏里。
+          原因：`.ic-nav` 有 `backdrop-filter: blur(10px)`，而 **backdrop-filter
+          会让该元素成为 `position: fixed` 后代的包含块**（和 transform/filter
+          同一类）。于是 `.sg-team-panel` 的 `right:18px` 变成「距 64px 宽导航栏
+          右边缘 18px」⇒ 420px 的面板整块被推到屏幕左外侧，只剩约 46px 一条
+          窄缝露在窗口左边缘，看起来就像个「小窗口」。portal 到 body 后包含块
+          回到视口，与祖先的 filter 彻底解耦。 */}
+      {open
+        ? createPortal(<TeamPanel onClose={() => setOpen(false)} />, document.body)
+        : null}
     </>
   );
 }

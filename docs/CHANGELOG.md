@@ -57,6 +57,15 @@
 20×500ms 仍未就绪就如实提示「画布还没就绪」。样式走 QSS（`theme_manager.py` 新增
 `#headerBarTeamBtn` 三条规则），不用 setStyleSheet —— 否则切主题就变死色。
 
+**二次修复（同日）· 面板被压成一条窄缝**：用户截图「就这么小一个窗口，你觉得谁能看到？」
+根因不是 CSS 缺失（产物里 `.sg-team-panel{position:fixed;right:18px;width:420px}` 完整存在），
+而是 **`.ic-nav` 上的 `backdrop-filter: blur(10px)` 会让它成为 `position: fixed` 后代的包含块**
+（与 `transform` / `filter` 同一类）。面板挂在该导航栏里 ⇒ `right:18px` 变成「距 64px 宽导航栏
+右边缘 18px」⇒ 420px 的面板整块被推到屏幕左外侧，只剩约 46px 一条缝，且样式内容被挤成竖排。
+修法：`createPortal(<TeamPanel/>, document.body)` —— 包含块回到视口，与祖先 filter 彻底解耦。
+**教训**：任何「浮动面板」组件，只要挂载点可能在带 `filter/backdrop-filter/transform` 的祖先里，
+就必须 portal 到 body，别指望 `position: fixed` 自己会跑到视口。
+
 **冻结区**：`AppNav.tsx` / `styles.css` / `canvasVersion.ts` 均属 `canvas-magnetic-intent`，
 用户选方案 B（放入常驻导航栏）即授权解冻，改完统一 `--update` 重锁。
 

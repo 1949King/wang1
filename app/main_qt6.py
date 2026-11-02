@@ -1185,7 +1185,7 @@ class Application:
             self._safe_print("[OK] 启动完成!")
             self._safe_print("   - 左侧导航栏: 点击切换模块")
             self._safe_print("   - 标签页: 同一模块内功能切换")
-            self._safe_print("   - 右上角 4 按钮：🔔 通知 / 🎨 主题 / ⚙ 设置 / 👤 用户中心")
+            self._safe_print("   - 右上角 5 按钮：🔔 通知 / 🎨 主题 / ⚙ 设置 / 👥 团队 / 👤 用户中心")
             self._safe_print("   - 状态栏: 显示执行状态和时间码")
             self._safe_print("=" * 60 + "\n")
             
