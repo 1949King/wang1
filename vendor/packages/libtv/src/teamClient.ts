@@ -228,6 +228,25 @@ export function teamInboxMap(paths: string[]): Promise<{ map: Record<string, str
   }).then((d) => ({ map: d.map || {}, outside: Array.isArray(d.outside) ? d.outside : [] }));
 }
 
+/**
+ * 把一个团队附件下载到本机素材库，返回本地路径。
+ *
+ * **一次只传一个 URL**：`canvas_server` 有 30 秒请求上限，十来个片段叠在一个请求里
+ * 必然超时并留下半截文件。调用方串行循环即可（局域网单文件 2~5 秒）。
+ *
+ * 后端只放行 `…/team/projects/{id}/assets/{sha}` 形式（SSRF 闸门），
+ * 别的地址会回 `bad_url`。
+ */
+export function teamMaterialize(
+  url: string,
+  name: string,
+): Promise<{ ok: boolean; path?: string; bytes?: number; cached?: boolean; message?: string }> {
+  return hostCall<{ ok: boolean; path?: string; bytes?: number; cached?: boolean; message?: string }>(
+    "/host/team/materialize",
+    { method: "POST", body: JSON.stringify({ url, name }) },
+  );
+}
+
 // ── 团队服务面 ──────────────────────────────────────
 export async function teamJoin(address: string, name: string, role = "editor"): Promise<TeamCred> {
   const addr = normalizeAddress(address);

@@ -42,6 +42,7 @@ import {
   teamLeave,
   teamListAssets,
   teamListProjects,
+  teamMaterialize,
   teamMembers,
   teamPull,
   teamPush,
@@ -51,10 +52,14 @@ import {
 import {
   applyMediaIndex,
   collectMediaRefs,
+  isTeamAsset,
   kindOf,
+  pruneMediaCache,
+  readMediaCache,
   rebaseAssetUrls,
   stripAssetTokens,
   uploadMediaRefs,
+  writeMediaCache,
   type MediaRef,
 } from "./teamAssets";
 import "./teamPanel.css";
@@ -131,13 +136,16 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   /**
    * 把「画布 + 剪辑时间线 + 所有媒体」打成一份**可上传的 bundle**。
    *
-   * 三步，缺一不可：
+   * 四步，缺一不可：
    *  ① `getProjectBundle()` **不含 `timeline`**（剪辑器时间线是 PyQt 那边的真相源，
    *     要单独经 `/host/project-snapshot/export` 取）⇒ 不补这一步，同事只能拿到
    *     画布图，成片时间线整个丢失；
    *  ② 片段用**本地绝对路径**引用素材，画布 JS 读不到 ⇒ 先经后端换算成
    *     `/inbox_file/…`（只换算、不传字节，避开 canvas_server 的 30 秒上限）；
-   *  ③ 所有媒体按 sha256 传进团队附件库，再把 bundle 里的 URL 换过去。
+   *  ③ **媒体索引缓存**：上次已经传过的素材直接复用 sha，不再重走网络。
+   *     用之前先拿服务端附件列表做交集 —— 用户删过的附件必须重新传，
+   *     否则写进去的是死链，而界面看上去「已同步」；
+   *  ④ 剩余新素材按 sha256 传进附件库，再把 bundle 里的 URL 换过去。
    *
    * 返回的 bundle 已剥掉令牌，可以直接 push。
    */
@@ -171,14 +179,52 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       }
     }
 
-    const refs: MediaRef[] = collectMediaRefs(base);
+    // ③ 复用上次传过的：先确认这些 sha 在服务器上还活着
+    let cached: Record<string, string> = readMediaCache(projectId);
+    let reused = 0;
+    if (Object.keys(cached).length) {
+      try {
+        const alive = new Set((await teamListAssets(projectId)).map((a) => a.sha256));
+        const pruned = pruneMediaCache(cached, alive);
+        cached = pruned.kept;
+        reused = Object.keys(cached).length;
+        if (pruned.dropped) {
+          warnings.push(`${pruned.dropped} 个素材在服务器上已被删除，这次会重新上传`);
+        }
+      } catch {
+        // 查不到存活状态就全部重传：宁可慢一趟，也不能写出指向已删附件的死链
+        cached = {};
+        reused = 0;
+      }
+    }
+    const staged = applyMediaIndex(base, projectId, cached);
+
+    // ④ 只传新增的
+    const refs: MediaRef[] = collectMediaRefs(staged);
     let uploaded = 0;
     let index: Record<string, string> = {};
     if (refs.length) {
-      setSync(`准备上传 ${refs.length} 个素材…`);
-      const res = await uploadMediaRefs(projectId, refs, (done, total, ref, phase) => {
-        setSync(`上传素材 ${done}/${total}：${ref.name}${phase === "fail" ? "（失败）" : ""}`);
-      });
+      let done = 0;
+      let curName = refs[0]?.name || "";
+      let lastTick = 0;
+      const total = refs.length;
+      const res = await uploadMediaRefs(
+        projectId,
+        refs,
+        (d, _t, ref, _phase) => {
+          done = d;
+          curName = ref.name;
+          setSync(`上传 ${Math.min(d + 1, total)}/${total}：${ref.name}`);
+        },
+        (loaded, all) => {
+          // 每 64KB 回调一次：200MB 会有 3000+ 次，不节流会把 React 拖死
+          const now = Date.now();
+          if (now - lastTick < 120) return;
+          lastTick = now;
+          const pct = all > 0 ? Math.round((loaded / all) * 100) : 0;
+          setSync(`上传 ${Math.min(done + 1, total)}/${total}：${curName} ${pct}%`);
+        },
+      );
       uploaded = res.uploaded;
       index = res.map;
       if (res.failed.length) {
@@ -190,8 +236,13 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       }
     }
     setSync("");
-    const bundle = stripAssetTokens(applyMediaIndex(base, projectId, index));
-    return { bundle, warnings, clipCount: clips.length, mediaCount: refs.length, uploaded };
+    const merged = { ...cached, ...index };
+    writeMediaCache(projectId, merged);
+    const bundle = stripAssetTokens(applyMediaIndex(staged, projectId, index));
+    return {
+      bundle, warnings, clipCount: clips.length,
+      mediaCount: refs.length + reused, uploaded, reused,
+    };
   };
 
   const startHost = async () => {
@@ -274,7 +325,8 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       await refreshTeam();
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
       say(prep.warnings.length ? "info" : "ok",
-        `已上传「${title}」rev ${pushed.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，成功 ${prep.uploaded}）${tail}`);
+        `已上传「${title}」rev ${pushed.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，` +
+        `新传 ${prep.uploaded}、复用 ${prep.reused}）${tail}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -293,7 +345,8 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       await refreshTeam();
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
       say(prep.warnings.length ? "info" : "ok",
-        `已上传到「${p.name}」→ rev ${res.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，成功 ${prep.uploaded}）${tail}`);
+        `已上传到「${p.name}」→ rev ${res.rev}（${prep.clipCount} 片段 / ${prep.mediaCount} 个素材，` +
+        `新传 ${prep.uploaded}、复用 ${prep.reused}）${tail}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -333,28 +386,61 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   };
 
   /**
-   * 时间线要不要直导剪辑器。
+   * 时间线要不要导进剪辑器，以及**先把素材落地到本机**。
    *
-   * 诚实边界：clips 里的 `path` 是**原作者机器上的路径**，换了机器基本指不到文件。
-   * 问一句再导，比导进去一堆黑片段让同事以为"素材丢了"要好；画布里的图和视频
-   * 不受影响（它们的 URL 已经指向团队附件库，能直接播）。
+   * 同事要「接着改」就绕不开这一步：剪辑器只认本地文件路径，而拉下来的片段
+   * 指向的是团队服务器。所以先串行下载（一次一个，避开 canvas_server 的 30 秒
+   * 上限），把每个片段的 `path` 换成本机素材库路径，再直导。
+   *
+   * 下载失败的片段**不静默丢**：照样导入并明说「这几段要手动重新链接素材」，
+   * 让人知道去哪找原因，而不是发现黑片段却不知道发生了什么。
    */
   const offerTimelineImport = async (b: PulledBundle) => {
     const clips = b.timeline?.clips || [];
     if (!clips.length) return;
-    const go = window.confirm(
-      `这版还带着 ${clips.length} 个剪辑片段。\n\n` +
-      "导入到剪辑器会套用**原作者电脑上的文件路径**，你这边可能找不到素材。\n" +
-      "（画布上的图和视频不受影响，能直接播。）\n\n仍然导入到剪辑器？",
-    );
-    if (!go) {
+
+    const remote = clips.filter((c) => isTeamAsset(String(c.path || "")));
+    const ask = remote.length
+      ? `这版带着 ${clips.length} 个剪辑片段，其中 ${remote.length} 个素材在团队服务器上。\n\n` +
+        `「确定」= 先把素材下载到本机素材库，再导入剪辑器（推荐）\n` +
+        `「取消」= 只看画布，先不碰剪辑器`
+      : `这版带着 ${clips.length} 个剪辑片段，但它们的素材路径不是团队附件，` +
+        `导入后大概率找不到文件。\n\n仍然导入剪辑器？`;
+    if (!window.confirm(ask)) {
       say("info", `画布已载入；${clips.length} 个片段未导入剪辑器`);
       return;
     }
+
+    const failed: string[] = [];
+    if (remote.length) {
+      setBusy("materialize");
+      try {
+        for (let i = 0; i < remote.length; i++) {
+          const c = remote[i];
+          const url = String(c.path || "");
+          const name = String(c.name || "") || `片段${i + 1}`;
+          setSync(`下载素材 ${i + 1}/${remote.length}：${name}`);
+          try {
+            const r = await teamMaterialize(url, name);
+            if (r.ok && r.path) c.path = r.path;
+            else failed.push(`${name}（${r.message || "未知原因"}）`);
+          } catch (e) {
+            failed.push(`${name}（${e instanceof Error ? e.message : String(e)}）`);
+          }
+        }
+      } finally {
+        setSync("");
+        setBusy("");
+      }
+    }
+
     try {
       const { pushTimelineToEditor } = await import("./projectZip");
       const r = await pushTimelineToEditor(clips);
-      say(r.ok ? "ok" : "err", r.message);
+      const tail = failed.length
+        ? `；${failed.length} 个素材没下载成功，这些片段导入后需手动重新链接（${failed.slice(0, 2).join("；")}）`
+        : remote.length ? `；已落地 ${remote.length} 个素材到本机素材库` : "";
+      say(failed.length ? "info" : r.ok ? "ok" : "err", r.message + tail);
     } catch (e) {
       fail(e);
     }

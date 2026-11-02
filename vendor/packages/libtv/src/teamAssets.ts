@@ -201,11 +201,14 @@ async function fetchBlob(url: string): Promise<Blob> {
 /**
  * 逐个上传。**一个失败不中断其余** —— 一条 200MB 成片失败不该让十张分镜图也传不上去；
  * 失败的逐条记进 `failed`，由调用方在面板上如实列出。
+ *
+ * `onBytes` 透传单文件的字节进度（大文件没有百分比，使用者会以为界面卡死）。
  */
 export async function uploadMediaRefs(
   projectId: string,
   refs: MediaRef[],
   onStep?: (done: number, total: number, ref: MediaRef, phase: "upload" | "done" | "fail") => void,
+  onBytes?: (loaded: number, total: number, ref: MediaRef) => void,
 ): Promise<UploadResult> {
   const map: Record<string, string> = {};
   const failed: UploadResult["failed"] = [];
@@ -216,7 +219,13 @@ export async function uploadMediaRefs(
     onStep?.(i, refs.length, ref, "upload");
     try {
       const blob = await fetchBlob(ref.url);
-      const res = await teamUploadAsset(projectId, blob, ref.name, ref.kind);
+      const res = await teamUploadAsset(
+        projectId,
+        blob,
+        ref.name,
+        ref.kind,
+        onBytes ? (loaded, total) => onBytes(loaded, total, ref) : undefined,
+      );
       map[ref.url] = res.sha256;
       uploaded++;
       onStep?.(i + 1, refs.length, ref, "done");
@@ -271,4 +280,71 @@ export function rebaseAssetUrls<T>(bundle: T): T {
 /** 这条 URL 是否已经是团队附件（面板据此显示「已同步」）。 */
 export function isTeamAsset(url: string): boolean {
   return TEAM_ASSET_RE.test(String(url || ""));
+}
+
+// ── 媒体索引缓存（2026-11-02 · 第二刀）──────────────────
+//
+// ## 为什么必须缓存
+//
+// 首版每次「上传到此」都把**全部**媒体重新 fetch + POST 一遍。服务端按 sha 去重、
+// 不会重复占盘，但一条 200MB 成片 + 40 张图**每次都要在局域网重走一遍**，
+// 用户点第二次上传会以为卡死。缓存「原始 URL → sha」，第二次只传新增的。
+//
+// ## 为什么还要「存活过滤」
+//
+// 缓存里的 sha 可能已经被人从服务器删掉（面板 ⑤ 有删除按钮）。直接复用会写进
+// 一批死链接，而前端的 `shouldUpload` 又认为「已是团队 URL 不用传」⇒ 同事打开是
+// 404 且没人报错。所以每次 push 前先拉一次服务端附件列表做交集。
+
+const LS_MEDIA_PREFIX = "shiguang:team:media:";
+
+/** 读某个项目的媒体索引缓存（读不到/坏了都回空对象，不抛）。 */
+export function readMediaCache(projectId: string): Record<string, string> {
+  if (!projectId) return {};
+  try {
+    const raw = window.localStorage.getItem(LS_MEDIA_PREFIX + projectId);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof k === "string" && typeof v === "string" && /^[a-f0-9]{64}$/i.test(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** 写缓存。**写失败不报错**：够不上缓存只是下次多传一遍，不该拦住上传本身。 */
+export function writeMediaCache(projectId: string, map: Record<string, string>): void {
+  if (!projectId) return;
+  try {
+    window.localStorage.setItem(LS_MEDIA_PREFIX + projectId, JSON.stringify(map));
+  } catch (e) {
+    try {
+      console.warn("[team] 媒体索引缓存写盘失败（localStorage 满或禁用）:", e);
+    } catch {
+      /* console 不可用时无需处理 */
+    }
+  }
+}
+
+/**
+ * 只保留服务端**确实还有**的 sha。
+ *
+ * 缓存命中的前提是「这个文件还在服务器上」；用户点了 ⑤ 段的删除之后，
+ * 靠这个函数把死条目剔掉，否则会写出一批 404 链接且界面上看不出来。
+ */
+export function pruneMediaCache(
+  cached: Record<string, string>,
+  alive: Set<string>,
+): { kept: Record<string, string>; dropped: number } {
+  const kept: Record<string, string> = {};
+  let dropped = 0;
+  for (const [url, sha] of Object.entries(cached)) {
+    if (alive.has(sha)) kept[url] = sha;
+    else dropped++;
+  }
+  return { kept, dropped };
 }

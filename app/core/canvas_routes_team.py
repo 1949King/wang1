@@ -8,6 +8,7 @@
 | `POST /host/team/stop`     | 停止 |
 | `GET  /host/team/discover` | 局域网扫描（UDP，只能由后端做——浏览器发不了 UDP） |
 | `POST /host/team/inbox-map`| 剪辑器 clip.path（本地绝对路径）→ 画布能 fetch 的 `/inbox_file/…` |
+| `POST /host/team/materialize`| 团队附件 → 本机素材库（同事真要接着剪时间线时用） |
 
 ## 为什么这些端点必须走 canvas_server（127.0.0.1）
 
@@ -24,6 +25,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import urllib.error
+import urllib.request
 from typing import Any, Dict, Optional
 
 from app.core.canvas_route_registry import _route_get, _route_post
@@ -32,6 +36,15 @@ logger = logging.getLogger(__name__)
 
 #: 进程级单例（一个画布进程只跑一个团队服务）
 _SERVER: Optional[Any] = None
+
+#: 只认团队附件地址：`…/team/projects/{id}/assets/{64位sha}[?token=…]`
+#: **这是 SSRF 的闸门** —— 不加这条，本机会被当成任意内网 URL 的下载代理。
+_MATERIALIZE_URL_RE = re.compile(
+    r"^https?://[^/\s]+/team/projects/[^/?#]+/assets/([a-f0-9]{64})/?(?:\?[^\s]*)?$", re.I
+)
+
+#: 单文件下载上限（与 Hub 的 MAX_ASSET_BYTES 对齐）
+_MATERIALIZE_MAX = 512 * 1024 * 1024
 
 
 def _cs():
@@ -199,3 +212,90 @@ class CanvasTeamRoutesMixin:
 
             mapping[raw_path] = "/inbox_file/" + quote(name)
         self._json(200, {"ok": True, "map": mapping, "outside": outside})
+
+    @_route_post("/host/team/materialize")
+    def _p_host_team_materialize(self, parsed, raw: bytes, ctype: str) -> None:
+        """把一个团队附件**下载到本机素材库**，返回本地路径。
+
+        为什么需要：同事拉下来的时间线片段记的是团队 URL，剪辑器只认本地文件路径，
+        不落地就永远只能「看」不能「接着剪」。
+
+        ## 为什么一次只下一个
+
+        `canvas_server` 的请求有 30 秒上限。局域网传 200MB 约 2~5 秒、放一批还行，
+        但十来个片段叠起来必然超时，留下半个文件更难查。所以约定**前端串行逐个调**，
+        单次只处理一个 URL，超时风险归零。
+
+        ## SSRF 闸门
+
+        只接受形如 `http://<host>/team/projects/<id>/assets/<64位sha>` 的地址，
+        其余一律 400 —— 否则本机就成了「任意内网 URL 的下载代理」。
+        """
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        url = str((body or {}).get("url") or "").strip()
+        name = str((body or {}).get("name") or "").strip()
+        m = _MATERIALIZE_URL_RE.match(url)
+        if not m:
+            self._json(400, {"ok": False, "code": "bad_url",
+                             "message": "只接受团队附件地址（…/team/projects/{id}/assets/{sha}）"})
+            return
+        sha = m.group(1).lower()
+        try:
+            from app.core.canvas_bridge import canvas_inbox_dir
+
+            inbox = canvas_inbox_dir()
+        except Exception:
+            logger.debug("[/host/team/materialize] 取 inbox 目录失败", exc_info=True)
+            self._json(500, {"ok": False, "message": "取不到画布素材目录（canvas_inbox_dir）"})
+            return
+        os.makedirs(inbox, exist_ok=True)
+        base = os.path.basename(name) or (sha[:12] + ".bin")
+        # Windows 非法字符会直接让 open() 失败；`..` 之类也会把 basename 变成空或越级
+        base = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", base)[:120]
+        if base in (".", "..", ""):
+            base = sha[:12] + ".bin"
+        # 加 sha 前缀：绝不覆盖用户素材库里已有的同名文件（成片.mp4 满天飞）
+        dest = os.path.join(inbox, "team_%s_%s" % (sha[:8], base))
+        if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+            self._json(200, {"ok": True, "path": dest, "bytes": os.path.getsize(dest),
+                             "cached": True})
+            return
+        tmp = dest + ".part"
+        got = 0
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "shiguang-team/1"})
+            with urllib.request.urlopen(req, timeout=20) as resp, open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(1 << 16)
+                    if not chunk:
+                        break
+                    got += len(chunk)
+                    if got > _MATERIALIZE_MAX:
+                        raise ValueError("超过 %dMB 上限" % (_MATERIALIZE_MAX // 1048576))
+                    f.write(chunk)
+        except Exception as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                logger.debug("[/host/team/materialize] 清理半截文件失败 %s", tmp, exc_info=True)
+            logger.warning("[/host/team/materialize] 下载失败 %s: %s", url, e)
+            self._json(200, {"ok": False, "code": "download_failed",
+                             "message": "下载失败：%s" % _friendly(e)})
+            return
+        if got <= 0:
+            try:
+                os.remove(tmp)
+            except OSError:
+                logger.debug("[/host/team/materialize] 清理空文件失败 %s", tmp, exc_info=True)
+            self._json(200, {"ok": False, "code": "empty", "message": "对方返回了 0 字节"})
+            return
+        os.replace(tmp, dest)
+        self._json(200, {"ok": True, "path": dest, "bytes": got})

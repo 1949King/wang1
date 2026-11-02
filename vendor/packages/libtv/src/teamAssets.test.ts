@@ -189,3 +189,54 @@ describe("teamAssets · mapStrings", () => {
     expect(() => m.mapStrings(deep, (s) => s.toUpperCase())).not.toThrow();
   });
 });
+
+describe("teamAssets · 媒体索引缓存", () => {
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("写完能读回，且按项目隔离", async () => {
+    const m = await import("./teamAssets");
+    m.writeMediaCache("p_1", { "/inbox_file/a.png": SHA });
+    expect(m.readMediaCache("p_1")).toEqual({ "/inbox_file/a.png": SHA });
+    expect(m.readMediaCache("p_2")).toEqual({});
+    expect(m.readMediaCache("")).toEqual({});
+  });
+
+  it("坏数据不抛：非法 sha 被滤掉，坏 JSON 回空对象", async () => {
+    const m = await import("./teamAssets");
+    const ls = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    ls.setItem("shiguang:team:media:p_bad", JSON.stringify({ a: "tooshort", b: SHA, c: 123 }));
+    expect(m.readMediaCache("p_bad")).toEqual({ b: SHA });
+    ls.setItem("shiguang:team:media:p_json", "{not json");
+    expect(m.readMediaCache("p_json")).toEqual({});
+    ls.setItem("shiguang:team:media:p_arr", "[1,2,3]");
+    expect(m.readMediaCache("p_arr")).toEqual({});
+  });
+
+  it("pruneMediaCache 剔掉服务端已删的并报数量", async () => {
+    const m = await import("./teamAssets");
+    const { kept, dropped } = m.pruneMediaCache(
+      { a: SHA, b: SHA2, c: SHA2 },
+      new Set([SHA]),
+    );
+    expect(kept).toEqual({ a: SHA });
+    expect(dropped).toBe(2);
+    // 全不在 ⇒ 全剔，调用方据此决定重传
+    expect(m.pruneMediaCache({ a: SHA }, new Set()).kept).toEqual({});
+  });
+
+  it("localStorage 不可用时写入静默失败、读取回空（不拦住上传）", async () => {
+    (globalThis as unknown as { window: { localStorage: unknown } }).window = {
+      get localStorage(): never {
+        throw new Error("SecurityError");
+      },
+    };
+    const m = await import("./teamAssets");
+    expect(() => m.writeMediaCache("p_1", { a: SHA })).not.toThrow();
+    expect(m.readMediaCache("p_1")).toEqual({});
+  });
+});
