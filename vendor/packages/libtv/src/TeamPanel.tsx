@@ -878,7 +878,9 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                     </span>
                     <span className="sg-team-dim">
                       共 {pair.max_uses} 个名额 · 已用 {pair.uses}
-                      {pair.host_name ? ` · 发码方「${pair.host_name}」` : ""}
+                      {/* host_name 是**服务器名**（TeamServer.name），不是人名 —— 原来写「发码方」
+                          会让人以为是同事的名字，实机截图里还因为太长折成三行 */}
+                      {pair.host_name ? ` · 服务器 ${pair.host_name}` : ""}
                     </span>
                   </div>
                 </div>

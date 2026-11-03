@@ -19,13 +19,13 @@
  */
 
 /** 画布语义化版本（不带 v 前缀，便于与 package.json 对齐） */
-export const CANVAS_VERSION = "0.3.44";
+export const CANVAS_VERSION = "0.3.45";
 
 /** 画布版本显示串（带 v 前缀，供导航栏渲染） */
 export const CANVAS_VERSION_LABEL = `v${CANVAS_VERSION}`;
 
 /** 版本代号：跟随本版主题命名，便于口头指代 */
-export const CANVAS_VERSION_CODENAME = "一张码能请几个人，看得见";
+export const CANVAS_VERSION_CODENAME = "桌宠给配对码让个位";
 
 /** 导航栏版本号的 tooltip 文案 */
 export const CANVAS_VERSION_TITLE = `拾光导演台 · ${CANVAS_VERSION_CODENAME}`;

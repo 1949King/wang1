@@ -49,6 +49,15 @@ export function TeamTopBarButton() {
     };
   }, []);
 
+  // 2026-11-03 实机截图实证：桌宠和团队面板都锚在右下角，而桌宠 z-index 1500、
+  // 面板只有 60 ⇒ Q 版狐狸直接盖在配对码卡片上，把「立即作废」和提示文字吃掉半截。
+  // 不给面板抬 z-index：1400 是命令面板的全屏遮罩，面板浮到它之上是更严重的错。
+  // 桌宠是装饰、面板是交互 ⇒ 面板打开时让桌宠让位（DOM 不动，关掉即回原位）。
+  useEffect(() => {
+    document.body.classList.toggle("sg-team-open", open);
+    return () => document.body.classList.remove("sg-team-open");
+  }, [open]);
+
   return (
     <>
       <button
