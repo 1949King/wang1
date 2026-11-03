@@ -319,11 +319,33 @@ class Hub:
                     created_at REAL NOT NULL,
                     expires_at REAL NOT NULL,
                     used_at REAL NOT NULL DEFAULT 0,
-                    used_by TEXT NOT NULL DEFAULT ''
+                    used_by TEXT NOT NULL DEFAULT '',
+                    max_uses INTEGER NOT NULL DEFAULT 1,
+                    uses INTEGER NOT NULL DEFAULT 0
                 );
                 """
             )
             self._migrate_asset_columns(conn)
+            self._migrate_pairing_columns(conn)
+
+    @staticmethod
+    def _migrate_pairing_columns(conn: sqlite3.Connection) -> None:
+        """给 `pairing` 补「可邀请几人」的两列（幂等）。
+
+        老库里的码都是「一人一次」，所以补列后要把已用过的行标成 `uses = 1`
+        —— 否则那些行会显示成「还能加 1 人」，等于把废码说成活的。
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(pairing)").fetchall()}
+        added_max = False
+        if "max_uses" not in cols:
+            conn.execute("ALTER TABLE pairing ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 1")
+            added_max = True
+        if "uses" not in cols:
+            conn.execute("ALTER TABLE pairing ADD COLUMN uses INTEGER NOT NULL DEFAULT 0")
+            # 老语义：used_at>0 就是「用掉了」，等价于用满 1 次
+            conn.execute("UPDATE pairing SET uses = 1 WHERE used_at > 0")
+        elif added_max:
+            conn.execute("UPDATE pairing SET max_uses = 1 WHERE max_uses < 1")
 
     @staticmethod
     def _migrate_asset_columns(conn: sqlite3.Connection) -> None:
@@ -383,56 +405,164 @@ class Hub:
     # 用了 127.0.0.1）。
     #
     # 三条纪律：
-    #   ① **一次性**：兑换即作废（`used_at`），截图发群里也顶多被用一次；
+    #   ① **限次**：默认一人一次（`max_uses=1`），也能一次请 3、5 个人 —— 工作室
+    #      三个人要加，不该让主人念三遍码。用满即废，截图发群里也顶多用满配额；
     #   ② **短命**：120 秒，够念给同事，不够暴力枚举（6 位 = 90 万组合，
     #      配合服务层的失败限速，穷举不现实）；
     #   ③ **可复用同一张**：同一个人连着点两次不该换号 —— 用户念到一半、
-    #      或者同事正要输，码变了就是白念。
-    def create_pairing(self, member_id: str, ttl: float = PAIR_TTL) -> Dict[str, Any]:
-        """生成（或复用）一张配对码。返回 `{code, expires_at, ttl, reused}`。"""
+    #      或者同事正要输，码变了就是白念；
+    #   ④ **可主动作废**：念给了错的人（隔壁工位那种），一键废掉比干等 120 秒强。
+
+    @staticmethod
+    def _pairing_public(row: Any, now: float) -> Dict[str, Any]:
+        """一行配对码 → 对外形状（含「还能加几人 / 已用几次 / 是废了还是过期了」）。
+
+        `revoked` 与 `exhausted` 必须分开：一个是人主动废的，一个是配额用完，
+        界面上要说清是哪种 —— 都糊成「已失效」的话，人不知道该重新出码还是
+        该等同事重试。
+        """
+        max_uses = max(1, int(row["max_uses"] or 1))
+        uses = max(0, int(row["uses"] or 0))
+        left = max(0, max_uses - uses)
+        used_at = float(row["used_at"] or 0)
+        expires = float(row["expires_at"])
+        expired = expires <= now
+        return {
+            "code": str(row["code"]),
+            "created_by": str(row["created_by"] or ""),
+            "used_by": str(row["used_by"] or ""),
+            "max_uses": max_uses,
+            "uses": uses,
+            "remaining": left,
+            "expires_at": expires,
+            "exhausted": left <= 0,
+            "expired": expired,
+            "revoked": used_at > 0 and left > 0,
+            "alive": left > 0 and used_at <= 0 and not expired,
+        }
+
+    def create_pairing(
+        self, member_id: str, ttl: float = PAIR_TTL, max_uses: int = 1
+    ) -> Dict[str, Any]:
+        """生成（或复用）一张配对码。
+
+        `max_uses` = 这张码能请几个人（夹在 1~9）。**要更多人时会作废旧码**：
+        配额只能往上加不能半路改 —— 否则「已请 2 人」的码被改成「只能请 1 人」
+        就成了自相矛盾的状态。调用方拿到 `replaced=True` 要如实提示「旧码作废了」。
+        """
         now = _now()
         span = max(30.0, float(ttl or PAIR_TTL))
+        want = max(1, min(int(max_uses or 1), 9))
         with self._lock, self._conn() as conn:
             # 顺手清掉一天前的死码，别让这张表无限长
             conn.execute("DELETE FROM pairing WHERE expires_at < ?", (now - 86400,))
             row = conn.execute(
-                "SELECT code, expires_at FROM pairing WHERE created_by = ?"
-                " AND used_at = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT * FROM pairing WHERE created_by = ?"
+                " AND used_at = 0 AND expires_at > ? AND uses < max_uses"
+                " ORDER BY created_at DESC LIMIT 1",
                 (member_id, now),
             ).fetchone()
+            replaced = False
             if row is not None:
-                return {"code": row["code"], "expires_at": float(row["expires_at"]),
-                        "ttl": int(row["expires_at"] - now), "reused": True}
+                if int(row["max_uses"] or 1) >= want:
+                    return {**self._pairing_public(row, now), "ttl": int(row["expires_at"] - now),
+                            "reused": True, "replaced": False}
+                # 现有码名额不够：废掉它再发新的（不然会出现两张并存的活码）
+                conn.execute("UPDATE pairing SET used_at = ? WHERE code = ?", (now, row["code"]))
+                replaced = True
             for _ in range(32):
                 code = str(secrets.randbelow(900000) + 100000)
                 try:
                     conn.execute(
-                        "INSERT INTO pairing (code, created_by, created_at, expires_at)"
-                        " VALUES (?,?,?,?)", (code, member_id, now, now + span),
+                        "INSERT INTO pairing (code, created_by, created_at, expires_at,"
+                        " max_uses, uses) VALUES (?,?,?,?,?,0)",
+                        (code, member_id, now, now + span, want),
                     )
-                    return {"code": code, "expires_at": now + span,
-                            "ttl": int(span), "reused": False}
+                    fresh = conn.execute("SELECT * FROM pairing WHERE code = ?", (code,)).fetchone()
+                    return {**self._pairing_public(fresh, now), "ttl": int(span),
+                            "reused": False, "replaced": replaced}
                 except sqlite3.IntegrityError:
                     continue        # 撞上别人正在用的码，换一个（概率 1/90 万，真撞过就重试）
         raise TeamError("pair_busy", "生成配对码失败：连续撞号，稍等一秒再点一次")
 
     def pairing_alive(self, code: str) -> bool:
-        """这张码还能用吗（未过期、未使用）。**只读**：不该在这条路径上作废它。"""
+        """这张码还能用吗（未过期、没被作废、名额还有）。**只读**：不该在这条路径上消耗它。"""
         clean = str(code or "").strip()
         if not clean:
             return False
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT 1 FROM pairing WHERE code = ? AND used_at = 0 AND expires_at > ?",
+                "SELECT 1 FROM pairing WHERE code = ? AND used_at = 0"
+                " AND expires_at > ? AND uses < max_uses",
                 (clean, _now()),
             ).fetchone()
         return row is not None
 
-    def pairing_claim(self, code: str, member_id: str = "") -> Dict[str, Any]:
-        """兑换配对码：**校验通过就立刻作废**（一次性），返回码的元信息。
+    def pairing_info(self, code: str) -> Optional[Dict[str, Any]]:
+        """查一张码的完整状态（手机落地页 / 面板轮询用）。不存在回 `None`。"""
+        clean = str(code or "").strip()
+        if not clean:
+            return None
+        now = _now()
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
+        return self._pairing_public(row, now) if row is not None else None
 
-        作废与校验放在同一条 UPDATE 的 WHERE 里做不了（sqlite 的 rowcount 判定
-        在并发下不够直观），这里在同一把锁 + 同一事务内「先查后改」，够安全。
+    def latest_pairing(self, member_id: str) -> Optional[Dict[str, Any]]:
+        """我这个成员手上**还能用**的那张码；没有回 `None`。
+
+        **只读**：面板每 2 秒轮询一次，绝不能顺手新建一张 —— 那会让人每隔
+        两秒就看到一个新号码。
+        """
+        now = _now()
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM pairing WHERE created_by = ?"
+                " AND used_at = 0 AND expires_at > ? AND uses < max_uses"
+                " ORDER BY created_at DESC LIMIT 1",
+                (member_id, now),
+            ).fetchone()
+        return self._pairing_public(row, now) if row is not None else None
+
+    def last_pairing(self, member_id: str) -> Optional[Dict[str, Any]]:
+        """我这个成员**最近一张**码（活死都算，只看 10 分钟内）。
+
+        存在的理由：码被用满/作废之后，面板还得说清「刚才那张 229140 已经请满 3 人」。
+        只回「没有活码」的话，人就不知道该重新出码还是该等同事重试。
+        """
+        now = _now()
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM pairing WHERE created_by = ? AND expires_at > ?"
+                " ORDER BY created_at DESC LIMIT 1",
+                (member_id, now - 600),
+            ).fetchone()
+        return self._pairing_public(row, now) if row is not None else None
+
+    def pairing_revoke(self, code: str, member_id: str = "") -> Dict[str, Any]:
+        """主动作废一张码（只能废自己发的）。
+
+        和「用满」区分开记：`used_at` 只表示「不再可用」，配额用没用完看 `uses`。
+        """
+        clean = str(code or "").strip()
+        now = _now()
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
+            if row is None:
+                raise TeamError("not_found", "没有这张配对码")
+            if member_id and str(row["created_by"]) != str(member_id):
+                raise TeamError("bad_owner", "这张码不是你发的，作废不了")
+            if float(row["used_at"] or 0) > 0:
+                return {**self._pairing_public(row, now), "revoked": False}   # 已经是废的，幂等
+            conn.execute("UPDATE pairing SET used_at = ? WHERE code = ?", (now, clean))
+            row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
+        return {**self._pairing_public(row, now), "revoked": True}
+
+    def pairing_claim(self, code: str, member_id: str = "") -> Dict[str, Any]:
+        """兑换配对码：校验通过就**消耗一个名额**，返回码的元信息。
+
+        名额与校验放在同一把锁 + 同一事务里「先查后改」：sqlite 的 rowcount 在
+        并发下不够直观，而这种码被两个人同时输错/同时输对，都是真会发生的事。
         """
         clean = str(code or "").strip()
         now = _now()
@@ -440,15 +570,22 @@ class Hub:
             row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
             if row is None:
                 raise TeamError("bad_code", "配对码不对：是 6 位数字，核对一下再输")
-            if float(row["used_at"] or 0) > 0:
-                raise TeamError("code_used", "这个配对码已经用过了，让同事再点一次「让同事加入」")
-            if float(row["expires_at"]) <= now:
+            info = self._pairing_public(row, now)
+            if info["revoked"]:
+                raise TeamError("code_revoked", "这张配对码被主人作废了，让他重新出一个")
+            if info["exhausted"]:
+                raise TeamError("code_used", "这个配对码已经用完了，让同事再点一次「让同事加入」")
+            if info["expired"]:
                 raise TeamError("code_expired", "配对码过期了（只有 %d 分钟），让同事重新生成一个"
                                 % (PAIR_TTL // 60))
-            conn.execute("UPDATE pairing SET used_at = ?, used_by = ? WHERE code = ?",
-                         (now, member_id, clean))
-        return {"code": clean, "created_by": row["created_by"],
-                "expires_at": float(row["expires_at"])}
+            uses = info["uses"] + 1
+            # 用满就把 used_at 一起写掉：这样「还有没有活码」只需看 used_at 一处
+            conn.execute(
+                "UPDATE pairing SET uses = ?, used_by = ?, used_at = ? WHERE code = ?",
+                (uses, member_id, now if uses >= info["max_uses"] else 0.0, clean),
+            )
+            row = conn.execute("SELECT * FROM pairing WHERE code = ?", (clean,)).fetchone()
+        return self._pairing_public(row, now)
 
     # ── 项目 / 版本 ─────────────────────────────────────
     def _project_row(self, project_id: str) -> sqlite3.Row:

@@ -283,88 +283,6 @@ export async function teamJoin(address: string, name: string, role = "editor"): 
   return cred;
 }
 
-// ── 配对码 / 二维码（2026-11-02）────────────────────
-//
-// 手填 IP 是这套流程里最硬的一步：得有人去查「我这台的内网 IP 是多少」再一个字
-// 一个字念给对方。配对码把它压成 6 位数字 —— 念一遍就够。
-//
-// 三条路分工不同，别混：
-//   · teamPairing()     主机侧：申请一张**一次性**码（附二维码），120 秒有效
-//   · teamFindByCode()  同事侧第一步：靠码在局域网里找到主机地址（UDP 广播，
-//                       浏览器发不出去 ⇒ 只能借本机桥代劳）
-//   · teamPair()        同事侧第二步：拿码换令牌（**唯一不带令牌的团队端点**）
-
-/** 一张配对码（与 `team_server._pairing_payload` 对齐）。 */
-export type TeamPairingInfo = {
-  /** 6 位数字，空串表示没生成出来 */
-  code: string;
-  ttl: number;
-  /** 到期时间戳（秒），0 表示没拿到码 */
-  expires_at: number;
-  /** true = 复用了还没过期的那张，不是新号码 */
-  reused: boolean;
-  /** 主机地址 `http://192.168.x.x:18770` */
-  address: string;
-  /** 二维码里编的地址：手机扫开是一页能复制地址的说明 */
-  pair_url: string;
-  /** `data:image/png;base64,…`；空串=生成失败（不影响用码，码本身才是主体） */
-  qr: string;
-  message?: string;
-};
-
-/**
- * 主机侧：要一张配对码。**已经有未过期的会原样复用**（同一台机器连点两次不该
- * 得到两个号码 —— 那会让先前念出去的那个失效得更快）。
- */
-export function teamPairing(): Promise<TeamPairingInfo> {
-  return teamCall<TeamPairingInfo>("/team/pairing", { body: {} });
-}
-
-/** 靠码找主机的探测结果；`address` 为空串 = 没找到（`message` 里有原因）。 */
-export type PairProbe = { address: string; name: string; message: string };
-
-/**
- * 同事侧：只凭 6 位码在局域网里找主机地址。
- *
- * 找不到**不抛错**（不是"失败"，是"这片网里没人拿着这张码"），把后端那句能照做
- * 的话原样带回去。只有码格式不对才抛 `bad_code`。
- */
-export async function teamFindByCode(code: string): Promise<PairProbe> {
-  const c = String(code || "").trim();
-  if (!/^\d{4,10}$/.test(c)) {
-    throw new TeamError("bad_code", "配对码是 6 位数字，检查一下再输");
-  }
-  const d = await hostCall<{ server?: DiscoveredServer | null; message?: string }>("/host/team/find-code", {
-    method: "POST",
-    body: JSON.stringify({ code: c }),
-  });
-  const s = d.server;
-  return {
-    address: s?.address ? normalizeAddress(s.address) : "",
-    name: String(s?.name || ""),
-    message: String(d.message || ""),
-  };
-}
-
-/**
- * 同事侧：用配对码加入，返回并持久化凭据。
- *
- * `token: ""` 是**故意的**：其它团队端点都要令牌，这一条恰恰是拿码换令牌的那一条。
- * 不显式置空就会把本机残留的旧令牌带上，服务端虽然不看，但"带错东西"这种事
- * 不该只靠对端宽容。
- */
-export async function teamPair(code: string, name: string, address?: string): Promise<TeamCred> {
-  const addr = normalizeAddress(address || teamAddress());
-  const c = String(code || "").trim();
-  if (!addr) throw new TeamError("no_address", "还没找到主机地址 —— 先用配对码在局域网里找一下");
-  if (!c) throw new TeamError("bad_code", "配对码是 6 位数字，别空着");
-  const data = await teamCall<{ member_id: string; name: string; token: string }>("/team/pair",
-    { body: { code: c, name: name || "同事" }, address: addr, token: "" });
-  const cred: TeamCred = { address: addr, member_id: data.member_id, name: data.name, token: data.token };
-  saveCred(cred);
-  return cred;
-}
-
 export function teamListProjects(): Promise<TeamProject[]> {
   return teamCall<{ projects: TeamProject[] }>("/team/projects").then((d) =>
     Array.isArray(d.projects) ? d.projects : []);
@@ -593,4 +511,135 @@ export function teamUploadAsset(
     xhr.onabort = () => reject(new TeamError("aborted", `已取消上传「${name}」`));
     xhr.send(blob);
   });
+}
+
+// ── 配对码 / 二维码（2026-11-02）────────────────────
+//
+// 手填 IP 是这套流程里最硬的一步：得有人去查「我这台的内网 IP 是多少」再一个字
+// 一个字念给对方。配对码把它压成 6 位数字 —— 念一遍就够。
+//
+// 三条路分工不同，别混：
+//   · teamPairing()     主机侧：申请一张**一次性**码（附二维码），120 秒有效
+//   · teamFindByCode()  同事侧第一步：靠码在局域网里找到主机地址（UDP 广播，
+//                       浏览器发不出去 ⇒ 只能借本机桥代劳）
+//   · teamPair()        同事侧第二步：拿码换令牌（**唯一不带令牌的团队端点**）
+
+/** 一张配对码（与 `team_server._pairing_payload` 对齐）。 */
+export type TeamPairingInfo = {
+  /** 6 位数字，空串表示「我手上现在没有活码」 */
+  code: string;
+  /** 发码那台机器的名字（多台服务器时用来确认没连错） */
+  host_name?: string;
+  /** 主机地址 `http://192.168.x.x:18770` */
+  address: string;
+  host_ip?: string;
+  host_port?: number;
+  /** 这张码一共能请几个人 */
+  max_uses: number;
+  /** 已经用掉几个名额 */
+  uses: number;
+  /** 还能请几个 */
+  remaining: number;
+  /** 到期时间戳（秒），0 表示没拿到码 */
+  expires_at: number;
+  /** 还剩几秒（服务端算好的，省得前端跟本机时钟较劲） */
+  ttl: number;
+  /** 现在能不能用 */
+  alive: boolean;
+  /** 名额用完了 */
+  exhausted: boolean;
+  /** 过期了 */
+  expired: boolean;
+  /** 被主人主动作废了（与「用完了」不同，要说清） */
+  revoked: boolean;
+  /** 复用了一张还没过期的码，不是新号码 */
+  reused: boolean;
+  /** 因为名额不够而废掉了旧码，重新发的 */
+  replaced: boolean;
+  /** 二维码里编的地址：手机扫开是一页能复制地址的说明 */
+  pair_url: string;
+  /** `data:image/png;base64,…`；空串=生成失败（不影响用码，码本身才是主体） */
+  qr: string;
+  message?: string;
+};
+
+/**
+ * 主机侧：要一张配对码。**已经有未过期的会原样复用**（同一台机器连点两次不该
+ * 得到两个号码 —— 那会让先前念出去的那个失效得更快）。
+ *
+ * `maxUses` = 这次要请几个人（1~9）。要得比现有码多时会**作废旧码**，返回
+ * `replaced: true` —— 界面上得说一句，别让人以为旧码还能用。
+ */
+export function teamPairing(maxUses = 1): Promise<TeamPairingInfo> {
+  return teamCall<TeamPairingInfo>("/team/pairing", { body: { max_uses: maxUses } });
+}
+
+/**
+ * 主机侧：**只读**查「我手上那张码现在什么状态」。
+ *
+ * 面板每 2 秒轮询一次用。这条绝不能新建码 —— 否则人还在念，号码就变了。
+ * 没有活码时 `code` 是空串（不是报错）。
+ */
+export function teamPairingStatus(): Promise<TeamPairingInfo> {
+  return teamCall<TeamPairingInfo>("/team/pairing");
+}
+
+/** 主机侧：立刻作废这张码（念给了错的人时，比干等 2 分钟强）。 */
+export function teamRevokePairing(code: string): Promise<TeamPairingInfo> {
+  return teamCall<TeamPairingInfo>("/team/pairing/revoke", { body: { code } });
+}
+
+/** 靠码找主机的探测结果；`address` 为空串 = 没找到（`message` 里有原因）。 */
+export type PairProbe = { address: string; name: string; message: string };
+
+/**
+ * 同事侧：只凭 6 位码在局域网里找主机地址。
+ *
+ * 找不到**不抛错**（不是"失败"，是"这片网里没人拿着这张码"），把后端那句能照做
+ * 的话原样带回去。只有码格式不对才抛 `bad_code`。
+ */
+export async function teamFindByCode(code: string): Promise<PairProbe> {
+  const c = String(code || "").trim();
+  if (!/^\d{4,10}$/.test(c)) {
+    throw new TeamError("bad_code", "配对码是 6 位数字，检查一下再输");
+  }
+  const d = await hostCall<{ server?: DiscoveredServer | null; message?: string }>("/host/team/find-code", {
+    method: "POST",
+    body: JSON.stringify({ code: c }),
+  });
+  const s = d.server;
+  return {
+    address: s?.address ? normalizeAddress(s.address) : "",
+    name: String(s?.name || ""),
+    message: String(d.message || ""),
+  };
+}
+
+/** `teamPair` 的结果：凭据 + 「这张码还剩几个名额」（界面据此提示「还能再加 N 人」）。 */
+export type PairJoinResult = TeamCred & { remaining: number; max_uses: number; host_name: string };
+
+/**
+ * 同事侧：用配对码加入，返回并持久化凭据。
+ *
+ * `token: ""` 是**故意的**：其它团队端点都要令牌，这一条恰恰是拿码换令牌的那一条。
+ * 不显式置空就会把本机残留的旧令牌带上，服务端虽然不看，但"带错东西"这种事
+ * 不该只靠对端宽容。
+ */
+export async function teamPair(code: string, name: string, address?: string): Promise<PairJoinResult> {
+  const addr = normalizeAddress(address || teamAddress());
+  const c = String(code || "").trim();
+  if (!addr) throw new TeamError("no_address", "还没找到主机地址 —— 先用配对码在局域网里找一下");
+  if (!c) throw new TeamError("bad_code", "配对码是 6 位数字，别空着");
+  const data = await teamCall<{
+    member_id: string; name: string; token: string;
+    remaining?: number; max_uses?: number; host_name?: string;
+  }>("/team/pair", { body: { code: c, name: name || "同事" }, address: addr, token: "" });
+  const cred: TeamCred = { address: addr, member_id: data.member_id, name: data.name, token: data.token };
+  saveCred(cred);
+  return {
+    ...cred,
+    remaining: Number(data.remaining ?? 0),
+    max_uses: Number(data.max_uses ?? 1),
+    host_name: String(data.host_name || ""),
+  };
 }

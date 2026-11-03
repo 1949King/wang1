@@ -594,33 +594,166 @@ def test_pair_http_needs_no_token_but_only_once(tmp_path):
         _, host = _req(base, "/team/join", {"name": "主机"})
         code, p = _req(base, "/team/pairing", {}, host["token"])
         assert code == 200 and len(p["code"]) == 6
+        assert p["max_uses"] == 1 and p["remaining"] == 1 and p["alive"] is True
         assert p["address"].startswith("http://") and "/pair?code=" in p["pair_url"]
         assert p["qr"].startswith("data:image/png;base64,")
-        assert p["expires_at"] > 0
+        assert p["expires_at"] > 0 and 0 < p["ttl"] <= 120
+        assert isinstance(p["host_name"], str)
 
-        # 手机落地页：能看到地址和码，且明确说码还有效
+        # 手机落地页：地址 + 码 + 名额都看得见
         page = urllib.request.urlopen(base + "/pair?code=" + p["code"], timeout=10).read().decode()
-        assert "配对码有效" in page and p["code"] in page
+        assert p["code"] in page and "还能请 1 人" in page
 
-        # 刷新面板不该换号：还没过期就原样复用（否则刚念出去的码会白费）
-        code, back = _req(base, "/team/pairing", token=host["token"])
-        assert code == 200 and back["code"] == p["code"] and back["reused"] is True
+        # 🔴 GET 只读：面板每 2 秒轮询一次，反复查既不能换号也不能新建
+        for _ in range(3):
+            code, back = _req(base, "/team/pairing", token=host["token"])
+            assert code == 200 and back["code"] == p["code"]
 
-        # 无令牌兑换成功，拿到的是一个能用的令牌
+        # 无令牌兑换成功，并回报「还剩几个名额」
         code, joined = _req(base, "/team/pair", {"code": p["code"], "name": "同事B"})
-        assert code == 200 and joined["paired"] is True
+        assert code == 200 and joined["paired"] is True and joined["remaining"] == 0
         assert srv.hub.auth(joined["token"])["name"] == "同事B"
 
-        # 第二个人拿同一张码再来 ⇒ 拒（一次性）
+        # 第二个人拿同一张码再来 ⇒ 拒（名额用完）
         code, dup = _req(base, "/team/pair", {"code": p["code"], "name": "同事C"})
         assert code >= 400 and dup["code"] == "code_used"
 
-        # 手机落地页此时要如实说失效了（地址照旧有用）
+        # 手机落地页此时要如实说「请满了」（不是笼统一句"已失效"）
         page2 = urllib.request.urlopen(base + "/pair?code=" + p["code"], timeout=10).read().decode()
-        assert "已失效" in page2
+        assert "已经请满" in page2
 
-        # 码作废之后再要：必须给新号，不能把用过的号再发出去
-        code, fresh = _req(base, "/team/pairing", token=host["token"])
-        assert code == 200 and fresh["code"] and fresh["code"] != p["code"] and fresh["reused"] is False
+        # 名额用完后 GET 仍能看到「刚那张已请满」（不伪造活码，也不假装从没有过）
+        code, none_left = _req(base, "/team/pairing", token=host["token"])
+        assert code == 200 and none_left["code"] == p["code"]
+        assert none_left["alive"] is False and none_left["exhausted"] is True
+        # 再要才给新号
+        code, fresh = _req(base, "/team/pairing", {}, host["token"])
+        assert code == 200 and fresh["code"] and fresh["code"] != p["code"]
     finally:
         srv.stop()
+
+
+def test_pair_http_multi_use_selects_quota(tmp_path):
+    """一次请 3 个人：面板选「3 人」→ 三张名额，第三个人进来后码自动死。"""
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, host = _req(base, "/team/join", {"name": "主机"})
+        code, p = _req(base, "/team/pairing", {"max_uses": 3}, host["token"])
+        assert code == 200 and p["max_uses"] == 3 and p["remaining"] == 3
+
+        remain = []
+        for i in range(3):
+            code, joined = _req(base, "/team/pair", {"code": p["code"], "name": "同事%d" % i})
+            assert code == 200
+            remain.append(joined["remaining"])
+        assert remain == [2, 1, 0]
+
+        code, dup = _req(base, "/team/pair", {"code": p["code"], "name": "第四个"})
+        assert code >= 400 and dup["code"] == "code_used"
+
+        # 面板侧的只读查询此时应该回「刚那张已请满」，而不是一张活码
+        code, back = _req(base, "/team/pairing", token=host["token"])
+        assert code == 200 and back["code"] == p["code"] and back["alive"] is False
+
+        # 作废一条新码
+        code, p2 = _req(base, "/team/pairing", {}, host["token"])
+        code, rv = _req(base, "/team/pairing/revoke", {"code": p2["code"]}, host["token"])
+        assert code == 200 and rv["revoked"] is True
+        code, gone = _req(base, "/team/pair", {"code": p2["code"], "name": "迟到的人"})
+        assert code >= 400 and gone["code"] == "code_revoked"
+    finally:
+        srv.stop()
+
+
+def test_pairing_multi_use_quota(hub):
+    host = hub.register_member("主机")
+    p = hub.create_pairing(host["member_id"], max_uses=3)
+    assert p["max_uses"] == 3 and p["remaining"] == 3 and p["uses"] == 0
+    for i in range(3):
+        got = hub.pairing_claim(p["code"], "m_%d" % i)
+        assert got["uses"] == i + 1 and got["remaining"] == 2 - i
+    assert hub.pairing_alive(p["code"]) is False
+    with pytest.raises(TeamError) as ei:
+        hub.pairing_claim(p["code"], "m_x")
+    assert ei.value.code == "code_used"
+
+
+def test_pairing_revoke_is_owner_only_and_reports_reason(hub):
+    a = hub.register_member("A")
+    b = hub.register_member("B")
+    code = hub.create_pairing(a["member_id"])["code"]
+
+    with pytest.raises(TeamError) as ei:
+        hub.pairing_revoke(code, b["member_id"])
+    assert ei.value.code == "bad_owner"
+
+    assert hub.pairing_revoke(code, a["member_id"])["revoked"] is True
+    assert hub.pairing_alive(code) is False
+    # 被主人废掉 ≠ 用完了 —— 报错要说清是哪种，人才知道该找谁
+    with pytest.raises(TeamError) as ei2:
+        hub.pairing_claim(code)
+    assert ei2.value.code == "code_revoked"
+    # 幂等：再废一次不抛，只是不再声称"这次废掉了"
+    again = hub.pairing_revoke(code, a["member_id"])
+    assert again["revoked"] is False and again["alive"] is False
+
+
+def test_pairing_widen_replaces_old_code(hub):
+    """名额只能往上加：要 3 人时必须废掉 1 人的旧码，否则会出现两张并存的活码。"""
+    host = hub.register_member("主机")
+    one = hub.create_pairing(host["member_id"], max_uses=1)
+    assert hub.create_pairing(host["member_id"], max_uses=1)["reused"] is True
+    assert hub.create_pairing(host["member_id"], max_uses=1)["replaced"] is False
+
+    wide = hub.create_pairing(host["member_id"], max_uses=3)
+    assert wide["code"] != one["code"] and wide["max_uses"] == 3
+    assert wide["replaced"] is True and wide["reused"] is False
+    assert hub.pairing_alive(one["code"]) is False
+    with pytest.raises(TeamError) as ei:
+        hub.pairing_claim(one["code"])
+    assert ei.value.code == "code_revoked"
+
+
+def test_latest_pairing_is_readonly(hub):
+    host = hub.register_member("主机")
+    assert hub.latest_pairing(host["member_id"]) is None
+    p = hub.create_pairing(host["member_id"])
+    for _ in range(3):
+        assert hub.latest_pairing(host["member_id"])["code"] == p["code"]
+    hub.pairing_claim(p["code"], "m_1")
+    assert hub.latest_pairing(host["member_id"]) is None
+    # 「最近一张」还在，且如实标成用满 —— 面板靠它解释「刚那张怎么了」
+    dead = hub.last_pairing(host["member_id"])
+    assert dead["code"] == p["code"] and dead["exhausted"] is True and dead["alive"] is False
+    # 别人的码不算「我手上的」
+    other = hub.register_member("另一位")
+    assert hub.latest_pairing(other["member_id"]) is None
+    assert hub.last_pairing(other["member_id"]) is None
+
+
+def test_pairing_columns_migrated_on_old_db(tmp_path):
+    """老库补列：已用过的码不能显示成「还能加 1 人」（等于把废码说成活的）。"""
+    import sqlite3
+
+    db = tmp_path / "team" / "team.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE pairing (code TEXT PRIMARY KEY, created_by TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL, expires_at REAL NOT NULL,
+            used_at REAL NOT NULL DEFAULT 0, used_by TEXT NOT NULL DEFAULT '');
+        INSERT INTO pairing VALUES ('111111','m_a',1e9,1e9+120,1e9,'m_b');
+        INSERT INTO pairing VALUES ('222222','m_a',1e9,1e9+120,0,'');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    hub = Hub(str(tmp_path / "team"))
+    used = hub.pairing_info("111111")
+    assert used["uses"] == 1 and used["exhausted"] is True and used["alive"] is False
+    fresh = hub.pairing_info("222222")
+    assert fresh["uses"] == 0 and fresh["max_uses"] == 1 and fresh["remaining"] == 1

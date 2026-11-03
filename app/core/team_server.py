@@ -73,7 +73,7 @@ MAX_ASSET_BODY = MAX_ASSET_BYTES + (1 << 20)
 _CHUNK = 64 * 1024
 SERVER_NAME = "shiguang-team-hub"
 #: 3 = 加了配对码（让同事用 6 位数加入，不必知道 IP）
-SERVER_VERSION = "3"
+SERVER_VERSION = "4"
 #: 允许从附件名里挑 `kind` 的取值
 _ASSET_KINDS = frozenset(["image", "video", "audio", "text", "file"])
 
@@ -121,25 +121,75 @@ def _json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
-def _pairing_payload(handler: Any, row: Dict[str, Any]) -> Dict[str, Any]:
-    """配对码的对外形状：码 + 剩余秒数 + 本机地址 + 二维码（手机可扫）。
+#: 二维码缓存（`pair_url → data:`）。面板每 2 秒轮询，不该每轮都跑一遍 cv2 编码。
+_QR_CACHE: Dict[str, str] = {}
+_QR_LOCK = threading.Lock()
 
+
+def _qr_cached(url: str) -> str:
+    """按 URL 缓存二维码；同一个 URL 只编码一次。"""
+    if not url:
+        return ""
+    with _QR_LOCK:
+        hit = _QR_CACHE.get(url)
+    if hit is not None:
+        return hit
+    uri = qr_png_data_uri(url)
+    with _QR_LOCK:
+        if len(_QR_CACHE) > 16:
+            _QR_CACHE.clear()       # 码每 2 分钟就换一批，留 16 张足够
+        _QR_CACHE[url] = uri
+    return uri
+
+
+def _pairing_payload(handler: Any, info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """配对码的对外形状：码 + 名额 + 剩余秒数 + 本机地址 + 二维码（手机可扫）。
+
+    `info` 为 `None` 表示「这个成员手上现在没有活码」—— 返回空码而不是伪造一张。
     二维码里编的是 `http://<本机内网IP>:<端口>/pair?code=…`，扫码后是一个能
-    复制地址的极简页面 —— 「把地址递给别人」才是二维码在这里的唯一用途。
+    复制地址 + 看名额的极简页面。
     """
     port = int(getattr(getattr(handler, "server", None), "server_port", 0) or 0)
     ip = TeamServer.lan_ip()
     address = ("http://%s:%d" % (ip, port)) if (ip and port) else ""
-    pair_url = (address + "/pair?code=" + str(row.get("code") or "")) if address else ""
-    return {
-        "code": str(row.get("code") or ""),
-        "ttl": int(row.get("ttl") or 0),
-        "expires_at": float(row.get("expires_at") or 0),
-        "reused": bool(row.get("reused")),
+    out: Dict[str, Any] = {
+        "ok": True,
+        "host_name": str(getattr(handler, "beacon_name", "") or ""),
         "address": address,
-        "pair_url": pair_url,
-        "qr": qr_png_data_uri(pair_url) if pair_url else "",
+        "host_ip": ip or "",
+        "host_port": port,
+        "code": "",
+        "max_uses": 0,
+        "uses": 0,
+        "remaining": 0,
+        "expires_at": 0.0,
+        "ttl": 0,
+        "alive": False,
+        "exhausted": False,
+        "expired": False,
+        "revoked": False,
+        "reused": False,
+        "replaced": False,
+        "pair_url": "",
+        "qr": "",
     }
+    if not info:
+        return out
+    for key in ("code", "max_uses", "uses", "remaining", "expires_at", "alive",
+                "exhausted", "expired", "revoked", "created_by", "used_by"):
+        if key in info:
+            out[key] = info[key]
+    # `ttl` 是「还剩几秒」，和 `expires_at` 一起给，前端倒计时不用自己算时钟差
+    out["ttl"] = max(0, int(float(info.get("expires_at") or 0) - time.time()))
+    if info.get("reused") is not None:
+        out["reused"] = bool(info.get("reused"))
+    if info.get("replaced") is not None:
+        out["replaced"] = bool(info.get("replaced"))
+    code = str(out.get("code") or "")
+    if address and code:
+        out["pair_url"] = address + "/pair?code=" + code
+        out["qr"] = _qr_cached(out["pair_url"])
+    return out
 
 
 class _TeamHandler(BaseHTTPRequestHandler):
@@ -163,11 +213,12 @@ class _TeamHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _pair_page(self) -> None:
-        """手机扫码后看到的页面：**只做一件事 —— 让地址可复制**。
+        """手机扫码后看到的页面：**只做一件事 —— 让地址和码可复制**。
 
         手机上没有画布，扫完不可能「直接在手机上加入团队」。所以这一页不做假的
-        「加入」按钮，只把 `http://ip:port` 和 6 位码摆出来，方便复制发回电脑。
-        码已过期也照常显示地址（地址永远有用），并如实说码失效了。
+        「加入」按钮，只把 `http://ip:port`、6 位码、**还能请几个人**摆出来，
+        方便复制发回电脑。码失效也照常显示地址（地址永远有用），并如实说
+        是作废了、用完了还是过期了 —— 三种情况下一步动作不一样。
         """
         from html import escape as _esc
 
@@ -176,9 +227,21 @@ class _TeamHandler(BaseHTTPRequestHandler):
         port = int(getattr(getattr(self, "server", None), "server_port", 0) or 0)
         ip = TeamServer.lan_ip()
         address = ("http://%s:%d" % (ip, port)) if (ip and port) else ""
-        alive = bool(code) and self.hub.pairing_alive(code)
-        badge = ("<p class=ok>配对码有效，2 分钟内可用一次</p>" if alive
-                 else "<p class=bad>这个配对码已失效（用过或过期）—— 让同事在面板上重新生成</p>")
+        info = self.hub.pairing_info(code) if code else None
+        left = int((info or {}).get("remaining") or 0)
+        total = int((info or {}).get("max_uses") or 0)
+        if not code:
+            badge = "<p class=bad>这个链接里没有配对码，让同事重新扫一次</p>"
+        elif info is None:
+            badge = "<p class=bad>没有这张配对码（可能已被清理），让同事重新生成一个</p>"
+        elif (info or {}).get("revoked"):
+            badge = "<p class=bad>这张码被主人作废了 —— 让他重新出一个</p>"
+        elif (info or {}).get("exhausted"):
+            badge = "<p class=bad>这张码已经请满 %d 人 —— 让同事再出一个新的</p>" % total
+        elif (info or {}).get("expired"):
+            badge = "<p class=bad>这张码过期了（只有 2 分钟）—— 让同事重新生成一个</p>"
+        else:
+            badge = "<p class=ok>有效 · 还能请 %d 人（这张码共 %d 个名额）</p>" % (left, total)
         html = """<!doctype html><html lang=zh-CN><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>拾光剪影 · 加入团队</title>
@@ -205,22 +268,33 @@ class _TeamHandler(BaseHTTPRequestHandler):
   <button onclick="copyAddr()">复制地址</button>
 </div>
 <div class=card>
-  <div class=lbl>配对码</div>
-  <code class=code>%(code)s</code>
+  <div class=lbl>配对码（6 位数字）</div>
+  <code class=code id=code>%(code)s</code>
   %(badge)s
+  <button onclick="copyCode()">复制配对码</button>
 </div>
 <p class=tip>电脑上：画布左侧点 👥 → ② 段「我连别人的团队」→ 把上面 6 位数输进去 →
 点「用配对码加入」，不用填地址。</p>
 <script>
-function copyAddr(){
-  var t=document.getElementById('addr').textContent.trim(), ok=false;
+function copyText(t){
+  var ok=false;
   try{ if(navigator.clipboard){ navigator.clipboard.writeText(t); ok=true; } }catch(e){}
   if(!ok){
     var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta);
     ta.select(); try{ document.execCommand('copy'); ok=true; }catch(e){}
     document.body.removeChild(ta);
   }
-  var b=event.target; b.textContent = ok ? '已复制' : '长按上面的地址手动复制';
+  return ok;
+}
+function copyAddr(){
+  var t=document.getElementById('addr').textContent.trim();
+  var ok=copyText(t);
+  event.target.textContent = ok ? '已复制地址' : '长按上面的地址手动复制';
+}
+function copyCode(){
+  var t=document.getElementById('code').textContent.trim();
+  var ok=copyText(t);
+  event.target.textContent = ok ? '已复制配对码' : '长按上面的号码手动复制';
 }
 </script></html>""" % {"name": _esc(str(self.beacon_name or "团队")),
                         "addr": _esc(address or "（这台机器没有可用的内网地址）"),
@@ -490,17 +564,12 @@ function copyAddr(){
             self._pair_page()
             return
         if path == "/team/pairing":
+            # **只读**：面板每 2 秒轮询一次用来刷新倒计时/名额。这条路径绝不能
+            # 新建码，否则面板会每隔两秒换一个号码（人还在念，码就变了）。
+            # 手上的码用尽/作废后，回「最近一张」而不是空 —— 面板要说清是哪种。
             me = self._member()
-            row = None
-            try:
-                row = hub.create_pairing(me["id"])       # 有未过期的就原样复用
-            except TeamError:
-                row = None
-            if row is None:
-                self._send(200, {"ok": True, "code": "", "ttl": 0,
-                                 "message": "暂时生不出配对码，稍后再点"})
-                return
-            self._send(200, {"ok": True, **_pairing_payload(self, row)})
+            info = hub.latest_pairing(me["id"]) or hub.last_pairing(me["id"])
+            self._send(200, _pairing_payload(self, info))
             return
         if path == "/team/members":
             self._member()
@@ -551,12 +620,22 @@ function copyAddr(){
             return
         if path == "/team/pairing":
             me = self._member()
-            row = hub.create_pairing(me["id"])
-            self._send(200, {"ok": True, **_pairing_payload(self, row)})
+            data = self._body()
+            info = hub.create_pairing(me["id"], max_uses=int(data.get("max_uses") or 1))
+            self._send(200, _pairing_payload(self, info))
+            return
+        if path == "/team/pairing/revoke":
+            me = self._member()
+            data = self._body()
+            info = hub.pairing_revoke(str(data.get("code") or ""), me["id"])
+            payload = _pairing_payload(self, None)      # 作废后「我手上没有活码」
+            payload.update({"revoked": True, "code": str(info.get("code") or ""),
+                            "message": "这张码已经作废，念出去也进不来了"})
+            self._send(200, payload)
             return
         if path == "/team/pair":
-            # 🔴 **这条不需要令牌** —— 它就是用令牌来换令牌的那一条。
-            # 安全边界：一次性码 + 120 秒寿命 + 同 IP 失败限速（见 _pair_wait_seconds）。
+            # 🔴 **这条不需要令牌** —— 它就是用码换令牌的那一条。
+            # 安全边界：限次码 + 120 秒寿命 + 同 IP 失败限速（见 _pair_wait_seconds）。
             ip = str(self.client_address[0]) if self.client_address else ""
             wait = _pair_wait_seconds(ip)
             if wait > 0:
@@ -573,13 +652,16 @@ function copyAddr(){
                 raise TeamError("bad_code", "配对码是 6 位数字，别空着")
             mid = "m_" + secrets.token_hex(8)
             try:
-                hub.pairing_claim(code, mid)        # 校验通过即作废（一次性）
+                claimed = hub.pairing_claim(code, mid)     # 校验通过就消耗一个名额
             except TeamError:
                 _pair_strike(ip)
                 raise
             _pair_clear(ip)
             info = hub.register_member(name, str(data.get("role") or "editor"), member_id=mid)
-            self._send(200, {"ok": True, **info, "paired": True})
+            self._send(200, {"ok": True, **info, "paired": True,
+                             "remaining": claimed.get("remaining", 0),
+                             "max_uses": claimed.get("max_uses", 1),
+                             "host_name": self.beacon_name})
             return
         if path == "/team/projects":
             me = self._member()

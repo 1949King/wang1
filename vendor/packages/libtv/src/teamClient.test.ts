@@ -368,3 +368,111 @@ describe("teamClient · 配对码", () => {
     expect(headersOf(calls[0]).Authorization).toBe("Bearer tok");
   });
 });
+
+/**
+ * 2026-11-03 · 配对码加强：名额 / 只读轮询 / 作废
+ *
+ * 这三条各自锁一件事：
+ *   · 要几个名额必须真的发出去（否则「请 3 人」等于没做）；
+ *   · 轮询那条**必须是 GET**（POST 会新建码 ⇒ 人还在念号码就变了）；
+ *   · 作废要把 code 带上（后端只能废自己发的，不带就 404）。
+ */
+describe("teamClient · 配对码名额与作废", () => {
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  type PairCall = { url: string; init?: RequestInit };
+
+  function stubPair(impl: (url: string, init?: RequestInit) => unknown) {
+    const calls: PairCall[] = [];
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(
+      async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return impl(String(url), init);
+      },
+    ) as unknown as typeof fetch;
+    return calls;
+  }
+
+  async function joined(token = "tok") {
+    installFakes();
+    const m0 = await loadModule();
+    const calls = stubPair(() => ({
+      ok: true,
+      json: async () => ({ ok: true, member_id: "m_1", name: "张三", token }),
+    }));
+    await m0.teamJoin("192.168.1.4:18770", "张三");
+    expect(calls.length).toBe(1);
+    return token;
+  }
+
+  const basePayload = {
+    ok: true, code: "229140", max_uses: 3, uses: 0, remaining: 3,
+    expires_at: 1700000000, ttl: 118, alive: true, exhausted: false, expired: false,
+    revoked: false, reused: false, replaced: false, host_name: "老王的工作站",
+    address: "http://192.168.1.4:18770",
+    pair_url: "http://192.168.1.4:18770/pair?code=229140",
+    qr: "data:image/png;base64,AAAA",
+  };
+
+  it("要 3 个名额 ⇒ 请求体里带 max_uses=3", async () => {
+    await joined();
+    const calls = stubPair(() => ({ ok: true, json: async () => basePayload }));
+    const m = await loadModule();
+    const p = await m.teamPairing(3);
+
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ max_uses: 3 });
+    expect(p.max_uses).toBe(3);
+    expect(p.remaining).toBe(3);
+  });
+
+  it("轮询状态走 GET（不带 body）—— POST 会新建码", async () => {
+    await joined();
+    const calls = stubPair(() => ({ ok: true, json: async () => basePayload }));
+    const m = await loadModule();
+    const p = await m.teamPairingStatus();
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/pairing");
+    // teamCall 没给 body 就应该是 GET：GET /team/pairing 是只读的
+    expect(calls[0].init?.method).toBe("GET");
+    expect(calls[0].init?.body).toBeUndefined();
+    expect(p.code).toBe("229140");
+  });
+
+  it("作废把 code 一起发出去", async () => {
+    await joined();
+    const calls = stubPair(() => ({
+      ok: true,
+      json: async () => ({ ...basePayload, alive: false, revoked: true, remaining: 0, code: "229140" }),
+    }));
+    const m = await loadModule();
+    const r = await m.teamRevokePairing("229140");
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/pairing/revoke");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ code: "229140" });
+    expect(r.revoked).toBe(true);
+    expect(r.alive).toBe(false);
+  });
+
+  it("用码加入要回「还剩几个名额」，界面靠它告诉人还能带几个", async () => {
+    installFakes();
+    const calls = stubPair(() => ({
+      ok: true,
+      json: async () => ({
+        ok: true, member_id: "m_9", name: "李四", token: "tok9", paired: true,
+        remaining: 2, max_uses: 3, host_name: "老王的工作站",
+      }),
+    }));
+    const m = await loadModule();
+    const r = await m.teamPair("229140", "李四", "192.168.1.4:18770");
+
+    expect(r.remaining).toBe(2);
+    expect(r.max_uses).toBe(3);
+    expect(r.host_name).toBe("老王的工作站");
+    // 兑换这一条仍然不带令牌
+    expect((calls[0].init?.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+});

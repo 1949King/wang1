@@ -14,7 +14,7 @@
  *   · 传上去的 bundle 里**不留令牌**（`stripAssetTokens`），且素材上传失败要
  *     逐条报出来（`failed`）——绝不静默跳过让同事打开看空白
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCanvasStore } from "./store";
 import {
   TeamError,
@@ -47,6 +47,8 @@ import {
   teamMembers,
   teamPair,
   teamPairing,
+  teamPairingStatus,
+  teamRevokePairing,
   teamPull,
   teamPush,
   teamRelease,
@@ -70,6 +72,7 @@ import {
   type MediaRef,
 } from "./teamAssets";
 import { formatTeamDiff } from "./teamDiffText";
+import { copyText } from "./teamClipboard";
 import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 import "./teamPanel.css";
 
@@ -84,6 +87,18 @@ type PulledBundle = {
   stage3d?: unknown;
   timeline?: { clips?: Record<string, unknown>[]; clip_count?: number };
 };
+
+/**
+ * 码不能用了以后，说清是**哪一种** —— 三种情况下一步动作完全不同：
+ * 作废了要重新出码，用完了也要重新出码（但可以选更多人），过期了重新出码就行。
+ * 都糊成「已失效」的话，人只会反复点重试。
+ */
+function deadPairReason(p: TeamPairingInfo): string {
+  if (p.revoked) return "已被你作废";
+  if (p.exhausted || p.remaining <= 0) return "名额用完了";
+  if (p.expired) return "已过期（只活 2 分钟）";
+  return "已失效";
+}
 
 export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [host, setHost] = useState<TeamHostStatus | null>(null);
@@ -105,10 +120,16 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [preview, setPreview] = useState<string>("");
   /** 主机侧刚生成（或复用）的配对码；null = 还没点过。 */
   const [pair, setPair] = useState<TeamPairingInfo | null>(null);
+  /** 这次要请几个人（1/3/5/9）。人数只能往上加：要得更多时会作废旧码。 */
+  const [pairUses, setPairUses] = useState<number>(1);
+  /** 卡片底下那行小提示（「已复制」「作废了」），比全局提示更贴近动作。 */
+  const [pairNote, setPairNote] = useState<string>("");
   /** 同事侧输入框里的 6 位码。 */
   const [codeIn, setCodeIn] = useState<string>("");
   /** 倒计时用的"现在"（秒）。只在有码时每秒跳一次。 */
   const [now, setNow] = useState<number>(0);
+  /** 出码那一刻的成员 ID 快照：之后多出来的人就是「刚用码进来的」。 */
+  const memberBaseline = useRef<string>("");
 
   // 码只在 120 秒内有效，秒数必须自己走 —— 否则面板停在那儿显示「120 秒有效」，
   // 人以为永远有效，念晚了同事就白试一次。
@@ -343,6 +364,68 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   };
 
   /**
+   * 出码之后每 2 秒问一次：名额变了没有 / 有没有人刚加进来。
+   *
+   * 用**只读**的 `GET /team/pairing`：那条路径绝不新建码 —— 否则人还在念，
+   * 面板就换了个号码。码失效（用尽 / 作废 / 过期）后自动停掉轮询。
+   *
+   * `say` / `refreshHost` 走 ref：它们每次渲染都是新引用，放进依赖会让这个
+   * 2 秒定时器不停重建（清掉再建），反而更容易丢帧。
+   */
+  const pairCode = pair?.code || "";
+  const pairLive = !!pair?.alive && pairLeft > 0;
+  const sayRef = useRef(say);
+  sayRef.current = say;
+  const hostRef = useRef(refreshHost);
+  hostRef.current = refreshHost;
+
+  useEffect(() => {
+    if (!pairCode || !pairLive) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const st = await teamPairingStatus();
+        if (stop) return;
+        if (st.code === pairCode) {
+          setPair((prev) => (prev ? { ...prev, ...st } : st));
+        } else {
+          // 服务端手上已经没有活码了（用尽/被废/过期清理）
+          setPair((prev) => (prev ? { ...prev, alive: false, remaining: 0, exhausted: true } : prev));
+          setPairNote("这张码已经不能用了，重新出一个");
+        }
+      } catch {
+        /* 网络抖一下就跳过，下一轮再来 —— 轮询失败不该弹错误打扰正在念码的人 */
+      }
+      try {
+        const list = await teamMembers();
+        if (stop) return;
+        setMembers(list);
+        const ids = list.map((m) => m.id).sort().join(",");
+        if (!memberBaseline.current) {
+          memberBaseline.current = ids;         // 出码那一刻的基线
+        } else if (ids !== memberBaseline.current) {
+          const before = memberBaseline.current.split(",");
+          const fresh = list.filter((m) => !before.includes(m.id));
+          if (fresh.length) {
+            sayRef.current("ok",
+              `${fresh.map((m) => m.name).join("、")} 已用配对码加入 —— 团队现在 ${list.length} 人`);
+          }
+          memberBaseline.current = ids;
+          void hostRef.current();
+        }
+      } catch {
+        /* 同上 */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 2000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [pairCode, pairLive]);
+
+  /**
    * 主机侧：出一张配对码给身边的同事。
    *
    * 生成码要**本机身份**（`created_by`），所以还没加入团队时会拿到 401 —— 那种
@@ -351,11 +434,14 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const makePairing = async () => {
     setBusy("pairing");
     try {
-      const p = await teamPairing();
+      const p = await teamPairing(pairUses);
       setNow(Date.now() / 1000);
       setPair(p);
+      setPairNote(p.replaced ? "名额变多了，旧码已作废" : "");
+      memberBaseline.current = members.map((m) => m.id).sort().join(",");
       if (!p.expires_at) say("err", p.message || "暂时生不出配对码，等一秒再点一次");
-      else say("ok", p.reused ? `配对码还是 ${p.code}（上次那张没过期，接着用）` : `配对码 ${p.code}，念给同事听`);
+      else if (p.reused) say("ok", `配对码还是 ${p.code}（上次那张没过期，接着用）`);
+      else say("ok", `配对码 ${p.code}，能请 ${p.max_uses} 人，念给同事听`);
     } catch (e) {
       if (e instanceof TeamError && e.code === "unauthorized") {
         say("err", "先把这台机器自己也加进团队（② 里点「加入」），才轮得到你发码给同事");
@@ -363,6 +449,35 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       } else {
         fail(e);
       }
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /** 复制码 / 复制邀请链接：失败要说实话（画布内核的剪贴板不一定好使）。 */
+  const copyPair = async (what: "code" | "url") => {
+    if (!pair) return;
+    const text = what === "code" ? pair.code : pair.pair_url;
+    if (!text) {
+      setPairNote("这台机器没有可用的内网地址，链接发不出去 —— 直接用 6 位数");
+      return;
+    }
+    const ok = await copyText(text);
+    setPairNote(ok ? (what === "code" ? `已复制 ${pair.code}` : "已复制邀请链接，发给同事即可")
+      : "复制失败 —— 手动选中上面那串再按 Ctrl+C");
+  };
+
+  /** 作废这张码：念给了错的人时，比干等 2 分钟强。 */
+  const revokePair = async () => {
+    if (!pair?.code) return;
+    setBusy("revoke");
+    try {
+      await teamRevokePairing(pair.code);
+      setPairNote("已作废 —— 念出去也进不来了");
+      setPair((prev) => (prev ? { ...prev, alive: false, revoked: true, remaining: 0 } : prev));
+      say("info", "配对码已作废");
+    } catch (e) {
+      fail(e);
     } finally {
       setBusy("");
     }
@@ -395,7 +510,8 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       setCred(cc);
       setAddress(cc.address);
       setCodeIn("");
-      say("ok", `已用配对码加入：${cc.name}`);
+      say("ok", `已用配对码加入：${cc.name}` +
+        (cc.max_uses > 1 ? `（这张码还能请 ${cc.remaining} 人）` : ""));
       await refreshTeam();
     } catch (e) {
       // 码用过 / 过期 / 试太多次 —— 后端的 message 都能照着做，原样显示
@@ -735,21 +851,54 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
         {host?.running ? (
           <div className="sg-team-pair">
             <div className="sg-team-row">
+              <select
+                value={pairUses}
+                onChange={(e) => setPairUses(Number(e.target.value))}
+                disabled={busy === "pairing"}
+                title="这张码能请几个人"
+              >
+                <option value={1}>请 1 人</option>
+                <option value={3}>请 3 人</option>
+                <option value={5}>请 5 人</option>
+                <option value={9}>请 9 人</option>
+              </select>
               <button type="button" disabled={busy === "pairing"} onClick={() => void makePairing()}>
-                {busy === "pairing" ? "生成中…" : pair ? "重新出码" : "让同事加入（出 6 位码）"}
+                {busy === "pairing" ? "生成中…" : pair?.code ? "重新出码" : "让同事加入（出 6 位码）"}
               </button>
-              <span className="sg-team-dim">
-                {pair?.code
-                  ? (pairLeft > 0 ? `${pairLeft} 秒内有效 · 只能用一次` : "已失效，重新出码")
-                  : "不用念 IP —— 给他 6 位数字就行"}
-              </span>
+              {pair?.code ? null : <span className="sg-team-dim">不用念 IP —— 给他 6 位数字就行</span>}
             </div>
             {pair?.code ? (
-              <div className="sg-team-code">
-                <b className={pairLeft > 0 ? "" : "dead"}>{pair.code}</b>
-                {pair.qr && pairLeft > 0 ? <img src={pair.qr} alt="配对二维码" /> : null}
+              <div className={`sg-team-code${pairLive ? "" : " dead"}`}>
+                <div className="sg-team-code-main">
+                  <b className={pairLive ? "" : "dead"}>{pair.code}</b>
+                  {pair.qr && pairLive ? <img src={pair.qr} alt="配对二维码" /> : null}
+                  <div className="sg-team-code-facts">
+                    <span className={pairLive ? "sg-team-left" : "sg-team-left off"}>
+                      {pairLive ? `还能请 ${pair.remaining} 人 · ${pairLeft} 秒后失效` : deadPairReason(pair)}
+                    </span>
+                    <span className="sg-team-dim">
+                      共 {pair.max_uses} 个名额 · 已用 {pair.uses}
+                      {pair.host_name ? ` · 发码方「${pair.host_name}」` : ""}
+                    </span>
+                  </div>
+                </div>
+                {pairLive ? (
+                  <div className="sg-team-bar">
+                    {/* 分母是服务端的 PAIR_TTL（120 秒），只用来画这条进度；能不能用一律以 alive 为准 */}
+                    <i style={{ width: `${Math.min(100, Math.max(0, Math.round((pairLeft / 120) * 100)))}%` }} />
+                  </div>
+                ) : null}
+                <div className="sg-team-acts">
+                  <button type="button" onClick={() => void copyPair("code")}>复制码</button>
+                  <button type="button" onClick={() => void copyPair("url")}>复制邀请链接</button>
+                  {pairLive ? (
+                    <button type="button" disabled={busy === "revoke"} onClick={() => void revokePair()}>
+                      {busy === "revoke" ? "作废中…" : "立即作废"}
+                    </button>
+                  ) : null}
+                </div>
                 <span className="sg-team-dim">
-                  同事在 ② 里填这 6 位数字；手机扫二维码能看到地址，方便转发到他电脑。
+                  {pairNote || "同事在 ② 填这 6 位数字；手机扫二维码能看到地址和名额，方便转发"}
                 </span>
               </div>
             ) : null}
