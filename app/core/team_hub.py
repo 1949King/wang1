@@ -60,6 +60,11 @@ MAX_ASSET_NAME = 120
 #: 认领默认 TTL（秒）
 DEFAULT_CLAIM_TTL = 600
 
+#: 「本机主人」的角色名。单例角色：一个团队只有一个 owner（`ensure_owner` 负责保证）。
+#: 注意：**今天它还不参与鉴权** —— `role` 目前只是登记信息，任何成员令牌都能做任何事。
+#: 真正的权限矩阵是后续一刀，别把这里的出现当成「已经有权限控制了」。
+OWNER_ROLE = "owner"
+
 #: 配对码有效期（秒）。**2 分钟**是刻意选的：念一串 6 位数给对方、对方输完，
 #: 通常 15~30 秒；给太长等于给暴力枚举留窗口，给太短会当场过期。
 PAIR_TTL = 120
@@ -396,6 +401,54 @@ class Hub:
         with self._lock, self._conn() as conn:
             rows = conn.execute("SELECT id, name, role, created_at FROM member ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
+
+    def member_by_role(self, role: str) -> Optional[Dict[str, Any]]:
+        """按角色取最早的一位成员（没有就 None）。给「本机主人」这类单例角色用。"""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, name, role FROM member WHERE role = ? ORDER BY created_at LIMIT 1",
+                (str(role or ""),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def ensure_owner(self, name: str = "") -> Dict[str, Any]:
+        """保证本机有一个 `owner` 成员，并回一份**新的**明文令牌。
+
+        为什么需要它：面板要出配对码/邀请链接就得有 Bearer（`created_by` 记谁发的），
+        而令牌只存哈希、原样取不回来。于是老流程变成「启动服务 → 手填自己地址 →
+        点加入自己 → 才能发码」，把用户绊在第一步。这里由服务端直接把主人认了。
+
+        三级策略（兼容老库，别造出第二个人）：
+          ① 已有 owner  → 换令牌，`member_id` 不变（项目归属/历史版本都挂在它上面）
+          ② 没有 owner 但有成员 → 把**最早那位**提升为 owner（服务器通常就是第一个加入的人），
+             否则会凭空多出一个「本机主人」，成员列表里两个人长得一样
+          ③ 一个成员都没有 → 新建
+
+        ⚠️ 每次都换令牌 ⇒ 调用方必须**先拿盘上的令牌试 `auth()`**，还有效就复用；
+        否则每轮询一次就把自己别处的会话踢掉（见 `canvas_routes_team._owner_cred`）。
+        """
+        token = secrets.token_urlsafe(32)
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, name FROM member WHERE role = ? ORDER BY created_at LIMIT 1",
+                (OWNER_ROLE,),
+            ).fetchone()
+            promoted = False
+            if row is None:
+                row = conn.execute(
+                    "SELECT id, name FROM member ORDER BY created_at LIMIT 1"
+                ).fetchone()
+                promoted = row is not None
+            if row is not None:
+                mid = str(row["id"])
+                conn.execute(
+                    "UPDATE member SET role = ?, token_hash = ? WHERE id = ?",
+                    (OWNER_ROLE, _token_hash(token), mid),
+                )
+                return {"member_id": mid, "name": str(row["name"]), "role": OWNER_ROLE,
+                        "token": token, "created": False, "promoted": promoted}
+        info = self.register_member(name or "本机主人", role=OWNER_ROLE)
+        return {**info, "created": True, "promoted": False}
 
     # ── 配对码（2026-11-02）───────────────────────────────
     #

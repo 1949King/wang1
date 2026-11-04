@@ -38,6 +38,70 @@ def test_member_register_and_auth(hub):
     assert m["token"].encode() not in raw
 
 
+# ── 本机主人自动引导（2026-11-04）──────────────────────────
+#
+# 背景：面板出配对码要 Bearer，而令牌只存哈希取不回来 ⇒ 老流程逼用户
+# 「手填自己地址 → 加入自己」才能发码，第一步就卡在 401 上。
+def test_ensure_owner_bootstraps_then_rotates_token(hub):
+    first = hub.ensure_owner("本机主人")
+    assert first["created"] is True and first["promoted"] is False
+    assert first["role"] == "owner"
+    assert hub.auth(first["token"])["role"] == "owner"
+
+    again = hub.ensure_owner("本机主人")
+    assert again["created"] is False and again["promoted"] is False
+    assert again["member_id"] == first["member_id"]      # 身份不变（项目归属挂在它上面）
+    assert again["token"] != first["token"]
+    # 换了令牌旧的就必须失效，否则等于留了一张永久后门
+    assert hub.auth(first["token"]) is None
+    assert hub.auth(again["token"])["id"] == first["member_id"]
+
+
+def test_ensure_owner_promotes_earliest_member_instead_of_adding_one(hub):
+    """老库升级：服务器那台通常就是第一个加入的人 ⇒ 提升他，别凭空多出一个「本机主人」。"""
+    old = hub.register_member("王志")
+    info = hub.ensure_owner("本机主人")
+    assert info["promoted"] is True and info["created"] is False
+    assert info["member_id"] == old["member_id"]
+    assert info["name"] == "王志"        # 名字跟着成员走，不被默认名盖掉
+    assert len(hub.members()) == 1       # 不能变成两个人
+    assert hub.member_by_role("owner")["id"] == old["member_id"]
+
+
+def test_ensure_owner_keeps_existing_owner_over_earlier_editor(hub):
+    owner = hub.ensure_owner("主人")
+    hub.register_member("后来的编辑")
+    again = hub.ensure_owner("主人")
+    assert again["member_id"] == owner["member_id"]
+    assert len(hub.members()) == 2
+
+
+def test_owner_cred_reuses_disk_token_and_never_mints_on_read(tmp_path):
+    """盘上那张还有效就复用：换令牌 = 把主人别处的会话踢下线。
+
+    同时守住一条：只读路径（status 每 2 秒轮询）**绝不能**顺手签发/写盘。
+    """
+    from app.core import canvas_routes_team as ct
+
+    class _Srv:
+        def __init__(self, hub):
+            self.hub = hub
+
+    hub = Hub(str(tmp_path / "team"))
+    srv = _Srv(hub)
+    first = ct._owner_cred(srv, create=True)
+    assert first and first["reused"] is False
+    assert os.path.isfile(os.path.join(hub.root, ct.OWNER_FILE))
+
+    again = ct._owner_cred(srv, create=True)
+    assert again["token"] == first["token"] and again["reused"] is True
+
+    # 干净库 + create=False ⇒ 返回 None，且不许落下任何文件
+    bare_root = str(tmp_path / "bare")
+    assert ct._owner_cred(_Srv(Hub(bare_root))) is None
+    assert not os.path.exists(os.path.join(bare_root, ct.OWNER_FILE))
+
+
 def test_create_and_get_bundle_roundtrip(hub):
     m = hub.register_member("张三")
     created = hub.create_project("短剧A", m["member_id"], _bundle("v1"))

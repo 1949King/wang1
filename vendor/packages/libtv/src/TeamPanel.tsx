@@ -299,10 +299,18 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     try {
       const st = await teamHostStart({ name: "拾光剪影团队" });
       setHost(st);
-      // 服务起来后顺手把地址填进 ②：下一步多半就是「加入自己」——
-      // 不填的话人得从上面那行里手抄一遍 IP，抄错就得到一句网络错误。
-      if (!cred && st.running && st.address) setAddress(st.address);
-      say("ok", st.running ? `团队服务已启动：${st.address}` : "启动失败");
+      // 2026-11-04：服务端启动时已把「本机主人」认了，凭据在 teamHostStart 里落了盘。
+      // 同步一份到面板状态，否则「已连接」那一行和出码按钮仍按「没身份」处理。
+      if (st.owner?.member_id) {
+        setCred(teamCred());
+        say("ok", `团队服务已启动：${st.address} —— 你已经是本机主人，可以直接出配对码`);
+      } else if (st.running && st.address) {
+        // 老服务端（还没这一天改动）或凭据没签出来：保留原来的兜底
+        if (!cred) setAddress(st.address);
+        say("ok", `团队服务已启动：${st.address}`);
+      } else {
+        say("err", "启动失败");
+      }
     } catch (e) {
       fail(e);
     } finally {
@@ -444,7 +452,9 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       else say("ok", `配对码 ${p.code}，能请 ${p.max_uses} 人，念给同事听`);
     } catch (e) {
       if (e instanceof TeamError && e.code === "unauthorized") {
-        say("err", "先把这台机器自己也加进团队（② 里点「加入」），才轮得到你发码给同事");
+        // 2026-11-04 起服务端启动就把主人认了，正常不会再走到这里；
+        // 剩下两种可能：服务没起来，或升级前建的老库还没签过主人凭据。
+        say("err", "这台机器还没有主人凭据 —— 先「停止」再「启动团队服务」一次即可");
         if (host?.address) setAddress(host.address);
       } else {
         fail(e);

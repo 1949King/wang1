@@ -182,6 +182,17 @@ async function teamCall<T>(
 }
 
 // ── 本机管理面 ──────────────────────────────────────
+/** 本机主人凭据（服务端随启动一起下发；`reused` = 沿用盘上那张令牌，没换新的）。 */
+export type TeamOwnerCred = {
+  member_id: string;
+  name: string;
+  role: string;
+  token: string;
+  reused?: boolean;
+  created?: boolean;
+  promoted?: boolean;
+};
+
 export type TeamHostStatus = {
   ok: boolean;
   running: boolean;
@@ -192,17 +203,30 @@ export type TeamHostStatus = {
   root?: string;
   stats: { projects?: number; members?: number; pending_handoffs?: number };
   hint?: string;
+  owner?: TeamOwnerCred | null;
 };
 
 export function teamHostStatus(): Promise<TeamHostStatus> {
   return hostCall<TeamHostStatus>("/host/team/status");
 }
 
-export function teamHostStart(opts: { port?: number; name?: string; root?: string } = {}): Promise<TeamHostStatus> {
-  return hostCall<TeamHostStatus>("/host/team/start", {
+/**
+ * 启动本机团队服务。
+ *
+ * 🔴 2026-11-04：服务端在启动时就把「本机主人」认了（`ensure_owner`），凭据随响应回来
+ * （`owner`）。这里顺手落盘 —— 否则用户还得「手填自己地址 → 点加入自己」才能出配对码，
+ * 第一步就卡在 401 上。凭据无效/被删时服务端会重签，`reused` 只作诊断用。
+ */
+export async function teamHostStart(opts: { port?: number; name?: string; root?: string } = {}): Promise<TeamHostStatus> {
+  const st = await hostCall<TeamHostStatus>("/host/team/start", {
     method: "POST",
     body: JSON.stringify(opts),
   });
+  const o = st.owner;
+  if (o?.token && o.member_id && st.address) {
+    saveCred({ address: st.address, member_id: o.member_id, name: o.name, token: o.token });
+  }
+  return st;
 }
 
 export function teamHostStop(): Promise<TeamHostStatus> {

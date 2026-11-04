@@ -75,12 +75,73 @@ def _friendly(exc: BaseException) -> str:
         return str(exc)
 
 
+#: 主人凭据落盘文件名（明文令牌，0600）。
+#: 删掉它只会让下次启动「重新签发一张令牌」，团队数据（项目/版本/素材）不受影响。
+OWNER_FILE = "owner.json"
+
+
+def _device_name() -> str:
+    """本机显示名。用主机名而不是用户名 —— 局域网上「DESKTOP-8K2」比「Administrator」好认。"""
+    try:
+        import socket
+
+        return socket.gethostname() or "本机主人"
+    except Exception:  # stability-gate: allow-swallow（取不到主机名不该让启动失败）
+        return "本机主人"
+
+
+def _owner_cred(srv: Any, create: bool = False) -> Optional[Dict[str, Any]]:
+    """取本机主人凭据。
+
+    为什么要落盘：令牌只存哈希，服务端**取不回来**。不存一份明文，每次启动都得签发
+    新令牌 —— 而「换个令牌」等于把主人别处（比如另一台连着同一团队的机器）踢下线。
+
+    所以策略是：盘上那张还有效就原样复用（`reused=True`），无效/没文件才签发（`create=True`）。
+    GET 类端点必须 `create=False` —— 状态接口每 2 秒被轮询一次，不能顺手写盘。
+    """
+    from app.core.team_hub import OWNER_ROLE
+
+    hub = srv.hub
+    root = str(getattr(hub, "root", "") or "")
+    path = os.path.join(root, OWNER_FILE) if root else ""
+    token = ""
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                token = str(json.load(f).get("token") or "")
+        except Exception:  # stability-gate: allow-swallow（缺文件/坏 JSON = 还没签过）
+            token = ""
+    if token:
+        me = hub.auth(token)
+        if me and str(me.get("role")) == OWNER_ROLE:
+            return {"member_id": me["id"], "name": me["name"], "role": OWNER_ROLE,
+                    "token": token, "reused": True, "created": False}
+    if not create:
+        return None
+    info = {**hub.ensure_owner(_device_name()), "reused": False}
+    if path:
+        try:
+            os.makedirs(root, exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(info, f, ensure_ascii=False)
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:   # Windows 上 chmod 语义有限，不为此阻断启动
+                logger.debug("[team] owner.json 权限收紧失败（Windows chmod 语义有限）", exc_info=True)
+            os.replace(tmp, path)
+        except Exception:
+            logger.warning("[team] owner.json 写不进去：主人凭据只在本进程有效", exc_info=True)
+    return info
+
+
 def _status_payload() -> Dict[str, Any]:
     srv = _SERVER
     # 单例存在 ≠ 正在跑：stop() 后 _httpd 会被置空，这里必须一起判
     if srv is None or getattr(srv, "_httpd", None) is None:
         return {"ok": True, "running": False, "address": "", "lan_ip": "", "port": 0,
-                "stats": {}, "hint": "点「启动团队服务」后，同事才能连这台机器"}
+                "stats": {}, "owner": None,
+                "hint": "点「启动团队服务」后，同事才能连这台机器"}
     try:
         stats = srv.hub.stats()
     except Exception:  # stability-gate: allow-swallow（统计失败不该让状态接口 500）
@@ -88,7 +149,7 @@ def _status_payload() -> Dict[str, Any]:
         stats = {}
     return {"ok": True, "running": True, "address": "http://%s:%d" % (srv.lan_ip(), srv.port),
             "lan_ip": srv.lan_ip(), "port": int(srv.port), "name": srv.name,
-            "root": srv.hub.root, "stats": stats}
+            "root": srv.hub.root, "stats": stats, "owner": _owner_cred(srv)}
 
 
 class CanvasTeamRoutesMixin:
@@ -128,7 +189,10 @@ class CanvasTeamRoutesMixin:
                     name=str(body.get("name") or "拾光剪影团队"),
                 )
             info = _SERVER.start()
-            self._json(200, {"ok": True, **info, **_status_payload()})
+            # 启动即认主人：从前这里什么都不做，用户得「手填自己地址 → 加入自己」
+            # 才能拿到出码要用的 Bearer，第一步就卡住（2026-11-04 实机复现）。
+            owner = _owner_cred(_SERVER, create=True)
+            self._json(200, {"ok": True, **info, **_status_payload(), "owner": owner})
         except Exception as e:
             logger.exception("[/host/team/start] 失败")
             self._json(500, {"ok": False, "message": f"团队服务启动失败：{_friendly(e)}"})
