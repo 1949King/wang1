@@ -727,18 +727,54 @@ class Hub:
             if base and base != current:
                 author = self._author_of(project_id, current)
                 raise ConflictError(current, author)
-            new_rev = current + 1
-            sha, size = self._write_bundle(project_id, new_rev, bundle)
-            ts = _now()
-            with self._conn() as conn:
-                conn.execute("UPDATE project SET rev = ?, updated_at = ? WHERE id = ?",
-                             (new_rev, ts, project_id))
-                conn.execute(
-                    "INSERT INTO version (project_id, rev, sha256, bytes, author_id, message, created_at)"
-                    " VALUES (?,?,?,?,?,?,?)",
-                    (project_id, new_rev, sha, size, member_id, str(message or "")[:500], ts),
-                )
+            return self._publish(project_id, member_id, bundle, current + 1, message)
+
+    def _publish(self, project_id: str, member_id: str, bundle: Any,
+                 new_rev: int, message: str = "") -> Dict[str, Any]:
+        """把一份 bundle 落成第 `new_rev` 版。**调用方必须已持有 `self._lock`**
+        （`push` 与 `rollback` 共用这里，避免两条路各写一遍插入语句、日后漏改一边）。"""
+        sha, size = self._write_bundle(project_id, new_rev, bundle)
+        ts = _now()
+        with self._conn() as conn:
+            conn.execute("UPDATE project SET rev = ?, updated_at = ? WHERE id = ?",
+                         (new_rev, ts, project_id))
+            conn.execute(
+                "INSERT INTO version (project_id, rev, sha256, bytes, author_id, message, created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (project_id, new_rev, sha, size, member_id, str(message or "")[:500], ts),
+            )
         return {"project_id": project_id, "rev": new_rev, "sha256": sha, "bytes": size}
+
+    def rollback(self, project_id: str, member_id: str, to_rev: int,
+                 base_rev: int = 0) -> Dict[str, Any]:
+        """把历史版本 `to_rev` 的内容**重新发布成最新版**。
+
+        为什么不是「删掉后面的版本、把指针退回去」：那会把同事在这之后做的工作直接
+        抹掉，而回滚的人往往只想救自己那一版、并不想删别人的。所以历史**只增不删** ——
+        回滚＝又提交了一版，内容是旧的，备注写清「回滚到 rev N」。事后想再回到回滚前
+        的那一版，rev 还在列表里。
+
+        `base_rev` 与当前 rev 不符 ⇒ Conflict：不让「看着 rev 3 的旧界面」把别人后来
+        提交的 rev 4 一起盖掉。
+        """
+        with self._lock:
+            row = self._project_row(project_id)
+            current = int(row["rev"])
+            target = int(to_rev or 0)
+            if target < 1 or target > current:
+                raise TeamError("not_found", "版本不存在：rev=%d" % target)
+            if target == current:
+                raise TeamError("noop", "rev %d 已经是最新版了，不用回滚" % target)
+            base = int(base_rev or 0)
+            if base and base != current:
+                raise ConflictError(current, self._author_of(project_id, current))
+            # 源版本的文件要先读得出来：删过 data 目录时宁可在这里报错，
+            # 也不要「回滚成功」却发现新版本内容是空的。
+            src = self._read_bundle(project_id, target)
+            src_meta = next((v for v in self.versions(project_id) if v["rev"] == target), {})
+            note = "回滚到 rev %d（%s）" % (target, src_meta.get("author") or "同事")
+            res = self._publish(project_id, member_id, src, current + 1, note)
+        return {**res, "rolled_back_to": target}
 
     def _author_of(self, project_id: str, rev: int) -> str:
         with self._lock, self._conn() as conn:

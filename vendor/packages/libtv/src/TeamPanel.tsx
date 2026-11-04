@@ -57,8 +57,12 @@ import {
   setLocalRev,
   teamDiff,
   type TeamPairingInfo,
+  type TeamVersion,
+  teamRollback,
+  teamVersions,
 } from "./teamClient";
 import { backupBeforePull } from "./teamBackup";
+import { TeamVersions } from "./TeamVersions";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -113,6 +117,10 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [selected, setSelected] = useState<string>("");
   const [target, setTarget] = useState<string>("");
   const [note, setNote] = useState<string>("");
+  /** 展开历史版本的项目 id（空串=都收起）。 */
+  const [verFor, setVerFor] = useState<string>("");
+  const [vers, setVers] = useState<TeamVersion[]>([]);
+  const [verLoading, setVerLoading] = useState<boolean>(false);
   const [busy, setBusy] = useState<string>("");
   const [line, setLine] = useState<{ kind: "ok" | "err" | "info"; text: string }>({ kind: "info", text: "" });
   const [assets, setAssets] = useState<TeamAsset[]>([]);
@@ -564,7 +572,11 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     setBusy("push");
     try {
       const prep = await prepareTeamBundle(projectId);
-      const res = await teamPush(projectId, prep.bundle, p.rev, note || "更新画布");
+      // base_rev 优先用「我本地这份是基于哪一版」：项目列表里的 rev 是刷新那一刻的，
+      // 中间别人提交过它也不会变 —— 拿它当 base 会把别人的版本闷着盖掉。
+      // 有本地锚点就按锚点判冲突；没有（从没拉过）才退回列表里的 rev。
+      const baseRev = localRevOf(projectId) || p.rev;
+      const res = await teamPush(projectId, prep.bundle, baseRev, note || "更新画布");
       setLocalRev(projectId, res.rev);
       await refreshTeam();
       const tail = prep.warnings.length ? `；注意：${prep.warnings.join("；")}` : "";
@@ -657,6 +669,75 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       say(keep.ok ? "ok" : "info", `已拉取「${p.name}」rev ${data.rev}${saved}${lock}`);
       await refreshTeam();
       await offerTimelineImport(fixed);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /** 展开/收起某个项目的历史版本；展开时现拉一次（不留旧缓存，免得看到的 rev 是过期的）。 */
+  const openVersions = async (projectId: string) => {
+    if (verFor === projectId) {
+      setVerFor("");
+      return;
+    }
+    setVerFor(projectId);
+    setVers([]);
+    setVerLoading(true);
+    try {
+      setVers(await teamVersions(projectId));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setVerLoading(false);
+    }
+  };
+
+  /** 把历史上某一版拉到我本地（不动服务器）。覆盖前同样先另存一份。 */
+  const pullRev = async (projectId: string, rev: number, name: string) => {
+    if (!window.confirm(
+      `把「${name}」的 rev ${rev} 拉到你本地？\n\n` +
+      `只影响你这台机器，服务器上的版本一个都不会动。\n` +
+      `会覆盖当前画布 —— 覆盖前同样会先把现在的画布另存为一个本地工程。`,
+    )) return;
+    const keep = backupBeforePull();
+    if (!keep.ok && !window.confirm(
+      `另存一份失败：${keep.why}\n\n继续会覆盖当前画布，而且找不回来。仍要继续？`,
+    )) return;
+    setBusy("pull");
+    try {
+      const data = await teamPull(projectId, rev);
+      loadPulled(data.bundle, name);
+      // 锚点记成本地实际拿到的那一版：之后算差异、上传判冲突都以它为基准
+      setLocalRev(projectId, rev);
+      const saved = keep.skipped ? "" : keep.ok ? `；当前画布已另存为「${keep.name}」` : "；⚠️ 没能另存一份";
+      say("ok", `已把「${name}」rev ${rev} 拉到本地${saved}`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /**
+   * 让全组都变成历史上某一版。服务端记成**新的一版**（历史只增不删），
+   * 所以这句话必须在确认框里说清，否则没人敢按。
+   */
+  const rollbackTo = async (projectId: string, toRev: number, name: string, latestRev: number) => {
+    if (!window.confirm(
+      `让「${name}」全组回到 rev ${toRev}？\n\n` +
+      `· 同事现在看到的是 rev ${latestRev}，会被替换成 rev ${toRev} 的内容\n` +
+      `· **不会删掉任何历史版本** —— 服务端记成新的一版（rev ${latestRev + 1}），\n` +
+      `  后悔了还能再回滚回来\n` +
+      `· 想只影响自己、不动别人，请用旁边那个「拉这一版」`,
+    )) return;
+    setBusy("rollback");
+    try {
+      const r = await teamRollback(projectId, toRev, latestRev);
+      say("ok", `已回滚到 rev ${toRev}（记为新的一版 rev ${r.rev}，历史都还在）`);
+      await refreshTeam();
+      setVers(await teamVersions(projectId));
     } catch (e) {
       fail(e);
     } finally {
@@ -1015,12 +1096,19 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             <button type="button" onClick={() => void refreshTeam()}>刷新</button>
             <span className="sg-team-dim">上传=新建一个共享项目；别的项目用下方「上传到此」</span>
           </div>
+          {/* 备注框放在这里而不是「交接」那一行：它是**上传时的版本名**，
+              放在交接框里等于用户上传时根本看不见它，「版本命名」就成了黑箱。 */}
+          <div className="sg-team-row">
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+                   placeholder="版本备注（改了第 3 卡的字幕）—— 上传和交接都会带上" />
+          </div>
           {projects.length ? (
             <div className="sg-team-list">
               {projects.map((p) => {
                 const claimed = p.claimed_by && p.claim_expires_at > Date.now() / 1000;
                 return (
-                  <div key={p.project_id} className={`sg-team-item${selected === p.project_id ? " on" : ""}`}
+                  <div key={p.project_id} className="sg-team-proj">
+                  <div className={`sg-team-item${selected === p.project_id ? " on" : ""}`}
                        onClick={() => setSelected(p.project_id)}>
                     <div className="sg-team-item-main">
                       <b>{p.name}</b>
@@ -1030,9 +1118,22 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                     <div className="sg-team-item-actions">
                       <button type="button" onClick={(e) => { e.stopPropagation(); void pullFrom(p.project_id); }}>拉取</button>
                       <button type="button" onClick={(e) => { e.stopPropagation(); void pushTo(p.project_id); }}>上传到此</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void openVersions(p.project_id); }}>
+                        {verFor === p.project_id ? "收起历史" : "历史"}
+                      </button>
                       <button type="button" onClick={(e) => { e.stopPropagation(); void claim(p.project_id); }}>认领</button>
                       <button type="button" onClick={(e) => { e.stopPropagation(); void release(p.project_id); }}>释放</button>
                     </div>
+                  </div>
+                  {verFor === p.project_id ? (
+                    <TeamVersions
+                      versions={vers}
+                      loading={verLoading}
+                      latestRev={p.rev}
+                      onLoadRev={(rev) => void pullRev(p.project_id, rev, p.name)}
+                      onRollback={(rev) => void rollbackTo(p.project_id, rev, p.name, p.rev)}
+                    />
+                  ) : null}
                   </div>
                 );
               })}
@@ -1047,7 +1148,6 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="留言（第 3 卡我改好了）" />
               <button type="button" disabled={busy === "handoff"} onClick={() => void doHandoff(selectedProject.project_id)}>
                 交接
               </button>

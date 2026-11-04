@@ -386,13 +386,43 @@ export type TeamDiff = {
 };
 
 /** `from`/`to` 传 0 表示「不指定」：都传 0 服务端自动取最近两版。 */
-export function teamDiff(projectId: string, fromRev = 0, toRev = 0): Promise<TeamDiff> {
-  const qs: string[] = [];
+export function teamDiff(projectId: string, fromRev = 0, toRev = 0): Promise<TeamDiff> {  const qs: string[] = [];
   if (fromRev) qs.push("from=" + fromRev);
   if (toRev) qs.push("to=" + toRev);
   return teamCall(
     "/team/projects/" + encodeURIComponent(projectId) + "/diff" + (qs.length ? "?" + qs.join("&") : ""),
   );
+}
+
+// ── 历史版本与回滚 ──────────────────────────────────
+
+/** 一版的历史条目（服务端 `/versions` 原样下发）。 */
+export type TeamVersion = {
+  rev: number;
+  sha256: string;
+  bytes: number;
+  author: string;
+  message: string;
+  created_at: number;
+};
+
+export function teamVersions(projectId: string): Promise<TeamVersion[]> {
+  return teamCall<{ versions: TeamVersion[] }>(
+    "/team/projects/" + encodeURIComponent(projectId) + "/versions",
+  ).then((d) => (Array.isArray(d.versions) ? d.versions : []));
+}
+
+/**
+ * 回滚 = 把 `toRev` 的内容**重新提交成最新版**（历史只增不删）。
+ * `baseRev` 传当前看到的 rev：中途有人提交过就 Conflict，不会连他那一版一起盖掉。
+ */
+export function teamRollback(
+  projectId: string,
+  toRev: number,
+  baseRev = 0,
+): Promise<{ rev: number; rolled_back_to: number }> {
+  return teamCall("/team/projects/" + encodeURIComponent(projectId) + "/rollback",
+    { body: { to_rev: toRev, base_rev: baseRev } });
 }
 
 // ── 本地版本锚点 ────────────────────────────────────

@@ -159,3 +159,21 @@ body.sg-team-open .sg-pet { display: none; }
 .sg-team-preview a {
   font-size: 11.5px; color: #9ed0ff; text-decoration: underline; word-break: break-all;
 }
+
+/* 历史版本（0.3.48）：一版一行，动作按钮在右，长备注自然换行 */
+.sg-team-vers { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.sg-team-ver {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 7px 9px; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+.sg-team-ver-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sg-team-ver-now {
+  font-size: 10px; padding: 1px 5px; border-radius: 5px;
+  border: 1px solid rgba(120, 200, 140, 0.5); color: rgba(150, 220, 165, 0.95);
+}
+.sg-team-ver-note { font-size: 12px; line-height: 1.5; color: rgba(228, 232, 240, 0.82); word-break: break-word; }
+
+/* 项目行 + 它自己的历史版本（0.3.48）：历史必须贴在所属项目下面，不能混成一坨 */
+.sg-team-proj { display: flex; flex-direction: column; gap: 4px; }

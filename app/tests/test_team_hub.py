@@ -821,3 +821,58 @@ def test_pairing_columns_migrated_on_old_db(tmp_path):
     assert used["uses"] == 1 and used["exhausted"] is True and used["alive"] is False
     fresh = hub.pairing_info("222222")
     assert fresh["uses"] == 0 and fresh["max_uses"] == 1 and fresh["remaining"] == 1
+
+
+# ── 回滚：历史只增不删（2026-11-04 · 画布 0.3.48）──────────────────────
+
+def test_rollback_republishes_old_content_as_new_rev(hub):
+    """回滚 ＝ 又提交一版旧内容，不是把指针退回去（同事后来的工作不能被抹掉）。"""
+    a = hub.register_member("张三")
+    pid = hub.create_project("短剧A", a["member_id"], _bundle("v1"))["project_id"]
+    hub.push(pid, a["member_id"], _bundle("v2"), base_rev=1)      # rev → 2
+    res = hub.rollback(pid, a["member_id"], to_rev=1, base_rev=2)
+
+    assert res["rev"] == 3 and res["rolled_back_to"] == 1
+    got = hub.get_bundle(pid)
+    assert got["rev"] == 3
+    assert got["bundle"]["nodes"][0]["data"]["marker"] == "v1"     # 内容是旧的
+    # 🔴 rev 2 必须仍在：回滚不是删除，事后还要能回到「回滚前」
+    assert [v["rev"] for v in hub.versions(pid)] == [3, 2, 1]
+    assert hub.get_bundle(pid, 2)["bundle"]["nodes"][0]["data"]["marker"] == "v2"
+
+
+def test_rollback_note_says_where_it_came_from(hub):
+    a = hub.register_member("张三")
+    pid = hub.create_project("短剧A", a["member_id"], _bundle("v1"))["project_id"]
+    hub.push(pid, a["member_id"], _bundle("v2"), base_rev=1)
+    hub.rollback(pid, a["member_id"], to_rev=1, base_rev=2)
+    latest = hub.versions(pid)[0]
+    assert latest["rev"] == 3
+    assert "回滚到 rev 1" in latest["message"]
+    assert "张三" in latest["message"]        # 谁那一版，事后才查得到
+
+
+def test_rollback_rejects_latest_old_and_unknown_rev(hub):
+    a = hub.register_member("张三")
+    pid = hub.create_project("短剧A", a["member_id"], _bundle("v1"))["project_id"]
+    with pytest.raises(TeamError) as e_latest:
+        hub.rollback(pid, a["member_id"], to_rev=1)          # 它已经是最新
+    assert e_latest.value.code == "noop"
+    with pytest.raises(TeamError) as e_future:
+        hub.rollback(pid, a["member_id"], to_rev=9)
+    assert e_future.value.code == "not_found"
+    with pytest.raises(TeamError) as e_zero:
+        hub.rollback(pid, a["member_id"], to_rev=0)
+    assert e_zero.value.code == "not_found"
+
+
+def test_rollback_conflicts_when_someone_pushed_meanwhile(hub):
+    """看着旧界面回滚，会把同事刚提交的那一版顺手盖掉 ⇒ 必须 Conflict。"""
+    a = hub.register_member("张三")
+    b = hub.register_member("李四")
+    pid = hub.create_project("短剧A", a["member_id"], _bundle("v1"))["project_id"]
+    hub.push(pid, b["member_id"], _bundle("v2"), base_rev=1)      # rev → 2
+    with pytest.raises(ConflictError) as ei:
+        hub.rollback(pid, a["member_id"], to_rev=1, base_rev=1)   # 他以为还在 rev 1
+    assert ei.value.current_rev == 2
+    assert "李四" in ei.value.author

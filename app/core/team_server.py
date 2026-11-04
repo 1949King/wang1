@@ -681,6 +681,9 @@ function copyCode(){
                 res = hub.claim(pid, me["id"], int(data.get("ttl") or 600))
             elif action == "release":
                 res = hub.release(pid, me["id"])
+            elif action == "rollback":
+                res = hub.rollback(pid, me["id"], int(data.get("to_rev") or 0),
+                                   int(data.get("base_rev") or 0))
             elif action == "handoff":
                 res = hub.handoff(pid, me["id"], str(data.get("to") or ""),
                                   str(data.get("message") or ""))
