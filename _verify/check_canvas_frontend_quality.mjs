@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = path.resolve(process.argv[1], "../../vendor/packages/libtv/src");
+const ROOT = path.resolve(process.argv[1], "../../vendor/packages/canvas-core/src");
 const args = process.argv.slice(2);
 const AS_JSON = args.includes("--json");
 const TOP = (() => {

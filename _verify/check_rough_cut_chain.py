@@ -243,7 +243,7 @@ check("路由契约守卫登记：CLIENTS 含 hostRoughCut.ts",
       "hostRoughCut.ts" in routes_guard)
 
 # P0-1 Phase 2（2026-10-18）：tauri 侧 libtv 副本已删除，两宿主共用真源包，只扫一处。
-for repo in (os.path.join("vendor", "packages", "libtv", "src"),):
+for repo in (os.path.join("vendor", "packages", "canvas-core", "src"),):
     hr_src = _src(os.path.join(repo, "hostRoughCut.ts"))
     check(f"前端在册（{repo.split(os.sep)[1]}）：hostRoughCut 订阅判读 + 两端点",
           'rough_cut.review' in hr_src
@@ -255,7 +255,7 @@ for repo in (os.path.join("vendor", "packages", "libtv", "src"),):
           "confirmed:" not in hr_src
           and '"confirmed"' not in hr_src
           and "'confirmed'" not in hr_src)
-shell_src = _src(os.path.join("vendor", "packages", "libtv", "src", "CanvasShell.tsx"))
+shell_src = _src(os.path.join("vendor", "packages", "canvas-core", "src", "CanvasShell.tsx"))
 check("CanvasShell 挂载 RoughCutReviewDock（壳层常驻订阅）",
       "import RoughCutReviewDock" in shell_src and "<RoughCutReviewDock />" in shell_src)
 

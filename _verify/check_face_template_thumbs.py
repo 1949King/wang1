@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "vendor" / "shiguang-canvas" / "public" / "face-templates"
 MANIFEST = OUT_DIR / "manifest.json"
-TS_PATH = ROOT / "vendor" / "packages" / "libtv" / "src" / "faceTemplates.ts"
+TS_PATH = ROOT / "vendor" / "packages" / "canvas-core" / "src" / "faceTemplates.ts"
 W, H = 128, 160
 
 

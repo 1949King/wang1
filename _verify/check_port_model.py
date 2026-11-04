@@ -16,7 +16,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TS_REL = os.path.join("vendor", "packages", "libtv", "src", "ports.ts")
+TS_REL = os.path.join("vendor", "packages", "canvas-core", "src", "ports.ts")
 PY_REL = os.path.join("app", "core", "canvas_port_model.py")
 
 _fails = []

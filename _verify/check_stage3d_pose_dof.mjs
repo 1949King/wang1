@@ -23,8 +23,8 @@ import { GLTFLoader } from "../vendor/shiguang-canvas/node_modules/three/example
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GLB = pathResolve(HERE, "../vendor/shiguang-canvas/public/models/bodykun.glb");
-const SRC_TS = pathResolve(HERE, "../vendor/packages/libtv/src/stage3dPoseLibrary.ts");
-const SRC_RIG = pathResolve(HERE, "../vendor/packages/libtv/src/riggedHumanoid.ts");
+const SRC_TS = pathResolve(HERE, "../vendor/packages/canvas-core/src/stage3dPoseLibrary.ts");
+const SRC_RIG = pathResolve(HERE, "../vendor/packages/canvas-core/src/riggedHumanoid.ts");
 const DUMP = process.argv.includes("--dump");
 
 let pass = 0, fail = 0;

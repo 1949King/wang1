@@ -8,7 +8,7 @@ magneticStrength / getMagneticOffset 两个函数已删除。
 import os, re
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC = os.path.join(REPO, "vendor", "packages", "libtv", "src", "magnetic")
+SRC = os.path.join(REPO, "vendor", "packages", "canvas-core", "src", "magnetic")
 
 
 def read(name):

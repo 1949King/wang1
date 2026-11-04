@@ -18,7 +18,7 @@
 | 名称 | **拾光剪影** — 剪辑 + AI 生成的近乎全能工作台（PyQt6 桌面应用） |
 | 形态 | PyQt6 桌面壳 + WebEngine 内嵌 React 画布（本地单机应用） |
 | 主程序版本 | **V4.47.0**（`app/version.py`，2026-10-25） |
-| 画布版本 | **0.3.33**（`vendor/packages/libtv/src/canvasVersion.ts`，独立版本线，刻意不同步） |
+| 画布版本 | **0.3.33**（`vendor/packages/canvas-core/src/canvasVersion.ts`，独立版本线，刻意不同步） |
 | 生产代码规模 | Python ≈ **185,352 行**（app/ 481 个 .py，不含测试）+ 画布 TS/TSX **48,535 行** ≈ **23.4 万行** |
 | 测试/验证 | `app/tests` 18,477 行 + `_verify` 18,714 行 + `scripts` 4,533 行 |
 | Git | 1,598 个跟踪文件；最新提交 `3e10a445`；origin = `github.com/1949King/shiguangjianying`（仅本机，未 push） |
@@ -42,8 +42,8 @@
 |---|---|
 | UI 壳 | PyQt6（Fusion + 深/浅双主题 QSS，`theme_tokens.py` 57 keys 单一真相源） |
 | 视频处理 | FFmpeg / OpenCV / PyAV / MLT（**双内核**）；转场语义分层 exact（xfade-direct ≤4 LSB）vs bake（预览-导出对齐） |
-| 画布前端 | TypeScript + React 19 + Zustand + Three.js + @xyflow/react（真源 `vendor/packages/libtv/src`，宿主壳 `vendor/shiguang-canvas`，Vite 构建） |
-| 画布宿主 | 宿主 A：WebEngine 嵌入 Qt（默认 `engine=shiguang`）；宿主 B：独立 Tauri 进程（副库 `vendor/AI-Canvas-tauri/`，P0-1 后以 `@shiguang/libtv: workspace:*` 依赖包真源，`src/libtv/` 副本已删） |
+| 画布前端 | TypeScript + React 19 + Zustand + Three.js + @xyflow/react（真源 `vendor/packages/canvas-core/src`，宿主壳 `vendor/shiguang-canvas`，Vite 构建） |
+| 画布宿主 | 宿主 A：WebEngine 嵌入 Qt（默认 `engine=shiguang`）；宿主 B：独立 Tauri 进程（副库 `vendor/AI-Canvas-tauri/`，P0-1 后以 `@shiguang/canvas-core: workspace:*` 依赖包真源，`src/libtv/` 副本已删） |
 | AI | Ollama（本地）+ 多云 Provider（DeepSeek/OpenAI 等 15 类）；ComfyUI 生图；编辑器内 Agent / Skill / MCP 客户端（stdio+SSE） |
 | 音画 | 音画纠偏 ~280ms（冻结区不变量，勿压回） |
 

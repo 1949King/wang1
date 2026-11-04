@@ -76,9 +76,9 @@ logger = logging.getLogger(__name__)
 MAX_NODES = 24
 MAX_EDGES = 48
 
-# 前端真源（画布单一真源在 vendor/packages/libtv）
-_LIBTV_REL = os.path.join("vendor", "packages", "libtv", "src")
-_PALETTE_REL = os.path.join(_LIBTV_REL, "NodePalette.tsx")
+# 前端真源（画布单一真源在 vendor/packages/canvas-core）
+_CANVAS_CORE_REL = os.path.join("vendor", "packages", "canvas-core", "src")
+_PALETTE_REL = os.path.join(_CANVAS_CORE_REL, "NodePalette.tsx")
 
 _PALETTE_ROW_RE = re.compile(
     r'type:\s*"([A-Za-z][A-Za-z0-9_]*)"\s*,\s*label:\s*"([^"]*)"'

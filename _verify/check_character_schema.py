@@ -7,7 +7,7 @@
     ① app/modules/lego/character_management_module.py  CHARACTER_FIELD_SCHEMA
     ② app/core/canvas_bridge.py                        build_character_prompt（仅 visual 组）
     ③ app/core/canvas_server.py + canvas_routes_get.py /host/characters（按 schema 派生 + 下发 prompt；A4 后端点在 _routes_get）
-    ④ vendor/packages/libtv/src/stores/node-factory.ts
+    ④ vendor/packages/canvas-core/src/stores/node-factory.ts
     ⑤ vendor/AI-Canvas-tauri/src/libtv/stores/node-factory.ts
     ⑥ 两个 store.ts 的「角色设定块 → prompt」拼装（必须消费 ③ 下发的 prompt）
     ⑦ character_management_module.py 的 HUMAN_VARIANT_OPTIONS ↔ 画布 riggedHumanoid.ts 的
@@ -51,11 +51,11 @@ SERVER = os.path.join(ROOT, "app", "core", "canvas_server.py")
 SERVER_ROUTES = os.path.join(ROOT, "app", "core", "canvas_routes_get.py")
 # P0-1 Phase 2（2026-10-18）：tauri 侧 libtv 副本已删除，两宿主共用真源包，只扫一处。
 FRONTENDS = [
-    os.path.join(ROOT, "vendor", "packages", "libtv", "src", "stores", "node-factory.ts"),
+    os.path.join(ROOT, "vendor", "packages", "canvas-core", "src", "stores", "node-factory.ts"),
 ]
 # ⑥ 画布提示词拼装（真源包，web/tauri 双宿主共用）
 STORES = [
-    os.path.join(ROOT, "vendor", "packages", "libtv", "src", "store.ts"),
+    os.path.join(ROOT, "vendor", "packages", "canvas-core", "src", "store.ts"),
 ]
 
 problems: list[str] = []
@@ -159,9 +159,9 @@ def main() -> int:
     # 查不到预设、**静默退回兜底推断**（角色库明明选了「儿童」，导演台给个成年男体，不报错）。
     variants = _literal("HUMAN_VARIANT_OPTIONS")
     py_values = [v for v, _label in variants]
-    rigged = os.path.join(ROOT, "vendor", "packages", "libtv", "src", "riggedHumanoid.ts")
+    rigged = os.path.join(ROOT, "vendor", "packages", "canvas-core", "src", "riggedHumanoid.ts")
     if not os.path.isfile(rigged):
-        problems.append("vendor/packages/libtv/src/riggedHumanoid.ts 缺失，无法校验体型预设镜像")
+        problems.append("vendor/packages/canvas-core/src/riggedHumanoid.ts 缺失，无法校验体型预设镜像")
     else:
         m = re.search(r"export const HUMAN_PRESETS[^\n]*\{(.*?)\n\};", read(rigged), re.S)
         if not m:

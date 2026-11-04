@@ -3,7 +3,7 @@
 
 背景：
   旧版守卫比对「主库 shiguang-canvas ↔ 副库 AI-Canvas-tauri/src/libtv 副本」的
-  MD5 漂移。P0-1 抽包后画布真源唯一存在于 vendor/packages/libtv（@shiguang/libtv），
+  MD5 漂移。P0-1 抽包后画布真源唯一存在于 vendor/packages/canvas-core（@shiguang/canvas-core），
   两宿主以 workspace 依赖引用、副本已删除 ⇒ 比对对象不复存在，守卫升级为
   「防止副本以任何形式复活」+「接线在册」+「全量构建门禁」。
 
@@ -13,9 +13,9 @@
       - 宿主 src 下任何 .ts/.tsx 与包内 src 文件**字节一致**（散落的复制粘贴）⇒ FAIL
         （vite-env.d.ts 属宿主壳标配，白名单放行）。
   [2] 接线在册：
-      - 两宿主 package.json 必须依赖 "@shiguang/libtv": "workspace:*"；
+      - 两宿主 package.json 必须依赖 "@shiguang/canvas-core": "workspace:*"；
       - 宿主源码不得再出现 './libtv/ 或 '../libtv/ 相对导入；
-      - pnpm-workspace.yaml members 必须含 packages/libtv + shiguang-canvas + AI-Canvas-tauri。
+      - pnpm-workspace.yaml members 必须含 packages/canvas-core + shiguang-canvas + AI-Canvas-tauri。
   [3] 全量构建门禁（默认跑，--no-build 跳过）：
       - web 宿主 pnpm --filter shiguang-canvas run build；
       - tauri 宿主 pnpm --filter AI-Canvas-tauri exec vite build
@@ -40,15 +40,15 @@ import sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PKG_SRC_REL = os.path.join("vendor", "packages", "libtv", "src")
+PKG_SRC_REL = os.path.join("vendor", "packages", "canvas-core", "src")
 HOSTS = {
     "shiguang-canvas": os.path.join("vendor", "shiguang-canvas"),
     "AI-Canvas-tauri": os.path.join("vendor", "AI-Canvas-tauri"),
 }
 # 宿主壳标配文件：与包内容撞车不算「副本复活」
 FINGERPRINT_ALLOW = {"vite-env.d.ts"}
-# 相对导入 libtv 副本路径（真源只允许经 @shiguang/libtv 包名引用）
-REL_LIBTV_IMPORT_RE = re.compile(r"""from\s+["']\.\.?/[^"']*libtv/""")
+# 相对导入 libtv 副本路径（真源只允许经 @shiguang/canvas-core 包名引用）
+REL_CANVAS_CORE_IMPORT_RE = re.compile(r"""from\s+["']\.\.?/[^"']*libtv/""")
 
 
 def _walk_ts(root: str) -> dict:
@@ -81,8 +81,8 @@ def _check_no_copies(failures: list) -> None:
 
     for host, host_rel in HOSTS.items():
         # 目录级：src/libtv 不得复活
-        sub_libtv = os.path.join(ROOT, host_rel, "src", "libtv")
-        if os.path.isdir(sub_libtv):
+        sub_canvas_core = os.path.join(ROOT, host_rel, "src", "canvas-core")
+        if os.path.isdir(sub_canvas_core):
             failures.append(f"{host}: src/libtv/ 副本目录复活（P0-1 已抽包，禁止宿主持有副本）")
             print(f"  ✗ {host}: src/libtv/ 目录存在")
             continue
@@ -110,11 +110,11 @@ def _check_wiring(failures: list) -> None:
             failures.append(f"{host}: package.json 缺失")
             continue
         deps = json.load(open(pj, encoding="utf-8")).get("dependencies", {})
-        if deps.get("@shiguang/libtv") != "workspace:*":
-            failures.append(f'{host}: 未依赖 "@shiguang/libtv": "workspace:*"（实到 {deps.get("@shiguang/libtv")}）')
+        if deps.get("@shiguang/canvas-core") != "workspace:*":
+            failures.append(f'{host}: 未依赖 "@shiguang/canvas-core": "workspace:*"（实到 {deps.get("@shiguang/canvas-core")}）')
             print(f"  ✗ {host}: 包依赖接线缺失")
         else:
-            print(f"  ✓ {host}: @shiguang/libtv workspace:* 在册")
+            print(f"  ✓ {host}: @shiguang/canvas-core workspace:* 在册")
 
     for host, host_rel in HOSTS.items():
         src_dir = os.path.join(ROOT, host_rel, "src")
@@ -122,8 +122,8 @@ def _check_wiring(failures: list) -> None:
             continue
         for rel, p in sorted(_walk_ts(src_dir).items()):
             body = open(p, encoding="utf-8", errors="replace").read()
-            if REL_LIBTV_IMPORT_RE.search(body):
-                failures.append(f"{host}: {rel} 仍用相对路径导入 libtv 副本（应改 @shiguang/libtv/*）")
+            if REL_CANVAS_CORE_IMPORT_RE.search(body):
+                failures.append(f"{host}: {rel} 仍用相对路径导入 libtv 副本（应改 @shiguang/canvas-core/*）")
                 print(f"  ✗ {host}: {rel} 相对导入 libtv/")
 
     ws = os.path.join(ROOT, "vendor", "pnpm-workspace.yaml")
@@ -131,7 +131,7 @@ def _check_wiring(failures: list) -> None:
         failures.append("vendor/pnpm-workspace.yaml 不存在")
     else:
         body = open(ws, encoding="utf-8").read()
-        for member in ("packages/libtv", "shiguang-canvas", "AI-Canvas-tauri"):
+        for member in ("packages/canvas-core", "shiguang-canvas", "AI-Canvas-tauri"):
             if member not in body:
                 failures.append(f"pnpm-workspace.yaml members 缺 {member}")
             else:

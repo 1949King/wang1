@@ -24,12 +24,12 @@ def main() -> int:
     routes = _read("app/core/canvas_routes_code_video.py")
     jobs = _read("app/core/canvas_code_video_jobs.py")
     render_host = _read("app/core/code_video/render_host.py")
-    client = _read("vendor/packages/libtv/src/codeVideoClient.ts")
-    node = _read("vendor/packages/libtv/src/codeVideoNode.tsx")
-    register = _read("vendor/packages/libtv/src/registerBuiltinNodes.ts")
-    palette = _read("vendor/packages/libtv/src/NodePalette.tsx")
-    ports = _read("vendor/packages/libtv/src/ports.ts")
-    novice = _read("vendor/packages/libtv/src/novice/types.ts")
+    client = _read("vendor/packages/canvas-core/src/codeVideoClient.ts")
+    node = _read("vendor/packages/canvas-core/src/codeVideoNode.tsx")
+    register = _read("vendor/packages/canvas-core/src/registerBuiltinNodes.ts")
+    palette = _read("vendor/packages/canvas-core/src/NodePalette.tsx")
+    ports = _read("vendor/packages/canvas-core/src/ports.ts")
+    novice = _read("vendor/packages/canvas-core/src/novice/types.ts")
     caps = _read("app/core/capability_handlers_code_video.py")
 
     # 1. 后端端点 + mixin 继承

@@ -18,8 +18,8 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP = os.path.join("vendor", "packages", "libtv", "src", "App.tsx")
-OVERLAYS = os.path.join("vendor", "packages", "libtv", "src", "CanvasOverlays.tsx")
+APP = os.path.join("vendor", "packages", "canvas-core", "src", "App.tsx")
+OVERLAYS = os.path.join("vendor", "packages", "canvas-core", "src", "CanvasOverlays.tsx")
 
 _fails = []
 
@@ -49,11 +49,11 @@ def check_wiring() -> None:
         if probe not in ov:
             _fail(f"① CanvasOverlays 缺 {probe}")
     # V4.41.15 起浮层入口收进底部「⚡工具」横向工具板（旧 ov-bar 四胶囊退役）
-    dock = _read(os.path.join("vendor", "packages", "libtv", "src", "LibTvChrome.tsx"))
+    dock = _read(os.path.join("vendor", "packages", "canvas-core", "src", "LibTvChrome.tsx"))
     for probe in ("输出历史", "灯位", "导演指导", "上游引用", "useToolboxStore"):
         if probe not in dock:
             _fail(f"① LibTvChrome 工具板缺入口：{probe}")
-    store = _read(os.path.join("vendor", "packages", "libtv", "src", "toolboxStore.ts"))
+    store = _read(os.path.join("vendor", "packages", "canvas-core", "src", "toolboxStore.ts"))
     for probe in ("historyOpen", "lightingOpen", "directorOpen", "upstreamRefs", "zustand"):
         if probe not in store:
             _fail(f"① toolboxStore 缺 {probe}")
@@ -61,7 +61,7 @@ def check_wiring() -> None:
 
 def check_upstream_refs_module() -> None:
     """连线上游引用：必须存在真实引用通道 + 默认关（不在用户没同意时改节点）。"""
-    src = _read(os.path.join("vendor", "packages", "libtv", "src", "upstreamRefs.ts"))
+    src = _read(os.path.join("vendor", "packages", "canvas-core", "src", "upstreamRefs.ts"))
     if not src:
         return
     for probe in ("firstFrameUrl", "REF_MARK", "enabled: false"):

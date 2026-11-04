@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FRAMES_DIR = ROOT / "vendor" / "shiguang-canvas" / "public" / "mascot"
-MANIFEST = ROOT / "vendor" / "packages" / "libtv" / "src" / "mascot" / "mascotFrames.ts"
+MANIFEST = ROOT / "vendor" / "packages" / "canvas-core" / "src" / "mascot" / "mascotFrames.ts"
 CARD = ROOT / "assets" / "mascot" / "shilan-主形象卡-v3-成年比例.png"
 
 CANVAS = (316, 480)

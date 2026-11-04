@@ -28,7 +28,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TS_PATH = os.path.join(ROOT, "vendor", "packages", "libtv", "src", "faceParams.ts")
+TS_PATH = os.path.join(ROOT, "vendor", "packages", "canvas-core", "src", "faceParams.ts")
 PY_PATH = os.path.join(ROOT, "app", "core", "canvas_bridge.py")
 
 # 已知存量漂移（解冻 canvas_bridge.py 补全后逐项下调；清空后守卫转防回归硬绿）

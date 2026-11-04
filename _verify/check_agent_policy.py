@@ -23,8 +23,8 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GET_PY = os.path.join("app", "core", "canvas_routes_get.py")
-POLICY_TS = os.path.join("vendor", "packages", "libtv", "src", "agentPolicy.ts")
-APP_TSX = os.path.join("vendor", "packages", "libtv", "src", "App.tsx")
+POLICY_TS = os.path.join("vendor", "packages", "canvas-core", "src", "agentPolicy.ts")
+APP_TSX = os.path.join("vendor", "packages", "canvas-core", "src", "App.tsx")
 
 _fails = []
 

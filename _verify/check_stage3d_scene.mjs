@@ -1,5 +1,5 @@
 // 3D 导演台 · 场景快照（Stage3D 配套辅助）自检
-// 源：vendor/packages/libtv/src/stage3dScene.ts
+// 源：vendor/packages/canvas-core/src/stage3dScene.ts
 //
 // ⚠️ 本文件是 stage3dScene.ts 的**纯函数副本**快照（无 React / 无 three.js）。
 // 改源时务必同步本文件。下面用 `@source:` 标记关键函数。
@@ -152,7 +152,7 @@ check("diff bgColorChanged=false（未改）", d.bgColorChanged === false, d);
 
 // ── 源硬值校验（防副本漂移） ──
 const { readFileSync } = await import("node:fs");
-const SRC = readFileSync("vendor/packages/libtv/src/stage3dScene.ts", "utf-8");
+const SRC = readFileSync("vendor/packages/canvas-core/src/stage3dScene.ts", "utf-8");
 check("源 schemaVersion=1", /schemaVersion:\s*1/.test(SRC), "改了 schemaVersion 请同步测试");
 check("源有 sceneToJSON", /export function sceneToJSON/.test(SRC), "sceneToJSON 不在源里");
 check("源有 sceneStateFromJSON", /export function sceneStateFromJSON/.test(SRC), "sceneStateFromJSON 不在源里");

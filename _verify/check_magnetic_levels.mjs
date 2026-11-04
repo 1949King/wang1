@@ -13,8 +13,8 @@
 // 并补「源里不得再出现 magneticStrength / getMagneticOffset」的负向守卫。
 //
 // 源文件：
-//   - vendor/packages/libtv/src/magnetic/magneticLevels.ts
-//   - vendor/packages/libtv/src/magnetic/MagneticEngine.ts
+//   - vendor/packages/canvas-core/src/magnetic/magneticLevels.ts
+//   - vendor/packages/canvas-core/src/magnetic/MagneticEngine.ts
 
 // @source: magneticLevels.ts
 const NONE = {
@@ -118,7 +118,7 @@ check("gap=0 → instant（贴合）", levelByGap(0, cfg) === "instant", levelBy
 // ── 源硬值校验（防副本漂移） ──────────────────────────────────
 const { readFileSync } = await import("node:fs");
 const LEVELS_SRC = readFileSync(
-  "vendor/packages/libtv/src/magnetic/magneticLevels.ts",
+  "vendor/packages/canvas-core/src/magnetic/magneticLevels.ts",
   "utf-8",
 );
 // 5 个等级的 strength / rank 字面量必须与源一致（用带逗号的字面量避免 0 误匹配 0.12）
@@ -133,7 +133,7 @@ for (const [name, lit] of Object.entries(RANKS)) {
 
 // 负向守卫：MagneticEngine 不得再出现 magneticStrength / getMagneticOffset（渐进吸引已废除）
 const ENGINE_SRC = readFileSync(
-  "vendor/packages/libtv/src/magnetic/MagneticEngine.ts",
+  "vendor/packages/canvas-core/src/magnetic/MagneticEngine.ts",
   "utf-8",
 );
 check("源已删除 magneticStrength", !/magneticStrength/.test(ENGINE_SRC), "仍存在 magneticStrength");

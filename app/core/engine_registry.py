@@ -325,9 +325,9 @@ ENGINES: Tuple[EngineSpec, ...] = (
 
     # ── 族 9 · 画布侧 ──────────────────────────────────────────────
     _e(id="canvas.magnetic", family="canvas", capability="canvas",
-       module="vendor/packages/libtv/src/magnetic/MagneticEngine.ts", role=ROLE_PRIMARY),
+       module="vendor/packages/canvas-core/src/magnetic/MagneticEngine.ts", role=ROLE_PRIMARY),
     _e(id="canvas.stack", family="canvas", capability="canvas",
-       module="vendor/packages/libtv/src", role=ROLE_PRIMARY,
+       module="vendor/packages/canvas-core/src", role=ROLE_PRIMARY,
        note="React19+xyflow12+three0.185+zustand5（技术栈形态，无单文件）"),
 )
 

@@ -37,7 +37,7 @@ sys.path.insert(0, ROOT)
 
 ROUTES_PY = os.path.join(ROOT, "app", "core", "canvas_routes_post.py")
 SERVER_PY = os.path.join(ROOT, "app", "core", "canvas_server.py")
-APP_TSX = os.path.join(ROOT, "vendor", "packages", "libtv", "src", "App.tsx")
+APP_TSX = os.path.join(ROOT, "vendor", "packages", "canvas-core", "src", "App.tsx")
 
 # kind → (同步端点方法名, 异步 callable 名)
 KIND_SYNC_ASYNC = {

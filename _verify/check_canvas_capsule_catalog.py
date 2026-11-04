@@ -22,10 +22,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-LIBTV = os.path.join(ROOT, "vendor", "packages", "libtv", "src")
-CAPSULE_TS = os.path.join(LIBTV, "intentCapsuleCatalog.ts")
-SPEC_TS = os.path.join(LIBTV, "codeVideoSpec.ts")
-PORTS_TS = os.path.join(LIBTV, "ports.ts")
+CANVAS_CORE = os.path.join(ROOT, "vendor", "packages", "canvas-core", "src")
+CAPSULE_TS = os.path.join(CANVAS_CORE, "intentCapsuleCatalog.ts")
+SPEC_TS = os.path.join(CANVAS_CORE, "codeVideoSpec.ts")
+PORTS_TS = os.path.join(CANVAS_CORE, "ports.ts")
 
 _failures: list = []
 

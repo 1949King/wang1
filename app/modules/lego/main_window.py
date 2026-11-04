@@ -1588,7 +1588,7 @@ class MainWindow(QMainWindow):
         """顶栏「👥 团队」—— 切到 AI 画布并弹出它的团队协调面板。
 
         为什么不是「弹一个 Qt 原生团队面板」：团队面板（本机服务 / 连别人 / 共享项目 /
-        交接 / 收件箱）已经完整实现在画布里（`vendor/packages/libtv/src/TeamPanel.tsx`），
+        交接 / 收件箱）已经完整实现在画布里（`vendor/packages/canvas-core/src/TeamPanel.tsx`），
         再写一套 = 两套状态机抢同一个 team hub，必然一边新一边旧。这里只做「跳转 + 唤起」。
 
         为什么必须走 `_perform_module_load` 而不是 `switch_to_module`：后者只认导航栏里的
