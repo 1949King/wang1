@@ -312,10 +312,19 @@ export function teamListProjects(): Promise<TeamProject[]> {
     Array.isArray(d.projects) ? d.projects : []);
 }
 
-export function teamMembers(): Promise<Array<{ id: string; name: string; role: string }>> {
-  return teamCall<{ members: Array<{ id: string; name: string; role: string }> }>("/team/members")
+/** 成员列表。`last_seen` 是「最后一次活跃」的秒级时间戳（老服务端没有 ⇒ undefined）。 */
+export function teamMembers(): Promise<TeamMember[]> {
+  return teamCall<{ members: TeamMember[] }>("/team/members")
     .then((d) => (Array.isArray(d.members) ? d.members : []));
 }
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  role: string;
+  /** 最后一次活跃（秒）。0/undefined = 从来没动过（老库补列后就是这样）。 */
+  last_seen?: number;
+};
 
 export function teamCreateProject(name: string, bundle: unknown): Promise<{ project_id: string; rev: number }> {
   return teamCall("/team/projects", { body: { name, bundle } });

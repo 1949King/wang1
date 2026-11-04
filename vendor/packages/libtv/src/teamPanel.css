@@ -189,3 +189,13 @@ body.sg-team-open .sg-pet { display: none; }
   border-color: rgba(120, 170, 255, 0.65); background: rgba(120, 170, 255, 0.16);
   color: #eaf1ff;
 }
+
+/* 连接状态与成员在线（0.3.50） */
+.sg-team-linkbad { color: rgba(255, 150, 150, 0.95); font-size: 11.5px; }
+.sg-team-people { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; }
+.sg-team-who { font-size: 11px; color: rgba(210, 216, 226, 0.6); }
+.sg-team-who::before {
+  content: "○"; margin-right: 4px; font-size: 9px; color: rgba(255, 255, 255, 0.32);
+}
+.sg-team-who.on { color: rgba(228, 232, 240, 0.92); }
+.sg-team-who.on::before { content: "●"; color: rgba(126, 214, 146, 0.95); }

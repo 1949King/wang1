@@ -64,6 +64,7 @@ import {
 import { backupBeforePull } from "./teamBackup";
 import { TeamVersions } from "./TeamVersions";
 import { assetCounts, emptyAssetHint, filterAssets, kindLabel, type AssetKindFilter } from "./assetFilter";
+import { isOnline, linkText, onlineCount, seenText } from "./teamPresence";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -82,7 +83,7 @@ import { copyText } from "./teamClipboard";
 import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
 import "./teamPanel.css";
 
-type Member = { id: string; name: string; role: string };
+type Member = { id: string; name: string; role: string; last_seen?: number };
 
 /** 拉下来的 bundle 里我们关心的字段（其余原样不带，避免把未知结构塞回 store）。 */
 type PulledBundle = {
@@ -123,6 +124,10 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [vers, setVers] = useState<TeamVersion[]>([]);
   const [verLoading, setVerLoading] = useState<boolean>(false);
   const [busy, setBusy] = useState<string>("");
+  /** 心跳结论："" = 还没探过（不谎报），ok = 通，down = 断了。 */
+  const [link, setLink] = useState<"ok" | "down" | "">("");
+  /** 「现在」的秒级时间戳，跟着心跳往前走 —— 在线状态要靠它算「几分钟前」。 */
+  const [nowSec, setNowSec] = useState<number>(() => Date.now() / 1000);
   const [line, setLine] = useState<{ kind: "ok" | "err" | "info"; text: string }>({ kind: "info", text: "" });
   const [assets, setAssets] = useState<TeamAsset[]>([]);
   /** ⑤ 段素材的类型筛选（全部/视频/图片/音频/其他）。 */
@@ -446,6 +451,64 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       window.clearInterval(timer);
     };
   }, [pairCode, pairLive]);
+
+  /**
+   * 心跳：确认「服务器还在不在」，顺手把成员在线状态刷新一次。
+   *
+   * 为什么必须有一条：所有请求都只在**你点按钮时**才发。空闲时服务器被关掉、网线松了、
+   * 笔记本换了 Wi-Fi，面板一个字都不变 —— 你以为还连着，改完点上传才发现白改。
+   * 这里用一次轻请求（成员列表）同时当心跳和 presence 刷新，不另造机制。
+   *
+   * `loud=false` 时不弹错误：掉线每 12 秒弹一次提示等于骚扰，红字常驻就够。
+   */
+  const beat = async (loud = false): Promise<boolean> => {
+    if (!teamCred()) return false;
+    try {
+      const list = await teamMembers();
+      setMembers(list);
+      setNowSec(Date.now() / 1000);
+      setLink("ok");
+      if (loud) say("ok", `连接正常 —— 团队 ${list.length} 人`);
+      return true;
+    } catch (e) {
+      setLink("down");
+      setNowSec(Date.now() / 1000);
+      if (loud) fail(e);
+      return false;
+    }
+  };
+  const beatRef = useRef(beat);
+  beatRef.current = beat;
+
+  useEffect(() => {
+    if (!cred) {
+      setLink("");
+      return;
+    }
+    let stop = false;
+    // 名字别叫 tick：上面出码轮询里已经有一个 tick，重名会被质量棘轮记一笔
+    const pulse = () => {
+      if (stop) return;
+      // 出码那 2 分钟里配对轮询本来就在刷成员，别再叠一层心跳
+      if (pairCode && pairLive) return;
+      void beatRef.current();
+    };
+    void pulse();
+    const timer = window.setInterval(pulse, 12000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [cred, pairCode, pairLive]);
+
+  const probeLink = async () => {
+    setBusy("ping");
+    try {
+      await beat(true);
+    } finally {
+      setBusy("");
+    }
+  };
 
   /**
    * 主机侧：出一张配对码给身边的同事。
@@ -1094,6 +1157,28 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             </button>
           ) : null}
         </div>
+        {/* 连接状态与「谁还在」：挂在 ② 段末尾，不另开一段（信息架构不动） */}
+        {cred ? (
+          <>
+            <div className="sg-team-row">
+              <span className={link === "down" ? "sg-team-linkbad" : "sg-team-dim"}>
+                {linkText(link, members.length, onlineCount(members, nowSec))}
+              </span>
+              <button type="button" disabled={busy === "ping"} onClick={() => void probeLink()}>
+                {busy === "ping" ? "检查中…" : link === "down" ? "重新连" : "检查连接"}
+              </button>
+            </div>
+            {members.length ? (
+              <div className="sg-team-people">
+                {members.map((m) => (
+                  <span key={m.id} className={`sg-team-who${isOnline(m.last_seen, nowSec) ? " on" : ""}`}>
+                    {m.name}{m.id === cred.member_id ? "（我）" : ""} · {seenText(m.last_seen, nowSec)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </section>
 
       {/* 3. 项目 */}

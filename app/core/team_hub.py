@@ -65,6 +65,10 @@ DEFAULT_CLAIM_TTL = 600
 #: 真正的权限矩阵是后续一刀，别把这里的出现当成「已经有权限控制了」。
 OWNER_ROLE = "owner"
 
+#: 「最后一次活跃」的刷新节流（秒）。面板每 2 秒轮询多个端点，逐次写库没必要；
+#: 20 秒粒度足够回答「他还在不在」，也不至于让一条空闲连接显示成掉线。
+SEEN_THROTTLE = 20.0
+
 #: 配对码有效期（秒）。**2 分钟**是刻意选的：念一串 6 位数给对方、对方输完，
 #: 通常 15~30 秒；给太长等于给暴力枚举留窗口，给太短会当场过期。
 PAIR_TTL = 120
@@ -270,7 +274,8 @@ class Hub:
                     name TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'editor',
                     token_hash TEXT NOT NULL,
-                    created_at REAL NOT NULL
+                    created_at REAL NOT NULL,
+                    last_seen REAL NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS project (
                     id TEXT PRIMARY KEY,
@@ -332,6 +337,7 @@ class Hub:
             )
             self._migrate_asset_columns(conn)
             self._migrate_pairing_columns(conn)
+            self._migrate_member_columns(conn)
 
     @staticmethod
     def _migrate_pairing_columns(conn: sqlite3.Connection) -> None:
@@ -368,6 +374,17 @@ class Hub:
         if "poster" not in cols:
             conn.execute("ALTER TABLE asset ADD COLUMN poster TEXT NOT NULL DEFAULT ''")
 
+    @staticmethod
+    def _migrate_member_columns(conn: sqlite3.Connection) -> None:
+        """给 `member` 补 `last_seen`（幂等）。
+
+        老库补完是 0 而不是「现在」—— 那些成员最后一次动是什么时候我们确实不知道，
+        写个 now 出来会让所有人一升级就显示成「在线」，那是编的。
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(member)").fetchall()}
+        if "last_seen" not in cols:
+            conn.execute("ALTER TABLE member ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
+
     # ── 成员 ────────────────────────────────────────────
     def register_member(self, name: str, role: str = "editor", member_id: str = "") -> Dict[str, Any]:
         """登记成员并返回**明文令牌**（只此一次，库里存哈希）。
@@ -382,9 +399,11 @@ class Hub:
         token = secrets.token_urlsafe(32)
         mid = str(member_id or "").strip() or ("m_" + secrets.token_hex(8))
         with self._lock, self._conn() as conn:
+            now = _now()
             conn.execute(
-                "INSERT INTO member (id, name, role, token_hash, created_at) VALUES (?,?,?,?,?)",
-                (mid, clean, str(role or "editor")[:32], _token_hash(token), _now()),
+                "INSERT INTO member (id, name, role, token_hash, created_at, last_seen)"
+                " VALUES (?,?,?,?,?,?)",
+                (mid, clean, str(role or "editor")[:32], _token_hash(token), now, now),
             )
         return {"member_id": mid, "name": clean, "role": role, "token": token}
 
@@ -393,13 +412,23 @@ class Hub:
             return None
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT id, name, role FROM member WHERE token_hash = ?", (_token_hash(token),)
+                "SELECT id, name, role, last_seen FROM member WHERE token_hash = ?", (_token_hash(token),)
             ).fetchone()
-        return dict(row) if row else None
+            if not row:
+                return None
+            # 「谁还在」只能靠请求痕迹推：面板每 2 秒轮询好几个端点，每来一次就写一次库
+            # 没必要，所以按 SEEN_THROTTLE 节流。返回值不带 last_seen（调用方要的是身份，
+            # 不是活跃时间；要给前端看的走 members()）。
+            now = _now()
+            if now - float(row["last_seen"] or 0.0) >= SEEN_THROTTLE:
+                conn.execute("UPDATE member SET last_seen = ? WHERE id = ?", (now, row["id"]))
+        return {"id": row["id"], "name": row["name"], "role": row["role"]}
 
     def members(self) -> List[Dict[str, Any]]:
         with self._lock, self._conn() as conn:
-            rows = conn.execute("SELECT id, name, role, created_at FROM member ORDER BY created_at").fetchall()
+            rows = conn.execute(
+                "SELECT id, name, role, created_at, last_seen FROM member ORDER BY created_at"
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def member_by_role(self, role: str) -> Optional[Dict[str, Any]]:

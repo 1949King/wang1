@@ -876,3 +876,58 @@ def test_rollback_conflicts_when_someone_pushed_meanwhile(hub):
         hub.rollback(pid, a["member_id"], to_rev=1, base_rev=1)   # 他以为还在 rev 1
     assert ei.value.current_rev == 2
     assert "李四" in ei.value.author
+
+
+# ── 在线状态：last_seen（2026-11-04 · 画布 0.3.50）────────────────────
+
+def test_new_member_is_immediately_seen(hub):
+    """刚加入的人当然算「刚活跃」——否则面板会把新同事显示成「没上线过」。"""
+    m = hub.register_member("张三")
+    row = next(x for x in hub.members() if x["id"] == m["member_id"])
+    assert row["last_seen"] > 0
+
+
+def test_auth_refreshes_last_seen_but_is_throttled(hub, monkeypatch):
+    """每次请求都写库没必要；但超过节流窗口必须刷新，否则「在线」永远不动。"""
+    import app.core.team_hub as th
+
+    m = hub.register_member("张三")
+    base = hub.members()[0]["last_seen"]
+
+    monkeypatch.setattr(th, "_now", lambda: base + 5)          # 窗口内
+    hub.auth(m["token"])
+    assert hub.members()[0]["last_seen"] == base               # 不该写
+
+    monkeypatch.setattr(th, "_now", lambda: base + 60)         # 超窗口
+    hub.auth(m["token"])
+    assert hub.members()[0]["last_seen"] == base + 60
+
+
+def test_auth_with_bad_token_does_not_touch_anything(hub):
+    m = hub.register_member("张三")
+    before = hub.members()[0]["last_seen"]
+    assert hub.auth("not-a-token") is None
+    assert hub.members()[0]["last_seen"] == before
+
+
+def test_member_last_seen_column_migrated_on_old_db(tmp_path):
+    """老库补列取 0 而不是「现在」：升级瞬间全员显示「在线」是编的。"""
+    import sqlite3
+
+    db = tmp_path / "team" / "team.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE member (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'editor', token_hash TEXT NOT NULL,
+            created_at REAL NOT NULL);
+        INSERT INTO member VALUES ('m_1','张三','editor','x',1e9);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    hub = Hub(str(tmp_path / "team"))
+    row = hub.members()[0]
+    assert row["last_seen"] == 0
