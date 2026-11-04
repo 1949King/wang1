@@ -58,6 +58,7 @@ import {
   teamDiff,
   type TeamPairingInfo,
 } from "./teamClient";
+import { backupBeforePull } from "./teamBackup";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -612,19 +613,49 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       setSync("");
       setBusy("");
     }
-    return window.confirm(`拉取「${title}」会覆盖当前画布。${preview}\n\n继续？`);
+    return window.confirm(
+      `拉取「${title}」会覆盖当前画布。${preview}\n\n` +
+      `覆盖前会先把现在的画布另存为一个本地工程（名字带「覆盖前 时间」），\n` +
+      `需要时能在「我的画布」里找到它。\n\n继续？`,
+    );
+  };
+
+  /**
+   * 拉取/接手之后顺手认领，返回一句能接在提示语后面的说明。
+   *
+   * 「打开就该占坑」：不认领的话，你在改的这段时间别人看到的项目是空闲的，
+   * 他一上传你就白改。锁被别人占着**不算失败** —— 如实说「锁在 X 手上」，
+   * 比闷着不认领然后上传时才冲突要好。
+   */
+  const claimNote = async (projectId: string): Promise<string> => {
+    try {
+      const r = await teamClaim(projectId);
+      const mins = Math.max(1, Math.round((r.expires_at - Date.now() / 1000) / 60));
+      return `，已顺手认领（${mins} 分钟内别人上传会看到你在改）`;
+    } catch (e) {
+      if (e instanceof TeamError && e.code === "locked") return `；⚠️ 没认领上：${e.message}，上传时可能撞`;
+      return `；没认领上（${e instanceof Error ? e.message : String(e)}），不影响这次拉取`;
+    }
   };
 
   const pullFrom = async (projectId: string) => {
     const p = projects.find((x) => x.project_id === projectId);
     if (!p) return;
     if (!(await confirmPull(projectId, p.name))) return;
+    // 先另存再覆盖：确认弹窗里答应过「会先存一份」，做不到就得当场说，不能照拉。
+    const keep = backupBeforePull();
+    if (!keep.ok && !window.confirm(
+      `另存一份失败：${keep.why}\n\n继续拉取会覆盖当前画布，而且找不回来。仍要继续？`,
+    )) return;
     setBusy("pull");
     try {
       const data = await teamPull(projectId);
       const fixed = loadPulled(data.bundle, p.name);
       setLocalRev(projectId, data.rev);
-      say("ok", `已拉取「${p.name}」rev ${data.rev}`);
+      const saved = keep.skipped ? "" : keep.ok ? `；当前画布已另存为「${keep.name}」` : "；⚠️ 没能另存一份";
+      const lock = await claimNote(projectId);
+      say(keep.ok ? "ok" : "info", `已拉取「${p.name}」rev ${data.rev}${saved}${lock}`);
+      await refreshTeam();
       await offerTimelineImport(fixed);
     } catch (e) {
       fail(e);
@@ -748,8 +779,9 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       const data = await teamPull(item.project_id);
       const fixed = loadPulled(data.bundle, item.project_name);
       setLocalRev(item.project_id, data.rev);
-      await teamClaim(item.project_id);
-      say("ok", `已接手「${p?.name || item.project_name}」`);
+      // 交接单已经确认掉了，这里认领失败（锁在别人手上）不该把整次接手判失败
+      const lock = await claimNote(item.project_id);
+      say("ok", `已接手「${p?.name || item.project_name}」${lock}`);
       await refreshTeam();
       await offerTimelineImport(fixed);
     } catch (e) {
