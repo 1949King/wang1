@@ -660,7 +660,9 @@ def test_pair_http_needs_no_token_but_only_once(tmp_path):
         assert code == 200 and len(p["code"]) == 6
         assert p["max_uses"] == 1 and p["remaining"] == 1 and p["alive"] is True
         assert p["address"].startswith("http://") and "/pair?code=" in p["pair_url"]
-        assert p["qr"].startswith("data:image/png;base64,")
+        # 2026-11-04 移除二维码：配对只留「6 位码」和「邀请链接」两条路。
+        # 这里守的是**别再有人把图塞回载荷** —— 那会让面板多一个模板和一层 cv2。
+        assert "qr" not in p
         assert p["expires_at"] > 0 and 0 < p["ttl"] <= 120
         assert isinstance(p["host_name"], str)
 
@@ -904,7 +906,7 @@ def test_auth_refreshes_last_seen_but_is_throttled(hub, monkeypatch):
 
 
 def test_auth_with_bad_token_does_not_touch_anything(hub):
-    m = hub.register_member("张三")
+    hub.register_member("张三")
     before = hub.members()[0]["last_seen"]
     assert hub.auth("not-a-token") is None
     assert hub.members()[0]["last_seen"] == before

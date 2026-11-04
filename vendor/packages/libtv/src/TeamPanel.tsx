@@ -65,6 +65,7 @@ import { backupBeforePull } from "./teamBackup";
 import { TeamVersions } from "./TeamVersions";
 import { assetCounts, emptyAssetHint, filterAssets, kindLabel, type AssetKindFilter } from "./assetFilter";
 import { isOnline, linkText, onlineCount, seenText } from "./teamPresence";
+import { parseInvite } from "./teamInvite";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -367,7 +368,8 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const join = async (addr = address) => {
+  /** 直连加入：只认主机地址。`join` 会先把链接/码拆成地址再走进来。 */
+  const joinDirect = async (addr: string) => {
     setBusy("join");
     try {
       const c = await teamJoin(addr, name || "同事");
@@ -388,6 +390,54 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     } finally {
       setBusy("");
     }
+  };
+
+  /**
+   * 链接 / 带地址的码：地址已经在手，**直接换令牌**，不用再发 UDP 广播。
+   *
+   * 为什么要单独一条：广播只在同网段有效。同事发来的链接里已经写着他那台的
+   * 真实地址，跨网段（比如两边接了不同 AP、或者对方禁了广播）时这一跳是唯一
+   * 能通的路径 —— 再去找一遍反而把「明明有地址」的成功机会丢掉。
+   */
+  const joinByLink = async (addr: string, code: string) => {
+    setAddress(addr);
+    setBusy("paircode");
+    say("info", `正在用邀请链接加入 ${addr}…`);
+    try {
+      const cc = await teamPair(code, name || "同事", addr);
+      setCred(cc);
+      setAddress(cc.address);
+      setCodeIn("");
+      say("ok", `已用邀请链接加入：${cc.name}` +
+        (cc.max_uses > 1 ? `（这张码还能请 ${cc.remaining} 人）` : ""));
+      await refreshTeam();
+    } catch (e) {
+      fail(e);
+      void refreshHost();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /**
+   * 加入的统一入口：**6 位码 / 邀请链接 / 主机地址，粘什么都行**。
+   *
+   * 二维码在 2026-11-04 砍掉之后，「链接」成了跟 6 位码并列的第二种配对方式。
+   * 那就必须在接收端有地方吃得下它 —— 否则同事收到一串 URL，软件里没处粘，
+   * 等于发了个只能看的东西。三种形态的分辨交给 `parseInvite`（纯函数，有测试），
+   * 这里只决定走哪条路。
+   */
+  const join = async (raw = address) => {
+    const p = parseInvite(raw);
+    if (p.kind === "none") {
+      say("err", p.why);
+      return;
+    }
+    if (p.code) {
+      await joinByLink(p.host, p.code);
+      return;
+    }
+    await joinDirect(p.host);
   };
 
   /**
@@ -576,13 +626,26 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
    * 分成两步是**必须的**：浏览器发不出 UDP 广播，地址只能由本机桥去问（`find-code`）。
    * 找到之后立刻 setAddress，这样即使下一步换令牌失败，人也能在地址栏里看到
    * 到底连的是哪台机器 —— 不至于"没反应"。
+   *
+   * `raw` 可以是一整条邀请链接（粘进输入框就行）：那种情况地址已经在链接里，
+   * 不用广播，直接走 `joinByLink`。认不出来就不动，把 `why` 原样说出来。
    */
-  const joinByCode = async () => {
-    const c = codeIn.trim();
-    if (!/^\d{4,10}$/.test(c)) {
-      say("err", "配对码是主机面板上那 6 位数字，检查一下再输");
+  const joinByCode = async (raw?: string) => {
+    const p = parseInvite(raw === undefined ? codeIn : raw);
+    if (p.kind === "none") {
+      say("err", p.why);
       return;
     }
+    if (p.kind === "host") {
+      setCodeIn("");
+      await joinDirect(p.host);
+      return;
+    }
+    if (p.host) {
+      await joinByLink(p.host, p.code);
+      return;
+    }
+    const c = p.code;
     setBusy("paircode");
     say("info", "正在用配对码在局域网里找主机…");
     try {
@@ -1068,7 +1131,6 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
               <div className={`sg-team-code${pairLive ? "" : " dead"}`}>
                 <div className="sg-team-code-main">
                   <b className={pairLive ? "" : "dead"}>{pair.code}</b>
-                  {pair.qr && pairLive ? <img src={pair.qr} alt="配对二维码" /> : null}
                   <div className="sg-team-code-facts">
                     <span className={pairLive ? "sg-team-left" : "sg-team-left off"}>
                       {pairLive ? `还能请 ${pair.remaining} 人 · ${pairLeft} 秒后失效` : deadPairReason(pair)}
@@ -1097,7 +1159,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                   ) : null}
                 </div>
                 <span className="sg-team-dim">
-                  {pairNote || "同事在 ② 填这 6 位数字；手机扫二维码能看到地址和名额，方便转发"}
+                  {pairNote || "两条路都行：念这 6 位数字给他，或者把邀请链接发过去"}
                 </span>
               </div>
             ) : null}
@@ -1112,16 +1174,15 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
         <div className="sg-team-row">
           <input
             value={codeIn}
-            onChange={(e) => setCodeIn(e.target.value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="主机给的 6 位配对码"
-            inputMode="numeric"
+            onChange={(e) => setCodeIn(e.target.value.slice(0, 300))}
+            placeholder="6 位配对码，或粘贴邀请链接"
             spellCheck={false}
-            style={{ width: 156 }}
+            style={{ width: 214 }}
           />
           <button type="button" disabled={busy === "paircode"} onClick={() => void joinByCode()}>
-            {busy === "paircode" ? "查找中…" : "用配对码加入"}
+            {busy === "paircode" ? "查找中…" : "用码或链接加入"}
           </button>
-          <span className="sg-team-dim">2 分钟内有效、只能用一次</span>
+          <span className="sg-team-dim">码 2 分钟内有效、只能用一次；链接整条粘进来就行</span>
         </div>
         <div className="sg-team-row">
           <button type="button" disabled={busy === "scan"} onClick={() => void scan()}>
@@ -1139,7 +1200,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
           <input
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="http://192.168.1.4:18770"
+            placeholder="主机地址 http://192.168.1.4:18770，或粘贴邀请链接"
             spellCheck={false}
           />
           <input

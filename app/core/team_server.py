@@ -58,7 +58,6 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.core.team_discovery import Beacon
-from app.core.team_qr import qr_png_data_uri
 from app.core.team_hub import (ConflictError, Hub, LockedError, MAX_ASSET_BYTES,
                                TeamError)
 
@@ -121,33 +120,20 @@ def _json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
-#: 二维码缓存（`pair_url → data:`）。面板每 2 秒轮询，不该每轮都跑一遍 cv2 编码。
-_QR_CACHE: Dict[str, str] = {}
-_QR_LOCK = threading.Lock()
-
-
-def _qr_cached(url: str) -> str:
-    """按 URL 缓存二维码；同一个 URL 只编码一次。"""
-    if not url:
-        return ""
-    with _QR_LOCK:
-        hit = _QR_CACHE.get(url)
-    if hit is not None:
-        return hit
-    uri = qr_png_data_uri(url)
-    with _QR_LOCK:
-        if len(_QR_CACHE) > 16:
-            _QR_CACHE.clear()       # 码每 2 分钟就换一批，留 16 张足够
-        _QR_CACHE[url] = uri
-    return uri
+#: 邀请链接的形状：`http://<内网IP>:<端口>/pair?code=…`
+#:
+#: **2026-11-04 移除二维码**（用户决定）：配对只留两条路 —— ① 6 位数字码
+#: （当面念/微信发数字）② 邀请链接（发一串 URL）。二维码本质只是把这条 URL
+#: 编成图，属于同一个东西的第三种包装，砍掉后少一层 cv2 依赖和一个
+#: 「图生成失败」的分支。链接本身没动，`/pair?code=` 落地页照旧。
 
 
 def _pairing_payload(handler: Any, info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """配对码的对外形状：码 + 名额 + 剩余秒数 + 本机地址 + 二维码（手机可扫）。
+    """配对码的对外形状：码 + 名额 + 剩余秒数 + 本机地址 + 邀请链接。
 
     `info` 为 `None` 表示「这个成员手上现在没有活码」—— 返回空码而不是伪造一张。
-    二维码里编的是 `http://<本机内网IP>:<端口>/pair?code=…`，扫码后是一个能
-    复制地址 + 看名额的极简页面。
+    `pair_url` 是 `http://<本机内网IP>:<端口>/pair?code=…`，点开是一个能复制
+    地址 + 看名额的极简页面（手机上也能开）。
     """
     port = int(getattr(getattr(handler, "server", None), "server_port", 0) or 0)
     ip = TeamServer.lan_ip()
@@ -171,7 +157,6 @@ def _pairing_payload(handler: Any, info: Optional[Dict[str, Any]]) -> Dict[str, 
         "reused": False,
         "replaced": False,
         "pair_url": "",
-        "qr": "",
     }
     if not info:
         return out
@@ -188,7 +173,6 @@ def _pairing_payload(handler: Any, info: Optional[Dict[str, Any]]) -> Dict[str, 
     code = str(out.get("code") or "")
     if address and code:
         out["pair_url"] = address + "/pair?code=" + code
-        out["qr"] = _qr_cached(out["pair_url"])
     return out
 
 
@@ -213,12 +197,16 @@ class _TeamHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _pair_page(self) -> None:
-        """手机扫码后看到的页面：**只做一件事 —— 让地址和码可复制**。
+        """邀请链接点开后看到的页面：**只做一件事 —— 让地址和码可复制**。
 
-        手机上没有画布，扫完不可能「直接在手机上加入团队」。所以这一页不做假的
+        这一页不需要装了软件 —— 手机上、同事的电脑上、任何浏览器都能开。
+        电脑上没有画布（或者他不是在软件里点链接），所以这一页不做假的
         「加入」按钮，只把 `http://ip:port`、6 位码、**还能请几个人**摆出来，
-        方便复制发回电脑。码失效也照常显示地址（地址永远有用），并如实说
+        方便复制回软件里。码失效也照常显示地址（地址永远有用），并如实说
         是作废了、用完了还是过期了 —— 三种情况下一步动作不一样。
+
+        二维码已在 2026-11-04 移除，但这一页留着：它是**邀请链接的落地页**，
+        与二维码无关。
         """
         from html import escape as _esc
 
@@ -231,7 +219,7 @@ class _TeamHandler(BaseHTTPRequestHandler):
         left = int((info or {}).get("remaining") or 0)
         total = int((info or {}).get("max_uses") or 0)
         if not code:
-            badge = "<p class=bad>这个链接里没有配对码，让同事重新扫一次</p>"
+            badge = "<p class=bad>这个链接里没有配对码，让同事把完整链接再发一次</p>"
         elif info is None:
             badge = "<p class=bad>没有这张配对码（可能已被清理），让同事重新生成一个</p>"
         elif (info or {}).get("revoked"):

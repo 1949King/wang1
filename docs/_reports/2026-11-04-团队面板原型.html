@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>团队协作面板 · 可点原型（2026-11-04）</title>
+<style>
+  :root{
+    --bg:#0e1014; --win:#15181e; --win2:#1a1e26;
+    --card:rgba(255,255,255,.035); --card2:rgba(255,255,255,.06);
+    --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16);
+    --tx:#e9ecf1; --tx2:#9aa3b2; --tx3:#68707e;
+    --acc:#6ea8ff; --accbg:rgba(110,168,255,.14);
+    --ok:#7ed692; --okbg:rgba(126,214,146,.14);
+    --warn:#f5c05a; --bad:#ff9696; --badbg:rgba(255,150,150,.14);
+    --shadow:0 18px 60px rgba(0,0,0,.55);
+  }
+  [data-theme="light"]{
+    --bg:#eef0f4; --win:#ffffff; --win2:#f6f7fa;
+    --card:#f7f8fb; --card2:#eef1f6;
+    --line:rgba(15,20,30,.10); --line2:rgba(15,20,30,.18);
+    --tx:#1b1f27; --tx2:#5a6272; --tx3:#8a92a2;
+    --acc:#2f6fd0; --accbg:rgba(47,111,208,.10);
+    --ok:#2f8f4e; --okbg:rgba(47,143,78,.12);
+    --warn:#a9750d; --bad:#c33b3b; --badbg:rgba(195,59,59,.10);
+    --shadow:0 18px 50px rgba(15,25,45,.18);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--tx); min-height:100vh;
+    font:13px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    padding:18px; display:flex; justify-content:center;
+  }
+  .wrap{width:100%;max-width:1180px}
+
+  /* ── 说明条 ───────────────────────────── */
+  .hint{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:10px 14px; margin-bottom:14px; font-size:12px; color:var(--tx2);
+  }
+  .hint b{color:var(--tx);font-weight:500}
+  .hint .kbd{
+    display:inline-block;padding:1px 6px;border-radius:5px;border:1px solid var(--line2);
+    background:var(--win2);color:var(--tx);font-size:11px;font-family:ui-monospace,monospace;
+  }
+  .hint .spacer{flex:1}
+
+  /* ── 模拟主程序窗口 ───────────────────── */
+  .app{
+    position:relative; background:var(--win); border:1px solid var(--line);
+    border-radius:14px; overflow:hidden; box-shadow:var(--shadow); height:660px;
+    display:flex; flex-direction:column;
+  }
+  .titlebar{
+    height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;
+    border-bottom:1px solid var(--line); background:var(--win2); flex:0 0 auto;
+  }
+  .logo{width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,var(--acc),#9b7bff)}
+  .title{font-size:13px;font-weight:500}
+  .ver{font-size:11px;color:var(--tx3)}
+  .titlebar .spacer{flex:1}
+  .tb-btn{
+    height:28px;min-width:30px;padding:0 9px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--line2); background:var(--card); color:var(--tx2);
+    font-size:12px;display:inline-flex;align-items:center;gap:5px;
+  }
+  .tb-btn:hover{background:var(--card2);color:var(--tx)}
+  .tb-btn.on{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
+
+  .body{display:flex;flex:1;min-height:0}
+  .rail{
+    width:64px;flex:0 0 64px;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0;
+    background:var(--win2);
+  }
+  .rail button{
+    width:46px;height:46px;border-radius:10px;border:1px solid transparent;
+    background:transparent;color:var(--tx2);cursor:pointer;font-size:11px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  }
+  .rail button span.i{font-size:15px;line-height:1}
+  .rail button:hover{background:var(--card);color:var(--tx)}
+  .rail button.on{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
+
+  .stage{flex:1;padding:22px;position:relative;overflow:hidden}
+  .stage-title{font-size:15px;font-weight:500;margin-bottom:4px}
+  .stage-sub{font-size:12px;color:var(--tx3);margin-bottom:18px}
+  .mock{border:1px dashed var(--line2);border-radius:12px;padding:16px;background:var(--card)}
+  .mock .row{height:10px;border-radius:5px;background:var(--card2);margin-bottom:9px}
+  .mock .row.w70{width:70%} .mock .row.w45{width:45%} .mock .row.w88{width:88%}
+  .mock-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+  .mock-grid div{height:74px;border-radius:9px;background:var(--card2);border:1px solid var(--line)}
+
+  /* ── 团队浮层 ─────────────────────────── */
+  .panel{
+    position:absolute; top:52px; right:14px; width:420px; max-height:590px;
+    display:none; flex-direction:column;
+    background:var(--win); border:1px solid var(--line2); border-radius:14px;
+    box-shadow:var(--shadow); z-index:20; overflow:hidden;
+  }
+  .panel.open{display:flex}
+  .p-head{
+    display:flex;align-items:center;gap:8px;padding:11px 13px;
+    border-bottom:1px solid var(--line); cursor:move; background:var(--win2);
+  }
+  .p-head h3{font-size:13px;font-weight:500}
+  .p-head .spacer{flex:1}
+  .p-close{
+    width:24px;height:24px;border-radius:7px;border:1px solid var(--line2);
+    background:transparent;color:var(--tx2);cursor:pointer;font-size:13px;line-height:1;
+  }
+  .p-close:hover{background:var(--badbg);border-color:var(--bad);color:var(--bad)}
+  .p-body{overflow-y:auto;padding:11px 13px 13px;display:flex;flex-direction:column;gap:11px}
+  .p-body::-webkit-scrollbar{width:8px}
+  .p-body::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+
+  /* 状态条 */
+  .statusbar{
+    display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+    padding:8px 10px;border-radius:10px;background:var(--card);
+    border:1px solid var(--line); font-size:11.5px;color:var(--tx2);
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+  .dot.off{background:var(--tx3)}
+  .statusbar b{color:var(--tx);font-weight:500}
+  .statusbar .sep{width:1px;height:11px;background:var(--line2)}
+
+  /* 分区 */
+  .sec{display:flex;flex-direction:column;gap:7px}
+  .sec-h{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx2)}
+  .sec-h .t{color:var(--tx);font-weight:500;font-size:12px}
+  .sec-h .n{
+    font-size:10.5px;padding:0 6px;border-radius:20px;background:var(--accbg);
+    color:var(--acc);border:1px solid transparent;
+  }
+  .sec-h .spacer{flex:1}
+  .mini{
+    padding:3px 8px;border-radius:7px;border:1px solid var(--line2);background:transparent;
+    color:var(--tx2);font-size:11px;cursor:pointer;
+  }
+  .mini:hover{background:var(--card2);color:var(--tx)}
+
+  /* 接续卡 */
+  .handoff{
+    border:1px solid var(--acc); border-radius:11px; overflow:hidden;
+    background:var(--accbg);
+  }
+  .ho-top{padding:10px 11px 8px}
+  .ho-t1{font-size:12.5px;font-weight:500;line-height:1.45}
+  .ho-t1 .who{color:var(--acc)}
+  .ho-meta{font-size:11px;color:var(--tx2);margin-top:3px}
+  .ho-todo{list-style:none;padding:0 11px 4px;display:flex;flex-direction:column;gap:4px}
+  .ho-todo li{
+    display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--tx2);
+    padding:4px 7px;border-radius:7px;background:var(--card);
+  }
+  .ho-todo li .st{font-size:10px;padding:0 5px;border-radius:5px;border:1px solid var(--line2);color:var(--tx3);flex:0 0 auto}
+  .ho-todo li .st.done{color:var(--ok);border-color:var(--ok);background:var(--okbg)}
+  .ho-todo li .st.wait{color:var(--warn);border-color:var(--warn);background:rgba(245,192,90,.12)}
+  .ho-todo li .st.todo{color:var(--acc);border-color:var(--acc);background:var(--accbg)}
+  .ho-todo li .tx{flex:1;min-width:0;color:var(--tx)}
+  .ho-actions{display:flex;align-items:center;gap:7px;padding:8px 11px 10px}
+  .btn{
+    padding:5px 11px;border-radius:8px;cursor:pointer;font-size:11.5px;
+    border:1px solid var(--line2);background:var(--card);color:var(--tx);
+  }
+  .btn:hover{background:var(--card2)}
+  .btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+  .btn.pri:hover{filter:brightness(1.08)}
+  [data-theme="light"] .btn.pri{color:#fff}
+  .ho-note{font-size:10.5px;color:var(--tx3);padding:0 11px 10px;line-height:1.5}
+
+  /* 项目行 */
+  .proj{border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+  .proj.on{border-color:var(--acc)}
+  .prow{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}
+  .prow:hover{background:var(--card2)}
+  .prow .nm{font-size:12px;font-weight:500;flex:0 0 auto}
+  .prow .mt{font-size:10.5px;color:var(--tx3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lock{
+    font-size:10px;padding:0 5px;border-radius:5px;border:1px solid var(--warn);color:var(--warn);
+    background:rgba(245,192,90,.12);flex:0 0 auto;
+  }
+  .acts{display:none;gap:5px;padding:0 10px 9px;flex-wrap:wrap}
+  .proj.on .acts{display:flex}
+  .acts .btn{padding:3px 9px;font-size:11px}
+
+  /* 版本列表 */
+  .vers{display:none;flex-direction:column;gap:5px;padding:0 10px 10px}
+  .vers.on{display:flex}
+  .ver-row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:8px;background:var(--win2);font-size:11px}
+  .ver-row .rv{font-weight:500;color:var(--tx);flex:0 0 auto}
+  .ver-row .now{font-size:9.5px;padding:0 4px;border-radius:4px;border:1px solid var(--ok);color:var(--ok);flex:0 0 auto}
+  .ver-row .info{flex:1;min-width:0;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ver-row button{padding:2px 7px;font-size:10.5px}
+
+  /* 折叠区 */
+  .fold{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+  .fold-h{display:flex;align-items:center;gap:7px;padding:8px 10px;cursor:pointer;font-size:11.5px;color:var(--tx2)}
+  .fold-h:hover{background:var(--card2)}
+  .fold-h .arw{font-size:9px;color:var(--tx3);transition:transform .15s}
+  .fold.open .arw{transform:rotate(90deg)}
+  .fold-c{display:none;padding:2px 10px 10px;font-size:11px;color:var(--tx2);line-height:1.6}
+  .fold.open .fold-c{display:block}
+  .fold-c .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .fold-c .inp{
+    flex:1;min-width:110px;padding:4px 8px;border-radius:7px;border:1px solid var(--line2);
+    background:var(--win2);color:var(--tx);font-size:11px;
+  }
+
+  /* 成员设备 */
+  .people{display:flex;flex-direction:column;gap:4px;margin-top:2px}
+  .who{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--tx2)}
+  .who .nm{color:var(--tx);font-size:11.5px}
+  .who .dev{font-size:10.5px;color:var(--tx3)}
+  .who .dev.on{color:var(--ok)}
+
+  /* toast */
+  .toast{
+    position:absolute;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);
+    background:var(--win2);border:1px solid var(--line2);border-radius:9px;
+    padding:8px 14px;font-size:12px;box-shadow:var(--shadow);
+    opacity:0;pointer-events:none;transition:all .18s;z-index:40;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* 旧版面板（对比） */
+  .old .p-body{gap:9px}
+  .old .osec{border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--card)}
+  .old .osec h5{font-size:11.5px;font-weight:500;margin-bottom:6px;color:var(--tx2)}
+  .old .orow{display:flex;gap:6px;flex-wrap:wrap}
+  .old .oinp{
+    flex:1;min-width:100px;padding:4px 8px;border-radius:7px;border:1px solid var(--line2);
+    background:var(--win2);color:var(--tx3);font-size:11px;
+  }
+  .old .onote{font-size:10.5px;color:var(--tx3);margin-top:5px}
+
+  .footer{margin-top:12px;font-size:11.5px;color:var(--tx3);line-height:1.7}
+  .footer b{color:var(--tx2);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hint">
+    <b>可点原型</b>
+    <span>点右上角 <span class="kbd">团队</span> 打开浮层，再点左侧导航切换模块 —— <b>浮层不会关，模块也不切走</b></span>
+    <span class="spacer"></span>
+    <button class="mini" onclick="toggleOld()" id="oldBtn">看旧版面板</button>
+    <button class="mini" onclick="toggleTheme()" id="themeBtn">浅色</button>
+  </div>
+
+  <div class="app" id="app">
+    <div class="titlebar">
+      <div class="logo"></div>
+      <div class="title">拾光剪影</div>
+      <div class="ver" id="verLabel">V4.47 · 画布 0.3.50</div>
+      <div class="spacer"></div>
+      <button class="tb-btn on" id="teamBtn" onclick="togglePanel()">
+        <span class="i">◉</span> 团队 <span id="teamBadge" style="font-size:9.5px;padding:0 4px;border-radius:4px;background:var(--accbg);color:var(--acc)">2</span>
+      </button>
+      <button class="tb-btn" onclick="toggleTheme()">◐</button>
+      <button class="tb-btn">?</button>
+    </div>
+
+    <div class="body">
+      <div class="rail">
+        <button class="on" data-m="edit" onclick="switchModule('edit',this)"><span class="i">✂</span>剪辑</button>
+        <button data-m="img" onclick="switchModule('img',this)"><span class="i">◪</span>生图</button>
+        <button data-m="s3d" onclick="switchModule('s3d',this)"><span class="i">◈</span>3D</button>
+        <button data-m="canvas" onclick="switchModule('canvas',this)"><span class="i">◫</span>画布</button>
+        <button data-m="asset" onclick="switchModule('asset',this)"><span class="i">▤</span>资产</button>
+      </div>
+
+      <div class="stage">
+        <div class="stage-title" id="stTitle">剪辑器 · 时间线</div>
+        <div class="stage-sub" id="stSub">你现在在这里改片。点上面的「团队」——浮层会盖上来，但你没有离开这个模块。</div>
+        <div class="mock">
+          <div class="row w88"></div>
+          <div class="row w70"></div>
+          <div class="row w45"></div>
+          <div class="mock-grid"><div></div><div></div><div></div></div>
+        </div>
+      </div>
+
+      <div class="panel" id="panel">
+        <div class="p-head" id="pHead">
+          <h3>团队协作</h3>
+          <span style="font-size:10.5px;color:var(--tx3)" id="pMode">新版 · 按动作组织</span>
+          <div class="spacer"></div>
+          <button class="p-close" onclick="togglePanel()">×</button>
+        </div>
+        <div class="p-body" id="pBody"></div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <b>这一版要验证的三个判断：</b>
+    ① 团队能力是工作区级，任何模块点开都不切走；
+    ② 首屏是「等我做」，不是「启动服务 / 填地址」；
+    ③ 接续包带着上下文来（第几版 / 待办 / 落在同一处），不是发个文件加一句话。
+  </div>
+</div>
+
+<script>
+const S = {
+  module:"edit",
+  old:false,
+  panelOpen:true,
+  openProj:1,
+  openVers:false,
+  folds:{srv:false,asset:false},
+  meta:{
+    edit:["剪辑器 · 时间线","你现在在这里改片。点上面的「团队」——浮层会盖上来，但你没有离开这个模块。"],
+    img:["生图工作台","切到生图台了 —— 浮层还开着，你没被打断。这里也能直接把生成的图传进团队。"],
+    s3d:["3D 导演台","切到 3D 台。团队与当前模块无关，所以能力要浮在上面，而不是绑在某个模块里。"],
+    canvas:["AI 画布","这是老入口所在的地方。画布里仍保留一个面板（编辑时不切出去），但它不再是唯一入口。"],
+    asset:["我的资产","资产页。选一个成片 → 团队浮层里就能推到同事那台机器上。"]
+  }
+};
+
+const projects = [
+  {name:"第三集", rev:6, owner:"张三", when:"2 分钟前", lock:"你在改", mine:true},
+  {name:"预告片", rev:4, owner:"李四", when:"昨天 18:20", lock:"", mine:false},
+  {name:"素材测试", rev:1, owner:"王五", when:"3 天前", lock:"", mine:false}
+];
+
+const versions = [
+  {rev:6, who:"张三", when:"今天 20:12", note:"回滚到 rev 5（李四）", now:true},
+  {rev:5, who:"李四", when:"今天 20:03", note:"第 2 卡字幕改短，加了转场", now:false},
+  {rev:4, who:"张三", when:"今天 19:40", note:"镜 03 调色完成", now:false},
+  {rev:3, who:"王五", when:"昨天 22:11", note:"（这一版没写备注）", now:false}
+];
+
+const todos = [
+  {st:"done", label:"已完成", tx:"镜 03 调色已完成，等合成"},
+  {st:"todo", label:"要做", tx:"第 2 卡字幕要改短"},
+  {st:"wait", label:"待定", tx:"结尾 5 秒转场方案未定"}
+];
+
+function render(){
+  const b = document.getElementById("pBody");
+  document.getElementById("pMode").textContent = S.old ? "旧版 · 按配置组织" : "新版 · 按动作组织";
+  document.getElementById("oldBtn").textContent = S.old ? "看新版面板" : "看旧版面板";
+  document.getElementById("panel").classList.toggle("old", S.old);
+  b.innerHTML = S.old ? oldHTML() : newHTML();
+  document.getElementById("teamBtn").classList.toggle("on", S.panelOpen);
+  document.getElementById("panel").classList.toggle("open", S.panelOpen);
+}
+
+function newHTML(){
+  return `
+  <div class="statusbar">
+    <span class="dot"></span><b>连接正常</b>
+    <span class="sep"></span>团队 <b>3</b> 人 · 在线 <b>1</b>
+    <span class="sep"></span>你：<b>张三</b> · 台式
+  </div>
+
+  <div class="people">
+    <div class="who"><span class="dot" style="width:6px;height:6px"></span><span class="nm">张三（你）</span><span class="dev on">台式 · 在线</span><span class="dev">笔记本 · 8 分钟前</span></div>
+    <div class="who"><span class="dot off" style="width:6px;height:6px"></span><span class="nm">李四</span><span class="dev">工作室机 · 12 分钟前</span></div>
+    <div class="who"><span class="dot off" style="width:6px;height:6px"></span><span class="nm">王五</span><span class="dev">还没上线过</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="t">等我做</span><span class="n">2</span><span class="spacer"></span><button class="mini" onclick="toast('接续包列表（原型）')">全部</button></div>
+
+    <div class="handoff">
+      <div class="ho-top">
+        <div class="ho-t1"><span class="who">张三</span> 把「第三集」交给你继续</div>
+        <div class="ho-meta">第 6 版 · 3 条待办 · 1 处等你确认</div>
+      </div>
+      <ul class="ho-todo">
+        ${todos.map(t=>`<li><span class="st ${t.st}">${t.label}</span><span class="tx">${t.tx}</span></li>`).join("")}
+      </ul>
+      <div class="ho-actions">
+        <button class="btn pri" onclick="accept()">接续</button>
+        <button class="btn" onclick="toast('先只看看：拉下来但不认领')">只看这版</button>
+        <button class="btn" onclick="toast('已回他一句：收到，我看下结尾转场')">回一句</button>
+      </div>
+      <div class="ho-note">接续后会落在同一处画布位置、同一缩放，并选中他标的那几个节点。</div>
+    </div>
+
+    <div class="proj">
+      <div class="prow" onclick="toast('李四 把「预告片」第 4 版交给你 —— 0 条待办')">
+        <span class="nm">预告片</span>
+        <span class="mt">李四 · 昨天 18:20 · 第 4 版 · 留言：结尾你帮我看看</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="t">一起做的项目</span><span class="n">3</span><span class="spacer"></span><button class="mini" onclick="toast('已刷新')">刷新</button></div>
+    ${projects.map((p,i)=>projHTML(p,i)).join("")}
+  </div>
+
+  ${foldHTML("srv","服务器与加入","一辈子点一两次，所以收起来",
+    `<div class="row"><button class="btn">启动团队服务</button><button class="btn">停止</button></div>
+     <div class="row"><span style="font-size:10.5px">同事地址 http://192.168.1.4:18770</span></div>
+     <div class="row"><button class="btn">让同事加入（出 6 位码）</button><button class="btn">复制邀请链接</button></div>
+     <div class="row"><span style="font-size:10.5px">配对只两条路：念 6 位数字，或者把链接发过去（二维码已去掉）</span></div>
+     <div class="row"><input class="inp" placeholder="6 位配对码，或粘贴邀请链接"><button class="btn">用码或链接加入</button></div>`)}
+  ${foldHTML("asset","素材与历史","按项目看，不在首屏堆列表",
+    `<div class="row" style="gap:4px">
+       <button class="mini">全部 12</button><button class="mini">视频 3</button>
+       <button class="mini">图片 7</button><button class="mini">音频 1</button>
+       <input class="inp" placeholder="搜文件名 / 出处（镜 03）">
+     </div>
+     <div class="row" style="font-size:10.5px;color:var(--tx3)">成片 mp4 走这里推进来，最多 512MB；同一份文件全组只占一份空间</div>`)}
+  `;
+}
+
+function projHTML(p,i){
+  const on = S.openProj===i;
+  return `<div class="proj ${on?'on':''}">
+    <div class="prow" onclick="toggleProj(${i})">
+      <span class="nm">${p.name}</span>
+      <span class="mt">rev ${p.rev} · ${p.owner} · ${p.when}</span>
+      ${p.lock?`<span class="lock">${p.lock}</span>`:""}
+    </div>
+    <div class="acts">
+      <button class="btn" onclick="event.stopPropagation();toast('拉取「${p.name}」——覆盖前会先另存一份')">拉取</button>
+      <button class="btn" onclick="event.stopPropagation();toast('上传到此（base_rev ${p.rev}）')">上传到此</button>
+      <button class="btn" onclick="event.stopPropagation();toast('推给…：会把视口/待办/意图一起打包')">推给…</button>
+      <button class="btn" onclick="event.stopPropagation();toggleVers()">历史</button>
+      ${p.mine?"":`<button class="btn" onclick="event.stopPropagation();toast('已认领 10 分钟')">认领</button>`}
+    </div>
+    ${on && S.openVers ? versHTML() : ""}
+  </div>`;
+}
+
+function versHTML(){
+  return `<div class="vers on">
+    ${versions.map(v=>`<div class="ver-row">
+      <span class="rv">rev ${v.rev}</span>
+      ${v.now?`<span class="now">最新</span>`:""}
+      <span class="info">${v.who} · ${v.when} · ${v.note}</span>
+      ${v.now?"":`<button class="mini" onclick="event.stopPropagation();toast('拉 rev ${v.rev} 到本地（不动服务器）')">拉这版</button>
+      <button class="mini" onclick="event.stopPropagation();toast('已回滚到 rev ${v.rev}，记为新的一版，历史都还在')">覆盖最新</button>`}
+    </div>`).join("")}
+  </div>`;
+}
+
+function foldHTML(key,title,sub,inner){
+  const open = S.folds[key];
+  return `<div class="fold ${open?'open':''}">
+    <div class="fold-h" onclick="toggleFold('${key}')">
+      <span class="arw">▶</span><span>${title}</span>
+      <span style="font-size:10.5px;color:var(--tx3)">${sub}</span>
+    </div>
+    <div class="fold-c">${inner}</div>
+  </div>`;
+}
+
+function oldHTML(){
+  return `
+  <div class="osec">
+    <h5>① 我当服务器</h5>
+    <div class="orow"><button class="btn">启动团队服务</button><button class="btn">让同事加入</button></div>
+    <div class="onote">点完会显示地址，同事填进去就能连</div>
+  </div>
+  <div class="osec">
+    <h5>② 我连别人的团队</h5>
+    <div class="orow"><input class="oinp" placeholder="6 位配对码"><button class="btn">用配对码加入</button></div>
+    <div class="orow" style="margin-top:5px"><input class="oinp" placeholder="http://192.168.1.4:18770"><button class="btn">加入</button></div>
+    <div class="onote">扫描局域网 / 手填地址</div>
+  </div>
+  <div class="osec">
+    <h5>③ 共享项目</h5>
+    <div class="orow"><button class="btn">上传当前画布</button><button class="btn">刷新</button></div>
+    <div class="onote">第三集 rev 6 · 张三 · 2 分钟前　🔒你在改</div>
+    <div class="onote">预告片 rev 4 · 李四 · 昨天 18:20</div>
+    <div class="onote">素材测试 rev 1 · 王五 · 3 天前</div>
+  </div>
+  <div class="osec"><h5>④ 交接给我的（2）</h5><div class="onote">第三集 ← 张三：你接着做</div></div>
+  <div class="osec"><h5>⑤ 素材与成片（12）</h5><div class="onote">成片.mp4 · 封面.png · bgm.mp3 …</div></div>
+  <div style="font-size:10.5px;color:var(--bad);line-height:1.6;padding:2px 2px 0">
+    首屏这两段对已经加入的成员永远是废的；真正要用的 ③④⑤ 被压到下面，还得自己找。
+  </div>`;
+}
+
+function switchModule(m,el){
+  S.module = m;
+  document.querySelectorAll(".rail button").forEach(b=>b.classList.remove("on"));
+  el.classList.add("on");
+  const [t,s] = S.meta[m];
+  document.getElementById("stTitle").textContent = t;
+  document.getElementById("stSub").textContent = s;
+  if(S.panelOpen) toast("切到「"+t.split(" ·")[0]+"」—— 团队浮层还在，没被带走");
+}
+function togglePanel(){
+  S.panelOpen = !S.panelOpen;
+  render();
+  if(S.panelOpen) toast("浮层打开 —— 你还在「"+S.meta[S.module][0].split(" ·")[0]+"」，没有切走");
+}
+function toggleOld(){ S.old=!S.old; render(); }
+function toggleTheme(){
+  const r=document.documentElement;
+  const light = r.getAttribute("data-theme")==="light";
+  r.setAttribute("data-theme", light?"dark":"light");
+  document.getElementById("themeBtn").textContent = light?"浅色":"暗色";
+}
+function toggleProj(i){ S.openProj = S.openProj===i?-1:i; S.openVers=false; render(); }
+function toggleVers(){ S.openVers=!S.openVers; render(); }
+function toggleFold(k){ S.folds[k]=!S.folds[k]; render(); }
+function accept(){
+  toast("正在接续：先另存当前画布 → 拉第 6 版 → 恢复视口与选中 → 认领 10 分钟");
+  setTimeout(()=>toast("已接续「第三集」第 6 版 —— 画布落在镜 03，选中的就是那 3 个节点"),1400);
+}
+let tid=null;
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg; t.classList.add("show");
+  clearTimeout(tid);
+  tid=setTimeout(()=>t.classList.remove("show"),2600);
+}
+
+(function drag(){
+  const head=document.getElementById("pHead"), panel=document.getElementById("panel");
+  let sx=0,sy=0,ox=0,oy=0,drag=false;
+  head.addEventListener("mousedown",e=>{
+    if(e.target.tagName==="BUTTON")return;
+    drag=true; sx=e.clientX; sy=e.clientY;
+    const r=panel.getBoundingClientRect(), pr=panel.parentElement.getBoundingClientRect();
+    ox=r.left-pr.left; oy=r.top-pr.top;
+    panel.style.right="auto"; panel.style.left=ox+"px"; panel.style.top=oy+"px";
+  });
+  window.addEventListener("mousemove",e=>{
+    if(!drag)return;
+    panel.style.left=(ox+e.clientX-sx)+"px";
+    panel.style.top=Math.max(0,oy+e.clientY-sy)+"px";
+  });
+  window.addEventListener("mouseup",()=>drag=false);
+})();
+
+render();
+</script>
+</body>
+</html>

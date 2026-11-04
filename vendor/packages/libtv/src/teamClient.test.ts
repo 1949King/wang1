@@ -227,7 +227,7 @@ describe("teamClient · 视频封面走本机桥", () => {
 });
 
 /**
- * 2026-11-02 · 配对码 / 二维码
+ * 2026-11-02 · 配对码 / 邀请链接
  *
  * 这套东西替掉的是「手填 IP」—— 它自己的坑必须锁住：
  *   · 找主机**只能**走本机桥（浏览器发不出 UDP 广播），不能打同事的服务器；
@@ -339,7 +339,7 @@ describe("teamClient · 配对码", () => {
     expect(m.teamCred()?.token).toBe("tok");
   });
 
-  it("pairing 打 /team/pairing（带令牌），回码 + 二维码 + 到期时间", async () => {
+  it("pairing 打 /team/pairing（带令牌），回码 + 邀请链接 + 到期时间", async () => {
     installFakes();
     const m0 = await loadModule();
     stubSeq(() => ({
@@ -354,7 +354,6 @@ describe("teamClient · 配对码", () => {
         ok: true, code: "229140", ttl: 120, expires_at: 1700000000, reused: false,
         address: "http://192.168.1.4:18770",
         pair_url: "http://192.168.1.4:18770/pair?code=229140",
-        qr: "data:image/png;base64,AAAA",
       }),
     }));
 
@@ -362,7 +361,8 @@ describe("teamClient · 配对码", () => {
     const p = await m.teamPairing();
 
     expect(p.code).toBe("229140");
-    expect(p.qr.startsWith("data:image/png;base64,")).toBe(true);
+    // 2026-11-04 移除二维码：链接是「第二种配对方式」，不再是图的附属品
+    expect(p.pair_url).toContain("/pair?code=229140");
     expect(p.expires_at).toBeGreaterThan(0);
     expect(calls[0].url).toBe("http://192.168.1.4:18770/team/pairing");
     expect(headersOf(calls[0]).Authorization).toBe("Bearer tok");
@@ -415,7 +415,6 @@ describe("teamClient · 配对码名额与作废", () => {
     revoked: false, reused: false, replaced: false, host_name: "老王的工作站",
     address: "http://192.168.1.4:18770",
     pair_url: "http://192.168.1.4:18770/pair?code=229140",
-    qr: "data:image/png;base64,AAAA",
   };
 
   it("要 3 个名额 ⇒ 请求体里带 max_uses=3", async () => {
