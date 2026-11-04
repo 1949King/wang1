@@ -199,3 +199,41 @@ body.sg-team-open .sg-pet { display: none; }
 }
 .sg-team-who.on { color: rgba(228, 232, 240, 0.92); }
 .sg-team-who.on::before { content: "●"; color: rgba(126, 214, 146, 0.95); }
+
+/* ── ⑥ 评审意见（2026-11-04 · 画布 0.3.52）──────────────────────
+   面板恒为深色浮层，所以不需要浅色主题变体（与 ⑤ 素材段同理）。 */
+.sg-team-note {
+  width: 100%; box-sizing: border-box; min-height: 44px; resize: vertical;
+  padding: 6px 8px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.05);
+  color: #e9ecf1; font-family: inherit;
+}
+.sg-team-note::placeholder { color: rgba(210, 216, 226, 0.42); }
+/* 筛选按钮的「选中」态：两段式切换必须一眼看出现在看的是哪一组 */
+.sg-team-row button.on {
+  border-color: rgba(120, 170, 255, 0.6); background: rgba(120, 170, 255, 0.16);
+  color: #eaf1ff;
+}
+.sg-team-cmt {
+  display: flex; flex-direction: column; gap: 4px; padding: 7px 9px; border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+}
+/* 已解决的压暗但仍可读：它还在列表里（能重新打开），不能做成禁用态 */
+.sg-team-cmt.done { opacity: 0.55; }
+.sg-team-cmt-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 11px; }
+.sg-team-cmt-head b { font-size: 12px; color: rgba(235, 240, 248, 0.95); }
+/* pre-wrap：意见里分行写「1. …2. …」的人不少，合并成一行就没法看了 */
+.sg-team-cmt-body { font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.sg-team-cmt-ok { color: rgba(126, 214, 146, 0.9); font-size: 11px; }
+.sg-team-cmt-acts { display: flex; gap: 5px; flex-wrap: wrap; }
+.sg-team-cmt-acts button { font-size: 11px; padding: 2px 8px; }
+
+/* 角色标签（2026-11-04）：主人/可改/只看。"只看"必须一眼看见，
+   否则甲方不知道为什么按钮点了没反应。 */
+.sg-team-role {
+  font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 6px; font-size: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(210, 216, 226, 0.72);
+}
+.sg-team-role.owner { color: #ffd59a; border-color: rgba(255, 213, 154, 0.4); }
+.sg-team-role.viewer { color: rgba(150, 190, 255, 0.9); border-color: rgba(120, 170, 255, 0.36); }
+.sg-team-rolebtn { margin-left: 6px; font-size: 10px; padding: 1px 6px; }

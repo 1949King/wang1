@@ -58,8 +58,8 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.core.team_discovery import Beacon
-from app.core.team_hub import (ConflictError, Hub, LockedError, MAX_ASSET_BYTES,
-                               TeamError)
+from app.core.team_hub import (EDITOR_ROLE, ConflictError, Hub, LockedError, MAX_ASSET_BYTES,
+                               OWNER_ROLE, VIEWER_ROLE, TeamError, allow_role)
 
 logger = logging.getLogger(__name__)
 
@@ -156,12 +156,13 @@ def _pairing_payload(handler: Any, info: Optional[Dict[str, Any]]) -> Dict[str, 
         "revoked": False,
         "reused": False,
         "replaced": False,
+        "role": EDITOR_ROLE,
         "pair_url": "",
     }
     if not info:
         return out
     for key in ("code", "max_uses", "uses", "remaining", "expires_at", "alive",
-                "exhausted", "expired", "revoked", "created_by", "used_by"):
+                "exhausted", "expired", "revoked", "created_by", "used_by", "role"):
         if key in info:
             out[key] = info[key]
     # `ttl` 是「还剩几秒」，和 `expires_at` 一起给，前端倒计时不用自己算时钟差
@@ -431,6 +432,24 @@ function copyCode(){
             raise TeamError("unauthorized", "令牌无效或缺失（先 POST /team/join）")
         return m
 
+    def _need(self, need: str) -> Dict[str, Any]:
+        """取当前成员，**并校验角色够不够**。不够 ⇒ 403 `forbidden`。
+
+        `need` 取 `"editor"`（要能改）或 `"owner"`（要能管人）。读操作不用它。
+
+        文案讲究：403 不能只说「没权限」。人看到的第一反应是「是不是坏了」。
+        所以要把「你现在是什么角色 / 谁能给你升」写进去 —— 尤其 viewer 这个角色
+        是 2026-11-04 才出现的，老成员第一次遇到 403 会一头雾水。
+        """
+        me = self._member()
+        if not allow_role(me.get("role"), need):
+            raise TeamError(
+                "forbidden",
+                "你是「查看者」，只能看和提意见 —— 改动需要编辑权限。"
+                "让团队的主人在成员列表里把你升成编辑者",
+            )
+        return me
+
     # ── 路由 ────────────────────────────────────────────
     def _assets_route(self, method: str) -> bool:
         """附件端点（二进制，不在 JSON 路由表里）。**返回 True = 已处理**。
@@ -460,7 +479,7 @@ function copyCode(){
                 self._send_file(path, str(row["mime"]), str(row["name"]))
             return True
         if method == "POST":
-            me = self._member()
+            me = self._need(EDITOR_ROLE)
             if sha:
                 raise TeamError("not_found", "上传请用 /assets（URL 末尾不带 sha）")
             query = parse_qs(urlparse(self.path).query)
@@ -479,7 +498,7 @@ function copyCode(){
             self._send(200, {"ok": True, **res})
             return True
         if method == "DELETE":
-            self._member()
+            self._need(EDITOR_ROLE)
             if not sha:
                 raise TeamError("not_found", "要删哪个附件？URL 末尾要带 sha256")
             self._send(200, {"ok": True, **self.hub.delete_asset(pid, sha)})
@@ -583,6 +602,11 @@ function copyCode(){
             self._member()
             self._send(200, {"ok": True, "versions": hub.versions(parts[3])})
             return
+        # /team/projects/{id}/comments —— 读**任何角色**都能（viewer 就是来看意见的）
+        if len(parts) == 5 and parts[4] == "comments":
+            self._member()
+            self._send(200, {"ok": True, "comments": hub.list_comments(parts[3])})
+            return
         # /team/projects/{id}/diff?from=&to=
         if len(parts) == 5 and parts[4] == "diff":
             self._member()
@@ -602,18 +626,31 @@ function copyCode(){
     def _route_post(self, path: str) -> None:
         hub = self.hub
         if path == "/team/join":
+            # 🔴 2026-11-04：这条**没有令牌也能打**，所以它的权限必须按最保守的给。
+            #
+            # 以前这里直接把请求里的 `role` 原样写库 —— 局域网里任何人 POST 一下
+            # `{"name":"x","role":"owner"}` 就成了主人。那是真洞，不是理论风险。
+            #
+            # 现在的规则只有两条：
+            #   · **第一个成员** = owner（这台机器的主人自举，与 `ensure_owner` 一致）
+            #   · **之后的所有人** = viewer（能看、能提意见，改不了东西）
+            # 想要「能改」，必须拿主人发的配对码（`/team/pair`，码里带着 role）。
+            # 这条不破坏原有路径：扫描局域网/手填地址照样能进，只是进来是只读的。
             data = self._body()
-            info = hub.register_member(str(data.get("name") or ""), str(data.get("role") or "editor"))
+            first = hub.member_count() == 0
+            role = OWNER_ROLE if first else VIEWER_ROLE
+            info = hub.register_member(str(data.get("name") or ""), role)
             self._send(200, {"ok": True, **info})
             return
         if path == "/team/pairing":
-            me = self._member()
+            me = self._need(EDITOR_ROLE)
             data = self._body()
-            info = hub.create_pairing(me["id"], max_uses=int(data.get("max_uses") or 1))
+            info = hub.create_pairing(me["id"], max_uses=int(data.get("max_uses") or 1),
+                                      role=str(data.get("role") or EDITOR_ROLE))
             self._send(200, _pairing_payload(self, info))
             return
         if path == "/team/pairing/revoke":
-            me = self._member()
+            me = self._need(EDITOR_ROLE)
             data = self._body()
             info = hub.pairing_revoke(str(data.get("code") or ""), me["id"])
             payload = _pairing_payload(self, None)      # 作废后「我手上没有活码」
@@ -645,21 +682,52 @@ function copyCode(){
                 _pair_strike(ip)
                 raise
             _pair_clear(ip)
-            info = hub.register_member(name, str(data.get("role") or "editor"), member_id=mid)
+            # 角色**只能来自码**，不接受请求体里的 `role` —— 否则拿到一张只读码的人
+            # 自己加一句 `"role":"editor"` 就绕过去了。码才是主人表达意图的地方。
+            info = hub.register_member(name, str(claimed.get("role") or EDITOR_ROLE), member_id=mid)
             self._send(200, {"ok": True, **info, "paired": True,
                              "remaining": claimed.get("remaining", 0),
                              "max_uses": claimed.get("max_uses", 1),
                              "host_name": self.beacon_name})
             return
+        # POST /team/members/{id}/role —— **只有主人能改**（2026-11-04）
+        if (len(path.split("/")) == 5 and path.startswith("/team/members/")
+                and path.endswith("/role")):
+            me = self._need(OWNER_ROLE)
+            data = self._body()
+            target = path.split("/")[3]
+            row = hub.set_member_role(me["id"], target, str(data.get("role") or VIEWER_ROLE))
+            self._send(200, {"ok": True, "member": row})
+            return
         if path == "/team/projects":
-            me = self._member()
+            me = self._need(EDITOR_ROLE)
             data = self._body()
             res = hub.create_project(str(data.get("name") or ""), me["id"], data.get("bundle") or {})
             self._send(200, {"ok": True, **res})
             return
         parts = path.split("/")
-        if len(parts) == 5 and parts[1] == "team" and parts[2] == "projects":
+        # /team/projects/{id}/comments —— **viewer 也能提**，这是评审的角色分工：
+        # 客户只读但必须能说话。所以这条不能用 `_need(EDITOR_ROLE)`，
+        # 而且必须排在下面那个「len(parts)==5 一律要编辑权」的分支之前。
+        if len(parts) == 5 and parts[1] == "team" and parts[2] == "projects" and parts[4] == "comments":
             me = self._member()
+            data = self._body()
+            res = hub.add_comment(parts[3], me["id"], str(data.get("body") or ""),
+                                  node_id=str(data.get("node_id") or ""),
+                                  rev=int(data.get("rev") or 0))
+            self._send(200, {"ok": True, "comment": res})
+            return
+        # /team/projects/{id}/comments/{cid} —— 标记已解决 / 重新打开（要编辑权）
+        if (len(parts) == 6 and parts[1] == "team" and parts[2] == "projects"
+                and parts[4] == "comments"):
+            me = self._need(EDITOR_ROLE)
+            data = self._body()
+            res = hub.set_comment_resolved(parts[3], parts[5], me["id"],
+                                           bool(data.get("resolved", True)))
+            self._send(200, {"ok": True, "comment": res})
+            return
+        if len(parts) == 5 and parts[1] == "team" and parts[2] == "projects":
+            me = self._need(EDITOR_ROLE)
             pid, action = parts[3], parts[4]
             data = self._body()
             if action == "push":
@@ -681,7 +749,7 @@ function copyCode(){
             return
         # /team/inbox/{hid}/ack
         if len(parts) == 5 and parts[1] == "team" and parts[2] == "inbox" and parts[4] == "ack":
-            me = self._member()
+            me = self._need(EDITOR_ROLE)
             res = hub.ack_handoff(parts[3], me["id"])
             self._send(200, {"ok": True, **res})
             return

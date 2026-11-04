@@ -60,10 +60,36 @@ MAX_ASSET_NAME = 120
 #: 认领默认 TTL（秒）
 DEFAULT_CLAIM_TTL = 600
 
-#: 「本机主人」的角色名。单例角色：一个团队只有一个 owner（`ensure_owner` 负责保证）。
-#: 注意：**今天它还不参与鉴权** —— `role` 目前只是登记信息，任何成员令牌都能做任何事。
-#: 真正的权限矩阵是后续一刀，别把这里的出现当成「已经有权限控制了」。
+#: 角色（2026-11-04 起**真正参与鉴权**，不再只是登记信息）。
+#:
+#: | 角色 | 能做什么 | 谁能给 |
+#: |---|---|---|
+#: | `owner`  | 全部 + 改别人角色 | 只有本机主人（`ensure_owner` 自举，一个团队一个） |
+#: | `editor` | 读 + 改（推/拉/锁/历史/传素材/提批注） | 主人发的码默认给这个 |
+#: | `viewer` | 只能读 + 提批注，改不了任何东西 | 发码时选「只看」，或没拿码直接进的人 |
+#:
+#: 为什么要分这三档而不是「有令牌就能干」：设计评审最常见的动作是**把工程发给甲方/外部人
+#: 看**。以前只要给账号就是全权限 —— 客户能删你项目。现在给 viewer 就够。
 OWNER_ROLE = "owner"
+EDITOR_ROLE = "editor"
+VIEWER_ROLE = "viewer"
+
+#: 角色强弱（数字越大权限越多）。`allow_role` 只比这个数，不写 if 链。
+_ROLE_RANK = {VIEWER_ROLE: 1, EDITOR_ROLE: 2, OWNER_ROLE: 3}
+
+
+def role_rank(role: Any) -> int:
+    """角色的权限等级；认不出的角色当 **viewer**（未知不等于高权限）。"""
+    return _ROLE_RANK.get(str(role or "").strip().lower(), 1)
+
+
+def allow_role(role: Any, need: str) -> bool:
+    """`role` 够不够做 `need` 这件事。
+
+    认不出的角色按 viewer 算 —— 这一条是**故意的不对称**：写错角色名时宁可少给权限
+    （用户看到 403 会来问），也不要多给（他永远不会发现）。
+    """
+    return role_rank(role) >= role_rank(need)
 
 #: 「最后一次活跃」的刷新节流（秒）。面板每 2 秒轮询多个端点，逐次写库没必要；
 #: 20 秒粒度足够回答「他还在不在」，也不至于让一条空闲连接显示成掉线。
@@ -74,6 +100,13 @@ SEEN_THROTTLE = 20.0
 PAIR_TTL = 120
 #: 配对码位数（纯数字，首位不为 0 ⇒ 100 万以内 90 万种组合）
 PAIR_LEN = 6
+
+#: 单条批注的正文上限（字）。评审意见是给人读的一句话/一段话，2 千字够长；
+#: 再长应该是文档或附件，塞进批注表只会让面板列表变成一堵墙。
+MAX_COMMENT_BODY = 2000
+#: `node_id` 上限。画布节点 id 是 `n_` + 十六进制那种，128 已经极宽松 ——
+#: 卡上限是为了防止有人把整段 JSON 塞进来当 id。
+MAX_COMMENT_NODE = 128
 
 #: 附件扩展名白名单（**不信任客户端给的后缀**，宁可落 `.bin` 也不让 `..%2f` 之类穿透目录）
 _ASSET_EXTS = frozenset([
@@ -331,8 +364,27 @@ class Hub:
                     used_at REAL NOT NULL DEFAULT 0,
                     used_by TEXT NOT NULL DEFAULT '',
                     max_uses INTEGER NOT NULL DEFAULT 1,
-                    uses INTEGER NOT NULL DEFAULT 0
+                    uses INTEGER NOT NULL DEFAULT 0,
+                    role TEXT NOT NULL DEFAULT 'editor'
                 );
+                -- 批注（2026-11-04）：设计评审的载体。
+                -- 🔴 关键设计：**挂在 `node_id` 上，不是挂在整份文档上**。
+                -- 挂文档上会退化成"聊天记录"（"第三卡那个字幕不对" 到底是哪个？），
+                -- 挂节点上才能「点到那个图就看到那条意见」。node_id 是画布节点的
+                -- 稳定 id，不是坐标 —— 坐标会随排版变，一改位置批注就漂走了。
+                -- `node_id` 为空串表示「针对整份画布」的意见（比如"整体色调偏冷"）。
+                CREATE TABLE IF NOT EXISTS comment (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL DEFAULT '',
+                    rev INTEGER NOT NULL DEFAULT 0,
+                    author_id TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    resolved_at REAL NOT NULL DEFAULT 0,
+                    resolved_by TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_comment_proj ON comment (project_id, created_at);
                 """
             )
             self._migrate_asset_columns(conn)
@@ -341,10 +393,12 @@ class Hub:
 
     @staticmethod
     def _migrate_pairing_columns(conn: sqlite3.Connection) -> None:
-        """给 `pairing` 补「可邀请几人」的两列（幂等）。
+        """给 `pairing` 补后来才加的列（幂等）。
 
         老库里的码都是「一人一次」，所以补列后要把已用过的行标成 `uses = 1`
         —— 否则那些行会显示成「还能加 1 人」，等于把废码说成活的。
+        `role` 补列取 `editor`：老码当初发出去就是「能改的同事」，不是只读，
+        升级后把他们降成 viewer 会让人莫名其妙改不动东西。
         """
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(pairing)").fetchall()}
         added_max = False
@@ -357,6 +411,8 @@ class Hub:
             conn.execute("UPDATE pairing SET uses = 1 WHERE used_at > 0")
         elif added_max:
             conn.execute("UPDATE pairing SET max_uses = 1 WHERE max_uses < 1")
+        if "role" not in cols:
+            conn.execute("ALTER TABLE pairing ADD COLUMN role TEXT NOT NULL DEFAULT 'editor'")
 
     @staticmethod
     def _migrate_asset_columns(conn: sqlite3.Connection) -> None:
@@ -430,6 +486,38 @@ class Hub:
                 "SELECT id, name, role, created_at, last_seen FROM member ORDER BY created_at"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def member_count(self) -> int:
+        """成员总数。用来判断「这是不是第一次加入」—— 第一个进来的人才是 owner。"""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM member").fetchone()
+        return int(row["n"] if row else 0)
+
+    def set_member_role(self, actor_id: str, target_id: str, role: str) -> Dict[str, Any]:
+        """改某个成员的角色。**只有 owner 能改**，而且改不了 owner 自己。
+
+        为什么不让 owner 互改：这个团队模型是「一台机器一个主人」（`ensure_owner` 保证单例）。
+        允许出现第二个 owner 之后，「谁是这台机器的主人」就没有答案了，而所有
+        「本机主人」相关逻辑（出码、服务器开关）都建立在这个唯一性上。
+
+        为什么允许降级：设计评审里客户看完一轮就该收回权限，让他变回 viewer 比
+        踢出团队再重加一遍礼貌得多 —— 后者会丢他提过的批注归属。
+        """
+        want = EDITOR_ROLE if str(role or "").strip().lower() == EDITOR_ROLE else VIEWER_ROLE
+        with self._lock, self._conn() as conn:
+            actor = conn.execute("SELECT id, role FROM member WHERE id = ?", (actor_id,)).fetchone()
+            if actor is None or str(actor["role"]) != OWNER_ROLE:
+                raise TeamError("forbidden", "只有本机主人能改成员角色")
+            target = conn.execute("SELECT id, role FROM member WHERE id = ?", (target_id,)).fetchone()
+            if target is None:
+                raise TeamError("not_found", "没有这个成员（他可能已经被移除了）")
+            if str(target["role"]) == OWNER_ROLE:
+                raise TeamError("forbidden", "本机主人的角色不能让渡 —— 团队始终只有一个主人")
+            conn.execute("UPDATE member SET role = ? WHERE id = ?", (want, target_id))
+            row = conn.execute(
+                "SELECT id, name, role, created_at, last_seen FROM member WHERE id = ?", (target_id,)
+            ).fetchone()
+        return dict(row)
 
     def member_by_role(self, role: str) -> Optional[Dict[str, Any]]:
         """按角色取最早的一位成员（没有就 None）。给「本机主人」这类单例角色用。"""
@@ -513,6 +601,8 @@ class Hub:
             "code": str(row["code"]),
             "created_by": str(row["created_by"] or ""),
             "used_by": str(row["used_by"] or ""),
+            #: 用这张码进来的人是什么角色（`editor` 能改 / `viewer` 只看）
+            "role": str(row["role"] or EDITOR_ROLE),
             "max_uses": max_uses,
             "uses": uses,
             "remaining": left,
@@ -524,17 +614,23 @@ class Hub:
         }
 
     def create_pairing(
-        self, member_id: str, ttl: float = PAIR_TTL, max_uses: int = 1
+        self, member_id: str, ttl: float = PAIR_TTL, max_uses: int = 1, role: str = EDITOR_ROLE
     ) -> Dict[str, Any]:
         """生成（或复用）一张配对码。
 
         `max_uses` = 这张码能请几个人（夹在 1~9）。**要更多人时会作废旧码**：
         配额只能往上加不能半路改 —— 否则「已请 2 人」的码被改成「只能请 1 人」
         就成了自相矛盾的状态。调用方拿到 `replaced=True` 要如实提示「旧码作废了」。
+
+        `role` = 用这张码进来的人是什么角色。只允许 `editor` / `viewer`：
+        **码不能发 owner**（主人只有一个，得靠 `ensure_owner` 自举，不能靠转发链接长出来）。
+        角色和名额一样，是「码的属性」—— 复用旧码时沿用旧码的 role，不改它：
+        同一串数字不能对甲是可改、对乙是只读。
         """
         now = _now()
         span = max(30.0, float(ttl or PAIR_TTL))
         want = max(1, min(int(max_uses or 1), 9))
+        want_role = VIEWER_ROLE if str(role or "").strip().lower() == VIEWER_ROLE else EDITOR_ROLE
         with self._lock, self._conn() as conn:
             # 顺手清掉一天前的死码，别让这张表无限长
             conn.execute("DELETE FROM pairing WHERE expires_at < ?", (now - 86400,))
@@ -546,10 +642,10 @@ class Hub:
             ).fetchone()
             replaced = False
             if row is not None:
-                if int(row["max_uses"] or 1) >= want:
+                if int(row["max_uses"] or 1) >= want and str(row["role"] or "") == want_role:
                     return {**self._pairing_public(row, now), "ttl": int(row["expires_at"] - now),
                             "reused": True, "replaced": False}
-                # 现有码名额不够：废掉它再发新的（不然会出现两张并存的活码）
+                # 名额不够、或者要的角色不一样：废掉它再发新的（不然会出现两张并存的活码）
                 conn.execute("UPDATE pairing SET used_at = ? WHERE code = ?", (now, row["code"]))
                 replaced = True
             for _ in range(32):
@@ -557,8 +653,8 @@ class Hub:
                 try:
                     conn.execute(
                         "INSERT INTO pairing (code, created_by, created_at, expires_at,"
-                        " max_uses, uses) VALUES (?,?,?,?,?,0)",
-                        (code, member_id, now, now + span, want),
+                        " max_uses, uses, role) VALUES (?,?,?,?,?,0,?)",
+                        (code, member_id, now, now + span, want, want_role),
                     )
                     fresh = conn.execute("SELECT * FROM pairing WHERE code = ?", (code,)).fetchone()
                     return {**self._pairing_public(fresh, now), "ttl": int(span),
@@ -1087,6 +1183,102 @@ class Hub:
                 logger.debug("[team] 附件字节删除失败 %s", path, exc_info=True)
         return {"sha256": sha, "removed": removed}
 
+    # ── 批注（2026-11-04 · 设计评审）────────────────────
+    #
+    # 团队到这一版为止解决了「传」，但没解决「说」。设计协作的真实循环是
+    # 「做 → 给人看 → 收意见 → 改」，而意见以前只能走微信（截个图圈红框）。
+    #
+    # 三条纪律：
+    #   ① **挂节点**：`node_id` 指向画布节点，不指向坐标 —— 一改位置批注就漂走
+    #      的话，这条功能等于不存在；空串 = 针对整份画布的意见。
+    #   ② **不改 bundle**：批注是独立表，不进版本快照。否则每提一条意见都产生
+    #      一个新 rev，"谁改了什么" 会被意见淹掉；而且 reviewer 提意见时并不想
+    #      动别人的画布。
+    #   ③ **提到第几版就说第几版**（`rev`）：意见是对着某一版说的。存下来才能
+    #      回答「他看的是哪一版」——不然改完再看他提的问题会觉得莫名其妙。
+
+    @staticmethod
+    def _comment_public(row: Any) -> Dict[str, Any]:
+        """一行批注 → 对外形状。`resolved` 直接给布尔，前端不用比时间戳。"""
+        return {
+            "id": str(row["id"]),
+            "project_id": str(row["project_id"]),
+            "node_id": str(row["node_id"] or ""),
+            "rev": int(row["rev"] or 0),
+            "author_id": str(row["author_id"]),
+            "author": str(row["author_name"] or ""),
+            "body": str(row["body"]),
+            "created_at": float(row["created_at"] or 0),
+            "resolved": float(row["resolved_at"] or 0) > 0,
+            "resolved_at": float(row["resolved_at"] or 0),
+            "resolved_by": str(row["resolved_by"] or ""),
+            "resolver": str(row["resolver_name"] or ""),
+        }
+
+    _COMMENT_SELECT = (
+        "SELECT c.*, m.name AS author_name, r.name AS resolver_name"
+        " FROM comment c"
+        " LEFT JOIN member m ON m.id = c.author_id"
+        " LEFT JOIN member r ON r.id = c.resolved_by"
+    )
+
+    def _comment_row(self, comment_id: str) -> Dict[str, Any]:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                self._COMMENT_SELECT + " WHERE c.id = ?", (comment_id,)
+            ).fetchone()
+        if row is None:
+            raise TeamError("not_found", "没有这条批注（可能已经被删了）")
+        return self._comment_public(row)
+
+    def add_comment(self, project_id: str, author_id: str, body: str,
+                    node_id: str = "", rev: int = 0) -> Dict[str, Any]:
+        """提一条批注。返回完整的一条（带作者名），前端不必再查一次。"""
+        text = str(body or "").strip()
+        if not text:
+            raise TeamError("empty_body", "批注不能是空的 —— 写一句要改什么")
+        if len(text) > MAX_COMMENT_BODY:
+            raise TeamError("too_long", "一条批注最多 %d 字，再长就写成文档吧" % MAX_COMMENT_BODY)
+        node = str(node_id or "").strip()[:MAX_COMMENT_NODE]
+        self._project_row(project_id)          # 项目不存在 ⇒ not_found
+        cid = "c_" + secrets.token_hex(8)
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO comment (id, project_id, node_id, rev, author_id, body, created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (cid, project_id, node, max(0, int(rev or 0)), author_id, text, _now()),
+            )
+        return self._comment_row(cid)
+
+    def list_comments(self, project_id: str) -> List[Dict[str, Any]]:
+        """按时间正序列出。**未解决与已解决都给** —— 前端要能切换看历史。"""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                self._COMMENT_SELECT + " WHERE c.project_id = ?"
+                " ORDER BY c.created_at ASC, c.id ASC",
+                (project_id,),
+            ).fetchall()
+        return [self._comment_public(r) for r in rows]
+
+    def set_comment_resolved(self, project_id: str, comment_id: str,
+                             member_id: str, resolved: bool = True) -> Dict[str, Any]:
+        """标记已解决 / 重新打开。
+
+        `resolved_by` 在重开时清空 —— 留着的话「谁解决的」会指向一个其实没解决的人。
+        """
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM comment WHERE id = ? AND project_id = ?",
+                (comment_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise TeamError("not_found", "没有这条批注（可能已经被删了）")
+            conn.execute(
+                "UPDATE comment SET resolved_at = ?, resolved_by = ? WHERE id = ?",
+                (_now() if resolved else 0.0, member_id if resolved else "", comment_id),
+            )
+        return self._comment_row(comment_id)
+
     # ── 健康 ────────────────────────────────────────────
     def stats(self) -> Dict[str, Any]:
         with self._lock, self._conn() as conn:
@@ -1095,6 +1287,9 @@ class Hub:
             pending = conn.execute("SELECT COUNT(*) AS n FROM handoff WHERE status='pending'").fetchone()["n"]
             assets = conn.execute("SELECT COUNT(*) AS n FROM asset").fetchone()["n"]
             asset_bytes = conn.execute("SELECT COALESCE(SUM(bytes),0) AS n FROM asset").fetchone()["n"]
+            open_comments = conn.execute(
+                "SELECT COUNT(*) AS n FROM comment WHERE resolved_at = 0"
+            ).fetchone()["n"]
         return {"projects": int(projects), "members": int(members),
                 "pending_handoffs": int(pending), "assets": int(assets),
-                "asset_bytes": int(asset_bytes)}
+                "asset_bytes": int(asset_bytes), "open_comments": int(open_comments)}

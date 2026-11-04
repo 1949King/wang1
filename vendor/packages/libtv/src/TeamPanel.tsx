@@ -47,7 +47,6 @@ import {
   teamMembers,
   teamPair,
   teamPairing,
-  teamPairingStatus,
   teamRevokePairing,
   teamPull,
   teamPush,
@@ -60,12 +59,16 @@ import {
   type TeamVersion,
   teamRollback,
   teamVersions,
+  teamSetRole,
+  type TeamRole,
 } from "./teamClient";
 import { backupBeforePull } from "./teamBackup";
 import { TeamVersions } from "./TeamVersions";
 import { assetCounts, emptyAssetHint, filterAssets, kindLabel, type AssetKindFilter } from "./assetFilter";
 import { isOnline, linkText, onlineCount, seenText } from "./teamPresence";
 import { parseInvite } from "./teamInvite";
+import { TeamReview } from "./TeamReviewPanel";
+import { usePairingPoll } from "./usePairingPoll";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -118,6 +121,13 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [inbox, setInbox] = useState<TeamHandoffItem[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selected, setSelected] = useState<string>("");
+  /**
+   * 画布当前选中的节点（2026-11-04）：批注要挂在这上面。
+   *
+   * 为什么订阅 `selectedId` 而不是每次取 `getState()`：用户点了别的节点，
+   * 「提给「镜 03」」那行字得跟着变，否则他会把意见挂到上一个节点上。
+   */
+  const canvasSelectedId = useCanvasStore((s) => s.selectedId);
   const [target, setTarget] = useState<string>("");
   const [note, setNote] = useState<string>("");
   /** 展开历史版本的项目 id（空串=都收起）。 */
@@ -142,6 +152,14 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [pair, setPair] = useState<TeamPairingInfo | null>(null);
   /** 这次要请几个人（1/3/5/9）。人数只能往上加：要得更多时会作废旧码。 */
   const [pairUses, setPairUses] = useState<number>(1);
+  /**
+   * 这张码给什么角色（2026-11-04）。
+   *
+   * `viewer` 是给**甲方/外部评审**用的：能看、能提意见，改不了任何东西。
+   * 角色是**码的属性**（不是加入后再设置）—— 因为「给他看但别动」这句话得在
+   * 发出去那一刻就成立，不能等他自己先能改了再收回。
+   */
+  const [pairRole, setPairRole] = useState<TeamRole>("editor");
   /** 卡片底下那行小提示（「已复制」「作废了」），比全局提示更贴近动作。 */
   const [pairNote, setPairNote] = useState<string>("");
   /** 同事侧输入框里的 6 位码。 */
@@ -198,6 +216,32 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
     void refreshHost();
     void refreshTeam();
   }, [refreshHost, refreshTeam]);
+
+  /**
+   * 我自己是什么角色（`owner` / `editor` / `viewer`）。
+   *
+   * 从成员列表里按 `member_id` 找自己，**而不是**让后端塞进令牌 —— 角色会因为
+   * 主人一键降级而改变，令牌里缓存一份就会「明明被降级了还能点」。
+   * 找不到（刚加入、列表还没刷）时按 `viewer` 算：宁可少显示按钮，
+   * 也不要在只读身份下露出「上传」然后点一下吃 403。
+   */
+  const myRole: TeamRole = (members.find((m) => m.id === cred?.member_id)?.role as TeamRole)
+    || "viewer";
+
+  /** 主人给别人升降级（服务端还会再校验一次，这里只是提前把按钮收起来）。 */
+  const toggleRole = async (m: Member) => {
+    const next: TeamRole = m.role === "viewer" ? "editor" : "viewer";
+    setBusy(m.id);
+    try {
+      await teamSetRole(m.id, next);
+      setMembers((prev) => prev.map((x) => (x.id === m.id ? { ...x, role: next } : x)));
+      say("ok", next === "editor" ? `${m.name} 现在能改了` : `${m.name} 现在是只看，改不动东西`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  };
 
   // ── 动作 ──────────────────────────────────────────
   /**
@@ -456,51 +500,35 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const hostRef = useRef(refreshHost);
   hostRef.current = refreshHost;
 
-  useEffect(() => {
-    if (!pairCode || !pairLive) return;
-    let stop = false;
-    const tick = async () => {
-      try {
-        const st = await teamPairingStatus();
-        if (stop) return;
-        if (st.code === pairCode) {
-          setPair((prev) => (prev ? { ...prev, ...st } : st));
-        } else {
-          // 服务端手上已经没有活码了（用尽/被废/过期清理）
-          setPair((prev) => (prev ? { ...prev, alive: false, remaining: 0, exhausted: true } : prev));
-          setPairNote("这张码已经不能用了，重新出一个");
-        }
-      } catch {
-        /* 网络抖一下就跳过，下一轮再来 —— 轮询失败不该弹错误打扰正在念码的人 */
+  // 出码后每 2 秒问一次服务端（名额 / 谁刚加入）。轮询本身在 `usePairingPoll` 里，
+  // 这里只留三件「拿到结果之后要做什么」—— 都是改本组件的状态。
+  usePairingPoll({
+    pairCode,
+    live: pairLive,
+    onStatus: (st) => setPair((prev) => (prev ? { ...prev, ...st } : st)),
+    onGone: () => {
+      // 服务端手上已经没有活码了（用尽/被废/过期清理）
+      setPair((prev) => (prev ? { ...prev, alive: false, remaining: 0, exhausted: true } : prev));
+      setPairNote("这张码已经不能用了，重新出一个");
+    },
+    onMembers: (list) => {
+      setMembers(list);
+      const ids = list.map((m) => m.id).sort().join(",");
+      if (!memberBaseline.current) {
+        memberBaseline.current = ids;         // 出码那一刻的基线
+        return;
       }
-      try {
-        const list = await teamMembers();
-        if (stop) return;
-        setMembers(list);
-        const ids = list.map((m) => m.id).sort().join(",");
-        if (!memberBaseline.current) {
-          memberBaseline.current = ids;         // 出码那一刻的基线
-        } else if (ids !== memberBaseline.current) {
-          const before = memberBaseline.current.split(",");
-          const fresh = list.filter((m) => !before.includes(m.id));
-          if (fresh.length) {
-            sayRef.current("ok",
-              `${fresh.map((m) => m.name).join("、")} 已用配对码加入 —— 团队现在 ${list.length} 人`);
-          }
-          memberBaseline.current = ids;
-          void hostRef.current();
-        }
-      } catch {
-        /* 同上 */
+      if (ids === memberBaseline.current) return;
+      const before = memberBaseline.current.split(",");
+      const fresh = list.filter((m) => !before.includes(m.id));
+      if (fresh.length) {
+        sayRef.current("ok",
+          `${fresh.map((m) => m.name).join("、")} 已用配对码加入 —— 团队现在 ${list.length} 人`);
       }
-    };
-    void tick();
-    const timer = window.setInterval(() => { void tick(); }, 2000);
-    return () => {
-      stop = true;
-      window.clearInterval(timer);
-    };
-  }, [pairCode, pairLive]);
+      memberBaseline.current = ids;
+      void hostRef.current();
+    },
+  });
 
   /**
    * 心跳：确认「服务器还在不在」，顺手把成员在线状态刷新一次。
@@ -569,14 +597,15 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const makePairing = async () => {
     setBusy("pairing");
     try {
-      const p = await teamPairing(pairUses);
+      const p = await teamPairing(pairUses, pairRole);
       setNow(Date.now() / 1000);
       setPair(p);
       setPairNote(p.replaced ? "名额变多了，旧码已作废" : "");
       memberBaseline.current = members.map((m) => m.id).sort().join(",");
       if (!p.expires_at) say("err", p.message || "暂时生不出配对码，等一秒再点一次");
       else if (p.reused) say("ok", `配对码还是 ${p.code}（上次那张没过期，接着用）`);
-      else say("ok", `配对码 ${p.code}，能请 ${p.max_uses} 人，念给同事听`);
+      else say("ok", `配对码 ${p.code}，能请 ${p.max_uses} 人` +
+        (pairRole === "viewer" ? "，进来只能看和提意见" : "，念给同事听"));
     } catch (e) {
       if (e instanceof TeamError && e.code === "unauthorized") {
         // 2026-11-04 起服务端启动就把主人认了，正常不会再走到这里；
@@ -1122,6 +1151,16 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                 <option value={5}>请 5 人</option>
                 <option value={9}>请 9 人</option>
               </select>
+              {/* 角色跟着码走：同样的 6 位数字不能对甲是可改、对乙是只读 */}
+              <select
+                value={pairRole}
+                onChange={(e) => setPairRole(e.target.value as TeamRole)}
+                disabled={busy === "pairing"}
+                title="用这张码进来的人能做什么"
+              >
+                <option value="editor">能改（同事）</option>
+                <option value="viewer">只看（评审/甲方）</option>
+              </select>
               <button type="button" disabled={busy === "pairing"} onClick={() => void makePairing()}>
                 {busy === "pairing" ? "生成中…" : pair?.code ? "重新出码" : "让同事加入（出 6 位码）"}
               </button>
@@ -1231,11 +1270,22 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             </div>
             {members.length ? (
               <div className="sg-team-people">
-                {members.map((m) => (
-                  <span key={m.id} className={`sg-team-who${isOnline(m.last_seen, nowSec) ? " on" : ""}`}>
-                    {m.name}{m.id === cred.member_id ? "（我）" : ""} · {seenText(m.last_seen, nowSec)}
-                  </span>
-                ))}
+                {members.map((m) => {
+                  const isMe = m.id === cred.member_id;
+                  const canToggle = myRole === "owner" && m.role !== "owner" && !isMe;
+                  return (
+                    <span key={m.id} className={`sg-team-who${isOnline(m.last_seen, nowSec) ? " on" : ""}`}>
+                      {m.name}{isMe ? "（我）" : ""} · {seenText(m.last_seen, nowSec)}
+                      <i className={`sg-team-role ${m.role}`}>{roleLabel(m.role)}</i>
+                      {canToggle ? (
+                        <button type="button" className="sg-team-rolebtn" disabled={busy === m.id}
+                                onClick={() => void toggleRole(m)}>
+                          {m.role === "viewer" ? "给编辑权" : "收回编辑权"}
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })}
               </div>
             ) : null}
           </>
@@ -1415,8 +1465,40 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
           ) : <div className="sg-team-dim">{emptyAssetHint(0, "all", "")}</div>}
         </section>
       ) : null}
+
+      {/* 6. 评审（2026-11-04）：挂节点的意见。
+          放在素材之后而不是项目之后：素材和意见都是「这个项目的细节」，
+          而 ③ 是「项目列表」。点了项目 → 往下看素材 → 再往下看意见，是同一趟动作。 */}
+      {cred ? (
+        <TeamReview
+          projectId={selected}
+          projectName={projects.find((p) => p.project_id === selected)?.name || ""}
+          canWrite={myRole === "editor" || myRole === "owner"}
+          selectedId={canvasSelectedId}
+          selectedLabel={nodeLabelOf(canvasSelectedId)}
+          onLocate={(nodeId: string) => useCanvasStore.getState().setSelected(nodeId)}
+          say={say}
+          fail={fail}
+        />
+      ) : null}
     </div>
   );
+}
+
+/** 角色的中文标签。认不出的角色按「只看」说 —— 与后端 `allow_role` 同一口径。 */
+function roleLabel(role: string): string {
+  return role === "owner" ? "主人" : role === "editor" ? "可改" : "只看";
+}
+
+/** 画布节点 id → 人看得懂的名字（「镜 03」）。取不到就回空串，界面上说「某一处」。 */
+function nodeLabelOf(id: string | null): string {
+  if (!id) return "";
+  const nodes = useCanvasStore.getState().nodes as Array<{
+    id: string;
+    data?: Record<string, unknown>;
+  }>;
+  const hit = nodes.find((n) => n.id === id);
+  return String(hit?.data?.title || "");
 }
 
 /** 附件类型的小图标（不引第三方图标库，纯字符）。 */

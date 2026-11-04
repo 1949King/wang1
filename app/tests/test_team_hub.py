@@ -196,8 +196,13 @@ def test_http_end_to_end(tmp_path):
 
         code, a = _req(base, "/team/join", {"name": "张三"})
         assert code == 200 and a["token"]
-        code, b = _req(base, "/team/join", {"name": "李四"})
-        assert code == 200
+        # 2026-11-04 起：无码 join 只能是 viewer（第一个成员自举成 owner）。
+        # 李四要能改，得走主人发的码 —— 这里刻意走真实路径，而不是把测试改成
+        # 「反正能推就行」，否则冲突检测测的就不是真实权限下的行为了。
+        assert a["role"] == "owner"
+        _, pairing = _req(base, "/team/pairing", {}, a["token"])
+        code, b = _req(base, "/team/pair", {"name": "李四", "code": pairing["code"]})
+        assert code == 200 and b["role"] == "editor"
 
         # 未带令牌 ⇒ 401
         code, _ = _req(base, "/team/projects")
@@ -933,3 +938,289 @@ def test_member_last_seen_column_migrated_on_old_db(tmp_path):
     hub = Hub(str(tmp_path / "team"))
     row = hub.members()[0]
     assert row["last_seen"] == 0
+
+
+# ── 角色鉴权（2026-11-04 · 画布 0.3.52）────────────────────
+#
+# 为什么这组必须有：以前 `role` 只是登记信息，**任何成员令牌都能做任何事**。
+# 而设计评审最常见的动作是把工程发给甲方看 —— 那样等于把删除权一起给出去了。
+# 这里锁四件事：
+#   ① 认不出角色时按 viewer 算（少给权限，不给多）；
+#   ② 无码 join 只能拿到 viewer，且请求体里自封 `role: owner` 无效；
+#   ③ 主人能升任何人，但改不了自己的角色，别人也改不了他；
+#   ④ 老库升级后码的角色是 editor（不能把原来能改的人降成只读）。
+
+
+def test_role_rank_and_allow_are_monotonic():
+    from app.core.team_hub import allow_role, role_rank
+
+    assert role_rank("owner") > role_rank("editor") > role_rank("viewer")
+    assert allow_role("owner", "owner") and allow_role("owner", "editor")
+    assert allow_role("editor", "editor") and not allow_role("editor", "owner")
+    assert allow_role("viewer", "viewer") and not allow_role("viewer", "editor")
+
+
+def test_unknown_role_is_treated_as_viewer():
+    """写错角色名 ⇒ 当 viewer。**故意的不对称**：多给权限用户永远发现不了。"""
+    from app.core.team_hub import allow_role, role_rank
+
+    for bad in ("", None, "admin", "机器人", "  "):
+        assert role_rank(bad) == 1
+        assert not allow_role(bad, "editor")
+    # 大小写与首尾空格不算「不认识」—— 老库里可能写的是 `Editor `
+    assert allow_role("Editor ", "editor")
+    assert allow_role("EDITOR", "editor")
+
+
+def test_join_without_code_is_viewer_and_cannot_write(tmp_path):
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, owner = _req(base, "/team/join", {"name": "主人"})
+        code, guest = _req(base, "/team/join", {"name": "路人"})
+        assert code == 200 and guest["role"] == "viewer"
+
+        # 能读
+        assert _req(base, "/team/projects", token=guest["token"])[0] == 200
+        assert _req(base, "/team/members", token=guest["token"])[0] == 200
+        # 不能写：建项目 / 上传附件都挡
+        code, err = _req(base, "/team/projects", {"name": "x", "bundle": _bundle()},
+                         guest["token"])
+        assert code == 403 and err["code"] == "forbidden"
+        assert "编辑者" in err["message"] or "编辑权限" in err["message"]
+    finally:
+        srv.stop()
+
+
+def test_join_ignores_role_in_request_body(tmp_path):
+    """自封 owner 无效 —— 这是 2026-11-04 之前的真洞，不是理论风险。"""
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _req(base, "/team/join", {"name": "主人"})
+        code, evil = _req(base, "/team/join", {"name": "攻击者", "role": "owner"})
+        assert code == 200 and evil["role"] == "viewer"
+        # 再试一次带 editor，也一样
+        code, evil2 = _req(base, "/team/join", {"name": "攻击者2", "role": "editor"})
+        assert evil2["role"] == "viewer"
+    finally:
+        srv.stop()
+
+
+def test_pairing_can_invite_viewer(tmp_path):
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, owner = _req(base, "/team/join", {"name": "主人"})
+        _, p = _req(base, "/team/pairing", {"role": "viewer"}, owner["token"])
+        assert p["role"] == "viewer"
+        code, guest = _req(base, "/team/pair", {"name": "甲方", "code": p["code"]})
+        assert code == 200 and guest["role"] == "viewer"
+        # 拿到 viewer 码的人，自己加 role 也升不上去（角色只来自码）
+        _, p2 = _req(base, "/team/pairing", {"role": "viewer"}, owner["token"])
+        code, sneak = _req(base, "/team/pair",
+                           {"name": "滑头", "code": p2["code"], "role": "editor"})
+        assert code == 200 and sneak["role"] == "viewer"
+    finally:
+        srv.stop()
+
+
+def test_pairing_reuse_requires_same_role(tmp_path):
+    """同一串数字不能对甲是可改、对乙是只读 ⇒ 换角色必须换码。"""
+    hub = Hub(str(tmp_path / "team"))
+    m = hub.register_member("主人", "owner")
+    first = hub.create_pairing(m["member_id"], max_uses=3, role="editor")
+    same = hub.create_pairing(m["member_id"], max_uses=3, role="editor")
+    assert same["code"] == first["code"] and same["reused"] is True
+
+    other = hub.create_pairing(m["member_id"], max_uses=3, role="viewer")
+    assert other["code"] != first["code"] and other["replaced"] is True
+    # 旧码被作废，不能留两张活码
+    assert hub.pairing_alive(first["code"]) is False
+    assert hub.pairing_alive(other["code"]) is True
+
+
+def test_owner_can_promote_member_and_then_can_write(tmp_path):
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, owner = _req(base, "/team/join", {"name": "主人"})
+        _, guest = _req(base, "/team/join", {"name": "同事"})
+        assert _req(base, "/team/projects", {"name": "x", "bundle": _bundle()},
+                    guest["token"])[0] == 403
+
+        code, res = _req(base, "/team/members/%s/role" % guest["member_id"],
+                         {"role": "editor"}, owner["token"])
+        assert code == 200 and res["member"]["role"] == "editor"
+        # 升完之后立刻能建项目（权限是查库的，不是缓存在令牌里）
+        code, made = _req(base, "/team/projects", {"name": "x", "bundle": _bundle()},
+                          guest["token"])
+        assert code == 200 and made["project_id"]
+    finally:
+        srv.stop()
+
+
+def test_non_owner_cannot_change_role_and_owner_role_is_immutable(tmp_path):
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, owner = _req(base, "/team/join", {"name": "主人"})
+        _, p = _req(base, "/team/pairing", {}, owner["token"])
+        _, editor = _req(base, "/team/pair", {"name": "同事", "code": p["code"]})
+
+        # 编辑者想改别人角色 ⇒ 403
+        code, err = _req(base, "/team/members/%s/role" % owner["member_id"],
+                         {"role": "viewer"}, editor["token"])
+        assert code == 403 and err["code"] == "forbidden"
+
+        # 主人改自己 ⇒ 403（团队始终只有一个主人）
+        code, err = _req(base, "/team/members/%s/role" % owner["member_id"],
+                         {"role": "editor"}, owner["token"])
+        assert code == 403 and "让渡" in err["message"]
+    finally:
+        srv.stop()
+
+
+def test_set_member_role_rejects_unknown_member(hub):
+    m = hub.register_member("主人", "owner")
+    with pytest.raises(TeamError) as gone:
+        hub.set_member_role(m["member_id"], "m_不存在", "editor")
+    assert gone.value.code == "not_found"
+
+
+def test_old_db_pairing_gets_editor_role(tmp_path):
+    """老库升级后码的角色必须是 editor：那些人本来是能改的，
+    升级瞬间变只读会让人莫名其妙改不动东西。"""
+    import sqlite3
+
+    db = tmp_path / "team" / "team.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE member (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'editor', token_hash TEXT NOT NULL,
+            created_at REAL NOT NULL, last_seen REAL NOT NULL DEFAULT 0);
+        CREATE TABLE pairing (code TEXT PRIMARY KEY, created_by TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL, expires_at REAL NOT NULL,
+            used_at REAL NOT NULL DEFAULT 0, used_by TEXT NOT NULL DEFAULT '',
+            max_uses INTEGER NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO member VALUES ('m_1','张三','owner','x',1e9,0);
+        INSERT INTO pairing VALUES ('229140','m_1',1e9,9e18,0,'',1,0);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    hub = Hub(str(tmp_path / "team"))
+    info = hub.pairing_info("229140")
+    assert info is not None and info["role"] == "editor"
+
+
+# ── 批注（2026-11-04 · 设计评审）────────────────────────────
+#
+# 这一组的重点是**角色分工**：viewer 能提意见但不能替人标「已解决」。
+# 如果哪天有人把提批注也加上编辑权门槛，客户就再也说不了话了 —— 那正是
+# 这条功能存在的理由（甲方只看不改，但必须能说话）。
+
+
+def test_comment_lifecycle(hub):
+    m = hub.register_member("张三", "owner")
+    p = hub.create_project("第一集", m["member_id"], _bundle())
+
+    c = hub.add_comment(p["project_id"], m["member_id"], "镜 03 字幕压住人脸了",
+                        node_id="n1", rev=2)
+    assert c["node_id"] == "n1" and c["rev"] == 2
+    assert c["author"] == "张三" and c["resolved"] is False
+
+    listed = hub.list_comments(p["project_id"])
+    assert len(listed) == 1 and listed[0]["body"].startswith("镜 03")
+
+    done = hub.set_comment_resolved(p["project_id"], c["id"], m["member_id"], True)
+    assert done["resolved"] is True and done["resolver"] == "张三"
+
+    reopened = hub.set_comment_resolved(p["project_id"], c["id"], m["member_id"], False)
+    assert reopened["resolved"] is False
+    # 重开必须把「谁解决的」清掉，否则记录指向一个其实没解决的人
+    assert reopened["resolved_by"] == "" and reopened["resolver"] == ""
+
+
+def test_comment_rejects_empty_body_and_missing_project(hub):
+    m = hub.register_member("张三", "owner")
+    p = hub.create_project("第一集", m["member_id"], _bundle())
+
+    with pytest.raises(TeamError) as empty:
+        hub.add_comment(p["project_id"], m["member_id"], "   ")
+    assert empty.value.code == "empty_body"
+
+    with pytest.raises(TeamError) as too_long:
+        hub.add_comment(p["project_id"], m["member_id"], "字" * 2001)
+    assert too_long.value.code == "too_long"
+
+    with pytest.raises(TeamError) as gone:
+        hub.add_comment("proj_不存在", m["member_id"], "随便说点什么")
+    assert gone.value.code == "not_found"
+
+
+def test_comment_does_not_touch_rev(hub):
+    """提批注**不产生新版本** —— 否则每提一条意见都多一个 rev，
+    「谁改了什么」会被意见淹掉，而且评审者并不想动别人的画布。"""
+    m = hub.register_member("张三", "owner")
+    p = hub.create_project("第一集", m["member_id"], _bundle())
+    before = hub._project_row(p["project_id"])["rev"]
+    hub.add_comment(p["project_id"], m["member_id"], "整体色调偏冷", node_id="")
+    after = hub._project_row(p["project_id"])["rev"]
+    assert before == after == 1
+
+
+def test_viewer_can_comment_but_cannot_resolve(tmp_path):
+    srv = TeamServer(str(tmp_path / "team"), host="127.0.0.1", port=0)
+    info = srv.start()
+    base = "http://127.0.0.1:%d" % info["port"]
+    try:
+        _, owner = _req(base, "/team/join", {"name": "主人"})
+        # 甲方：无码 join ⇒ viewer
+        _, client = _req(base, "/team/join", {"name": "甲方"})
+        assert client["role"] == "viewer"
+
+        _, made = _req(base, "/team/projects",
+                       {"name": "第一集", "bundle": _bundle()}, owner["token"])
+        pid = made["project_id"]
+
+        # viewer 能提 —— 这是关键
+        code, res = _req(base, "/team/projects/%s/comments" % pid,
+                         {"body": "这一版封面太暗", "node_id": "n1", "rev": 1},
+                         client["token"])
+        assert code == 200 and res["comment"]["author"] == "甲方"
+        cid = res["comment"]["id"]
+
+        # 但解决不了（那是干活的人的流程）
+        code, err = _req(base, "/team/projects/%s/comments/%s" % (pid, cid),
+                         {"resolved": True}, client["token"])
+        assert code == 403 and err["code"] == "forbidden"
+
+        # 编辑者能解决；读列表两种角色都能
+        code, done = _req(base, "/team/projects/%s/comments/%s" % (pid, cid),
+                          {"resolved": True}, owner["token"])
+        assert code == 200 and done["comment"]["resolved"] is True
+        code, listed = _req(base, "/team/projects/%s/comments" % pid, token=client["token"])
+        assert code == 200 and len(listed["comments"]) == 1
+        assert listed["comments"][0]["resolver"] == "主人"
+    finally:
+        srv.stop()
+
+
+def test_stats_counts_open_comments(tmp_path):
+    hub = Hub(str(tmp_path / "team"))
+    m = hub.register_member("张三", "owner")
+    p = hub.create_project("第一集", m["member_id"], _bundle())
+    c = hub.add_comment(p["project_id"], m["member_id"], "第一处")
+    hub.add_comment(p["project_id"], m["member_id"], "第二处")
+    assert hub.stats()["open_comments"] == 2
+    hub.set_comment_resolved(p["project_id"], c["id"], m["member_id"], True)
+    assert hub.stats()["open_comments"] == 1

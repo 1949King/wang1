@@ -423,7 +423,9 @@ describe("teamClient · 配对码名额与作废", () => {
     const m = await loadModule();
     const p = await m.teamPairing(3);
 
-    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ max_uses: 3 });
+    // 2026-11-04 起请求体固定带 role（默认 editor）：角色是码的属性，
+    // 不能等加入后再设置 —— 「给他看但别动」得在发出去那一刻就成立
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ max_uses: 3, role: "editor" });
     expect(p.max_uses).toBe(3);
     expect(p.remaining).toBe(3);
   });
@@ -473,5 +475,115 @@ describe("teamClient · 配对码名额与作废", () => {
     expect(r.host_name).toBe("老王的工作站");
     // 兑换这一条仍然不带令牌
     expect((calls[0].init?.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+});
+
+/**
+ * 2026-11-04 · 批注与角色
+ *
+ * 这里只锁**路径和请求体**：正文怎么分组、时间怎么说人话在 `teamReview.test.ts`。
+ * 路径错一位（`/comments` 写成 `/comment`）后端会 404，但那只有真机上才看得见 ——
+ * 单测里花一行就能拦住。
+ */
+describe("teamClient · 批注与角色", () => {
+  beforeEach(() => installFakes());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  type Call = { url: string; init?: RequestInit };
+
+  function stub(impl: () => unknown) {
+    const calls: Call[] = [];
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = vi.fn(
+      async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return impl();
+      },
+    ) as unknown as typeof fetch;
+    return calls;
+  }
+
+  async function ready() {
+    installFakes();
+    const m0 = await loadModule();
+    stub(() => ({ ok: true, json: async () => ({ ok: true, member_id: "m_1", name: "张三", token: "tok" }) }));
+    await m0.teamJoin("192.168.1.4:18770", "张三");
+  }
+
+  const oneComment = {
+    ok: true,
+    comment: {
+      id: "c_1", project_id: "p_1", node_id: "n1", rev: 2, author_id: "m_1",
+      author: "张三", body: "字幕压住脸了", created_at: 100, resolved: false,
+      resolved_at: 0, resolved_by: "", resolver: "",
+    },
+  };
+
+  it("提批注：POST /comments，正文与 node_id 一起发", async () => {
+    await ready();
+    const calls = stub(() => ({ ok: true, json: async () => oneComment }));
+    const m = await loadModule();
+    const c = await m.teamAddComment("p_1", "字幕压住脸了", "n1", 2);
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/projects/p_1/comments");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      body: "字幕压住脸了", node_id: "n1", rev: 2,
+    });
+    expect(c.author).toBe("张三");
+  });
+
+  it("解决批注：路径带评论 id，body 带 resolved", async () => {
+    await ready();
+    const calls = stub(() => ({ ok: true, json: async () => oneComment }));
+    const m = await loadModule();
+    await m.teamResolveComment("p_1", "c_1", true);
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/projects/p_1/comments/c_1");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ resolved: true });
+  });
+
+  it("列表：GET /comments，不是 POST（POST 会新建一条）", async () => {
+    await ready();
+    const calls = stub(() => ({ ok: true, json: async () => ({ ok: true, comments: [oneComment.comment] }) }));
+    const m = await loadModule();
+    const list = await m.teamComments("p_1");
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/projects/p_1/comments");
+    expect(calls[0].init?.body).toBeUndefined();
+    expect(list.length).toBe(1);
+  });
+
+  it("改角色：POST /team/members/{id}/role", async () => {
+    await ready();
+    const calls = stub(() => ({
+      ok: true,
+      json: async () => ({ ok: true, member: { id: "m_2", name: "李四", role: "viewer" } }),
+    }));
+    const m = await loadModule();
+    const row = await m.teamSetRole("m_2", "viewer");
+
+    expect(calls[0].url).toBe("http://192.168.1.4:18770/team/members/m_2/role");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ role: "viewer" });
+    expect(row.role).toBe("viewer");
+  });
+
+  it("出码可以指定只读角色（甲方那一档）", async () => {
+    await ready();
+    const calls = stub(() => ({
+      ok: true,
+      json: async () => ({
+        ok: true, code: "229140", role: "viewer", max_uses: 1, uses: 0, remaining: 1,
+        expires_at: 1700000000, ttl: 120, alive: true,
+        pair_url: "http://192.168.1.4:18770/pair?code=229140",
+      }),
+    }));
+    const m = await loadModule();
+    const p = await m.teamPairing(1, "viewer");
+
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ max_uses: 1, role: "viewer" });
+    expect(p.role).toBe("viewer");
   });
 });

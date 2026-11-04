@@ -318,6 +318,22 @@ export function teamMembers(): Promise<TeamMember[]> {
     .then((d) => (Array.isArray(d.members) ? d.members : []));
 }
 
+/** 角色（2026-11-04 起真正参与鉴权）。 */
+export type TeamRole = "owner" | "editor" | "viewer";
+
+/**
+ * 改某个成员的角色。**只有 owner 能调**，服务端会挡（403）。
+ *
+ * 为什么需要它：给甲方看完一轮就该收回权限。踢出去再重加一遍会丢掉他提过的
+ * 批注归属，降级才是对的做法。
+ */
+export function teamSetRole(memberId: string, role: TeamRole): Promise<TeamMember> {
+  return teamCall<{ member: TeamMember }>(
+    "/team/members/" + encodeURIComponent(memberId) + "/role",
+    { body: { role } },
+  ).then((d) => d.member);
+}
+
 export type TeamMember = {
   id: string;
   name: string;
@@ -624,6 +640,8 @@ export type TeamPairingInfo = {
   reused: boolean;
   /** 因为名额不够而废掉了旧码，重新发的 */
   replaced: boolean;
+  /** 用这张码进来的人是什么角色 */
+  role?: TeamRole;
   /** 邀请链接：`http://ip:port/pair?code=…`，点开是一页能复制地址和码的说明 */
   pair_url: string;
   message?: string;
@@ -636,8 +654,8 @@ export type TeamPairingInfo = {
  * `maxUses` = 这次要请几个人（1~9）。要得比现有码多时会**作废旧码**，返回
  * `replaced: true` —— 界面上得说一句，别让人以为旧码还能用。
  */
-export function teamPairing(maxUses = 1): Promise<TeamPairingInfo> {
-  return teamCall<TeamPairingInfo>("/team/pairing", { body: { max_uses: maxUses } });
+export function teamPairing(maxUses = 1, role: TeamRole = "editor"): Promise<TeamPairingInfo> {
+  return teamCall<TeamPairingInfo>("/team/pairing", { body: { max_uses: maxUses, role } });
 }
 
 /**
@@ -653,6 +671,65 @@ export function teamPairingStatus(): Promise<TeamPairingInfo> {
 /** 主机侧：立刻作废这张码（念给了错的人时，比干等 2 分钟强）。 */
 export function teamRevokePairing(code: string): Promise<TeamPairingInfo> {
   return teamCall<TeamPairingInfo>("/team/pairing/revoke", { body: { code } });
+}
+
+// ── 批注（2026-11-04 · 设计评审）───────────────────────────
+//
+// 这是团队从「互相传文件」变成「一起做设计」的那一层。设计协作的真实循环是
+// 做 → 给人看 → 收意见 → 改，以前最后两步只能走微信（截图 + 圈红框）。
+//
+// 两条约定：
+//   · 批注**挂在节点上**（`node_id`），不挂坐标 —— 一改位置就漂走的批注等于没有；
+//   · 提批注**不改版本**（不产生新 rev），否则每条意见都会变成一个「版本」，
+//     把「谁改了什么」淹掉。
+
+/** 一条批注（与 `team_hub._comment_public` 对齐）。 */
+export type TeamComment = {
+  id: string;
+  project_id: string;
+  /** 挂在哪个画布节点上；空串 = 针对整份画布 */
+  node_id: string;
+  /** 提这条时项目是第几版（0 = 不知道） */
+  rev: number;
+  author_id: string;
+  /** 作者名字（服务端 join 好，前端不用自己查） */
+  author: string;
+  body: string;
+  created_at: number;
+  resolved: boolean;
+  resolved_at: number;
+  resolved_by: string;
+  /** 解决者名字；未解决时是空串 */
+  resolver: string;
+};
+
+/** 列出项目全部批注（未解决 + 已解决都给，前端自己分组）。任何角色都能读。 */
+export function teamComments(projectId: string): Promise<TeamComment[]> {
+  return teamCall<{ comments: TeamComment[] }>(
+    "/team/projects/" + encodeURIComponent(projectId) + "/comments",
+  ).then((d) => (Array.isArray(d.comments) ? d.comments : []));
+}
+
+/**
+ * 提一条批注。**viewer 也能调** —— 这正是「甲方只看不改但必须能说话」的实现。
+ */
+export function teamAddComment(
+  projectId: string, body: string, nodeId = "", rev = 0,
+): Promise<TeamComment> {
+  return teamCall<{ comment: TeamComment }>(
+    "/team/projects/" + encodeURIComponent(projectId) + "/comments",
+    { body: { body, node_id: nodeId, rev } },
+  ).then((d) => d.comment);
+}
+
+/** 标记已解决 / 重新打开。要编辑权（解决是「干活的人」的动作）。 */
+export function teamResolveComment(
+  projectId: string, commentId: string, resolved = true,
+): Promise<TeamComment> {
+  return teamCall<{ comment: TeamComment }>(
+    "/team/projects/" + encodeURIComponent(projectId) + "/comments/" + encodeURIComponent(commentId),
+    { body: { resolved } },
+  ).then((d) => d.comment);
 }
 
 /** 靠码找主机的探测结果；`address` 为空串 = 没找到（`message` 里有原因）。 */
