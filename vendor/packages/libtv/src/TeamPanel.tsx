@@ -63,6 +63,7 @@ import {
 } from "./teamClient";
 import { backupBeforePull } from "./teamBackup";
 import { TeamVersions } from "./TeamVersions";
+import { assetCounts, emptyAssetHint, filterAssets, kindLabel, type AssetKindFilter } from "./assetFilter";
 import {
   applyMediaIndex,
   collectMediaRefs,
@@ -124,6 +125,10 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [busy, setBusy] = useState<string>("");
   const [line, setLine] = useState<{ kind: "ok" | "err" | "info"; text: string }>({ kind: "info", text: "" });
   const [assets, setAssets] = useState<TeamAsset[]>([]);
+  /** ⑤ 段素材的类型筛选（全部/视频/图片/音频/其他）。 */
+  const [assetKind, setAssetKind] = useState<AssetKindFilter>("all");
+  /** ⑤ 段素材的搜索词（匹配文件名 / 出处 / 作者）。 */
+  const [assetQ, setAssetQ] = useState<string>("");
   const [sync, setSync] = useState<string>("");
   /** 正在内联预览的附件 sha256（点开条目时设置，空串=收起）。 */
   const [preview, setPreview] = useState<string>("");
@@ -873,6 +878,8 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const selectedProject = projects.find((p) => p.project_id === selected);
+  const assetTally = assetCounts(assets);
+  const shownAssets = filterAssets(assets, assetKind, assetQ);
 
   const fmtBytes = (n: number) => {
     const v = Number(n) || 0;
@@ -895,6 +902,10 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
 
   useEffect(() => {
     setPreview("");
+    // 换项目时把筛选清掉：带着上一个项目的「只看视频 + 搜索镜 03」进新项目，
+    // 大概率是一片空白，而用户会以为新项目没素材。
+    setAssetKind("all");
+    setAssetQ("");
     void refreshAssets(selected);
   }, [selected, refreshAssets]);
 
@@ -1195,8 +1206,28 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             <span className="sg-team-dim">成片 mp4 / 图 / 音频都行；有封面的会显示缩略图</span>
           </div>
           {assets.length ? (
-            <div className="sg-team-list">
-              {assets.map((a) => {
+            <>
+              {/* 筛与搜：项目跑到三十几条时，「找镜 03 那个视频」只能靠这两个 */}
+              <div className="sg-team-row sg-team-filters">
+                {(["all", "video", "image", "audio", "other"] as AssetKindFilter[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={`sg-team-chip${assetKind === k ? " on" : ""}`}
+                    onClick={() => setAssetKind(k)}
+                  >
+                    {kindLabel(k)} {assetTally[k]}
+                  </button>
+                ))}
+                <input
+                  value={assetQ}
+                  onChange={(e) => setAssetQ(e.target.value)}
+                  placeholder="搜文件名 / 出处（镜 03）"
+                />
+              </div>
+              {shownAssets.length ? (
+                <div className="sg-team-list">
+                  {shownAssets.map((a) => {
                 const url = teamAssetUrl(selected, a.sha256);
                 const open = preview === a.sha256;
                 const posterUrl = a.poster ? teamAssetUrl(selected, a.poster) : "";
@@ -1229,9 +1260,13 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                     ) : null}
                   </div>
                 );
-              })}
-            </div>
-          ) : <div className="sg-team-dim">这个项目还没有素材。成片视频、生成的图都可以从这里传。</div>}
+                  })}
+                </div>
+              ) : (
+                <div className="sg-team-dim">{emptyAssetHint(assets.length, assetKind, assetQ)}</div>
+              )}
+            </>
+          ) : <div className="sg-team-dim">{emptyAssetHint(0, "all", "")}</div>}
         </section>
       ) : null}
     </div>

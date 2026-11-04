@@ -177,3 +177,15 @@ body.sg-team-open .sg-pet { display: none; }
 
 /* 项目行 + 它自己的历史版本（0.3.48）：历史必须贴在所属项目下面，不能混成一坨 */
 .sg-team-proj { display: flex; flex-direction: column; gap: 4px; }
+
+/* 素材筛选条（0.3.49）：chip 一排，搜索框吃掉剩下的宽度 */
+.sg-team-filters { gap: 4px; }
+.sg-team-chip {
+  padding: 3px 8px; border-radius: 999px; cursor: pointer; font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.04);
+  color: rgba(228, 232, 240, 0.8);
+}
+.sg-team-chip.on {
+  border-color: rgba(120, 170, 255, 0.65); background: rgba(120, 170, 255, 0.16);
+  color: #eaf1ff;
+}
