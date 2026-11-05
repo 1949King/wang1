@@ -6,6 +6,66 @@ Qt6 主应用入口
 
 import sys
 import os
+
+# ===========================================================================
+# 启动序（顺序不能改）
+# ===========================================================================
+# ① AI 内核装载：把随包分发的 runtime/ 接进 sys.path。必须早于任何可能 import
+#    torch 的代码；原因见 app/core/runtime_pack.py（torch 进不了 PyInstaller）。
+from app.core.runtime_pack import ensure_runtime_path
+
+ensure_runtime_path()
+
+# ② 原生库导入顺序（历史坑，别踩回去）
+#    实测（2026-11-05 本机，可复现）：
+#        import PyQt6.QtWidgets; import sentencepiece   → 原生访问违例，exit 139
+#        import sentencepiece;   import PyQt6.QtWidgets  → 正常
+#    sentencepiece 的 C 扩展在 Qt 已加载时创建模块就崩，Python 层没有栈。
+#    受影响路径是 gguf/vocab.py:12 → import sentencepiece，也就是「加载 GGUF
+#    量化模型」在 Qt 进程里必崩。
+#    ⇒ 处理方式：**AI 内核里不带 sentencepiece**（scripts/make_runtime_pack.py
+#      的 SKIP_TOPLEVEL_DISTS）。它对 gguf 是 try/except 可选依赖，对
+#      transformers 是 is_sentencepiece_available() 门控的可选功能，缺了只是
+#      少数旧式分词器模型的退化，不会崩。相比之下「带了就崩进程」不可接受。
+#    所以这里**不做**预热导入 —— 曾经加过，在冻结版里反而让每次启动都崩。
+
+# ③ 自检分流：必须在 import PyQt6 **之前**。
+#    实测：PyQt6 先加载、再 import torch 系原生库，同进程会触发原生段错误
+#    （exit 139，无 Python 栈）。与本项目 app/core/interchange/_otio_worker.py
+#    拆子进程是同一类问题。自检不需要 GUI，绕开 Qt 即可。
+if "--selftest" in sys.argv:
+    from app.core import ai_runtime_selftest as _st
+
+    _out = ""
+    if "--selftest-out" in sys.argv:
+        _i = sys.argv.index("--selftest-out")
+        if _i + 1 < len(sys.argv):
+            _out = sys.argv[_i + 1]
+    # --only <名字>：只跑一项。用于排除「同进程互相干扰」造成的假失败
+    # （全项自检把几十个原生库塞一个进程，比产品实际条件更苛刻）。
+    _only = ""
+    if "--only" in sys.argv:
+        _i = sys.argv.index("--only")
+        if _i + 1 < len(sys.argv):
+            _only = sys.argv[_i + 1]
+    sys.exit(_st.emit(as_json="--json" in sys.argv, out_path=_out, only=_only))
+
+# ③b OTIO 转换子进程入口（冻结版专用，也必须在 import PyQt6 之前）。
+#    背景：主进程绝不能 import opentimelineio —— 它的 C 扩展在 Qt 之后加载必
+#    段错误（见 app/core/interchange/_otio_worker.py 顶部实测记录）。开发态由
+#    `python -m app.core.interchange._otio_worker` 起子进程；冻结后 sys.executable
+#    是这个 exe，`-m` 参数没人认，会直接把 GUI 拉起来 ⇒ OTIO 导入导出在发布版
+#    静默失效。这里给冻结态一个等价入口，保证子进程里没有任何 Qt。
+if "--otio-worker" in sys.argv:
+    from app.core.interchange import _otio_worker as _otio_w
+
+    _i = sys.argv.index("--otio-worker")
+    # _otio_worker.main 期望 argv[0] 是脚本名、argv[1] 是子命令
+    sys.exit(_otio_w.main(["_otio_worker", *sys.argv[_i + 1:]]))
+
+# ④ 之后才是 GUI 依赖。这里之所以可以安全地在 import 块之前插代码：
+#    历史上 spec 把 torch 全排除、进程里一个 torch 都没有也能正常启动，说明
+#    这些模块级 import 从不触达 torch（重型依赖全是函数内懒加载）。
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton, QGridLayout
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
@@ -18,6 +78,7 @@ from app.modules.lego.main_window import MainWindow
 
 # 导入登录窗口
 from app.modules.lego.login_window import LoginWindow, ActivationWindow
+
 
 class AppStartupThread(QThread):
     """应用启动线程"""
@@ -111,6 +172,7 @@ class AIShortDramaEditorApp:
 
 def main():
     """主函数"""
+    # 自检入口已在模块顶部（import PyQt6 之前）分流，这里不会走到 --selftest。
     # WebEngine 必须在 QApplication 创建前设置此属性，否则报:
     # QtWebEngineWidgets must be imported or Qt.AA_ShareOpenGLContexts
     # must be set before a QCoreApplication instance is created

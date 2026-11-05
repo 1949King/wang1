@@ -107,7 +107,17 @@ def _run_worker(args: List[str], timeout: float = 180.0) -> Tuple[int, str, str]
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"] = _PROJECT_ROOT + os.pathsep + env.get("PYTHONPATH", "")
-    cmd = [sys.executable, "-m", "app.core.interchange._otio_worker", *args]
+    # 🔴 冻结版必须换入口：此时 `sys.executable` 是 GUI 的那个 exe，
+    #    `exe -m app.core.interchange._otio_worker formats` 不会被 Python 当成
+    #    模块执行，main_qt6.py 直接把 -m 当普通参数忽略、拉起整个 GUI ——
+    #    于是子进程永远不会返回，超时后 OTIO 导入导出在发布版里静默失效。
+    #    所以冻结版走 main_qt6.py 里同名的一个显式分流参数（在 import PyQt6
+    #    之前就 sys.exit），保证子进程里没有 Qt。
+    if getattr(sys, "frozen", False):
+        head = ["--otio-worker"]
+    else:
+        head = ["-m", "app.core.interchange._otio_worker"]
+    cmd = [sys.executable, *head, *args]
     no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
         proc = subprocess.run(

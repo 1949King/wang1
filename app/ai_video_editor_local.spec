@@ -58,20 +58,62 @@ datas = [
 ]
 
 # 收集隐式依赖（仅保留「核心包」必需、且体积可控的包）。
-# 重 AI 运行时（torch/torchvision/torchaudio/transformers/numba/onnxruntime/
-# easyocr/librosa）在项目内均为函数内懒加载（无顶层 import），打包时排除之：
-#   1) 打包阶段 PyInstaller 会 __import__ 模块图收集 DLL，这些原生库在 ~8GB 空闲
-#      内存下触发原生访问违例(0xC0000005)，导致打包进程崩溃；
-#   2) 排除后对应 AI 特性（生视频/生图/语音识别/超分等）在发布版中优雅降级，
-#      由调用处既有 try/except 兜底，不影响核心剪辑/导出/3D 导演台。
-# 这些 AI 运行时后续可作独立安装包分发（见 docs/商用化改造路线图.md P2）。
-# scipy 已从 hiddenimports 移除：scipy._external.array_api_compat 会
-# 在 import 阶段反向导入 torch/dask/cupy，触发 torch.cuda 原生 DLL 加载，
-# 在 PyInstaller 的 import_library 隔离子进程中导致访问违例(0xC0000005)。
-# scipy 在项目内均为函数内懒加载（无顶层 import），移除后相关特性优雅降级。
+#
+# ===== AI 内核不进 PyInstaller（重要，别改回去）=====
+# torch / transformers / diffusers 等**永远留在 excludes**，但它们**不是被砍掉的功能**：
+# 它们以普通目录形态随包分发在 `<exe 同级>/runtime/`，启动时由
+# `app/core/runtime_pack.py::ensure_runtime_path()` 注入 sys.path 加载。
+#
+# 为什么不能进 PyInstaller：
+#   1) 打包期 PyInstaller 会 __import__ 模块图收集原生 DLL，torch 的原生库在
+#      import_library 隔离子进程里触发原生访问违例(0xC0000005)，打包进程直接崩
+#      （实测：`SubprocessDiedError: Isolated subprocess crashed while importing
+#      package 'peft'` —— 注意报的包名是 peft 不是 torch，因为链条是被依赖拖进去的）；
+#   2) 运行时目录可裁可换（删 *.lib / include 等链接期产物，见
+#      scripts/make_runtime_pack.py），而 PyInstaller 产物不可裁。
+#
+# 🔴 纪律：`app/core/ai_runtime_selftest.py` 里的 `import torch` 写在函数体内也
+#    逃不掉 —— PyInstaller 的模块图会跟进函数级 import。所以凡是 runtime/ 供给的
+#    顶层包，**必须**同时出现在下面的 excludes 里，否则打包必崩。
+#
+# 反面参考：曾把 pytorch 从 excludes 拿掉、想「直接打进包里」，结果就是上面那条崩。
 _hidden = [
     'faster_whisper', 'imageio',
 ]
+
+
+def _app_modules():
+    """枚举 app/ 下**全部**模块，塞进 hiddenimports。
+
+    为什么必须自动枚举：产品的模块体系是「按目录/按名字动态加载」的
+    （导航切换、插件目录扫描、引擎注册表都是运行时才算模块名），
+    PyInstaller 的静态分析一个都看不见。手写 hiddenimports 实测漏了 107 个：
+    `app.core.editor_scheduler`、`app.modules.lego.timeline_widget`、
+    27 个特效/转场插件全都不在包里 —— 打包产物看着能启动，一点就到
+    ModuleNotFoundError。手写清单这种形式的错是必然的，不是不小心。
+    """
+    skip = {'__pycache__', 'tests', 'temp', '_retired', 'packaging_env'}
+    # 与 excludes 保持一致：这一层已被显式排除，再塞进 hiddenimports 只会
+    # 让 Analysis 报一堆 "excluded module" 警告，且它确实进不了包。
+    skip_prefix = ('app.core.video_processing',)
+    out = []
+    for dp, dn, fn in os.walk(os.path.join(_ROOT, 'app')):
+        dn[:] = [d for d in dn if d not in skip]
+        for f in fn:
+            if not f.endswith('.py'):
+                continue
+            rel = os.path.relpath(os.path.join(dp, f), _ROOT)
+            mod = rel[:-3].replace(os.sep, '.')
+            if mod.endswith('.__init__'):
+                mod = mod[: -len('.__init__')]
+            if mod.startswith(skip_prefix):
+                continue
+            out.append(mod)
+    return sorted(set(out))
+
+
+_app = _app_modules()
+print(f"[spec] 枚举 app 模块 {len(_app)} 个 → hiddenimports")
 
 # 合并显式 hiddenimports
 hiddenimports = [
@@ -85,7 +127,7 @@ hiddenimports = [
     # 第三方显式声明
     'moviepy', 'PIL', 'numpy', 'cv2', 'psutil',
     'aiohttp', 'requests', 'imageio', 'imageio_ffmpeg',
-] + _hidden
+] + _hidden + _app
 
 # 收集数据文件（仅保留核心包所需的模型/资源）
 datas += collect_data_files('faster_whisper')
@@ -102,15 +144,39 @@ a = Analysis(
     runtime_hooks=[],
     # yt_dlp 仅被 transformers.video_utils 懒加载（从 YouTube 下载视频才用），
     # 且其 hook 处理 curl_cffi 时会在 isolated 子进程卡死，故排除之。
-    # 重 AI 运行时改为 excluded：避免打包期导入崩溃，且这些特性全部懒加载可优雅降级。
-    # app.core.video_processing 为 C++/MLT/PyAV 原生引擎层（含未编译的
-    # cpp_engine C++ 源码与 FFmpeg 原生 DLL），import_library 扫描其原生
-    # DLL 时触发访问违例(0xC0000005)。所有调用方均已用 try/except 懒加载，
-    # 打包后自动回退 FFmpeg CLI 渲染路径。
+    # AI 内核整段排除 —— 由 runtime/ 供给，理由见上方长注释。
+    # 注意：这里排的是「顶层包名」，PyInstaller 按前缀匹配，'torch' 不会覆盖 'torchao'。
     excludes=['tkinter', 'yt_dlp', 'curl_cffi',
-              'torch', 'torchvision', 'torchaudio',
-              'transformers', 'numba', 'onnxruntime',
-              'easyocr', 'librosa', 'tensorboard',
+              # —— torch 栈 ——
+              'torch', 'torchvision', 'torchaudio', 'torchao',
+              'transformers', 'diffusers', 'accelerate', 'peft',
+              'diffsynth_engine', 'sentencepiece', 'huggingface_hub',
+              # —— 视觉 / 音频 / OCR（重型原生）——
+              'mediapipe', 'easyocr', 'librosa', 'numba', 'llvmlite',
+              'onnxruntime', 'skimage', 'scikit-image',
+              # —— 数值 / 科学计算 ——
+              'sklearn', 'sympy', 'jax', 'jaxlib',
+              # —— 被上面拖进来的大件 ——
+              'modelscope', 'trimesh', 'matplotlib',
+              # —— gguf：它由 runtime/ 供给，而且**必须排掉** ——
+              # gguf/vocab.py:12 → import sentencepiece，而 sentencepiece 与
+              # PyQt6 有导入顺序依赖的原生冲突（先 Qt 后 sentencepiece 必
+              # 0xC0000005；反过来正常）。PyInstaller 的隔离导入子进程里 PyQt6
+              # 先被加载，于是 import_library('gguf') 必崩 —— 报错显示
+              # `crashed while importing package 'gguf'`，但真凶是 sentencepiece。
+              # 把 gguf 排除后子进程不再碰它，构建恢复正常。
+              'gguf',
+              'tensorboard',
+              # —— opentimelineio：与 torch/gguf 同一类崩溃 ——
+              # 加进 hiddenimports（app.core.interchange 依赖它）后，PyInstaller
+              # 的 import_library 隔离子进程在 PyQt6 已加载的情况下 import 它，
+              # 直接 0xC0000005：
+              #   SubprocessDiedError: ... importing package 'opentimelineio',
+              #   exit code 3221225477
+              # 它自带原生扩展 _opentimelineio.pyd，属于「加载期与 Qt 冲突」那一族。
+              # 处理方式：不进 Analysis，改由 runtime/ 供给（同 torch）。
+              'opentimelineio',
+              # —— 原生引擎层（含未编译 cpp_engine，collect 期会 0xC0000005）——
               'app.core.video_processing'],
     noarchive=False,
     optimize=0,
