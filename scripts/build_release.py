@@ -244,9 +244,15 @@ def _sync_stdlib(pkg: str) -> tuple[int, int]:
 def _sync_app_subpkg(rel: str) -> tuple[int, int]:
     """把项目里的 app 子包按目录形态拷进 _internal（原因见 SYNC_APP_SUBPKGS）。
 
-    两处专门跳过，都有实测依据：
+    三处专门跳过，都有实测依据：
       · ``build/`` —— cpp_engine 的 CMake/MVSC 中间产物（.obj + Release 副本
         250 MB），运行时零需求；
+      · ``.git/`` —— `app/skills/external/` 下三个 skill 是用 git clone 拉进来的
+        （seedance2-skill / video-use / videocut-skills，合计 2.3 MB），
+        里面是**别人仓库的历史**：发布包不需要，还会把来源与提交记录一起带出去。
+        而且 git 的 pack 文件默认只读（-r--r--r--），PyInstaller 下次重建
+        `_rmtree(dist)` 时会 PermissionError: [WinError 5] 直接打断打包 ——
+        这是实测撞出来的，不是预防性写法；
       · ``_internal`` 里**已存在同名**的 .dll —— 这个子包根下的 FFmpeg DLL
         （avcodec-62 / avfilter-11 等）合计 320 MB，而 `_internal/` 根和
         `_internal/thirdparty/ffmpeg/bin/` 已经有同名的了，再拷一份纯属浪费。
@@ -258,7 +264,7 @@ def _sync_app_subpkg(rel: str) -> tuple[int, int]:
         have = {n.lower() for n in os.listdir(INTERNAL)}
     return _sync_tree(
         src, dst, rel,
-        skip_dirs={"build", "__pycache__"},
+        skip_dirs={"build", "__pycache__", ".git", ".github", ".idea", ".vscode"},
         skip_ext={".obj", ".lib", ".exp", ".pdb", ".ilk", ".idb", ".pyc", ".pyo"},
         skip_dll_if_in=have,
     )
