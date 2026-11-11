@@ -77,7 +77,8 @@
 - 🔴 **`git stash push -- <path>` 会捎进暂存区状态 ⇒ pop 冲突**。解法 = `git checkout HEAD -- <冲突文件>`，勿手解标记。
 - 行尾：画布 `src/*.ts(x)`、`现行技术文档.md`、`frozen_zones.json`、`memory/*`、`docs/CHANGELOG.md`（现为 LF） = LF；`version.py`、`.mdc` = CRLF。写入前先 `'\r\n' in raw` 判行尾。`grep` 搜 emoji（astral 字符）0 命中 ⇒ 用 python 读文本断言。ruff 用 `C:/Python314/python.exe -m ruff`；回归优先 `.venv312`；Node22 直调 `22.22.2-6/node.exe`。
 - 🔴 **远程仓库**：origin = `git@github.com:1949King/wang1.git`（私有）。已 filter-repo 剥除 3 个 >100MB 文件（2.88GB→316MB，236 提交）强推；**本地 main 仍是旧历史（315 提交），下次推送前需再手术**。
-  ⚠️ **2026-11-12 实测：GitHub 完全不可达** —— SSH 22 端口 `Connection refused`；HTTPS 443 走 `127.0.0.1` 代理但代理没起（`Failed to connect ... over proxy`）。⇒ 想推之前先确认代理/网络，别把「推不上去」误判成凭据或仓库问题。
+  ⚠️ **2026-11-12 实测：GitHub 完全不可达** —— SSH 22 `Connection refused`；HTTPS 443 走 `127.0.0.1:7897` 代理但该端口**无监听**；绕代理直连也被阻断。⇒ 想推之前先确认代理/网络，别把「推不上去」误判成凭据或仓库问题。
+  🔴 **推送前必须做历史手术，且有两个前置条件**：① 本地仍有 3 个 >100MB 的 blob（`拾光剪影-发布版.zip` 743MB / `assets/videos/纵年华--01.mp4` 723MB / `cpp_engine/avfilter-11.dll` 104MB），GitHub 硬限 100MB ⇒ 直接 push 必被拒；② `git filter-repo` 要求**工作区干净**，而长期挂着几十个历史未提交改动。完整处方（5 步命令）见 `.workbuddy/memory/2026-11-12.md` 的「推送决策与处方」，**别自己临场拼命令**。
 - **内核族 `caps.verified` 是机器可核对的承诺**：改 `VERIFIED` 须 `docs/knowledge/kernel_evidence.json` 有该族 `passed=true`。
 - **`Bash` 工具偶发 `SandboxError(0xFFFFF826)` / `bash.exe: Permission denied`** ⇒ 换 `PowerShell` + `dangerouslyDisableSandbox: true`。
 
