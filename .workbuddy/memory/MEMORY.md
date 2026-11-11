@@ -1,7 +1,7 @@
 # 拾光剪影 — 项目长期记忆
 > 细节深水区已拆到 `.workbuddy/memory/topics/`：`gguf-quant.md` · `agent-blueprint.md` · `canvas-bridge.md`（含视频黑框/缺口现状）。日志查 `.workbuddy/memory/YYYY-MM-DD.md`，工作法查 `~/.workbuddy/skills/`。
 >
-> **记忆同步机制（2026-11-12 核实，别猜）**：① 本文件是**项目记忆的唯一真相源**，且**已在 git 里** ⇒ 提交并推到远程后云端确有一份；② 跨项目个人档案（职业/转型/表达纪律）在 `C:\Users\Administrator\.workbuddy\user-<id>-personal\MEMORY.md`，属账号级目录、不在本仓库；③ **云端 profile 由服务端从对话自动学习，本地改不了**（`memory/` 是只读缓存，手写会被下次会话覆盖）——想让它"进云端"只能靠：a) 把内容写进上面两个文件；b) 在本会话里说出来让它成为对话事实；c) 推 git。别许诺"我同步到云端了"。
+> **记忆同步机制（2026-11-12 核实，别猜）**：① 本文件是**项目记忆的唯一真相源**，且**已在 git 里**（`.workbuddy` 整体被 gitignore，这些文件是 `git add -f` 强制入库的）⇒ 提交并推到远程后云端确有一份；② 跨项目个人档案（职业/转型/表达纪律）在 `C:\Users\Administrator\.workbuddy\user-<id>-personal\MEMORY.md`，属账号级目录、**不在本仓库**；③ **`AGENTS.md` 的「项目记忆」章节是给所有 Agent 的入口表**（2026-11-12 加），换机器/换工具从这里找得到；④ **云端 profile 由服务端从对话自动学习，本地改不了**（`memory/` 是只读缓存，手写会被下次会话覆盖）——想让它"进云端"只能靠：a) 把内容写进上面两个文件；b) 在本会话里说出来让它成为对话事实；c) 推 git。别许诺"我同步到云端了"。
 
 ## 〇、规模（2026-11-12 实测，写数字一律用这个口径）
 - `app/**/*.py`：**512 个文件 / 222,485 行**（排除 `tests/` `_retired/` `temp/` `__pycache__` `app/models`）
