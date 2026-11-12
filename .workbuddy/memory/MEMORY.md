@@ -82,3 +82,6 @@
   help_module 823→776 行）。改大文件用 edit / 行号 splice，改完核对行数 + git diff --stat。
 - 🔴 WebEngine 的 localStorage 不持久且 setItem 不报错：需要跨重启的状态必须写服务端标记
   （data/compliance_acceptance.json + /host/compliance/*）。
+- 🔴 **提交门禁不许绕过**：2026-11-13 首次提交误用 `--no-verify`，随即被体积守卫抓出两处超标
+  （App.tsx 2016 行 / extensions_module 2233 行）；修复后 amend 走正常 hooks 才过。
+  体积守卫扫**工作树**：并行会话未提交的改动也算进你的文件行数。
