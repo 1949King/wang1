@@ -1,5 +1,21 @@
 # 拾光剪影 — 变更日志
 
+## G1/G4/G5/G6 落地：合规标识 + 依赖清单 + 首屏向导 + 能力清单（2026-11-12）
+
+- **G1**：app/core/compliance_label.py（角标 PNG + MP4 元数据 + 可配置时长/位置/透明度），接入 editor_export_panel 导出成功路径；默认配置 app/config/compliance_label.json；8 单测。
+- **G4**：projectZip.ts 新增 collectRequirements 与 requirements.json（导出写 / 导入带回）；3 单测。
+- **G5**：firstRun.ts 三条预设 + FirstRunWizard.tsx + HomeLanding 入口（选模板→写一句→落骨架）；3 单测。
+- **G6**：技术文档 §40.5 能力清单（131 项：editor 49 / canvas 45 / pipeline 30 / extension 3 / model 3 / workflow 1）。
+- 未提交（工作区存在并行会话改动），待确认后按精确 pathspec 提交。
+
+## 免责声明首屏（2026-11-12）
+
+- 首次进入全屏展示，内容区**必须滑到底**才能点「我已阅读并同意」；确认后不再弹出（localStorage 记录版本）。
+- 再次查看：底部工具栏「帮助 → 📜 免责声明」（同一组件，只读模式）。
+- 取舍：放**帮助**不放设置（设置是改配置、帮助是读内容；避免双入口文案不一致）；
+  条款版本升级会再次提示（合规要求，可一行关闭）。
+- 验证：vitest 5 例通过；canvas 构建通过。
+
 ## 补齐 · 对着图说话：批注 + 只看身份（2026-11-04，画布 0.3.52）
 
 团队从此能把工程发给甲方看而不担心被删。设计协作的循环是「做 → 给人看 → 收意见 → 改」，

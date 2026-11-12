@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import "./LibTvChrome.css";
+import { ComplianceGate } from "./ComplianceGate";
 import { getGraphFuture, getGraphPast } from "./stores/history-store";
 import { PANEL_META, PANEL_NAMES, useWindowManager, type PanelName } from "./windowManager";
 import { useToolboxStore } from "./toolboxStore";
@@ -109,6 +110,8 @@ export function LibTvBottomDock({
   onGallery: () => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
+  // 免责声明（2026-11-12）：首次进入由 App 弹一次；之后从这里可随时重看
+  const [complianceOpen, setComplianceOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const historyOpen = useToolboxStore((s) => s.historyOpen);
@@ -350,6 +353,14 @@ export function LibTvBottomDock({
               </button>
               <button type="button" className="ltd-item" onClick={fire(onHelp)} title="快捷键与命令面板">
                 <span className="ltd-ico">?</span>快捷键
+              </button>
+              <button
+                type="button"
+                className="ltd-item"
+                onClick={() => setComplianceOpen(true)}
+                title="免责声明与合规说明（首次进入时也会出现一次）"
+              >
+                <span className="ltd-ico">📜</span>免责声明
               </button>
             </div>
           </div>

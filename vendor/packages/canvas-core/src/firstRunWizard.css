@@ -1,0 +1,18 @@
+/* 首屏向导（G5 · 2026-11-12） */
+.sg-fr-mask { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); backdrop-filter: blur(3px); }
+.sg-fr { width: min(560px, 92vw); border-radius: 14px; padding: 16px; background: #16181e; border: 1px solid rgba(255,255,255,0.14); color: #e9ecf1; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+.sg-fr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.sg-fr-head b { font-size: 15px; }
+.sg-fr-x { border: none; background: transparent; color: #98a1b3; font-size: 18px; cursor: pointer; }
+.sg-fr-tip { font-size: 12.5px; color: #b9c2d4; margin-bottom: 10px; }
+.sg-fr-cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.sg-fr-card { display: flex; flex-direction: column; gap: 4px; padding: 10px; text-align: left; border-radius: 10px; cursor: pointer; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); color: #e9ecf1; }
+.sg-fr-card.on { border-color: #4c8dff; background: rgba(76,141,255,0.16); }
+.sg-fr-card b { font-size: 12.5px; }
+.sg-fr-card span { font-size: 11px; color: #98a1b3; line-height: 1.4; }
+.sg-fr-input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 9px; font-size: 12.5px; color: #e9ecf1; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.14); resize: vertical; }
+.sg-fr-hint { margin-top: 8px; font-size: 11px; color: #8b93a3; line-height: 1.5; }
+.sg-fr-err { margin-top: 8px; padding: 6px 8px; border-radius: 8px; font-size: 11.5px; background: rgba(220,120,90,0.18); color: #ffb9a3; }
+.sg-fr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sg-fr-actions button { padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 12.5px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.07); color: #e9ecf1; }
+.sg-fr-actions button.primary { background: #2f6feb; border-color: #2f6feb; }

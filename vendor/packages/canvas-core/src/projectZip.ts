@@ -2,6 +2,55 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
+/** 工程依赖清单（G4 · 2026-11-12）：换机/交接前先知道"要装什么才能跑"。 */
+export type ProjectRequirements = {
+  schema: number;
+  app: string;
+  appVersion: string;
+  exportedAt: string;
+  models: string[];
+  engines: string[];
+  features: string[];
+  notes: string[];
+};
+
+/**
+ * 从节点里收集依赖（纯函数，单测友好）。
+ *
+ * 设计取舍：不猜"缺哪个文件"，只记录**工程自己引用了什么**；
+ * 真正的缺失去导入时用本机清单比对（后续 G4 二期），这里先保证清单不丢。
+ */
+export function collectRequirements(nodes: Node[]): ProjectRequirements {
+  const models = new Set<string>();
+  const engines = new Set<string>();
+  const features = new Set<string>();
+  for (const n of nodes || []) {
+    const d = (n.data || {}) as Record<string, unknown>;
+    for (const k of ["imageModel", "videoModel", "model", "ttsModel", "musicModel"]) {
+      const v = d[k];
+      if (typeof v === "string" && v.trim()) models.add(v.trim());
+    }
+    const kind = String(d.kind || n.type || "");
+    if (kind) features.add(kind);
+    if (d.workflow || d.comfyWorkflow) engines.add("comfyui");
+    if (d.stage3d) engines.add("three.js");
+  }
+  const notes: string[] = [];
+  if (models.size === 0) notes.push("未记录模型引用（可能全部使用默认模型）");
+  if (engines.has("comfyui")) notes.push("需要本机已安装 ComfyUI（GPL 合规：不随包分发）");
+  const g = globalThis as unknown as { __SG_APP_VERSION__?: string };
+  return {
+    schema: 1,
+    app: "shiguang",
+    appVersion: String(g.__SG_APP_VERSION__ || "unknown"),
+    exportedAt: new Date().toISOString(),
+    models: [...models],
+    engines: [...engines],
+    features: [...features],
+    notes,
+  };
+}
+
 export type ProjectBundle = {
   version?: number;
   schemaVersion?: number;
@@ -18,6 +67,8 @@ export type ProjectBundle = {
     clip_count?: number;
     taken_at?: string;
   };
+  /** G4：导出时写入的依赖清单（导入时原样带回） */
+  requirements?: ProjectRequirements;
 };
 
 function crc32(buf: Uint8Array): number {
@@ -211,8 +262,12 @@ export async function exportProjectZip(bundle: ProjectBundle): Promise<Blob> {
     nodes,
     savedAt: new Date().toISOString(),
   };
+  const requirements = collectRequirements(project.nodes || []);
+  project.requirements = requirements;
+  const projectJson = encodeUtf8(JSON.stringify(project, null, 2));
   const files: { name: string; data: Uint8Array }[] = [
-    { name: "project.json", data: encodeUtf8(JSON.stringify(project, null, 2)) },
+    { name: "project.json", data: projectJson },
+    { name: "requirements.json", data: encodeUtf8(JSON.stringify(requirements, null, 2)) },
   ];
   for (const [path, dataUrl] of Object.entries(mediaMap)) {
     const parsed = dataUrlToBytes(dataUrl);
@@ -228,6 +283,15 @@ export async function importProjectZip(file: File | Blob): Promise<ProjectBundle
   const raw = byName.get("project.json");
   if (!raw) throw new Error("ZIP 内缺少 project.json");
   const project = JSON.parse(new TextDecoder().decode(raw)) as ProjectBundle;
+  // G4：requirements.json 优先（它由 collectRequirements 生成，比 project.json 内嵌的更权威）
+  const reqRaw = byName.get("requirements.json");
+  if (reqRaw) {
+    try {
+      project.requirements = JSON.parse(new TextDecoder().decode(reqRaw)) as ProjectRequirements;
+    } catch {
+      /* 清单坏了不影响导入 */
+    }
+  }
   const resolve = (url?: string) => {
     if (!url || !url.startsWith("zip://")) return url;
     const path = url.slice("zip://".length);

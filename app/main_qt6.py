@@ -718,6 +718,14 @@ class Application:
         # 打包/被别的进程以无参方式拉起时 sys.argv 可能为空，这里兜底一个程序名。
         _qargv = [a for a in (sys.argv or []) if isinstance(a, str)] or ["shiguang"]
         self._qt_app = QApplication(_qargv)
+        # 2026-11-12：WebEngine 默认右键菜单是英文（Back/Forward/Save image…）。
+        # 用应用级事件过滤器换成中文；不改冻结区里的画布模块。
+        try:
+            from .core.web_context_menu import install_chinese_context_menu
+
+            install_chinese_context_menu(self._qt_app)
+        except Exception as _cm:  # stability-gate: allow-swallow（菜单失败不得影响启动）
+            logger.debug("中文右键菜单安装失败: %s", _cm)
         self._qt_app.setStyle("Fusion")  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
         
         font = QFont("Microsoft YaHei", 10)

@@ -1168,8 +1168,10 @@ class HomeModule(BaseModule):
         sub_layout.addWidget(self._comfyui_card)
 
         self._mcp_card = McpSummaryCard()
+        # 2026-11-13：点「设置」以前只是打开设置模块（默认页），用户找不到 MCP 配置。
+        # MCP 配置在「拓展中心 → 🔌 MCP 服务」页签，直接跳过去。
         self._mcp_card.open_settings_requested.connect(
-            lambda: self._navigate_to("settings")
+            lambda: self._navigate_to("extensions", "mcp")
         )
         self._mcp_card.copy_config_requested.connect(self._on_mcp_copy_config)
         sub_layout.addWidget(self._mcp_card)

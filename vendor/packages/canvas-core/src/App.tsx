@@ -56,6 +56,10 @@ import { applyActiveAestheticToPrompt } from "./aestheticPresets";
 import type { PromptItem } from "./promptLibrary";
 import { buildWorkflowSkill, downloadWorkflowSkill, readWorkflowSkillFile, skillToProjectBundle } from "./workflowSkill";
 import { effectiveCard } from "./personCard";
+import { ComplianceGate } from "./ComplianceGate";
+import { acceptCompliance, acceptComplianceRemote, decideCompliance, fetchRemoteAcceptance, needsCompliance } from "./complianceStore";
+import { COMPLIANCE_VERSION } from "./complianceDoc";
+import { MediaViewerHost } from "./MediaViewerHost";
 
 const Stage3D = lazy(() => import("./Stage3D"));
 
@@ -168,6 +172,28 @@ export default function App() {
   const dramaTitle = useCanvasStore((s) => s.dramaTitle);
   const episode = useCanvasStore((s) => s.episode);
   const viewMode = useCanvasStore((s) => s.viewMode);
+  // 免责声明首屏（2026-11-12）：仅首次进入（或条款版本更新）时出现一次
+  // 免责声明：先查服务端记录（localStorage 在本机会失效 ⇒ 每次启动都弹）。
+  // 初始 false 避免"闪一下又消失"；查到需要才弹。
+  const [complianceOpen, setComplianceOpen] = useState<boolean>(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const remote = await fetchRemoteAcceptance();
+      const local = (() => {
+        try {
+          return needsCompliance() ? null : "agreed";
+        } catch {
+          return null;
+        }
+      })();
+      const need = decideCompliance(remote, local, COMPLIANCE_VERSION);
+      if (alive && need) setComplianceOpen(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const addNode = useCanvasStore((s) => s.addNode);
   const addRegistryNode = useCanvasStore((s) => s.addRegistryNode);
   const addStoryboardGrid = useCanvasStore((s) => s.addStoryboardGrid);
@@ -1604,6 +1630,18 @@ export default function App() {
 
   return (
     <NodeActionsContext.Provider value={nodeActionsValue}>
+    <MediaViewerHost />
+    {complianceOpen ? (
+      <ComplianceGate
+        mode="gate"
+        onAccept={() => {
+          // 双写：服务端（跨重启可靠）+ localStorage（快）
+          void acceptComplianceRemote(COMPLIANCE_VERSION);
+          acceptCompliance();
+          setComplianceOpen(false);
+        }}
+      />
+    ) : null}
     <CanvasShell
       viewMode={viewMode}
       setViewMode={setViewMode}

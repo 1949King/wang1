@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "text": "本片含 AI 生成内容",
+  "position": "bottom-right",
+  "opacity": 0.55,
+  "margin_ratio": 0.03,
+  "font_size_ratio": 0.035,
+  "show_seconds": 8,
+  "metadata": {
+    "comment": "本片含 AI 生成内容（依据《微短剧发展管理办法》提示标识要求）",
+    "ai_generated": "true",
+    "record_no": "",
+    "credits": ""
+  }
+}

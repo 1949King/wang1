@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from app.core.canvas_route_registry import _route_post
+from app.core.canvas_route_registry import _route_get, _route_post
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,34 @@ def _cs() -> Any:
 
 
 class CanvasDrawPlanRoutesMixin:
+    """人物卡/角色库/免责声明路由。宿主类需提供 _json / _check_host_token。"""
+
+    # ── 免责声明"已同意"（2026-11-12）：localStorage 不持久 ⇒ 服务端记账 ──
+    @_route_get("/host/compliance/acceptance")
+    def _p_host_compliance_acceptance(self, parsed) -> None:
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        from app.core.compliance_accept import read_state
+
+        self._json(200, {"ok": True, **read_state()})
+
+    @_route_post("/host/compliance/accept")
+    def _p_host_compliance_accept(self, parsed, raw: bytes, ctype: str) -> None:
+        cs = _cs()
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        from app.core.compliance_accept import write_state
+
+        ok = write_state(str(body.get("version") or ""), str(body.get("at") or ""))
+        self._json(200 if ok else 500, {"ok": ok, "message": "" if ok else "写入失败"})
     """人物卡/角色库路由。宿主类需提供 _json / _check_host_token。"""
 
     # ── POST /host/person-card/preview：人物卡 → 英文提示词（2026-11-01 · C 项）──
@@ -131,5 +159,4 @@ class CanvasDrawPlanRoutesMixin:
         except Exception:
             logger.exception("[/host/characters/delete] 失败")
             self._json(500, {"ok": False, "message": "角色删除失败"})
-
 

@@ -1,4 +1,7 @@
 /** 落地页 — 视觉对齐 infinite-canvas home（深色点阵 + 大标题 + 双 CTA + 沉淀区） */
+import { useState } from "react";
+
+import { FirstRunWizard } from "./FirstRunWizard";
 type ShowcaseItem = {
   id: string;
   title: string;
@@ -48,6 +51,7 @@ export default function HomeLanding({
   showcase,
 }: Props) {
   const items = showcase && showcase.length > 0 ? showcase : FALLBACK_SHOWCASE;
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   return (
     <main className="ic-home">
@@ -63,9 +67,12 @@ export default function HomeLanding({
             ，让创作从单次生成变成连续推演。
           </p>
           <div className="ic-cta-row">
-            <button type="button" className="ic-btn-primary" onClick={onStart}>
-              开始使用
+            <button type="button" className="ic-btn-primary" onClick={() => setWizardOpen(true)}>
+              3 分钟从一句话开始
               <span aria-hidden>→</span>
+            </button>
+            <button type="button" className="ic-btn-ghost" onClick={onStart}>
+              开始使用
             </button>
             <button type="button" className="ic-btn-ghost" onClick={onOpenCanvas}>
               打开画布
@@ -110,6 +117,9 @@ export default function HomeLanding({
           </div>
         </section>
       </section>
+      {wizardOpen ? (
+        <FirstRunWizard onClose={() => setWizardOpen(false)} onDone={() => { setWizardOpen(false); onOpenCanvas(); }} />
+      ) : null}
     </main>
   );
 }

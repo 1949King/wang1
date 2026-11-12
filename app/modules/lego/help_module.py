@@ -5,7 +5,7 @@
 提供 19 个帮助话题的搜索和浏览功能。
 """
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -71,6 +71,18 @@ class HelpModule(BaseModule):
         self._help_search_results.setVisible(False)
         sbl.addWidget(self._help_search_results)
 
+        # 2026-11-12 修「搜索时不断弹窗口」：
+        # 原实现每个按键都会对 19 个话题各做一次「清空并重建页面」来提取文本，
+        # 期间链接按钮会被重建到鼠标位置、甚至被误点（外开浏览器窗口）——
+        # 现在：输入防抖 280ms + 主题文本只提取一次并缓存 + 提取时禁止重入。
+        self._topic_text_cache = {}
+        self._extracting = False
+        self._current_topic_cb = None
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(280)
+        self._search_timer.timeout.connect(self._run_help_search)
+
         topics = [
             ("🚀", "快速入门", self._quick_start),
             ("📖", "新手专区 🌟", self._beginner),
@@ -90,6 +102,7 @@ class HelpModule(BaseModule):
             ("🌐", "外部画布备选", self._canvas_alternatives),
             ("👥", "团队协作", self._team),
             ("❓", "常见问题", self._faq),
+            ("📜", "免责声明与合规", self._disclaimer),
         ]
         self._help_topics = topics  # 保存引用供搜索使用
 
@@ -106,7 +119,7 @@ class HelpModule(BaseModule):
         for icon, name, cb in topics:
             btn = QPushButton(f"{icon}  {name}")
             btn.setStyleSheet("QPushButton{background:transparent;color:#888;border:none;border-radius:6px;padding:7px 10px;font-size:11px;text-align:left;}QPushButton:hover{background:#1e1e1e;color:#ccc;}")
-            btn.clicked.connect(lambda checked, c=cb: c())
+            btn.clicked.connect(lambda checked, c=cb: self._nav_to(c))
             self._help_nav_buttons.append(btn)
             sbl.addWidget(btn)
         sbl.addStretch()
@@ -119,6 +132,10 @@ class HelpModule(BaseModule):
             item = self._cl.takeAt(0)
             w = item.widget()
             if w:
+                # 2026-11-13：先 hide 再脱离父级。
+                # 只 setParent(None) 会让可见控件**短暂变成顶层窗口**（屏幕上闪出小窗），
+                # 用户看到的就是"搜索时许多小窗反复跳动"；hide 之后脱离就不会露头。
+                w.hide()
                 w.setParent(None)
                 w.deleteLater()
             elif item.layout():
@@ -134,6 +151,7 @@ class HelpModule(BaseModule):
             item = layout.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
                 w.setParent(None)
                 w.deleteLater()
             elif item.layout():
@@ -781,15 +799,30 @@ class HelpModule(BaseModule):
 
     # ── 搜索功能 ──
 
+    def _nav_to(self, cb):
+        """点侧栏话题：记录当前话题（搜索提取后要恢复回来）。"""
+        self._current_topic_cb = cb
+        cb()
+
     def _on_help_search(self, text: str):
-        """搜索框文本变化时：在全量帮助文本中搜索关键词"""
-        text = text.strip()
-        if len(text) < 1:
-            # 清空搜索 → 恢复导航按钮
+        """搜索框变化：只重启防抖计时器（真正搜索在 _run_help_search）。
+
+        2026-11-12：原实现在这里全量重建 19 个话题页面来提取文本，
+        导致每敲一个字符界面就重建一轮、链接按钮被重建到鼠标下方，
+        用户点击时会误触外开浏览器/弹窗。现在改为防抖 + 只提取一次。
+        """
+        if not text.strip():
+            self._search_timer.stop()
             self._help_search_results.setVisible(False)
             self._help_search_results.clear()
             for btn in self._help_nav_buttons:
                 btn.setVisible(True)
+            return
+        self._search_timer.start()
+
+    def _run_help_search(self):
+        text = self._help_search.text().strip()
+        if not text:
             return
 
         # 隐藏导航按钮，显示搜索结果
@@ -838,7 +871,7 @@ class HelpModule(BaseModule):
         """点击搜索结果 → 导航到对应 topic 并清空搜索"""
         cb = item.data(Qt.ItemDataRole.UserRole)
         if cb and callable(cb):
-            cb()
+            self._nav_to(cb)
             # 清空搜索状态
             self._help_search.clear()
             self._help_search_results.setVisible(False)
@@ -847,12 +880,21 @@ class HelpModule(BaseModule):
                 btn.setVisible(True)
 
     def _get_topic_text(self, cb) -> str:
-        """获取 topic 页面的纯文本内容（用于搜索索引）"""
-        # 利用 _clear + 执行回调 → 收集 QLabel 文本 → 拼接
-        # 注意：此方法会临时渲染页面，完成后恢复
+        """提取话题正文（只提取一次并缓存；提取期间禁止重入）。
+
+        2026-11-12 修「搜索弹窗」：原实现每次调用都重建页面且**不恢复**用户当前页。
+        现在：命中缓存直接返回；提取前后恢复用户当前话题；重入返回空串。
+        """
+        key = getattr(cb, "__name__", str(cb))
+        cached = self._topic_text_cache.get(key)
+        if cached is not None:
+            return cached
+        if self._extracting:
+            return ""
+        self._extracting = True
+        prev = self._current_topic_cb
+        text = ""
         try:
-            # 保存当前内容区域状态
-            import copy
             self._clear()
             cb()
             texts = []
@@ -861,9 +903,45 @@ class HelpModule(BaseModule):
                 w = item.widget()
                 if isinstance(w, QLabel) and w.text():
                     texts.append(w.text())
-            return " ".join(texts)
+            text = " ".join(texts)
         except Exception:
-            return ""
+            logger.debug("[help] 提取话题文本失败: %s", key, exc_info=True)
+        finally:
+            self._extracting = False
+            try:
+                if prev is not None:
+                    self._clear()
+                    prev()
+            except Exception:  # stability-gate: allow-swallow（恢复失败不得打断搜索）
+                logger.debug("[help] 恢复当前话题失败", exc_info=True)
+        self._topic_text_cache[key] = text
+        # 立刻处理 deleteLater 队列：否则一轮搜索会攒下上百个"待删除"控件，
+        # 它们短暂仍是顶层窗口（闪烁）+ 占内存。
+        try:
+            from PyQt6.QtCore import QCoreApplication, QEvent
+
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        except Exception:  # stability-gate: allow-swallow（清理失败不影响搜索）
+            logger.debug("[help] 清理待删除控件失败", exc_info=True)
+        return text
+
+    def _disclaimer(self):
+        """免责声明与合规说明（2026-11-12）—— 与画布首屏同一份内容。"""
+        self._clear()
+        try:
+            from app.core.compliance_text import VERSION, SECTIONS
+
+            self._title("📜 免责声明与合规说明")
+            self._text(f"版本 {VERSION} · 首次进入软件时会弹出一次，之后可随时回到这里查看。")
+            for title, body in SECTIONS:
+                self._subtitle(title)
+                self._text(body)
+            self._tip("以上为软件内的说明文本，不构成法律意见；如有疑问请咨询专业人士。")
+        except Exception:  # stability-gate: allow-swallow（文本模块异常时给出明确指引）
+            logger.debug("[help] 免责声明渲染失败", exc_info=True)
+            self._title("📜 免责声明与合规说明")
+            self._text("内容模块未加载成功；可在软件首次启动弹窗中查看，或检查 app/core/compliance_text.py。")
+        self._cl.addStretch()
 
     def _team(self):
         """团队协作（局域网多人改同一画布）—— 正文在 docs/help/team.md。

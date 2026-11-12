@@ -595,6 +595,16 @@ class EditorExportPanelMixin:
                         output_path = self._burn_stickers_if_any(output_path)
                     except Exception as _se:
                         logger.info(f'贴纸烧录跳过: {_se}')
+                    try:
+                        # G1 合规（2026-11-12）：AI 生成内容标识（角标 + 元数据）
+                        from app.core.compliance_label import apply_ai_label_inplace
+                        _label = apply_ai_label_inplace(output_path)
+                        if _label.get("applied"):
+                            self._notify_edit("导出：已写入 AI 生成标识")
+                        else:
+                            logger.info("AI 标识未写入: %s", _label.get("reason"))
+                    except Exception as _le:  # stability-gate: allow-swallow（标识失败不得毁掉已导出的成品）
+                        logger.info(f'AI 标识写入跳过: {_le}')
                     output_size = result.get("output_size", 0) if isinstance(result, dict) else getattr(result, "output_size", 0)
                     processing_time = result.get("processing_time", 0) if isinstance(result, dict) else getattr(result, "processing_time", 0)
                     self._notify_edit("导出完成")

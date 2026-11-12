@@ -292,6 +292,12 @@ class ExtensionsModule(BaseModule):
         except Exception as e:
             QMessageBox.warning(self, "打开失败", f"AI 特效工坊启动失败:\n{e}")
 
+    def handle_module_action(self, action: str) -> bool:
+        """响应子页跳转（例：首页 MCP 卡片「设置」→ MCP 服务页）。实现见 extensions_module_pages。"""
+        from app.modules.lego.extensions_module_pages import switch_extension_tab
+
+        return switch_extension_tab(self._tabs, action)
+
     def _tab_style(self) -> str:
         """标签页样式"""
         return (

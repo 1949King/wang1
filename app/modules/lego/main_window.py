@@ -1291,6 +1291,15 @@ class MainWindow(QMainWindow):
         if data_payload:
             self._event_bus.emit(EventType.COPY_GENERATED, data_payload)
 
+        # 通用子页跳转（2026-11-13）：模块自己实现 handle_module_action(action)。
+        # 例：首页 MCP 卡片「设置」→ 拓展中心「🔌 MCP 服务」页签。
+        if action and widget is not None and hasattr(widget, "handle_module_action"):
+            try:
+                if widget.handle_module_action(str(action)):
+                    return
+            except Exception as e:  # stability-gate: allow-swallow（跳转失败不影响其他 action）
+                logger.debug("模块子页跳转失败 %s/%s: %s", module_id, action, e)
+
         # 修复：首页「最近项目」双击此前只切到编辑器页签，从不真正加载工程——
         # 这里补上真正的打开逻辑
         if module_id == "editor" and action == "open_project":
