@@ -14,6 +14,12 @@ export type StoryboardShot = {
   shot?: string;
   description?: string;
   dialogue?: string;
+  /**
+   * 这一镜在故事里的作用（2026-11-15 加）。
+   * 后端 `canvas_aigc.storyboard_breakdown` 产出，取值 setup/advance/turn/close；
+   * 也可能缺失或为中文（LLM 不确定），前端用 `normalizeShotPurpose` 归一。
+   */
+  purpose?: string;
 };
 
 /** 一键拉片：剧本 → 分镜表（宿主 LLM，失败用启发式） */

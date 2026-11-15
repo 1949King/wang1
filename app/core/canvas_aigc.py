@@ -22,6 +22,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.core.canvas_ai_config_cache import cached_config, ollama_models_fast
+# 镜头作用（叙事层）：拆镜时给每镜猜作用。实现单独成文件，避免本文件超体积守卫。
+from app.core.aigc_shot_purpose import (
+    infer_shot_purpose as _infer_shot_purpose,
+    normalize_shot_purpose,
+)
 
 logger = logging.getLogger("AI短剧编辑器.canvas_bridge")
 
@@ -2464,6 +2469,8 @@ def _heuristic_storyboard(script: str) -> List[Dict[str, Any]]:
                 "shot": shotsizes[i % len(shotsizes)],
                 "description": desc[:200],
                 "dialogue": dialogue[:120],
+                # 叙事层：拆镜时顺带标出这一镜的作用（用户可改，省去逐张点选）
+                "purpose": _infer_shot_purpose(i, len(parts), p),
             }
         )
     return out
@@ -2491,8 +2498,12 @@ def storyboard_breakdown(script: str, use_llm: bool = False) -> Dict[str, Any]:
                         "你是分镜师。严格按剧本原文拆解，不要添加/修改/润色剧本内容，"
                         "不要优化或重新创作。把每一段落/场景对应成结构化分镜，"
                         '每镜一行 JSON：{"id":1,"duration":5,"shot":"特写/中景/远景",'
-                        '"description":"画面描述（用剧本原文，不要自由发挥）","dialogue":"对白"}。'
-                        "输出 JSON 数组，不要其他文字。"
+                        '"description":"画面描述（用剧本原文，不要自由发挥）","dialogue":"对白",'
+                        '"purpose":"setup|advance|turn|close"}。'
+                        "purpose 表示这一镜在故事里的作用："
+                        "setup=交代环境/人物/关系的铺垫镜，advance=推动情节往前，"
+                        "turn=打破观众预期的转折/反转，close=收尾落幅。"
+                        "必须给每一镜都填 purpose。输出 JSON 数组，不要其他文字。"
                     ),
                 },
                 {"role": "user", "content": f"剧本：\n{script}\n\n请输出分镜表 JSON。"},
@@ -2515,6 +2526,11 @@ def storyboard_breakdown(script: str, use_llm: bool = False) -> Dict[str, Any]:
                             "shot": str(s.get("shot") or "中景"),
                             "description": str(s.get("description") or ""),
                             "dialogue": str(s.get("dialogue") or ""),
+                            # LLM 可能不给、给中文或给错 ⇒ 一律回落到按位置/词推测
+                            "purpose": normalize_shot_purpose(s.get("purpose"))
+                            or _infer_shot_purpose(
+                                i, len(shots), str(s.get("description") or "")
+                            ),
                         }
                     )
                 if norm:

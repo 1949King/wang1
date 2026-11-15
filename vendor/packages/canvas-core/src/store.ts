@@ -97,6 +97,7 @@ import {
   defaultStoryboardCells,
   ANIMATION_ACTION_LABELS,
   animationGrid,
+  normalizeShotPurpose,
   type CharacterEntry,
 } from "./stores/node-factory";
 // 灯位→3D 灯光快照类型。**type-only**：stage3dLighting.ts 反向 import 本 store，值级会成环
@@ -120,13 +121,8 @@ export {
   createShotlistRow, defaultStoryboardCells, ANIMATION_ACTION_LABELS, animationGrid,
 };
 
-export type StoryboardShot = {
-  id?: number;
-  duration?: number;
-  shot?: string;
-  description?: string;
-  dialogue?: string;
-};
+import type { StoryboardShot } from "./bridgeStoryboard";
+export type { StoryboardShot };
 
 export type ViewMode =
   | "home"
@@ -1036,6 +1032,9 @@ export const useCanvasStore = create<Store>((set, get) => ({
           duration: Number(s.duration) || 3,
           dialogue: s.dialogue || "",
           prompt: s.description || `分镜 ${i + 1}`,
+          // 2026-11-15：镜号/作用一次落地（原实现只写 title，卡面无镜号且需逐张点选）
+          shotNumber: i + 1,
+          shotPurpose: normalizeShotPurpose(s.purpose),
         } as Partial<ShotData>,
       );
       shotNodes.push(node);
@@ -1084,6 +1083,8 @@ export const useCanvasStore = create<Store>((set, get) => ({
           duration: Number(s.duration) || 3,
           dialogue: s.dialogue || "",
           prompt: s.description || `分镜 ${i + 1}`,
+          shotNumber: i + 1, // 序列进数据（与 applyStoryboard 同规则）
+          shotPurpose: normalizeShotPurpose(s.purpose),
           // 导演卡拆解顺带把 AI 相机计划（机位 + 运镜）写进分镜卡，供 Stage3D 摆机位
           camera3d: cam
             ? {

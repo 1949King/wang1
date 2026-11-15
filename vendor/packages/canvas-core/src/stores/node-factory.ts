@@ -115,6 +115,36 @@ export const SHOT_PURPOSE_META: Record<ShotPurpose, { label: string; hint: strin
 /** 点选顺序（按叙事弧排列，不是字母序） */
 export const SHOT_PURPOSE_ORDER: ShotPurpose[] = ["setup", "advance", "turn", "close"];
 
+/**
+ * 把外部来源（后端拆解 / LLM）的作用名归一成 `ShotPurpose`。
+ *
+ * 为什么要归一：后端 LLM 很可能直接返回「转折」而不是 `turn`，
+ * 也可能干脆不给。无法识别时回落到 `advance`（最常见的功能），
+ * **不抛错也不留空** —— 卡片上永远有一个可改的起点，比空白好。
+ */
+export function normalizeShotPurpose(value: unknown): ShotPurpose {
+  const key = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  const alias: Record<string, ShotPurpose> = {
+    setup: "setup",
+    铺垫: "setup",
+    开场: "setup",
+    交代: "setup",
+    advance: "advance",
+    推进: "advance",
+    发展: "advance",
+    turn: "turn",
+    转折: "turn",
+    反转: "turn",
+    close: "close",
+    收尾: "close",
+    结尾: "close",
+    落幅: "close",
+  };
+  return alias[key] ?? "advance";
+}
+
 export type ShotData = {
   kind: "shot";
   title: string;

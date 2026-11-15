@@ -15,6 +15,7 @@ import {
   SHOT_PURPOSE_META,
   SHOT_PURPOSE_ORDER,
   makeNode,
+  normalizeShotPurpose,
 } from "../stores/node-factory";
 
 const resetGraph = () =>
@@ -71,5 +72,42 @@ describe("镜号（序列层）", () => {
     const id = useCanvasStore.getState().addNode("note");
     const n = useCanvasStore.getState().nodes.find((x) => x.id === id);
     expect((n?.data as { shotNumber?: number } | undefined)?.shotNumber).toBeUndefined();
+  });
+});
+
+describe("拆镜时自动标作用（2026-11-15 加）", () => {
+  it("normalizeShotPurpose 认中文别名", () => {
+    expect(normalizeShotPurpose("转折")).toBe("turn");
+    expect(normalizeShotPurpose("收尾")).toBe("close");
+    expect(normalizeShotPurpose("铺垫")).toBe("setup");
+  });
+
+  it("normalizeShotPurpose 认英文 key，未知值回落 advance（不留空）", () => {
+    expect(normalizeShotPurpose("close")).toBe("close");
+    expect(normalizeShotPurpose("乱写")).toBe("advance");
+    expect(normalizeShotPurpose(undefined)).toBe("advance");
+  });
+
+  it("applyStoryboard 把镜号与作用一次落地（不是只写进 title）", () => {
+    resetGraph();
+    useCanvasStore.getState().applyStoryboard(
+      [
+        { id: 1, shot: "远景", description: "雨夜街景", duration: 3, purpose: "setup" },
+        { id: 2, shot: "中景", description: "她推门", duration: 3, purpose: "转折" },
+        { id: 3, shot: "特写", description: "黑场", duration: 2, purpose: "close" },
+      ],
+      "测试剧本",
+    );
+    const shots = useCanvasStore
+      .getState()
+      .nodes.filter((n) => (n.data as { kind?: string }).kind === "shot");
+    expect(shots).toHaveLength(3);
+    // 关键：字段有值，卡片才显示「镜 N」；只写 title 的话卡面是空的
+    expect(shots.map((s) => (s.data as { shotNumber?: number }).shotNumber)).toEqual([1, 2, 3]);
+    expect(shots.map((s) => (s.data as { shotPurpose?: string }).shotPurpose)).toEqual([
+      "setup",
+      "turn",
+      "close",
+    ]);
   });
 });
