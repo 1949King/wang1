@@ -12,7 +12,7 @@
 """
 
 from __future__ import annotations
-from typing import List, Dict, Optional, Callable, Any
+from typing import List, Dict, Optional, Callable, Any, Tuple
 from dataclasses import dataclass, field
 
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
@@ -33,53 +33,52 @@ logger = logging.getLogger("AI短剧编辑器.modules.lego.feature_search")
 
 _PINYIN_MAP: Dict[str, str] = {
     # 工具栏
-    "导": "dao", "入": "ru", "剪": "jian", "切": "qie", "复": "fu", "制": "zhi",
-    "粘": "zhan", "贴": "tie", "删": "shan", "除": "chu", "撤": "che", "销": "xiao",
-    "重": "chong", "做": "zuo", "出": "chu", "内": "nei", "核": "he",
+    "剪": "jian", "切": "qie", "制": "zhi",
+    "粘": "zhan", "贴": "tie", "删": "shan", "撤": "che", "销": "xiao",
+    "重": "chong", "做": "zuo", "内": "nei", "核": "he",
     # 属性 tab
-    "属": "shu", "性": "xing", "变": "bian", "换": "huan", "缩": "suo", "放": "fang",
-    "旋": "xuan", "转": "zhuan", "锚": "mao", "点": "dian", "中": "zhong", "心": "xin",
-    "左": "zuo", "上": "shang", "右": "you", "下": "xia", "合": "he", "成": "cheng",
-    "不": "bu", "透": "tou", "明": "ming", "度": "du", "混": "hun", "正": "zheng",
-    "常": "chang", "暗": "an", "叠": "die", "加": "jia", "深": "shen", "亮": "liang",
-    "滤": "lv", "屏": "ping", "柔": "rou", "光": "guang", "强": "qiang", "差": "cha",
-    "排": "pai", "色": "se", "相": "xiang", "饱": "bao", "和": "he",
-    "画": "hua", "位": "wei", "置": "zhi", "大": "da", "小": "xiao", "边": "bian",
+    "属": "shu", "变": "bian", "换": "huan", "放": "fang",
+    "旋": "xuan", "转": "zhuan", "锚": "mao", "心": "xin",
+    "左": "zuo", "上": "shang", "右": "you", "下": "xia",
+    "不": "bu", "透": "tou", "明": "ming", "度": "du", "正": "zheng",
+    "常": "chang", "暗": "an", "叠": "die", "深": "shen", "亮": "liang",
+    "滤": "lv", "柔": "rou", "光": "guang", "差": "cha",
+    "排": "pai", "相": "xiang", "饱": "bao", "和": "he",
+    "画": "hua", "位": "wei", "大": "da", "小": "xiao",
     "框": "kuang", "智": "zhi", "能": "neng", "抠": "kou", "像": "xiang",
-    "绿": "lv", "蓝": "lan", "自": "zi", "定": "ding", "义": "yi", "容": "rong",
-    "软": "ruan", "化": "hua", "速": "su", "裁": "cai", "预": "yu", "设": "she",
+    "绿": "lv", "自": "zi", "定": "ding", "义": "yi", "容": "rong",
+    "软": "ruan", "化": "hua", "速": "su", "裁": "cai", "预": "yu",
     "慢": "man", "快": "kuai", "缓": "huan", "入": "ru", "阶": "jie", "梯": "ti",
     "倒": "dao", "动": "dong", "因": "yin", "子": "zi",
     # 调色 tab
-    "调": "diao", "基": "ji", "础": "chu", "校": "jiao", "曝": "pu", "曝": "pu",
-    "对": "dui", "高": "gao", "阴": "yin", "影": "ying", "白": "bai", "黑": "hei",
+    "基": "ji", "础": "chu", "校": "jiao", "曝": "pu",
+    "对": "dui", "影": "ying", "白": "bai", "黑": "hei",
     "彩": "cai", "整": "zheng", "然": "ran", "温": "wen", "调": "diao",
-    "锐": "rui", "片": "pian", "复": "fu", "古": "gu", "暖": "uan",
+    "锐": "rui", "片": "pian", "复": "fu", "古": "gu", "暖": "nuan",
     "青": "qing", "橙": "cheng", "经": "jing", "典": "dian", "日": "ri", "系": "xi",
-    "清": "qing", "新": "xin", "赛": "sai", "博": "bo", "朋": "peng",
+    "新": "xin", "赛": "sai", "博": "bo", "朋": "peng",
     "废": "fei", "土": "tu", "糖": "tang", "果": "guo", "夜": "ye", "蓝": "lan",
     "曲": "qu", "线": "xian", "通": "tong", "道": "dao", "红": "hong",
-    "部": "bu", "间": "jian",
+    "部": "bu",
     # 特效 tab
     "特": "te", "效": "xiao", "电": "dian", "感": "gan", "梦": "meng", "幻": "huan",
-    "都": "du", "市": "shi", "黄": "huang", "昏": "hun", "淡": "dan", "滑": "hua",
-    "模": "mo", "糊": "hu", "翻": "fan", "溶": "rong", "解": "jie", "擦": "ca",
+    "都": "du", "市": "shi", "黄": "huang", "昏": "hun", "滑": "hua",
+    "糊": "hu", "翻": "fan", "溶": "rong", "解": "jie", "擦": "ca",
     "推": "tui", "类": "lei", "型": "xing", "时": "shi", "长": "chang", "弹": "tan",
     "性": "xing", "回": "hui",
     # 文字 tab
-    "文": "wen", "字": "zi", "幕": "mu", "列": "lie", "表": "biao", "添": "tian",
-    "加": "jia", "生": "sheng", "成": "cheng", "机": "ji", "器": "qi", "识": "shi",
-    "别": "bie", "语": "yu", "音": "yin", "语": "yu", "言": "yan",
-    "合": "he", "并": "bing", "编": "bian", "辑": "ji", "样": "yang", "式": "shi",
+    "文": "wen", "字": "zi", "幕": "mu", "列": "lie",
+    "加": "jia", "生": "sheng", "成": "cheng", "机": "ji", "识": "shi",
+    "别": "bie", "语": "yu", "言": "yan",
+    "合": "he", "并": "bing", "编": "bian", "辑": "ji", "样": "yang",
     "体": "ti", "粗": "cu", "斜": "xie", "描": "miao", "边": "bian", "阴": "yin",
-    "背": "bei", "景": "jing",
     # 贴纸 tab
     "爱": "ai", "星": "xing", "火": "huo", "焰": "yan", "钻": "zuan", "石": "shi",
-    "乐": "le", "符": "fu", "闪": "shan", "聊": "liao", "天": "tian", "气": "qi",
+    "符": "fu", "闪": "shan", "聊": "liao", "天": "tian", "气": "qi",
     "泡": "pao", "标": "biao", "签": "qian", "表": "biao", "情": "qing",
     # 音频 tab
-    "频": "pin", "增": "zeng", "强": "qiang", "降": "jiang", "噪": "zao",
-    "截": "jie", "取": "qu", "添": "tian", "背": "bei", "景": "jing",
+    "增": "zeng", "降": "jiang", "噪": "zao",
+    "截": "jie", "添": "tian", "背": "bei", "景": "jing",
     "提": "ti", "取": "qu", "声": "sheng", "人": "ren", "淡": "dan",
     "均": "jun", "衡": "heng", "器": "qi", "低": "di", "中": "zhong", "高": "gao",
     "压": "ya", "缩": "suo", "比": "bi", "混": "hun", "响": "xiang",
@@ -89,7 +88,7 @@ _PINYIN_MAP: Dict[str, str] = {
     "敏": "min",
     # AI tab
     "引": "yin", "擎": "qing", "状": "zhuang", "态": "tai", "模": "mo", "待": "dai",
-    "务": "wu", "处": "chu", "理": "li", "历": "li", "史": "shi",
+    "务": "wu", "处": "chu", "历": "li", "史": "shi",
     # 角色 tab
     "角": "jiao", "色": "se",
     # 导出 tab
@@ -99,10 +98,26 @@ _PINYIN_MAP: Dict[str, str] = {
     "强": "qiang", "选": "xuan", "择": "ze", "开": "kai", "始": "shi",
     "束": "shu", "结": "jie", "停": "ting",
     # 补充字符
-    "镜": "jing", "头": "tou", "档": "dang", "案": "an", "库": "ku",
+    "镜": "jing", "头": "tou", "档": "dang", "案": "an",
     "库": "ku", "管": "guan", "理": "li", "设": "she", "置": "zhi",
     "分": "fen", "辨": "bian", "率": "lv", "码": "ma", "格": "ge",
-    "屏": "ping", "段": "duan", "段": "duan", "区": "qu", "间": "jian",
+    "屏": "ping", "段": "duan", "区": "qu", "间": "jian",
+}
+
+# ═══════════════════════════════════════════════════════════════
+# 多音字备选读音
+# ═══════════════════════════════════════════════════════════════
+# 为什么需要这张表（2026-11-15 修）：
+#   `_PINYIN_MAP` 是 `字 → 单读音`，而 dict 字面量**不许有重复键** ——
+#   写了两次的键，只有后一次生效，前一次被静默丢弃，且不报任何错。
+#   本文件原先就有 43 处重复键（42 处值相同属噪音，1 处 `乐` 是「le / yue」两读
+#   互相覆盖），另把「暖」误写成 `uan`。
+#   ⇒ 主表只放一个读音（取本应用语境里的常用读法），其余读音在这里补，
+#     由 `_get_pinyin_full` 追加到结果尾部，保证两个读音都能被搜到。
+#   注意：只追加到**整词拼音尾部**，不插入字符位置中间，
+#        否则会破坏 `q in item._pinyin` 的连续子串匹配。
+_POLYPHONIC_EXTRA: Dict[str, Tuple[str, ...]] = {
+    "乐": ("le",),   # 音乐(yue) / 快乐(le)
 }
 
 def _get_pinyin_initials(text: str) -> str:
@@ -120,18 +135,27 @@ def _get_pinyin_initials(text: str) -> str:
     return ''.join(result)
 
 def _get_pinyin_full(text: str) -> str:
-    """提取中文文本的完整拼音（无空格连接）。非中文字符保留原样小写。"""
+    """提取中文文本的完整拼音（无空格连接）。非中文字符保留原样小写。
+
+    多音字的备选读音追加在**尾部**（空格分隔），供子串搜索兜底 ——
+    见 `_POLYPHONIC_EXTRA` 的注释，插在中间会破坏连续匹配。
+    """
     result = []
+    extra = []
     for ch in text:
         if '\u4e00' <= ch <= '\u9fff':
             py = _PINYIN_MAP.get(ch, '')
             if py:
                 result.append(py)
+                extra.extend(_POLYPHONIC_EXTRA.get(ch, ()))
             else:
                 result.append(ch)
         else:
             result.append(ch.lower())
-    return ''.join(result)
+    out = ''.join(result)
+    if extra:
+        out += " " + " ".join(extra)
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════

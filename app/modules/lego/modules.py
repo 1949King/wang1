@@ -293,8 +293,18 @@ class VideoProcessor:
         }
     
     def process_video(self, video_path, mode, export_settings=None):
-        """ """
+        """提交一次视频处理任务到线程池。
+
+        ⚠️ 这里必须写 `nonlocal export_settings`（2026-11-15 修）：
+        `task()` 里既要读 `export_settings`（判 None），又给它赋默认值。
+        Python 的规则是**函数内只要有赋值，这个名字在整个函数里就是局部的**，
+        于是那句 `if export_settings is None` 抛 UnboundLocalError，
+        再被下面的 `except Exception` 吞掉只写日志 ——
+        结果就是「调用方永远收到『任务已提交到线程池』，任务每次都失败」。
+        这类错不报异常、不崩界面，只能靠 ruff F823 或逐行读出来。
+        """
         def task():
+            nonlocal export_settings
             try:
                 # 默认导出设置
                 if export_settings is None:
