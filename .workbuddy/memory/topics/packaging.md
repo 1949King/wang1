@@ -73,3 +73,66 @@ SYNC_APP_SUBPKGS = ["app/core/video_processing", "app/plugins", "app/skills"]
 - 插件 27、外部 skill 11 与源码**逐文件一致**
 - 自检 **26 项：24 过 / 2 降级**（mediapipe、OTIO，均有降级路径）
 - 产物 **6.35 GB**（runtime 4.37 + _internal 1.96），真机启动正常
+
+## 八、NSIS 安装包（2026-11-15 实测，六条血泪）
+
+### 8.1 结论先给：这个体积**装不进 NSIS**
+
+makensis 是 32 位程序，安装包数据块要 mmap 进 2 GB 用户态地址空间。
+逐档实测（NSIS 3.13 / Win11）：
+
+| 数据量 | 结果 |
+|---|---|
+| 900 MB / 1.4 GB / 1.6 GB / 1.8 GB | ✅ 全成功（1.8 GB 耗时 1 分 12 秒） |
+| 1.96 GB（真实 `_internal`） | ❌ `Internal compiler error #12345: error mmapping file (1992247082, 33554432) is out of range` |
+| 6.35 GB（含 runtime） | ❌ 同上；zlib 换 lzma 一样 |
+
+失败发生在**开始后几秒的预分配阶段**，与压缩率无关 ⇒ 是地址空间上限，不是配置问题。
+`NSIS_DATABLOCK_LIMIT = 2 GiB` 已写进 `build_release.py` 按体积自动决策。
+
+⚠️ **别再「装个 NSIS 就能出包」**——工具装了、脚本对了，照样失败。要先量体积。
+
+### 8.2 `.nsi` 与 license 文本**必须 UTF-8 with BOM**
+
+NSIS 3 + `Unicode true` 靠 BOM 判编码。**无 BOM** 会被按 ANSI(GBK) 解释字节流
+⇒ 安装包界面中文全乱码，而 **makensis 退出码是 0**（编译期零提示）。
+反例实测：同脚本删掉前 3 字节 BOM，`/PPO` 输出中文全乱；加回 BOM 全正常。
+编译时看 `Processing script file: "...nsi" (UTF8)` 有 `(UTF8)` 才算对。
+
+### 8.3 `/D` 与脚本 `!define` 同名 = 硬错误
+
+`makensis /DAPP_VERSION=1.0` 撞上脚本里的 `!define APP_VERSION` ⇒
+`!define: "APP_VERSION" already defined!` 然后 **abort**。
+要留命令行覆盖能力，生成的头文件里每个 define 都用 `!ifndef` 包住。
+
+### 8.4 卸载器**不需要**自删处理（纠正一个反向判断）
+
+NSIS 卸载器启动时会**自动复制到 `$TEMP` 再从那里运行**
+（只有显式传 `_?=` 才关闭该行为）⇒ `RMDir /r "$INSTDIR"` 不会卡在「删不掉正在运行的自己」。
+真正要处理的是 **CWD**：CWD 还在 `$INSTDIR` 时目录被占用，先 `SetOutPath $TEMP`。
+
+⚠️ **真正危险的是反过来：删得太干净**。本程序把作品写在自己目录下
+（`短剧AI剪辑输出/`、`output/`、`素材库/`），无条件 `RMDir /r "$INSTDIR"`
+= **卸载即删光用户作品**，且无任何提示。必须问一句，「保留」分支只删程序本体，
+末尾用**不带 `/r`** 的 `RMDir`（目录非空自动失败 ⇒ 数据保住）。
+
+### 8.5 版本号只认 `app/version.py`
+
+曾写死 `4.10.3` 而代码已 4.47.0（脱节 37 个次版本）⇒ 文件名错 + 注册表
+`DisplayVersion` 错 ⇒ 用户看到的版本是假的。
+链路：`app/version.py` → `build_release.read_app_version()`（**正则读，别 import**
+——`import app` 会拖起 PyQt6/torch）→ `dist/build_info.nsh` → `!include`。
+出包后按版本号**精确校验**产物，别「取 dist 里最新一个 Setup」（会拿到旧包）。
+已加 16 个契约测试（`app/tests/test_installer_contract.py`），含 BOM/写死版本两个反例。
+
+### 8.6 打包要排除运行时产物
+
+`dist\拾光剪影\` 里会躺着 `短剧AI剪辑输出\`（本机测试作品）和 `debug.log`。
+`File /r` 不排除就等于每发一次包带一份本机产物。
+`/x "runtime" /x "短剧AI剪辑输出" /x "output" /x "logs" /x "debug.log"`。
+
+### 8.7 `File /r` 是**编译期**指令
+
+源目录不存在时 makensis 直接报错 ⇒「有没有 runtime」必须在编译期由
+`HAS_RUNTIME` 决定，不能在脚本里用运行时 `IfFileExists` 判断（拦不住编译失败）。
+
