@@ -19,7 +19,7 @@
 |---|---|---|
 | `.workbuddy/memory/MEMORY.md` | **项目长期记忆**：定位 · 核心不变量 · 持久约束（血泪） · 验证与提交纪律 · 团队协作现状 | ✅ 已入库，clone 即有 |
 | `.workbuddy/memory/YYYY-MM-DD.md` | 每日工作日志：当天实测数据、失败尝试、结论 | ⚠️ 部分入库（见下） |
-| `.workbuddy/memory/topics/*.md` | 深水区：`gguf-quant` / `agent-blueprint` / `canvas-bridge` | ✅ 已入库 |
+| `.workbuddy/memory/topics/*.md` | 深水区：`packaging`（打包六坑） / `team-collab`（团队协作三空洞补法） / `gguf-quant` / `agent-blueprint` / `canvas-bridge` | ✅ 已入库 |
 | `docs/knowledge/*.json` | 机器基线：冻结区 / 稳定性 / ruff / 覆盖 | ✅ 已入库 |
 
 🔴 **接手第一天先读 `MEMORY.md`，再读技术文档。** 它写的是「看着能改、实际不能改」那类事——
