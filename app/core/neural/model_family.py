@@ -72,12 +72,26 @@ class ModelFamilySpec:
 # ── 权重探测（全部惰性 + try，画布 HTTP 线程可安全调）────────────────────────
 def _probe_image(model_id: str) -> Callable[[], bool]:
     def f() -> bool:
+        # ★ 2026-11-15 修：原来写的是 `from ...diffsynth_image import is_downloaded`，
+        #   而 `is_downloaded` 是 **DiffsynthImageEngine 的静态方法、不是模块级函数**
+        #   ⇒ ImportError 被 except 吞掉 ⇒ 恒判「权重不在盘」。
+        #   实测后果：sd15 / sdxl / svd 三个主力明明在盘却被 resolve() 判不可用。
         try:
-            from app.core.neural.diffsynth_image import IMAGE_MODELS, is_downloaded
+            from app.core.neural.diffsynth_image import IMAGE_MODELS, DiffsynthImageEngine
 
-            return model_id in IMAGE_MODELS and bool(is_downloaded(model_id))
+            if model_id not in IMAGE_MODELS:
+                return False
+            if DiffsynthImageEngine.is_downloaded(model_id):
+                return True
         except Exception:
-            logger.debug("[model_family] 图像权重探测失败（%s）", model_id, exc_info=True)
+            logger.debug("[model_family] 图像权重探测失败（diffsynth，%s）", model_id, exc_info=True)
+        # 主选后端没有就再看备选后端（两族都声明 diffsynth→diffusers 双后端）
+        try:
+            from app.core.neural.diffusers_image import DiffusersImageEngine
+
+            return bool(DiffusersImageEngine.is_downloaded(model_id))
+        except Exception:
+            logger.debug("[model_family] 图像权重探测失败（diffusers，%s）", model_id, exc_info=True)
             return False
 
     return f
@@ -85,24 +99,33 @@ def _probe_image(model_id: str) -> Callable[[], bool]:
 
 def _probe_svd() -> bool:
     try:
-        from app.core.neural.video_gen import is_downloaded
+        # 同上：`video_gen.is_downloaded` 模块函数不存在，真名是 VideoGenEngine.is_downloaded
+        from app.core.neural.video_gen import VideoGenEngine
 
-        return bool(is_downloaded("svd-xt-i2v"))
+        return bool(VideoGenEngine.is_downloaded("svd-xt-i2v"))
     except Exception:
         logger.debug("[model_family] SVD 权重探测失败", exc_info=True)
         return False
 
 
 def _probe_local_video(kind: str) -> Callable[[], bool]:
-    """③ 系各族：扫本地权重目录（local_video_infer 顶层纯 stdlib，可安全惰性 import）。"""
+    """③ 系各族：只认「扫描到的真实模型目录」，**不要**再用 `_guess_model_kind`。
+
+    ★ 2026-11-15 修：原来的写法是
+        `any(m.kind == kind for m in _scan_local_models()) or bool(_guess_model_kind(kind))`
+    第二个条件传进去的是**族名**（如 "cogvideox"），而 `_guess_model_kind` 做的是
+    关键词匹配，"cogvideox" 命中自身关键词 ⇒ 恒返回非空 ⇒ 整条探测恒 True。
+    实测后果：本机零权重的 cogvideox / ltx / mochi 被 `resolve()` 谎报「权重在盘」。
+    （wan 那时能跑，属于假阳性恰好与事实一致。）
+
+    族名 ≠ 模型 id：能看到的只能是磁盘上真实存在的目录。
+    """
 
     def f() -> bool:
         try:
-            from app.core.local_video_infer import _guess_model_kind, _scan_local_models
+            from app.core.local_video_infer import _scan_local_models
 
-            return any(m.kind == kind for m in _scan_local_models()) or bool(
-                _guess_model_kind(kind)
-            )
+            return any(m.kind == kind for m in _scan_local_models())
         except Exception:
             logger.debug("[model_family] 本地视频权重探测失败（%s）", kind, exc_info=True)
             return False

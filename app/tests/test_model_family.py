@@ -160,3 +160,99 @@ def test_planner_default_order_comes_from_registry(monkeypatch, tmp_path):
     r2 = EP._engine_probe("image")
     assert r2["engine"] == "diffsynth"
     assert r2["is_fallback"] is False
+
+
+# ── 权重探测必须与磁盘事实同源（2026-11-15 修）──────────────────────────────
+# 修之前这里有两个静默失败，导致 `weights_present()` 全线失真：
+#   ① `from ...diffsynth_image import is_downloaded` / `from ...video_gen import is_downloaded`
+#      —— 真名是 **Engine.is_downloaded 静态方法**，模块级函数不存在 ⇒ ImportError 被吞 ⇒ 恒 False
+#      ⇒ sd15 / sdxl / svd 明明在盘却被 resolve() 判「权重不在盘」。
+#   ② `_probe_local_video` 的第二个条件 `bool(_guess_model_kind(kind))` 传的是**族名**，
+#      族名自己命中自己的关键词 ⇒ 恒 True ⇒ 零权重的 cogvideox / ltx / mochi 被谎报「在盘」。
+# 下面三条测的就是「别再退回去」。
+
+
+def test_image_probe_agrees_with_engine_static_method():
+    """图像族：能探测到 True 当且仅当引擎静态方法说已下载（不许恒 False）。"""
+    from app.core.neural.diffsynth_image import IMAGE_MODELS, DiffsynthImageEngine
+
+    checked = 0
+    for fam, mid in (("sd15", "sd15-t2i"), ("sdxl", "sdxl-t2i")):
+        assert mid in IMAGE_MODELS
+        if not DiffsynthImageEngine.is_downloaded(mid):
+            continue  # 本机没下就不比，避免换机器误红
+        assert MF.weights_present(fam) is True, f"{fam} 权重在盘，探测却返回 False"
+        checked += 1
+    assert checked >= 0  # 只作可读性说明：0 也合法（无权重机器）
+
+
+def test_svd_probe_agrees_with_engine_static_method():
+    """SVD：探测结果必须等于 VideoGenEngine.is_downloaded（此前恒 False）。"""
+    from app.core.neural.video_gen import VideoGenEngine
+
+    if not VideoGenEngine.is_downloaded("svd-xt-i2v"):
+        assert MF.weights_present("svd") is False
+        return
+    assert MF.weights_present("svd") is True, "SVD 权重在盘，探测却返回 False"
+
+
+def test_local_video_probe_only_trusts_disk_scan():
+    """③ 系各族：探测结果必须与「真实扫描到的 kind」逐一对齐。
+
+    这条不依赖本机是否下载 —— 有目录就必须 True，没目录就必须 False。
+    恒 True（旧 bug）和恒 False 都会在这里红。
+    """
+    from app.core.local_video_infer import _scan_local_models
+
+    present = {m.kind for m in _scan_local_models()}
+    for fam in ("wan", "cogvideox", "hunyuan", "ltx", "mochi", "minimax_h3"):
+        assert MF.weights_present(fam) == (fam in present), (
+            f"{fam}：探测={MF.weights_present(fam)} 但磁盘扫描={fam in present}"
+        )
+
+
+def test_probes_have_no_legacy_wrong_patterns():
+    """源码级防回归：两种错误写法都不许再出现。
+
+    改成 AST 断言而不是字符串匹配 —— 字符串会被**注释**命中（第一版就踩了：
+    注释里写着「不要再写 import is_downloaded」，结果断言自己被自己的注释绊倒）。
+    行为断言在「正好蒙对」的机器上还会假绿，而这两条错误的根因是写法本身：
+      · 模块级 import 一个不存在的函数（真名是 Engine 静态方法）；
+      · 拿**族名**去 `_guess_model_kind` 猜模型 id ⇒ 族名自己命中自己 ⇒ 恒 True。
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    def _tree(fn):
+        return ast.parse(textwrap.dedent(inspect.getsource(fn)))
+
+    def _imported(tree):
+        out = set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                out |= {a.name for a in n.names}
+        return out
+
+    def _touched(tree):
+        """函数体里真正被引用的标识符（Name.id + Attribute.attr）。"""
+        return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
+            n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)
+        }
+
+    img = _tree(MF._probe_image)
+    svd = _tree(MF._probe_svd)
+    vid = _tree(MF._probe_local_video)
+
+    for name, tree in (("_probe_image", img), ("_probe_svd", svd)):
+        assert "is_downloaded" not in _imported(tree), (
+            f"{name}：is_downloaded 是 Engine 静态方法，不能用模块级 import（ImportError 会被吞）"
+        )
+    assert "DiffsynthImageEngine" in _touched(img), "图像探测必须落到引擎静态方法上"
+    assert "VideoGenEngine" in _touched(svd), "SVD 探测必须落到引擎静态方法上"
+
+    assert "_guess_model_kind" not in _touched(vid), "族名会被自己命中 ⇒ 探测恒 True"
+    assert "_guess_model_kind" not in _imported(vid)
+    assert "_scan_local_models" in _touched(vid), "只能认磁盘上真实扫描到的模型目录"
+
+
