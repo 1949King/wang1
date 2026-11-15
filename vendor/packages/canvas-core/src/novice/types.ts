@@ -160,7 +160,7 @@ export const KIND_STYLE: Record<string, { color: string; icon: string; label: st
   animation: { color: "#fb7185", icon: "🎞", label: "动画" },
   panorama: { color: "#34d399", icon: "🌐", label: "全景" },
   character: { color: "#e879f9", icon: "🧑‍🎨", label: "角色" },
-  codeVideo: { color: "#22d3ee", icon: "🧩", label: "代码成片" },
+  codeVideo: { color: "#22d3ee", icon: "🧩", label: "做图形动画" },
 };
 
 /** 取节点对应的卡面样式（未知类型给中性灰） */
@@ -326,7 +326,7 @@ export const NOVICE_STAGE_GROUPS: { id: NoviceStage; title: string; icon: string
  * 「小白模式只换一张脸」的原设计。分类标准：**这张卡自己能不能产出可直接用的成品？**
  *
  * - object   造出来的东西（画面/视频/音频/角色/文本）——本身就是成品
- * - action   要消耗上游才能产出（批量出图/一键成片/生成设定/写个故事）
+ * - action   要消耗上游才能产出（批量出图/做图形动画/生成设定/写个故事）
  * - container 装东西（宫格分镜/分镜表/编组）
  * - source   提供原料（放素材/提示词）
  */
@@ -385,7 +385,7 @@ export const NOVICE_ENTRY: Record<string, NoviceEntry> = {
   // ── 批量与设定 ──
   generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch", role: "action" },
   config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch", role: "action" },
-  codeVideo: { name: "一键成片", desc: "分镜/契约 → 代码渲染成片", stage: "batch", role: "action" },
+  codeVideo: { name: "做图形动画", desc: "字幕 / 图表 / 几何动画 · 网页逐帧渲染", stage: "batch", role: "action" },
   prompt: { name: "提示词", desc: "可复用的风格描述", stage: "batch", role: "source" },
   text: { name: "文本块", desc: "说明 / 备注", stage: "batch", role: "object" },
   // ── 素材与笔记 ──

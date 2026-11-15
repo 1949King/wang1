@@ -60,7 +60,7 @@ export const BUILTIN_NODE_META: Record<string, { title: string; icon: ReactNode;
   note:      { title: "画布笔记", icon: "📌", desc: "AI-Canvas 对齐 · 文字/形状标注", defaultSize: { width: 240, height: 160 } },
   source:    { title: "源文件",   icon: "📂", desc: "AI-Canvas 对齐 · 本地素材入口", defaultSize: { width: 300, height: 220 } },
   character: { title: "角色",     icon: "🧑‍🎨", desc: "角色库条目 · 点卡片打开捏脸", defaultSize: { width: 260, height: 240 } },
-  codeVideo: { title: "代码成片", icon: "🧩", desc: "分镜/契约 → Chromium+ffmpeg 成片（诚实失败）", defaultSize: { width: 340, height: 320 } },
+  codeVideo: { title: "做图形动画", icon: "🧩", desc: "字幕/图表/几何动画 · Chromium 逐帧 + ffmpeg 编码（诚实失败）", defaultSize: { width: 340, height: 320 } },
 };
 
 type BuiltinNode = { type: string; Component: ComponentType<NodeProps<Node>> };
