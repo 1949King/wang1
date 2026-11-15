@@ -889,7 +889,24 @@ export const useCanvasStore = create<Store>((set, get) => ({
       x: 120 + Math.random() * 320,
       y: 80 + Math.random() * 240,
     };
-    const node = makeNode(type, position);
+    /*
+     * 镜头卡自动编号（2026-11-15 加）
+     *
+     * 序列信息写在**数据**里，不写在画布位置上 —— 用户明确拒绝「为顺序牺牲
+     * 摆放自由度」。新建镜头自动拿「当前最大镜号 + 1」，用户可在右侧面板手改
+     * （插镜、调序）。其它卡片类型不带此字段。
+     */
+    let extra: Partial<NodeData> | undefined;
+    if (type === "shot") {
+      const maxNo = get().nodes.reduce((m, n) => {
+        const d = n.data as { kind?: string; shotNumber?: number };
+        return d.kind === "shot" && typeof d.shotNumber === "number"
+          ? Math.max(m, d.shotNumber)
+          : m;
+      }, 0);
+      extra = { shotNumber: maxNo + 1 } as Partial<NodeData>;
+    }
+    const node = makeNode(type, position, extra);
     set((state) => ({
       nodes: [...state.nodes.map((n) => ({ ...n, selected: false })), { ...node, selected: true }],
       selectedId: node.id,

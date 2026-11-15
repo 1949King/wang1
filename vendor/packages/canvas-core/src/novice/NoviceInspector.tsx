@@ -28,6 +28,11 @@ import {
 } from "../canvasEnhanceActions";
 import { yuePlanViaHost, yueTranscribeViaHost } from "../canvasYue";
 import {
+  SHOT_PURPOSE_META,
+  SHOT_PURPOSE_ORDER,
+  type ShotPurpose,
+} from "../stores/node-factory";
+import {
   bucketComplianceLevels,
   checkScriptCompliance,
   collectComplianceCharacters,
@@ -995,6 +1000,46 @@ export default function NoviceInspector() {
             onChange={(e) => updateSelectedData({ duration: Number(e.target.value) })}
           />
         </div>
+      ) : null}
+
+      {/*
+       * 叙事 + 序列层（2026-11-15 加）：只对镜头卡显示。
+       * 「这一镜的作用」用导演的说法（铺垫/推进/转折/收尾），不是工程枚举；
+       * 镜号决定播放顺序 —— 因此卡片可以在画布上随便摆，顺序不受摆放影响。
+       */}
+      {kind === "shot" ? (
+        <>
+          <div className="nv-insp-field">
+            <label>这一镜的作用</label>
+            <div className="nv-seg wrap">
+              {SHOT_PURPOSE_ORDER.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  title={SHOT_PURPOSE_META[p].hint}
+                  className={
+                    ((d.shotPurpose as ShotPurpose | undefined) ?? "advance") === p ? "on" : ""
+                  }
+                  onClick={() => updateSelectedData({ shotPurpose: p })}
+                >
+                  {SHOT_PURPOSE_META[p].label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="nv-insp-field">
+            <label>
+              镜号 <b>{Number(d.shotNumber) || 0}</b>
+            </label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={Number(d.shotNumber) || 0}
+              onChange={(e) => updateSelectedData({ shotNumber: Number(e.target.value) || 0 })}
+            />
+          </div>
+        </>
       ) : null}
 
       {GEN_WITH_MOTION ? (

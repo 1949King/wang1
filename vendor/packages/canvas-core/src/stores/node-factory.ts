@@ -96,9 +96,38 @@ export type StatusBlock = {
   errorMessage?: string;
 };
 
+/**
+ * 镜头作用（叙事层 · 2026-11-15 加）
+ *
+ * 为什么是中文四档而不是枚举常量名：用户明确要求「不要用工程概念表达」。
+ * 导演会说「这一镜是铺垫」，不会说 `purpose: setup`。四档覆盖短剧叙事的完整弧：
+ * 起（铺垫）→ 承（推进）→ 转（转折）→ 合（收尾）。
+ */
+export type ShotPurpose = "setup" | "advance" | "turn" | "close";
+
+export const SHOT_PURPOSE_META: Record<ShotPurpose, { label: string; hint: string }> = {
+  setup: { label: "铺垫", hint: "交代环境 / 人物 / 关系" },
+  advance: { label: "推进", hint: "让情节往前走" },
+  turn: { label: "转折", hint: "打破观众预期" },
+  close: { label: "收尾", hint: "落幅 / 留钩子" },
+};
+
+/** 点选顺序（按叙事弧排列，不是字母序） */
+export const SHOT_PURPOSE_ORDER: ShotPurpose[] = ["setup", "advance", "turn", "close"];
+
 export type ShotData = {
   kind: "shot";
   title: string;
+  /**
+   * 镜号（2026-11-15 加）
+   *
+   * **序列写在数据里，不写在画布位置上** —— 用户明确拒绝「为顺序牺牲摆放自由度」。
+   * 卡片可以随便摆，镜号决定播放顺序；新建时由 `store.addNode` 自动补
+   * 「当前最大号 + 1」，用户可在右侧面板手改（插镜/调序）。
+   */
+  shotNumber?: number;
+  /** 这一镜的作用（叙事层）。缺省「推进」——短剧里最常见的功能 */
+  shotPurpose?: ShotPurpose;
   shotSize: string;
   duration: number;
   dialogue: string;
@@ -660,6 +689,7 @@ export function makeNode(
       duration: 3,
       dialogue: "",
       prompt: "电影感，竖屏漫剧分镜",
+      shotPurpose: "advance",
       ...extra,
     } as ShotData,
     script: {

@@ -17,6 +17,7 @@ import { describeImageSize } from "../imageSize";
 import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useCanvasStore } from "../store";
+import { SHOT_PURPOSE_META, type ShotPurpose } from "../stores/node-factory";
 import {
   CARD_GEOMETRY,
   CARD_ROLE_META,
@@ -178,6 +179,17 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
   const hint = noviceHint(kind);
   const summary = summaryOf(d, kind);
   const meta = metaOf(d);
+  /**
+   * 序列 + 叙事层（2026-11-15 加）：镜号与「这一镜的作用」直接显示在卡面上。
+   * 目的：摆十张卡时能看出「这是第 3 镜、它是转折」—— 顺序信息在数据里，不在位置上，
+   * 所以卡片随便摆也不影响播放顺序（用户要求的自由度不被牺牲）。
+   */
+  const shotNo = kind === "shot" ? Number((d as { shotNumber?: number }).shotNumber) || 0 : 0;
+  const shotPurpose: ShotPurpose | null =
+    kind === "shot"
+      ? (((d as { shotPurpose?: ShotPurpose }).shotPurpose) ?? "advance")
+      : null;
+  const purposeMeta = shotPurpose ? SHOT_PURPOSE_META[shotPurpose] : null;
   const thumb = thumbOf(d);
   const layerCount = Array.isArray(d.stack?.layers) ? (d.stack!.layers as unknown[]).length : 0;
   const depth = Math.min(3, Math.max(1, Number(d.intentDepth) || 2));
@@ -299,6 +311,11 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
         <span className="nv-card-title" title={titleOf(d, style.label)}>
           {titleOf(d, style.label)}
         </span>
+        {shotNo > 0 ? (
+          <span className="nv-card-shotno" title="镜号决定播放顺序；卡片位置不影响顺序">
+            镜 {shotNo}
+          </span>
+        ) : null}
       </header>
 
       <div className="nv-card-body">
@@ -325,7 +342,19 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
         ) : (
           summary ? <p className="nv-card-text">{summary}</p> : null
         )}
-        {meta ? <p className="nv-card-meta">{meta}</p> : null}
+        {meta || purposeMeta ? (
+          <p className="nv-card-meta">
+            {purposeMeta && shotPurpose ? (
+              <span
+                className={`nv-card-purpose nv-card-purpose--${shotPurpose}`}
+                title={purposeMeta.hint}
+              >
+                {purposeMeta.label}
+              </span>
+            ) : null}
+            {meta}
+          </p>
+        ) : null}
       </div>
 
       <footer className="nv-card-foot" style={{ height: CARD_GEOMETRY.footerHeight }}>
