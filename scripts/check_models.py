@@ -22,14 +22,17 @@
 | 下载源（repo / 体积 / 显存 / 内存） | `video_gen.VIDEO_MODELS`、`diffsynth_image.IMAGE_MODELS` |
 | 真正下载 | `VideoGenEngine.pull()` / `DiffsynthImageEngine.pull()`（ModelScope `snapshot_download`）|
 
-## 三种「没有」要分清（别混成一句话）
+## 四种「没有」要分清（别混成一句话）
 
 1. **有下载源、本机没下** → 可以直接 `--pull`。
 2. **有源但硬件不够**（如 Wan2.2 要 20GB 内存，本机 15.3GB）→ 能下不能跑，默认不替你下。
-3. **连下载源都没登记**（cogvideox / hunyuan / ltx / mochi / minimax_h3 只有推理代码，
-   `VIDEO_MODELS` 里没有它们的 repo）→ **拉不了**，不是不肯拉，是无处可拉。
+3. **有仓但不能一键拉**（hunyuan：ModelScope 那份是原版 .pt 布局，缺 model_index.json）
+   → 打印原因，不给 `--pull` 命令。
+4. **连开放权重都没有**（minimax_h3：相关 repo 全 404，官方只有 API）
+   → 本地这条路客观不存在，**不是没适配**。
 
-第 3 类要接进来，得先在 `VIDEO_MODELS` 里登记 repo/体积/显存/内存四项，属「接入新模型」的活。
+第 3、4 类的原因文字在 `app/core/neural/local_family_catalog.py` 里，
+改原因只改那一处，检查器照着显示。
 """
 from __future__ import annotations
 
@@ -122,6 +125,8 @@ def _catalog() -> dict[str, dict]:
                 "ram": m.get("ram_gb"),
                 "source": "魔搭 ModelScope",
                 "downloaded": bool(vg.VideoGenEngine.is_downloaded(m["id"])),
+                "note": m.get("note") or "",
+                "no_pull_reason": "",
             }
     except Exception:
         pass
@@ -139,6 +144,42 @@ def _catalog() -> dict[str, dict]:
                 "ram": spec.get("ram_gb"),
                 "source": "魔搭 ModelScope",
                 "downloaded": bool(DiffsynthImageEngine.is_downloaded(mid)),
+                "note": "",
+                "no_pull_reason": "",
+            }
+    except Exception:
+        pass
+    # 只有推理代码、原先没登记下载源的五族（cogvideox/ltx/mochi/hunyuan/minimax_h3）
+    try:
+        from app.core.neural import local_family_catalog as LFC
+        from app.core.local_video_infer import _has_weights
+
+        eng = None
+        try:
+            from app.core.neural_engine import get_neural_engine
+
+            eng = get_neural_engine()
+        except Exception:
+            eng = None
+        for mid, spec in LFC.LOCAL_FAMILY_MODELS.items():
+            local = ""
+            if eng is not None and spec.get("repo"):
+                try:
+                    local = eng.repo_local_dir(spec["repo"])
+                except Exception:
+                    local = ""
+            out[mid] = {
+                "kind": "video",
+                "family": spec["kind"],
+                "label": spec["label"],
+                "repo": spec.get("repo") or "",
+                "gb": spec.get("subset_gb") or 0.0,
+                "vram": spec.get("vram_gb") or 0.0,
+                "ram": spec.get("ram_gb") or 0,
+                "source": "魔搭 ModelScope" if spec.get("repo") else "（无开放权重）",
+                "downloaded": bool(local) and _has_weights(local),
+                "note": spec.get("note") or "",
+                "no_pull_reason": spec.get("no_pull_reason") or "",
             }
     except Exception:
         pass
@@ -161,7 +202,13 @@ def collect(capabilities: list[str] | None, show_all: bool) -> tuple[dict, list[
             continue  # 默认：只显示本机已有的
         res = MF.resolve(f.get("family") or "")
         d = weights.get(f.get("family") or "")
-        cand = [mid for mid, c in cat.items() if c["family"] == f.get("family")]
+        # 「可拉取」= 该族下至少有一个 **真能拉** 的 id（有 repo 且没被 no_pull_reason 挡住）。
+        # 只判 `cand` 非空会把 hunyuan / minimax_h3 也报成「是」—— 那是假的可操作承诺。
+        cand = [
+            mid
+            for mid, c in cat.items()
+            if c["family"] == f.get("family") and c["repo"] and not c.get("no_pull_reason")
+        ]
         rows.append(
             {
                 **f,
@@ -233,34 +280,52 @@ def render_missing(cat: dict, hw: dict, rows: list[dict]) -> str:
     lines.append(f"{'模型 id':<18}{'来源':<14}{'体积':>8}  {'需内存':>7}  {'需显存':>7}  结论")
     lines.append("-" * 92)
     pullable: list[str] = []
+    blocked: list[tuple[str, str]] = []
+    no_repo: list[tuple[str, str]] = []
     for mid, c in sorted(cat.items(), key=lambda kv: (kv[1]["kind"], kv[0])):
         if c["downloaded"]:
             continue
+        if not c["repo"]:
+            no_repo.append((mid, c.get("no_pull_reason") or "没有登记下载源"))
+            continue
         gb, ram, vram = c.get("gb"), c.get("ram"), c.get("vram")
-        disk_ok = (hw.get("disk_free_gb") or 0) >= (gb or 0) * 1.05
-        ram_ok = (hw.get("ram_gb") or 0) >= (ram or 0)
-        verdict = []
-        if not disk_ok:
-            verdict.append("磁盘不够·不能下")
-        elif not ram_ok:
-            verdict.append("磁盘够，但内存不够·下了跑不动")
+        if c.get("no_pull_reason"):
+            blocked.append((mid, c["no_pull_reason"]))
+            verdict = "有仓但格式/许可不允许一键拉"
+        elif (hw.get("disk_free_gb") or 0) < (gb or 0) * 1.05:
+            verdict = "磁盘不够·不能下"
+        elif (hw.get("ram_gb") or 0) < (ram or 0):
+            verdict = "磁盘够，但内存不够·下了跑不动"
         else:
-            verdict.append("可下载")
+            verdict = "可下载"
             pullable.append(mid)
         lines.append(
             f"{mid:<18}{c['source']:<14}"
             f"{(f'{gb}GB') if gb else '-':>8}  {(f'{ram}GB') if ram else '-':>7}  "
-            f"{(f'{vram}GB') if vram else '-':>7}  {'；'.join(verdict)}"
+            f"{(f'{vram}GB') if vram else '-':>7}  {verdict}"
         )
     lines.append("-" * 92)
+    lines.append("  注：需内存一列是**估算**（权重体积 ×1.3 取整，未实测）；显存列是官方/经验建议值。")
+
+    if blocked:
+        lines.append("")
+        lines.append("—— 有仓库、但不能一键拉的（原因在下面，别当成「没适配」）——")
+        for mid, why in blocked:
+            lines.append(f"  · {mid}")
+            lines.append(f"      {why}")
+
+    if no_repo:
+        lines.append("")
+        lines.append("—— 连开放权重都没有（本地这条路不存在）——")
+        for mid, why in no_repo:
+            lines.append(f"  · {mid}")
+            lines.append(f"      {why}")
 
     no_src = [r["family"] for r in rows if not r["weights"] and not r["pullable"]]
-    if no_src:
+    if no_src and not no_repo:
         lines.append("")
-        lines.append("—— 有推理代码、但**没有登记下载源**的族（当前拉不了）——")
+        lines.append("—— 有推理代码、但没有登记下载源的族（当前拉不了）——")
         lines.append(f"  {', '.join(no_src)}")
-        lines.append("  原因：VIDEO_MODELS 里没有它们的 repo/体积/显存/内存四项，只有 _infer_* 代码。")
-        lines.append("  要接进来得先登记下载源（属「接入新模型」），或手动把权重放到 app/models/cache/<repo>/。")
 
     if pullable:
         lines.append("")
@@ -344,6 +409,9 @@ def do_pull(target: str, yes: bool) -> int:
         for mid, c in cat.items():
             if c["downloaded"]:
                 continue
+            if c.get("no_pull_reason"):
+                print(f"跳过 {mid}：不能一键下载（{c['no_pull_reason'][:40]}…）")
+                continue
             if (hw.get("ram_gb") or 0) < (c.get("ram") or 0):
                 print(f"跳过 {mid}：需内存 {c.get('ram')}GB > 本机 {hw.get('ram_gb')}GB，下了也跑不动")
                 continue
@@ -363,6 +431,10 @@ def do_pull(target: str, yes: bool) -> int:
         if c["downloaded"]:
             print(f"{target} 已在本机，无需下载。")
             return 0
+        if c.get("no_pull_reason"):
+            print(f"✗ {target} 不能一键下载：", file=sys.stderr)
+            print(f"  {c['no_pull_reason']}", file=sys.stderr)
+            return 1
         if (hw.get("ram_gb") or 0) < (c.get("ram") or 0):
             print(
                 f"⚠ {target} 需内存 {c.get('ram')}GB，本机只有 {hw.get('ram_gb')}GB"
@@ -392,6 +464,8 @@ def do_pull(target: str, yes: bool) -> int:
     for mid, _c in plan:
         print(f"\n=== 下载 {mid} ===", flush=True)
         try:
+            from app.core.neural import local_family_catalog as LFC
+
             if mid in IMAGE_MODELS:
                 res = DiffsynthImageEngine().pull(
                     mid, progress_cb=lambda s: print("   ", s, flush=True)
@@ -400,6 +474,8 @@ def do_pull(target: str, yes: bool) -> int:
                 res = VideoGenEngine().pull(
                     mid, progress_cb=lambda s: print("   ", s, flush=True)
                 )
+            elif mid in LFC.LOCAL_FAMILY_MODELS:
+                res = LFC.download(mid, progress_cb=lambda s: print("   ", s, flush=True))
             else:
                 print(f"  无法路由到下载引擎：{mid}")
                 rc = 1

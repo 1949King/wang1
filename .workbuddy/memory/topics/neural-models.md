@@ -75,3 +75,41 @@ Ollama **只服务文本模型，拉不了扩散模型**。`ollama` pip 包没�
 传 `reference_image` 会 fail-fast 拒绝（I2V 缺 encoder）。
 硬约束：帧数 **4k+1**、宽高被 **16** 整除。
 5 秒 = 81 帧 / 480×832 / 20 步 = **927 秒**，显存 6.6 / 8.2GB。
+
+## 六、五族下载源登记（2026-11-15，`app/core/neural/local_family_catalog.py`）
+
+上一轮只做到「说清楚拉不了」，这一轮把 **repo 和体积真登记上**了。
+
+**ModelScope 只有两个端点可用**（搜索 API 全 404：`/api/v1/dolphin/models`、
+`/api/v1/models/search` 都不通）：
+- 存在性 `GET /api/v1/models/<owner>/<name>` → 200
+- 体积 `GET .../repo/files?Revision=master&Recursive=True` → **无 FileSize 汇总，自己求和**
+
+HuggingFace 全线超时，只有 ModelScope 通。
+
+| id | repo | 整仓 | 下载子集 | diffusers 布局 |
+|---|---|---|---|---|
+| cogvideox-2b | ZhipuAI/CogVideoX-2b | 12.8GB | 12.8GB | ✓ |
+| cogvideox-5b | ZhipuAI/CogVideoX-5b | 20.1GB | 20.1GB | ✓ |
+| ltx-video-13b | Lightricks/LTX-Video | 236.7GB | **26.5GB** | ✓ |
+| ltx-video-095 | Lightricks/LTX-Video-0.9.5 | 23.9GB | 23.6GB | ✓ |
+| mochi-1-preview | genmo/mochi-1-preview | 124.3GB | **85.2GB** | ✓ |
+| hunyuan-video | Tencent-Hunyuan/HunyuanVideo | 37.1GB | — | **✗ 原版 .pt** |
+| minimax-h3 | 4 个候选 repo 全 404 | — | — | 无开放权重 |
+
+三条硬结论：① **整仓体积 ≠ 下载量**（LTX 236.7GB 里 210GB 是 13B 单文件 + media/；
+Mochi 有重复 bf16 分片）⇒ `download()` 必须带 `DIFFUSERS_PATTERNS`；
+② hunyuan 缺 `model_index.json`，`HunyuanVideoPipeline.from_pretrained()` 直接失败 ⇒ `pull=False`；
+③ minimax_h3 官方只有 API，`PIPELINE_CLASS_MAP` 里那项是给「已自行拿到权重的人」用的。
+
+**落盘对齐最容易哑火**：`repo_local_dir()` 把 `owner/name` 换成 `owner_name`，
+`_scan_local_models()` 靠目录名匹配关键词 ⇒ `ZhipuAI_CogVideoX-2b` 含 `cogvideox` ✓。
+测试 `test_download_dir_name_matches_keyword` 钉死这条。
+
+**`--all` 的「可拉取」列别写成 `bool(cand)`**（该族在 catalog 里有没有条目）——
+那样 hunyuan / minimax_h3 也显示「是」，是假的可操作承诺。
+判据必须是「有 repo 且无 `no_pull_reason`」。
+
+**`ram_gb` 是估算**：`权重体积 × 1.3` 取整，`public_list()` 带 `ram_gb_estimated=True`。
+本机现实：五族全落「磁盘够、内存不够」（17 / 31~35 / 111 GB vs 15.3GB）
+⇒ 收益是「从拉不了变成能拉但跑不动」，**没有多出可用模型**。
