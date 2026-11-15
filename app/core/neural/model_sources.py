@@ -74,7 +74,7 @@ _REPRESENTATIVE_MS: Dict[str, str] = {
     "hunyuan": "Tencent-Hunyuan/HunyuanVideo",
 }
 
-_NOTE_MS = "官方/镜像仓；同一页里通常还有社区上传的 fp8、GGUF、剪枝版"
+_NOTE_MS = "官方/镜像仓；社区剪枝、fp8、GGUF 版多为**同族的独立仓库**，在魔搭搜族名可见"
 _NOTE_GH = "原版仓库，权重多在 Releases 或另跳 HuggingFace / 魔搭，不一定有 .safetensors"
 
 
