@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.neural import local_models_view as LV
+from app.core.neural import model_sources as MS
 
 logger = logging.getLogger("AI短剧编辑器.local_models_panel")
 
@@ -87,9 +88,31 @@ class LocalModelsPanel(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         lay.addWidget(self._table, 1)
+
+        # ── 社区获取：选中哪行就换成哪行的入口。
+        #    刻意不用 QMenu 弹菜单 —— 本项目在 QtWebEngine 环境里用 QMenu.exec()
+        #    有过 0xc0000005 崩溃史，右键菜单已统一改走按钮。这里同理由按钮承担。
+        src_row = QHBoxLayout()
+        self._src_label = QLabel("")
+        self._src_label.setStyleSheet("color: #8b9bb0; font-size: 12px;")
+        src_row.addWidget(self._src_label)
+        self._src_box = QHBoxLayout()
+        self._src_box.setSpacing(6)
+        src_row.addLayout(self._src_box)
+        src_row.addStretch(1)
+        lay.addLayout(src_row)
+
+        note = QLabel(MS.community_notes())
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #6b7a8d; font-size: 11px;")
+        lay.addWidget(note)
+
+        self._table.itemSelectionChanged.connect(self._update_sources)
+        self._update_sources()
 
         self.refresh()
 
@@ -121,6 +144,7 @@ class LocalModelsPanel(QWidget):
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch)
+        self._update_sources()
 
     # ── 下载（in-process，不占 GUI 线程）───────────
     def _selected_row(self):
@@ -128,6 +152,41 @@ class LocalModelsPanel(QWidget):
         if idx < 0 or idx >= len(self._rows):
             return None
         return self._rows[idx]
+
+    # ── 社区获取（链接由 neural.model_sources 提供，均已核实可达）──
+    def _clear_sources(self) -> None:
+        """清空按钮区。**先 hide() 再 setParent(None)** —— 可见控件直接脱离父级
+        会变成独立顶层窗口（曾一次搜索新增 583 个"小窗"）。"""
+        while self._src_box.count():
+            item = self._src_box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+
+    def _update_sources(self) -> None:
+        self._clear_sources()
+        row = self._selected_row()
+        if row is None:
+            self._src_label.setText("社区获取：选中一行后显示「魔搭 / GitHub」入口")
+            return
+        srcs = list(row.get("sources") or [])
+        if not srcs:
+            self._src_label.setText(
+                "社区获取：%s 没有开放权重，无入口可给" % str(row.get("label") or ""))
+            return
+        self._src_label.setText("社区获取（自己去挑版本）：")
+        for s in srcs:
+            url = str(s.get("url") or "")
+            if not url:
+                continue
+            btn = QPushButton(str(s.get("name") or "打开"))
+            btn.setToolTip("%s\n%s" % (url, str(s.get("note") or "")))
+            btn.clicked.connect(
+                lambda _checked=False, u=url: QDesktopServices.openUrl(QUrl(u))
+            )
+            self._src_box.addWidget(btn)
 
     def _pull_selected(self) -> None:
         row = self._selected_row()
@@ -139,6 +198,25 @@ class LocalModelsPanel(QWidget):
             return
         mid = str(row.get("id") or "")
         cap = str(row.get("capability") or "")
+        # 「族」行的 id 不是注册表 id（形如 `cogvideox（族）`）⇒ 按族找该族可下载项，
+        # 否则这一行的「下载选中」对五族永远是失败，等于摆了个死按钮。
+        if "（" in mid:
+            try:
+                from app.core.neural import local_family_catalog as LFC
+
+                cands = [
+                    k
+                    for k, v in LFC.LOCAL_FAMILY_MODELS.items()
+                    if v.get("kind") == str(row.get("family") or "") and v.get("pull") and v.get("repo")
+                ]
+                mid = cands[0] if cands else ""
+            except Exception:
+                mid = ""
+            if not mid:
+                self._summary.setText(
+                    "「%s」没有可一键下载的仓库，请用下方「社区获取」自己去找"
+                    % str(row.get("label") or ""))
+                return
         self._btn_pull.setEnabled(False)
         self._summary.setText("正在下载 %s …（体积大，请耐心等待）" % mid)
 
@@ -148,7 +226,28 @@ class LocalModelsPanel(QWidget):
         def work() -> None:
             ok, msg = False, "未知错误"
             try:
-                if cap == "video":
+                from app.core.neural import local_family_catalog as LFC
+
+                if mid in LFC.LOCAL_FAMILY_MODELS:
+                    spec = LFC.LOCAL_FAMILY_MODELS[mid]
+                    need = int(spec.get("ram_gb") or 0)
+                    have = 0
+                    try:
+                        import psutil
+
+                        have = int(psutil.virtual_memory().total / 1024**3)
+                    except Exception:
+                        have = 0
+                    if need and have and have < need:
+                        # 诚实失败：能下不能跑就不下，省 12~85GB 磁盘。
+                        self._summary.setText(
+                            "❌ %s 需内存 %dGB，本机 %dGB ⇒ 下了也跑不动，已放弃下载。"
+                            "要用请换机器，或点下方「社区获取」取更小的量化版。"
+                            % (mid, need, have))
+                        self._btn_pull.setEnabled(True)
+                        return
+                    r = LFC.download(mid, progress_cb=progress)
+                elif cap == "video":
                     from app.core.neural.video_gen import get_video_engine
 
                     r = get_video_engine().pull(mid, progress_cb=progress)

@@ -30,6 +30,21 @@ logger = logging.getLogger("AI短剧编辑器.core.neural.local_models_view")
 _VIDEO_FAMILY_EXTRA = ("cogvideox", "hunyuan", "ltx", "mochi", "minimax_h3")
 
 
+def _dl_gb(m: Dict[str, Any]) -> Any:
+    """从 `available_models()` 的一行里取**下载体积**。
+
+    踩过的坑（2026-11-15）：两个注册表的字段都叫 `download_gb`，
+    而这里原先分别写成 `size_gb`（图像）和 `subset_gb`（视频）——
+    两个都取不到值 ⇒ UI 上「体积 GB」整列全是「—」，而实际有 3.97~26.9GB。
+    这类「字段名对不上、静默变空」的错不会报异常，只能靠列内容为空发现。
+    """
+    for k in ("download_gb", "size_gb", "subset_gb"):
+        v = m.get(k)
+        if v:
+            return v
+    return None
+
+
 def _verification_map() -> Dict[str, str]:
     """族 → 验证态（model_family 不可用则空表，UI 显示「未登记」）。"""
     try:
@@ -57,7 +72,7 @@ def _image_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
             rows.append({
                 "id": mid, "label": m.get("label") or mid, "capability": "image",
                 "family": fam, "verification": vmap.get(fam, ""),
-                "downloaded": downloaded, "size_gb": m.get("size_gb"),
+                "downloaded": downloaded, "size_gb": _dl_gb(m),
                 "vram_gb": m.get("vram_gb"), "ram_gb": m.get("ram_gb"),
                 "native_fps": 0, "modes": list(m.get("modes") or []),
                 "dir": folder, "note": m.get("note") or "",
@@ -83,7 +98,7 @@ def _video_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
             rows.append({
                 "id": mid, "label": m.get("label") or mid, "capability": "video",
                 "family": fam, "verification": vmap.get(fam, ""),
-                "downloaded": downloaded, "size_gb": m.get("subset_gb"),
+                "downloaded": downloaded, "size_gb": _dl_gb(m),
                 "vram_gb": m.get("vram_gb"), "ram_gb": m.get("ram_gb"),
                 "native_fps": m.get("native_fps") or 0,
                 "modes": list(m.get("modes") or []),
@@ -92,6 +107,23 @@ def _video_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
     except Exception:
         logger.debug("[local_models_view] 视频注册表不可用", exc_info=True)
     return rows
+
+
+def _family_min_gb(fam: str) -> Any:
+    """族内**最小可下载体积**（用于「族」行展示；没有可下载项就 None）。
+
+    取最小而不是最大：这一列回答的是「最少要占多少磁盘」，用最大值会吓退人。
+    """
+    try:
+        from app.core.neural import local_family_catalog as LFC
+    except Exception:
+        return None
+    gbs = [
+        float(s.get("subset_gb") or 0)
+        for s in LFC.LOCAL_FAMILY_MODELS.values()
+        if s.get("kind") == fam and float(s.get("subset_gb") or 0) > 0
+    ]
+    return min(gbs) if gbs else None
 
 
 def _extra_family_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -106,10 +138,10 @@ def _extra_family_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
         if s is None:
             continue
         rows.append({
-            "id": "%s（未接入下载器）" % fam, "label": "%s 族" % fam,
+            "id": "%s（族）" % fam, "label": "%s 族" % fam,
             "capability": "video", "family": fam,
             "verification": vmap.get(fam, ""), "downloaded": False,
-            "size_gb": None, "vram_gb": s.min_vram_gb, "ram_gb": None,
+            "size_gb": _family_min_gb(fam), "vram_gb": s.min_vram_gb, "ram_gb": None,
             "native_fps": s.native_fps, "modes": [], "dir": "",
             "note": s.note or "已登记、无权重",
         })
@@ -117,9 +149,22 @@ def _extra_family_rows(vmap: Dict[str, str]) -> List[Dict[str, Any]]:
 
 
 def list_local_models() -> List[Dict[str, Any]]:
-    """统一本地模型清单：图像 + 视频注册表 + 仅登记族。异常一律返回已收集部分。"""
+    """统一本地模型清单：图像 + 视频注册表 + 仅登记族。异常一律返回已收集部分。
+
+    每行额外带 `sources`（`[{name,url,note}]`）：去魔搭 / GitHub 自己挑版本的入口。
+    链接全部来自 `neural.model_sources`，那边只收核实过 200 的地址。
+    """
     vmap = _verification_map()
-    return _image_rows(vmap) + _video_rows(vmap) + _extra_family_rows(vmap)
+    rows = _image_rows(vmap) + _video_rows(vmap) + _extra_family_rows(vmap)
+    try:
+        from app.core.neural import model_sources as MS
+
+        MS.attach_sources(rows)
+    except Exception:
+        logger.debug("[local_models_view] 社区来源链接组装失败", exc_info=True)
+        for r in rows:
+            r.setdefault("sources", [])
+    return rows
 
 
 def summary(rows: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
