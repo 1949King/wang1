@@ -43,8 +43,8 @@
 - **看模型可用性排障**：`--all` 看 9 族全景，`--missing` 看缺什么/怎么拿。
 - **孤儿端点差集法四扫描面**：画布 src 非注释行 / `canvas_server.py` JS 字面量 / `app/**/*.py` URL 拼接 / Rust `src-tauri/src/lib.rs`。
 - **`人话 vs 假指标`**：自检的 `cpu=/gpu=` 曾写成 `(x @ x.T).sum()`（随机矩阵乘求和、还会出负数）被当性能证据。凡「像指标」的输出要么有量纲真测量，要么双端比对（同 seed 比 `max|Δ|`）。「没测出来」≠「测出来了」：后端空串前端原样保留，禁填默认值；非法数值落 0 不猜。**同名不同义常量高频坑**（warnings / quality_tiers）：带 quality/tier/mode/level 的字段先核前端语义。
-- `switch_to_module()` 对 `nav_hidden` 模块静默无效 ⇒ 走 `_perform_module_load`。本机 locale=utf-8 ⇒ `open()` 必带 encoding。YuE 全曲跑不动 ⇒ 执行端不可用必须诚实失败，绝不假音频。沙箱 tempfile 回退 cwd ⇒ 三入口钉 `.workbuddy/tmp`。沙箱里**模拟鼠标点击打不进去**，GUI 只能让用户点；截图用 `PrintWindow(hwnd, mem, 2)`；起进程只能 python `subprocess`。
-- 沙箱里**模拟鼠标点击打不进去**（`mouse_event` 无效），GUI 只能让用户点；窗口枚举 + PIL `PrintWindow(hwnd, mem, 2)` 截屏可用。ps 里 `Start-Process`/`cmd start`/`.NET Process.Start` 全被拦，只能用 python `subprocess` 拉起。
+- `switch_to_module()` 对 `nav_hidden` 模块静默无效 ⇒ 走 `_perform_module_load`。本机 locale=utf-8 ⇒ `open()` 必带 encoding。YuE 全曲跑不动 ⇒ 执行端不可用必须诚实失败，绝不假音频。沙箱 tempfile 回退 cwd ⇒ 三入口钉 `.workbuddy/tmp`。
+- 沙箱里**模拟鼠标点击打不进去**（`mouse_event` 无效），GUI 只能让用户点；截图用 PIL `PrintWindow(hwnd, mem, 2)`；起进程只能用 python `subprocess`（`Start-Process`/`cmd start`/`.NET Process.Start` 全被拦）。
 - **`tsc` 棘轮**：`cd vendor/packages/canvas-core && node node_modules/typescript/bin/tsc --noEmit --pretty false`，基线 **37**（2026-11-12 复核）。测试里 `.catch(e => e as Error & {code})` 会把成功返回并进联合（+9 TS2339）⇒ 写 `rejection(p)` helper。
 
 ## 四、验证与提交纪律
