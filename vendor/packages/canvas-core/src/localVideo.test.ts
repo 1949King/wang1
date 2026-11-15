@@ -5,9 +5,10 @@
  *   ① `listLocalVideoModels` → POST `/host/local-video-generate` {action:"models"}
  *   ② `generateVideoLocalViaHost` → POST 同端点 {action:"generate", model_id, image}
  *
- * 为什么只测桥接层：真正的路由分支在 `App.tsx` 的 `generateVideoUnified` 内部
- * （组件内、未导出）。桥接层是**契约边界**——端点写错/字段名写错，组件侧再对也没用，
- * 所以把契约钉在这里性价比最高。
+ * 为什么测到这一层：`generateVideoUnified` 早期在 `App.tsx` 组件内（未导出），
+ * 现已迁到 `localVideo.ts` 并导出，所以可直接测。桥接层是**契约边界**——
+ * 端点写错/字段名写错，上层再对也没用，所以把契约钉在这里性价比最高；
+ * 纯函数（`buildVideoChain` / `localModelModes`）另在 `localVideo.route.test.ts` 直测。
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
@@ -92,8 +93,14 @@ describe("generateVideoUnified：本地视频能力边界", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("SVD 缺首帧时诚实失败，不发无效请求", async () => {
-    const fetchMock = vi.fn();
+  it("SVD 缺首帧：前端不代判，交后端按 modes 拒绝并给出可操作建议", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonRes({
+        ok: false,
+        message:
+          "「svd-xt-i2v」是图生视频模型，需要首帧图。请先给节点配一张首帧图，或改选纯文生视频模型（如 wan21-t2v-1.3b）",
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const res = await generateVideoUnified({
       parsed: { channel_id: "local", model: "svd-xt-i2v" },
@@ -104,7 +111,10 @@ describe("generateVideoUnified：本地视频能力边界", () => {
     });
     expect(res.ok).toBe(false);
     expect(res.message).toContain("首帧");
-    expect(fetchMock).not.toHaveBeenCalled();
+    // ★ 2026-11-15 起前端不再自己维护「哪些本地模型要首帧」——
+    //   那份硬编码 Set 与后端 video_gen.modes 必然漂移（wan21 只有 t2v、wan22 是 t2v+i2v），
+    //   所以判定统一交给后端，这里断言请求确实发下去了（能力判定单源）。
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
 

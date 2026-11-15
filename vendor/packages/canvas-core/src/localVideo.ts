@@ -39,18 +39,23 @@ export const LOCAL_CHANNEL_ID = "local";
 /** 「自动」通道：不手选模型，交给执行层（/host/execution-plan）裁定本地/云端顺序。 */
 export const AUTO_CHANNEL_ID = "auto";
 
-/** 纯文生视频的本地模型（没有首帧也能跑；其余本机模型按图生视频处理）。 */
-const TEXT_ONLY_LOCAL_VIDEO = new Set(["wan21-t2v-1.3b"]);
-
 export type VideoChainHop = "local" | "cloud";
 
 /**
  * 纯函数：把执行层计划收敛成**本次实际可尝试**的顺序。
  *
  * 诚实边界：
- *   · 本地 SVD 是 i2v ⇒ 没有首帧就**不排本地**（而不是排了再报错）；
+ *   · 本地第一跳是 SVD（i2v）⇒ 没有首帧就**不排本地**（而不是排了再报错）；
  *   · 云端需要兜底模型 ⇒ 没配就不排云端；
  *   · 两者都被排除时报空链 + 原因（调用方如实提示，绝不假装生成了）。
+ *
+ * ★ 2026-11-15：此处原有前端硬编码 `new Set(["wan21-t2v-1.3b"])` 决定"缺首帧放不放行"。
+ *   已删除 —— 那是第二套能力声明，与后端 `video_gen.modes` 必然漂移
+ *   （同族不同能力：wan21 只有 t2v，wan22 是 t2v+i2v）。现在：
+ *   · 手选模型的能力判定 100% 交后端（`_model_modes` 按模型 id 判，消息带替代建议）；
+ *   · auto 通道的本地跳固定是 SVD，缺首帧就该跳过 —— 保持不变。
+ *   ⇒ 已知缺口：auto 通道目前没有"用本地 T2V 模型"的入口（`localModel` 无人传），
+ *     想跑 wan 需在模型下拉里显式选它。接通 auto 是独立的一项，别塞进这个函数。
  */
 export function buildVideoChain(
   plan: { chain?: unknown } | null,
@@ -277,6 +282,7 @@ export async function generateVideoUnified(opts: {
     const hasReference = Boolean(opts.referenceImage);
     const fallback = opts.cloudFallback ?? (await pickCloudVideoFallback());
     const plan = await fetchVideoExecutionPlan(hasReference);
+    // auto 的本地跳固定是 SVD（i2v）⇒ 缺首帧就该跳过（能力判定不在这里另抄一份）。
     const { chain, reasons } = buildVideoChain(plan, {
       hasReference,
       cloudFallback: Boolean(fallback),
@@ -298,14 +304,14 @@ export async function generateVideoUnified(opts: {
         if (lr.ok) {
           return {
             ok: true,
-            message: `本地 SVD 成功（${lr.message || "已生成"}）`,
+            message: `本地成功（${lr.message || "已生成"}）`,
             video_url: lr.video_url || "",
             video_path: lr.video_path || "",
             route_used: "local",
             chain_tried: tried,
           };
         }
-        lastError = lr.message || "本地 SVD 失败";
+        lastError = lr.message || "本地生成失败";
         continue;
       }
       if (!fallback) continue;
@@ -350,14 +356,12 @@ export async function generateVideoUnified(opts: {
 
   // ── 本机模型（diffusers）──
   if (channel_id === LOCAL_CHANNEL_ID) {
-    if (!opts.referenceImage && !TEXT_ONLY_LOCAL_VIDEO.has(model)) {
-      return {
-        ok: false,
-        message: "该本地视频模型需要首帧图，请先给节点配一张首帧图（Wan 2.1 T2V 可直接文生视频）",
-        video_url: "",
-        video_path: "",
-      };
-    }
+    // ★ 2026-11-15：原来这里用前端硬编码的 `new Set(["wan21-t2v-1.3b"])` 判断
+    //   「缺首帧时放不放行」。那是第二套能力声明，且与后端 `video_gen.modes` 必然漂移
+    //   （同族不同能力：wan21 只有 t2v，wan22 是 t2v+i2v）。
+    //   现在**前端不代判**：缺首帧 / 多首帧都照原样下发，由后端按 `modes` 如实拒绝
+    //   并给出可操作建议（`canvas_routes_local_video._model_modes`）。
+    //   与「尾帧由后端如实拒绝」是同一条纪律 —— 前端猜一次就多一处漂移源。
     const lr = await generateVideoLocalViaHost({
       image: opts.referenceImage,
       prompt: opts.prompt,
