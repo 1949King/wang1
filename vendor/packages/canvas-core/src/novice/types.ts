@@ -314,7 +314,39 @@ export const NOVICE_STAGE_GROUPS: { id: NoviceStage; title: string; icon: string
   { id: "organize", title: "整理", icon: "🗂" },
 ];
 
-/** 单个意图入口：小白名 + 一句话说明 + 所属阶段 */
+/**
+ * 卡片语义角色（2026-11-15 加）
+ *
+ * 为什么需要：实测中「摆一张卡时不知道该放几张」——因为同一张卡有时当「东西」、
+ * 有时当「步骤」用。`video`（让它动起来）既像一段视频、又像"把图变成视频"的动作；
+ * `audio`（配句台词）既像一段音频、又像配音操作。语义不纯会让用户不自觉地把
+ * 卡片连成流水线，图就滑向 ComfyUI 的算子图。
+ *
+ * 这里只做**分类**，不新增节点、不改数据模型 —— 纯渲染层标签，符合
+ * 「小白模式只换一张脸」的原设计。分类标准：**这张卡自己能不能产出可直接用的成品？**
+ *
+ * - object   造出来的东西（画面/视频/音频/角色/文本）——本身就是成品
+ * - action   要消耗上游才能产出（批量出图/一键成片/生成设定/写个故事）
+ * - container 装东西（宫格分镜/分镜表/编组）
+ * - source   提供原料（放素材/提示词）
+ */
+export type CardRole = "object" | "action" | "container" | "source";
+
+export const CARD_ROLE_META: Record<CardRole, {
+  /** 角标符号（卡片左上角，一眼区分） */
+  mark: string;
+  /** 完整标签 */
+  label: string;
+  /** 一句话说明（Inspector 提示用） */
+  hint: string;
+}> = {
+  object: { mark: "", label: "成品", hint: "造出来的东西，可以直接用" },
+  action: { mark: "→", label: "动作", hint: "需要别的卡喂它，才会产出东西" },
+  container: { mark: "▣", label: "容器", hint: "里面装着多张卡" },
+  source: { mark: "◱", label: "原料", hint: "提供素材或描述，不自己产出" },
+};
+
+/** 单个意图入口：小白名 + 一句话说明 + 所属阶段 + 语义角色 */
 export type NoviceEntry = {
   /** 小白模式显示名（左栏入口 + 建卡后的默认标题） */
   name: string;
@@ -322,6 +354,8 @@ export type NoviceEntry = {
   desc: string;
   /** 所属创作阶段分组 */
   stage: NoviceStage;
+  /** 语义角色（决定卡面视觉与摆放提示，见 CardRole 注释） */
+  role: CardRole;
 };
 
 /**
@@ -330,35 +364,35 @@ export type NoviceEntry = {
  */
 export const NOVICE_ENTRY: Record<string, NoviceEntry> = {
   // ── 开始创作 ──
-  directorCard: { name: "写个故事", desc: "一段剧情自动拆成分镜", stage: "start" },
-  shot: { name: "出一张画面", desc: "分镜画面 · 有景别焦段", stage: "start" },
-  script: { name: "写剧本", desc: "剧本大纲，会自动拆分镜", stage: "start" },
-  shotlist: { name: "分镜表", desc: "可编辑的镜号表", stage: "start" },
-  storyboard: { name: "宫格分镜", desc: "九宫格排版 + 交互裁格", stage: "start" },
+  directorCard: { name: "写个故事", desc: "一段剧情自动拆成分镜", stage: "start", role: "action" },
+  shot: { name: "出一张画面", desc: "分镜画面 · 有景别焦段", stage: "start", role: "object" },
+  script: { name: "写剧本", desc: "剧本大纲，会自动拆分镜", stage: "start", role: "object" },
+  shotlist: { name: "分镜表", desc: "可编辑的镜号表", stage: "start", role: "container" },
+  storyboard: { name: "宫格分镜", desc: "九宫格排版 + 交互裁格", stage: "start", role: "container" },
   // ── 做画面 ──
-  image: { name: "做张插图", desc: "独立画面资产", stage: "frame" },
-  video: { name: "让它动起来", desc: "视频 · 有运镜和时长", stage: "frame" },
-  panorama: { name: "做全景", desc: "360° 可旋转场景", stage: "frame" },
-  animation: { name: "做动画", desc: "逐帧精灵图 · 可循环播", stage: "frame" },
+  image: { name: "做张插图", desc: "独立画面资产", stage: "frame", role: "object" },
+  video: { name: "让它动起来", desc: "视频 · 有运镜和时长", stage: "frame", role: "object" },
+  panorama: { name: "做全景", desc: "360° 可旋转场景", stage: "frame", role: "object" },
+  animation: { name: "做动画", desc: "逐帧精灵图 · 可循环播", stage: "frame", role: "object" },
   // ── 做声音 ──
-  audio: { name: "配句台词", desc: "配音 / 声音风格", stage: "audio" },
-  music: { name: "配段音乐", desc: "整曲 · Suno / YuE 乐", stage: "audio" },
-  digitalHuman: { name: "做数字人", desc: "形象 + 台词配音", stage: "audio" },
+  audio: { name: "配句台词", desc: "配音 / 声音风格", stage: "audio", role: "object" },
+  music: { name: "配段音乐", desc: "整曲 · Suno / YuE 乐", stage: "audio", role: "object" },
+  digitalHuman: { name: "做数字人", desc: "形象 + 台词配音", stage: "audio", role: "object" },
   // ── 摆位与实拍 ──
-  director: { name: "摆个人物", desc: "3D 摆姿势和机位", stage: "stage" },
-  source: { name: "放素材", desc: "本地图 / 视频 / 音频", stage: "stage" },
-  character: { name: "捏个角色", desc: "角色库人物 · 点卡片捏脸", stage: "stage" },
+  director: { name: "摆个人物", desc: "3D 摆姿势和机位", stage: "stage", role: "object" },
+  source: { name: "放素材", desc: "本地图 / 视频 / 音频", stage: "stage", role: "source" },
+  character: { name: "捏个角色", desc: "角色库人物 · 点卡片捏脸", stage: "stage", role: "object" },
   // ── 批量与设定 ──
-  generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch" },
-  config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch" },
-  codeVideo: { name: "一键成片", desc: "分镜/契约 → 代码渲染成片", stage: "batch" },
-  prompt: { name: "提示词", desc: "可复用的风格描述", stage: "batch" },
-  text: { name: "文本块", desc: "说明 / 备注", stage: "batch" },
+  generator: { name: "批量出图", desc: "一次多张，挑最好的", stage: "batch", role: "action" },
+  config: { name: "生成设定", desc: "锁定全场生成参数", stage: "batch", role: "action" },
+  codeVideo: { name: "一键成片", desc: "分镜/契约 → 代码渲染成片", stage: "batch", role: "action" },
+  prompt: { name: "提示词", desc: "可复用的风格描述", stage: "batch", role: "source" },
+  text: { name: "文本块", desc: "说明 / 备注", stage: "batch", role: "object" },
   // ── 素材与笔记 ──
-  markdown: { name: "文档", desc: "策划案 / 台词本", stage: "notes" },
-  note: { name: "便签", desc: "随手记 / 标注", stage: "notes" },
+  markdown: { name: "文档", desc: "策划案 / 台词本", stage: "notes", role: "object" },
+  note: { name: "便签", desc: "随手记 / 标注", stage: "notes", role: "object" },
   // ── 整理 ──
-  group: { name: "编组", desc: "把卡片装进容器", stage: "organize" },
+  group: { name: "编组", desc: "把卡片装进容器", stage: "organize", role: "container" },
 };
 
 /** 取 kind 的小白入口（未知 kind 返回 null，调用方回落技术名） */

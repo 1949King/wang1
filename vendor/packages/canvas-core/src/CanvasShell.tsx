@@ -79,7 +79,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { getGraphPast, getGraphFuture } from "./stores/history-store";
 // V4.41.20：顶栏 🚀 生成按钮 → toggle generateOpen
 import { useToolboxStore } from "./toolboxStore";
-import { buildNoviceNodeTypes, NoviceInspector, NOVICE_ENTRY } from "./novice";
+import { buildNoviceNodeTypes, NoviceInspector, NoviceSequenceBar, NOVICE_ENTRY } from "./novice";
 import { RecipePanel } from "./RecipePanel";
 import { installRecipeAgentBridge } from "./recipeBridge";
 import CanvasTierSeg from "./canvasTierSeg";
@@ -1674,7 +1674,7 @@ export default function CanvasShell(props: CanvasShellProps) {
                 );
               })() : null}
             </ReactFlow>
-            {nodes.length === 0 ? (
+            {isNovice ? <NoviceSequenceBar /> : null}{nodes.length === 0 ? (
               <CanvasEmptyState />
             ) : null}
             {canvasLayoutMode === "storyboard" && storyboardShots.length > 0 ? (

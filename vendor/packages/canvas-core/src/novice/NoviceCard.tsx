@@ -19,8 +19,10 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useCanvasStore } from "../store";
 import {
   CARD_GEOMETRY,
+  CARD_ROLE_META,
   INTENT_LAYERS,
   LAMP_STYLE,
+  NOVICE_ENTRY,
   kindStyle,
   lampOf,
   noviceHint,
@@ -165,6 +167,13 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
   const d = data as LooseData;
   const kind = String(d.kind || "");
   const style = kindStyle(kind);
+  /**
+   * 语义角色（2026-11-15 加）：object 成品 / action 动作 / container 容器 / source 原料。
+   * 只影响卡面视觉（data-role → CSS）与角标，**不动尺寸、不加阴影**
+   * （冻结不变量：卡片实尺寸必须 240×200）。
+   */
+  const role = NOVICE_ENTRY[kind]?.role ?? "object";
+  const roleMeta = CARD_ROLE_META[role];
   const lamp = lampOf(d.status);
   const hint = noviceHint(kind);
   const summary = summaryOf(d, kind);
@@ -259,6 +268,7 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
        * 「卡片实尺寸必须 240×200（磁吸落位基准）」与「不再有 box-shadow 光晕」。
        */
       data-depth={depth}
+      data-role={role}
       style={{
         width: CARD_GEOMETRY.width,
         /**
@@ -278,6 +288,11 @@ function NoviceCardImpl({ id, data, selected }: NodeProps) {
       <Handle type="source" position={Position.Right} className="nv-handle" isConnectable={false} />
 
       <header className="nv-card-head" style={{ height: CARD_GEOMETRY.headerHeight }}>
+        {roleMeta.mark ? (
+          <span className="nv-card-role" title={roleMeta.label} aria-label={roleMeta.label}>
+            {roleMeta.mark}
+          </span>
+        ) : null}
         <span className="nv-card-ico" aria-hidden>
           {style.icon}
         </span>

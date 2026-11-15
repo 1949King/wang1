@@ -1,0 +1,54 @@
+/* ============================================================
+   序列总览条（2026-11-15 加）
+   小白模式画布上的只读统计条：镜数 / 总时长 / 未出画面数。
+   与 novice-cards.css 同色系（该模式固定深色，不跟随主题）。
+   注意：**只做汇总显示**，不提供排序、不改变任何卡片位置。
+   ============================================================ */
+
+.nv-seqbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(21, 26, 38, 0.92);
+  color: #e6e8ef;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.nv-seqbar-main {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.nv-seqbar-warn {
+  color: #fbbf24;
+}
+
+.nv-seqbar-done {
+  color: #34d399;
+}
+
+.nv-seqbar-hint {
+  color: #8b9bb0;
+}
+
+/* 时长区间：ok 无强调，short/long 给边框提示色 */
+.nv-seqbar--short {
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.nv-seqbar--long {
+  border-color: rgba(249, 115, 22, 0.5);
+}

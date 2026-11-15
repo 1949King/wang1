@@ -334,3 +334,61 @@
   border-bottom: none;
   height: 72px !important;
 }
+
+/* ============================================================
+   卡片语义角色（2026-11-15 加）
+   ------------------------------------------------------------
+   实测痛点：摆卡时不知道该放几张、不知道哪张是"东西"哪张是"步骤"，
+   于是不自觉把卡片连成流水线 → 图滑向 ComfyUI 的算子图。
+   这里只做**视觉区分**，不改尺寸、不加 box-shadow（冻结不变量：
+   卡片实尺寸必须 240×200，且不再有光晕）。左侧色带用 background-image
+   画在背景上，因此不占盒模型尺寸。
+   ============================================================ */
+
+/* 左上角角色角标（object 无角标，其余三种显示符号） */
+.nv-card-role {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* 动作卡（→）：左侧橙色竖带 —— 表示"它要作用于别的东西" */
+.nv-card[data-role="action"] {
+  background-image: linear-gradient(90deg, #f97316 0 3px, transparent 3px);
+}
+.nv-card[data-role="action"] .nv-card-role {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.18);
+}
+
+/* 容器卡（▣）：虚线边框 —— 表示"里面装着多张卡" */
+.nv-card[data-role="container"] {
+  border-style: dashed;
+  border-color: rgba(20, 184, 166, 0.45);
+}
+.nv-card[data-role="container"] .nv-card-role {
+  color: #14b8a6;
+  background: rgba(20, 184, 166, 0.18);
+}
+
+/* 原料卡（◱）：点线边框 —— 表示"提供原料，不自己产出" */
+.nv-card[data-role="source"] {
+  border-style: dotted;
+  border-color: rgba(139, 155, 176, 0.5);
+}
+.nv-card[data-role="source"] .nv-card-role {
+  color: #8b9bb0;
+  background: rgba(139, 155, 176, 0.16);
+}

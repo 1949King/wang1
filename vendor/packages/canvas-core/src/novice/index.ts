@@ -22,5 +22,6 @@ export function buildNoviceNodeTypes(base: NodeTypes): NodeTypes {
 }
 
 export { NoviceCard } from "./NoviceCard";
+export { NoviceSequenceBar } from "./NoviceSequenceBar";
 export { default as NoviceInspector } from "./NoviceInspector";
 export * from "./types";
