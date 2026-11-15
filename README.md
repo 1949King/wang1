@@ -35,7 +35,36 @@
 | 通信 | 本地 HTTP + SSE（`canvas_server.py`，端口 18765）+ 粘合层契约（`app/core/glue/`） |
 | AI | Ollama（本地）+ 多云 Provider；Whisper ASR；ComfyUI 生图；YuE 全曲生成（需远程执行端） |
 
-## 快速开始
+## 安装（终端用户）
+
+两种形态，内容一样，外壳不同。**完整说明见 [`docs/安装与部署.md`](docs/安装与部署.md)**。
+
+| 形态 | 怎么用 |
+|---|---|
+| **安装包** `拾光剪影-Setup-<版本>.exe` | 双击 → 6 页向导（许可 / 组件 / 目录 / 完成）→ 从开始菜单或桌面启动。有卸载入口 |
+| **绿色版** `拾光剪影-<版本>-portable.zip` | 解压到**固定目录** → 双击 `拾光剪影.exe`。免管理员，无卸载器，删目录即可 |
+
+要点：
+
+- **装完不含任何 AI 模型权重**。本地生图/生视频要自己从 ModelScope 等社区取（程序内模型面板每行有入口），`python scripts/check_models.py --missing` 可看缺什么。
+- 安装包可选装「本地 AI 内核」（约 6 GB 量级）；不装就只能用云端模型 + 纯剪辑。
+- 卸载会**问你要不要保留用户数据**（作品、素材库、项目文件）。选「否」保留。
+
+### 自己出包
+
+```bash
+winget install NSIS.NSIS                                              # 一次性：装 NSIS
+.venv312\Scripts\python.exe scripts\build_release.py --installer      # PyInstaller → 内核 → 自检 → Setup.exe
+.venv312\Scripts\python.exe scripts\build_release.py --installer --skip-pyinstaller --skip-selftest --fast-compress
+```
+
+> ⚠️ **当前 `--installer` 会失败，是体积问题不是脚本问题。** `_internal` 有 1.96 GB，
+> 超过 makensis（32 位）实测约 1.8 GB 的地址空间上限，报
+> `Internal compiler error #12345: error mmapping file ...`。
+> 安装脚本本身已完成并测过（6 页向导 / UTF-8 BOM / 卸载保护用户数据 / 15 个契约测试）。
+> 现在能用的是绿色版 zip。出路见 [`docs/安装与部署.md` §2.7](docs/安装与部署.md)。
+
+## 快速开始（开发）
 
 ```bash
 # 1) 环境：Windows + Python 3.12（.venv312）+ Node 22

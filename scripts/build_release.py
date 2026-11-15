@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,15 @@ RUNTIME_SRC = os.path.join(ROOT, "build", "runtime_pack")
 RUNTIME_DST = os.path.join(DIST, "runtime")
 NSI = os.path.join(ROOT, "scripts", "installer.nsi")
 SITE_PACKAGES = os.path.join(ROOT, ".venv312", "Lib", "site-packages")
+
+# makensis 是 32 位程序，安装包数据块 mmap 到 2 GB 地址空间就崩（实测 2026-11-15）：
+#
+#   Internal compiler error #12345:
+#   error mmapping file (1992247082, 33554432) is out of range.
+#
+# 1992247082 ≈ 1.99 GB，正好是边界。本项目 dist 合计 6.35 GB（本体 1.96 + 内核 4.37），
+# 所以「内核要不要并进同一个安装包」必须按体积判断，不能想当然。
+NSIS_DATABLOCK_LIMIT = 2 * 1024 ** 3
 
 # 打包期把 torch 目录临时改名，躲开 PyInstaller 的收集崩溃。
 #
@@ -424,8 +434,97 @@ def selftest() -> dict:
     return report
 
 
-def build_installer() -> str:
+def read_app_version() -> str:
+    """从 app/version.py 读 __version__。
+
+    为什么不 `import app.version`：那会先执行 `app/__init__.py`，
+    这条链会拖起 PyQt6（乃至 torch），在打包脚本里既慢又容易崩
+    （本项目已知 PyQt6 + torch 同进程会原生段错误）。正则读一行最稳。
+    """
+    path = os.path.join(ROOT, "app", "version.py")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r'__version__\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
+    except OSError as exc:
+        raise SystemExit(f"读不到 {path}：{exc}") from exc
+    raise SystemExit(f"{path} 里找不到 __version__")
+
+
+def write_build_info(version: str) -> str:
+    """生成 dist/build_info.nsh —— 安装脚本里版本号的**唯一**来源。
+
+    为什么需要这个文件：installer.nsi 里原先写死 `!define APP_VERSION "4.10.3"`，
+    和 app/version.py 完全脱钩。实测脱节 37 个次版本，后果不只是文件名错 ——
+    注册表 DisplayVersion 也会写成 4.10.3，用户在「应用和功能」里看到假版本，
+    排查问题时据此对不上号。
+
+    ── 关于 HAS_RUNTIME（2026-11-15 实测修正）──────────────────────
+    原设计是「AI 内核作为可选组件并入同一个安装包」。**这个设计在 NSIS 上不成立**：
+
+        Internal compiler error #12345:
+        error mmapping file (1992247082, 33554432) is out of range.
+
+    1992247082 ≈ 1.99 GB，正好是 2 GB 边界。makensis 是 32 位程序，
+    数据块 mmap 到 2 GB 地址空间就崩。而本项目的实际体积是：
+
+        _internal（程序本体）  1.96 GB  —— 单独就已经贴着线
+        runtime （AI 内核）    4.37 GB
+        合计                   6.35 GB  —— 必然撞线
+
+    所以这里不能「有 runtime 就合并」，必须按体积决策：装得下才合并，
+    装不下就只装本体，内核走 zip 单独分发（见 docs/安装与部署.md）。
+    """
+    nsh = os.path.join(ROOT, "dist", "build_info.nsh")
+    os.makedirs(os.path.dirname(nsh), exist_ok=True)
+
+    total = du(DIST)
+    has_rt = os.path.isdir(RUNTIME_DST)
+    rt_bytes = du(RUNTIME_DST) if has_rt else 0
+    merge_runtime = has_rt and total <= NSIS_DATABLOCK_LIMIT
+    packed = total if merge_runtime else (total - rt_bytes)
+
+    lines = [
+        "; 本文件由 scripts/build_release.py 生成，请勿手改。",
+        ";",
+        "; 每个 define 都用 !ifndef 包住，原因有两个：",
+        ";   ① makensis 的 /D 与脚本里的 !define 同名时是**硬错误**",
+        ";      （`!define: \"X\" already defined!` 然后 abort），",
+        ";      包住之后命令行就能合法覆盖 —— 冒烟测试要用这个能力。",
+        ";   ② 语义上这些是「默认值」，不是不可变更的常量。",
+        "!ifndef APP_VERSION",
+        f'  !define APP_VERSION "{version}"',
+        "!endif",
+        "!ifndef EST_SIZE_KB",
+        # 只按真正入包的部分算 —— 否则控制面板会显示 6 GB，而实际只装了 2 GB
+        f"  !define EST_SIZE_KB {packed // 1024}",
+        "!endif",
+    ]
+
+    if merge_runtime:
+        lines += ["!ifndef HAS_RUNTIME", "  !define HAS_RUNTIME", "!endif"]
+        log(f"   内核并入安装包（总体积 {total/1073741824:.2f} GB ≤ "
+            f"{NSIS_DATABLOCK_LIMIT/1073741824:.0f} GB 上限）")
+    elif has_rt:
+        log(f"   ⚠️ 内核 {rt_bytes/1073741824:.2f} GB **不并入**安装包"
+            f"（总体积 {total/1073741824:.2f} GB 超出 makensis 的 2 GB 数据块上限）")
+        log("      ⇒ 安装包只含程序本体，runtime/ 需随附 zip 单独分发")
+
+    # utf-8-sig：NSIS 在 Unicode 模式下靠 BOM 判定编码，
+    # 无 BOM 会被当 ANSI(GBK) 解释，中文注释变乱码。
+    with open(nsh, "w", encoding="utf-8-sig", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return nsh
+
+
+def build_installer(fast_compress: bool = False) -> str:
     log("④ NSIS 打安装包 …")
+    version = read_app_version()
+    nsh = write_build_info(version)
+    log(f"   版本 {version}（真源 app/version.py）→ {os.path.relpath(nsh, ROOT)}")
+
     makensis = shutil.which("makensis")
     if not makensis:
         for cand in (r"C:\Program Files (x86)\NSIS\makensis.exe",
@@ -434,16 +533,33 @@ def build_installer() -> str:
                 makensis = cand
                 break
     if not makensis:
-        raise SystemExit("找不到 makensis.exe，请安装 NSIS 或手动执行 scripts\\installer.nsi")
-    rc = subprocess.call([makensis, NSI], cwd=ROOT)
+        raise SystemExit(
+            "找不到 makensis.exe（NSIS 编译器）。装法任选其一：\n"
+            "  winget install NSIS.NSIS\n"
+            "  https://nsis.sourceforge.io/Download 下载安装包\n"
+            "已装但仍报这个错：确认 C:\\Program Files (x86)\\NSIS\\makensis.exe 存在，\n"
+            "或把它加进 PATH。"
+        )
+
+    args = [makensis]
+    if fast_compress:
+        args.append("/DSG_FAST_COMPRESS=1")
+        log("   快速压缩模式（zlib）：产物体积更大，但省去 lzma 的数十分钟")
+    args.append(NSI)
+
+    rc = subprocess.call(args, cwd=ROOT)
     if rc != 0:
         raise SystemExit(f"makensis 失败，退出码 {rc}")
-    out_dir = os.path.join(ROOT, "dist")
-    setups = [f for f in os.listdir(out_dir) if f.startswith("拾光剪影-Setup-")]
-    if not setups:
-        raise SystemExit("makensis 成功但没找到 Setup 产物")
-    setups.sort(key=lambda f: os.path.getmtime(os.path.join(out_dir, f)), reverse=True)
-    return os.path.join(out_dir, setups[0])
+
+    # 不再「取目录里最新一个 Setup」—— 那样很容易拿到上一次的旧产物，
+    # 报出来的文件名和实际内容对不上。这里按版本号精确校验。
+    expect = os.path.join(ROOT, "dist", f"拾光剪影-Setup-{version}.exe")
+    if not os.path.exists(expect):
+        raise SystemExit(
+            f"makensis 返回成功，但没找到预期产物：\n  {expect}\n"
+            f"检查 installer.nsi 的 OutFile 与 APP_VERSION（当前 {version}）是否一致。"
+        )
+    return expect
 
 
 def main() -> int:
@@ -451,6 +567,8 @@ def main() -> int:
     ap.add_argument("--skip-pyinstaller", action="store_true", help="复用现有 dist，不重打")
     ap.add_argument("--installer", action="store_true", help="继续生成 NSIS 安装包")
     ap.add_argument("--skip-selftest", action="store_true", help="跳过自检（不建议）")
+    ap.add_argument("--fast-compress", action="store_true",
+                    help="安装包用 zlib 而非 solid lzma（体积更大，但快很多）")
     args = ap.parse_args()
 
     if not args.skip_pyinstaller:
@@ -469,7 +587,7 @@ def main() -> int:
     log(f"   其中主程序 _internal/        {du(os.path.join(DIST,'_internal'))/1073741824:.2f} GB")
 
     if args.installer:
-        setup = build_installer()
+        setup = build_installer(fast_compress=args.fast_compress)
         log(f"   安装包 {os.path.basename(setup)}  {os.path.getsize(setup)/1073741824:.2f} GB")
 
     if report is not None and not report["ok"]:
