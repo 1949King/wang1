@@ -17,7 +17,8 @@
  */
 
 import { describeImageSize } from "../imageSize";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { GENERATABLE_KINDS, NodeActionsContext } from "../nodes";
 import { useCanvasStore } from "../store";
 import { breakdownStoryboard } from "../bridge";
 import { repairImageViaHost } from "../canvasRepair";
@@ -150,6 +151,7 @@ export default function NoviceInspector() {
   const listTemplates = useCanvasStore((s) => s.listTemplates);
   const loadTemplate = useCanvasStore((s) => s.loadTemplate);
   const saveSelectionTemplate = useCanvasStore((s) => s.saveSelectionTemplate);
+  const { generateNode } = useContext(NodeActionsContext);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [proOpen, setProOpen] = useState(false);
   const [capsuleOpen, setCapsuleOpen] = useState(false);
@@ -339,6 +341,34 @@ export default function NoviceInspector() {
   const style = kindStyle(kind);
   const depth = Math.min(3, Math.max(1, Number(d.intentDepth) || 2));
 
+  /** 复用节点级生成动作：按当前卡片 ID 走原有模型、进度、错误与状态回写链。 */
+  const renderGenerateEntry = () => {
+    if (!GENERATABLE_KINDS.has(kind)) return null;
+    const generating = d.status === "generating";
+    const label = generating
+      ? "生成中…"
+      : kind === "digitalHuman"
+        ? "生成配音"
+        : "生成这张卡片";
+    return (
+      <button
+        type="button"
+        className="nv-insp-quick-btn primary nv-insp-generate"
+        disabled={generating || !generateNode}
+        title={generating ? "正在生成，请勿重复点击" : "使用当前参数与已选模型生成"}
+        onClick={() => {
+          if (!generating) generateNode?.(selectedId);
+        }}
+      >
+        <span className="nv-insp-quick-ico" aria-hidden>✦</span>
+        <span>
+          <b>{label}</b>
+          <em>使用当前参数与已选模型，结果回写这张卡片</em>
+        </span>
+      </button>
+    );
+  };
+
   // ===== 3D 导演台专属面板：把「摆姿 / 机位 / 截图回写」完整带进小白模式 =====
   if (kind === "director") {
     const captures = Array.isArray(d.captureUrls) ? (d.captureUrls as string[]) : [];
@@ -441,6 +471,8 @@ export default function NoviceInspector() {
             ))}
           </div>
         ) : null}
+
+        {renderGenerateEntry()}
 
         <p className="nv-insp-foot">
           这是 3D 导演台卡片：摆姿、机位、截图都在内嵌舞台里完成。
@@ -1626,6 +1658,8 @@ export default function NoviceInspector() {
           ))}
         </div>
       ) : null}
+
+      {renderGenerateEntry()}
 
       <button
         type="button"

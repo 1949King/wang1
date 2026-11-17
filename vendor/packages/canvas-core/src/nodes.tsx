@@ -22,7 +22,7 @@ const useNodeActions = () => useContext(NodeActionsContext);
  * 支持「一键生成」的节点类型 —— 与 App.tsx 的 onGenerate 白名单保持同口径。
  * 不在此列的节点（剧本 / 提示词 / 文本 / 编组 / 配置）不显示生成按钮。
  */
-const GENERATABLE_KINDS = new Set([
+export const GENERATABLE_KINDS = new Set([
   "shot",
   "image",
   "video",

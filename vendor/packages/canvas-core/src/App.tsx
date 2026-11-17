@@ -5,7 +5,7 @@ import { useEditorCanvasLink } from "./hooks/useEditorCanvasLink";
 import CanvasShell from "./CanvasShell";
 // V4.41.20：把 9 个生成/入轨回调注入 generateActions store，给浮窗 GeneratePanel 用
 import { useInjectGenerateActions } from "./generateActionsInjector";
-import { NodeActionsContext } from "./nodes";
+import { GENERATABLE_KINDS, NodeActionsContext } from "./nodes";
 import { registerBuiltinNodes } from "./registerBuiltinNodes";
 import { registerNodeDefinitions } from "./plugins/node-registry";
 import { STICKY_PLUGIN } from "./plugins/examples/sticky-note";
@@ -1584,11 +1584,8 @@ export default function App() {
     }
     const data = node.data as NodeData;
     const kind = data.kind;
-    if (
-      kind !== "shot" && kind !== "image" && kind !== "video" &&
-      kind !== "generator" && kind !== "audio" && kind !== "music" &&
-      kind !== "text"
-    ) {
+    // 与节点卡片、右侧参数面板共用 10 类白名单；text 保留旧的重试兼容性。
+    if (!GENERATABLE_KINDS.has(kind) && kind !== "text") {
       setStatus(`当前节点类型（${kind}）不支持重试生成`);
       return;
     }

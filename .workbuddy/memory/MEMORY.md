@@ -30,6 +30,7 @@
 - 🔴 **打包**：细节见 `topics/packaging.md`。三条秒记：① 目录扫描型加载的 `app/plugins`、`app/skills`、`app/core/video_processing` **必须进 `build_release.SYNC_APP_SUBPKGS`**（进 PYZ 等于没进，缺了**静默返回 0**）；② 整目录拷包必须排 `.git`（只读 pack ⇒ `PermissionError [WinError 5]`）；③ `opentimelineio`/`mediapipe` 在冻结进程加载即崩；④ **NSIS 装不下**：makensis 32 位 ~1.8GB 上限（1.8 成/1.96 败），6.35GB ⇒ 无 Setup.exe；`.nsi` 无 BOM ⇒ 中文乱码且退出码 0（`packaging.md §八`）。
 - 🔴 **稳定性门禁豁免逐行 + 必写理由**：`# stability-gate: allow-print（理由）` / `allow-swallow（理由）`。合规只有两类：CLI 报告器 stdout、结构性正常分支（无父控制台 / `add_dll_directory` 拒绝 / 体积统计跳过）。**能真改就别豁免**。
 - 🔴 **入口位置由能力归属层级决定，不由体积守卫有没有空位决定**：团队入口曾塞进画布第二条顶栏 ⇒ 被 `showWorkspace` 挡住，另外 8 个界面全看不见。工作区级能力 ⇒ 挂常驻 `AppNav`。
+- 🔴 **Vitest node 环境用 `renderToStaticMarkup()` 测 Zustand 组件时，store 默认读 `getInitialState()` 而非刚 `setState()` 的当前态** ⇒ 空面板会同时制造可生成项假失败、不可生成项假阳性；只 mock React `useSyncExternalStore` 的服务端读取为当前 `getSnapshot()`，真实 store / 节点工厂 / 组件不动，并断言非生成面板确实渲染。回归样例：`src/novice/generateEntry.test.ts`。
 - 🔴 **`backdrop-filter`（及 filter/transform）祖先会成为 `position:fixed` 后代的包含块**：团队面板挂进 `.ic-nav` 后 420px 只剩 46px 窄缝。**浮动面板一律 `createPortal(..., document.body)`**。
 - 🔴 **PyQt ↔ 画布唤起用「探测全局函数」不用 `dispatchEvent`**（后者页面未加载也返成功）：画布挂 `window.__sgTeamOpen`，PyQt 侧 `runJavaScript` 拿 'ok'/'pending' 轮询。
 - 🔴 **帮助页正文真源是 `docs/help/<id>.md`**：加话题 = `topics` 加一行 + `_xxx()` 三行 + 落 md，改说明不用改代码。`_render_markdown` 只认 `#/##/###`、`- `、`> `、`|表格|`、`---`。
