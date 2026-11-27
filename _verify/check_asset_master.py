@@ -3,7 +3,7 @@
 
 断言：
   ① 结构在册：MASTER_KINDS 四值 / MODEL_VERSION 存在 / AssetMaster+AssetVariant 字段齐
-  ② 纯模型纪律：模块顶层**不 import PyQt6/requests/sqlite3**，无 print / 无文件 IO
+  ② 纯模型纪律：模块顶层**不 import PySide6/PyQt6/PyQt5/requests/sqlite3**，无 print / 无文件 IO
   ③ 母版-变体继承：resolve_variant = canonical ⊕ overrides，且不改入参（深合并语义）
   ④ 不猜：kind 非法 / master_id 空 / 变体 master_id 不匹配 / 变体 id 重复 ⇒ 全部进 errors
   ⑤ stale 纪律：update_canonical 后变体全标 stale 且**不自动重生成**；
@@ -40,7 +40,7 @@ def _code_only() -> str:
     """去掉模块/行内注释与字符串字面量，只留真正会执行的代码。
 
     纯模型纪律查的是「有没有运行时依赖」，而文档字符串里正常会写
-    「不 import PyQt6」这类**说明**——直接对源码全文 grep 会把说明当成
+    「不 import Qt 绑定」这类**说明**——直接对源码全文 grep 会把说明当成
     依赖（本守卫首跑即误报）。故先剥注释与字符串，再做关键词判定。
     """
     import io
@@ -88,7 +88,7 @@ def check_surface() -> None:
 
 def check_purity() -> None:
     src = _code_only()
-    banned = ("PyQt6", "requests", "sqlite3", "subprocess", "QApplication")
+    banned = ("PySide6", "PyQt6", "PyQt5", "requests", "sqlite3", "subprocess", "QApplication")
     for token in banned:
         if token in src:
             _fail(f"② 纯模型模块出现运行时依赖：{token}（应零 I/O、零 UI）")

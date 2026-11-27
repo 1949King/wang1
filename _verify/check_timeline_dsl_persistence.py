@@ -183,7 +183,7 @@ def check_wiring() -> None:
     with open(store_path, "r", encoding="utf-8") as f:
         ssrc = f.read()
     import re
-    if re.search(r"^(import PyQt6|from PyQt6)", ssrc, re.M):
+    if re.search(r"^(import (?:PySide6|PyQt6|PyQt5)|from (?:PySide6|PyQt6|PyQt5))", ssrc, re.M):
         _fail("⑤ timeline_store 顶层 import Qt（子进程/桥接层红线）")
 
 

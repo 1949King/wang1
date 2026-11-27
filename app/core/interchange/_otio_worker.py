@@ -1,11 +1,11 @@
 """OTIO 转换子进程 worker（**主进程不得 import 本模块**）。
 
-为什么必须独立进程（2026-10-11 实测）
+为什么必须独立进程（2026-10-11 PyQt6 时代实测）
 ------------------------------------
 ``import PyQt6.QtCore, opentimelineio`` → **段错误**（access violation）；
 ``import opentimelineio, PyQt6.QtCore``（反序）→ 正常。
-即 opentimelineio 的 C 扩展在 Qt 之后加载会崩。Qt GUI 必然先加载 PyQt6，
-故所有 OTIO 读写在**无 Qt 的子进程**里完成（本项目一贯做法：wmic / ffmpeg 同理隔离）。
+即 opentimelineio 的 C 扩展在 Qt 之后加载会崩。迁移 PySide6 后未据此假设冲突消失，
+所有 OTIO 读写仍在**无 Qt 的子进程**里完成（本项目一贯做法：wmic / ffmpeg 同理隔离）。
 
 用法::
 

@@ -20,8 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QPoint
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QPushButton, QWidget,
     QGraphicsDropShadowEffect, QMenu, QSizePolicy,
 )
@@ -65,11 +65,11 @@ class FloatingSidebar(QFrame):
         floating_changed(bool)  — 悬浮模式切换
     """
 
-    navigate_to = pyqtSignal(str)
-    open_settings = pyqtSignal()
-    open_help = pyqtSignal()
-    open_about = pyqtSignal()
-    floating_changed = pyqtSignal(bool)
+    navigate_to = Signal(str)
+    open_settings = Signal()
+    open_help = Signal()
+    open_about = Signal()
+    floating_changed = Signal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -197,7 +197,7 @@ class FloatingSidebar(QFrame):
             # QPropertyAnimation 在 start() 后即可能被回收 → 动画夭折)
             anim = QPropertyAnimation(self, b"pos", self)
             anim.setDuration(int(MOTION_TOKENS["dur_slow"]))  # 300ms
-            # PyQt6 没有 cubic-bezier 直传，用 OutExpo 近似 ease-out-expo
+            # PySide6 没有 cubic-bezier 直传，用 OutExpo 近似 ease-out-expo
             anim.setEasingCurve(QEasingCurve.Type.OutExpo)
             anim.setStartValue(self.pos())
             anim.setEndValue(QPoint(target_x, self.y()))

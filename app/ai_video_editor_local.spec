@@ -117,11 +117,11 @@ print(f"[spec] 枚举 app 模块 {len(_app)} 个 → hiddenimports")
 
 # 合并显式 hiddenimports
 hiddenimports = [
-    # PyQt6
-    'PyQt6.QtCore', 'PyQt6.QtWidgets', 'PyQt6.QtGui',
-    'PyQt6.QtMultimedia', 'PyQt6.QtMultimediaWidgets',
-    'PyQt6.QtWebEngineWidgets', 'PyQt6.QtWebEngineCore',
-    'PyQt6.QtWebChannel', 'PyQt6.QtNetwork', 'PyQt6.QtPrintSupport',
+    # PySide6（Qt / WebEngine 由 PyInstaller 的 PySide6 hooks 收集）
+    'PySide6.QtCore', 'PySide6.QtWidgets', 'PySide6.QtGui',
+    'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets',
+    'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineCore',
+    'PySide6.QtWebChannel', 'PySide6.QtNetwork', 'PySide6.QtPrintSupport',
     # 本地包
     'app.modules.lego', 'app.core', 'app.modules', 'license',
     # 第三方显式声明
@@ -160,17 +160,18 @@ a = Analysis(
               'modelscope', 'trimesh', 'matplotlib',
               # —— gguf：它由 runtime/ 供给，而且**必须排掉** ——
               # gguf/vocab.py:12 → import sentencepiece，而 sentencepiece 与
-              # PyQt6 有导入顺序依赖的原生冲突（先 Qt 后 sentencepiece 必
-              # 0xC0000005；反过来正常）。PyInstaller 的隔离导入子进程里 PyQt6
-              # 先被加载，于是 import_library('gguf') 必崩 —— 报错显示
+              # PyQt6 时代实测有导入顺序依赖的原生冲突（先 Qt 后 sentencepiece 必
+              # 0xC0000005；反过来正常）。迁移 PySide6 后继续保守隔离，不把旧冲突
+              # 视为已自动解决。隔离导入子进程里 Qt 先被加载时 import_library('gguf')
+              # 曾必崩 —— 报错显示
               # `crashed while importing package 'gguf'`，但真凶是 sentencepiece。
               # 把 gguf 排除后子进程不再碰它，构建恢复正常。
               'gguf',
               'tensorboard',
               # —— opentimelineio：与 torch/gguf 同一类崩溃 ——
-              # 加进 hiddenimports（app.core.interchange 依赖它）后，PyInstaller
-              # 的 import_library 隔离子进程在 PyQt6 已加载的情况下 import 它，
-              # 直接 0xC0000005：
+              # 加进 hiddenimports（app.core.interchange 依赖它）后，PyQt6 时代实测
+              # PyInstaller 的 import_library 隔离子进程在 Qt 已加载时 import 它，
+              # 直接 0xC0000005；迁移 PySide6 后仍保留隔离：
               #   SubprocessDiedError: ... importing package 'opentimelineio',
               #   exit code 3221225477
               # 它自带原生扩展 _opentimelineio.pyd，属于「加载期与 Qt 冲突」那一族。
@@ -189,6 +190,8 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='拾光剪影',
+    # 桌面/任务栏图标：根目录多尺寸 ICO（与 icon.png 同源设计）
+    icon=os.path.join(_ROOT, 'icon.ico'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

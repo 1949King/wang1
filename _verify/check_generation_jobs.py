@@ -2,7 +2,7 @@
 """生成任务表自检 —— 异步 / 真实进度 / 可取消 / 并发限流。
 
 跑法：python _verify/check_generation_jobs.py
-不依赖 PyQt、不发真实网络请求，用假任务验证状态机与取消语义。
+不依赖 Qt、不发真实网络请求，用假任务验证状态机与取消语义。
 """
 from __future__ import annotations
 

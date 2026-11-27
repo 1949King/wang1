@@ -367,6 +367,7 @@ class DiffsynthImageEngine:
                 else:
                     _warnings.append("画布 inbox 写入失败且无法内嵌 ⇒ 请到 image_path 取文件")
             elapsed = _time.time() - t0
+            self._record_telemetry(spec, elapsed, ok=True)
             return {"ok": True, "path": out_path,
                     "image_path": out_path,
                     "image_url": _image_url,
@@ -379,7 +380,31 @@ class DiffsynthImageEngine:
                     "message": f"生成完成：{out_path}（{n_steps} 步 · cfg {n_cfg} · {elapsed:.1f}s）"}
         except Exception as e:
             logger.debug("[diffsynth_image] generate 失败", exc_info=True)
+            try:
+                self._record_telemetry(spec, 0.0, ok=False)
+            except Exception:
+                logger.debug("[diffsynth_image] 失败遥测写入异常", exc_info=True)
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
+
+    # ── 遥测（2026-10-29 补埋点：与 diffusers_image._record_telemetry 同口径）──
+    def _record_telemetry(self, spec: Dict[str, Any], elapsed: float, ok: bool) -> None:
+        """把真实执行结果写进引擎遥测（首图/稳态分开记；失败只记失败率）。
+
+        纪律：遥测写入失败绝不影响生成（包 try、只 debug）。
+        """
+        try:
+            from app.core.ai import engine_telemetry as ET
+
+            arch = "sdxl" if str(spec.get("arch")) == "sdxl" else "sd15"
+            n = int(getattr(self, "_gen_count", 0))
+            ms = max(0.0, float(elapsed) * 1000.0)
+            ET.record(engine="diffsynth", model_arch=arch, ok=bool(ok),
+                      first_ms=ms if (ok and n == 0) else 0.0,
+                      steady_ms=ms if (ok and n > 0) else 0.0)
+            if ok:
+                self._gen_count = n + 1
+        except Exception:
+            logger.debug("[diffsynth_image] 遥测写入失败（不阻断）", exc_info=True)
 
 
 _engine: Optional[DiffsynthImageEngine] = None

@@ -86,7 +86,7 @@ ROOT_PACKAGES = [
     "httpx2",
     # opentimelineio：时间线交换（FCPXML/EDL/OTIO）用。它自带原生扩展
     # `_opentimelineio.pyd`，进不了 PyInstaller 的 Analysis（隔离导入子进程里
-    # 与 PyQt6 冲突，0xC0000005），所以和 torch 一样由内核目录供给。
+    # 在 PyQt6 时代与 Qt 冲突，0xC0000005；PySide6 继续隔离），由内核目录供给。
     "opentimelineio",
     # spec excludes 里的重型库
     "easyocr", "mediapipe", "librosa", "numba", "llvmlite",
@@ -101,7 +101,8 @@ SKIP_PKG_SUBDIR = {"include"}
 
 # 🔴 内核**不能**带的 dist（2026-11-05 实测，别删这条注释）。
 #
-# ``sentencepiece`` 和 PyQt6 在同一进程里是**原生加载顺序互斥**的：
+# PyQt6 时代实测 ``sentencepiece`` 和 Qt 在同一进程里是**原生加载顺序互斥**的；
+# 迁移 PySide6 后继续保守隔离，不推定旧原生冲突已自动消失：
 #   · 先 ``import PyQt6.QtWidgets`` 再 ``import sentencepiece`` ⇒ exit 139 / 0xC0000005，
 #     无 Python 栈、无 faulthandler，直接进程消失
 #   · 反过来（先 sentencepiece 后 PyQt6）正常

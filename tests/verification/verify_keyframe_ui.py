@@ -1,6 +1,6 @@
 """
 P1#8 关键帧可视化 - 数据契约与坐标映射验证脚本
-不启动 GUI（避免 import moviepy/PyQt6 副作用），直接验证核心逻辑
+不启动 GUI（避免 import moviepy/PySide6 副作用），直接验证核心逻辑
 """
 import os
 import sys

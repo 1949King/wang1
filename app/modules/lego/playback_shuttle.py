@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional, Set, Tuple
 
-from PyQt6.QtCore import QObject, QTimer, QEvent, pyqtSignal, Qt
+from PySide6.QtCore import QObject, QTimer, QEvent, Signal, Qt
 
 import logging
 
@@ -42,7 +42,7 @@ def _is_text_input_widget(widget: object) -> bool:
     if widget is None:
         return False
     try:
-        from PyQt6.QtWidgets import (
+        from PySide6.QtWidgets import (
             QComboBox,
             QDoubleSpinBox,
             QLineEdit,
@@ -65,8 +65,8 @@ class PlaybackShuttle(QObject):
     通过覆盖宿主的 `_playback_rate` 方法 + 应用级 event filter 接管 JKL 键。
     """
 
-    rate_changed = pyqtSignal(float)
-    finished = pyqtSignal()
+    rate_changed = Signal(float)
+    finished = Signal()
 
     def __init__(self, host: object):
         parent = host if isinstance(host, QObject) else None
@@ -138,7 +138,7 @@ class PlaybackShuttle(QObject):
             host._start_timeline_playback = _patched_start
 
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
 
             self._app = QApplication.instance()
             if self._app is not None:
@@ -177,7 +177,7 @@ class PlaybackShuttle(QObject):
         if not self._focus_belongs_to_host():
             return False
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
 
             fw = QApplication.focusWidget()
         except Exception:
@@ -193,7 +193,7 @@ class PlaybackShuttle(QObject):
     def _focus_belongs_to_host(self) -> bool:
         host = self._host
         try:
-            from PyQt6.QtWidgets import QApplication, QWidget
+            from PySide6.QtWidgets import QApplication, QWidget
         except Exception:
             return True
         fw = QApplication.focusWidget()

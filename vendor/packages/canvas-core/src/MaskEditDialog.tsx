@@ -1,5 +1,9 @@
-/** 蒙版局部重绘对话框 — 白笔=重绘区 */
+/** 蒙版局部重绘对话框 — 白笔=重绘区。
+ *  T3：mode 三选（inpaint 默认走原 onSubmit；remove/outpaint 走宿主本地优先 + 可选网关）。 */
 import { useEffect, useRef, useState } from "react";
+import { gatewayEdit } from "./bridge";
+
+type EditMode = "inpaint" | "remove" | "outpaint";
 
 type Props = {
   imageUrl: string;
@@ -15,6 +19,11 @@ export default function MaskEditDialog({ imageUrl, open, busy, onClose, onSubmit
   const drawing = useRef(false);
   const [prompt, setPrompt] = useState("保持构图，仅重绘蒙版区域");
   const [brush, setBrush] = useState(28);
+  const [mode, setMode] = useState<EditMode>("inpaint");
+  const [megapixels, setMegapixels] = useState(1.0);
+  const [gwBusy, setGwBusy] = useState(false);
+  const [resultUrl, setResultUrl] = useState("");
+  const [resultMsg, setResultMsg] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -80,6 +89,51 @@ export default function MaskEditDialog({ imageUrl, open, busy, onClose, onSubmit
     return mask.toDataURL("image/png");
   };
 
+  // 干净原图 data URL（与蒙版同尺寸，供 remove/outpaint 走宿主）
+  const buildImageDataUrl = () => {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img) return "";
+    const tmp = document.createElement("canvas");
+    tmp.width = canvas.width;
+    tmp.height = canvas.height;
+    const ctx = tmp.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(img, 0, 0, tmp.width, tmp.height);
+    return tmp.toDataURL("image/png");
+  };
+
+  const handleSubmit = async () => {
+    const mask = buildMask();
+    // 默认 inpaint：走原 onSubmit（CanvasShell 零改动）
+    if (mode === "inpaint") {
+      if (!mask) return;
+      onSubmit(mask, prompt);
+      return;
+    }
+    // remove/outpaint：宿主本地优先 + 可选网关
+    const image = buildImageDataUrl();
+    if (!image) return;
+    if (mode === "remove" && !mask) return;
+    setGwBusy(true);
+    setResultUrl("");
+    setResultMsg("");
+    const res = await gatewayEdit({
+      mode,
+      image,
+      mask: mode === "outpaint" ? "" : mask,
+      prompt,
+      megapixels,
+    });
+    setGwBusy(false);
+    if (res.ok && res.image_data_url) {
+      setResultUrl(res.image_data_url);
+      setResultMsg(res.message || "处理成功");
+    } else {
+      setResultMsg(res.guidance || res.message || "处理失败");
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -91,9 +145,42 @@ export default function MaskEditDialog({ imageUrl, open, busy, onClose, onSubmit
             关闭
           </button>
         </div>
+        <div className="btn-row" style={{ margin: "0 0 8px" }}>
+          {(["inpaint", "remove", "outpaint"] as EditMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={mode === m ? "btn primary" : "btn"}
+              onClick={() => {
+                setMode(m);
+                setResultUrl("");
+                setResultMsg("");
+              }}
+            >
+              {m === "inpaint" ? "语义重绘" : m === "remove" ? "物体移除" : "扩图"}
+            </button>
+          ))}
+        </div>
         <p className="muted" style={{ margin: "0 0 8px" }}>
-          在图上涂白的区域会被重绘；黑区尽量保留。走宿主 /host/inpaint。
+          {mode === "inpaint"
+            ? "涂白区域按提示词重绘，黑区逐字节保留。走宿主 /host/inpaint。"
+            : mode === "remove"
+              ? "涂白区域将被移除（本地 LaMa/SD1.5 优先，可选网关）。"
+              : "向外扩展画面（单图 + megapixels，走可选网关；未启用诚实提示）。"}
         </p>
+        {mode === "outpaint" && (
+          <div className="field">
+            <label>扩图像素（megapixels）</label>
+            <input
+              type="number"
+              min={0.5}
+              max={8}
+              step={0.5}
+              value={megapixels}
+              onChange={(e) => setMegapixels(Number(e.target.value))}
+            />
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           className="sg-mask-canvas"
@@ -139,16 +226,34 @@ export default function MaskEditDialog({ imageUrl, open, busy, onClose, onSubmit
           <button
             type="button"
             className="btn primary"
-            disabled={busy}
-            onClick={() => {
-              const mask = buildMask();
-              if (!mask) return;
-              onSubmit(mask, prompt);
-            }}
+            disabled={busy || gwBusy}
+            onClick={handleSubmit}
           >
-            {busy ? "重绘中…" : "提交重绘"}
+            {busy || gwBusy
+              ? "处理中…"
+              : mode === "inpaint"
+                ? "提交重绘"
+                : mode === "remove"
+                  ? "提交移除"
+                  : "提交扩图"}
           </button>
         </div>
+        {resultUrl && (
+          <div className="field">
+            <label>处理结果</label>
+            <img src={resultUrl} alt="编辑结果" style={{ maxWidth: "100%", borderRadius: 8 }} />
+            <div className="btn-row">
+              <a className="btn" href={resultUrl} download="shiguang-edit.png">
+                下载结果
+              </a>
+            </div>
+          </div>
+        )}
+        {resultMsg && (
+          <p className="muted" style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>
+            {resultMsg}
+          </p>
+        )}
       </div>
     </div>
   );

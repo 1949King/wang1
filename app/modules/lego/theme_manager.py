@@ -27,8 +27,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QSettings
 
 from app.core.theme_tokens import DARK_TOKENS, LIGHT_TOKENS
 
@@ -958,7 +958,7 @@ class ThemeManager:
             self._applying = False
 
     def _do_apply_theme(self, preference: str, theme: str, main_window: Optional[QWidget]) -> None:
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
         if app is None:
             logger.warning("QApplication 未初始化，无法应用主题")
@@ -980,6 +980,22 @@ class ThemeManager:
             if top is not main_window:
                 self._apply_theme_property(top, theme)
 
+        # 3b. 主题回调（单一机制，2026-11-27）：全局 QSS 之外，带内联样式的控件
+        #     （如设置模块）必须随「同一次切换」刷新自身样式。此前只有设置页下拉框
+        #     这一条入口会刷新它，标题栏主题按钮 / 按时间切换 / 画布设置页等入口
+        #     都绕过去 ⇒ 全局已换肤、设置页内联样式仍是旧主题（浅底浅字）。
+        #     所有入口最终都经过 apply_theme，所以回调统一挂在这里。
+        #     先落定主题状态再回调：回调方（如设置页的主题下拉框）要读最新偏好。
+        self._current_theme = theme
+        self._theme_preference = preference
+        for top in app.topLevelWidgets():
+            refresh = getattr(top, "refresh_module_themes", None)
+            if callable(refresh):
+                try:
+                    refresh(theme)
+                except Exception as e:
+                    logger.warning("主题回调刷新失败 (%s): %s", type(top).__name__, e)
+
         # 4. 持久化
         try:
             for org, app_name in (("AI短剧编辑器", "Theme"), ("拾光剪影", "Settings")):
@@ -989,8 +1005,6 @@ class ThemeManager:
         except Exception as e:
             logger.debug("持久化主题设置失败: %s", e)
 
-        self._current_theme = theme
-        self._theme_preference = preference
         logger.info("主题已切换: %s (preference=%s)", theme, preference)
 
     @staticmethod

@@ -10,7 +10,7 @@
 
 设计原则（贴合项目特性）
 ------------------------
-- **纯 core、UI 无关**：不 import PyQt；模型调用与工具执行都通过注入回调，
+- **纯 core、UI 无关**：不 import PyQt6/PySide6；模型调用与工具执行都通过注入回调，
   便于无 LLM 的自包含回归测试（注入假的 model_fn / tool_executor）。
 - **复用既有地基，不另起炉灶**：预算走 `agent_session`（12 轮 / 24 工具）、
   任务步骤走 `agent_task_store`、策略走 `agent_policy.decide`、大脑学习走
@@ -45,6 +45,29 @@ logger = logging.getLogger(__name__)
 # 预算默认值：与 agent_policy 对齐（不硬编码，运行期从 policy 取，这里仅兜底）
 _DEFAULT_MAX_ROUNDS = 12
 _DEFAULT_MAX_TOOLS = 24
+
+# 思考等级（2026-11-18）：四档 →（轮次预算, 工具预算）+ 一句 system 策略提示。
+# standard 与历史默认 12/24 完全一致 ⇒ 不传 thinking_level 时行为逐字不变，旧调用方零感知。
+THINKING_LEVELS: Dict[str, Tuple[int, int]] = {
+    "off": (1, 2),
+    "light": (4, 10),
+    "standard": (_DEFAULT_MAX_ROUNDS, _DEFAULT_MAX_TOOLS),
+    "heavy": (20, 40),
+}
+THINKING_LEVEL_DEFAULT = "standard"
+
+_THINKING_HINTS: Dict[str, str] = {
+    "off": "\n[思考等级·关闭] 只做最小动作：最多一次工具调用，然后直接给出结论。",
+    "light": "\n[思考等级·轻] 先给最小可行方案，避免多轮反复；确有必要才追加工具调用。",
+    "heavy": "\n[思考等级·重] 动手前先写出步骤，逐步执行，并在每轮核对执行结果后再决定下一步。",
+}
+
+
+def normalize_thinking_level(level: str) -> str:
+    """把外部传入的思考等级归一为四档之一；空值 / 非法值回落 standard。"""
+    key = (level or "").strip().lower()
+    return key if key in THINKING_LEVELS else THINKING_LEVEL_DEFAULT
+
 
 _JSON_OBJ = re.compile(r"\{[\s\S]*\}")
 _JSON_ARR = re.compile(r"\[[\s\S]*\]")
@@ -255,6 +278,7 @@ class AgentLoop:
         history: Optional[List[Dict[str, str]]] = None,
         max_rounds: Optional[int] = None,
         max_tools: Optional[int] = None,
+        thinking_level: str = "",
         use_native_tools: bool = False,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> LoopResult:
@@ -273,6 +297,7 @@ class AgentLoop:
             approve_fn: 写工具确认回调；协作模式写工具且未提供时，循环停止等待确认。
             history: 既有对话历史（user/assistant）。
             max_rounds / max_tools: 覆盖默认预算。
+            thinking_level: off / light / standard / heavy（空=standard，与历史默认一致）。
             use_native_tools: 尝试用原生 function calling（Track C），失败回退 JSON。
             on_progress: 进度回调（每轮/每工具），供 UI/SSE。
 
@@ -288,8 +313,10 @@ class AgentLoop:
         amode = normalize_mode(mode)
         session_id = (session_id or "agent_loop").strip() or "agent_loop"
         agent_sessions.set_mode(session_id, amode)
-        max_rounds = max_rounds or _DEFAULT_MAX_ROUNDS
-        max_tools = max_tools or _DEFAULT_MAX_TOOLS
+        thinking = normalize_thinking_level(thinking_level)
+        level_rounds, level_tools = THINKING_LEVELS[thinking]
+        max_rounds = max_rounds or level_rounds
+        max_tools = max_tools or level_tools
 
         result = LoopResult(session_id=session_id, success=False)
         self._active[session_id] = result
@@ -305,6 +332,7 @@ class AgentLoop:
             "\n[多轮执行] 每轮可输出要执行的工具调用（JSON），执行结果会喂回给你；"
             "任务完成或只需回答时，直接输出纯文本答复（不要 JSON）。"
         )
+        system += _THINKING_HINTS.get(thinking, "")
 
         messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
         for m in (history or []):

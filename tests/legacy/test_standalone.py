@@ -44,18 +44,18 @@ result = subprocess.run(cmd, capture_output=True, timeout=10)
 print(f"返回码: {result.returncode}")
 print(f"输出长度: {len(result.stdout)}")
 
-# 测试 PyQt6
-print("\n--- PyQt6 ---")
+# 测试 PySide6
+print("\n--- PySide6 ---")
 try:
-    from PyQt6.QtGui import QPixmap
-    from PyQt6.QtCore import QByteArray
-    print("PyQt6 导入成功")
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtCore import QByteArray
+    print("PySide6 导入成功")
     
     # 测试 QPixmap
     byte_array = QByteArray(result.stdout[:100])
     pixmap = QPixmap()
     print(f"QPixmap 创建成功")
 except Exception as e:
-    print(f"PyQt6 导入失败: {e}")
+    print(f"PySide6 导入失败: {e}")
 
 print("\n测试完成!")

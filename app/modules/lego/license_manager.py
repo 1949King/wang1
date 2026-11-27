@@ -23,13 +23,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 import webbrowser
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox,
     QWidget
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
 
@@ -508,7 +508,7 @@ def get_current_level() -> LicenseLevel:
 
 # 使用示例
 if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
     import sys
     
     app = QApplication(sys.argv)

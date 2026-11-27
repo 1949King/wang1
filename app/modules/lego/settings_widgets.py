@@ -22,11 +22,11 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import (
-    Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QRectF, QPointF,
+from PySide6.QtCore import (
+    Qt, Signal, Property, QPropertyAnimation, QEasingCurve, QRectF, QPointF,
 )
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QRadialGradient
-from PyQt6.QtWidgets import (
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QRadialGradient
+from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
 )
 
@@ -56,7 +56,7 @@ def _rgb(hexv: str, alpha: int = 255) -> QColor:
 class ToggleSwitch(QWidget):
     """38×22 圆角开关，旋钮 18×18，开=brand 色，弹簧过渡（对应 --ease-spring）"""
 
-    toggled = pyqtSignal(bool)
+    toggled = Signal(bool)
 
     def __init__(self, checked: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -78,7 +78,7 @@ class ToggleSwitch(QWidget):
         self._pos = max(0.0, min(1.0, float(v)))
         self.update()
 
-    knobPos = pyqtProperty(float, _get_pos, _set_pos)
+    knobPos = Property(float, _get_pos, _set_pos)
 
     # ── 状态 ──
     def isChecked(self) -> bool:
@@ -142,7 +142,7 @@ class ToggleSwitch(QWidget):
 class SegmentedControl(QFrame):
     """多选一分段控件（对应 AI-Canvas 的 grid grid-cols-N 单选组）"""
 
-    changed = pyqtSignal(str)
+    changed = Signal(str)
 
     def __init__(
         self,
@@ -489,8 +489,8 @@ class PreferenceCard(QFrame):
     对应 AI-Canvas .sidebar-pref-card（含 .is-floating 选中态）
     """
 
-    toggled = pyqtSignal(str, bool)   # (key, value)
-    clicked = pyqtSignal(str)         # (key)  —— 仅点卡片主体
+    toggled = Signal(str, bool)   # (key, value)
+    clicked = Signal(str)         # (key)  —— 仅点卡片主体
 
     def __init__(
         self,
@@ -603,7 +603,7 @@ class PresetCard(QFrame):
         ├─ 圆点 + 预设名 + 当前使用 chip ─┤ ← 底部
     """
 
-    activated = pyqtSignal(str)
+    activated = Signal(str)
 
     def __init__(
         self,
@@ -952,7 +952,7 @@ class _PresetPreview(QWidget):
         for i in range(2):
             w_factor = 1.0 if i == 0 else 0.7
             p.setPen(Qt.PenStyle.NoPen)
-            # 注意：PyQt6 的 QColor 没有 (str, alpha) 重载 —— 必须用 _rgb() 走
+            # 注意：PySide6 的 QColor 没有 (str, alpha) 重载 —— 必须用 _rgb() 走
             # QColor(name) + setAlpha()。V4.43.4 曾误写成 QColor("#fff", 80)，
             # 真机一渲染 paintEvent 就抛 TypeError（静态门禁查不出来）。
             p.setBrush(QBrush(_rgb("#ffffff" if not is_light else "#1a1a26", 80)))

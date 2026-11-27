@@ -9,6 +9,13 @@
   - BSRGAN (HuggingFace: Faldom/BSRGAN)
 
 回退策略: ONNX → PyTorch → OpenCV DNN → 传统插值
+
+T2 本地优先（2026-11-20）:
+  - 模型权重**绝不自动下载、不随包**：只探测用户自取放置的本地文件，
+    缺失时诚实降级并给出 guidance（获取方式见「下载中心」tool_weights）。
+  - 自取路径：SHIGUANG_REALESRGAN_PATH 整文件 / thirdparty/models/realesrgan_x4plus.onnx。
+  - 原 onnx-community/RealESRGAN_x4plus 仓已不存在（T0 核实），
+    资源地址改 https://huggingface.co/qualcomm/Real-ESRGAN-x4plus（BSD-3-Clause）。
 """
 
 import numpy as np
@@ -20,6 +27,7 @@ logger = logging.getLogger("AI短剧编辑器.super_resolution")
 
 # ── 模型规格 ──────────────────────────────────────────────
 
+# 历史仓 id：不再用于下载（T2：绝不自动下载；仅留作历史标识）
 REALESRGAN_ONNX = "onnx-community/RealESRGAN_x4plus"
 BSRGAN_ONNX = "Faldom/BSRGAN"
 
@@ -62,6 +70,52 @@ def find_espcn_model(scale: int) -> str:
     return ""
 
 
+# ── T2（2026-11-20）：RealESRGAN 本地优先 —— 绝不自动下载，只认用户自取放置的权重 ──
+
+REALESRGAN_FILENAME = "realesrgan_x4plus.onnx"
+
+#: 权重缺失时给用户的自取指引（与 tool_weights 下载中心同一文案，单一真源）。
+REALESRGAN_GUIDANCE = (
+    "未检测到 RealESRGAN x4plus 超分权重（realesrgan_x4plus.onnx）。本软件绝不自动下载模型：\n"
+    "【资源地址（BSD-3-Clause，T0 已核）】\n"
+    "  · https://huggingface.co/qualcomm/Real-ESRGAN-x4plus\n"
+    "【部署步骤】\n"
+    "  1. 获取 RealESRGAN_x4plus 的 ONNX 权重，放置时命名为 realesrgan_x4plus.onnx。\n"
+    "  2. 放到以下任一位置：\n"
+    "     ① 环境变量 SHIGUANG_REALESRGAN_PATH 指向的完整文件路径；\n"
+    "     ② 仓库 thirdparty/models/realesrgan_x4plus.onnx。\n"
+    "  3. 重启画布桥后重试「画质增强」。缺失时诚实降级双三次插值（degraded=True）。"
+)
+
+
+def realesrgan_search_paths() -> List[str]:
+    """RealESRGAN 权重的**候选路径**（按优先级，T2 本地优先）。
+
+    与 espcn_search_paths 同纪律：只找本地文件，绝不触发下载。
+      ① 环境变量 `SHIGUANG_REALESRGAN_PATH` 指向的**整文件**路径
+      ② `<仓库>/thirdparty/models/realesrgan_x4plus.onnx`
+    """
+    paths = []
+    env_file = os.environ.get("SHIGUANG_REALESRGAN_PATH", "").strip()
+    if env_file:
+        paths.append(env_file)
+    try:
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+        paths.append(os.path.join(repo, "thirdparty", "models", REALESRGAN_FILENAME))
+    except Exception:  # stability-gate: allow-swallow（可选搜索根探测：算不出 repo 根就只是少一个候选路径，不影响正确性）
+        pass
+    return paths
+
+
+def find_realesrgan_onnx() -> str:
+    """返回**实际存在**的 RealESRGAN 权重路径；都没有则返回空串（绝不自动下载）。"""
+    for p in realesrgan_search_paths():
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
 class SuperResolutionEngine:
     """
     超分辨率神经网络推理引擎。
@@ -97,14 +151,21 @@ class SuperResolutionEngine:
             return False
 
         # 方案1: RealESRGAN ONNX（最高质量）
+        # T2（2026-11-20）：**绝不自动下载** —— 只认用户自取放置的本地权重；
+        # 缺失时打 guidance 后落 ESPCN/双三次旧链（诚实降级，不冒充 AI）。
         if use_realesrgan and eng.backend == InferenceBackend.ONNX:
-            model_path = eng.download_model(REALESRGAN_ONNX)
+            model_path = find_realesrgan_onnx()
             if model_path:
                 self._model_name = "realesrgan"
                 if eng.load_onnx_model(model_path, self._model_name):
                     self._loaded = True
-                    logger.info(f"RealESRGAN 已加载: {scale}x")
+                    logger.info(f"RealESRGAN 已加载: {scale}x（本地自取权重: {model_path}）")
                     return True
+                # 加载失败 ⇒ 不认领（与 A-6 同纪律：防回退冒充 AI）
+                self._model_name = ""
+                logger.warning("RealESRGAN 权重在盘但加载失败（%s），不认领 realesrgan", model_path)
+            else:
+                logger.info("RealESRGAN 权重缺失，绝不自动下载。%s", REALESRGAN_GUIDANCE)
 
         # 方案2: OpenCV DNN ESPCN（轻量）
         #

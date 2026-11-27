@@ -13,7 +13,7 @@
      字面形态全计（硬零非棘轮，回流即 FAIL）；
   ② Protocol ``_EditorExportHost`` 体内无 ``_clips`` 声明、含 ``_timeline_store`` 声明；
   ③ 两文件 ``snapshot()`` 调用点合计 ≥ 9（消费出口接线在册，防「改回直读」漂移）；
-  ④ editor_export.py 顶层无 PyQt6 import（Qt 红线：核心层可被子进程复用）。
+  ④ editor_export.py 顶层无 PySide6/PyQt6/PyQt5 import（Qt 红线：核心层可被子进程复用）。
 
 用法（项目根执行）：
   .venv312\\Scripts\\python.exe _verify/check_export_store_consumption.py
@@ -96,16 +96,17 @@ def count_snapshot_calls(tree: ast.AST) -> int:
 
 
 def check_no_qt_top_level(tree: ast.AST, rel: str) -> None:
-    """④ 顶层（模块级）无 PyQt6 import；函数内延迟导入不计。"""
+    """④ 顶层（模块级）无 Qt 绑定 import；函数内延迟导入不计。"""
+    qt_bindings = ("PySide6", "PyQt6", "PyQt5")
     for st in tree.body:
         if isinstance(st, ast.Import):
             for a in st.names:
-                if a.name.split(".")[0] == "PyQt6":
-                    _fail(f"④ {rel} 顶层 import PyQt6（Qt 红线）")
+                if a.name.split(".")[0] in qt_bindings:
+                    _fail(f"④ {rel} 顶层 import Qt 绑定（Qt 红线）")
         elif isinstance(st, ast.ImportFrom):
             mod = (st.module or "").split(".")[0]
-            if st.level == 0 and mod == "PyQt6":
-                _fail(f"④ {rel} 顶层 from PyQt6 导入（Qt 红线）")
+            if st.level == 0 and mod in qt_bindings:
+                _fail(f"④ {rel} 顶层 from Qt 绑定导入（Qt 红线）")
 
 
 def main() -> int:

@@ -118,16 +118,16 @@ if (Test-Path $viteLog) {
     Get-Content $viteLog -Tail 10 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
 }
 
-# ── Step 5: 启动 PyQt6 主窗口 (后台, pythonw 无控制台) ──
+# ── Step 5: 启动 PySide6 主窗口 (后台, pythonw 无控制台) ──
 Write-Host ""
-Write-Host "[Step 5/6] 启动 PyQt6 主窗口 (pythonw)..." -ForegroundColor Yellow
+Write-Host "[Step 5/6] 启动 PySide6 主窗口 (pythonw)..." -ForegroundColor Yellow
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 $procQt = Start-Process -FilePath $VENV_PYTHON `
     -ArgumentList "$ROOT\main_qt6.py" `
     -WorkingDirectory $ROOT `
     -PassThru
-Write-Host "  PyQt6 PID=$($procQt.Id)" -ForegroundColor Cyan
+Write-Host "  PySide6 PID=$($procQt.Id)" -ForegroundColor Cyan
 
 # 等几秒让 Qt 初始化 canvas_bridge
 Write-Host "  等待 canvas_bridge (port=$BRIDGE_PORT) 就绪..." -ForegroundColor Yellow
@@ -151,7 +151,7 @@ Write-Host "  启动汇总" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host "  vite      : PID=$($procVite.Id)  port=$VITE_PORT  " -NoNewline
 if ($viteReady) { Write-Host "OK" -ForegroundColor Green } else { Write-Host "WARN" -ForegroundColor Red }
-Write-Host "  PyQt6     : PID=$($procQt.Id)" -NoNewline
+Write-Host "  PySide6     : PID=$($procQt.Id)" -NoNewline
 if (-not $procQt.HasExited) { Write-Host "OK (运行中)" -ForegroundColor Green } else { Write-Host "EXITED code=$($procQt.ExitCode)" -ForegroundColor Red }
 Write-Host "  bridge    : port=$BRIDGE_PORT  " -NoNewline
 if ($bridgeReady) { Write-Host "OK (已就绪)" -ForegroundColor Green } else { Write-Host "PENDING (按需启动)" -ForegroundColor Yellow }

@@ -65,8 +65,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import QPoint, QTimer, Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QListWidget,
     QProgressBar, QMessageBox,
 )

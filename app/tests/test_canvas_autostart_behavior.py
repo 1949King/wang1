@@ -68,3 +68,23 @@ def test_retries_are_bounded(monkeypatch) -> None:
     C.CharacterManagementModule._on_web_load_finished(s, False)
     assert s._canvas_load_retries == 3, "超过 3 次不再无限重试"
     assert any("加载失败" in x for x in s.status)
+
+
+def test_frozen_static_dist_does_not_require_package_json(monkeypatch, tmp_path) -> None:
+    """发布包只带 dist/public 时，静态画布不得被源码包清单拦截。"""
+    runtime = CR.CanvasRuntime()
+    monkeypatch.setattr(CR, "vendor_web_dir", lambda: tmp_path)
+    static_calls = []
+
+    def start_static():
+        static_calls.append(True)
+        return True, "静态画布已启动"
+
+    ready_results = iter([False, True])
+    monkeypatch.setattr(runtime, "_start_static_server", start_static)
+    monkeypatch.setattr(runtime, "is_ready", lambda: next(ready_results))
+
+    ok, message = runtime.ensure_started()
+
+    assert ok, message
+    assert static_calls, "完整 dist 应先走静态服务，不得要求 package.json"

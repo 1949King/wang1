@@ -37,9 +37,9 @@ import threading
 import time
 import sys as _sys
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
+from PySide6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
     QListWidgetItem, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
@@ -320,7 +320,7 @@ class EditorEffectsMixin:
         platform = self._platform_var.currentText() if hasattr(self, '_platform_var') else "抖音"
         
         # 显示进度对话框
-        from PyQt6.QtWidgets import QProgressDialog
+        from PySide6.QtWidgets import QProgressDialog
         progress = QProgressDialog("正在分析视频内容...", "取消", 0, 100, self)
         progress.setWindowTitle("TOP 0级AI智能剪辑")
         progress.setModal(True)
@@ -407,7 +407,7 @@ class EditorEffectsMixin:
         platform = platform_map.get(platform_text, Platform.DOUYIN)
         
         # 显示进度对话框
-        from PyQt6.QtWidgets import QProgressDialog
+        from PySide6.QtWidgets import QProgressDialog
         progress = QProgressDialog("正在分析视频爆款潜力...", "取消", 0, 100, self)
         progress.setWindowTitle("🔥 爆款预测分析")
         progress.setModal(True)
@@ -496,7 +496,7 @@ class EditorEffectsMixin:
             result_text += "\n⚠️ 以上预测和成功率均为启发式估算，非真实平台数据统计，仅供参考\n"
             
             # 显示结果对话框
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
             dialog = QDialog(self)
             dialog.setWindowTitle("🔥 爆款预测结果")
             dialog.setMinimumSize(600, 500)

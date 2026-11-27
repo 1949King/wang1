@@ -18,8 +18,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from PyQt6.QtCore import Qt, QTimer  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtCore import Qt, QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 SHOT_DIR = os.path.join(ROOT, "_verify")
 LOG = []
@@ -41,7 +41,7 @@ def find_editor(root: QWidget):
 def main() -> int:
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
     except ImportError:
         pass
 

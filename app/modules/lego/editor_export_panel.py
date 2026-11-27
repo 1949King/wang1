@@ -41,7 +41,7 @@ import shutil
 import logging
 import tempfile
 
-from PyQt6.QtWidgets import QMessageBox, QComboBox
+from PySide6.QtWidgets import QMessageBox, QComboBox
 
 from .core import EventType
 
@@ -153,7 +153,7 @@ class EditorExportPanelMixin:
         """把当前时间线导出为 OTIO / EDL / FCPXML（**不渲染视频**）。
 
         * 未安装 ``opentimelineio`` 时明确失败，绝不产出空/假文件；
-        * 真正的 OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PyQt6 之后段错误）；
+        * 真正的 OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PySide6 之后段错误）；
         * EDL(CMX3600) 天生只支持单条视频轨，多轨时会自动取主力视频轨（并告知）。
         """
         from app.core.interchange import otio_adapter
@@ -222,14 +222,14 @@ class EditorExportPanelMixin:
     def _import_timeline_document(self) -> bool:
         """导入 OTIO / EDL / FCPXML 为时间线片段（**追加模式**，整包可撤销）。
 
-        * OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PyQt6 之后段错误）；
+        * OTIO 读写发生在独立子进程（Qt 进程 import 它会在 PySide6 之后段错误）；
         * 未安装 ``opentimelineio`` 时明确失败，绝不产假数据；
         * 当前时间线非空时经确认**追加**在既有片段之后（不覆盖用户成果）；
         * 轨道落位：音频片段→音频轨、其余→视频轨（``timeline_widget.add_clip``
           强制对齐 track/type，多轨文档合并到主轨）；
         * 素材路径按文档原样；缺失文件如实提示（片段仍入轨，需重新链接素材）。
         """
-        from PyQt6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog
 
         from app.core.interchange import otio_adapter
         from app.core.interchange.editor_timeline_bridge import (
@@ -422,7 +422,7 @@ class EditorExportPanelMixin:
             # ── 先让用户选导出位置与格式（含时间线互操作格式）──
             # 放在拼接/转码之前：若选的是 OTIO/EDL/FCPXML，直接导出时间线文档，
             # 省掉整条 ffmpeg 拼接渲染（秒级完成）。
-            from PyQt6.QtWidgets import QFileDialog
+            from PySide6.QtWidgets import QFileDialog
             base_name = os.path.basename(source_clip_path)
             kernel_prefix = "Pro" if self._kernel_mode == "pro" else "Fast"
             default_name = f"[{kernel_prefix}]_{os.path.splitext(base_name)[0]}.{format}"

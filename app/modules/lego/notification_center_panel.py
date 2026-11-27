@@ -6,7 +6,7 @@
 展示系统消息 / 版本更新 / 反馈提交 / 告警四类应用内通知。
 
 数据源：app.core.notification_store（单例 + JSON 持久化）
-落点：PyQt6 主程序顶 navbar（V4.42.1 起，非画布模块）
+落点：PySide6 主程序顶 navbar（V4.42.1 起，非画布模块）
 
 布局：
     [1] 头部 · 标题 + 全部已读 + 关闭
@@ -28,9 +28,9 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QEvent
-from PyQt6.QtGui import QCursor, QColor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QPoint, QEvent
+from PySide6.QtGui import QCursor, QColor
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QApplication, QButtonGroup, QScrollArea, QGraphicsDropShadowEffect,
 )
@@ -90,8 +90,8 @@ def _format_time(ts: float) -> str:
 class _NotificationCard(QFrame):
     """单条通知：级别图标 + 标题 + 正文 + 时间 + 删除按钮"""
 
-    clicked = pyqtSignal(str)              # 通知 id
-    delete_requested = pyqtSignal(str)        # 通知 id
+    clicked = Signal(str)              # 通知 id
+    delete_requested = Signal(str)        # 通知 id
 
     def __init__(self, notification: Notification, parent=None):
         super().__init__(parent)
@@ -189,12 +189,12 @@ class NotificationCenterPanel(QFrame):
     """Trae IDE 风格通知中心下拉面板"""
 
     # 业务信号
-    mark_all_read_requested = pyqtSignal()
-    clear_all_requested = pyqtSignal()
-    check_update_requested = pyqtSignal()
-    feedback_requested = pyqtSignal()
-    delete_requested = pyqtSignal(str)        # 通知 id
-    item_clicked = pyqtSignal(str)            # 通知 id（UI 上等同于 mark_read）
+    mark_all_read_requested = Signal()
+    clear_all_requested = Signal()
+    check_update_requested = Signal()
+    feedback_requested = Signal()
+    delete_requested = Signal(str)        # 通知 id
+    item_clicked = Signal(str)            # 通知 id（UI 上等同于 mark_read）
 
     PANEL_WIDTH = 360
     PANEL_MAX_HEIGHT = 480

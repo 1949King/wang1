@@ -43,8 +43,8 @@ except OSError:
 def qt_app():
     """Qt 应用 fixture (session 级别, 整个测试套件共用 1 个 QApplication)"""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication(sys.argv)
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv or ["pytest"])
     yield app
     # 不主动 quit, 让 pytest 进程结束时自动清理
 

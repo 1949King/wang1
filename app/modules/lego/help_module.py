@@ -5,9 +5,9 @@
 提供 19 个帮助话题的搜索和浏览功能。
 """
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPixmap
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QLineEdit, QListWidget, QListWidgetItem,
     QStackedWidget
@@ -385,7 +385,7 @@ class HelpModule(BaseModule):
 
         self._subtitle("新手入门（建议按顺序搜索学习）")
         self._link_row("B站：AI视频剪辑软件入门", "https://search.bilibili.com/all?keyword=AI视频剪辑软件入门", "了解基本操作")
-        self._link_row("B站：PyQt6桌面软件界面介绍", "https://search.bilibili.com/all?keyword=视频剪辑软件界面介绍", "了解工作台布局")
+        self._link_row("B站：PySide6桌面软件界面介绍", "https://search.bilibili.com/all?keyword=视频剪辑软件界面介绍", "了解工作台布局")
         self._link_row("B站：短视频剪辑完整流程", "https://search.bilibili.com/all?keyword=短视频剪辑完整流程", "完整剪辑演示")
 
         self._subtitle("功能详解")
@@ -755,8 +755,8 @@ class HelpModule(BaseModule):
         self._text("左侧导航「AI 画布」加载自研「拾光导演台」（LibTV 向节点画布，"
                     "vendor/shiguang-canvas）。生成结果经 bridge 送回时间线。")
         self._subtitle("首次使用前置条件")
-        self._bullet(["需要 PyQt6-WebEngine：未安装时画布区域会显示红字错误，按提示"
-                      "`.venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0` 装好后完全重启软件",
+        self._bullet(["需要 PySide6 WebEngine（随 PySide6 完整包安装）：未安装时画布区域会显示红字错误，按提示"
+                      "`.venv312\\Scripts\\python.exe -m pip install PySide6==6.10.0` 装好后完全重启软件",
                       "自研导演台：`cd vendor/shiguang-canvas && npm install && npm run build`（有 dist 则秒开 :3011）",
                       "生图：导演台左侧选 AIGC 模型 →「生成选中节点」（走宿主代理）；无 Key/失败时用占位图仍可入轨"])
         self._subtitle("界面说明")
@@ -918,7 +918,7 @@ class HelpModule(BaseModule):
         # 立刻处理 deleteLater 队列：否则一轮搜索会攒下上百个"待删除"控件，
         # 它们短暂仍是顶层窗口（闪烁）+ 占内存。
         try:
-            from PyQt6.QtCore import QCoreApplication, QEvent
+            from PySide6.QtCore import QCoreApplication, QEvent
 
             QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         except Exception:  # stability-gate: allow-swallow（清理失败不影响搜索）

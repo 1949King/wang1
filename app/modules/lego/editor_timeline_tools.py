@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Iterable, Optional, Sequence, Set, Tuple
 
-from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import QApplication, QFrame, QWidget
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import QApplication, QFrame, QWidget
 
 logger = logging.getLogger(__name__)
 

@@ -84,6 +84,16 @@ class MediaCapabilityHandlers:
         如实回报实际使用的引擎，走降级路径时 degraded=True 必标注。"""
         return self._apply_enhance(req, "cutout")
 
+    def ai_face_restore(self, req: CapabilityRequest) -> CapabilityResult:
+        """AI 修脸（意图 face）：检测人脸区域做增强，无人脸时诚实「原样返回」。
+        复用 /host/canvas-enhance 同一实现（canvas_enhance.apply_intents）。"""
+        return self._apply_enhance(req, "face")
+
+    def ai_style(self, req: CapabilityRequest) -> CapabilityResult:
+        """AI 风格迁移（意图 style）：按画风重绘（style/strength 可传，缺省 cyberpunk/0.8）。
+        复用 /host/canvas-enhance 同一实现；模型未就绪时如实标 degraded（CPU 回退）。"""
+        return self._apply_enhance(req, "style")
+
     def video_depth(self, req: CapabilityRequest) -> CapabilityResult:
         """深度视频提取：复用 /host/video-depth 的 video_depth.extract_depth_video。
 
@@ -350,3 +360,44 @@ class MediaCapabilityHandlers:
             req.request_id, ok, output=res,
             error=None if ok else (res.get("reason") or "未落轨"),
         )
+
+
+# ── media 族注册（2026-10-29 从 capability_handlers.py 迁入）────────────
+# 为什么迁：capability_handlers.py 顶到 2005 行破 check_file_size 2000 行守卫，
+# 按「只减不增」纪律本应拆文件；media 族注册语句内聚在本模块（handler 也在
+# 本模块）⇒ 一并迁入，原处只留一行调用。能力目录真源仍是
+# agent_capability_catalog.CAPABILITY_ROWS（注册语句只负责「handler 绑定」）。
+def register_media_capabilities(dispatcher, media_handlers: "MediaCapabilityHandlers") -> None:
+    """把 media 族 canvas 能力绑到 dispatcher（幂等语义由 dispatcher.register 保证）。"""
+    from app.core.capability_dispatcher import CapabilityCategory
+
+    dispatcher.register("canvas.ai_upscale", CapabilityCategory.CANVAS,
+                        media_handlers.ai_upscale, "AI 超分放大（ESPCN/RealESRGAN，如实回报引擎）")
+    dispatcher.register("canvas.ai_matte", CapabilityCategory.CANVAS,
+                        media_handlers.ai_matte, "AI 抠像换背景（降级必标注）")
+    # 刀 B 配套（2026-10-29）：face_restore / style_transfer 两个 library-only 引擎接画布入口
+    dispatcher.register("canvas.ai_face_restore", CapabilityCategory.CANVAS,
+                        media_handlers.ai_face_restore, "AI 修复人脸（无人脸原样返回，如实回报）")
+    dispatcher.register("canvas.ai_style", CapabilityCategory.CANVAS,
+                        media_handlers.ai_style, "AI 风格迁移（style/strength 可调，降级必标注）")
+    dispatcher.register("canvas.video_depth", CapabilityCategory.CANVAS,
+                        media_handlers.video_depth, "深度视频提取（模型缺失时诚实失败）")
+    dispatcher.register("canvas.reference_breakdown", CapabilityCategory.CANVAS,
+                        media_handlers.reference_breakdown, "逐帧拉片 L1（参考片→结构化镜头表）")
+    # 拉片 L2（2026-10-14 补缺）：深度运镜推断 + 可选云端视觉景别 enrich（素材出域显式开启）
+    dispatcher.register("canvas.reference_breakdown_l2", CapabilityCategory.CANVAS,
+                        media_handlers.reference_breakdown_l2,
+                        "逐帧拉片 L2（运镜深度推断+景别视觉 enrich，置信度门槛如实标注）")
+    # 指令式视频编辑（2026-10-15）：Seedance Base64 / Kling 公网 URL 双渠道，失败保原镜
+    dispatcher.register("canvas.video_edit", CapabilityCategory.CANVAS,
+                        media_handlers.video_edit,
+                        "指令式视频编辑（改原片不重生成；失败保原镜，诚实标注）")
+    dispatcher.register("canvas.segment_retake", CapabilityCategory.CANVAS,
+                        media_handlers.segment_retake, "片段重拍（保音轨/时长对齐）")
+    # LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线
+    # （DirectorSkill 同源薄委托 → script_writer / director_timeline 单一真源）
+    dispatcher.register("pipeline.script_write", CapabilityCategory.PIPELINE,
+                        media_handlers.script_write, "文本生剧本（主题→LLM 剧本，降级如实标注）")
+    dispatcher.register("pipeline.director_apply_timeline", CapabilityCategory.PIPELINE,
+                        media_handlers.director_apply_timeline,
+                        "分镜表+素材目录按镜序入轨（DirectorSkill 步骤5.5 同源）")

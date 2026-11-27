@@ -11,8 +11,8 @@ from typing import Any, Callable, List, Optional, Sequence
 _READ_ACTIONS = frozenset({"answer", "info"})
 
 try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
         QDialog,
         QDialogButtonBox,
         QHBoxLayout,
@@ -102,7 +102,7 @@ def pick_checked_indices(
 ) -> Optional[List[int]]:
     """弹出勾选清单。None=取消；[]=确认但一项都没勾。"""
     if QDialog is None or Qt is None:
-        raise RuntimeError("PyQt6 不可用")
+        raise RuntimeError("PySide6 不可用")
     dlg = _SuggestChecklistDialog(
         parent,
         title=title,

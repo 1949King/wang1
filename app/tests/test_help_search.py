@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def app():
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     a = QApplication.instance() or QApplication(["help-test"])
     yield a
@@ -37,7 +37,7 @@ def test_topics_include_disclaimer(help_module):
 
 
 def test_search_creates_no_new_top_level_windows(app, help_module):
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     before = {id(w) for w in QApplication.topLevelWidgets()}
     help_module._help_search.setText("团队协作")

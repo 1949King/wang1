@@ -21,14 +21,14 @@ from typing import Any, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 try:
-    from PyQt6.QtCore import Qt, QPointF, QRectF, pyqtSignal
-    from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
-    from PyQt6.QtWidgets import QMenu, QWidget
+    from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+    from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+    from PySide6.QtWidgets import QMenu, QWidget
 except Exception:  # pragma: no cover
     Qt = QPointF = QRectF = None  # type: ignore
     QColor = QPainter = QPainterPath = QPen = None  # type: ignore
     QMenu = QWidget = None  # type: ignore
-    pyqtSignal = None  # type: ignore
+    Signal = None  # type: ignore
 
 from app.core.keyframe_animation import (
     EasingType,
@@ -57,11 +57,11 @@ _MARGIN = 28
 class KeyframeCurveEditor(QWidget):
     """单属性通道关键帧曲线编辑器。"""
 
-    keyframes_changed = pyqtSignal(list) if pyqtSignal is not None else None
+    keyframes_changed = Signal(list) if Signal is not None else None
 
     def __init__(self, parent=None, value_range=(0.0, 1.0), fps: float = 30.0):
         if QWidget is None:
-            raise RuntimeError("PyQt6 不可用")
+            raise RuntimeError("PySide6 不可用")
         super().__init__(parent)
         self._keyframes: List[dict] = []
         self._value_range: Tuple[float, float] = value_range

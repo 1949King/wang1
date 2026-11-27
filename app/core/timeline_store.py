@@ -14,7 +14,7 @@
   （``to_timeline`` 走 ``editor_timeline_bridge`` 确定性构建）由 store 提供单一出口，
   供刀2（撤销/持久化）与刀3（消费端）接入。
 
-Qt 红线：本模块**不得 import PyQt6**（桥接层为纯数据，可被子进程复用）。
+Qt 红线：本模块**不得 import PyQt6/PySide6**（桥接层为纯数据，可被子进程复用）。
 """
 from __future__ import annotations
 

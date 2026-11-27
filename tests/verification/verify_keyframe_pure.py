@@ -1,6 +1,6 @@
 """
 P1#8 关键帧可视化 - 纯逻辑层回归测试（不实例化 QFrame）
-原因：PyQt6 6.11 中 QLabel.setEllipsize 已被移除（既有 bug，与本任务无关），
+原因：Qt 6.11 绑定中 QLabel.setEllipsize 已被移除（既有 bug，与本任务无关），
      完整 ClipWidget.__init__ 会触发该路径。改为只测纯逻辑方法：
        - _coerce_keyframes 静态方法
        - KEYFRAME_COLORS 覆盖
@@ -84,7 +84,7 @@ def test_color_for_prop_default():
 
 def test_class_signals_exist():
     """keyframe_clicked 信号定义存在（让 TimelineWidget 桥接可用）"""
-    # pyqtSignal 在类上是 attribute，验证类有
+    # Signal 在类上是 attribute，验证类有
     assert hasattr(ClipWidget, 'keyframe_clicked'), "ClipWidget 缺 keyframe_clicked 信号"
     # 验证类本身可被 import（说明 modules.py 编译 OK）
     assert ClipWidget.__name__ == 'ClipWidget'

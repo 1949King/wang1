@@ -17,12 +17,12 @@
 import os
 import logging
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QListWidget, QListWidgetItem, QMenu,
 )
-from PyQt6.QtCore import Qt, QMimeData, QUrl
-from PyQt6.QtGui import QDrag
+from PySide6.QtCore import Qt, QMimeData, QUrl
+from PySide6.QtGui import QDrag
 
 from .base_module import BaseModule
 
@@ -257,7 +257,7 @@ class MaterialsModule(BaseModule):
 
     def _import_single_file(self, type_key: str):
         """导入单个文件到指定素材类型"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
         _, exts = self._local_type_names[type_key]
         ext_filter = f"{type_key} 文件 (" + " ".join(f"*.{e}" for e in exts) + ")"
         file_path, _ = QFileDialog.getOpenFileName(self, f"选择{type_key}文件", "", ext_filter)
@@ -348,7 +348,7 @@ class MaterialsModule(BaseModule):
 
     def _import_local_assets(self):
         """导入本地文件到素材库"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
         all_exts = []
         for _, exts in self._local_type_names.values():
             all_exts.extend(f"*.{e}" for e in exts)
@@ -389,7 +389,7 @@ class MaterialsModule(BaseModule):
 
     def _browse_local_folder(self, type_key: str):
         """浏览文件夹，批量导入素材到指定类型"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
         folder = QFileDialog.getExistingDirectory(self, "选择素材文件夹")
         if not folder:
             return

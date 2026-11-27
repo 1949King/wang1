@@ -1,6 +1,6 @@
 # 拾光剪影
 
-> **剪辑 + AI 生成的近乎全能工作台** — PyQt6 桌面应用，一句话：**从素材/分镜到成片的本地一体化创作台**（「想法→成片」是方向：S0 选题 / S1 长篇剧本 / S2 母版层待补）。
+> **剪辑 + AI 生成的近乎全能工作台** — PySide6 桌面应用，一句话：**从素材/分镜到成片的本地一体化创作台**（「想法→成片」是方向：S0 选题 / S1 长篇剧本 / S2 母版层待补）。
 > 当前版本 **V4.47.0**（主程序，`app/version.py`）· 画布 **0.3.33**（`vendor/packages/canvas-core`，独立版本线）
 
 ---
@@ -29,7 +29,7 @@
 
 | 层 | 技术 |
 |---|---|
-| 桌面壳 | Python 3.12 + PyQt6（Fusion + 深/浅双主题，`theme_tokens.py` 单一配色真相源） |
+| 桌面壳 | Python 3.12 + PySide6 6.10.2 / Qt 6.10.2（Fusion + 深/浅双主题，`theme_tokens.py` 单一配色真相源） |
 | 视频处理 | FFmpeg · OpenCV · PyAV · MLT（双内核） |
 | 画布前端 | TypeScript · React 19 · Zustand · Three.js · @xyflow/react · Vite |
 | 通信 | 本地 HTTP + SSE（`canvas_server.py`，端口 18765）+ 粘合层契约（`app/core/glue/`） |

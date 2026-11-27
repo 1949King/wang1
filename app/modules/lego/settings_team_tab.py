@@ -20,8 +20,8 @@ import html
 import logging
 import re
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -109,7 +109,7 @@ def _open_panel(host: QWidget) -> None:
         fn()
         return
     # 拿不到主窗口时不静默：告诉用户唯一可靠的手工入口
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     QMessageBox.information(
         host,

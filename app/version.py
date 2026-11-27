@@ -1,13 +1,17 @@
-__version__ = "4.47.0"
+__version__ = "4.47.1"
 
 # 详细的版本元信息
 VERSION_INFO = {
     "major": 4,
     "minor": 47,
-    "patch": 0,
-    "codename": "P0 推理缓存三件套：DeepCache/MLA/前缀缓存理念移植进自研 diffusers 栈",
-    "release_date": "2026-10-25",
+    "patch": 1,
+    "codename": "补丁：主题切换收敛为单一机制，修复设置页浅底浅字",
+    "release_date": "2026-11-27",
     "description": (
+        "V4.47.1 补丁（2026-11-27）：主题切换收敛为单一机制（只由 ThemeManager\n"
+        "驱动，所有入口统一回调各模块），修复标题栏主题按钮后设置页「浅底浅字」、\n"
+        "分组标题发浅、切回深色留白框、主题下拉框不同步。\n"
+        "\n【以下为 V4.47.0 基线说明】\n"
         "V4.47.0：把 DeepSeek 三项推理理念（MLA 低秩压缩 / PagedAttention 块池与前缀\n"
         "缓存 / MoE 按需卸载）移植进自研 diffusers 栈，全部收敛在单一新文件\n"
         "app/core/neural/inference_cache.py，主引擎只做薄接线。设计依据：\n"

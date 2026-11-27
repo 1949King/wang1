@@ -18,9 +18,9 @@ from typing import Dict, List, Optional, Callable, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
-from PyQt6.QtGui import QKeySequence
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QObject, Signal
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QKeySequenceEdit, QMessageBox,
     QLineEdit, QComboBox, QWidget,
@@ -148,11 +148,11 @@ class ShortcutManager(QObject):
     最小复现与条件对照见 `docs/冷启动性能诊断报告.md` §7.5b。
     """
 
-    shortcut_changed = pyqtSignal(str, str)  # (action_id, new_key)
+    shortcut_changed = Signal(str, str)  # (action_id, new_key)
 
     def __init__(self, config_path: str = ""):
         # ⚠️ super().__init__() 必须在任何 self 属性访问之前调用：
-        # PyQt6 在 QObject 基类未初始化时读取实例属性会抛
+        # 历史 PyQt6 实现在 QObject 基类未初始化时读取实例属性会抛
         # `RuntimeError: super-class __init__() of type X was never called`。
         super().__init__()
         if getattr(self, '_initialized', False):
@@ -536,7 +536,7 @@ class ShortcutEditorDialog(QDialog):
 
     def _on_export(self):
         """导出配置"""
-        from PyQt6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             self, "导出快捷键配置", "shortcuts.json",
             "JSON Files (*.json)"
@@ -549,7 +549,7 @@ class ShortcutEditorDialog(QDialog):
 
     def _on_import(self):
         """导入配置"""
-        from PyQt6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(
             self, "导入快捷键配置", "",
             "JSON Files (*.json)"

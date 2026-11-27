@@ -3,7 +3,7 @@
 
 断言：
   ① 结构在册：三态 draft/ready/blocked / IdeaCard 字段齐 / 模块级薄封装在
-  ② 纯模型纪律：无 PyQt6/requests/sqlite3 / 无 print / 无文件 IO
+  ② 纯模型纪律：无 PySide6/PyQt6/PyQt5/requests/sqlite3 / 无 print / 无文件 IO
   ③ 不猜题材受众：create_idea_card 缺省留空，validate 必须报错（不自动补值）
   ④ status 三值硬：set_status 非法值 ValueError；from_dict 遇到非法字符串**原样保留**
      （交给 validate 报错，不静默回落成 draft）
@@ -39,7 +39,7 @@ def _src() -> str:
 def _code_only() -> str:
     """剥掉注释与字符串字面量，只留会执行的代码。
 
-    文档字符串里正常会写「不 import PyQt6」这类说明，全文 grep 会把说明
+    文档字符串里正常会写「不 import Qt 绑定」这类说明，全文 grep 会把说明
     当成依赖（本守卫首跑即误报）。
     """
     import tokenize
@@ -81,7 +81,7 @@ def check_surface() -> None:
 
 def check_purity() -> None:
     src = _code_only()
-    for token in ("PyQt6", "requests", "sqlite3", "subprocess", "QApplication"):
+    for token in ("PySide6", "PyQt6", "PyQt5", "requests", "sqlite3", "subprocess", "QApplication"):
         if token in src:
             _fail(f"② 纯模型模块出现运行时依赖：{token}")
     if "print" in src:

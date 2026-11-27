@@ -5,13 +5,13 @@
 """
 
 import sys
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QLineEdit, QMessageBox, QStackedWidget, QFormLayout,
     QComboBox, QTabWidget
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 from license.license_manager import LicenseManager, LicenseDialog, get_license_manager
 
@@ -227,7 +227,7 @@ class LoginWindow(QMainWindow):
 
 def main():
     """主函数"""
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
     
     app = QApplication(sys.argv)
     

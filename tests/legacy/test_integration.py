@@ -8,8 +8,8 @@ import sys
 import time
 
 # 必须先创建 QApplication
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer
 app = QApplication(sys.argv)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

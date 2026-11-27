@@ -49,6 +49,25 @@ _PROMPT = (
 )
 
 
+# ── 视觉 backend 注入（2026-11-14）──
+# 默认 None ⇒ _ask_vision 行为与改造前**逐字等价**（仍走本机 Ollama）。
+# 只有显式 set_vision_backend(...) 才切到云端多模态；出域授权由 backend 自己把关，
+# 见 app/core/ai/vision_backends.py。刻意做成模块级注入而非改 enrich_shot_table 的
+# 签名，是为了不碰任何调用方、不破坏既有「素材不出机」承诺。
+_VISION_BACKEND = None
+
+
+def set_vision_backend(backend) -> None:
+    """注入视觉后端；传 None 恢复默认本地 Ollama。"""
+    global _VISION_BACKEND
+    _VISION_BACKEND = backend
+
+
+def get_vision_backend():
+    """取当前视觉后端（None = 本地默认路径）。"""
+    return _VISION_BACKEND
+
+
 def _ollama_client():
     """延迟取 Ollama 客户端（避免顶层导入顺序问题）。"""
     try:
@@ -190,9 +209,20 @@ def _parse_json_obj(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _ask_vision(model: str, frames: List[bytes]) -> Optional[Dict[str, Any]]:
-    """把帧发给本机视觉模型，返回解析后的 dict；失败返回 None。"""
+    """把帧发给视觉模型，返回解析后的 dict；失败返回 None。
+
+    注入 backend 时走 backend；未注入时保持原 Ollama 路径不变（零行为变化）。
+    backend.ask 自带 JSON 自校验 / 空响应检测 / 出域授权，见 vision_backends.py。
+    """
     if not frames:
         return None
+    backend = get_vision_backend()
+    if backend is not None:
+        try:
+            return backend.ask(model, frames, _PROMPT)
+        except Exception as e:
+            logger.debug("[vision] 注入 backend 调用失败，本次降级：%s", e, exc_info=True)
+            return None
     images = [base64.b64encode(b).decode("ascii") for b in frames]
     client = _ollama_client()
     try:
@@ -238,7 +268,13 @@ def enrich_shot_table(res: Dict[str, Any], video_path: str, model: str = "") -> 
         res["vision_message"] = "视频文件缺失，已降级为像素启发式"
         return res
 
-    resolved = _resolve_vision_model(model)
+    backend = get_vision_backend()
+    if backend is not None:
+        # 云端 backend 自己决定模型，跳过「本机是否有视觉模型」的检查；
+        # 出域授权与凭据仍由 backend.ask_detailed 把关，这里不代替它放行。
+        resolved = str(getattr(backend, "model", "") or model or "cloud-vision")
+    else:
+        resolved = _resolve_vision_model(model)
     if not resolved:
         res["vision_fallback"] = True
         res["vision_message"] = "本机未发现视觉模型，已降级为像素启发式（请在配置页安装并选择）"

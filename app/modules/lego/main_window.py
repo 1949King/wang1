@@ -9,14 +9,14 @@ from dataclasses import dataclass
 from enum import Enum
 import logging
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QLabel, QPushButton, QFrame,
     QStatusBar, QSizePolicy, QScrollArea, QSpacerItem,
     QTabWidget, QSplitter, QToolBar, QApplication
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QSettings
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QSettings
+from PySide6.QtGui import QIcon, QFont, QColor, QAction
 
 from .core import EventBus, EventType, MasterClock, DataBus
 from .auth import auth_service  # 修复 P0-A: 移除 main_window.py 内的伪 User/AuthService,统一从 auth 模块导入
@@ -300,8 +300,8 @@ def _make_nav_toggle_icon(collapsed: bool, color: str) -> "QIcon":
       2. 语义抽象 —— 看不出它管的是「整条导航栏」，而非某个具体功能；
       3. 旧样式把颜色写死成深色主题色，浅色主题下对比度掉到 2.0:1。
     """
-    from PyQt6.QtCore import QPointF, QRectF
-    from PyQt6.QtGui import QGuiApplication, QPainter, QPen, QPixmap, QPolygonF
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QGuiApplication, QPainter, QPen, QPixmap, QPolygonF
 
     # 高分屏：位图按屏幕 DPR 放大、再设回 DPR，保证边缘锐利
     try:
@@ -354,7 +354,7 @@ def _make_nav_toggle_icon(collapsed: bool, color: str) -> "QIcon":
 class NavigationBar(QWidget):
     """左侧导航栏 - 剪映深色风格"""
     
-    module_selected = pyqtSignal(str)
+    module_selected = Signal(str)
     
     def __init__(self):
         super().__init__()
@@ -961,7 +961,7 @@ class MainWindow(QMainWindow):
         由设置面板的「功能开关」保存后调用。
         使用 QTimer 延迟到下一个事件循环，避免阻塞UI
         """
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._apply_module_changes_impl)
 
     def _apply_module_changes_impl(self):
@@ -1112,7 +1112,7 @@ class MainWindow(QMainWindow):
 
     def _load_module_with_progress(self, module_id: str):
         """带进度的模块加载"""
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
         QTimer.singleShot(50, lambda: self._perform_module_load(module_id))
 
     def _perform_module_load(self, module_id: str):
@@ -1206,6 +1206,21 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.debug("同步用户中心面板主题失败: %s", e)
 
+    def refresh_module_themes(self, actual_theme):
+        """主题回调：由 ThemeManager.apply_theme 在全局 QSS 生效后调用（单一机制）。
+
+        给所有已加载模块调用 set_theme：基类实现只同步 theme 属性；重写了 set_theme
+        的模块（如设置模块）借此刷新自己的内联样式，保证与全局主题一致。
+        任何切换入口（标题栏按钮 / 设置页下拉框 / 按时间切换 / 画布设置页）
+        都经过 ThemeManager，所以不会再出现「全局换了、某模块没换」。
+        """
+        for module_id, module_info in self._modules.items():
+            if module_info.instance:
+                try:
+                    module_info.instance.set_theme(actual_theme)
+                except Exception as e:
+                    logger.debug("模块 %s 主题刷新失败: %s", module_id, e)
+
     def _apply_theme(self, theme):
         """
         应用主题 - 通过 ThemeManager 统一管理
@@ -1227,15 +1242,8 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.debug("导航栏主题更新失败: %s", e)
 
-        # 给所有已加载模块设置 theme 属性（不调用 set_theme 避免重复触发）
-        for module_id, module_info in self._modules.items():
-            if module_info.instance:
-                try:
-                    module_info.instance.setProperty("theme", actual_theme)
-                    for child in module_info.instance.findChildren(QWidget):
-                        child.setProperty("theme", actual_theme)
-                except Exception as e:
-                    logger.debug("模块 %s 主题属性设置失败: %s", module_id, e)
+        # 模块级刷新（theme 属性 + 各模块自身内联样式）统一由 ThemeManager 回调
+        # refresh_module_themes() 完成，保证所有切换入口行为一致（2026-11-27）
 
         # 持久化主题设置
         self._settings.setValue("theme", theme)
@@ -1594,10 +1602,67 @@ class MainWindow(QMainWindow):
         self._popup_user_center()
 
     def _on_team_btn_clicked(self):
-        """顶栏「👥 团队」—— 切到 AI 画布并弹出它的团队协调面板。
+        """顶栏「👥 团队」—— **在哪个模块就弹哪个**，绝不把人从当前工作里搬走。
 
-        为什么不是「弹一个 Qt 原生团队面板」：团队面板（本机服务 / 连别人 / 共享项目 /
-        交接 / 收件箱）已经完整实现在画布里（`vendor/packages/canvas-core/src/TeamPanel.tsx`），
+        2026-11-04 用户实机反馈：在剪辑器里点「团队」也被强行切到画布，手上的上下文丢了。
+        根因是这个按钮以前只有一条路（切画布 + 唤起 `TeamPanel`），而 `TeamPanel` 跟画布
+        状态是硬绑的（`selectedId` 批注锚点、`getProjectBundle()` 上传、`loadProjectBundle()`
+        拉取、`setSelected()` 定位）—— 所以它搬不出来，但**「起服务 / 出码 / 加入 / 看谁在线」
+        这几件事本来就不需要画布**，凭什么非得进画布才能做？
+
+        于是拆成两半（产品形态由用户 2026-11-04 选定「连接小窗 + 布局后置」）：
+          · **在画布** → 原样弹 `TeamPanel`（内容层：上传/拉取/版本/批注/评审）
+          · **不在画布** → 弹 `TeamQuickPanel`（连接层），并留一个「在画布中打开完整面板」
+        两半共用同一个 team hub，小窗不缓存任何团队状态（现问现取），不是第二套状态机。
+        """
+        if self._current_module == "characters":
+            self._open_canvas_team_panel()
+            return
+        self._show_team_quick_panel()
+
+    def _show_team_quick_panel(self):
+        """在任意模块弹出团队连接小窗 —— 不切模块、不启动画布、秒开。"""
+        panel = getattr(self, "_team_quick_panel", None)
+        try:
+            if panel is None:
+                from .team_quick_panel import TeamQuickPanel
+
+                # parent 必须是主窗口，不能是 None：
+                #   · parent=None ⇒ 它是个「没有主人」的顶层窗口，主窗口关掉/最小化它不跟着走，
+                #     用户会看到「我已经关了软件，团队窗口还在」这种鬼东西；
+                #   · parent=主窗口 ⇒ Qt 把它挂成主窗口的 transient，跟着主人一起收，
+                #     窗口样式也沿 parent 链继承，不用自己再造一套。
+                # 2026-11-04 用户实机指出「它跟项目窗口没关系、关掉还在」——
+                # 根因就是这里传了 None。
+                panel = TeamQuickPanel(theme_manager=ThemeManager.instance(), parent=self)
+                panel.open_full_requested.connect(self._on_team_open_full)
+                # 留引用防 GC；主窗口销毁时 Qt 会连带删掉 C++ 对象，所以还要清引用，
+                # 否则下次访问就是一个已析构的壳（RuntimeError: wrapped C/C++ object deleted）
+                self._team_quick_panel = panel
+                panel.destroyed.connect(self._on_team_quick_panel_destroyed)
+            panel.popup_below(self._team_btn)
+        except Exception:
+            logger.exception("团队连接小窗打不开")
+            self.show_status("团队小窗打不开，去画布里用完整面板", "#ef4444")
+
+    def _on_team_quick_panel_destroyed(self, *_args):
+        """小窗被 Qt 销毁（主窗口关闭）时清引用。
+
+        不清的话，下次点「团队」拿到的 `self._team_quick_panel` 是一个已析构的壳，
+        调 `popup_below` 会抛 `RuntimeError: wrapped C/C++ object of type TeamQuickPanel has been deleted`
+        —— 而且这个错误看起来像"团队功能坏了"，实际只是引用没清。
+        """
+        self._team_quick_panel = None
+
+    def _on_team_open_full(self):
+        """小窗里点了「在画布中打开完整面板」：切画布 + 唤起（用户主动跳，不是被绑架）。"""
+        self._open_canvas_team_panel()
+
+    def _open_canvas_team_panel(self):
+        """切到 AI 画布并弹出它的团队协调面板（原 `_on_team_btn_clicked` 的全部逻辑）。
+
+        为什么不是「弹一个 Qt 原生完整团队面板」：团队面板（共享项目 / 交接 / 收件箱 /
+        版本历史 / 批注评审）已经完整实现在画布里（`vendor/packages/canvas-core/src/TeamPanel.tsx`），
         再写一套 = 两套状态机抢同一个 team hub，必然一边新一边旧。这里只做「跳转 + 唤起」。
 
         为什么必须走 `_perform_module_load` 而不是 `switch_to_module`：后者只认导航栏里的
@@ -1623,7 +1688,7 @@ class MainWindow(QMainWindow):
 
     def _push_team_panel(self, attempt: int = 0):
         """轮询探测画布是否已挂上 `window.__sgTeamOpen`，就绪即唤起团队面板。"""
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         info = self._modules.get("characters")
         web = getattr(getattr(info, "instance", None), "_web", None)
@@ -1647,7 +1712,7 @@ class MainWindow(QMainWindow):
 
     def _on_team_panel_probe(self, res, attempt: int):
         """`runJavaScript` 回调：'ok' = 面板已唤起；'pending' = 画布还没加载完，继续等。"""
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         if res == "ok":
             self.show_status("已打开画布团队面板", "#14b8a6")
@@ -1871,8 +1936,8 @@ class MainWindow(QMainWindow):
     def _stop_all_media_on_exit(self):
         """关闭前强制停止所有 QMediaPlayer，防止幽灵音频。"""
         try:
-            from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-            from PyQt6.QtCore import QUrl
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtCore import QUrl
         except Exception:
             return
         # 模块级（剪辑主音/BGM）

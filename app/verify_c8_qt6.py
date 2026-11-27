@@ -14,8 +14,8 @@ t0 = time.time()
 
 # 1. 启动 Qt6
 print(f"[1/5] 启动 QApplication...")
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer
 app = QApplication(sys.argv)
 print(f"  ✅ QApplication 启动成功 ({time.time()-t0:.2f}s)")
 

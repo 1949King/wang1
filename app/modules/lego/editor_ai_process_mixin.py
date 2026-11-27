@@ -10,8 +10,8 @@ EditorAiProcessMixin: 从 editor_module.py 抽出的 AI 处理方法。
 import os, logging, subprocess, threading
 import sys as _sys
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
     QMessageBox, QApplication
 )
 

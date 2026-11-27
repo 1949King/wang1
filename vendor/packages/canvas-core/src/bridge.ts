@@ -651,6 +651,51 @@ export async function inpaintViaHost(opts: {
   }
 }
 
+/** T3 局部语义编辑（本地优先 + 可选网关）：inpaint/remove/outpaint。
+ *  宿主 /host/gateway-edit 先走本地 SD1.5/LaMa，再可选网关；未启用诚实返 guidance。 */
+export async function gatewayEdit(opts: {
+  mode: "inpaint" | "remove" | "outpaint";
+  image: string;
+  mask?: string;
+  prompt?: string;
+  model?: string;
+  channel_id?: string;
+  megapixels?: number;
+  size?: string;
+}): Promise<{
+  ok: boolean;
+  message?: string;
+  guidance?: string;
+  image_data_url?: string;
+  engine?: string;
+  degraded?: boolean;
+  mode?: string;
+}> {
+  const token = bridgeToken();
+  try {
+    const res = await fetch(
+      `${BRIDGE}/host/gateway-edit?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          mode: opts.mode,
+          image: opts.image,
+          mask: opts.mask || "",
+          prompt: opts.prompt || "",
+          model: opts.model || "",
+          channel_id: opts.channel_id || "",
+          megapixels: opts.megapixels ?? 1.0,
+          size: opts.size || "1024x1024",
+        }),
+      },
+    );
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: `局部编辑异常: ${e}` };
+  }
+}
+
 export async function generateAudioViaHost(opts: {
   prompt: string;
   model?: string;

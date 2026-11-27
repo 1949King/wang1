@@ -1,12 +1,19 @@
 /**
- * 团队协作面板（2026-10-31 · V4.49.1；2026-11-02 加素材层）
+ * 团队协作面板（2026-10-31 · V4.49.1；2026-11-02 加素材层；2026-11-05 按动作重排）
  *
- * 五段式，对应五个真实动作（不做"设置项博物馆"）：
- *   1. 本机服务 —— 我是不是那台"服务器"（启动/停止 + 显示同事该填的地址）
- *   2. 连接     —— 我是同事，扫描或手填地址后加入
- *   3. 项目     —— 上传当前画布 / 拉取 / 认领 / 交接
- *   4. 收件箱   —— 别人交接给我的，一键接手
- *   5. 素材     —— 成片/图片/音频这些**大文件**（画布 JSON 装不下的那部分）
+ * 2026-11-05 **重排的原因**（别改回去）：
+ *   旧版是「① 我当服务器 → ② 我连别人的团队 → ③ 项目 → ④ 收件箱 → ⑤ 素材」。
+ *   ①② 是**一辈子点一两次**的装机器动作（起服务 / 填地址 / 念 6 位码），却打了头；
+ *   每天真正要看的「谁把活交给我了」被压到第四段，同事还得往下翻才知道自己掉线了。
+ *   现在按**动作频次**排：
+ *
+ *   状态条   —— 连没连上、几个人在线（原来藏在 ② 段末尾）
+ *   等我做   —— 别人交接给我的（原 ④，提到首屏）
+ *   一起做的项目 —— 上传 / 拉取 / 认领 / 版本历史 / 交接（原 ③）
+ *   折叠：服务器与加入 —— 原 ①②，**功能一个没删**，只是收起来
+ *   折叠：素材与成片 —— 原 ⑤
+ *
+ *   未加入团队时「服务器与加入」强制展开（`ioOpen`）—— 收起来等于把唯一入口藏了。
  *
  * 纪律：
  *   · 拉取会覆盖当前画布 ⇒ **必须二次确认**（不静默覆盖用户正在做的事）
@@ -141,9 +148,9 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [nowSec, setNowSec] = useState<number>(() => Date.now() / 1000);
   const [line, setLine] = useState<{ kind: "ok" | "err" | "info"; text: string }>({ kind: "info", text: "" });
   const [assets, setAssets] = useState<TeamAsset[]>([]);
-  /** ⑤ 段素材的类型筛选（全部/视频/图片/音频/其他）。 */
+  /** 素材段的类型筛选（全部/视频/图片/音频/其他）。 */
   const [assetKind, setAssetKind] = useState<AssetKindFilter>("all");
-  /** ⑤ 段素材的搜索词（匹配文件名 / 出处 / 作者）。 */
+  /** 素材段的搜索词（匹配文件名 / 出处 / 作者）。 */
   const [assetQ, setAssetQ] = useState<string>("");
   const [sync, setSync] = useState<string>("");
   /** 正在内联预览的附件 sha256（点开条目时设置，空串=收起）。 */
@@ -168,6 +175,25 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const [now, setNow] = useState<number>(0);
   /** 出码那一刻的成员 ID 快照：之后多出来的人就是「刚用码进来的」。 */
   const memberBaseline = useRef<string>("");
+  /**
+   * 「服务器与加入」折叠区（2026-11-05）。
+   *
+   * 启动服务、填地址、念 6 位码——这三件事对一个已经加进来的成员来说，
+   * **一辈子只点一两次**。旧版把它们排在 ① ② 打头，每天的活（谁交给我了什么）
+   * 却被压到第四段，用户得往下翻。
+   * 默认：已加入=收起，未加入=展开（见 `ioOpen`）。
+   */
+  const [foldIo, setFoldIo] = useState<boolean>(() => !teamCred());
+  /** 「素材与成片」折叠区：按项目看的东西，不在首屏堆列表。默认收起。 */
+  const [foldAsset, setFoldAsset] = useState<boolean>(true);
+
+  /**
+   * 折叠区是否真的展开。
+   *
+   * ⚠️ 没加入团队时**强制展开**：整块收起来等于把唯一入口藏了，
+   * 新同事只会看到一个空面板。加入成功后 `cred` 变真值，它自己就收起来了。
+   */
+  const ioOpen = foldIo || !cred;
 
   // 码只在 120 秒内有效，秒数必须自己走 —— 否则面板停在那儿显示「120 秒有效」，
   // 人以为永远有效，念晚了同事就白试一次。
@@ -426,7 +452,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       // 地址却填了自己（或同事）的机器，于是面板只丢一句网络错误，人不知道下一步点哪。
       // 有 `host.running` 这个已知状态就要用上：把「该点 ①」直接写进错误行。
       if (!host?.running && e instanceof TeamError && e.code.startsWith("net_")) {
-        say("err", `${e.message}；如果这台就是服务器，先点 ① 的「启动团队服务」再回来加入`);
+        say("err", `${e.message}；如果这台就是服务器，先在上面「服务器与加入」里点「启动团队服务」再回来加入`);
       } else {
         fail(e);
       }
@@ -1068,7 +1094,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
   const uploadFile = async (file: File | null) => {
     if (!file) return;
     if (!selected) {
-      say("err", "先在 ③ 里选一个共享项目，素材要挂在项目下面");
+      say("err", "先在「一起做的项目」里选一个，素材要挂在项目下面");
       return;
     }
     setBusy("asset");
@@ -1117,9 +1143,155 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
       {line.text ? <div className={`sg-team-line ${line.kind}`}>{line.text}</div> : null}
       {sync ? <div className="sg-team-line info">{sync}</div> : null}
 
-      {/* 1. 本机服务 */}
+      {/* ── 状态条（2026-11-05）──
+          连接、几个人、还在不在线：旧版把这三样塞在 ② 段末尾，已加入的人
+          要往下翻过半屏才知道同事掉线了。现在一行看完。 */}
+      {cred ? (
+        <>
+          <div className="sg-team-status">
+            <span className={`dot${link === "down" ? " down" : link === "ok" ? "" : " unknown"}`} />
+            <b>{link === "down" ? "断开了" : link === "ok" ? "连接正常" : "正在查…"}</b>
+            <span className="sep" />
+            <span>团队 {members.length} 人 · 在线 {onlineCount(members, nowSec)}</span>
+            <span className="sp" />
+            <button type="button" disabled={busy === "ping"} onClick={() => void probeLink()}>
+              {busy === "ping" ? "检查中…" : link === "down" ? "重新连" : "检查连接"}
+            </button>
+          </div>
+          {/* 断了要说后果，不只说状态：「传不上去」比「连接失败」有用 */}
+          {link === "down"
+            ? <div className="sg-team-line err">{linkText(link, members.length, onlineCount(members, nowSec))}</div>
+            : null}
+          {members.length ? (
+            <div className="sg-team-people">
+              {members.map((m) => {
+                const isMe = m.id === cred.member_id;
+                const canToggle = myRole === "owner" && m.role !== "owner" && !isMe;
+                return (
+                  <span key={m.id} className={`sg-team-who${isOnline(m.last_seen, nowSec) ? " on" : ""}`}>
+                    {m.name}{isMe ? "（我）" : ""} · {seenText(m.last_seen, nowSec)}
+                    <i className={`sg-team-role ${m.role}`}>{roleLabel(m.role)}</i>
+                    {canToggle ? (
+                      <button type="button" className="sg-team-rolebtn" disabled={busy === m.id}
+                              onClick={() => void toggleRole(m)}>
+                        {m.role === "viewer" ? "给编辑权" : "收回编辑权"}
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* 等我做（原 ④）——
+          这是唯一**每天都要看**的一段（别人把活交给你了），却被旧版排在
+          两段「装机器」+ 项目列表之后。提到首屏第一位。 */}
+      {cred ? (
+        <section className="sg-team-sec">
+          <h4>等我做{inbox.length ? `（${inbox.length}）` : ""}</h4>
+          {inbox.length ? inbox.map((it) => (
+            <div key={it.handoff_id} className="sg-team-item">
+              <div className="sg-team-item-main">
+                <b>{it.project_name || it.project_id}</b>
+                <span className="sg-team-dim">来自 {it.from} · {it.message}</span>
+              </div>
+              <div className="sg-team-item-actions">
+                <button type="button" disabled={busy === "accept"} onClick={() => void accept(it)}>接手</button>
+              </div>
+            </div>
+          )) : <div className="sg-team-dim">暂时没有 —— 同事把项目交给你时会出现在这里</div>}
+        </section>
+      ) : null}
+
+      {/* 3. 项目 */}
+      {cred ? (
+        <section className="sg-team-sec">
+          <h4>一起做的项目{projects.length ? `（${projects.length}）` : ""}</h4>
+          <div className="sg-team-row">
+            <button type="button" disabled={busy === "upload"} onClick={() => void uploadCurrent()}>
+              {busy === "upload" ? "上传中…" : "上传当前画布"}
+            </button>
+            <button type="button" onClick={() => void refreshTeam()}>刷新</button>
+            <span className="sg-team-dim">上传=新建一个共享项目；别的项目用下方「上传到此」</span>
+          </div>
+          {/* 备注框放在这里而不是「交接」那一行：它是**上传时的版本名**，
+              放在交接框里等于用户上传时根本看不见它，「版本命名」就成了黑箱。 */}
+          <div className="sg-team-row">
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+                   placeholder="版本备注（改了第 3 卡的字幕）—— 上传和交接都会带上" />
+          </div>
+          {projects.length ? (
+            <div className="sg-team-list">
+              {projects.map((p) => {
+                const claimed = p.claimed_by && p.claim_expires_at > Date.now() / 1000;
+                return (
+                  <div key={p.project_id} className="sg-team-proj">
+                  <div className={`sg-team-item${selected === p.project_id ? " on" : ""}`}
+                       onClick={() => setSelected(p.project_id)}>
+                    <div className="sg-team-item-main">
+                      <b>{p.name}</b>
+                      <span className="sg-team-dim">rev {p.rev} · {p.owner} · {new Date(p.updated_at * 1000).toLocaleString()}</span>
+                      {claimed ? <span className="sg-team-lock">🔒 {p.claimed_by}</span> : null}
+                    </div>
+                    <div className="sg-team-item-actions">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void pullFrom(p.project_id); }}>拉取</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void pushTo(p.project_id); }}>上传到此</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void openVersions(p.project_id); }}>
+                        {verFor === p.project_id ? "收起历史" : "历史"}
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void claim(p.project_id); }}>认领</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void release(p.project_id); }}>释放</button>
+                    </div>
+                  </div>
+                  {verFor === p.project_id ? (
+                    <TeamVersions
+                      versions={vers}
+                      loading={verLoading}
+                      latestRev={p.rev}
+                      onLoadRev={(rev) => void pullRev(p.project_id, rev, p.name)}
+                      onRollback={(rev) => void rollbackTo(p.project_id, rev, p.name, p.rev)}
+                    />
+                  ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : <div className="sg-team-dim">还没有共享项目</div>}
+
+          {selectedProject ? (
+            <div className="sg-team-handoff">
+              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="">交接给…</option>
+                {members.filter((m) => m.id !== cred.member_id).map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <button type="button" disabled={busy === "handoff"} onClick={() => void doHandoff(selectedProject.project_id)}>
+                交接
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* ── 折叠：服务器与加入（原 ①②）──
+          功能一个没删，只是从「打头」挪到「收起」。 */}
       <section className="sg-team-sec">
-        <h4>① 我当服务器（同事连我）</h4>
+        <button type="button" className="sg-team-fold" onClick={() => setFoldIo(!foldIo)}
+                aria-expanded={ioOpen}>
+          <span className="caret">{ioOpen ? "▾" : "▸"}</span>
+          <span>服务器与加入</span>
+          <span className="hint">
+            {!cred ? "⚠️ 还没加入团队 —— 从这里接上"
+              : host?.running ? `本机在当服务器 · ${host.address}` : "一辈子点一两次"}
+          </span>
+        </button>
+        {ioOpen ? (
+          <>
+            <div className="sg-team-subsec">
+              <h5>① 我当服务器（同事连我）</h5>
         {host?.running ? (
           <div className="sg-team-row">
             <code className="sg-team-addr">{host.address}</code>
@@ -1204,11 +1376,11 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             ) : null}
           </div>
         ) : null}
-      </section>
+            </div>
 
-      {/* 2. 连接 */}
-      <section className="sg-team-sec">
-        <h4>② 我连别人的团队</h4>
+            {/* 2. 连接 */}
+            <div className="sg-team-subsec">
+              <h5>② 我连别人的团队</h5>
         {/* 首选这条路：一张 6 位码换地址，不必问对方 IP */}
         <div className="sg-team-row">
           <input
@@ -1257,134 +1429,27 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
             </button>
           ) : null}
         </div>
-        {/* 连接状态与「谁还在」：挂在 ② 段末尾，不另开一段（信息架构不动） */}
-        {cred ? (
-          <>
-            <div className="sg-team-row">
-              <span className={link === "down" ? "sg-team-linkbad" : "sg-team-dim"}>
-                {linkText(link, members.length, onlineCount(members, nowSec))}
-              </span>
-              <button type="button" disabled={busy === "ping"} onClick={() => void probeLink()}>
-                {busy === "ping" ? "检查中…" : link === "down" ? "重新连" : "检查连接"}
-              </button>
-            </div>
-            {members.length ? (
-              <div className="sg-team-people">
-                {members.map((m) => {
-                  const isMe = m.id === cred.member_id;
-                  const canToggle = myRole === "owner" && m.role !== "owner" && !isMe;
-                  return (
-                    <span key={m.id} className={`sg-team-who${isOnline(m.last_seen, nowSec) ? " on" : ""}`}>
-                      {m.name}{isMe ? "（我）" : ""} · {seenText(m.last_seen, nowSec)}
-                      <i className={`sg-team-role ${m.role}`}>{roleLabel(m.role)}</i>
-                      {canToggle ? (
-                        <button type="button" className="sg-team-rolebtn" disabled={busy === m.id}
-                                onClick={() => void toggleRole(m)}>
-                          {m.role === "viewer" ? "给编辑权" : "收回编辑权"}
-                        </button>
-                      ) : null}
-                    </span>
-                  );
-                })}
-              </div>
-            ) : null}
+        {/* 连接状态与「谁还在」已上移到顶部状态条（2026-11-05）：
+            这两样是**每天都要看**的，不该压在一段「装机器」的末尾。 */}
+      </div>
           </>
         ) : null}
       </section>
 
-      {/* 3. 项目 */}
-      {cred ? (
-        <section className="sg-team-sec">
-          <h4>③ 共享项目</h4>
-          <div className="sg-team-row">
-            <button type="button" disabled={busy === "upload"} onClick={() => void uploadCurrent()}>
-              {busy === "upload" ? "上传中…" : "上传当前画布"}
-            </button>
-            <button type="button" onClick={() => void refreshTeam()}>刷新</button>
-            <span className="sg-team-dim">上传=新建一个共享项目；别的项目用下方「上传到此」</span>
-          </div>
-          {/* 备注框放在这里而不是「交接」那一行：它是**上传时的版本名**，
-              放在交接框里等于用户上传时根本看不见它，「版本命名」就成了黑箱。 */}
-          <div className="sg-team-row">
-            <input value={note} onChange={(e) => setNote(e.target.value)}
-                   placeholder="版本备注（改了第 3 卡的字幕）—— 上传和交接都会带上" />
-          </div>
-          {projects.length ? (
-            <div className="sg-team-list">
-              {projects.map((p) => {
-                const claimed = p.claimed_by && p.claim_expires_at > Date.now() / 1000;
-                return (
-                  <div key={p.project_id} className="sg-team-proj">
-                  <div className={`sg-team-item${selected === p.project_id ? " on" : ""}`}
-                       onClick={() => setSelected(p.project_id)}>
-                    <div className="sg-team-item-main">
-                      <b>{p.name}</b>
-                      <span className="sg-team-dim">rev {p.rev} · {p.owner} · {new Date(p.updated_at * 1000).toLocaleString()}</span>
-                      {claimed ? <span className="sg-team-lock">🔒 {p.claimed_by}</span> : null}
-                    </div>
-                    <div className="sg-team-item-actions">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); void pullFrom(p.project_id); }}>拉取</button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); void pushTo(p.project_id); }}>上传到此</button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); void openVersions(p.project_id); }}>
-                        {verFor === p.project_id ? "收起历史" : "历史"}
-                      </button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); void claim(p.project_id); }}>认领</button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); void release(p.project_id); }}>释放</button>
-                    </div>
-                  </div>
-                  {verFor === p.project_id ? (
-                    <TeamVersions
-                      versions={vers}
-                      loading={verLoading}
-                      latestRev={p.rev}
-                      onLoadRev={(rev) => void pullRev(p.project_id, rev, p.name)}
-                      onRollback={(rev) => void rollbackTo(p.project_id, rev, p.name, p.rev)}
-                    />
-                  ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : <div className="sg-team-dim">还没有共享项目</div>}
-
-          {selectedProject ? (
-            <div className="sg-team-handoff">
-              <select value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">交接给…</option>
-                {members.filter((m) => m.id !== cred.member_id).map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              <button type="button" disabled={busy === "handoff"} onClick={() => void doHandoff(selectedProject.project_id)}>
-                交接
-              </button>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {/* 4. 收件箱 */}
-      {cred ? (
-        <section className="sg-team-sec">
-          <h4>④ 交接给我的（{inbox.length}）</h4>
-          {inbox.length ? inbox.map((it) => (
-            <div key={it.handoff_id} className="sg-team-item">
-              <div className="sg-team-item-main">
-                <b>{it.project_name || it.project_id}</b>
-                <span className="sg-team-dim">来自 {it.from} · {it.message}</span>
-              </div>
-              <div className="sg-team-item-actions">
-                <button type="button" disabled={busy === "accept"} onClick={() => void accept(it)}>接手</button>
-              </div>
-            </div>
-          )) : <div className="sg-team-dim">没有待接手的交接</div>}
-        </section>
-      ) : null}
+      {/* 4. 收件箱 → 已上移为首屏「等我做」段（2026-11-05） */}
 
       {/* 5. 素材（大文件：画布 JSON 装不下的那部分）*/}
       {cred ? (
         <section className="sg-team-sec">
-          <h4>⑤ 素材与成片（{assets.length}）</h4>
+          <button type="button" className="sg-team-fold" onClick={() => setFoldAsset(!foldAsset)}
+                  aria-expanded={!foldAsset}>
+            <span className="caret">{foldAsset ? "▸" : "▾"}</span>
+            <span>素材与成片</span>
+            <span className="count">{assets.length}</span>
+            <span className="hint">成片 / 图 / 音频 —— 按项目挂</span>
+          </button>
+          {foldAsset ? null : (
+          <>
           <div className="sg-team-row">
             <label className={`sg-team-file${!selected || busy === "asset" ? " off" : ""}`}>
               <input
@@ -1396,7 +1461,7 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
                   void uploadFile(f);
                 }}
               />
-              <span>{selected ? (busy === "asset" ? "上传中…" : "选文件上传") : "先在 ③ 选个共享项目"}</span>
+              <span>{selected ? (busy === "asset" ? "上传中…" : "选文件上传") : "先在上面「一起做的项目」选一个"}</span>
             </label>
             <button type="button" disabled={!selected} onClick={() => void refreshAssets(selected)}>刷新</button>
             <span className="sg-team-dim">成片 mp4 / 图 / 音频都行；有封面的会显示缩略图</span>
@@ -1463,12 +1528,14 @@ export function TeamPanel({ onClose }: { onClose?: () => void }) {
               )}
             </>
           ) : <div className="sg-team-dim">{emptyAssetHint(0, "all", "")}</div>}
+          </>
+          )}
         </section>
       ) : null}
 
       {/* 6. 评审（2026-11-04）：挂节点的意见。
           放在素材之后而不是项目之后：素材和意见都是「这个项目的细节」，
-          而 ③ 是「项目列表」。点了项目 → 往下看素材 → 再往下看意见，是同一趟动作。 */}
+          而「一起做的项目」是项目列表。点了项目 → 往下看素材 → 再往下看意见，是同一趟动作。 */}
       {cred ? (
         <TeamReview
           projectId={selected}

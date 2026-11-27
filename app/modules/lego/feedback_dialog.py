@@ -25,9 +25,9 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
-from PyQt6.QtCore import QSettings, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QSettings, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QComboBox, QLineEdit, QTextEdit, QDialogButtonBox,
 )
@@ -77,7 +77,7 @@ def _read_webhook_url() -> Optional[str]:
 class FeedbackDialog(QDialog):
     """意见反馈对话框（模态）"""
 
-    submitted = pyqtSignal(dict)  # {"category":..., "severity":..., "body":..., "email":...}
+    submitted = Signal(dict)  # {"category":..., "severity":..., "body":..., "email":...}
 
     def __init__(self, parent=None):
         super().__init__(parent)

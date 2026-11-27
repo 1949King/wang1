@@ -10,15 +10,15 @@ P1#8 关键帧可视化 - 端到端集成测试（offscreen 模式）
 import os
 import sys
 
-# 必须在 import PyQt6 之前设置 offscreen
+# 必须在 import PySide6 之前设置 offscreen
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # 让脚本作为模块被 import 时也能找到 app/
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..")))
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, QPoint
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt, QPoint
 
 app = QApplication.instance() or QApplication(sys.argv)
 
@@ -92,7 +92,7 @@ def test_clipwidget_keyframe_clicked_signal():
     # zoom 默认 100 -> px_per_sec=20 -> time_offset=1.0 -> x=20
     # y 在底部条带: h=38, band_top=31, y_center=34
     # 鼠标位置要 (20, 34)，但 mousePressEvent 需要 QMouseEvent
-    from PyQt6.QtGui import QMouseEvent, QGuiApplication
+    from PySide6.QtGui import QMouseEvent, QGuiApplication
     me = QMouseEvent(
         QMouseEvent.Type.MouseButtonPress,
         QPoint(20, 34),
@@ -133,7 +133,7 @@ def test_timeline_widget_bridges_signal():
     app.processEvents()
 
     # 模拟点击关键帧点
-    from PyQt6.QtGui import QMouseEvent
+    from PySide6.QtGui import QMouseEvent
     me = QMouseEvent(
         QMouseEvent.Type.MouseButtonPress,
         QPoint(10, 34),  # x=10 对应 time_offset=0.5

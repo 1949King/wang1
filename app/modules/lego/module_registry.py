@@ -45,9 +45,9 @@ import logging
 logger = logging.getLogger("AI短剧编辑器.modules.lego.module_registry")
 
 if TYPE_CHECKING:
-    from PyQt6.QtCore import QSettings  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
+    from PySide6.QtCore import QSettings  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
 else:
-    from PyQt6.QtCore import QSettings
+    from PySide6.QtCore import QSettings
 
 
 class ModuleTier(str, Enum):

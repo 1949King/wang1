@@ -19,7 +19,10 @@ hybrid_dispatch 此前把三件事写死了：
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, Tuple
+import logging
+from typing import Any, Iterable, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # 画布质量档 → 引擎质量档（引擎侧无此档位则 "" = 不干预）
 QUALITY_TO_PRESET = {

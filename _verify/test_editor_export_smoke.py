@@ -2,6 +2,7 @@
 """冒烟：editor_export 抽出后接口可用。"""
 import os
 import sys
+from types import SimpleNamespace
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
@@ -24,6 +25,7 @@ class _Host:
                 ],
             },
         ]
+        self._timeline_store = SimpleNamespace(snapshot=lambda: list(self._clips))
         self._timeline_widget = type("T", (), {"_tracks": [
             {"type": "video", "volume": 1.0},
             {"type": "audio", "volume": 1.0},

@@ -14,7 +14,7 @@ from typing import Any, Protocol
 logger = logging.getLogger(__name__)
 
 try:
-    from PyQt6.QtWidgets import (
+    from PySide6.QtWidgets import (
         QGridLayout,
         QHBoxLayout,
         QLabel,

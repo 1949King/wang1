@@ -55,7 +55,11 @@ def probe_wh_fps(video: str) -> Dict[str, float]:
         return {"w": 0, "h": 0, "fps": 0.0}
     out = {"w": 0, "h": 0, "fps": 0.0}
     try:
-        r = subprocess.run([ff, "-i", video], capture_output=True, text=True, timeout=60)
+        # 2026-10-31：encoding/errors 显式钉死 —— Windows GBK 代码页下 text=True
+        # 用 locale 解码 ffmpeg stderr（含中文路径/元数据）会 UnicodeDecodeError
+        # （pytest 读线程里炸，报错点离根因远）。ffmpeg 输出按 UTF-8 容错读。
+        r = subprocess.run([ff, "-i", video], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60)
         err = r.stderr or ""
         m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", err)
         if m:
@@ -74,7 +78,8 @@ def _has_audio_stream(video: str) -> bool:
     if not ff:
         return False
     try:
-        r = subprocess.run([ff, "-i", video], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([ff, "-i", video], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60)
         return "Audio:" in (r.stderr or "")
     except Exception:
         return False
@@ -263,7 +268,8 @@ def splice_retake(original: str, replacement: str, out_path: str, *,
         cmd += [out_path]
 
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=3600)
         if r.returncode != 0:
             return {"ok": False, "reason": f"拼接失败: {(r.stderr or '')[-600:]}"}
 

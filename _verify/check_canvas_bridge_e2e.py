@@ -27,7 +27,7 @@ PROBE_ID = "e2e-probe"   # 测试用插件 id，finally 里强制清理
 PORT = 18999
 BASE = f"http://127.0.0.1:{PORT}"
 
-# ── PyQt6 在本沙箱不可用，给 /host/characters 打一个桩 ──────────────
+# ── PySide6 在本沙箱不可用，给 /host/characters 打一个桩 ─────────────
 # 只替换 CharacterStore，CHARACTER_FIELD_SCHEMA 从源码 AST 取真值，保证测得是真的。
 tree = ast.parse(io.open(
     os.path.join(ROOT, "app", "modules", "lego", "character_management_module.py"),

@@ -6,7 +6,7 @@ AI特效制作插件 - 用户界面组件
 import numpy as np
 import cv2
 from typing import Dict, Any, Optional, Callable
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QSlider,
     QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox,
@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QColorDialog, QLineEdit, QTextEdit,
     QSplitter, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread, pyqtSlot
-from PyQt6.QtGui import QImage, QPixmap, QFont, QIcon, QPainter, QColor
+from PySide6.QtCore import Qt, Signal, QTimer, QThread, Slot
+from PySide6.QtGui import QImage, QPixmap, QFont, QIcon, QPainter, QColor
 
 
 import logging
@@ -24,9 +24,9 @@ logger = logging.getLogger("AI短剧编辑器.plugins.ai_effects_plugin.ui.ai_ef
 class EffectProcessorThread(QThread):
     """AI特效处理线程（避免阻塞UI）"""
     
-    progress_updated = pyqtSignal(int)
-    processing_complete = pyqtSignal(object)
-    error_occurred = pyqtSignal(str)
+    progress_updated = Signal(int)
+    processing_complete = Signal(object)
+    error_occurred = Signal(str)
     
     def __init__(self, plugin_instance, frame_data: np.ndarray, params: dict):
         super().__init__()
@@ -74,8 +74,8 @@ class AIEffectsWidget(QWidget):
         preview_requested(dict): 请求预览（带参数）
     """
     
-    effect_applied = pyqtSignal(np.ndarray)
-    preview_requested = pyqtSignal(dict)
+    effect_applied = Signal(np.ndarray)
+    preview_requested = Signal(dict)
     
     def __init__(self, plugin_instance=None, parent=None):
         super().__init__(parent)
@@ -657,7 +657,7 @@ class AIEffectsWidget(QWidget):
                 "当前特效类型暂未提供快捷预设，请手动调节参数后点击「应用效果」"
             )
     
-    @pyqtSlot(int)
+    @Slot(int)
     def _on_tab_changed(self, index: int):
         """标签页切换事件"""
         tab_names = ['style_transfer', 'background_replace', 
@@ -666,7 +666,7 @@ class AIEffectsWidget(QWidget):
             self.current_params['effect_type'] = tab_names[index]
             logger.info(f'[UI] 切换到特效类型: {tab_names[index]}')
     
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_style_changed(self, style_name: str):
         """风格选择变化"""
         style_map = {
@@ -681,7 +681,7 @@ class AIEffectsWidget(QWidget):
         }
         self.current_params['style_name'] = style_map.get(style_name, 'cyberpunk')
     
-    @pyqtSlot()
+    @Slot()
     def _on_color_select(self):
         """颜色选择对话框"""
         color = QColorDialog.getColor(QColor("#4A90E2"), self, "选择背景颜色")
@@ -713,7 +713,7 @@ class AIEffectsWidget(QWidget):
         
         logger.info(f"[UI] 已应用美颜预设: {preset['name']}")
     
-    @pyqtSlot()
+    @Slot()
     def _reset_params(self):
         """重置当前标签页的参数到默认值"""
         current_tab = self.tab_widget.currentIndex()
@@ -833,7 +833,7 @@ class AIEffectsWidget(QWidget):
         self.current_params = params
         return params
     
-    @pyqtSlot()
+    @Slot()
     def _apply_effect(self):
         """应用特效（在后台线程中执行）"""
         if self.current_image is None:
@@ -866,7 +866,7 @@ class AIEffectsWidget(QWidget):
         
         self.processing_thread.start()
     
-    @pyqtSlot(object)
+    @Slot(object)
     def _on_processing_complete(self, result: np.ndarray):
         """处理完成回调"""
         self.progress_bar.setVisible(False)
@@ -882,7 +882,7 @@ class AIEffectsWidget(QWidget):
         
         logger.info(f'[UI] ✅ 特效应用完成，输出尺寸: {result.shape[1]}x{result.shape[0]}')
     
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_processing_error(self, error_msg: str):
         """处理错误回调"""
         self.progress_bar.setVisible(False)
@@ -982,7 +982,7 @@ def show_ai_effects_dialog(image: np.ndarray, parent=None) -> Optional[np.ndarra
     Returns:
         处理后的图像，如果取消则返回None
     """
-    from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QDialogButtonBox
+    from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QDialogButtonBox
     
     app = QApplication.instance()
     if not app:

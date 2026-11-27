@@ -1,0 +1,34 @@
+拾光剪影 — 第三方模型许可与使用限制告知（NOTICE）
+=================================================
+
+本软件绝不自动下载模型权重、不随包权重。下列模型由用户自行从资源地址获取，
+其许可条款（含使用限制）随附副本；获取并使用即表示接受相应条款。
+
+1. SD1.5-inpainting（本地语义重绘 / 物体移除，T3）
+   许可：CreativeML Open RAIL-M（dated August 22, 2022）
+   副本：license/third_party/SD15-INPAINTING-OpenRAIL-M.txt
+   资源：https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting
+   使用限制（Attachment A，传导至衍生与全部用户）摘要：
+     禁止用于违法或伤害未成年人；生成可识别个人信息以害人；诽谤/骚扰/歧视；
+     不利法律权益的全自动决策；虚假信息害人等。
+   再分发须附本许可副本（Section III.5）；对输出不主张权利（Section III.6）；
+   输出合规责任由使用者承担。
+
+2. 其余本地工具权重（T0 许可已核，详见 app/core/neural/tool_weights.py）
+   · LaMa 局部修补 ........ Apache-2.0（Carve/LaMa-ONNX；README 权重声明请自行复核）
+   · RealESRGAN x4plus .... BSD-3-Clause（qualcomm/Real-ESRGAN-x4plus）
+   · TF-ESPCN ............. Apache-2.0（fannymonori/TF-ESPCN）
+   · RIFE v4.9 补帧 ....... MIT（权重自取，见下载中心）
+   · Depth-Anything-V2-small ... Apache-2.0（onnx-community；large 为 NC，不接入）
+   · Wan2.2-Lightning LoRA ..... Apache-2.0（lightx2v/Wan2.2-Lightning）
+
+3. MiniMax H3（可选网关全景生成，T5；默认关，权重不随包，用户自备网关）
+   许可：H3 COMMUNITY LICENSE（条件放行，用户已确认接受，2026-11-20）。
+   协议副本：license/third_party/MINIMAX-H3-Community-License.txt
+   （HF 官方原文逐字抓取；尾部 ~1KB 受抓取工具截断，权威全文见
+   https://huggingface.co/MiniMaxAI/MiniMax-H3/raw/main/LICENSE ，再分发前建议补全）。
+   条件（用户自担）：①使用地域限中国大陆（协议排除 EU/UK/韩/美）；
+   ②年营收≤2000万美元，超出须 MiniMax 书面授权（api@minimax.io）；
+   ③商用 UI 显著展示 "MiniMax H3"（全景节点动作区常驻署名 + 成功提示）；
+   ④再分发附本协议副本 + 本 NOTICE（installer [Files] 递归打包 license/）；
+   ⑤不得用 H3 输出训练/改进其他 AI 模型（协议 §V.3），并约束下游用户。

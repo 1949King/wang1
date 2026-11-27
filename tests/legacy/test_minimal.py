@@ -16,13 +16,13 @@ try:
 except Exception as e:
     print(f"  ❌ subprocess 导入失败: {e}")
 
-print("\n测试 2: PyQt6")
+print("\n测试 2: PySide6")
 try:
-    from PyQt6.QtGui import QPixmap
-    from PyQt6.QtCore import QByteArray
-    print("  ✅ PyQt6 导入成功")
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtCore import QByteArray
+    print("  ✅ PySide6 导入成功")
 except Exception as e:
-    print(f"  ❌ PyQt6 导入失败: {e}")
+    print(f"  ❌ PySide6 导入失败: {e}")
 
 print("\n测试 3: ffmpeg_utils")
 try:

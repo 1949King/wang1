@@ -273,3 +273,59 @@ def probe_video_duration(filepath: str) -> float:
             logger.debug(f"[FFmpegUtils] ffmpeg获取时长兜底失败: {e}")
 
     return 0.0
+
+
+def probe_has_audio(filepath: str) -> bool:
+    """探测视频文件是否含音轨，异常/缺失 ⇒ False 不抛。
+
+    使用 ffprobe -select_streams a:0 查询第一条音频流索引。
+    """
+    if not filepath or not os.path.isfile(filepath):
+        return False
+    probe = get_ffprobe()
+    if not probe:
+        return False
+    try:
+        r = subprocess.run(
+            [probe, "-v", "quiet", "-select_streams", "a:0",
+             "-show_entries", "stream=index", "-of", "csv=p=0", filepath],
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        return r.returncode == 0 and bool((r.stdout or "").strip())
+    except Exception:
+        logger.debug("[FFmpegUtils] probe_has_audio 异常", exc_info=True)
+        return False
+
+
+def mux_source_audio(video_no_audio: str, source_video: str, out_path: str) -> bool:
+    """把源视频音轨 mux 到无声产物，成功返回 True。
+
+    命令：-i 无声 -i 源 -map 0:v:0 -map 1:a:0? -c:v copy -c:a aac -shortest
+    源无音轨/文件不存在/ffmpeg 缺失/非零退出 ⇒ False（调用方保留无声产物）。
+    """
+    if not os.path.isfile(video_no_audio) or not os.path.isfile(source_video):
+        return False
+    if not probe_has_audio(source_video):
+        return False
+    ffmpeg = get_ffmpeg()
+    if not ffmpeg:
+        return False
+    try:
+        cmd = [
+            ffmpeg, "-y",
+            "-i", video_no_audio,
+            "-i", source_video,
+            "-map", "0:v:0", "-map", "1:a:0?",
+            "-c:v", "copy", "-c:a", "aac",
+            "-shortest",
+            out_path,
+        ]
+        r = subprocess.run(
+            cmd, capture_output=True, check=False, timeout=300,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        return r.returncode == 0 and os.path.isfile(out_path)
+    except Exception:
+        logger.debug("[FFmpegUtils] mux_source_audio 异常", exc_info=True)
+        return False

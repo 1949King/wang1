@@ -8,7 +8,7 @@ print(f"Python版本: {sys.version}")
 print(f"Python路径: {sys.path}")
 
 try:
-    from PyQt6.QtGui import QColor
+    from PySide6.QtGui import QColor
     print("QColor导入成功")
     
     # 测试QColor使用

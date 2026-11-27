@@ -8,11 +8,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print("测试导入...")
 
 try:
-    print("1. 导入 PyQt6...")
-    from PyQt6.QtWidgets import QApplication
-    print("   ✅ PyQt6 导入成功")
+    print("1. 导入 PySide6...")
+    from PySide6.QtWidgets import QApplication
+    print("   ✅ PySide6 导入成功")
 except Exception as e:
-    print(f"   ❌ PyQt6 导入失败: {e}")
+    print(f"   ❌ PySide6 导入失败: {e}")
 
 try:
     print("2. 导入 lego 模块...")

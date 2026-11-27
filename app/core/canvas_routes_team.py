@@ -390,7 +390,7 @@ class CanvasTeamRoutesMixin:
         | `<video src="x.mp4">` | `error.code = 4`（SRC_NOT_SUPPORTED） |
         | `<video src="x.webm">` | 正常，`readyState = 4` |
 
-        pip 装的 PyQt6-WebEngine **不带 H.264/AAC**，而本产品自己渲染的成片正是
+        pip 装的 PySide6 WebEngine **不带 H.264/AAC**，而本产品自己渲染的成片正是
         h264 ⇒ 浏览器里既放不出画面，`canvas.drawImage(video)` 也拿不到像素。
         所以「前端截首帧」这条路对 mp4 根本不存在，只能回到 ffmpeg。
 

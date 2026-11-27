@@ -33,7 +33,7 @@ import os
 # 定案 2026-10-06（已证伪：非代理 / 非 GPU / 非 _SPAHandler / 非 dist 内容），
 # 2026-10-11 真机再次复现；对照实验（加载 data: URL）：
 #     不加 flags → loadFinished ok=False；加 --no-sandbox → ok=True。
-# 注意：必须在**任何** PyQt6.QtWebEngine* 导入之前设置，故置于模块顶层。
+# 注意：必须在**任何** PySide6.QtWebEngine* 导入之前设置，故置于模块顶层。
 _webengine_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
 if "--no-sandbox" not in _webengine_flags:
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
@@ -44,11 +44,11 @@ del _webengine_flags
 def _probe_webengine() -> bool:
     """子进程预检 QtWebEngine 能否真正加载页面（2026-10-25）。
 
-    本机踩坑：PyQt6/Qt 6.10.2 与 PyQt6-WebEngine 6.10.0 混装 ⇒ 渲染进程
+    PyQt6 时代踩坑：Qt 6.10.2 与 WebEngine 6.10.0 混装 ⇒ 渲染进程
     fail-fast（0xC0000409），连 data: URL 都崩，无法 try/except。
     只能子进程试；失败则置 SHIGUANG_NO_WEBENGINE=1，画布改走系统浏览器。
 
-    成功结果按「PyQt6 + WebEngine 版本」缓存到 data/webengine_probe.json，
+    成功结果按「PySide6 + Addons 版本」缓存到 data/webengine_probe.json，
     避免每次启动多等 2~5s；失败不缓存（装好依赖后下次启动自动重试）。
 
     🔴 2026-10-25 二次修正：探针**本身**曾因 ``QApplication([])`` 传空 argv 而必崩
@@ -68,11 +68,11 @@ def _probe_webengine() -> bool:
         import sys as _sys
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ver = {"pyqt6": "", "webengine": ""}
+        ver = {"pyside6": "", "addons": ""}
         try:
             from importlib.metadata import version as _v
 
-            ver = {"pyqt6": _v("PyQt6"), "webengine": _v("PyQt6-WebEngine")}
+            ver = {"pyside6": _v("PySide6"), "addons": _v("PySide6-Addons")}
         except Exception:  # stability-gate: allow-swallow（读不到版本 ⇒ 不缓存，只多探一次，不影响启动）
             pass
         cache = os.path.join(root, "data", "webengine_probe.json")
@@ -160,7 +160,7 @@ if os.environ.get("SHIGUANG_PRELOAD_INFER", "1") != "0":
 # 预检通过（子进程已证可用）才早导入；失败走浏览器兜底，不冒崩溃风险。
 if os.environ.get("SHIGUANG_NO_WEBENGINE") != "1":
     try:
-        from PyQt6 import QtWebEngineWidgets  # noqa: F401  必须早于 QApplication
+        from PySide6 import QtWebEngineWidgets  # noqa: F401  必须早于 QApplication
     except Exception:  # stability-gate: allow-swallow（导入失败 ⇒ 走浏览器兜底）
         pass
 import sys
@@ -342,15 +342,15 @@ class DependencyChecker:
     """依赖检查器
 
     ⚠️ 陷阱备忘（2026-09-25 实测，勿踩）：
-    **不要在 PyQt6 已加载之后，在本进程内 `import mediapipe`** ——
+    **不要在 PySide6 已加载之后，在本进程内 `import mediapipe`** ——
     实测必然失败：`ImportError: DLL load failed while importing _framework_bindings:
-    动态链接库(DLL)初始化例程失败`。顺序敏感，反过来（mediapipe 先、PyQt6 后）则正常；
+    动态链接库(DLL)初始化例程失败`。顺序敏感，反过来（mediapipe 先、PySide6 后）则正常；
     与 cv2 / torch / easyocr / transformers 的任意组合也正常。
-    ⇒ 这是「PyQt6 与 mediapipe 的 DLL 加载顺序冲突」。
+    ⇒ 这是「PySide6 与 mediapipe 的 DLL 加载顺序冲突」。
 
     当前架构**没有踩到这个坑**：姿态解析走独立子进程
     （`app/core/ai/pose_extract_service.py` 用 `subprocess` 跑 `pose_worker.py`），
-    子进程不加载 PyQt6，故正常。
+    子进程不加载 PySide6，故正常。
     但本类的 ``check_dependencies`` 历史实现在**本进程内**真导入了 mediapipe，
     于是把它误报成「未安装」（装了的！）—— 这也是改用 ``find_spec`` 的附带收益：
     它只定位不执行，顺带消掉了这个误诊。
@@ -358,7 +358,7 @@ class DependencyChecker:
     """
     
     REQUIRED_PACKAGES: dict[str, str] = {
-        "PyQt6": "PyQt6",
+        "PySide6": "PySide6",
         "moviepy": "moviepy",
         "opencv-python-headless": "cv2",
         "torch": "torch",
@@ -398,7 +398,7 @@ class DependencyChecker:
         ⚠️ 默认用 ``importlib.util.find_spec`` —— 它只**定位**模块，不执行模块代码。
         历史实现是 ``__import__(import_name)``，那会把整个 AI 栈真的导一遍：
         实测 torch 11.2s · transformers 33.7s · mediapipe 4.3s（冷启动时更久），
-        而调用方 ``_check_environment`` **只用到其中一项**（PyQt6 的存在性）。
+        而调用方 ``_check_environment`` **只用到其中一项**（PySide6 的存在性）。
         ⇒ 冷启动白等约 50s。2026-09-25 修。
 
         代价说明：find_spec 判「装了」，不判「装好且能导入」（例如二进制损坏时
@@ -562,10 +562,10 @@ class Application:
 
         deps = DependencyChecker.check_dependencies()
 
-        pyqt6_installed = deps["required"].get("PyQt6", False)
-        if not pyqt6_installed:
-            logger.error("❌ 缺少必需依赖: PyQt6")
-            logger.error("请运行: pip install PyQt6")
+        pyside6_installed = deps["required"].get("PySide6", False)
+        if not pyside6_installed:
+            logger.error("❌ 缺少必需依赖: PySide6")
+            logger.error("请运行: pip install PySide6==6.10.2 PySide6-Essentials==6.10.2 PySide6-Addons==6.10.2 shiboken6==6.10.2")
             return False
 
         if not DependencyChecker.check_ffmpeg():
@@ -702,16 +702,16 @@ class Application:
         logger.info("🖥️ 初始化 Qt6 应用...")
 
         # QtWebEngine 必须在 QApplication 之前导入，否则懒加载模块里会 ImportError，
-        # 镶嵌页误报「未安装 PyQt6-WebEngine」。
+        # 镶嵌页误报「未安装 PySide6-Addons」。
         try:
-            from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
-            from PyQt6.QtWebEngineCore import QWebEngineScript  # noqa: F401
+            from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+            from PySide6.QtWebEngineCore import QWebEngineScript  # noqa: F401
             logger.info("  ✅ QtWebEngine 预加载")
         except Exception as e:
             logger.warning(f"  ⚠️ QtWebEngine 不可用（AI 画布将外开浏览器）: {e}")
 
-        from PyQt6.QtWidgets import QApplication  # type: ignore[reportMissingImports]
-        from PyQt6.QtGui import QFont  # type: ignore[reportMissingImports]
+        from PySide6.QtWidgets import QApplication  # type: ignore[reportMissingImports]
+        from PySide6.QtGui import QFont  # type: ignore[reportMissingImports]
         
         # 🔴 argv 必须非空（2026-10-25）：Qt 6.11 的 QtWebEngine 依赖 base::CommandLine，
         # 空 argv 会让 Chromium 渲染进程 fail-fast（0xC0000409），整块画布黑屏。
@@ -945,7 +945,7 @@ class Application:
         # V4.43.14：按设置开关恢复上次会话（模块 / 项目）—— 用户裁定「默认开启」。
         # 延迟 1.6s：等主窗口完成首帧布局再切模块，避免抢在渲染之前。
         try:
-            from PyQt6.QtCore import QTimer as _QTimer
+            from PySide6.QtCore import QTimer as _QTimer
 
             _QTimer.singleShot(1600, mw._restore_last_session)
         except Exception as _e:  # pragma: no cover - 兜底，绝不影响启动
@@ -1057,7 +1057,7 @@ class Application:
         返回 True 表示本进程成为主实例继续启动；False 表示应直接退出。
         """
         try:
-            from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+            from PySide6.QtNetwork import QLocalServer, QLocalSocket
         except Exception as e:
             logger.debug("QLocalServer 不可用，跳过单实例守卫: %s", e)
             return True
@@ -1165,7 +1165,7 @@ class Application:
             if os.environ.get("SHIGUANG_AUTO_CANVAS") == "1":
                 # 诊断开关（2026-10-25）：启动后自动打开 AI 画布，便于抓画布加载现场
                 try:
-                    from PyQt6.QtCore import QTimer
+                    from PySide6.QtCore import QTimer
 
                     _m = getattr(mw, "_modules", {}).get("characters")
                     if _m is not None:
@@ -1208,7 +1208,7 @@ class Application:
     def _schedule_startup_check(self, parent_window) -> None:
         """延迟执行一次启动环境自检（仅缺失关键依赖时提示用户）"""
         try:
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             from .modules.lego.settings_module import EnvironmentDiagnosticDialog
 
             def _run():

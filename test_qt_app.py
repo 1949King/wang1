@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-正确的 PyQt6 测试脚本 - 需要先创建 QApplication
+正确的 PySide6 测试脚本 - 需要先创建 QApplication
 """
 
 import os
@@ -9,7 +9,7 @@ import subprocess
 import time
 
 # 必须先创建 QApplication
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,16 +17,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 ffmpeg_path = os.path.join(os.path.dirname(__file__), "thirdparty", "ffmpeg", "bin", "ffmpeg.exe")
 test_video = os.path.join(os.path.dirname(__file__), "素材库", "test_video.mp4")
 
-print("=== PyQt6 测试 ===")
+print("=== PySide6 测试 ===")
 
-# 测试 1: PyQt6
-print("\n测试 1: PyQt6")
+# 测试 1: PySide6
+print("\n测试 1: PySide6")
 try:
-    from PyQt6.QtGui import QPixmap
-    from PyQt6.QtCore import QByteArray
-    print("  ✅ PyQt6 导入成功")
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtCore import QByteArray
+    print("  ✅ PySide6 导入成功")
 except Exception as e:
-    print(f"  ❌ PyQt6 导入失败: {e}")
+    print(f"  ❌ PySide6 导入失败: {e}")
 
 # 测试 2: ffmpeg_service
 print("\n测试 2: ffmpeg_service")

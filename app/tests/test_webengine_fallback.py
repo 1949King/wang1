@@ -8,6 +8,7 @@ import app.modules.lego.character_management_module as C
 
 _ROOT = Path(__file__).resolve().parents[2]
 _MAIN = _ROOT / "app" / "main_qt6.py"
+_FROZEN_MAIN = _ROOT / "main_qt6.py"
 
 
 class _FakeSelf:
@@ -27,6 +28,15 @@ def test_main_has_webengine_probe_and_sets_flag() -> None:
     assert "def _probe_webengine()" in src
     assert "probe_webengine.py" in src
     assert 'SHIGUANG_NO_WEBENGINE"] = "1"' in src
+
+
+def test_frozen_main_sets_no_sandbox_before_qt_imports() -> None:
+    """冻结入口也必须保留已验证的 Chromium 启动标志及导入顺序。"""
+    src = _FROZEN_MAIN.read_text(encoding="utf-8")
+    flag_assignment = 'os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]'
+    assert flag_assignment in src
+    assert 'if "--no-sandbox" not in _webengine_flags:' in src
+    assert src.index(flag_assignment) < src.index("from PySide6.QtWidgets")
 
 
 def test_probe_script_exists_and_exits_nonzero_on_broken_env() -> None:

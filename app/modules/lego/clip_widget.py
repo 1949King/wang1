@@ -7,11 +7,11 @@
 import os
 import logging
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtGui import (
     QColor, QPainter, QPen, QBrush, QFontMetrics, QPolygon, QPixmap,
 )
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolTip
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolTip
 
 from .editor_timeline_tools import (
     apply_batch_start_delta,
@@ -32,11 +32,11 @@ logger = logging.getLogger("AI短剧编辑器.timeline_widget")
 class ClipWidget(QFrame):
     """ """
 
-    clicked = pyqtSignal(object)
-    resized = pyqtSignal(object)
-    moved = pyqtSignal(object)
-    keyframe_clicked = pyqtSignal(object, dict)  # (clip_data, keyframe)
-    trim_committed = pyqtSignal(object)  # 拖拽/裁剪松手后发出
+    clicked = Signal(object)
+    resized = Signal(object)
+    moved = Signal(object)
+    keyframe_clicked = Signal(object, dict)  # (clip_data, keyframe)
+    trim_committed = Signal(object)  # 拖拽/裁剪松手后发出
 
     # 补短 P1#8：关键帧可视化 - 属性->颜色 映射
     KEYFRAME_COLORS = {
@@ -1097,10 +1097,10 @@ class ClipWidget(QFrame):
         token = self._thumb_gen_token
         pending_key = key
 
-        from PyQt6.QtCore import QThread, pyqtSignal
+        from PySide6.QtCore import QThread, Signal
 
         class FilmstripWorker(QThread):
-            thumbnails_ready = pyqtSignal(list, float)  # pixmaps, aspect
+            thumbnails_ready = Signal(list, float)  # pixmaps, aspect
 
             def __init__(self, path, timestamps, height):
                 super().__init__()
@@ -1270,10 +1270,10 @@ class ClipWidget(QFrame):
             return
 
         self._waveform_scheduled = True
-        from PyQt6.QtCore import QThread, pyqtSignal
+        from PySide6.QtCore import QThread, Signal
         
         class WaveformWorker(QThread):
-            waveform_ready = pyqtSignal(list)
+            waveform_ready = Signal(list)
             
             def __init__(self, clip_path, num_samples):
                 super().__init__()

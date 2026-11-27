@@ -5,19 +5,17 @@ Qt6 实现的现代化登录界面
 支持：手机号登录、QQ邮箱登录、注册、设备管理
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QLineEdit, QPushButton, QStackedWidget, QFrame,
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QStackedWidget,
     QMessageBox, QCheckBox, QTabWidget, QTableWidget,
-    QTableWidgetItem, QHeaderView, QDialog, QSpacerItem,
-    QSizePolicy, QApplication
+    QTableWidgetItem, QHeaderView, QDialog, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
-from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QLinearGradient
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QColor, QPainter, QLinearGradient
 
 from .auth import AuthService, DeviceFingerprint
 from .email_service import email_service
-from typing import Optional
 
 
 class ModernLineEdit(QLineEdit):
@@ -121,7 +119,7 @@ class LogoWidget(QWidget):
 class LoginWidget(QWidget):
     """登录面板"""
     
-    login_success = pyqtSignal()
+    login_success = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -279,7 +277,7 @@ class LoginWidget(QWidget):
 class RegisterWidget(QWidget):
     """注册面板"""
     
-    register_success = pyqtSignal()
+    register_success = Signal()
     
     def __init__(self):
         super().__init__()
@@ -667,7 +665,7 @@ class DeviceManagerDialog(QDialog):
 class LoginWindow(QWidget):
     """登录窗口"""
     
-    login_success = pyqtSignal()
+    login_success = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Window)
@@ -722,7 +720,7 @@ class LoginWindow(QWidget):
         app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_layout.addWidget(app_name)
         
-        app_desc = QLabel("专业级短视频创作工具")
+        app_desc = QLabel("剪辑 + AI 生成的全能工作台")
         app_desc.setStyleSheet("""
             font-size: 16px;
             color: rgba(255, 255, 255, 0.8);
@@ -731,7 +729,7 @@ class LoginWindow(QWidget):
         app_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_layout.addWidget(app_desc)
         
-        features = QLabel("🎬 智能剪辑  ✍️ AI文案  📊 数据分析  🔌 插件扩展")
+        features = QLabel("🎬 视频剪辑  🎨 AI 画布  🖼️ 本地生图/生视频  🤖 智能体")
         features.setStyleSheet("""
             font-size: 14px;
             color: rgba(255, 255, 255, 0.6);
@@ -823,7 +821,7 @@ class LoginWindow(QWidget):
 class ActivationWindow(QWidget):
     """授权激活窗口"""
     
-    activation_success = pyqtSignal()
+    activation_success = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Window)

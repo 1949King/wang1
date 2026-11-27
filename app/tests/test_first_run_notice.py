@@ -122,10 +122,10 @@ def test_dialog_builds_without_touching_real_state(monkeypatch):
     import os
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    pytest.importorskip("PyQt6.QtWidgets")
-    from PyQt6.QtWidgets import QApplication, QMessageBox
+    pytest.importorskip("PySide6.QtWidgets")
+    from PySide6.QtWidgets import QApplication, QMessageBox
 
-    app = QApplication.instance() or QApplication([])   # noqa: F841
+    app = QApplication.instance() or QApplication(["first-run-notice-test"])   # noqa: F841
 
     calls = {"ack": 0}
     monkeypatch.setattr(frm, "should_show", lambda *a, **k: True)

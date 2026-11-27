@@ -42,8 +42,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
-from PyQt6.QtCore import QPoint, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPoint, Qt, QThread, QTimer, Signal
+from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -115,7 +115,7 @@ def friendly_error(exc: BaseException) -> str:
 class _Req(QThread):
     """一次 HTTP 往返，结果经 `done` 回主线程。"""
 
-    done = pyqtSignal(dict)
+    done = Signal(dict)
 
     def __init__(
         self,
@@ -235,7 +235,7 @@ class TeamQuickPanel(QFrame):
     """团队连接小窗。任意模块都能弹，不切模块。"""
 
     # 用户点了「在画布中打开完整面板」—— 由 main_window 接住去做真正的跳转
-    open_full_requested = pyqtSignal()
+    open_full_requested = Signal()
 
     PANEL_WIDTH = 392
 

@@ -10,7 +10,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:
-    from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QFontMetrics
+    from PySide6.QtGui import QPixmap, QColor, QPainter, QFont, QFontMetrics
 except Exception:  # pragma: no cover
     QPixmap = QColor = QPainter = QFont = QFontMetrics = None  # type: ignore
 

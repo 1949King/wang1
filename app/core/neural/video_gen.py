@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,98 @@ _CFG_MAX = 3.0
 _HEIGHT = 576
 _WIDTH = 1024
 
+#: SVD 训练分辨率对应的基准面积（1024×576），比例自适应时保持面积不变。
+_BASE_AREA = _WIDTH * _HEIGHT
+
+
+def fit_output_size(img_w: int, img_h: int) -> Tuple[int, int]:
+    """按**输入图长宽比**选输出尺寸（2026-11-09 修）。
+
+    为什么需要：原先 `generate()` 无条件用模块常量 1024×576，与输入图比例无关。
+    真机实测（`.workbuddy/tmp/check_svd_aspect.py`，输入 512×512 方图）：
+    第 1 帧与「拉伸后输入」余弦相似度 **0.972**，与「居中裁剪后」只有 **0.852**
+    ⇒ SVD 对 conditioning image 是**直接拉伸**，不是裁剪。
+    结果：方形人脸被横向拉宽 1.78 倍，用户看到的就是「脸变胖」。
+
+    规则（优先 SVD 官方两档，其余保面积）：
+      - ratio ≥ 1.6  → 1024×576（横屏，模型最熟）
+      - ratio ≤ 0.625 → 576×1024（竖屏，模型最熟）
+      - 中间比例（含方形）→ 保持面积≈1024×576，按比例算
+      - 一律取 8 的倍数（VAE 空间下采样 8×），并夹到 [512, 1024]
+
+    尺寸非法（读图失败）时返回官方横屏档，绝不返回 0。
+    """
+    if img_w <= 0 or img_h <= 0:
+        return _WIDTH, _HEIGHT
+    ratio = float(img_w) / float(img_h)
+    if ratio >= 1.6:
+        return 1024, 576
+    if ratio <= 0.625:
+        return 576, 1024
+    h = int(round((_BASE_AREA / ratio) ** 0.5))
+    w = int(round(h * ratio))
+    w = max(512, min(1024, (w // 8) * 8))
+    h = max(512, min(1024, (h // 8) * 8))
+    return w, h
+
+
+def _image_size(path: str) -> Tuple[int, int]:
+    """读图尺寸；失败返回 (0, 0) 交给 fit_output_size 兜底。"""
+    try:
+        from PIL import Image as _Image
+
+        with _Image.open(path) as im:
+            return int(im.width), int(im.height)
+    except Exception:
+        logger.debug("[video_gen] 读取输入图尺寸失败: %s", path, exc_info=True)
+        return 0, 0
+
+
+# ────────────────────── 蒸馏 LoRA 探测（T4 生成加速，2026-11-20）──────────────────────
+# 单一真源：下载中心 tool_weights 委托本函数（不两套搜索逻辑）。
+# 红线：权重绝不自动下载、不随包 —— 用户自取放置，程序只做探测 + guidance。
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+
+#: Wan2.2-Lightning LoRA 缺失时的自取指引（与下载中心同源；Apache-2.0 已 T0 核实）。
+LIGHTNING_LORA_GUIDANCE = (
+    "未检测到 Wan2.2-Lightning 蒸馏 LoRA（*lightning*.safetensors）。本软件绝不自动下载模型：\n"
+    "【资源地址（Apache-2.0，T0 已核）】\n"
+    "  · https://huggingface.co/lightx2v/Wan2.2-Lightning\n"
+    "【部署步骤】\n"
+    "  1. 获取 Wan2.2-Lightning 的 LoRA 权重（.safetensors，文件名含 lightning）。\n"
+    "  2. 放到以下任一位置：\n"
+    "     ① 环境变量 SHIGUANG_LORA_DIR 指定目录；\n"
+    "     ② 仓库 thirdparty/models/loras/。\n"
+    "  3. 重启后在视频生成选「蒸馏加速」档。缺失时诚实回落 fast 档，绝不静默用非蒸馏跑 6 步。"
+)
+
+
+def find_lightning_lora() -> str:
+    """扫 SHIGUANG_LORA_DIR 与 thirdparty/models/loras 下的 *lightning*.safetensors。
+
+    找不到返回空串（调用方诚实报错 + guidance，绝不自动下载）。
+    """
+    roots: List[str] = []
+    env_dir = os.environ.get("SHIGUANG_LORA_DIR", "").strip()
+    if env_dir:
+        roots.append(env_dir)
+    roots.append(os.path.join(_REPO_ROOT, "thirdparty", "models", "loras"))
+    for r in roots:
+        if not os.path.isdir(r):
+            continue
+        try:
+            for fn in sorted(os.listdir(r)):
+                low = fn.lower()
+                if "lightning" in low and low.endswith(".safetensors"):
+                    p = os.path.join(r, fn)
+                    if os.path.isfile(p):
+                        return p
+        except OSError:
+            logger.debug("[video_gen] LoRA 目录扫描失败: %s", r, exc_info=True)
+    return ""
+
+
 TUNED: Dict[str, Dict[str, Any]] = {
     "svd-xt-i2v": {
         "steps": QUALITY_PRESETS["balanced"],  # 14
@@ -181,6 +273,19 @@ TUNED: Dict[str, Dict[str, Any]] = {
         #   此时 **CFG 必须为 1.0**，否则反而劣化。
         #   守卫 `_verify/check_video_gen.py` 对 `distilled=True` 的条目**跳过**「CFG 不得关闭」断言。
         "distilled": False,
+    },
+    # ★ T4（2026-11-20）：Wan2.2-TI2V-5B + Lightning 蒸馏 LoRA（6 步加速）。
+    #   蒸馏产物训练时就是无 CFG 的 ⇒ cfg_min/max=1.0（distilled=True，
+    #   守卫对该条目跳过「CFG 不得关闭」断言）。基模复用 wan22-ti2v-5b 同仓目录，
+    #   LoRA 需自取（find_lightning_lora）；缺失时 load 诚实失败，绝不静默当基模跑。
+    "wan22-ti2v-5b-lightning": {
+        "steps": QUALITY_PRESETS["preview"],  # 6（蒸馏舒适区 6~8 步）
+        "decode_chunk_size": 1,
+        "offload": True,
+        "offload_max_frames": 0,
+        "cfg_min": 1.0,
+        "cfg_max": 1.0,
+        "distilled": True,
     },
 }
 _DEFAULT_TUNED: Dict[str, Any] = {
@@ -260,6 +365,24 @@ VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
         "ram_gb": 20.0,
         "note": "扩散权重仅 5.29GB，但同样要那 10.58GB T5",
         "license": "Apache-2.0",
+    },
+    # ★ T4（2026-11-20）：蒸馏加速变体 —— 基模复用 wan22-ti2v-5b（同仓同目录，零重复下载），
+    #   另需自取 Wan2.2-Lightning LoRA（Apache-2.0，T0 已核；见下载中心 tool_weights）。
+    #   6 步 CFG=1.0（蒸馏权重口径）；真机加速比待权重到位后实测，不预支结论。
+    "wan22-ti2v-5b-lightning": {
+        "label": "Wan 2.2 TI2V-5B + Lightning LoRA（蒸馏 6 步加速）",
+        "repo": "Wan-AI/Wan2.2-TI2V-5B",
+        "pipeline": "WanPipeline",
+        "params": "5B+LoRA",
+        "modes": ["t2v", "i2v"],
+        "full_repo_gb": 31.9,
+        "subset_gb": 31.9,
+        "vram_gb": 8.0,
+        "ram_gb": 20.0,
+        "license": "Apache-2.0",
+        "base_model": "wan22-ti2v-5b",
+        "lora": "wan22_lightning",
+        "note": "基模复用 wan22-ti2v-5b；需自取 Wan2.2-Lightning LoRA（下载中心）；6 步 CFG=1.0",
     },
 }
 
@@ -481,6 +604,13 @@ class VideoGenEngine:
         if not self.is_downloaded(model_id):
             d = self.local_dir(model_id)
             return {"ok": False, "message": f"模型未下载。请先拉取（目标目录: {d}）"}
+        # ★ T4：蒸馏 LoRA 变体必须先有 LoRA 才建 pipe —— 缺失诚实失败 + 自取 guidance，
+        #   绝不静默当基模跑（用户选的是加速变体，跑基模会骗他步数/CFG 语义）。
+        lora_path = ""
+        if (VIDEO_MODELS.get(model_id) or {}).get("lora"):
+            lora_path = find_lightning_lora()
+            if not lora_path:
+                return {"ok": False, "message": LIGHTNING_LORA_GUIDANCE}
         if self._pipe is not None and self._loaded_id == model_id:
             return {"ok": True, "message": "已加载"}
 
@@ -510,6 +640,13 @@ class VideoGenEngine:
                 if model_id == "svd-xt-i2v":
                     kwargs["variant"] = "fp16"
                 p = DiffusionPipeline.from_pretrained(d, **kwargs)
+                # ★ T4：蒸馏 LoRA 在建 pipe 后、offload 钩子前加载（避免钩子与 LoRA 互撕）。
+                #   失败必须抛 —— 外层 except 转 ok=False，绝不静默当基模跑。
+                if lora_path:
+                    try:
+                        p.load_lora_weights(lora_path)
+                    except Exception as e:
+                        raise RuntimeError(f"蒸馏 LoRA 加载失败（{lora_path}）：{e}") from e
                 if pol["mode"] != MODE_WHOLE_GPU:
                     try:
                         if pol["mode"] == MODE_SEQUENTIAL_OFFLOAD:
@@ -778,7 +915,8 @@ class VideoGenEngine:
         spec = VIDEO_MODELS.get(model_id)
         if not spec:
             return {"ok": False, "message": f"未知模型 id: {model_id}"}
-        if "i2v" in spec["modes"] and not image_path:
+        # ★ T4：双模式模型（Wan 系 t2v+i2v）允许纯文生视频；仅 i2v-only（SVD）才强制要图。
+        if "i2v" in spec["modes"] and "t2v" not in spec["modes"] and not image_path:
             return {"ok": False, "message": f"{spec['label']} 是图生视频，必须提供 image_path"}
         if "t2v" in spec["modes"] and not prompt and not image_path:
             return {"ok": False, "message": "需要 prompt 或 image_path"}
@@ -790,6 +928,20 @@ class VideoGenEngine:
         )
         n_mb = int(MOTION_PRESETS.get(motion or "", tun.get("motion_bucket_id", 127)))
         n_frames = max(2, int(round(seconds * fps)))
+        # ★ T4：Wan 系时序 VAE 要求 4k+1 帧（WanPipeline 约束），向下取最近合法值；
+        #   非 Wan（SVD）不受影响。_is_wan 同时供下方 kw 分支使用（单一推导）。
+        _is_wan = "Wan" in str(spec.get("pipeline") or "")
+        if _is_wan:
+            n_frames = max(5, ((n_frames - 1) // 4) * 4 + 1)
+        # ★ T4：preview 档（6 步）只对步数蒸馏权重成立；非蒸馏基模选 preview
+        #   必须诚实回落 fast（10 步）并可见 —— 绝不静默用非蒸馏跑 6 步（出废片）。
+        _preview_note = ""
+        if (quality or "") == "preview" and not tun.get("distilled"):
+            n_steps = QUALITY_PRESETS["fast"]
+            _preview_note = (
+                "preview 档需步数蒸馏权重（如 Wan2.2-Lightning LoRA）；"
+                "当前模型未蒸馏 ⇒ 诚实回落 fast（10 步），绝不静默用非蒸馏跑 6 步"
+            )
 
         # ★ 先把帧数交给 load：offload 的取舍依赖帧数（见文件顶部 ② 实测）。
         #   load() 自带幂等 + 需要切换装载方式时自动重载，所以这里无条件调用。
@@ -813,6 +965,12 @@ class VideoGenEngine:
             #   load() 已按同一帧数算出策略，直接复用（单一决策点，不重复计算）。
             #   SVD 实测必须 1（比 2 快约 6 倍且更省显存）。
             _chunk = int(self._memory_policy.get("decode_chunk_size") or tun["decode_chunk_size"])
+            # ★ 输出尺寸随输入图比例走（2026-11-09）：原先硬编码 1024×576，
+            #   方图/竖图会被 SVD 直接拉伸（实测相似度 0.972 vs 裁剪 0.852）⇒ 人脸变胖。
+            #   无图（T2V 族）时仍用官方默认档。
+            _out_w, _out_h = (
+                fit_output_size(*_image_size(image_path)) if image_path else (_WIDTH, _HEIGHT)
+            )
             kw: Dict[str, Any] = {
                 "num_frames": n_frames,
                 "decode_chunk_size": _chunk,
@@ -831,9 +989,20 @@ class VideoGenEngine:
                 #   原先没传 ⇒ stock 用签名默认 576×1024，而内核若按
                 #   `unet.config.sample_size * vae_scale_factor` 推会算成 768×768，
                 #   两条路尺寸不同就没法比 PSNR（而画面看起来都"正常"）。
-                "width": int(_WIDTH),
-                "height": int(_HEIGHT),
+                "width": int(_out_w),
+                "height": int(_out_h),
             }
+            # ★ T4：Wan 系（DiT）参数口径与 SVD 不同 —— guidance_scale 单标量、
+            #   宽高必须 16 倍数（patchify）、无 motion_bucket/fps 等 SVD 专属键。
+            #   蒸馏 ⇒ CFG=1.0；非蒸馏 Wan 用 tuned cfg_max（未登记默认 5.0）。
+            if _is_wan:
+                kw = {
+                    "num_frames": n_frames,
+                    "num_inference_steps": n_steps,
+                    "guidance_scale": 1.0 if _is_distilled else float(tun.get("cfg_max", 5.0)),
+                    "width": (int(_out_w) // 16) * 16,
+                    "height": (int(_out_h) // 16) * 16,
+                }
             if seed:
                 kw["generator"] = torch.manual_seed(int(seed))
             # ★ P0-1 步缓存（DeepCache）：默认关，SHIGUANG_STEP_CACHE=deepcache 显式开。
@@ -860,7 +1029,7 @@ class VideoGenEngine:
                         spec=spec, arch=_sc_arch, kw=kw,
                         image_path=image_path, n_frames=n_frames, n_steps=n_steps,
                         n_mb=n_mb, fps=int(fps), chunk=_chunk,
-                        width=int(_WIDTH), height=int(_HEIGHT),
+                        width=int(_out_w), height=int(_out_h),
                         generator=kw.get("generator"), seed=int(seed),
                     )
                 else:
@@ -884,8 +1053,11 @@ class VideoGenEngine:
             # 落箱失败不影响产物本身：video_path 仍然有效，只是前端播不了。
             published = publish_to_inbox(out_path)
             elapsed = _time.time() - t_gen0
+            self._record_telemetry(model_id, elapsed, ok=True)
             _warnings: List[str] = []
             _warnings.extend(_kernel_warnings)
+            if _preview_note:
+                _warnings.append(_preview_note)
             _video_url = str(published.get("url") or "")
             if not _video_url:
                 # 落箱失败 ⇒ data URL 兜底，保证前端拿到的永远是可播放串
@@ -918,7 +1090,32 @@ class VideoGenEngine:
             return {"ok": False, "message": "显存不足（OOM）。请缩短时长/降低帧数，或换更小模型。"}
         except Exception as e:
             logger.debug("[video_gen] generate 失败", exc_info=True)
+            try:
+                self._record_telemetry(model_id, 0.0, ok=False)
+            except Exception:
+                logger.debug("[video_gen] 失败遥测写入异常", exc_info=True)
             return {"ok": False, "message": f"生成失败：{type(e).__name__}: {e}"}
+
+    # ── 遥测（2026-10-29 补埋点：与 diffusers_image._record_telemetry 同口径）──
+    def _record_telemetry(self, model_id: str, elapsed: float, ok: bool) -> None:
+        """把真实执行结果写进引擎遥测（首生成/稳态分开记；失败只记失败率）。
+
+        纪律：遥测写入失败绝不影响生成（包 try、只 debug）。
+        """
+        try:
+            from app.core.ai import engine_telemetry as ET
+
+            spec = VIDEO_MODELS.get(model_id) or {}
+            arch = str(spec.get("arch") or "svd")
+            n = int(getattr(self, "_gen_count", 0))
+            ms = max(0.0, float(elapsed) * 1000.0)
+            ET.record(engine="svd", model_arch=arch, ok=bool(ok),
+                      first_ms=ms if (ok and n == 0) else 0.0,
+                      steady_ms=ms if (ok and n > 0) else 0.0)
+            if ok:
+                self._gen_count = n + 1
+        except Exception:
+            logger.debug("[video_gen] 遥测写入失败（不阻断）", exc_info=True)
 
 
 def write_data_url(data_url: str, dest_dir: str, name_hint: str = "input") -> Optional[str]:

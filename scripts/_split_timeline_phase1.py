@@ -39,12 +39,12 @@ import time
 import urllib.request
 import weakref
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import (
     QFont, QColor, QPainter, QPen, QBrush, QFontMetrics,
     QPolygon, QPixmap, QImage,
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider,
 )

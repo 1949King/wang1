@@ -30,7 +30,7 @@ import threading
 import logging
 from typing import Any, Dict, List
 
-from PyQt6.QtWidgets import QMessageBox, QApplication
+from PySide6.QtWidgets import QMessageBox, QApplication
 
 logger = logging.getLogger("AI短剧编辑器.editor")
 
@@ -196,7 +196,7 @@ class AiAgentPanelMixin:
                     )
                     if reply == QMessageBox.StandardButton.Yes:
                         self._on_ai_clip_fallback(video_path, prompt)
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             QTimer.singleShot(0, _apply)
 
         def _run_llm_clip():
@@ -279,7 +279,7 @@ class AiAgentPanelMixin:
             return
         try:
             from app.core.agent_proactive import suggest_next_actions, collect_proactive_state
-            from PyQt6.QtWidgets import QLabel, QPushButton
+            from PySide6.QtWidgets import QLabel, QPushButton
         except Exception as e:
             logger.warning("加载建议引擎失败: %s", e)
             return

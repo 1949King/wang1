@@ -4,7 +4,7 @@
 """
 
 import sys
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 from license.license_manager import get_license_manager
 from main_qt6 import MainProgramWindow
 

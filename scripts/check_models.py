@@ -47,8 +47,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-CAP_ORDER = ["image", "video", "audio", "music", "llm"]
-CAP_LABEL = {"image": "生图", "video": "生视频", "audio": "语音", "music": "音乐", "llm": "对话"}
+CAP_ORDER = ["image", "video", "audio", "music", "llm", "tool"]
+CAP_LABEL = {"image": "生图", "video": "生视频", "audio": "语音", "music": "音乐",
+             "llm": "对话", "tool": "工具"}
 
 
 # ── 硬件 ───────────────────────────────────────────────────────────────────
@@ -221,6 +222,36 @@ def collect(capabilities: list[str] | None, show_all: bool) -> tuple[dict, list[
                 "pull_id": cand[0] if cand else "",
             }
         )
+    # 工具权重（单文件自取，绝不自动下载）：与生成模型族分列，永不进 --pull 通道
+    try:
+        from app.core.neural import tool_weights as TW
+
+        for tid, tspec in TW.TOOL_WEIGHTS.items():
+            if capabilities and "tool" not in capabilities:
+                continue
+            try:
+                tpath = str(tspec["probe"]() or "")
+            except Exception:
+                tpath = ""
+            if not show_all and not tpath:
+                continue
+            tgb = None
+            if tpath:
+                try:
+                    tgb = round(os.path.getsize(tpath) / 1024**3, 2)
+                except OSError:
+                    tgb = None
+            rows.append({
+                "family": tid, "capability": "tool", "weights": bool(tpath),
+                "verification": "", "backends": {},
+                "resolvable": bool(tpath),
+                "reasons": [] if tpath else ["权重未放置（自取，见 --missing 指引）"],
+                "backend_in_use": "", "disk_gb": tgb,
+                "disk_dir": os.path.dirname(tpath) if tpath else "",
+                "pullable": False, "pull_id": "",
+            })
+    except Exception:
+        pass
     rows.sort(
         key=lambda r: (
             CAP_ORDER.index(r["capability"]) if r["capability"] in CAP_ORDER else 99,
@@ -327,6 +358,18 @@ def render_missing(cat: dict, hw: dict, rows: list[dict]) -> str:
         lines.append("—— 有推理代码、但没有登记下载源的族（当前拉不了）——")
         lines.append(f"  {', '.join(no_src)}")
 
+    tool_missing = [r for r in rows if r.get("capability") == "tool" and not r.get("weights")]
+    if tool_missing:
+        from app.core.neural import tool_weights as TW
+
+        lines.append("")
+        lines.append("—— 工具权重（单文件自取，绝不自动下载）——")
+        for r in tool_missing:
+            tspec = TW.TOOL_WEIGHTS.get(r["family"]) or {}
+            lines.append(f"  · {r['family']}：{tspec.get('label') or r['family']}")
+            for ln in str(tspec.get("guidance") or "").splitlines():
+                lines.append(f"      {ln}")
+
     if pullable:
         lines.append("")
         lines.append("—— 可以直接拉取的（硬件够）——")
@@ -398,6 +441,15 @@ def render_all(rows: list[dict]) -> str:
 
 # ── 拉取 ───────────────────────────────────────────────────────────────────
 def do_pull(target: str, yes: bool) -> int:
+    # 工具权重绝不自动下载（用户红线）：--pull 命中工具 id 直接拒绝并给自取指引
+    from app.core.neural import tool_weights as TW
+
+    if target in TW.TOOL_WEIGHTS:
+        tspec = TW.TOOL_WEIGHTS[target]
+        print(f"✗ {target} 是工具权重，本软件绝不自动下载。请自取放置：", file=sys.stderr)
+        print(str(tspec.get("guidance") or ""), file=sys.stderr)
+        return 1
+
     from app.core.neural.diffsynth_image import DiffsynthImageEngine, IMAGE_MODELS
     from app.core.neural.video_gen import VIDEO_MODELS, VideoGenEngine
 

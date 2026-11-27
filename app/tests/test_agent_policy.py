@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
 """Policy Engine：Plan / B / C 矩阵与重试边界。"""
+from unittest.mock import Mock
+
+from app.core.capability_dispatcher import (
+    CapabilityCategory,
+    CapabilityDispatcher,
+    CapabilityRequest,
+    CapabilityResult,
+)
 from app.core.agent_policy import (
     DECISION_ALLOW,
     DECISION_DENY,
@@ -119,3 +127,31 @@ def test_compress_keeps_system_and_tail():
     assert out[0]["role"] == "system"
     assert any("压缩上下文" in str(m.get("content")) for m in out)
     assert len(str(out)) < len(str(msgs))
+
+
+def test_dispatcher_policy_exception_fails_closed(monkeypatch):
+    """策略判断自身异常时必须拒绝执行，不能让写能力绕过审批链。"""
+    dispatcher = object.__new__(CapabilityDispatcher)
+    dispatcher._initialized = False
+    CapabilityDispatcher.__init__(dispatcher)
+    dispatcher._builtin_registered = True
+    dispatcher._memory = Mock()
+    dispatcher._safe_emit = Mock()
+    handler = Mock(return_value=CapabilityResult(request_id="policy-error", success=True))
+    dispatcher.register("editor.split_clip", CapabilityCategory.EDITOR, handler)
+
+    def _raise_policy_error(**_kwargs):
+        raise RuntimeError("policy unavailable")
+
+    monkeypatch.setattr("app.core.agent_policy.decide", _raise_policy_error)
+    monkeypatch.setattr("app.core.agent_brain.agent_brain.activate", Mock())
+    result = dispatcher.invoke(CapabilityRequest(
+        request_id="policy-error",
+        capability_id="editor.split_clip",
+        caller="agent_loop",
+        agent_mode=MODE_COLLABORATIVE,
+    ))
+
+    assert result.success is False
+    assert "策略校验失败" in result.error
+    handler.assert_not_called()

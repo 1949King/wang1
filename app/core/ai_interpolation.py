@@ -15,7 +15,7 @@
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
+from PySide6.QtCore import QObject, Signal, QThread
 import logging
 import threading
 import time
@@ -298,8 +298,8 @@ class ContextAwareInterpolator:
 class InterpolationWorker(QThread):
     """补帧工作线程"""
     
-    # 2026-10-09 修：原为 pyqtSignal(float, List[np.ndarray])。
-    # pyqtSignal 只接受**真实 Python 类型 / bytes / ASCII 字符串**，不接受
+    # 2026-10-09 修：原信号声明误用 List[np.ndarray] 泛型。
+    # Signal 只接受**真实 Python 类型 / bytes / ASCII 字符串**，不接受
     # typing 的泛型别名（typing.List[np.ndarray] 是 _GenericAlias）——它会抛
     #     TypeError: bytes or ASCII string expected not '_GenericAlias'
     # 且因为异常发生在**类体执行期**，整个模块 import 即崩。后果：
@@ -307,10 +307,10 @@ class InterpolationWorker(QThread):
     #     会 ImportError（该处无 try/except，一旦用户开启补帧就崩渲染线程）；
     #   * deformity_repair_skill._try_real_interpolation 被 try/except 吞掉，
     #     永远返回「ai_interpolation 不可用」，Agent 补帧能力**静默失效**。
-    # 载荷是 list，用 object 声明（PyQt 会按 Python 对象传递，不复制）。
-    interpolation_ready = pyqtSignal(float, object)
-    marker_added = pyqtSignal(object)
-    progress = pyqtSignal(int, str)
+    # 载荷是 list，用 object 声明（PySide6 会按 Python 对象传递，不复制）。
+    interpolation_ready = Signal(float, object)
+    marker_added = Signal(object)
+    progress = Signal(int, str)
     
     def __init__(self, interpolator: ContextAwareInterpolator):
         super().__init__()
@@ -361,10 +361,10 @@ class InterpolationWorker(QThread):
 class AIInterpolationEngine(QObject):
     """线性补帧引擎（历史类名保留 AI 前缀以兼容导入）"""
     
-    # 同 InterpolationWorker 的修复理由：typing 泛型别名不能进 pyqtSignal。
-    # 原为 pyqtSignal(float, List[np.ndarray]) / pyqtSignal(List)。
-    interpolation_ready = pyqtSignal(float, object)
-    markers_updated = pyqtSignal(object)
+    # 同 InterpolationWorker 的修复理由：typing 泛型别名不能进 Signal。
+    # 原信号声明误用 List[np.ndarray] / List 泛型。
+    interpolation_ready = Signal(float, object)
+    markers_updated = Signal(object)
     
     def __init__(self):
         super().__init__()

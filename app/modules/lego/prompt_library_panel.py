@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QListWidget, QListWidgetItem, QTextEdit, QMessageBox,
     QCheckBox, QSplitter, QFrame, QScrollArea, QButtonGroup, QSizePolicy,
@@ -28,8 +28,8 @@ logger = logging.getLogger("AI短剧编辑器.prompt_library_panel")
 
 
 class _SyncWorker(QThread):
-    progress = pyqtSignal(int, int, str)
-    finished_ok = pyqtSignal(int, int, int)
+    progress = Signal(int, int, str)
+    finished_ok = Signal(int, int, int)
 
     def __init__(self, store: PromptLibraryStore, parent=None):
         super().__init__(parent)

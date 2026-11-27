@@ -37,7 +37,7 @@ def _python() -> str:
     """定位 python：**优先项目 venv**，其次当前解释器。
 
     为什么不能直接用 sys.executable（2026-10-05 血泪）：
-    本机系统 Python 3.14 只装了 PyQt6，`pypinyin` / `psutil` 等 requirements.txt
+    本机系统 Python 3.14 只装了 PySide6，`pypinyin` / `psutil` 等 requirements.txt
     里的依赖都没有；用它跑校验会让 PINYIN / TTSGUARD 因「缺依赖」误报 FAIL，
     看起来像产品回归，其实是**跑错了解释器**。项目真实运行时是 .venv312
     （见「启动AI短剧编辑器.bat」回退链），校验必须跟它对齐。
@@ -248,8 +248,8 @@ CHECKS = [
     ("LOCALMODEL", "_verify/check_local_model_wiring.py", "本地模型接线：画布可列出自部署模型"),
     # ── 本地视频生成接线（2026-10-01）──
     ("VIDEOGEN", "_verify/check_video_gen.py", "本地视频生成：镜像/免代理/Xet + 项目原生链路"),
-    # ── pyqtSignal 参数类型（2026-10-09：ai_interpolation / highlight_preview 整模块 import 崩）──
-    ("QTSTG", "_verify/check_qt_signal_types.py", "pyqtSignal 参数类型（防泛型别名致整模块 import 崩）"),
+    # ── Signal 参数类型（2026-10-09：ai_interpolation / highlight_preview 整模块 import 崩）──
+    ("QTSTG", "_verify/check_qt_signal_types.py", "Signal 参数类型（防泛型别名致整模块 import 崩）"),
     # ── 素材不出域硬约束（2026-10-09）──
     ("POWERON", "_verify/check_poweron_e2e.py",
      "通电验证：换词重配五件套 / 拉片 / 重拍端点真可达（起真服务打 HTTP）"),

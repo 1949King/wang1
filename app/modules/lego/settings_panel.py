@@ -31,9 +31,9 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QSettings, QSize
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QDialog, QFileDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton,
     QListWidget, QListWidgetItem, QStackedWidget, QFrame, QScrollArea,
     QGridLayout, QMessageBox,
@@ -315,8 +315,8 @@ class SettingsDialog(QDialog):
         appearance_changed(str)       — 外观预设 / 主题模式变化
     """
 
-    preference_changed = pyqtSignal(str, bool)
-    appearance_changed = pyqtSignal(str)
+    preference_changed = Signal(str, bool)
+    appearance_changed = Signal(str)
 
     _instance: Optional["SettingsDialog"] = None
 
@@ -729,7 +729,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._section_title("技术栈"))
         stack = QHBoxLayout()
         stack.setSpacing(6)
-        for label in ["PyQt6", "React Flow", "TypeScript", "Vite", "MCP"]:
+        for label in ["PySide6", "React Flow", "TypeScript", "Vite", "MCP"]:
             c = QLabel(label)
             c.setObjectName("chipMuted")
             stack.addWidget(c)

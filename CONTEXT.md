@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-A PyQt6-based desktop application(**拾光剪影**)focused on short-drama **editing** and **AI canvas** (agent + digital human). Publishing/finder plugins are interface shells only.
+A PySide6-based desktop application(**拾光剪影**)focused on short-drama **editing** and **AI canvas** (agent + digital human). Publishing/finder plugins are interface shells only.
 
 **唯一开发文档(单一事实源)**: [`docs/现行技术文档.md`](docs/现行技术文档.md) — 后续开发只读这一份
 **历史/深度细节(已归档)**: [`docs/_archive/`](docs/_archive/) — 不再作为现行依据
 
 ## Tech Stack
 
-- **UI Framework**: PyQt6
+- **UI Framework**: PySide6 6.10.2 / Qt 6.10.2
 - **Video Processing**: FFmpeg, OpenCV/PyAV, MLT (via `thirdparty/mlt/Shotcut` runtime; OpenShot was evaluated early and rejected — remnants removed 2026-09-14, NOT a fork)
 - **AI Integration**: Ollama (local), various cloud APIs (DeepSeek, OpenAI, etc.)
 - **Language**: Python 3.x

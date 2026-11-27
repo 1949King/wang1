@@ -26,8 +26,8 @@ import pytest
 @pytest.fixture(scope="module")
 def qapp():
     """Qt 对象（QObject/QKeySequence/QAction）在 offscreen 下需要 QApplication。"""
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication([])
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(["zcov-config-test"])
     yield app
 
 
@@ -408,7 +408,7 @@ def test_shortcut_export_import_config(sc_mgr, tmp_path):
 
 
 def test_shortcut_register_qaction_applies_sequence(sc_mgr, qapp):
-    from PyQt6.QtGui import QAction, QKeySequence
+    from PySide6.QtGui import QAction, QKeySequence
     mgr, _path = sc_mgr
     act = QAction("test", None)
     mgr.register_qaction("file.save", act)

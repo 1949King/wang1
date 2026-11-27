@@ -17,13 +17,13 @@ import os
 import json
 import logging
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QComboBox, QGroupBox, QTabWidget,
     QListWidget, QListWidgetItem, QApplication,
     QMessageBox, QFileDialog,
 )
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from .base_module import BaseModule
 from .core import EventType
@@ -696,7 +696,7 @@ class CopywritingModule(BaseModule):
     def _generate(self):
         content = self._content_input.toPlainText().strip()
         if not content:
-            from PyQt6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "提示", "请先输入内容或导入视频")
             return
         
@@ -817,7 +817,7 @@ class CopywritingModule(BaseModule):
             btn = btns[tab_index]
             original = btn.text()
             btn.setText("✓ 已复制")
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             QTimer.singleShot(1500, lambda b=btn, o=original: b.setText(o))
 
     def _push_to_editor(self):
@@ -828,7 +828,7 @@ class CopywritingModule(BaseModule):
         script = self._output_tabs.widget(3).toPlainText().strip()
 
         if not any([title, description, tags, script]):
-            from PyQt6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "提示", "请先生成文案内容")
             return
 
@@ -861,7 +861,7 @@ class CopywritingModule(BaseModule):
             "data": push_data,
         })
 
-        from PyQt6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             self, "推送成功",
             f"文案已推送到剪辑模块\n标题: {title[:30]}..."

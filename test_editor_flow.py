@@ -72,7 +72,7 @@ def test_frame_extraction():
     """测试帧提取（缩略图）"""
     print("\n=== 测试 3: 帧提取（缩略图）===")
     from app.core.ffmpeg_service import ffmpeg_service
-    from PyQt6.QtGui import QPixmap
+    from PySide6.QtGui import QPixmap
     
     test_video = find_test_video()
     if not test_video:
@@ -163,9 +163,9 @@ def test_clip_data_creation():
 def test_mediaplayer():
     """测试 QMediaPlayer 播放"""
     print("\n=== 测试 7: QMediaPlayer 播放 ===")
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-    from PyQt6.QtCore import QUrl
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+    from PySide6.QtCore import QUrl
     
     app = QApplication.instance() or QApplication(sys.argv)
     
@@ -205,7 +205,7 @@ def test_mediaplayer():
 def test_timeline_import():
     """测试 TimelineWidget 导入"""
     print("\n=== 测试 7: TimelineWidget 导入 ===")
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
     
     app = QApplication.instance() or QApplication(sys.argv)
     

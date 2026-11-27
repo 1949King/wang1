@@ -31,22 +31,22 @@ def _get_app():
     """拿（并**持有**）一个 QApplication。
 
     坑：把 QApplication 放在 fixture 局部变量里，fixture 返回后 Python 会回收它，
-    PyQt 随之销毁 C++ 侧 → 后续访问 PreviewManager 报
+    Qt 随之销毁 C++ 侧 → 后续访问 PreviewManager 报
     `wrapped C/C++ object ... has been deleted`。故用模块级变量钉住。
     """
     global _APP
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
-    _APP = QApplication.instance() or QApplication([])
+    _APP = QApplication.instance() or QApplication(["preview-preload-test"])
     return _APP
 
 
 @pytest.fixture()
 def pm():
     """真实 PreviewManager（offscreen Qt；不打开视频）。"""
-    pytest.importorskip("PyQt6.QtWidgets")
+    pytest.importorskip("PySide6.QtWidgets")
     _get_app()
     from app.core.preview_manager import PreviewManager
 

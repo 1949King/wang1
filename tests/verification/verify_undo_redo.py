@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, r"d:\本地磁盘(当前分区)(C)\Users\Administrator\Desktop\AI短剧编辑器2")
 
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication(sys.argv)
 
 print("=" * 60)
@@ -83,7 +83,7 @@ except Exception as e:
 
 # 7) 验证快捷键注册（QShortcut 在 QtGui 里，不在 QtWidgets）
 print("\n[7] 验证快捷键注册...")
-from PyQt6.QtGui import QShortcut as GuiQShortcut
+from PySide6.QtGui import QShortcut as GuiQShortcut
 shortcuts = em.findChildren(GuiQShortcut)
 print(f"  注册的 QShortcut 数量: {len(shortcuts)} (预期 ≥3: Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z)")
 for sc in shortcuts:

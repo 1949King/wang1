@@ -21,8 +21,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from PyQt6.QtCore import Qt, QTimer  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QTabWidget  # noqa: E402
+from PySide6.QtCore import Qt, QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
 
 TS = time.strftime("%Y%m%d_%H%M%S")
 SHOT_DIR = os.path.join(ROOT, "_verify", "ui_walk", TS)

@@ -14,7 +14,7 @@
   D. DirectorSkill._apply_to_timeline 薄委托：变量 timeline_applied/note 如实回写。
   E. 目录两行新能力登记（effect/paid 与设计一致）。
 
-运行：python _verify/test_libtv_dao2_single_source.py
+运行：python _verify/test_canvas_core_dao2_single_source.py
 产物：_verify/out_libtv_dao2.json
 """
 import json

@@ -104,15 +104,15 @@ def _get_concatenate_videoclips():
 
 
 # ═══════════════════════════════════════════════════════════════
-# PyQt6 导入
+# PySide6 导入
 # ═══════════════════════════════════════════════════════════════
 
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QSize, QUrl, QPoint, QMimeData, QEvent
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QUrl, QPoint, QMimeData, QEvent
+from PySide6.QtGui import (
     QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics,
     QPolygon, QShortcut, QKeySequence, QDrag, QPixmap, QImage
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog,
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
@@ -122,8 +122,8 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QMenu, QToolButton, QApplication, QSizePolicy,
     QFormLayout, QSpacerItem, QToolTip, QStackedLayout
 )
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 # ═══════════════════════════════════════════════════════════════
 # 项目内核导入
@@ -216,10 +216,10 @@ def _clear_msgbox(title: str, message: str, parent=None):
 class EditingAgentWorker(QThread):
     """剪辑 Agent 后台调用线程，负责对接云端 API 与本地 Ollama 模型。"""
 
-    chunk_ready = pyqtSignal(str)
-    result_ready = pyqtSignal(str)
-    error_ready = pyqtSignal(str)
-    stopped_ready = pyqtSignal()
+    chunk_ready = Signal(str)
+    result_ready = Signal(str)
+    error_ready = Signal(str)
+    stopped_ready = Signal()
 
     def __init__(self, provider: str, model: str, messages: List[Dict[str, str]],
                  parent=None, think: Optional[bool] = None):
@@ -302,9 +302,9 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     MAX_UNDO_DEPTH = 100  # 撤销/重做栈最大深度，防止长时间编辑内存溢出
     
     # 字幕生成线程信号
-    _subtitle_generated_signal = pyqtSignal(int)
-    ai_progress_signal = pyqtSignal(int, str)
-    ai_fail_signal = pyqtSignal(str)
+    _subtitle_generated_signal = Signal(int)
+    ai_progress_signal = Signal(int, str)
+    ai_fail_signal = Signal(str)
     
     def __init__(self):
         # 媒体播放器 - 在调用父类__init__之前初始化,因为_setup_ui会使用这些属性
@@ -791,7 +791,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
         try:
             # 预检 GL 可用性，避免黑窗
-            from PyQt6.QtGui import QOffscreenSurface, QOpenGLContext
+            from PySide6.QtGui import QOffscreenSurface, QOpenGLContext
             surf = QOffscreenSurface()
             surf.create()
             ctx = QOpenGLContext()
@@ -1923,7 +1923,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             return qimage
         try:
             from app.modules.lego.clip_transform import normalize_clip_transform
-            from PyQt6.QtCore import QRectF
+            from PySide6.QtCore import QRectF
         except Exception:
             return qimage
         w, h = qimage.width(), qimage.height()
@@ -2510,7 +2510,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     
     def _on_media_status_changed(self, status):
         """QMediaPlayer媒体状态变化回调"""
-        from PyQt6.QtMultimedia import QMediaPlayer
+        from PySide6.QtMultimedia import QMediaPlayer
         status_map = {
             QMediaPlayer.MediaStatus.NoMedia: "NoMedia",
             QMediaPlayer.MediaStatus.LoadingMedia: "LoadingMedia",
@@ -2567,7 +2567,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _ensure_media_audio_output(self):
         """保证主播放器有可用、未静音的 AudioOutput（切模块后可能被清掉）。"""
-        from PyQt6.QtMultimedia import QAudioOutput
+        from PySide6.QtMultimedia import QAudioOutput
         if getattr(self, "_audio_output", None) is None:
             self._audio_output = QAudioOutput()
             self._media_player.setAudioOutput(self._audio_output)
@@ -2584,7 +2584,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _arm_media_audio(self, source_t: float, rate: float = 1.0, *, expect_loading: bool = False):
         """在媒体就绪后播/seek；未就绪则记 pending，等 LoadedMedia。"""
-        from PyQt6.QtMultimedia import QMediaPlayer
+        from PySide6.QtMultimedia import QMediaPlayer
         self._ensure_media_signals()
         self._ensure_media_audio_output()
         seek_ms = max(0, int(float(source_t) * 1000))
@@ -2629,7 +2629,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _shutdown_media(self, *, release_source: bool = False):
         """停止时间线 + 主音 + BGM；关进程前应 release_source=True。"""
-        from PyQt6.QtCore import QUrl
+        from PySide6.QtCore import QUrl
 
         try:
             self._stop_timeline_playback()
@@ -2739,7 +2739,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _open_keyframe_curve_editor(self):
         """深工具：可视化关键帧曲线编辑器（拖拽点 / 双击改缓动 / 右键删除）。"""
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
 
         clip = self._current_clip
         if not clip:
@@ -5014,7 +5014,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         # 立刻刷真首帧；对话框关闭后再刷一次（避免被占位/空帧盖住）
         self._force_show_first_video_frame()
         try:
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self._force_show_first_video_frame)
             QTimer.singleShot(200, self._force_show_first_video_frame)
         except Exception:
@@ -5551,7 +5551,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     logger.debug("时间线帧渲染失败", exc_info=True)
             player = getattr(self, "_media_player", None)
             if player is not None:
-                from PyQt6.QtCore import QUrl
+                from PySide6.QtCore import QUrl
                 player.setSource(QUrl.fromLocalFile(src))
                 player.setPosition(int(max(0.0, in_p) * 1000))
             try:
@@ -5633,7 +5633,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 self._force_show_first_video_frame()
             player = getattr(self, "_media_player", None)
             if player is not None:
-                from PyQt6.QtCore import QUrl
+                from PySide6.QtCore import QUrl
                 if player.source().isEmpty() or not self._media_paths_equal(
                     getattr(self, "_video_source", ""), src
                 ):
@@ -6049,7 +6049,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _play_pause(self):
         """播放/暂停：时间线驱动（跨片段切源），接近剪映预览行为"""
-        from PyQt6.QtMultimedia import QMediaPlayer
+        from PySide6.QtMultimedia import QMediaPlayer
 
         src = getattr(self, '_video_source', None)
         if not src and self._current_clip:
@@ -6109,7 +6109,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         self._timeline_render_busy = False
         self._audio_bound_clip_id = None
         # 墙钟锚点：真实流逝时间驱动 playhead，避免渲染慢导致越播越拖
-        from PyQt6.QtCore import QElapsedTimer
+        from PySide6.QtCore import QElapsedTimer
         self._playback_clock = QElapsedTimer()
         self._playback_anchor_t = float(getattr(self, "_playhead_position", 0) or 0)
         self._playback_clock.start()
@@ -6232,7 +6232,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         # 播放中节流时间线 UI，避免每帧重绘轨道
         now_ms = 0
         try:
-            from PyQt6.QtCore import QDateTime
+            from PySide6.QtCore import QDateTime
             now_ms = int(QDateTime.currentMSecsSinceEpoch())
         except Exception:
             now_ms = int(time.time() * 1000)
@@ -6270,7 +6270,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                     break
         if not video_hits:
             try:
-                from PyQt6.QtGui import QImage
+                from PySide6.QtGui import QImage
                 bw, bh = self._preview_frame_size()
                 img = QImage(bw, bh, QImage.Format.Format_RGB888)
                 img.fill(0)
@@ -6455,7 +6455,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
             except Exception:
                 source_t = max(0.0, (timeline_t - st) * speed + in_p)
             cid = clip.get("id")
-            from PyQt6.QtCore import QUrl
+            from PySide6.QtCore import QUrl
             vol = float(clip.get("volume", 1.0) or 1.0)
             effects = self._collect_preview_effects(clip)
             if effects.get("_volume") is not None:
@@ -6608,7 +6608,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     def _qimage_or_ndarray_to_bgr(self, frame):
         try:
             import numpy as np
-            from PyQt6.QtGui import QImage
+            from PySide6.QtGui import QImage
             if isinstance(frame, QImage):
                 img = frame.convertToFormat(QImage.Format.Format_RGB888)
                 w, h = img.width(), img.height()
@@ -6625,7 +6625,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     def _bgr_to_qimage(self, bgr):
         try:
             import numpy as np
-            from PyQt6.QtGui import QImage
+            from PySide6.QtGui import QImage
             rgb = bgr[:, :, ::-1].copy()
             h, w, ch = rgb.shape
             return QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
@@ -6635,7 +6635,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     def _ensure_bgm_player(self):
         if getattr(self, "_bgm_player", None) is not None:
             return self._bgm_player
-        from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
         self._bgm_player = QMediaPlayer()
         self._bgm_audio_output = QAudioOutput()
         self._bgm_player.setAudioOutput(self._bgm_audio_output)
@@ -6773,8 +6773,8 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
                 logger.debug("计算片段音量失败: %s", e)
             if self._bgm_audio_output:
                 self._bgm_audio_output.setVolume(max(0.0, min(1.0, vol)))
-            from PyQt6.QtCore import QUrl
-            from PyQt6.QtMultimedia import QMediaPlayer
+            from PySide6.QtCore import QUrl
+            from PySide6.QtMultimedia import QMediaPlayer
             cid = clip.get("id")
             if getattr(self, "_bgm_bound_clip_id", None) != cid:
                 player.setSource(QUrl.fromLocalFile(src))
@@ -6795,7 +6795,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
         """在播放中跳转/改速后，把墙钟锚点重设到新位置。"""
         if not getattr(self, "_timeline_playing", False):
             return
-        from PyQt6.QtCore import QElapsedTimer
+        from PySide6.QtCore import QElapsedTimer
         self._playback_anchor_t = float(timeline_t)
         clock = QElapsedTimer()
         clock.start()
@@ -6981,7 +6981,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     # 媒体播放器事件处理
     def _on_playback_state_changed(self, state):
         """媒体播放态。时间线播放时勿抢写播放按钮。"""
-        from PyQt6.QtMultimedia import QMediaPlayer
+        from PySide6.QtMultimedia import QMediaPlayer
         self._is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
         if getattr(self, "_timeline_playing", False):
             return
@@ -9656,7 +9656,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     def _on_timeline_escape(self):
         """Esc：取消拖片 → 退出刀片。"""
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             if QApplication.activeModalWidget() is not None:
                 return
         except Exception:
@@ -9670,7 +9670,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
 
     def _exit_razor_tool(self):
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             if QApplication.activeModalWidget() is not None:
                 return
         except Exception:
@@ -9700,7 +9700,7 @@ class EditorModule(BaseModule, AiAgentPanelMixin, EditorExportPanelMixin, Editor
     def _razor_cut_shortcut(self):
         """C 键：切换刀片工具（输入框内不触发）。"""
         try:
-            from PyQt6.QtWidgets import (
+            from PySide6.QtWidgets import (
                 QApplication, QLineEdit, QTextEdit, QPlainTextEdit,
                 QComboBox, QSpinBox, QDoubleSpinBox, QAbstractSpinBox,
             )

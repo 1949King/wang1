@@ -6,7 +6,7 @@
 - ComfyUISummaryCard：状态 + 路径 + 一键启动
 - McpSummaryCard：端口 + 客户端连接数 + 令牌状态
 
-PyQt6 实现：
+PySide6 实现：
 - 复用 V4.43.0 新增的 #subpanelCard + #chipInfo / #chipSuccess / #chipDanger
 - 点击 → 触发信号给 main_window 路由到设置面板
 
@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
 
@@ -31,8 +31,8 @@ logger = logging.getLogger("AI短剧编辑器.home_sub_widgets")
 class ComfyUISummaryCard(QFrame):
     """ComfyUI 状态摘要（路径 / 状态 / 启动按钮）"""
 
-    open_settings_requested = pyqtSignal()
-    start_requested = pyqtSignal()
+    open_settings_requested = Signal()
+    start_requested = Signal()
 
     def __init__(
         self,
@@ -129,8 +129,8 @@ class ComfyUISummaryCard(QFrame):
 class McpSummaryCard(QFrame):
     """MCP 控制状态摘要（端口 / 客户端数 / 启动状态）"""
 
-    open_settings_requested = pyqtSignal()
-    copy_config_requested = pyqtSignal()
+    open_settings_requested = Signal()
+    copy_config_requested = Signal()
 
     def __init__(
         self,

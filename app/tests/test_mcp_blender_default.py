@@ -20,9 +20,9 @@ QtApp = None
 @pytest.fixture(scope="module")
 def qapp():
     global QtApp
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
-    QtApp = QApplication.instance() or QApplication([])
+    QtApp = QApplication.instance() or QApplication(["mcp-blender-test"])
     yield QtApp
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# 测试 PyQt5 安装路径
+# 测试 PySide6 安装路径
 
 import os
-import PyQt5
+import PySide6
 
-print('PyQt5 安装路径:', os.path.dirname(PyQt5.__file__))
+print('PySide6 安装路径:', os.path.dirname(PySide6.__file__))
 
 # 检查 Qt 平台插件目录
-qt_dir = os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms')
+qt_dir = os.path.join(os.path.dirname(PySide6.__file__), 'plugins', 'platforms')
 print('Qt 平台插件目录:', qt_dir)
 print('目录是否存在:', os.path.exists(qt_dir))
 

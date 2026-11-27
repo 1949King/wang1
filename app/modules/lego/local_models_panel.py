@@ -21,9 +21,9 @@ import os
 import threading
 from typing import Any, Dict, List
 
-from PyQt6.QtCore import QUrl
-from PyQt6.QtGui import QColor, QDesktopServices
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtWidgets import (
     QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -33,7 +33,7 @@ from app.core.neural import model_sources as MS
 
 logger = logging.getLogger("AI短剧编辑器.local_models_panel")
 
-CAP_LABEL = {"image": "🖼 生图", "video": "🎬 视频"}
+CAP_LABEL = {"image": "🖼 生图", "video": "🎬 视频", "tool": "🔧 工具"}
 VER_LABEL = {"verified": "✅ 已验证", "unverified": "⚠️ 未验证",
              "blocked": "⛔ 环境不满足", "": "— 未登记"}
 _COLS = ("类型", "模型", "族", "验证态", "权重", "体积 GB", "显存 GB")
@@ -173,8 +173,12 @@ class LocalModelsPanel(QWidget):
             return
         srcs = list(row.get("sources") or [])
         if not srcs:
-            self._src_label.setText(
-                "社区获取：%s 没有开放权重，无入口可给" % str(row.get("label") or ""))
+            if str(row.get("capability") or "") == "tool":
+                self._src_label.setText(
+                    "工具权重：自取放置，运行 python scripts/check_models.py --missing 查看地址与步骤")
+            else:
+                self._src_label.setText(
+                    "社区获取：%s 没有开放权重，无入口可给" % str(row.get("label") or ""))
             return
         self._src_label.setText("社区获取（自己去挑版本）：")
         for s in srcs:
@@ -192,6 +196,12 @@ class LocalModelsPanel(QWidget):
         row = self._selected_row()
         if row is None:
             self._summary.setText("请先在列表里选中一个模型")
+            return
+        # 工具权重绝不自动下载（用户红线）：只提示自取，不起下载线程
+        if str(row.get("capability") or "") == "tool":
+            self._summary.setText(
+                "工具权重不自动下载：请按指引自取放置"
+                "（python scripts/check_models.py --missing 查看地址与步骤）")
             return
         if row.get("downloaded"):
             self._summary.setText("该模型已下载：" + str(row.get("label")))

@@ -24,5 +24,5 @@ playwright>=1.40.0
 cryptography>=41.0.0
 
 # 时间线互操作（OTIO/EDL/FCPXML 导入导出；缺失时 interchange 诚实降级为不可用，
-# 注意：Qt GUI 进程绝不 import 它——C 扩展在 PyQt6 之后加载会段错误，读写走子进程）
+# 注意：Qt GUI 进程绝不 import 它——PyQt6 时代实测 C 扩展在 Qt 之后加载会段错误，PySide6 仍走无 Qt 子进程）
 opentimelineio>=0.18.0

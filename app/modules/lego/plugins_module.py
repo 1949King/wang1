@@ -19,13 +19,13 @@ import time
 import logging
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QScrollArea, QFrame, QMessageBox, QFileDialog,
     QDialog, QSlider, QLineEdit, QListWidget, QGroupBox,
     QTextEdit, QComboBox,
 )
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from .base_module import BaseModule
 
@@ -341,8 +341,8 @@ class PluginsModule(BaseModule):
 
     def _show_plugin_detail(self, name: str, icon: str, desc: str, ver_info: str, installed: bool):
         """点击插件卡片 → 弹出详情面板（版本/描述/依赖/评分/操作/评价）"""
-        from PyQt6.QtWidgets import QDialog, QSlider
-        from PyQt6.QtCore import Qt as QtCore
+        from PySide6.QtWidgets import QDialog, QSlider
+        from PySide6.QtCore import Qt as QtCore
 
         # 解析版本号
         ver_parts = ver_info.strip().split("\n")

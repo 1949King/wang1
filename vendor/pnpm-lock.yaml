@@ -19,9 +19,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.32.1(zod@4.6.7)
-      '@shiguang/libtv':
+      '@shiguang/canvas-core':
         specifier: workspace:*
-        version: link:../packages/libtv
+        version: link:../packages/canvas-core
       '@tauri-apps/api':
         specifier: ^2
         version: 2.12.4
@@ -153,7 +153,7 @@ importers:
         specifier: ^4.1.10
         version: 4.1.12(@types/node@24.19.2)(vite@8.3.4(@types/node@24.19.2)(jiti@1.21.7))
 
-  packages/libtv:
+  packages/canvas-core:
     devDependencies:
       '@tauri-apps/api':
         specifier: ^2
@@ -194,9 +194,9 @@ importers:
 
   shiguang-canvas:
     dependencies:
-      '@shiguang/libtv':
+      '@shiguang/canvas-core':
         specifier: workspace:*
-        version: link:../packages/libtv
+        version: link:../packages/canvas-core
       '@xyflow/react':
         specifier: ^12.6.0
         version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)

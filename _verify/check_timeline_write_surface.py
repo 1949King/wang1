@@ -266,7 +266,7 @@ def check_wiring() -> None:
     if "def set_fields(" not in src or "def update_where(" not in src:
         _fail("② 刀4 API 漂移：TimelineStore 缺少 set_fields/update_where")
     import re as _re
-    if _re.search(r"^(import PyQt6|from PyQt6)", src, _re.M):
+    if _re.search(r"^(import (?:PySide6|PyQt6|PyQt5)|from (?:PySide6|PyQt6|PyQt5))", src, _re.M):
         _fail("② timeline_store 顶层 import Qt（子进程红线）")
     from app.core.glue import policies
     for sym in ("set_fields", "update_where"):

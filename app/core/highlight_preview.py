@@ -13,7 +13,7 @@
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
+from PySide6.QtCore import QObject, Signal, QThread
 import logging
 import threading
 import time
@@ -93,12 +93,12 @@ class InterpolationMarker:
 class HighlightDetectorThread(QThread):
     """高光检测线程"""
     
-    # 2026-10-09 修：原为 pyqtSignal(List[HighlightSegment])。
-    # pyqtSignal 不接受 typing 泛型别名（_GenericAlias），会在类体执行期抛
+    # 2026-10-09 修：原信号声明误用 List[HighlightSegment] 泛型。
+    # Signal 不接受 typing 泛型别名（_GenericAlias），会在类体执行期抛
     # TypeError 导致**整个模块 import 失败**（详见 _verify/check_qt_signal_types.py）。
-    detection_progress = pyqtSignal(int, str)
-    detection_completed = pyqtSignal(object)
-    detection_failed = pyqtSignal(str)
+    detection_progress = Signal(int, str)
+    detection_completed = Signal(object)
+    detection_failed = Signal(str)
 
     def __init__(self, video_path: str, target_duration: float = 60.0):
         super().__init__()
@@ -233,10 +233,10 @@ class HighlightDetectorThread(QThread):
 class HighlightPreviewManager(QObject):
     """高光预览管理器"""
     
-    # 同 HighlightDetectorThread 的修复理由：typing 泛型不能进 pyqtSignal。
-    highlights_updated = pyqtSignal(object)
-    interpolation_markers_updated = pyqtSignal(object)
-    detection_progress = pyqtSignal(int, str)
+    # 同 HighlightDetectorThread 的修复理由：typing 泛型不能进 Signal。
+    highlights_updated = Signal(object)
+    interpolation_markers_updated = Signal(object)
+    detection_progress = Signal(int, str)
 
     def __init__(self):
         super().__init__()

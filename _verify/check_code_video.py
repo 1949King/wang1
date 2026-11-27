@@ -3,7 +3,7 @@
 """「代码 × 扩散」混合视频契约门禁（V4.44 · 2026-10-19）
 
 锁死五件事（改 app/core/code_video/ 或三处注册前先跑本脚本）：
-  A. 契约域零依赖：import code_video 不拉起 PyQt6/WebEngine（渲染刀才允许拖重依赖）
+  A. 契约域零依赖：import code_video 不拉起 PySide6/PyQt6/PyQt5/WebEngine（渲染刀才允许拖重依赖）
   B. 注册 ↔ 目录 ↔ action 别名三处一致（pipeline.code_video_plan）
   C. lineage 六键白名单与 glue GENERATION_KEYS 同源（入轨血缘单一事实来源）
   D. 契约行为冒烟：正常分镜编译过 + 文字层铁律反例被拒
@@ -38,7 +38,7 @@ def check(cond, msg):
 print("[A] 契约域可独立导入（不拉 Qt/WebEngine 重依赖）")
 import app.core.code_video as cv
 
-_heavy = [m for m in ("PyQt6", "PyQt5", "QtWebEngineWidgets", "webview") if m in sys.modules]
+_heavy = [m for m in ("PySide6", "PyQt6", "PyQt5", "QtWebEngineWidgets", "webview") if m in sys.modules]
 check(not _heavy, f"import 后无重依赖模块{'' if not _heavy else f'：{_heavy}'}")
 check(hasattr(cv, "compile_spec") and hasattr(cv, "from_storyboard"),
       "spec 域导出面完整（compile_spec / from_storyboard）")
@@ -148,7 +148,7 @@ import ast
 
 import app.core.code_video.render_host as _host  # noqa: F401
 
-_heavy2 = [m for m in ("PyQt6", "playwright", "torch", "diffusers") if m in sys.modules]
+_heavy2 = [m for m in ("PySide6", "PyQt6", "PyQt5", "playwright", "torch", "diffusers") if m in sys.modules]
 check(not _heavy2, f"import render_host 后无重依赖{'' if not _heavy2 else f'：{_heavy2}'}")
 
 
@@ -166,7 +166,7 @@ def _top_level_imports(rel):
 
 for rel in ("app/core/code_video/render_host.py", "app/core/code_video/render_worker.py"):
     imports = _top_level_imports(rel)
-    check(not ({"PyQt6", "PyQt5", "playwright"} & imports),
+    check(not ({"PySide6", "PyQt6", "PyQt5", "playwright"} & imports),
           f"{rel} 顶层不 import Qt/playwright（实际 {sorted(imports)[:6]}）")
 
 _host_src = open(os.path.join(ROOT, "app/core/code_video/render_host.py"), encoding="utf-8").read()

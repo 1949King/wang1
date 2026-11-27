@@ -67,7 +67,7 @@ def read(path: str) -> str:
 
 
 def _literal(name: str):
-    """静态取模块级字面量，避免 import PyQt6。"""
+    """静态取模块级字面量，避免 import PySide6。"""
     tree = ast.parse(read(MODULE))
     for node in tree.body:
         if isinstance(node, ast.Assign):

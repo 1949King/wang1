@@ -557,9 +557,9 @@ from app.core.ai_interpolation import (
 
 
 class TestModuleImportabilityRegression:
-    """2026-10-09 事故回归锁：pyqtSignal 收到 typing 泛型别名会让**整模块 import 崩**。
+    """2026-10-09 事故回归锁：Signal 收到 typing 泛型别名会让**整模块 import 崩**。
 
-    原写法 `pyqtSignal(float, List[np.ndarray])` 抛
+    原写法 `Signal(float, List[np.ndarray])` 抛
         TypeError: bytes or ASCII string expected not '_GenericAlias'
     因为异常在**类体执行期**，import 直接失败 ⇒ preview_manager 开补帧即崩、
     deformity_repair_skill 静默降级、覆盖率永远 0%。

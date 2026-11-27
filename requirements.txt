@@ -22,6 +22,8 @@ numpy>=1.24.0
 Pillow>=10.0.0
 psutil>=5.9.0
 aiohttp>=3.9.0
+# Windows 窗口捕获与播放器回归测试
+pywin32>=306; platform_system == "Windows"
 
 # 视频
 imageio>=2.30.0
@@ -48,8 +50,11 @@ diffsynth-engine==0.7.0
 # 量化（可选）：fp8/int8 走 torchao；不装则 quant_policy 如实降级为 fp16
 # torchao==0.16.0
 
-# UI
-PyQt6>=6.6.0
+# UI（Qt / WebEngine 同版本闭环）
+PySide6==6.10.2
+PySide6-Essentials==6.10.2
+PySide6-Addons==6.10.2
+shiboken6==6.10.2
 
 # 音频
 librosa>=0.10.0

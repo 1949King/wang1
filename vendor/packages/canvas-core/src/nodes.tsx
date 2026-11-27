@@ -5,6 +5,9 @@ import type { NodeData, NodeStatus } from "./store";
 import { useCanvasStore } from "./store";
 import { pickVideoPoster } from "./videoFallback";
 import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
+import { BRIDGE } from "./bridge";
+import { runInterpolate } from "./hostInterpolate";
+import { ImageTo3dAction } from "./model3dNode";
 // 节点内「生成」按钮样式（独立文件：styles.css 在冻结区，不该为一个小按钮动它）
 import "./nodeActions.css";
 
@@ -426,6 +429,8 @@ export const ImageNode = memo(function ImageNode({ id, data, selected }: NodePro
       {d.seed != null ? <div className="sg-meta-tiny">seed:{d.seed}</div> : null}
       <EditableText nodeId={id} value={d.prompt || ""} field="prompt" rows={2}
         placeholder="双击输入生图提示词…" />
+      {/* T5 图片转3D：本地深度重建 2.5D 网格（解冻 canvas-magnetic-intent 获批，2026-11-20） */}
+      {d.imageUrl ? <ImageTo3dAction id={id} src={d.imageUrl} /> : null}
     </Shell>
   );
 }, nodePropsEqual);
@@ -519,6 +524,69 @@ function DirectorL1Panel({ nodeId, d }: {
   );
 }
 
+/** 视频节点「神经补帧×2」动作（T4 项二，2026-11-20）。
+ *  RIFE v4.9 本地插帧：经 hostInterpolate 桥提交异步任务 + 自包含轮询。
+ *  模型缺失后端诚实返回 guidance（资源地址自取），前端透传展示，绝不自动下载。
+ *  降级光流时如实标注 degraded/reason，不冒充神经补帧。 */
+function VideoInterpolateAction({ nodeId, videoUrl }: { nodeId: string; videoUrl: string }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [guidance, setGuidance] = useState("");
+  const set = (patch: Record<string, unknown>) =>
+    useCanvasStore.getState().updateNodeData(nodeId, patch);
+  // 画布是 WebView，只认 http inbox URL；相对路径补 BRIDGE 前缀供后端归一化
+  const source = videoUrl.startsWith("http")
+    ? videoUrl
+    : videoUrl.startsWith("/")
+      ? `${BRIDGE}${videoUrl}`
+      : videoUrl;
+  const onClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (busy) return; // 防重复点击
+    setBusy(true);
+    setMsg("神经补帧中…");
+    setGuidance("");
+    set({ status: "generating", progress: 0, errorMessage: "" });
+    const res = await runInterpolate(
+      { video_url: source, multiplier: 2 },
+      {
+        onProgress: (job) => {
+          if (job.progress != null) set({ progress: job.progress });
+        },
+      },
+    );
+    setBusy(false);
+    if (res.ok && res.video_url) {
+      const url = res.video_url.startsWith("http") ? res.video_url : `${BRIDGE}${res.video_url}`;
+      set({ videoUrl: url, status: "success", progress: 100, errorMessage: "" });
+      setMsg(
+        res.degraded
+          ? `已补帧（降级光流${res.reason ? "：" + res.reason : ""}）`
+          : `神经补帧完成 · +${res.frames_added ?? 0} 帧`,
+      );
+    } else {
+      set({ status: "failed", errorMessage: res.error || "补帧失败" });
+      setMsg(res.error || "补帧失败");
+      if (res.guidance) setGuidance(res.guidance);
+    }
+  };
+  return (
+    <div className="sg-node-actions nodrag">
+      <button
+        type="button"
+        className="sg-gen-btn subtle"
+        disabled={busy}
+        title="RIFE v4.9 神经补帧×2（本地推理；需自取部署 rife49.pth，缺失时诚实提示，绝不自动下载）"
+        onClick={onClick}
+      >
+        {busy ? "补帧中…" : "🎞️ 神经补帧×2"}
+      </button>
+      {msg ? <div className="sg-meta-tiny">{msg}</div> : null}
+      {guidance ? <div className="sg-meta-tiny">{guidance}</div> : null}
+    </div>
+  );
+}
+
 export const VideoNode = memo(function VideoNode({ id, data, selected }: NodeProps) {
   const d = data as Extract<NodeData, { kind: "video" }>;
   const stackCount = d.videos?.length || (d.videoUrl ? 1 : 0);
@@ -554,6 +622,7 @@ export const VideoNode = memo(function VideoNode({ id, data, selected }: NodePro
       {!d.isReference ? (
         <DirectorL1Panel nodeId={id} d={d} />
       ) : null}
+      {!d.isReference && d.videoUrl ? <VideoInterpolateAction nodeId={id} videoUrl={d.videoUrl} /> : null}
       {d.firstFrameWeight != null || d.lastFrameWeight != null ? (
         <div className="sg-video-tags">
           {d.firstFrameWeight != null && <span className="sg-shot-tag">首帧{d.firstFrameWeight}</span>}

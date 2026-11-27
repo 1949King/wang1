@@ -298,3 +298,40 @@ def test_engine_singleton():
 
 def test_unload_safe_when_never_loaded():
     D.DiffusersImageEngine().unload()   # 不该抛
+
+
+# ─────────────────── GGUF 权重源（2026-11-01 生产接线）───────────────────
+
+def test_request_gguf_normalizes_and_status_never_fakes():
+    """request_gguf 归一化路径；未装填时 applied 必须是 False（状态不许假装已量化）。"""
+    e = D.DiffusersImageEngine()
+    assert e.request_gguf("   ") == ""
+    assert e.gguf_status()["applied"] is False
+    assert e.gguf_status()["loaded"] == 0
+    assert e.request_gguf("  D:/x/unet.gguf  ") == "D:/x/unet.gguf"
+    st = e.gguf_status()
+    assert st["requested"] == "D:/x/unet.gguf"
+    assert st["applied"] is False        # 只登记还没 load ⇒ 不能说已装
+
+
+def test_load_rejects_missing_gguf_without_falling_back():
+    """★ 显式给的 GGUF 不存在 ⇒ 诚实失败并写明路径，**不许静默退回 fp16**。
+    静默回退 = 用户以为在跑量化版、实际跑全量，本项目最恨的「假可用」。
+    """
+    src = inspect.getsource(D.DiffusersImageEngine.load)
+    assert "指定的 GGUF 不存在" in src
+    assert "apply_to_unet" in src
+
+
+def test_gguf_apply_happens_before_memory_policy():
+    """★ 装填点必须在显存策略之前：apply_to_unet 在 CPU 反量化后 load_state_dict，
+    之后 offload / 整卡策略才接管放置。反过来先 offload 再换权重会放错设备。
+    """
+    src = inspect.getsource(D.DiffusersImageEngine.load)
+    assert src.index("apply_to_unet") < src.index("pick_memory_policy")
+
+
+def test_gguf_and_fp8_mutually_exclusive():
+    """GGUF 已换成量化权重，再叠 fp8 = 二次量化 ⇒ 必须跳过 fp8 并说明原因。"""
+    src = inspect.getsource(D.DiffusersImageEngine.load)
+    assert "跳过 fp8" in src

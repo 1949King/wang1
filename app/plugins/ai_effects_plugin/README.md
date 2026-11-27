@@ -62,7 +62,7 @@ app/plugins/ai_effects_plugin/
 │   └── object_removal.py         # 物体移除模块
 ├── ui/                            # 用户界面组件
 │   ├── __init__.py               # UI模块导出
-│   └── ai_effects_widget.py      # PyQt6控制面板Widget
+│   └── ai_effects_widget.py      # PySide6控制面板Widget
 ├── assets/                        # 资源文件目录
 │   ├── icons/                    # 图标资源
 │   └── templates/                # 模板文件
@@ -76,7 +76,7 @@ app/plugins/ai_effects_plugin/
 numpy>=1.21.0
 opencv-python>=4.5.0
 Pillow>=8.0.0
-PyQt6>=6.2.0
+PySide6==6.10.2
 ```
 
 #### 推荐依赖（启用高级AI功能）
@@ -96,7 +96,7 @@ mediapipe>=0.8.0          # 轻量级人脸/手势检测
 
 2. **安装Python依赖**
    ```bash
-   pip install numpy opencv-python Pillow PyQt6
+   pip install numpy opencv-python Pillow PySide6==6.10.2
    
    # 可选：安装深度学习框架以获得更好的效果
    pip install torch torchvision dlib mediapipe
@@ -394,7 +394,7 @@ result = plugin.apply_effect(image, {...})
 
 ```
 ┌─────────────────────────────────────────────┐
-│            UI层 (PyQt6 Widget)              │
+│            UI层 (PySide6 Widget)              │
 │         AIEffectsWidget                     │
 │  ┌─────────┬─────────┬─────────┬─────────┐  │
 │  │风格迁移  │背景替换  │超分辨率  │智能美颜  │  │
@@ -430,7 +430,7 @@ result = plugin.apply_effect(image, {...})
 │           底层基础设施                        │
 │  • NumPy/OpenCV 图像处理                     │
 │  • PyTorch 深度学习推理                      │
-│  • PyQt6 GUI渲染                             │
+│  • PySide6 GUI渲染                             │
 └─────────────────────────────────────────────┘
 ```
 
@@ -441,7 +441,7 @@ result = plugin.apply_effect(image, {...})
 ### v1.0.0 (2026-07-11)
 - ✅ 初始版本发布
 - ✅ 实现5大AI特效模块完整功能
-- ✅ 完整的PyQt6用户界面
+- ✅ 完整的Qt用户界面（初版为 PyQt6，现迁移至 PySide6）
 - ✅ 符合项目PLUGIN_STANDARD规范
 - ✅ 支持插件热加载
 - ✅ 完善的文档和示例代码

@@ -7,7 +7,7 @@
 - 资源项 = emoji 图标 + 文件名 + 时间
 - 点击 → 触发资源使用信号
 
-PyQt6 实现：
+PySide6 实现：
 - QFrame 容器 + QHBoxLayout（流式不够灵活时也能用 wrap 布局 fallback）
 - 资源类型固定枚举（视频/音频/图片/项目/脚本/角色/场景）
 
@@ -19,8 +19,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QScrollArea,
 )
@@ -92,7 +92,7 @@ class RecentResourcesPanel(QFrame):
         resource_clicked(str)  — 点击资源 → 资源 id
     """
 
-    resource_clicked = pyqtSignal(str)
+    resource_clicked = Signal(str)
 
     def __init__(
         self,

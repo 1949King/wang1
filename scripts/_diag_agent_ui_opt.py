@@ -19,7 +19,7 @@ except py_compile.PyCompileError as e:
 # ── 2. 验证所有新增方法和属性存在 ──
 print("\n[2] 验证新增方法/属性定义 ...")
 # 导入需要 QApplication（避免创建实例即可）
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 if QApplication.instance() is None:
     qapp = QApplication([])
 

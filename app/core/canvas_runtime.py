@@ -633,14 +633,9 @@ class CanvasRuntime:
 
         # ── engine=shiguang：原 WebEngine + 静态/vite 路径（不动） ──
         web = vendor_web_dir()
-        if not (web / "package.json").is_file():
-            return False, (
-                f"未找到自研画布（期望 {web}）。\n"
-                "请确认 vendor/shiguang-canvas 存在，并执行:\n"
-                "  cd vendor/shiguang-canvas && npm install && npm run build"
-            )
 
-        # 1) 静态 dist（最快）
+        # 1) 静态 dist（最快）。发布包只携带 dist/public，没有源码 package.json；
+        #    因而必须先尝试完整静态产物，不能用源码包清单提前拦截冻结版。
         progress(f"正在秒开画布（引擎={eng}）…")
         ok, msg = self._start_static_server()
         if ok and self.is_ready():
@@ -648,7 +643,15 @@ class CanvasRuntime:
                         time.monotonic() - _t_boot)
             return True, msg
 
-        # 2) 无 dist：提示并拉 vite（可随后后台 build）
+        # 2) 无可用 dist 时才需要源码包与 vite。
+        if not (web / "package.json").is_file():
+            return False, (
+                f"未找到自研画布（期望 {web}）。\n"
+                "请确认 vendor/shiguang-canvas 存在，并执行:\n"
+                "  cd vendor/shiguang-canvas && npm install && npm run build"
+            )
+
+        # 无 dist：提示并拉 vite（可随后后台 build）
         #    把 dist 缺失的具体原因带进报错：只说「画布进程已退出」会把
         #    「产物被搬走」误诊成「Node/npm 装坏了」（2026-10-25 实际翻车）。
         dist_note = f"\n（dist 状态：{self._dist_problem}）" if self._dist_problem else ""

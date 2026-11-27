@@ -138,6 +138,17 @@ CAPABILITY_ROWS: List[Tuple[str, str, str, bool, str, str, str, List[str]]] = [
      "AI 超分放大：fast/standard 档走 OpenCV ESPCN 不下载，high 档 RealESRGAN 首次需下载",
      "right", "AI超分",
      ["超分", "放大", "高清", "upscale", "sharpen", "增强画质", "提分辨率"]),
+    # 刀 B 配套（2026-10-29）：把 engine_registry 里标 library-only 的 face_restore /
+    # style_transfer 也接到画布入口（与 ai_upscale/ai_matte 同一 /host/canvas-enhance 实现）。
+    # paid=False：本地引擎零调用费；模型未就绪时走诚实降级并在结果里标注。
+    ("canvas.ai_face_restore", "canvas", "media_write", False,
+     "AI 修复人脸：检测人脸区域增强，无人脸时原样返回（本地引擎，零调用费）",
+     "right", "AI修脸",
+     ["修脸", "修复人脸", "人脸增强", "face", "face_restore", "面部清晰"]),
+    ("canvas.ai_style", "canvas", "media_write", False,
+     "AI 风格迁移：按画风重绘（style/strength 可调；模型未就绪时如实标降级）",
+     "right", "AI风格",
+     ["风格迁移", "画风", "style", "重绘风格", "艺术风格", "风格化"]),
     ("canvas.ai_matte", "canvas", "media_write", False,
      "AI 抠像换背景：主体分离 → 纯色底/透明底（如实回报实际引擎，降级必标注）",
      "right", "AI抠像",

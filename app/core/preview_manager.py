@@ -2,8 +2,8 @@ from enum import Enum
 from app.modules.utils.logger import logger
 from typing import Optional, Dict, Any, Tuple, List, Callable
 from pathlib import Path
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QThread
-from PyQt6.QtGui import QImage
+from PySide6.QtCore import QObject, Signal, QTimer, Qt, QThread
+from PySide6.QtGui import QImage
 from app.core.frame_cache import FrameCache
 import threading
 import time
@@ -115,9 +115,9 @@ class RenderMode(Enum):
 
 class FrameReaderThread(QThread):
     """帧读取线程 - 使用 QElapsedTimer 精确帧调度，避免累积漂移"""
-    frame_ready = pyqtSignal(np.ndarray, float)
-    finished = pyqtSignal()
-    error = pyqtSignal(str)
+    frame_ready = Signal(np.ndarray, float)
+    finished = Signal()
+    error = Signal(str)
 
     def __init__(self, video_path: str, fps: float = 30.0):
         super().__init__()
@@ -153,7 +153,7 @@ class FrameReaderThread(QThread):
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
             # 使用 QElapsedTimer 精确计时（只在 play/seek 时 restart）
-            from PyQt6.QtCore import QElapsedTimer
+            from PySide6.QtCore import QElapsedTimer
             timer = QElapsedTimer()
             timer_running = False
             
@@ -252,8 +252,8 @@ class FrameReaderThread(QThread):
 
 
 class EffectsWorkerThread(QThread):
-    effect_ready = pyqtSignal(np.ndarray, float)
-    error = pyqtSignal(str)
+    effect_ready = Signal(np.ndarray, float)
+    error = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -429,8 +429,8 @@ class EffectsWorkerThread(QThread):
 
 class FramePreloaderThread(QThread):
     """帧预加载线程 - 参考 Olive 实时预览引擎的增量渲染策略"""
-    preload_complete = pyqtSignal(int)
-    progress = pyqtSignal(int)
+    preload_complete = Signal(int)
+    progress = Signal(int)
 
     def __init__(self, video_path: str, fps: float, cache_callback: Callable):
         super().__init__()
@@ -510,9 +510,9 @@ class FramePreloaderThread(QThread):
 
 
 class PreviewManager(QObject):
-    frame_ready = pyqtSignal(QImage)
-    timecode_updated = pyqtSignal(str)
-    preload_progress = pyqtSignal(int)
+    frame_ready = Signal(QImage)
+    timecode_updated = Signal(str)
+    preload_progress = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -1042,7 +1042,7 @@ class PreviewManager(QObject):
                 img = pixmap.toImage()
                 if not img.isNull():
                     # 转成 ndarray 以便复用 resize/effects 管线
-                    from PyQt6.QtGui import QImage as _QImage
+                    from PySide6.QtGui import QImage as _QImage
                     img = img.convertToFormat(_QImage.Format.Format_RGB888)
                     w, h = img.width(), img.height()
                     ptr = img.bits()
@@ -1175,7 +1175,7 @@ class PreviewManager(QObject):
                         if pixmap is not None and not pixmap.isNull():
                             img = pixmap.toImage()
                             if not img.isNull():
-                                from PyQt6.QtGui import QImage as _QImage
+                                from PySide6.QtGui import QImage as _QImage
                                 img = img.convertToFormat(_QImage.Format.Format_RGB888)
                                 w, h = img.width(), img.height()
                                 ptr = img.bits()

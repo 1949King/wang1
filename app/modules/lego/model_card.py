@@ -4,7 +4,7 @@
 从 model_management.py 拆分出来的可折叠模型卡片。
 """
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox,
     QGroupBox, QFormLayout, QMessageBox, QProgressDialog,
@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QApplication,
     QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer, Signal, QThread
+from PySide6.QtGui import QColor
 
 from typing import Dict, Any
 import threading
@@ -26,8 +26,8 @@ logger = logging.getLogger("AI短剧编辑器.model_card")
 class ModelCardWidget(QFrame):
     """可折叠模型卡片组件"""
     
-    activate_requested = pyqtSignal(str)
-    config_saved = pyqtSignal(str, dict)  # type: ignore[reportMissingTypeArgument]
+    activate_requested = Signal(str)
+    config_saved = Signal(str, dict)  # type: ignore[reportMissingTypeArgument]
     
     def __init__(self, provider_id: str, provider_info: dict[str, Any], parent=None):
         super().__init__(parent)
@@ -470,7 +470,7 @@ class ModelCardWidget(QFrame):
         layout.addLayout(btn_row)
     
     def _show_modelscope_pull_dialog(self):
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
         
         dialog = QDialog(self)
         dialog.setWindowTitle("下载魔搭模型")
@@ -520,8 +520,8 @@ class ModelCardWidget(QFrame):
         progress.show()
         
         class DownloadWorker(QThread):
-            finished = pyqtSignal(bool, str)
-            progress_update = pyqtSignal(str)
+            finished = Signal(bool, str)
+            progress_update = Signal(str)
             
             def __init__(self, model_name):
                 super().__init__()
@@ -630,7 +630,7 @@ class ModelCardWidget(QFrame):
         """
         class _StatusWorker(QThread):
             """后台执行 Ollama 诊断（diagnose/start_service/list_models），不阻塞主线程。"""
-            finished = pyqtSignal(object)  # 携带结果 dict
+            finished = Signal(object)  # 携带结果 dict
 
             def run(self):
                 import time
@@ -843,7 +843,7 @@ class ModelCardWidget(QFrame):
         QTimer.singleShot(0, lambda: self._start_ollama_btn.setEnabled(True))
     
     def _show_pull_dialog(self):
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox  # type: ignore[reportMissingImports]
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox  # type: ignore[reportMissingImports]
         
         # 先检查 Ollama 服务是否可用
         try:
@@ -919,8 +919,8 @@ class ModelCardWidget(QFrame):
         progress.show()
         
         class PullWorker(QThread):
-            finished = pyqtSignal(bool, str)
-            progress_update = pyqtSignal(str)
+            finished = Signal(bool, str)
+            progress_update = Signal(str)
             
             def __init__(self, model_name):
                 super().__init__()
@@ -992,7 +992,7 @@ class ModelCardWidget(QFrame):
             return
         
         class TestWorker(QThread):
-            finished = pyqtSignal(bool, str)
+            finished = Signal(bool, str)
             
             def __init__(self, provider_id, api_key, base_url, model_name):
                 super().__init__()

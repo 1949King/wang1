@@ -18,14 +18,14 @@ import os
 import logging
 from datetime import datetime
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QProgressBar, QComboBox, QLineEdit, QGroupBox, QTextEdit,
     QFileDialog, QMessageBox, QFormLayout, QDialog, QMenu,
     QApplication, QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Slot
 
 from .base_module import BaseModule
 
@@ -303,7 +303,7 @@ class TasksModule(BaseModule):
             self._batch_mgr.register_processor("导出", self._export_processor)
             self._batch_mgr.register_processor("转码", self._transcode_processor)
             # 定时同步后台任务进度到 UI（每秒刷新）
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             self._progress_timer = QTimer(self)
             self._progress_timer.timeout.connect(self._sync_task_progress)
             self._progress_timer.start(1000)
@@ -444,7 +444,7 @@ class TasksModule(BaseModule):
     
     def _new_task_dialog(self):
         """新建任务对话框 — 支持选择视频路径"""
-        from PyQt6.QtWidgets import QDialog, QFormLayout, QMessageBox
+        from PySide6.QtWidgets import QDialog, QFormLayout, QMessageBox
         dialog = QDialog(self)
         dialog.setWindowTitle("新建任务")
         dialog.setMinimumWidth(450)
@@ -516,7 +516,7 @@ class TasksModule(BaseModule):
                 
                 def _on_task_complete(batch_task):
                     """任务完成回调 — 由 BatchTaskManager 在工作线程调用，通过 invokeMethod 切回主线程"""
-                    from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+                    from PySide6.QtCore import QMetaObject, Qt, Q_ARG
                     QMetaObject.invokeMethod(
                         self, "_on_batch_task_finished",
                         Qt.ConnectionType.QueuedConnection,
@@ -592,7 +592,7 @@ class TasksModule(BaseModule):
 
     def _show_task_templates(self):
         """弹出任务模板菜单，选择后自动填充新建对话框"""
-        from PyQt6.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
         menu.setStyleSheet("QMenu{background:#1a1a1a;color:#ccc;border:1px solid #333;padding:4px;} QMenu::item{padding:8px 24px;font-size:12px;} QMenu::item:selected{background:#1e6bde;color:#fff;}")
         for name, ttype, desc in self.TASK_TEMPLATES:
@@ -615,7 +615,7 @@ class TasksModule(BaseModule):
 
     def _show_task_detail(self, row: int, col: int):
         """双击任务行 → 弹出详情面板（进度/参数/日志）"""
-        from PyQt6.QtWidgets import QDialog, QTextEdit, QFormLayout
+        from PySide6.QtWidgets import QDialog, QTextEdit, QFormLayout
 
         # 找到对应任务（考虑筛选状态）
         filtered = self._tasks
@@ -755,6 +755,7 @@ class TasksModule(BaseModule):
         except Exception as e:
             logger.debug(f"同步任务进度失败: {e}")
     
+    @Slot(str, str)
     def _on_batch_task_finished(self, queue_id: str, batch_task_id: str):
         """任务完成槽函数（主线程安全，由 QMetaObject.invokeMethod 调度）"""
         for task in self._tasks:

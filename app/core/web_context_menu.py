@@ -87,7 +87,7 @@ def build_menu_items(info: Dict[str, Any]) -> List[List[Tuple[str, str]]]:
 
 
 def _find_web_view(obj: Any):
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineWidgets import QWebEngineView
 
     node = obj
     for _ in range(8):
@@ -103,7 +103,7 @@ def _request_info(request: Any) -> Dict[str, Any]:
     if request is None:
         return {"has_link": False, "media": None, "editable": False, "has_selection": False}
     try:
-        from PyQt6.QtWebEngineCore import QWebEngineContextMenuRequest
+        from PySide6.QtWebEngineCore import QWebEngineContextMenuRequest
     except Exception:  # stability-gate: allow-swallow（旧版本没有该枚举时按无媒体处理）
         QWebEngineContextMenuRequest = None  # type: ignore
     media = None
@@ -135,7 +135,7 @@ def _request_info(request: Any) -> Dict[str, Any]:
 
 
 def _trigger(view: Any, key: str) -> None:
-    from PyQt6.QtWebEngineCore import QWebEnginePage
+    from PySide6.QtWebEngineCore import QWebEnginePage
 
     WA = QWebEnginePage.WebAction
     mapping = {
@@ -157,8 +157,8 @@ def _trigger(view: Any, key: str) -> None:
     page = view.page()
     if key == "open_link":
         try:
-            from PyQt6.QtCore import QUrl
-            from PyQt6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
 
             req = page.lastContextMenuRequest()
             QDesktopServices.openUrl(QUrl(req.linkUrl()))
@@ -179,8 +179,8 @@ class ChineseContextMenuFilter:
 
 
 def _make_filter(): 
-    from PyQt6.QtCore import QEvent, QObject
-    from PyQt6.QtWidgets import QApplication, QMenu
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QApplication, QMenu
 
     class _Filter(QObject):
         def eventFilter(self, obj, event):  # noqa: N802（Qt 命名）
@@ -228,7 +228,7 @@ def install_chinese_context_menu(app: Any) -> bool:
         if str(os.environ.get("SHIGUANG_QT_CTX_MENU", "0")).strip() != "1":
             logger.info("[web-menu] Qt 右键菜单默认关闭（改用前端中文菜单）；需要时设 SHIGUANG_QT_CTX_MENU=1")
             return False
-        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401  依赖探测
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401  依赖探测
 
         filt = _make_filter()
         app.installEventFilter(filt)

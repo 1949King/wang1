@@ -9,7 +9,7 @@ base_module.py — 模块基类
 - on_activated() / on_deactivated() 生命周期
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from .core import EventBus, DataBus, MasterClock
 from .skill_engine import SkillEngine

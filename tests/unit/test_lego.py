@@ -36,13 +36,13 @@ try:
 except Exception as e:
     print(f"  ❌ flow_orchestrator 导入失败: {e}")
 
-print("\n2. 测试 PyQt6...")
+print("\n2. 测试 PySide6...")
 try:
-    from PyQt6.QtWidgets import QApplication, QWidget
-    print("  ✅ PyQt6 导入成功")
+    from PySide6.QtWidgets import QApplication, QWidget
+    print("  ✅ PySide6 导入成功")
 except Exception as e:
-    print(f"  ❌ PyQt6 导入失败: {e}")
-    print("  请运行: pip install PyQt6")
+    print(f"  ❌ PySide6 导入失败: {e}")
+    print("  请运行: pip install PySide6")
 
 print("\n3. 测试事件总线...")
 try:

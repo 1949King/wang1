@@ -37,7 +37,7 @@ if errorlevel 1 (
     echo.
     echo ============================================================
     echo   启动失败！请检查以下问题：
-    echo   1. 确保已安装 PyQt6: pip install PyQt6
+    echo   1. 确保已安装 PySide6: pip install PySide6
     echo   2. 查看日志文件: logs/app_*.log
     echo ============================================================
     echo.

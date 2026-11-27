@@ -9,15 +9,15 @@
   model_card.py        — 模型卡片组件
 '''
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QComboBox, QLineEdit,
     QGroupBox, QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QStatusBar, QTabWidget, QDialog, QFormLayout,
     QDialogButtonBox, QApplication, QSlider
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 from typing import Optional, Dict, List, Any
 import logging

@@ -7,7 +7,7 @@
 3. **资源限额**：HTML 单文件/总数/总字节、成片帧数上限（与 spec.limits 的铁律互补，渲染边界再守一道）。
 
 设计纪律：
-* 纯标准库，不 import PyQt6 / playwright / ffmpeg（可被 _verify 守卫独立导入、可单测）；
+* 纯标准库，不 import PyQt6 / PySide6 / playwright / ffmpeg（可被 _verify 守卫独立导入、可单测）；
 * **不静默修正**：所有不合规都进 errors 列表，由调用方如实报告；绝不「先跑着」；
 * 规则表 `FORBIDDEN_RULES` 是单一事实来源，守卫脚本据此断言「规则在册」；
 * 运行时还有一道 `page.route("**/*")` 兜底（render_worker），但静态闸不能省 ——

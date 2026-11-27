@@ -7,7 +7,7 @@
 #   此前 9 道门禁的全部逻辑只存在于 .git/hooks/pre-commit —— 而 .git/ 不入库。
 #   后果：① CI 没法复用（clone 下来根本没有这些门禁，所以 ci.yml 只能另写一套，
 #   两边必然漂移）；② 换机器/重装即丢失；③ 没人能 review 门禁改了什么。
-#   2026-10-09 同时补 ⑩ pyqtSignal 类型、⑪ 素材不出域 → 9 道变 11 道。
+#   2026-10-09 同时补 ⑩ Signal 类型、⑪ 素材不出域 → 9 道变 11 道。
 #
 # 用法：
 #   bash scripts/precommit_gates.sh          # 增量模式（= git hook，只看暂存文件）
@@ -113,7 +113,7 @@ echo "── ⑥a 架构守护（分层纪律）"
 "$PY" scripts/arch_guard.py --scan app || fail=1
 
 echo "── ⑥b 画布单一真源防漂（P0-1 Phase 3：禁宿主副本 + 接线在册；构建门禁见全量）"
-# 2026-10-18 重写：抽包后真源唯一在 vendor/packages/libtv，本卡点改为
+# 2026-10-18 重写：抽包后真源唯一在 vendor/packages/canvas-core，本卡点改为
 # 「副本不得复活（目录+内容指纹）+ workspace 接线在册」。增量模式跳过 vite
 # 构建（慢），全量构建门禁由 _verify/run_all_checks.py（CANVASDUAL）默认执行。
 "$PY" _verify/check_canvas_dual_repo.py --no-build || fail=1
@@ -129,22 +129,22 @@ if [ "$ALL_MODE" = "1" ]; then
     HAVE_CANVAS=1
 else
     STAGED_CANVAS=$(git diff --cached --name-only --diff-filter=ACM -- \
-        'vendor/shiguang-canvas/' 'vendor/packages/libtv/' 'vendor/AI-Canvas-tauri/src/libtv/' || true)
+        'vendor/shiguang-canvas/' 'vendor/packages/canvas-core/' 'vendor/AI-Canvas-tauri/src/libtv/' || true)
     [ -n "$STAGED_CANVAS" ] && HAVE_CANVAS=1 || HAVE_CANVAS=0
 fi
 if [ "$HAVE_CANVAS" = "0" ]; then
     echo "   （无暂存的画布文件，跳过）"
 elif ! command -v node >/dev/null 2>&1; then
     echo "   ⚠️ 未找到 node，跳过前端卡点（不阻断，请尽快恢复 node 环境）"
-elif [ ! -f vendor/packages/libtv/node_modules/vitest/vitest.mjs ]; then
+elif [ ! -f vendor/packages/canvas-core/node_modules/vitest/vitest.mjs ]; then
     # CI 的 guards job 未装 npm 依赖；画布三卡点由 frontend-tests job 覆盖。
     # 这里显式跳过并说明，避免把「环境缺失」误报成「门禁失败」。
     echo "   ⚠️ 画布 node_modules 未安装，跳过前端三卡点"
     echo "      （CI 上由 frontend-tests job 覆盖 tsc + vitest + 质量棘轮）"
 else
     # ⑦a tsc 类型检查（棘轮：错误数 ≤ 37 只减不增）
-    # P0-1 抽包 Phase 1（2026-10-18）：tsc/vitest 随真源改在 @shiguang/libtv 包目录跑
-    TSC_OUT=$(cd vendor/packages/libtv && node node_modules/typescript/bin/tsc \
+    # tsc/vitest 统一在画布真源 @shiguang/canvas-core 包目录执行。
+    TSC_OUT=$(cd vendor/packages/canvas-core && node node_modules/typescript/bin/tsc \
         --noEmit --pretty false 2>&1)
     TSC_N=$(printf '%s\n' "$TSC_OUT" | grep -c "error TS" || true)
     TSC_BASELINE=37
@@ -159,7 +159,7 @@ else
     # --pool=threads：默认 forks pool 会把 SSR 编译结果写临时目录供 worker
     # 读取，被 WorkBuddy fs-shim 拦截（EPERM）造成假失败；threads 走内存
     # 通道不写盘，沙箱安全（2026-09-26 实测定位）。
-    VT_OUT=$(cd vendor/packages/libtv && node node_modules/vitest/vitest.mjs \
+    VT_OUT=$(cd vendor/packages/canvas-core && node node_modules/vitest/vitest.mjs \
         run --reporter=dot --pool=threads 2>&1)
     VT_RC=$?
     if [ "$VT_RC" -ne 0 ]; then
@@ -172,7 +172,7 @@ else
         echo "   ✓ vitest 单测通过（${VT_N:-?} 个）"
     fi
     # ⑦c 前端质量棘轮（check_canvas_frontend_quality.mjs）
-    # 报告型脚本改造为卡点：dupNames ≤10 / fnOver300 ≤10 / cycloOver60 ≤5
+    # 报告型脚本改造为卡点：dupNames ≤10 / fnOver300 ≤15 / cycloOver60 ≤8
     # 只减不增。基线组同名已人工定性＝启发式误报（多行箭头回调/局部
     # 同名，非模块级静默覆盖），新增同名即拦。
     # 2026-10-14 dupNames 8→10：新增 2 组均来自 AppErrorBoundary.tsx —— 细分
@@ -186,12 +186,23 @@ else
     # 该文件即回落 9，确认归因。属启发式误报，按 dupNames 先例人工定性记录。
     # 回落路径：若日后把 POSE_PRESETS 单独建数据模块，须同步
     # _verify/check_stage3d_pose_dof.mjs（它按源文本解析该文件），届时可改回 9。
+    # 2026-11-28 fnOver300 10→15 / cycloOver60 5→8（用户拍板）：
+    #   背景：包改名 libtv→canvas-core 后，本卡点的暂存过滤仍指向旧路径，
+    #   判定「无暂存的画布文件」而一直被静默跳过；路径修正后首次真跑，
+    #   暴露积累量——上次提交状态已是 12/7（用 git archive HEAD 的画布源码
+    #   跑同一脚本实测），工作区 15/8。
+    #   新增 3 项逐个核实为启发式误报（len = 到下一个函数起点的近似）：
+    #     bridge.ts generateMusicViaHost 实际 39 行（L731–769），被算成 1171；
+    #     TeamPanel.tsx claim 实际约 14 行（L995，下一个内部函数 L1009），被算成 409；
+    #     TeamPanel.tsx accept 位于组件末尾，其后是一串同级内部函数 + JSX，被算成 339。
+    #   未改任何业务代码；回落路径：修 check_canvas_frontend_quality.mjs 的
+    #   跨度估算（按括号配平截断）后，按实测值下调。
     Q_JSON=$(node _verify/check_canvas_frontend_quality.mjs --json 2>/dev/null)
     if [ -z "$Q_JSON" ]; then
         echo "   ✗ 前端质量扫描执行失败"
         fail=1
     else
-        Q_VERDICT=$(printf '%s' "$Q_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s).summary;const base={dupNames:10,fnOver300:10,cycloOver60:5};const bad=Object.entries(base).filter(([k,v])=>(j[k]||0)>v);if(bad.length){console.log('FAIL '+bad.map(([k,v])=>k+'='+j[k]+'>'+v).join(' '))}else{console.log('OK dupNames='+j.dupNames+'/10 fnOver300='+j.fnOver300+'/10 cycloOver60='+j.cycloOver60+'/5')}});")
+        Q_VERDICT=$(printf '%s' "$Q_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s).summary;const base={dupNames:10,fnOver300:15,cycloOver60:8};const bad=Object.entries(base).filter(([k,v])=>(j[k]||0)>v);if(bad.length){console.log('FAIL '+bad.map(([k,v])=>k+'='+j[k]+'>'+v).join(' '))}else{console.log('OK dupNames='+j.dupNames+'/10 fnOver300='+j.fnOver300+'/15 cycloOver60='+j.cycloOver60+'/8')}});")
         case "$Q_VERDICT" in
             OK*) echo "   ✓ 质量棘轮 ${Q_VERDICT#OK }" ;;
             *)   echo "   ✗ 质量棘轮新增超限：${Q_VERDICT#FAIL }"; fail=1 ;;
@@ -209,10 +220,10 @@ echo "── ⑨ 路由 mixin 属性可解析（cs.* 防静默失效）"
 # 让 mixin 的 cs.xxx 变 AttributeError、端点静默失效。纯静态、毫秒级。
 "$PY" _verify/check_canvas_route_attrs.py || fail=1
 
-echo "── ⑩ pyqtSignal 参数类型（防 typing 泛型别名致整模块 import 崩）"
+echo "── ⑩ Signal 参数类型（防 typing 泛型别名致整模块 import 崩）"
 # 2026-10-09 补（实测事故）：app/core/ai_interpolation.py:249 写的是
-#   pyqtSignal(float, List[np.ndarray])
-# pyqtSignal 不接受 _GenericAlias ⇒ 类体执行期抛 TypeError ⇒ **整个模块
+#   Signal(float, List[np.ndarray])
+# Signal 不接受 _GenericAlias ⇒ 类体执行期抛 TypeError ⇒ **整个模块
 # import 失败**。连锁：preview_manager 那句 import 无 try/except（开补帧即崩），
 # deformity_repair_skill 被 try/except 吞掉 ⇒ Agent 补帧能力静默失效。
 # 同批还查出 highlight_preview.py 3 处同型缺陷。ruff/tsc 都看不见（语法合法），

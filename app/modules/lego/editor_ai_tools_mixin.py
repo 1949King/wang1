@@ -17,8 +17,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QListWidget, QListWidgetItem, QCheckBox, QFileDialog, QMessageBox,
     QApplication,
@@ -61,7 +61,7 @@ class EditorAiToolsMixin:
 
     # 抽取自 editor_module.py L732-744
     def _ensure_ai_clip_algorithm(self):
-        """懒加载AI剪辑算法（避免顶层导入 PyQt6 重模块引发循环依赖）。"""
+        """懒加载AI剪辑算法（避免顶层导入 PySide6 重模块引发循环依赖）。"""
         if getattr(self, "_ai_clip_initialized", False):
             return getattr(self, "_ai_clip_algorithm", None)
         self._ai_clip_initialized = True
@@ -400,7 +400,7 @@ class EditorAiToolsMixin:
 
     # 抽取自 editor_module.py L8219-8236
     def _on_export_script_clicked(self):
-        """导出当前剪辑脚本到 JSON 文件（父窗口传 self，符合 PyQt6 弹窗铁律）。"""
+        """导出当前剪辑脚本到 JSON 文件（父窗口传 self，符合 PySide6 弹窗铁律）。"""
         script = getattr(self, "_last_editing_script", None)
         if not script:
             QMessageBox.information(self, "导出脚本", "暂无可用的剪辑脚本。")

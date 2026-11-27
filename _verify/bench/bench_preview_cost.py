@@ -69,7 +69,7 @@ def main():
         return 0
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])   # noqa: F841
 
     from app.core.preview_manager import PreviewManager

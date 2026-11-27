@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""验证 pyqtSignal 参数类型合法（防「整个模块 import 即崩」）—— 纯 AST，毫秒级。
+"""验证 PySide6 Signal 参数类型并识别旧 pyqtSignal 残留 —— 纯 AST，毫秒级。
 
 跑法: python _verify/check_qt_signal_types.py
 
@@ -43,7 +43,7 @@ SKIP_PARTS = {
     "build", "dist", ".mypy_cache", ".ruff_cache", "thirdparty",
 }
 
-# typing 里那些「不能进 pyqtSignal」的名字（都是 _GenericAlias / _SpecialForm）
+# typing 里那些「不能进 Signal/pyqtSignal」的名字（都是 _GenericAlias / _SpecialForm）
 BAD_TYPING_NAMES = {
     "List", "Dict", "Tuple", "Set", "FrozenSet", "Deque", "DefaultDict",
     "Optional", "Union", "Callable", "Sequence", "Mapping", "MutableMapping",
@@ -73,7 +73,7 @@ def _iter_py_files():
 
 
 def _call_name(node: ast.AST) -> str:
-    """取调用名（支持 QtCore.pyqtSignal 这类属性访问）。"""
+    """取调用名（支持 QtCore.Signal / QtCore.pyqtSignal 这类属性访问）。"""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -103,6 +103,7 @@ def main() -> int:
     problems = []
     scanned = 0
     signal_calls = 0
+    legacy_signal_calls = 0
 
     for path in _iter_py_files():
         try:
@@ -126,6 +127,8 @@ def main() -> int:
             if name not in SIGNAL_NAMES:
                 continue
             signal_calls += 1
+            if name == "pyqtSignal":
+                legacy_signal_calls += 1
             for arg in node.args:
                 why = _bad_arg(arg)
                 if why:
@@ -142,13 +145,14 @@ def main() -> int:
                             hint = SUGGEST["tuple"]
                     problems.append((rel, node.lineno, why, hint))
 
-    print(f"── 扫描完成：{scanned} 个含信号声明的 .py，{signal_calls} 处 pyqtSignal/Signal 调用")
+    print(f"── 扫描完成：{scanned} 个含信号声明的 .py，{signal_calls} 处 Signal/pyqtSignal 调用")
+    print(f"── 旧 pyqtSignal 残留：{legacy_signal_calls} 处（仍执行 typing 泛型检查）")
     if problems:
         print()
         for rel, line, why, hint in problems:
             print(f"✗ {rel}:{line}  {why}")
             if hint:
-                print(f"     ⇒ 建议改用 {hint}（typing 泛型不能进 pyqtSignal）")
+                print(f"     ⇒ 建议改用 {hint}（typing 泛型不能进 Qt Signal）")
         print()
         print(f"FAILED ({len(problems)} 处)")
         print("  说明：这会让整个模块 import 失败，不是风格问题。")

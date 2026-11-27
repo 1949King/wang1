@@ -8,13 +8,12 @@ logger = logging.getLogger(__name__)
 cv2 = None
 np = None
 Image = None
-ImageQt = None
 QPixmap = None
 QImage = None
 Qt = None
 QTimer = None
-pyqtSignal = None
-pyqtSlot = None
+Signal = None
+Slot = None
 QObject = None
 QThread = None
 QLabel = None
@@ -34,24 +33,24 @@ QMediaMetaData = None
 try:
     import cv2
     import numpy as np
-    from PIL import Image, ImageQt
-    from PyQt6.QtGui import QPixmap, QImage
-    from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject, QThread, QUrl, QMetaObject, Q_ARG
-    from PyQt6.QtWidgets import (QLabel, QSlider, QPushButton, QHBoxLayout,
+    from PIL import Image
+    from PySide6.QtGui import QPixmap, QImage
+    from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QThread, QUrl
+    from PySide6.QtWidgets import (QLabel, QSlider, QPushButton, QHBoxLayout,
                                   QVBoxLayout, QWidget, QComboBox, QStyle,
                                   QApplication)
-    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-    from PyQt6.QtMultimediaWidgets import QVideoWidget
-    logger.info('✓ 视频播放器依赖导入成功 (PyQt6 + QtMultimedia)')
+    from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+    from PySide6.QtMultimediaWidgets import QVideoWidget
+    logger.info('✓ 视频播放器依赖导入成功 (PySide6 + QtMultimedia)')
 except Exception as e:
     logger.warning(f'警告: 缺少视频播放器依赖: {e}')
     logger.info('视频播放器将在运行时提示缺少依赖')
 
 
 class FrameReaderThread(QThread): 
-    frame_signal = pyqtSignal(np.ndarray) if pyqtSignal else None
-    finished_signal = pyqtSignal() if pyqtSignal else None
-    error_signal = pyqtSignal(str) if pyqtSignal else None
+    frame_signal = Signal(np.ndarray)
+    finished_signal = Signal()
+    error_signal = Signal(str)
 
     def __init__(self, video_path): 
         if QThread:
@@ -268,7 +267,7 @@ class OptimizedVideoPlayer(QWidget):
     def load_video(self, video_path): 
         if not self.has_dependencies:
             if hasattr(self, 'preview_label'):
-                self.preview_label.setText("❌ 缺少PyQt5依赖")
+                self.preview_label.setText("❌ 缺少PySide6依赖")
             return
             
         if self._use_qt_multimedia and QMediaPlayer and QVideoWidget:

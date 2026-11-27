@@ -39,6 +39,7 @@ EXE = os.path.join(DIST, "拾光剪影.exe")
 RUNTIME_SRC = os.path.join(ROOT, "build", "runtime_pack")
 RUNTIME_DST = os.path.join(DIST, "runtime")
 NSI = os.path.join(ROOT, "scripts", "installer.nsi")
+ISS = os.path.join(ROOT, "scripts", "installer.iss")
 SITE_PACKAGES = os.path.join(ROOT, ".venv312", "Lib", "site-packages")
 
 # makensis 是 32 位程序，安装包数据块 mmap 到 2 GB 地址空间就崩（实测 2026-11-15）：
@@ -54,11 +55,11 @@ NSIS_DATABLOCK_LIMIT = 2 * 1024 ** 3
 #
 # 为什么必须这么做（实测，不是猜）：
 #   PyInstaller 的 find_binary_dependencies() 会在隔离子进程里把「已收集的包」
-#   逐个 import 一遍来枚举原生 DLL。那个子进程里 PyQt6 先被 import；随后
+#   逐个 import 一遍来枚举原生 DLL。PyQt6 时代实测那个子进程里 Qt 先被 import；随后
 #   scipy 的 scipy._lib.array_api_compat.torch 会反向 import torch ——
-#   而 **PyQt6 + torch 同进程必触发原生段错误**（实测 exit 139 /
-#   0xC0000005，Python 层无栈，本项目 app/core/interchange/_otio_worker.py
-#   拆子进程也是同一类问题）。
+#   **Qt + torch 同进程曾触发原生段错误**（exit 139 / 0xC0000005，Python 层无栈，
+#   本项目 app/core/interchange/_otio_worker.py 拆子进程也是同一类问题）。
+#   迁移 PySide6 后继续屏蔽，不把旧原生冲突视为已自动解决。
 #   报错会伪装成 SubprocessDiedError: crashed while importing package 'gguf'，
 #   因为崩的是同一条依赖链，报的包名跟真凶无关 —— 极难认。
 #
@@ -127,6 +128,25 @@ def du(path: str) -> int:
 
 
 INTERNAL = os.path.join(DIST, "_internal")
+
+# 必须随包的 VC++ 运行时 DLL（app-local 部署，微软支持的做法）。
+#
+# 为什么必须补（实测 2026-11-19）：构建机装了系统级 VC++ redist，PyInstaller
+# 不收集这些 CRT，自检也全过；但干净目标机没有 redist，安装后启动即弹
+# 「找不到 MSVCP140.dll，无法继续执行代码」。Windows loader 优先搜 exe 所在
+# 目录、再搜系统目录，所以：
+#   · DIST 根目录一份 → 修 exe 自身及根目录原生依赖的加载；
+#   · _internal 一份   → 覆盖 _internal 下各 .pyd 的加载（PyInstaller 会把它
+#     加进 DLL 搜索路径）。
+# 双保险合计约 1.5 MB，相对 6 GB 的包可忽略。
+VC_RUNTIME_DLLS = (
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "msvcp140_2.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "concrt140.dll",
+)
 
 # 需要在 _internal 里「差集同步」的包 —— PyInstaller 的按需收集在这里是硬伤。
 #
@@ -378,6 +398,36 @@ def complete_internal() -> None:
         f"{total_b/1048576:.1f} MB")
 
 
+def ensure_vc_runtime() -> None:
+    """把 VC++ 运行时从 System32 拷进 exe 根目录与 _internal（app-local）。
+
+    构建机缺任一 DLL 时直接报错停下 —— 宁可不出包，也不出「干净机打不开」的包。
+    已存在且大小一致则跳过，重复执行幂等。
+    """
+    log("②c 补 VC++ 运行时（防干净目标机缺 MSVCP140.dll）…")
+    system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+    missing = [n for n in VC_RUNTIME_DLLS
+               if not os.path.exists(os.path.join(system32, n))]
+    if missing:
+        raise SystemExit(
+            f"构建机 System32 缺 VC++ 运行时：{', '.join(missing)}\n"
+            "先在构建机安装 Visual C++ Redistributable (x64) 再出包：\n"
+            "  https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        )
+    copied = 0
+    for base in (DIST, INTERNAL):
+        os.makedirs(base, exist_ok=True)
+        for name in VC_RUNTIME_DLLS:
+            src = os.path.join(system32, name)
+            dst = os.path.join(base, name)
+            # 同大小视为已补过，避免每次出包重复拷
+            if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
+                continue
+            shutil.copy2(src, dst)
+            copied += 1
+    log(f"   补 {copied} 个 CRT DLL（根目录 + _internal 双份，各 {len(VC_RUNTIME_DLLS)} 个）")
+
+
 def copy_runtime() -> None:
     log("② 装入 AI 内核 runtime/ …")
     if not os.path.isdir(RUNTIME_SRC):
@@ -438,8 +488,8 @@ def read_app_version() -> str:
     """从 app/version.py 读 __version__。
 
     为什么不 `import app.version`：那会先执行 `app/__init__.py`，
-    这条链会拖起 PyQt6（乃至 torch），在打包脚本里既慢又容易崩
-    （本项目已知 PyQt6 + torch 同进程会原生段错误）。正则读一行最稳。
+    这条链会拖起 PySide6（乃至 torch），在打包脚本里既慢又容易崩
+    （PyQt6 时代已知 Qt + torch 同进程会原生段错误，迁移后继续隔离）。正则读一行最稳。
     """
     path = os.path.join(ROOT, "app", "version.py")
     try:
@@ -519,6 +569,57 @@ def write_build_info(version: str) -> str:
     return nsh
 
 
+def find_inno_compiler() -> str:
+    """定位 Inno Setup 编译器；缺失时给出明确安装方式。"""
+    iscc = shutil.which("ISCC")
+    if not iscc:
+        for candidate in (
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files\Inno Setup 6\ISCC.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
+        ):
+            if os.path.exists(candidate):
+                iscc = candidate
+                break
+    if not iscc:
+        raise SystemExit(
+            "找不到 ISCC.exe（Inno Setup 编译器）。安装命令：\n"
+            "  winget install --id JRSoftware.InnoSetup --exact"
+        )
+    return iscc
+
+
+def build_inno_installer(disk_spanning: bool = False, lite: bool = False) -> str:
+    """构建完整 Inno 安装包；分卷只改变交付形态，不裁剪 runtime。
+
+    lite=True 时注入 /DLITE_BUILD 走 iss 的 Lite 分支：排除 runtime/ 内核、
+    产物名带 -Lite 后缀。供轻量版第二遍编译复用同一份 dist（不重打 PyInstaller）。
+    """
+    log("④ Inno Setup 打完整安装包 …")
+    if lite:
+        log("   Lite 模式：排除 runtime/ 内核，产物名带 -Lite 后缀")
+    version = read_app_version()
+    args = [
+        find_inno_compiler(),
+        f"/DAPP_VERSION={version}",
+        f"/DSRC_DIR={DIST}",
+        f"/DOUT_DIR={os.path.join(ROOT, 'dist')}",
+        f"/DROOT_DIR={ROOT}",
+        f"/DDISK_SPANNING={'yes' if disk_spanning else 'no'}",
+    ]
+    if lite:
+        args.append("/DLITE_BUILD")
+    args.append(ISS)
+    rc = subprocess.call(args, cwd=ROOT)
+    if rc != 0:
+        raise SystemExit(f"ISCC 失败，退出码 {rc}")
+    suffix = "-Lite" if lite else ""
+    expect = os.path.join(ROOT, "dist", f"拾光剪影-Setup-{version}{suffix}.exe")
+    if not os.path.exists(expect):
+        raise SystemExit(f"ISCC 返回成功，但没找到预期产物：{expect}")
+    return expect
+
+
 def build_installer(fast_compress: bool = False) -> str:
     log("④ NSIS 打安装包 …")
     version = read_app_version()
@@ -566,15 +667,27 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-pyinstaller", action="store_true", help="复用现有 dist，不重打")
     ap.add_argument("--installer", action="store_true", help="继续生成 NSIS 安装包")
+    ap.add_argument("--inno-installer", action="store_true", help="继续生成完整 Inno 安装包")
+    ap.add_argument("--disk-spanning", action="store_true",
+                    help="Inno 超过单文件上限时使用 Setup.exe + .bin 分卷")
+    ap.add_argument("--lite", action="store_true",
+                    help="Inno 轻量版：排除 runtime/ 内核，产物名带 -Lite（须与 --inno-installer 同用）")
     ap.add_argument("--skip-selftest", action="store_true", help="跳过自检（不建议）")
     ap.add_argument("--fast-compress", action="store_true",
                     help="安装包用 zlib 而非 solid lzma（体积更大，但快很多）")
     args = ap.parse_args()
+    if args.disk_spanning and not args.inno_installer:
+        ap.error("--disk-spanning 只能与 --inno-installer 一起使用")
+    if args.lite and not args.inno_installer:
+        ap.error("--lite 只能与 --inno-installer 一起使用")
+    if args.lite and args.disk_spanning:
+        ap.error("--lite 是单文件轻量版，不与 --disk-spanning 同用")
 
     if not args.skip_pyinstaller:
         run_pyinstaller()
     copy_runtime()
     complete_internal()
+    ensure_vc_runtime()
 
     report = None
     if not args.skip_selftest:
@@ -589,6 +702,11 @@ def main() -> int:
     if args.installer:
         setup = build_installer(fast_compress=args.fast_compress)
         log(f"   安装包 {os.path.basename(setup)}  {os.path.getsize(setup)/1073741824:.2f} GB")
+
+    if args.inno_installer:
+        setup = build_inno_installer(disk_spanning=args.disk_spanning, lite=args.lite)
+        log(f"   Inno 安装包 {os.path.basename(setup)}  "
+            f"{os.path.getsize(setup)/1073741824:.2f} GB")
 
     if report is not None and not report["ok"]:
         log(f"!! 自检有硬失败（{', '.join(report.get('hard_failed') or [])}）—— 不要拿去发布")

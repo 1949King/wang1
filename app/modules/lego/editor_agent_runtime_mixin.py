@@ -15,12 +15,13 @@ playback-av / canvas-transform / clip-transform 冻结区。
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QListWidget,
     QProgressBar, QMessageBox, QListWidgetItem,
 )
@@ -717,7 +718,7 @@ class EditorAgentRuntimeMixin:
                 nxt = inbox.pop(0)
                 self._edit_agent_inbox = inbox
                 self._edit_agent_input.setText(nxt)
-                from PyQt6.QtCore import QTimer
+                from PySide6.QtCore import QTimer
                 QTimer.singleShot(0, self._send_edit_agent_message)
         except Exception as e:
             logger.warning(f"[Agent] _on_edit_agent_finished 处理失败: {e}")
@@ -878,3 +879,142 @@ class EditorAgentRuntimeMixin:
                 "Agent", f"❌ 全链路失败（非假成功）: {result.error}"
             )
 
+    # ======================================================================
+    # 多轮自主闭环（2026-11-18）：面板 → core AgentLoop
+    # 单轮实现原样保留下方；本区只在「多轮自主执行」开关打开时生效。
+    # ======================================================================
+    def _send_edit_agent_message_loop(self):
+        """多轮发送：模型每轮选工具 → 主线程执行 → 回执喂回模型 → 再决策。"""
+        user_text = self._edit_agent_input.text().strip()
+        if not user_text:
+            QMessageBox.warning(self, "剪辑 Agent", "请输入剪辑指令")
+            return
+
+        from app.core.agent_action_registry import (
+            build_agent_actions_help_block,
+            list_editor_capabilities_for_prompt,
+        )
+        from app.core.agent_policy import mode_prompt_block
+        from app.core.agent_persona import build_persona_hint, is_persona_enabled
+        from app.core.agent_task_store import agent_tasks
+        from .editor_agent_dock_mixin import EditorAgentLoopWorker
+
+        provider, model = self._get_selected_edit_agent_model()
+        agent_mode = self._get_agent_session_mode()
+        self._persist_agent_project_context_silent()
+
+        # system / tool 提示与单轮路径同源，不另写第二份提示词
+        system_prompt = (
+            "你是拾光剪影的 AI 剪辑助手。多轮执行时：需要改时间线就输出工具调用 JSON，"
+            "执行结果会喂回给你，观察后再决定下一步；任务完成时用纯文本总结做了什么。\n"
+            f"{build_persona_hint()}\n{mode_prompt_block(agent_mode)}"
+            "时间单位是秒，clip_index 从 0 开始。"
+        )
+        tool_prompt = build_agent_actions_help_block()
+        caps_info = list_editor_capabilities_for_prompt()
+        if caps_info:
+            tool_prompt += (
+                "\n\n已注册剪辑相关 capability（供理解，调用仍用上面 action）:\n"
+                + json.dumps(caps_info, ensure_ascii=False, indent=2)
+            )
+        memory_context = ""
+        try:
+            from app.core.memory_store import memory_store
+            memory_context = memory_store.get_agent_context(
+                top_k=5, include_preferences=is_persona_enabled())
+        except Exception as e:
+            logger.debug(f"[Agent] 多轮模式注入记忆失败: {e}")
+
+        task = agent_tasks.create(
+            session_id="editor", goal=user_text, mode=agent_mode, source="editor_loop")
+        self._edit_agent_task_id = task.get("id")
+        try:
+            agent_tasks.transition(task["id"], "running")
+        except Exception:
+            logger.debug("忽略异常（多轮任务状态迁移）: editor_agent_panel_mixin.py",
+                         exc_info=True)
+
+        self._append_agent_message("你", user_text)
+        using = provider or "自动降级"
+        if model:
+            using = f"{using}/{model}"
+        level = self._agent_thinking_level()
+        self._append_agent_message(
+            "Agent", f"正在用 {using} 多轮执行（思考等级：{level}）...")
+        self._edit_agent_input.clear()
+        self._edit_agent_last_user_text = user_text
+        self._agent_loop_last_round = 0
+
+        think_flag = self._agent_local_think_enabled() if provider == "ollama" else None
+        worker = EditorAgentLoopWorker(
+            provider=provider, model=model, goal=user_text, mode=agent_mode,
+            thinking_level=level, system_prompt=system_prompt, tool_prompt=tool_prompt,
+            memory_context=memory_context,
+            tool_bridge=self._ensure_agent_loop_bridge(),
+            think=think_flag, parent=self,
+        )
+        worker.progress_ready.connect(self._on_agent_loop_progress)
+        worker.error_ready.connect(self._on_edit_agent_error)
+        worker.stopped_ready.connect(self._on_agent_loop_stopped)
+        worker.finished_loop.connect(self._on_agent_loop_finished)
+        worker.finished.connect(self._on_edit_agent_finished)
+        self._edit_agent_worker = worker
+        self._edit_agent_send_btn.setEnabled(False)
+        self._edit_agent_stop_btn.setEnabled(True)
+        self._edit_agent_stop_btn.setVisible(True)
+        worker.start()
+
+    def _on_agent_loop_progress(self, info):
+        """轮次进度：仅在轮次变化时落一行，避免刷屏。"""
+        round_no = int((info or {}).get("round") or 0)
+        if round_no <= getattr(self, "_agent_loop_last_round", 0):
+            return
+        self._agent_loop_last_round = round_no
+        self._append_agent_message("系统", f"第 {round_no} 轮…")
+
+    def _on_agent_loop_finished(self, result):
+        """多轮结束：展示最终答复 + 待确认清单 + 诚实统计。"""
+        self._agent_loop_last_round = 0
+        data = result if isinstance(result, dict) else {}
+        reply = str(data.get("final_reply") or "").strip()
+        if reply:
+            self._append_agent_message("Agent", reply[:2000])
+        pending = data.get("pending_commands") or []
+        if pending:
+            lines = []
+            for i, c in enumerate(pending[:10]):
+                if not isinstance(c, dict):
+                    continue
+                params = json.dumps(c.get("params") or {}, ensure_ascii=False)
+                lines.append(f"{i + 1}. {c.get('action', '')} {params[:80]}")
+            self._append_agent_message(
+                "系统",
+                "以下写操作需要你确认后才会执行（本轮未落盘）：\n" + "\n".join(lines)
+                + "\n（切到「自主」模式可让多轮循环直接执行。）",
+            )
+        steps = [s for s in (data.get("steps") or []) if isinstance(s, dict)]
+        ok_count = sum(1 for s in steps if s.get("ok"))
+        reason = str(data.get("reason") or "")
+        self._append_agent_message(
+            "系统",
+            f"多轮结束（{reason}）：执行 {len(steps)} 次，成功 {ok_count} 次。",
+        )
+        self._record_agent_turn(getattr(self, "_edit_agent_last_user_text", ""), reply)
+        self._transition_agent_loop_task("completed")
+
+    def _on_agent_loop_stopped(self):
+        """用户中止：已完成的操作保留，后续步骤不再执行。"""
+        self._agent_loop_last_round = 0
+        self._append_agent_message("系统", "已停止多轮执行（已完成的操作保留）。")
+        self._transition_agent_loop_task("stopped")
+
+    def _transition_agent_loop_task(self, status: str):
+        """多轮任务状态迁移（失败只记日志，不影响界面）。"""
+        task_id = getattr(self, "_edit_agent_task_id", None)
+        if not task_id:
+            return
+        try:
+            from app.core.agent_task_store import agent_tasks
+            agent_tasks.transition(task_id, status)
+        except Exception as e:
+            logger.debug(f"[Agent] 多轮任务状态迁移失败: {e}")

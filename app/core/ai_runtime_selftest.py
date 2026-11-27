@@ -182,8 +182,8 @@ def _t_mediapipe():
 def _t_otio():
     """时间线交换层（FCPXML / EDL / OTIO 导入导出）。
 
-    🔴 这里**绝不能** `import opentimelineio`：它的 C 扩展在已经加载过 PyQt6
-    的进程里一加载就段错误（exit 139，无 Python 栈），会把整份自检报告一起带走
+    🔴 这里**绝不能** `import opentimelineio`：它的 C 扩展在已经加载过 Qt 绑定
+    （历史实测为 PyQt6）的进程里一加载就段错误（exit 139，无 Python 栈），会把整份自检报告一起带走
     —— 第一版就这么写的，实测直接把 exe 打成静默崩溃、报告文件都没生成。
     正确做法是走产品自己的端到端路径：otio_adapter 用 find_spec 探测 +
     在**无 Qt 的独立子进程**里干活，`available_export_formats()` 正好覆盖这两步。

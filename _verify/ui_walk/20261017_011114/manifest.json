@@ -1,0 +1,199 @@
+{
+  "shots_dir": "D:\\拾光剪影\\_verify\\ui_walk\\20261017_011114",
+  "modules": {
+    "home": {
+      "nav": true,
+      "shot": "00_home.png",
+      "tabs": []
+    },
+    "editor": {
+      "nav": true,
+      "shot": "010_editor.png",
+      "tabs": [
+        {
+          "tab": "属性",
+          "file": "010_editor__tab0_属性.png"
+        },
+        {
+          "tab": "调色",
+          "file": "010_editor__tab0_调色.png"
+        },
+        {
+          "tab": "特效",
+          "file": "010_editor__tab0_特效.png"
+        },
+        {
+          "tab": "文字",
+          "file": "010_editor__tab0_文字.png"
+        },
+        {
+          "tab": "贴纸",
+          "file": "010_editor__tab0_贴纸.png"
+        }
+      ],
+      "tools_tabs": [
+        {
+          "tab": "属性",
+          "file": "020_editor_tools_0_属性.png"
+        },
+        {
+          "tab": "调色",
+          "file": "020_editor_tools_1_调色.png"
+        },
+        {
+          "tab": "特效",
+          "file": "020_editor_tools_2_特效.png"
+        },
+        {
+          "tab": "文字",
+          "file": "020_editor_tools_3_文字.png"
+        },
+        {
+          "tab": "贴纸",
+          "file": "020_editor_tools_4_贴纸.png"
+        },
+        {
+          "tab": "音频",
+          "file": "020_editor_tools_5_音频.png"
+        },
+        {
+          "tab": "角色",
+          "file": "020_editor_tools_6_角色.png"
+        },
+        {
+          "tab": "AI",
+          "file": "020_editor_tools_7_AI.png"
+        },
+        {
+          "tab": "导出",
+          "file": "020_editor_tools_8_导出.png"
+        }
+      ]
+    },
+    "characters": {
+      "nav": true,
+      "shot": "010_characters.png",
+      "tabs": [],
+      "shot_late": "010_characters_late.png"
+    },
+    "copywriting": {
+      "nav": true,
+      "shot": "010_copywriting.png",
+      "tabs": [
+        {
+          "tab": "标题",
+          "file": "010_copywriting__tab0_标题.png"
+        },
+        {
+          "tab": "描述",
+          "file": "010_copywriting__tab0_描述.png"
+        },
+        {
+          "tab": "标签",
+          "file": "010_copywriting__tab0_标签.png"
+        },
+        {
+          "tab": "脚本",
+          "file": "010_copywriting__tab0_脚本.png"
+        }
+      ]
+    },
+    "tasks": {
+      "nav": true,
+      "shot": "010_tasks.png",
+      "tabs": []
+    },
+    "materials": {
+      "nav": true,
+      "shot": "010_materials.png",
+      "tabs": [
+        {
+          "tab": "📂 本地素材",
+          "file": "010_materials__tab0_📂 本地素材.png"
+        },
+        {
+          "tab": "✨ 提示词库",
+          "file": "010_materials__tab0_✨ 提示词库.png"
+        },
+        {
+          "tab": "📹 视频",
+          "file": "010_materials__tab1_📹 视频.png"
+        },
+        {
+          "tab": "🎵 音频",
+          "file": "010_materials__tab1_🎵 音频.png"
+        },
+        {
+          "tab": "🖼️ 图片",
+          "file": "010_materials__tab1_🖼️ 图片.png"
+        },
+        {
+          "tab": "📝 字幕",
+          "file": "010_materials__tab1_📝 字幕.png"
+        },
+        {
+          "tab": "📋 模板",
+          "file": "010_materials__tab1_📋 模板.png"
+        }
+      ]
+    },
+    "models": {
+      "nav": true,
+      "shot": "010_models.png",
+      "tabs": [
+        {
+          "tab": "🤖 模型广场",
+          "file": "010_models__tab0_🤖 模型广场.png"
+        },
+        {
+          "tab": "📊 网关统计",
+          "file": "010_models__tab0_📊 网关统计.png"
+        }
+      ]
+    },
+    "extensions": {
+      "nav": true,
+      "shot": "010_extensions.png",
+      "tabs": [
+        {
+          "tab": "📦 已安装",
+          "file": "010_extensions__tab0_📦 已安装.png"
+        },
+        {
+          "tab": "⚡ Skill 工坊",
+          "file": "010_extensions__tab0_⚡ Skill 工坊.png"
+        },
+        {
+          "tab": "🔌 MCP 服务",
+          "file": "010_extensions__tab0_🔌 MCP 服务.png"
+        },
+        {
+          "tab": "🛍️ 拓展商店",
+          "file": "010_extensions__tab0_🛍️ 拓展商店.png"
+        },
+        {
+          "tab": "🎨 画布节点",
+          "file": "010_extensions__tab0_🎨 画布节点.png"
+        }
+      ]
+    },
+    "performance": {
+      "nav": false,
+      "standalone": true,
+      "shot": "015_performance_standalone.png",
+      "tabs": []
+    },
+    "help": {
+      "nav": true,
+      "shot": "010_help.png",
+      "tabs": []
+    },
+    "settings": {
+      "nav": false,
+      "standalone": true,
+      "shot": "015_settings_standalone.png",
+      "tabs": []
+    }
+  },
+  "errors": []
+}

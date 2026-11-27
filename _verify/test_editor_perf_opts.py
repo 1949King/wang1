@@ -78,14 +78,18 @@ class TestTimelineWorkerLifecycle(unittest.TestCase):
         self.assertIn("def set_clip_interaction_active", src)
         self.assertIn("_wake_visible_clip_media()", src)
         self.assertIn("sleep_media_workers", src)
-        self.assertIn("_scaled_thumb_cache", src)
-        self.assertIn("def _resolve_clip_media_path", src)
+        # 片段控件已拆到 clip_widget.py，缓存断言跟随真实归属文件
+        clip_path = os.path.join(ROOT, "app", "modules", "lego", "clip_widget.py")
+        with open(clip_path, encoding="utf-8") as f:
+            clip_src = f.read()
+        self.assertIn("_scaled_thumb_cache", clip_src)
+        self.assertIn("def _resolve_clip_media_path", clip_src)
 
 
 class TestMediaWorkerGate(unittest.TestCase):
     def test_limits_concurrency_and_drains_queue(self):
         import importlib
-        # 独立导入模块级门（不依赖 PyQt 组件实例化）
+        # 独立导入模块级门（不依赖 Qt 组件实例化）
         tw_mod = importlib.import_module("app.modules.lego.timeline_widget")
         Gate = tw_mod._MediaWorkerGate
 
@@ -129,12 +133,12 @@ class TestGridBackgroundDirtyRectClipping(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         cls.app = QApplication.instance() or QApplication(sys.argv)
 
     def test_narrow_dirty_rect_draws_fewer_lines_than_full_width(self):
-        from PyQt6.QtCore import QRect
-        from PyQt6.QtGui import QPixmap, QPainter
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QPixmap, QPainter
         from app.modules.lego.timeline_widget import TrackViewport
 
         PPS = 400.0  # 高缩放 → sec_per_grid=0.5
@@ -218,23 +222,18 @@ class TestAgentPromptWhitelistAligned(unittest.TestCase):
     """剪辑 Agent 提示词里宣传的 action 必须都在真实白名单里，否则模型一提就被拒。"""
 
     @staticmethod
-    def _extract_advertised_actions(src: str) -> set:
-        start = src.find("可用 action:")
-        assert start >= 0, "未找到剪辑 Agent 提示词里的 action 列表"
-        end = src.find("。", start)
-        assert end > start
-        # 源码里是多段相邻字符串字面量拼接（跨行 + 引号），先去掉引号/换行再按逗号切
-        raw = src[start:end].replace('"', " ").replace("\n", " ")
-        actions_part = raw.split("可用 action:", 1)[1]
+    def _extract_advertised_actions(prompt_line: str) -> set:
+        """从注册表生成的提示词行提取 action，兼容旧的标题前缀。"""
+        actions_part = prompt_line.split("可用 action:", 1)[-1].rstrip("。")
         return {a.strip() for a in actions_part.split(",") if a.strip()}
 
     def test_prompt_actions_subset_of_allowed_actions(self):
         from app.modules.lego.ai_agent_panel import _AGENT_ALLOWED_ACTIONS
 
-        path = os.path.join(ROOT, "app", "modules", "lego", "editor_module.py")
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-        advertised = self._extract_advertised_actions(src)
+        from app.core.agent_action_registry import build_agent_actions_prompt_line
+
+        # 提示词已收敛到 action 注册表，直接验证真实生成出口
+        advertised = self._extract_advertised_actions(build_agent_actions_prompt_line())
         advertised -= {"answer", "info"}  # 内建，不需要在白名单里
         unknown = advertised - set(_AGENT_ALLOWED_ACTIONS)
         self.assertEqual(
@@ -242,14 +241,14 @@ class TestAgentPromptWhitelistAligned(unittest.TestCase):
             f"提示词宣传了白名单里没有的 action: {unknown}（模型一提就会被拒）",
         )
 
-    def test_add_clip_move_clip_not_advertised(self):
-        path = os.path.join(ROOT, "app", "modules", "lego", "editor_module.py")
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-        advertised = self._extract_advertised_actions(src)
-        # 未实现的 action：曾写进提示词却不在白名单/执行分支里，模型一提必被拒
+    def test_add_clip_blocked_and_move_clip_advertised(self):
+        from app.core.agent_action_registry import build_agent_actions_prompt_line
+
+        # 提示词已收敛到 action 注册表，直接验证真实生成出口
+        advertised = self._extract_advertised_actions(build_agent_actions_prompt_line())
+        # add_clip 仍未开放；move_clip 已实现并进入白名单，测试口径跟随现行能力
         self.assertNotIn("add_clip", advertised)
-        self.assertNotIn("move_clip", advertised)
+        self.assertIn("move_clip", advertised)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-不导入 PyQt6 的测试脚本
+不导入 Qt 的测试脚本
 """
 
 import os
@@ -11,7 +11,7 @@ ffmpeg_path = os.path.join(os.path.dirname(__file__), "thirdparty", "ffmpeg", "b
 ffprobe_path = os.path.join(os.path.dirname(__file__), "thirdparty", "ffmpeg", "bin", "ffprobe.exe")
 test_video = os.path.join(os.path.dirname(__file__), "素材库", "test_video.mp4")
 
-print("=== 不导入 PyQt6 的测试 ===")
+print("=== 不导入 Qt 的测试 ===")
 print(f"FFmpeg路径: {ffmpeg_path}")
 print(f"存在: {os.path.exists(ffmpeg_path)}")
 

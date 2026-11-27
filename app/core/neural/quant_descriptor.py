@@ -37,7 +37,24 @@ _SEVERITY = {VERDICT_VERIFIED: 0, VERDICT_UNVERIFIED: 1, VERDICT_REJECTED: 2}
 
 #: 进主路径的最低画质门槛（PSNR, dB）。同 prompt 同 seed 对照 fp16 基线。
 #: 35dB 是业界常用「肉眼难辨」线；低于 30dB 基本能看出差别。
+#:
+#: ⚠️ 2026-11-01 实证修正：**这条门槛不适用于扩散模型的权重量化**。
+#:    扩散去噪会把权重里 0.4% 的扰动放大成完全不同的高频细节，
+#:    实测「fp16 + 0.4% 随机噪声」同 seed 出图的 PSNR 只有 14.12dB（低于 35dB 门槛一大截），
+#:    而 GGUF Q8_0 是 17.14dB —— 两者同量级，说明 dB 数反映的是**扩散模型的敏感度**，
+#:    不是「量化实现好不好」。因此判量化该看 :attr:`QuantEvidence.lowfreq_psnr_db`
+#:    （低频结构）+ 肉眼观感；PSNR 只保留给非扩散场景（如 VAE 重建、图像滤镜）使用。
 DEFAULT_MIN_PSNR_DB = 35.0
+
+#: 扩散模型专用门槛：k× 降采样后的低频 PSNR（dB）。
+#:
+#: 为什么单独一条：逐像素 PSNR 在扩散采样上无效（见上），而「结构有没有崩」是可以量的。
+#: 取 20dB 的依据是本机实测的**对照组**而不是拍脑袋：
+#:   · fp16 + 0.4% 高斯噪声（完全不用量化）同 seed 出图 ⇒ 低频 17.95dB
+#:   · GGUF Q8_0 ⇒ 低频 21.31dB   · FP8 ⇒ 低频 24.56dB
+#: 即「比随机微扰更好」这条线落在 20dB 附近。⚠️ 样本只有 1 张图 / 1 个 seed，
+#: 依据偏薄——所以两条准入函数并存，调用方自己选口径，别把这条当金标准。
+DEFAULT_MIN_LOWFREQ_PSNR_DB = 20.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +86,15 @@ class QuantEvidence:
     reason: str
     source: str                      # 产出这条数据的脚本（可复跑）
     measured_at: str
+    #: k× 平均池化后的低频 PSNR —— 只看构图/色彩/明暗，忽略高频相位。
+    #: 为什么需要它：扩散采样的去噪过程会把「权重 0.4% 的扰动」放大成完全不同的
+    #: 高频细节，逐像素 PSNR 因此必然极低（实测 14~17dB，**与扰动来自哪里无关**）。
+    #: 拿 PSNR 卡扩散量化等于用尺子量温度。低频指标才反映「结构有没有崩」。
+    lowfreq_psnr_db: Optional[float] = None
+    #: 该条证据的结论是否已被后续实测**推翻**（环境变了 / 测法有误）。
+    #: 标记为 True 后不再参与准入裁决，但仍留在台账里供追溯——
+    #: 删掉历史会让下一个人再踩一遍同样的坑。
+    superseded: bool = False
 
 
 # ── 描述符登记（唯一真相源）──────────────────────────────────────────
@@ -104,6 +130,21 @@ DESCRIPTORS: Tuple[QuantDescriptor, ...] = (
         note="⚠️ Windows 上不可用：torchao 0.16 的 int4 走 mslk，"
              "而 mslk 的 win 轮子是纯 Python 空壳（0 个 .pyd）且强依赖 triton。实测装上即崩 torchao 导入。",
     ),
+    QuantDescriptor(
+        scheme="gguf_q8_0", scope="weights", calibration="dynamic", backend="gguf",
+        config_expr="gguf_loader.apply_to_unet(unet, path)（命名转换走 diffusers 官方 convert_ldm_unet_checkpoint）",
+        note="纯 Python、零编译、跨设备通吃（不挑 GPU 代际，这是 fp8 做不到的）。"
+             "**已接进生产加载路径**：`DiffusersImageEngine.request_gguf(path)` → `load()` 内装填。"
+             "两种模式：eager（默认，省硬盘/下载量，**不省显存**）与 lazy"
+             "（`gguf_lazy.apply_to_unet_lazy`，权重以量化字节常驻、forward 时 GPU 还原，"
+             "实测 SD1.5 峰值 2.81→1.07GB **省 62%**，代价慢 2.63×，输出与 eager 逐位相同）。",
+    ),
+    QuantDescriptor(
+        scheme="gguf_q4_k", scope="weights", calibration="dynamic", backend="gguf",
+        config_expr="同上，只是权重文件换成 Q4_K",
+        note="内核已逐元素对齐（rel=0），但**未做端到端装填与画质验收** ⇒ 只登记不启用。"
+             "理论显存账：SDXL UNet 2.39G 参数 × 0.5625 B ≈ 1.34GB（fp16 为 4.78GB）。",
+    ),
 )
 
 _DESC_BY_SCHEME: Dict[str, QuantDescriptor] = {d.scheme: d for d in DESCRIPTORS}
@@ -118,11 +159,33 @@ EVIDENCE: Tuple[QuantEvidence, ...] = (
         peak_gb_before=None, peak_gb_after=None,
         wall_ratio=None, psnr_db=None,
         verdict=VERDICT_UNVERIFIED,
-        reason="能跑通（apply_fp8_quantization 已在 load() 接线），但本机 "
-               "torch._scaled_mm 报 CUBLAS_STATUS_NOT_SUPPORTED ⇒ 走反量化回退，无加速；"
-               "画质/显存对照尚未做 ⇒ 停在 unverified，不得当卖点。",
+        reason="【已被 2026-11-01 实测推翻，superseded】当时结论：能跑通但 "
+               "torch._scaled_mm 报 CUBLAS_STATUS_NOT_SUPPORTED ⇒ 走反量化回退、无加速。"
+               "真因后来查明是 **torchao 0.16.0 的 cpp extensions 没编译**"
+               "（导入时就报 `Skipping import of cpp extensions due to incompatible torch version`），"
+               "不是 torch/CUBLAS 不支持 sm89。降到 torchao 0.12.0 后 _scaled_mm 直接跑通。"
+               "此条仅作追溯保留，不参与准入。",
         source="torchao_check.py（float8 动态量化项）+ 独立 venv 直测 _scaled_mm",
         measured_at="2026-10-27",
+        superseded=True,
+    ),
+    QuantEvidence(
+        scheme="fp8", model_id="sd15-t2i（512²·20步·同 seed·whole-GPU）",
+        unet_gb_before=1.72, unet_gb_after=1.45,
+        peak_gb_before=2.81, peak_gb_after=2.54,
+        wall_ratio=0.90, psnr_db=17.73,
+        verdict=VERDICT_UNVERIFIED,
+        reason="2026-11-01 重测（torchao 0.16.0 → 0.12.0 之后）：**FP8 真的能用了，且是净收益**。"
+               "① `torch._scaled_mm` 在 sm89 上执行成功（不再 CUBLAS_NOT_SUPPORTED）；"
+               "② 出图耗时 3.92s → 3.54s（**快 10%**）；③ 峰值显存 2.81 → 2.54GB（**-9.6%**）；"
+               "④ 画质 PSNR 17.73dB / 低频(8×) 24.56dB —— 与 GGUF Q8_0（21.31dB）同档，"
+               "且都优于「fp16 + 0.4% 噪声」对照组的 17.95dB。"
+               "只省 9.6% 是因为 Float8WeightOnlyConfig **只作用 nn.Linear**，"
+               "SD1.5 UNet 里 Conv2d 占 1.10GB 未被量化（与 int8 那条同根因）。"
+               "按 PSNR 门槛判 unverified，但按扩散专用低频口径（24.56dB）是达标的。",
+        source=".workbuddy/tmp/verify_fp8.py（算子）+ verify_fp8_e2e.py（出图/显存/耗时）",
+        measured_at="2026-11-01",
+        lowfreq_psnr_db=24.56,
     ),
     QuantEvidence(
         scheme="int8wo_v2", model_id="sdxl-t2i",
@@ -157,6 +220,28 @@ EVIDENCE: Tuple[QuantEvidence, ...] = (
         source="verify_int8_diffusers.py sd15-t2i（SHIGUANG_QVER=v1）",
         measured_at="2026-10-27",
     ),
+    QuantEvidence(
+        scheme="gguf_q8_0", model_id="sd15-t2i（512²·20步·同 seed）",
+        unet_gb_before=1.72, unet_gb_after=0.91,
+        peak_gb_before=None, peak_gb_after=None,
+        wall_ratio=0.85, psnr_db=17.14,
+        verdict=VERDICT_UNVERIFIED,
+        reason="权重层面完全正确（686 层 100% 装入零缺失、30 层抽样最大相对误差 4.05e-03、"
+               "conv_in/time_embedding 落在 UNet 内且非零）；出图层面：PSNR 17.14dB / SSIM 0.72 / "
+               "低频(8×) PSNR 21.31dB，**肉眼观感与 fp16 基线一致**（构图/色彩/物体位置全对，只有砖缝与辐条等高频细节不同）。"
+               "★ 关键对照实验（psnr_control.py）：**完全不用 GGUF**，仅给 fp16 权重加 0.4% 高斯扰动，"
+               "同 seed 出图 PSNR = 14.12dB —— **比 GGUF 还低** ⇒ 十几 dB 是扩散采样对权重微扰的固有放大，"
+               "不是量化实现问题。结论：PSNR 这把尺子对扩散模型无效，故本条不按 PSNR 门槛判定；"
+               "但「同 seed 不可逐像素复现」是事实，**不能声称无损**。"
+               "⚠️ eager 模式只省硬盘/下载量，**不省显存**；省显存走 gguf_lazy。"
+               "★ 生产接线验收（同日）：`request_gguf(<q8_0.gguf>)` → `load('sd15-t2i')` 返回 ok=True、"
+               "`gguf_status.loaded=686`、dominant_type=Q8_0，装填 20.9s，随后 `generate()` 4.0s 出 512² 图；"
+               "负例路径不存在时 ok=False 且原因写明路径（不静默退回 fp16 假装量化）。",
+        source=".workbuddy/tmp/psnr_gguf.py（PSNR/SSIM）+ psnr_control.py（扰动对照）+ e2e_final.py（权重闭环）"
+               " + verify_gguf_wired.py（生产路径接线）",
+        measured_at="2026-11-01",
+        lowfreq_psnr_db=21.31,
+    ),
 )
 
 
@@ -166,14 +251,19 @@ def descriptor(scheme: str) -> Optional[QuantDescriptor]:
 
 
 def evidence_for(scheme: str) -> List[QuantEvidence]:
-    """某 scheme 的全部实测证据。"""
+    """某 scheme 的全部实测证据（含已被推翻的，供追溯）。"""
     s = str(scheme or "").strip().lower()
     return [e for e in EVIDENCE if e.scheme == s]
 
 
+def _effective(scheme: str) -> List[QuantEvidence]:
+    """参与裁决的证据（排除 superseded）。"""
+    return [e for e in evidence_for(scheme) if not e.superseded]
+
+
 def verdict(scheme: str) -> Tuple[str, str]:
     """返回 (判定态, 理由)。取最坏态；无证据 = unverified。"""
-    evs = evidence_for(scheme)
+    evs = _effective(scheme)
     if not evs:
         return VERDICT_UNVERIFIED, "无实测证据（登记过 ≠ 验证过）"
     worst = max(evs, key=lambda e: _SEVERITY.get(e.verdict, 1))
@@ -210,6 +300,34 @@ def is_admissible(scheme: str, *, min_psnr_db: float = DEFAULT_MIN_PSNR_DB) -> T
     if worst < float(min_psnr_db):
         return False, f"{s} 最差 PSNR {worst:.1f}dB 低于门槛 {min_psnr_db:.1f}dB"
     return True, f"{s} 通过（最差 PSNR {worst:.1f}dB ≥ {min_psnr_db:.1f}dB）"
+
+
+def is_admissible_diffusion(scheme: str, *,
+                            min_lowfreq_db: float = DEFAULT_MIN_LOWFREQ_PSNR_DB
+                            ) -> Tuple[bool, str]:
+    """**扩散模型专用**准入裁决：看低频结构，不看逐像素 PSNR。
+
+    与 :func:`is_admissible` 并存而不替换它——原函数的口径（35dB）对非扩散场景
+    （VAE 重建、滤镜、超分）仍然正确，只是套到扩散采样上会永远不通过。
+    这里换一把尺子，但把「为什么换」写在 :data:`DEFAULT_MIN_LOWFREQ_PSNR_DB` 里，
+    包括「样本只有一张图」这个弱点，不藏。
+    """
+    s = str(scheme or "").strip().lower()
+    if s in ("", "fp16", "float16", "half", "none"):
+        return True, "基线精度，无需准入"
+    d = descriptor(s)
+    if d is None:
+        return False, f"未登记的量化方案: {s}"
+    state, why = verdict(s)
+    if state == VERDICT_REJECTED:
+        return False, f"{s} 已被实测否决：{why}"
+    evs = [e for e in evidence_for(s) if e.lowfreq_psnr_db is not None]
+    if not evs:
+        return False, f"{s} 无低频结构证据（登记过 ≠ 验证过）"
+    worst = min(e.lowfreq_psnr_db for e in evs)
+    if worst < float(min_lowfreq_db):
+        return False, f"{s} 最差低频 PSNR {worst:.1f}dB 低于门槛 {min_lowfreq_db:.1f}dB"
+    return True, f"{s} 通过（最差低频 PSNR {worst:.1f}dB ≥ {min_lowfreq_db:.1f}dB）"
 
 
 def summary() -> Dict[str, Any]:

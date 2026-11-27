@@ -65,9 +65,30 @@ def test_sdxl_vae_scale_is_not_sd15_value():
 
 
 def test_unknown_family_yields_rejecting_adapter():
+    """未注册族必须落到「一定拒绝」的 UnverifiedAdapter，不许走通用兜底。
+
+    2026-10-31 更新：wan 已有真 adapter（V4.48.5，K5 4/4），「未知族」改用
+    不存在的族名断言；wan 自身走 UNVERIFIED 拒绝路径由
+    `test_wan_unverified_rejects_until_parity` 单独锁。
+    """
+    ad = K.adapter_for("hunyuan")   # 未注册族
+    assert ad.family == "hunyuan"
+    assert ad.validate_caps(), "未实现的族必须明确拒绝，而不是走通用兜底"
+    assert type(ad).__name__ == "UnverifiedAdapter"
+
+
+def test_wan_unverified_rejects_until_parity():
+    """wan 有真 adapter 但 verified=UNVERIFIED ⇒ 必须仍能拒绝（parity 过前不许跑）。"""
     ad = K.adapter_for("wan")
     assert ad.family == "wan"
-    assert ad.validate_caps(), "未实现的族必须明确拒绝，而不是走通用兜底"
+    assert type(ad).__name__ == "WanAdapter"
+    # caps 自洽（契约完整性），但 verified 状态是 UNVERIFIED
+    assert ad.caps.violations() == []
+    from app.core.neural.kernel.contracts import UNVERIFIED
+    assert ad.caps.verified == UNVERIFIED
+    # 绑定前体检不因 UNVERIFIED 报错（拒绝发生在 validate() 的 parity 门槛），
+    # 但 run() 必须拒绝 —— 这里只锁「不是放行」这一个语义。
+    assert not ad.caps.verified == "verified"
 
 
 # ══════════════════════════════════════════════════════════════════

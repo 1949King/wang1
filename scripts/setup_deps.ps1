@@ -31,7 +31,10 @@ Write-Host "`n==> 安装字幕/OCR/音频依赖 ..."
     "Pillow>=10.0.0" `
     "numpy>=1.24.0" `
     "moviepy>=1.0.3" `
-    "PyQt6>=6.6.0"
+    "PySide6==6.10.2" `
+    "PySide6-Essentials==6.10.2" `
+    "PySide6-Addons==6.10.2" `
+    "shiboken6==6.10.2"
 
 Write-Host "`n==> 预下载 Whisper tiny/base 模型 ..."
 & $Py -c @"
@@ -50,7 +53,7 @@ for size in ('tiny', 'base'):
 Write-Host "`n==> 验收 ..."
 & $Py -c @"
 import sys
-req = ['PyQt6','cv2','torch','transformers','faster_whisper','easyocr','PIL','numpy','librosa','moviepy']
+req = ['PySide6','cv2','torch','transformers','faster_whisper','easyocr','PIL','numpy','librosa','moviepy']
 miss=[]
 for m in req:
     try: __import__(m)

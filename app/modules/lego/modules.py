@@ -170,9 +170,9 @@ def _get_concatenate_videoclips():
     """
     return _moviepy_editor.concatenate_videoclips
 
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QSize, QUrl, QPoint, QMimeData
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QPolygon, QShortcut, QKeySequence, QDrag
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QUrl, QPoint, QMimeData
+from PySide6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QPolygon, QShortcut, QKeySequence, QDrag
+from PySide6.QtWidgets import (
     QDialog,
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
@@ -182,8 +182,8 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QMenu, QToolButton, QApplication, QSizePolicy, QFormLayout, QSpacerItem,
     QToolTip
 )
-from PyQt6.QtMultimedia import QMediaPlayer
-from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from .core import EventBus, EventType, MasterClock, DataBus
 from .skill_engine import SkillEngine, Skill
@@ -916,8 +916,8 @@ class CustomMessageBox(QMessageBox):
 
 def show_custom_messagebox(icon_type, title, message, parent=None):
     """ """
-    from PyQt6.QtWidgets import QMessageBox
-    from PyQt6.QtGui import QIcon
+    from PySide6.QtWidgets import QMessageBox
+    from PySide6.QtGui import QIcon
     
     msg = CustomMessageBox(icon_type, title, message, parent)
     msg.exec()
@@ -1245,7 +1245,7 @@ class HomeModule(BaseModule):
     
     def _show_login_dialog(self):
         """ """
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QGroupBox, QCheckBox, QComboBox
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QGroupBox, QCheckBox, QComboBox
         
         dialog = QDialog(self)
         dialog.setWindowTitle("登录信息与设置")
@@ -1403,7 +1403,7 @@ class HomeModule(BaseModule):
             self._welcome_shown = False
         if not self._welcome_shown:
             # 延迟显示，等UI渲染完
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             QTimer.singleShot(300, self._show_welcome_guide)
 
     def _show_welcome_guide(self):
@@ -1411,7 +1411,7 @@ class HomeModule(BaseModule):
         if self._welcome_shown:
             return
         self._welcome_shown = True
-        from PyQt6.QtWidgets import QDialog, QMessageBox
+        from PySide6.QtWidgets import QDialog, QMessageBox
         msg = (
             "🎬 <b>欢迎使用 拾光剪影！</b>\n\n"
             "<b>核心功能一览：</b>\n"
@@ -1582,7 +1582,7 @@ class HomeModule(BaseModule):
         复用 MainWindow 已有的 MODULE_ACTIVATED(action=create_project)通路。
         """
         try:
-            from PyQt6.QtWidgets import QInputDialog
+            from PySide6.QtWidgets import QInputDialog
             text, ok = QInputDialog.getText(
                 self, "新建项目", "项目名称", text="未命名项目"
             )
@@ -1605,7 +1605,7 @@ class HomeModule(BaseModule):
         """
         try:
             from pathlib import Path
-            from PyQt6.QtWidgets import QFileDialog
+            from PySide6.QtWidgets import QFileDialog
             path_str, _ = QFileDialog.getOpenFileName(
                 self,
                 "导入项目文件",

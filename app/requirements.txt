@@ -11,9 +11,10 @@
 #   改 pin 前先跑 `_verify/check_inference_pins.py`（会比对「装着的」与「钉的」）。
 
 # ============== 必需依赖 (REQUIRED) ==============
-PyQt6>=6.6.0
-PyQt6-Qt6>=6.6.0
-PyQt6-sip>=13.6.0
+PySide6==6.10.2
+PySide6-Essentials==6.10.2
+PySide6-Addons==6.10.2
+shiboken6==6.10.2
 moviepy>=1.0.3
 opencv-python-headless>=4.8.0
 # torch / torchvision / torchaudio 请用 CUDA wheel（见上方精确版命令），勿用默认 CPU 源覆盖
@@ -32,6 +33,8 @@ numpy>=1.24.0
 librosa>=0.10.0
 imageio-ffmpeg>=0.4.0
 onnxruntime>=1.14.0
+# Windows 窗口捕获与播放器回归测试
+pywin32>=306; platform_system == "Windows"
 # ============== 安全依赖 (REQUIRED) ==============
 # 缺失会静默降级为不安全路径：bcrypt→SHA256+盐、cryptography→明文 PII，商用发布必须安装
 bcrypt>=4.0.0

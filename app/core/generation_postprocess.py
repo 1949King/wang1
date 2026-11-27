@@ -14,7 +14,10 @@ import logging
 import os
 import subprocess
 import tempfile
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
+
+from app.core.ffmpeg_utils import mux_source_audio, probe_has_audio
+from app.core.video_temporal_stabilize import stabilize_frame_sequence
 
 logger = logging.getLogger("AI短剧编辑器.generation_postprocess")
 
@@ -226,7 +229,9 @@ def _upscale_frames(frame_dir: str, progress_callback: Optional[Callable[[int, s
         from app.core.neural.super_resolution import SuperResolutionEngine
 
         engine = SuperResolutionEngine()
-        if not engine.load(scale=2):
+        # T2（2026-11-20）：优先 RealESRGAN（权重须用户自取，绝不自动下载）；
+        # 缺失时 load 返 False ⇒ 保留原帧（诚实降级，上层保留原片）。
+        if not engine.load(scale=2, use_realesrgan=True):
             return False
         frames = sorted(
             f for f in os.listdir(frame_dir) if f.startswith("f_") and f.endswith(".png")
@@ -239,6 +244,11 @@ def _upscale_frames(frame_dir: str, progress_callback: Optional[Callable[[int, s
                 continue
             up = engine.upscale(img)
             if up is not None:
+                # RealESRGAN 固定 4x 输出 ⇒ resize 0.5 得**净 2x**（上游 esrgan trick）；
+                # ESPCN/bicubic 已是 2x，不再缩。
+                if getattr(engine, "_model_name", "") == "realesrgan":
+                    h, w = img.shape[:2]
+                    up = cv2.resize(up, (w * 2, h * 2), interpolation=cv2.INTER_AREA)
                 cv2.imwrite(path, up)
             _report_progress(progress_callback, int(idx * 100 / total), f"超分 {idx}/{total}")
         return True
@@ -308,12 +318,29 @@ def apply_video_postprocess(
             )
             _report_progress(progress_callback, 88, "超分完成")
 
+        # 时序稳定后滤波（抑制逐帧超分闪烁，失败仅 warning 不阻断）
+        if need_sr:
+            stabilize_frame_sequence(
+                frame_dir,
+                progress_callback=_scaled_progress(progress_callback, 88, 90),
+            )
+
         _report_progress(progress_callback, 90, "视频编码中...")
         out_path = os.path.join(
             os.path.dirname(video_path),
             f"{os.path.splitext(os.path.basename(video_path))[0]}_post.mp4",
         )
         if _encode_frames(ffmpeg, frame_dir, out_path, new_fps):
+            # 补回源音轨（源无音轨/mux 失败 ⇒ 保留无声产物＝旧行为）
+            if probe_has_audio(video_path):
+                mux_path = os.path.join(
+                    os.path.dirname(video_path),
+                    f"{os.path.splitext(os.path.basename(video_path))[0]}_post_mux.mp4",
+                )
+                if mux_source_audio(out_path, video_path, mux_path):
+                    logger.info(f"[PostProcess] 视频后处理完成(含音轨): {mux_path}")
+                    _report_progress(progress_callback, 100, "视频后处理完成")
+                    return mux_path
             logger.info(f"[PostProcess] 视频后处理完成: {out_path}")
             _report_progress(progress_callback, 100, "视频后处理完成")
             return out_path

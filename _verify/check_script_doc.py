@@ -3,7 +3,7 @@
 
 断言：
   ① 结构在册：ScriptDoc/Episode 字段齐 / 模块级薄封装在 / version 恒透传
-  ② 纯模型纪律：无 PyQt6/requests/sqlite3 / 无 print / 无文件 IO
+  ② 纯模型纪律：无 PySide6/PyQt6/PyQt5/requests/sqlite3 / 无 print / 无文件 IO
   ③ 不猜集数：create_script_doc 的 episodes 恒为空；空 doc 合法但 validate 报「剧集为空」
   ④ 不猜集号：add_episode 收到 <=0 / 非 int / bool / 重复集号 ⇒ ValueError，
      **不重编号、不覆盖**
@@ -39,7 +39,7 @@ def _src() -> str:
 def _code_only() -> str:
     """剥掉注释与字符串字面量，只留会执行的代码。
 
-    文档字符串里正常会写「不 import PyQt6」这类说明，全文 grep 会把说明
+    文档字符串里正常会写「不 import Qt 绑定」这类说明，全文 grep 会把说明
     当成依赖（本守卫首跑即误报）。
     """
     import tokenize
@@ -84,7 +84,7 @@ def check_surface() -> None:
 
 def check_purity() -> None:
     src = _code_only()
-    for token in ("PyQt6", "requests", "sqlite3", "subprocess", "QApplication"):
+    for token in ("PySide6", "PyQt6", "PyQt5", "requests", "sqlite3", "subprocess", "QApplication"):
         if token in src:
             _fail(f"② 纯模型模块出现运行时依赖：{token}")
     if "print" in src:

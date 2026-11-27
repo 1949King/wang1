@@ -16,12 +16,12 @@
 import json
 import logging
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QFrame, QGroupBox, QTextEdit, QPushButton,
     QListWidget, QFileDialog, QMessageBox,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 
 from .base_module import BaseModule
 

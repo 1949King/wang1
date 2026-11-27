@@ -22,9 +22,23 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger("AI短剧编辑器.characters")
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QPalette
-from PyQt6.QtWidgets import (
+def _diag(msg: str) -> None:
+    """画布加载诊断落盘（data/canvas_load.log；控制台缓冲时不丢证据）。"""
+    try:
+        import os as _os
+
+        _root = _os.path.dirname(_os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__)))))
+        _p = _os.path.join(_root, "data", "canvas_load.log")
+        _os.makedirs(_os.path.dirname(_p), exist_ok=True)
+        with open(_p, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%H:%M:%S ") + str(msg) + "\n")
+    except Exception:  # stability-gate: allow-swallow（诊断写失败不得影响画布加载）
+        pass
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QColor, QPalette
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QListWidget,
     QListWidgetItem, QComboBox, QFileDialog, QMessageBox,
@@ -309,7 +323,7 @@ class CharacterStore:
 class CharacterEditorPanel(QWidget):
     """右侧：角色详情 / 编辑面板"""
 
-    saved = pyqtSignal()  # 保存后触发，通知外部刷新
+    saved = Signal()  # 保存后触发，通知外部刷新
 
     def __init__(self, store: CharacterStore, parent=None):
         super().__init__(parent)
@@ -620,9 +634,9 @@ def _probe_webengine() -> bool:
     if WEBENGINE_AVAILABLE and QWebEngineView is not object:
         return True
     try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView as _View
-        from PyQt6.QtWebEngineCore import QWebEngineScript as _Script
-        from PyQt6.QtWebEngineCore import QWebEngineProfile as _Profile
+        from PySide6.QtWebEngineWidgets import QWebEngineView as _View
+        from PySide6.QtWebEngineCore import QWebEngineScript as _Script
+        from PySide6.QtWebEngineCore import QWebEngineProfile as _Profile
         QWebEngineView = _View
         QWebEngineScript = _Script
         QWebEngineProfile = _Profile
@@ -648,9 +662,9 @@ class CharacterManagementModule(BaseModule):
 
     # 跨线程回主 UI：后台 CanvasWarmup / Agent 线程禁止用 QTimer.singleShot
     #（非归属线程调度时常不触发 → 服务已起但 WebView 永不 load、状态卡在「正在预热」）
-    _ui_status = pyqtSignal(str)
-    _ui_canvas_started = pyqtSignal(bool, str, str)  # ok, msg, url
-    _ui_agent_done = pyqtSignal(bool, str, str, str)  # ok, msg, url, token
+    _ui_status = Signal(str)
+    _ui_canvas_started = Signal(bool, str, str)  # ok, msg, url
+    _ui_agent_done = Signal(bool, str, str, str)  # ok, msg, url, token
 
     def __init__(self):
         self._store = CharacterStore()
@@ -832,7 +846,7 @@ class CharacterManagementModule(BaseModule):
             err = QLabel(
                 "无法镶嵌画布（QtWebEngine 不可用）。\n"
                 f"原因: {detail}\n\n"
-                "请确认已安装: .venv312\\Scripts\\python.exe -m pip install PyQt6-WebEngine==6.10.0\n"
+                "请确认已安装: .venv312\\Scripts\\python.exe -m pip install PySide6==6.10.2 PySide6-Addons==6.10.2\n"
                 "并完全退出后重新启动应用（须在创建窗口前加载 WebEngine）。\n\n"
                 "临时方案：点「启动画布」会用系统浏览器打开"
             )
@@ -1029,7 +1043,7 @@ class CharacterManagementModule(BaseModule):
             dlg.activateWindow()
             return
         try:
-            from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+            from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
 
             from .local_models_panel import LocalModelsPanel
         except Exception as e:
@@ -1078,7 +1092,7 @@ class CharacterManagementModule(BaseModule):
     def _ensure_web_view(self) -> bool:
         """首次需要加载页面时再创建 QWebEngineView（进模块只出壳）。"""
         if os.environ.get("SHIGUANG_NO_WEBENGINE") == "1":
-            # 2026-10-25（授权解冻）：本机 PyQt6 6.10.2 + WebEngine 6.10.0 混装 ⇒ 渲染必崩。
+            # 2026-10-25（授权解冻）：PyQt6 时代本机 Qt 6.10.2 + WebEngine 6.10.0 混装 ⇒ 渲染必崩。
             # 由 main_qt6 子进程预检置位；这里短路返回 False，_load_canvas 会落到
             # webbrowser.open(url)（画布在系统浏览器里照常可用，不再是黑屏）。
             self._set_status("本机 QtWebEngine 不可用 ⇒ 正在用系统浏览器打开画布…")
@@ -1099,7 +1113,7 @@ class CharacterManagementModule(BaseModule):
         # 与带 Stage3D / RiggedHumanoid 前缀的消息，避免普通 log 刷屏；失败静默降级
         # （日志能力不得影响画布加载本身）。
         try:
-            from PyQt6.QtWebEngineCore import QWebEnginePage as _QEP
+            from PySide6.QtWebEngineCore import QWebEnginePage as _QEP
 
             class _ConsoleMirrorPage(_QEP):
                 def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
@@ -1107,7 +1121,7 @@ class CharacterManagementModule(BaseModule):
                         m = str(message or "")[:600]
                         if not m:
                             return
-                        # 注意：不要对 level 做 int() —— PyQt6 的 Qt 枚举可能抛 TypeError，
+                        # 注意：不要对 level 做 int() —— PyQt6 时代的 Qt 枚举曾抛 TypeError，
                         # 一抛就被本函数的 except 吞掉，导致「镜像装了但一条日志都没有」
                         # （2026-10-19 实测踩过）。改用字符串判断，任何版本都安全。
                         lv = str(level)
@@ -1290,11 +1304,20 @@ class CharacterManagementModule(BaseModule):
         except Exception:
             logger.debug("canvas session token attach failed", exc_info=True)
         self._pending_canvas_url = url
-        if not self._ensure_web_view():
+        try:
+            import urllib.request as _ur
+
+            _code = _ur.urlopen(url.split('?')[0], timeout=5).status
+            _diag('load_canvas url=%s http=%s' % (url, _code))
+        except Exception as _e:  # stability-gate: allow-swallow（诊断不得影响加载）
+            _diag('load_canvas url=%s http_err=%s: %s' % (url, type(_e).__name__, _e))
+        _ok_view = self._ensure_web_view()
+        _diag('ensure_web_view -> %s' % _ok_view)
+        if not _ok_view:
             import webbrowser
             webbrowser.open(url)
             return
-        from PyQt6.QtCore import QUrl
+        from PySide6.QtCore import QUrl
         logger.info("loading canvas url=%s", url)
         self._web.load(QUrl(url))
 
@@ -1304,6 +1327,17 @@ class CharacterManagementModule(BaseModule):
 
     def _on_web_load_finished(self, ok: bool):
         url = self._pending_canvas_url or ""
+        try:
+            _pg = self._web.page() if self._web is not None else None
+            _pu = _pg.url().toString() if _pg is not None else ''
+            _prof = _pg.profile() if _pg is not None else None
+            _cp = _prof.cachePath() if _prof is not None else ''
+            _diag('load_finished ok=%s page_url=%s cache=%s visible=%s'
+                  % (ok, _pu, _cp, self.isVisible()))
+            if not ok and _pg is not None:
+                _pg.toHtml(lambda h: _diag('html_len=%d head=%s' % (len(h), h[:180])))
+        except Exception as _e:  # stability-gate: allow-swallow（诊断不得影响加载）
+            _diag('load_finished diag_err=%s' % (type(_e).__name__,))
         if ok:
             self._canvas_load_retries = 0
             self._set_status(f"画布已就绪 {url}" if url else "画布已就绪")
@@ -1348,7 +1382,7 @@ class CharacterManagementModule(BaseModule):
         """
         # 崩溃类终止状态（Crashed=2 / Killed=3），避免普通导航也误重载
         try:
-            from PyQt6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtWebEngineCore import QWebEnginePage
             crashed = status in (
                 QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus,
                 QWebEnginePage.RenderProcessTerminationStatus.KilledTerminationStatus,
@@ -1390,7 +1424,7 @@ class CharacterManagementModule(BaseModule):
             return
         if url != getattr(self, "_pending_canvas_url", ""):
             return
-        from PyQt6.QtCore import QUrl
+        from PySide6.QtCore import QUrl
         logger.info("retrying canvas url=%s", url)
         self._web.load(QUrl(url))
 
@@ -1428,7 +1462,7 @@ class CharacterManagementModule(BaseModule):
             self._set_status("Agent 未连接，没有可复制的地址")
             return
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             QApplication.clipboard().setText(url)
             self._set_status("Agent 地址已复制到剪贴板")
         except Exception as e:

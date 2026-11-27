@@ -21,8 +21,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout, QFrame,
 )
 
@@ -308,7 +308,7 @@ def build_general_top_block(mod) -> QWidget:
         preview_kind="perf_mode",
         on_desc="启动直接跳回上次的模块与工程，接着上次继续",
         off_desc="仅保留存档；手动进入该模块时仍可看到上次记录",
-        default_value=_read_bool_setting(_ss.SETTING_KEY_RESUME_SESSION, True),
+        default_value=_read_bool_setting(_ss.SETTING_KEY_RESUME_SESSION, False),
     )
     _resume_card.toggled.connect(
         lambda key, val: _write_str_setting(key, "1" if val else "0")

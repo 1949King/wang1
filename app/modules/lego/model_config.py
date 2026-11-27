@@ -70,6 +70,15 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "is_local": True,
         "hint": "自托管 OpenAI 兼容网关（默认本机 :8000）。填 Auth Key + Base URL，优先用于 gpt-image-2 生图。",
     },
+    "wujie-gateway": {
+        "name": "无界网关",
+        "icon": "🌐",
+        "url": "http://127.0.0.1:8190/v1",
+        "models": ["gpt-image-2", "minimax-h3"],
+        "is_local": True,
+        "hint": "自托管无界工作台网关（默认本机 :8190，默认关）。填 Base URL + Auth Key（无鉴权可填 local）后启用；"
+                "局部语义重绘/移除/扩图与 H3 草稿走此渠道。未配置时相关功能诚实提示，不影响本地 LaMa/SD1.5。",
+    },
     "stepfun": {"name": "阶跃星辰", "icon": "⭐", "url": "https://api.stepfun.com/v1", "models": ["step-1-8k", "step-1-32k", "step-1-128k", "step-1v-8k"], "is_local": False},
     "yi": {"name": "零一万物", "icon": "🔮", "url": "https://api.lingyiwanwu.com/v1", "models": ["yi-lightning", "yi-large", "yi-medium"], "is_local": False},
     "modelscope": {"name": "魔搭社区", "icon": "🏛️", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "models": ["qwen-turbo", "qwen-plus", "qwen-max"], "is_local": False},
@@ -651,3 +660,30 @@ def ensure_active_provider_sensible() -> str:
         save_active_provider("ollama")
         return "ollama"
     return active
+
+
+# ── 视觉「理解」模型登记（2026-11-14，AI 精剪链路）──────────────────
+# 刻意**不动**上面的能力列表：那批表被 UI 按 text/image/video/audio 四类过滤消费，
+# 塞新 capability 会改变下拉框行为。这里单独登记「能读帧」的理解型模型，
+# 供 app/core/ai/vision_backends.py 读取，零风险。
+#
+# 成本纪律（用户明确要求：别上来就搞用不起的）：
+#   · 默认走 ollama 本地视觉模型，零费用、素材不出机；
+#   · 云端只在 SHIGUANG_VISION_CLOUD=1 显式授权 + 自配 Key 时启用；
+#   · 这里只登记 Flash 轻量档，不登记 Pro / 旗舰档。
+# 能力核实：DeepSeek-V4.1-Flash 原生输入为 Text+Image；「视频理解」是火山方舟
+# 平台侧抽帧增强（Files Id / 单视频 ≤50MB），不是模型直接吃视频流。
+VISION_UNDERSTANDING_MODELS = {
+    "ollama": [
+        {"name": "", "capability": "vision", "note": "本机视觉模型，运行时自动探测，免费"},
+    ],
+    "deepseek": [
+        {"name": "deepseek-v4.1-flash", "capability": "vision",
+         "note": "轻量档，原生视觉理解；DeepSeek 官网渠道仅支持图片"},
+    ],
+    "doubao": [
+        {"name": "deepseek-v4-1-flash-261017", "capability": "vision",
+         "note": "火山方舟渠道，支持图片与平台侧抽帧的视频理解"},
+    ],
+}
+DEFAULT_CLOUD_VISION_MODEL = "deepseek-v4-1-flash-261017"

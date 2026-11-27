@@ -20,9 +20,9 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
 
@@ -45,7 +45,7 @@ CAPABILITIES = [
 
 # 7 个技术栈 chip
 TECH_STACK = [
-    "PyQt6", "React Flow", "TypeScript", "Vite",
+    "PySide6", "React Flow", "TypeScript", "Vite",
     "MCP", "YAML", "SQLite",
 ]
 
@@ -57,7 +57,7 @@ class AboutDialog(QDialog):
         check_update_requested() — 用户点「检查更新」
     """
 
-    check_update_requested = pyqtSignal()
+    check_update_requested = Signal()
 
     _instance: Optional["AboutDialog"] = None
 

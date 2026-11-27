@@ -303,3 +303,63 @@ def test_distilled_flag_is_documented():
     import pathlib
     src = pathlib.Path(V.__file__).read_text(encoding="utf-8")
     assert "蒸馏" in src and "CFG" in src
+
+
+# ─────────── 输出尺寸随输入比例（2026-11-09 真机发现）───────────
+# 用户实测「视频从没跑通」，真机跑通后发现新缺陷：输出恒为 1024×576，
+# 与输入图比例无关。SVD 对 conditioning image 是**直接拉伸**而非裁剪
+# （实测量化：第 1 帧 vs 拉伸后输入 cos=0.972，vs 居中裁剪 cos=0.852），
+# 结果 512×512 方图的人脸被横向拉宽 1.78 倍。
+
+
+def test_fit_output_size_keeps_aspect_for_square():
+    """★ 方图必须出方形（768×768），不许拉成 16:9。"""
+    assert V.fit_output_size(512, 512) == (768, 768)
+
+
+def test_fit_output_size_official_landscape_and_portrait():
+    """SVD 官方两档：16:9 → 1024×576，9:16 → 576×1024（模型最熟，别动）。"""
+    assert V.fit_output_size(1920, 1080) == (1024, 576)
+    assert V.fit_output_size(1080, 1920) == (576, 1024)
+
+
+def test_fit_output_size_always_multiple_of_eight():
+    """VAE 空间下采样 8×：宽高不是 8 的倍数会让 diffusers 直接报错或悄悄改尺寸。"""
+    for w, h in [(512, 512), (1920, 1080), (1080, 1920), (1024, 768),
+                 (768, 1024), (1000, 999), (3840, 2160), (640, 480)]:
+        ow, oh = V.fit_output_size(w, h)
+        assert ow % 8 == 0 and oh % 8 == 0, f"{w}x{h} -> {ow}x{oh} 不是 8 的倍数"
+
+
+def test_fit_output_size_never_returns_zero():
+    """读图失败传 0 时必须兜底成官方档，绝不能返回 0（会让管道崩）。"""
+    assert V.fit_output_size(0, 0) == (1024, 576)
+    assert V.fit_output_size(-5, 100) == (1024, 576)
+
+
+def test_fit_output_size_area_is_stable_for_mid_ratios():
+    """中间比例（4:3 / 3:4）保面积：与 1024×576 相差不超过 15%。"""
+    base = 1024 * 576
+    for w, h in [(1024, 768), (768, 1024)]:
+        ow, oh = V.fit_output_size(w, h)
+        assert abs(ow * oh - base) / base < 0.15, f"{w}x{h} -> {ow}x{oh} 面积偏离过大"
+
+
+def test_generate_uses_dynamic_size_not_hardcoded():
+    """★ 回归锁：generate() 不许再出现无条件的 `int(_WIDTH)`。
+
+    这条断言存在的意义：硬编码尺寸「看起来完全正常」（画面照出、视频照成），
+    只有拿方图/竖图跑一次才会发现脸变胖 —— 属于必须靠测试兜住的那类缺陷。
+    """
+    src = inspect.getsource(V.VideoGenEngine.generate)
+    assert 'int(_WIDTH)' not in src, "generate 又硬编码了 _WIDTH"
+    assert 'int(_HEIGHT)' not in src, "generate 又硬编码了 _HEIGHT"
+    assert "_out_w" in src and "_out_h" in src, "未使用自适应尺寸"
+    assert "fit_output_size" in src, "未调用 fit_output_size"
+
+
+def test_generate_passes_same_size_to_kernel_and_stock():
+    """内核路径与 stock 路径必须共用同一组宽高（否则 PSNR 对不上而画面都"正常"）。"""
+    src = inspect.getsource(V.VideoGenEngine.generate)
+    assert src.count("width=int(_out_w)") >= 1
+    assert src.count('"width": int(_out_w)') >= 1

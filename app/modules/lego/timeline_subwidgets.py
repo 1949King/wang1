@@ -13,12 +13,12 @@ import logging
 import threading
 import weakref
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import (
     QFont, QColor, QPainter, QPen, QBrush, QFontMetrics,
     QPolygon, QPixmap, QImage,
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider,
 )
@@ -215,7 +215,7 @@ def _extract_filmstrip_frames(path, timestamps, height, is_interrupted=None):
 class TimeRuler(QWidget):
     """时间标尺"""
 
-    clicked = pyqtSignal(float)  # 点击位置（秒）
+    clicked = Signal(float)  # 点击位置（秒）
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -572,7 +572,7 @@ class TimelineMarkerLayer(QWidget):
 
     def mouseMoveEvent(self, event):
         """处理鼠标移动，显示tooltip"""
-        from PyQt6.QtWidgets import QToolTip
+        from PySide6.QtWidgets import QToolTip
         
         x = event.pos().x()
         time_sec = max(0, (x - self._left_margin) / self._px_per_second())
@@ -632,11 +632,11 @@ class TimelineMarkerLayer(QWidget):
 class TrackControlPanel(QWidget):
     """统一控制栏 - 100px固定宽度，位于轨道区左侧非滚动区域"""
 
-    mute_toggled = pyqtSignal(object, bool)
-    solo_toggled = pyqtSignal(object, bool)
-    lock_toggled = pyqtSignal(object, bool)
-    volume_changed = pyqtSignal(object, float)
-    collapse_toggled = pyqtSignal(object, bool)
+    mute_toggled = Signal(object, bool)
+    solo_toggled = Signal(object, bool)
+    lock_toggled = Signal(object, bool)
+    volume_changed = Signal(object, float)
+    collapse_toggled = Signal(object, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -797,7 +797,7 @@ class TrackControlPanel(QWidget):
 class TrackViewport(QWidget):
     """轨道视图区域 - 支持播放头拖动；绘制框选橡胶筋。"""
     
-    playhead_dragged = pyqtSignal(float)
+    playhead_dragged = Signal(float)
     
     def __init__(self, parent=None):
         super().__init__(parent)

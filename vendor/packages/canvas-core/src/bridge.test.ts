@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { isComfyWorkflowJson, isComfyWorkflowText, generateImageViaHost, generateVideoViaHost } from "./bridge";
+import { isComfyWorkflowJson, isComfyWorkflowText, generateImageViaHost, generateVideoViaHost, gatewayEdit } from "./bridge";
 import type { GenJob } from "./generationQueue";
 
 describe("ComfyUI workflow 识别（前端入口）", () => {
@@ -332,5 +332,54 @@ describe("generateVideoViaHost 异步任务化", () => {
     const res = await generateVideoViaHost({ prompt: "x" });
     expect(res.ok).toBe(false);
     expect(res.message).toBe("生视频超时");
+  });
+});
+
+describe("gatewayEdit 局部语义编辑（T3 本地优先 + 可选网关）", () => {
+  it("POST /host/gateway-edit 透传 mode/image/mask/megapixels，结果原样带回", async () => {
+    let captured: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: any) => {
+      expect(url).toContain("/host/gateway-edit");
+      captured = JSON.parse(init.body);
+      return jsonRes({
+        ok: true,
+        image_data_url: "data:image/png;base64,CCC",
+        engine: "sd15-inpaint",
+        degraded: false,
+        mode: "remove",
+      });
+    }));
+    const res = await gatewayEdit({
+      mode: "remove",
+      image: "data:image/png;base64,IMG",
+      mask: "data:image/png;base64,MASK",
+      prompt: "移除",
+      megapixels: 2,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.image_data_url).toBe("data:image/png;base64,CCC");
+    expect(res.engine).toBe("sd15-inpaint");
+    expect(captured.mode).toBe("remove");
+    expect(captured.image).toBe("data:image/png;base64,IMG");
+    expect(captured.mask).toBe("data:image/png;base64,MASK");
+    expect(captured.megapixels).toBe(2);
+  });
+
+  it("未启用网关 → 宿主 guidance 原样透传（诚实，不假图）", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonRes({ ok: false, message: "无界网关未启用", guidance: "模型广场→无界网关→填 Key" }),
+    ));
+    const res = await gatewayEdit({ mode: "outpaint", image: "data:image/png;base64,IMG" });
+    expect(res.ok).toBe(false);
+    expect(res.guidance).toContain("无界网关");
+  });
+
+  it("fetch 异常 → {ok:false, message}", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network down");
+    }));
+    const res = await gatewayEdit({ mode: "inpaint", image: "data:image/png;base64,IMG", mask: "data:image/png;base64,M" });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("局部编辑异常");
   });
 });

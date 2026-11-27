@@ -7,6 +7,7 @@ import CanvasShell from "./CanvasShell";
 import { useInjectGenerateActions } from "./generateActionsInjector";
 import { GENERATABLE_KINDS, NodeActionsContext } from "./nodes";
 import { registerBuiltinNodes } from "./registerBuiltinNodes";
+import { registerModel3dNode } from "./registerModel3dNode";
 import { registerNodeDefinitions } from "./plugins/node-registry";
 import { STICKY_PLUGIN } from "./plugins/examples/sticky-note";
 import { ensurePluginsLoaded, installPluginFromUrl, setPluginEnabled, uninstallPlugin } from "./plugins/plugin-loader";
@@ -65,6 +66,7 @@ const Stage3D = lazy(() => import("./Stage3D"));
 
 /** 应用启动前注册内置节点到 registry（同步，ReactFlow 首次渲染前完成） */
 registerBuiltinNodes();
+registerModel3dNode(); // T5 图片转3D：3D模型节点（独立注册，registerBuiltinNodes 冻结不改）
 /** 注册示例插件 — 便利贴节点（生产环境应放 public/plugins/ 动态加载） */
 registerNodeDefinitions(STICKY_PLUGIN, "plugin:sticky-note");
 

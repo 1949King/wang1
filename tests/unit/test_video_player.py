@@ -1,44 +1,25 @@
 #!/usr/bin/env python3
-# 测试优化的视频播放器
+"""优化视频播放器及其 Windows 依赖的导入回归测试。"""
 
-import os
-import sys
 
-# 添加项目根目录到Python路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+def test_video_player_module_imports():
+    """播放器模块必须可导入，不能在 pytest 收集阶段退出进程。"""
+    from app.modules.video_player.optimized_video_player import OptimizedVideoPlayer
 
-print("测试优化的视频播放器...")
+    assert OptimizedVideoPlayer is not None
 
-# 测试模块导入
-try:
-    from modules.video_player.optimized_video_player import OptimizedVideoPlayer
-    print("✓ 视频播放器模块导入成功")
-except Exception as e:
-    print(f"✗ 视频播放器模块导入失败: {e}")
-    sys.exit(1)
 
-# 测试PyQt5依赖
-try:
-    from PyQt5.QtWidgets import QApplication
-    print("✓ PyQt5依赖检查通过")
-except Exception as e:
-    print(f"✗ PyQt5依赖检查失败: {e}")
-    sys.exit(1)
+def test_qt_dependency_imports():
+    """播放器使用的 Qt 绑定必须可导入。"""
+    from PySide6.QtWidgets import QApplication
 
-# 测试win32gui依赖
-try:
-    import win32gui
+    assert QApplication is not None
+
+
+def test_win32_dependency_imports():
+    """Windows 窗口捕获测试所需的 pywin32 模块必须可导入。"""
     import win32con
-    print("✓ win32gui依赖检查通过")
-except Exception as e:
-    print(f"✗ win32gui依赖检查失败: {e}")
-    sys.exit(1)
+    import win32gui
 
-print("\n所有依赖检查通过！")
-print("\n测试完成！")
-print("\n注意：")
-print("1. 视频播放器需要PyQt5、opencv-python、Pillow和pywin32依赖")
-print("2. 如果缺少依赖，请运行以下命令安装：")
-print("   pip install PyQt5 opencv-python Pillow pywin32")
-print("3. 播放器会在视频剪辑页面的预览区域显示")
-print("4. 双击媒体列表中的视频文件即可开始预览")
+    assert win32gui is not None
+    assert win32con is not None

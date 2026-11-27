@@ -45,9 +45,9 @@ import subprocess
 import threading
 import time
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
+from PySide6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
     QListWidgetItem, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
@@ -134,7 +134,7 @@ class EditorAgentPanelMixin:
         写进去会把偏好污染成 0。
         """
         try:
-            from PyQt6.QtCore import QSettings
+            from PySide6.QtCore import QSettings
 
             sp = getattr(self, "_agent_dock_splitter", None)
             if sp is None or not self._is_agent_dock_visible():
@@ -148,7 +148,7 @@ class EditorAgentPanelMixin:
     def _restore_agent_panel_width(self) -> None:
         """恢复上次的竖栏宽度（默认 360；夹在 300~720 防记忆值把布局搞坏）。"""
         try:
-            from PyQt6.QtCore import QSettings
+            from PySide6.QtCore import QSettings
 
             sp = getattr(self, "_agent_dock_splitter", None)
             if sp is None or not self._is_agent_dock_visible():
@@ -336,6 +336,11 @@ class EditorAgentPanelMixin:
         )
         self._agent_mode_combo.setStyleSheet(S["combo"])
         head.addWidget(self._agent_mode_combo)
+
+        # 思考等级（参考 TapNow 四档）：仅多轮自主执行生效，标准=历史默认预算
+        _think_combo = self._build_agent_thinking_combo()
+        _think_combo.setStyleSheet(S["combo"])
+        head.addWidget(_think_combo)
         head.addStretch()
 
         # 模型选择：弹性宽度（原固定 260px，窄面板会把其他按钮挤掉）
@@ -661,6 +666,9 @@ class EditorAgentPanelMixin:
             self._persona_btn_label(), self._toggle_agent_persona
         )
         more_menu.addAction("设置称呼", self._set_agent_nickname)
+        more_menu.addSeparator()
+        # 多轮自主闭环开关（2026-11-18）：关闭即完全回到旧单轮路径
+        self._add_agent_loop_menu_action(more_menu)
         more_btn.setMenu(more_menu)
         input_row.addWidget(more_btn)
         interaction_layout.addLayout(input_row)
@@ -724,7 +732,7 @@ class EditorAgentPanelMixin:
 
         # 快捷键直达（V4.34.1 调用体验）：Ctrl+Shift+A 切到 Agent 并聚焦输入框
         try:
-            from PyQt6.QtGui import QKeySequence, QShortcut
+            from PySide6.QtGui import QKeySequence, QShortcut
 
             self._agent_shortcut = QShortcut(QKeySequence("Ctrl+Shift+A"), self)
             self._agent_shortcut.activated.connect(self._focus_agent_panel)
@@ -1021,6 +1029,7 @@ class EditorAgentPanelMixin:
         view.setHtml(html)
         card.setVisible(True)
 
+
     # ======================================================================
     # 抽取自 editor_module.py L11651-11712
     # ======================================================================
@@ -1039,6 +1048,9 @@ class EditorAgentPanelMixin:
             else:
                 QMessageBox.information(self, "剪辑 Agent", "Agent 正在处理中，可点「暂停/终止」或等待完成后自动发送队列。")
             return
+        # 多轮自主闭环（2026-11-18）：开关打开走 AgentLoop，关闭走下面原单轮实现
+        if self._agent_loop_enabled():
+            return self._send_edit_agent_message_loop()
         user_text = self._edit_agent_input.text().strip()
         if not user_text:
             QMessageBox.warning(self, "剪辑 Agent", "请输入剪辑指令")
@@ -1770,7 +1782,7 @@ class EditorAgentPanelMixin:
                     duration=float(_p["clip_duration"])) or {}
                 _cost = float(_q.get("cost_estimate") or 0.0)
                 if _cost > 0:
-                    from PyQt6.QtWidgets import QMessageBox
+                    from PySide6.QtWidgets import QMessageBox
 
                     ret = QMessageBox.question(
                         self, "生成成本确认",

@@ -13,10 +13,10 @@ QOpenGLWidget + GLSL 滤镜链：
 
 from typing import Optional, Dict, Any
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QImage
-from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-from PyQt6.QtOpenGL import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtOpenGL import (
     QOpenGLShaderProgram,
     QOpenGLShader,
     QOpenGLTexture,
@@ -258,7 +258,7 @@ class GLFilterWidget(QOpenGLWidget):
 
     def initializeGL(self):
         try:
-            # PyQt6 已移除 QOpenGLContext.functions()，改用 VersionFunctionsFactory
+            # PySide6 已移除 QOpenGLContext.functions()，改用 VersionFunctionsFactory
             ctx = self.context()
             funcs = None
             for major, minor in ((2, 1), (2, 0)):

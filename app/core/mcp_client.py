@@ -486,13 +486,22 @@ class McpClientManager:
                     self._process.stdin.write(request_line)
                     self._process.stdin.flush()
 
-                    # 使用 select 等待响应，设置 30 秒超时
+                    # 使用 select 等待响应，设置 30 秒超时。
+                    # ⚠ Windows 的 select 只支持 socket：管道 fd 会抛 OSError
+                    #   (WinError 10093/10038)。旧实现只捕获 ImportError ⇒ 原生
+                    #   stdio 通道在 Windows 上必然连不上（Blender 等 stdio 通道都受影响）。
+                    #   这里捕获后统一走 _read_line_via_thread 兜底。
                     import select
-                    import sys
-                    import os
 
                     stdout_fd = self._process.stdout.fileno()
-                    ready, _, _ = select.select([stdout_fd], [], [], 30.0)
+                    try:
+                        ready, _, _ = select.select([stdout_fd], [], [], 30.0)
+                    except (ImportError, OSError, ValueError):
+                        ready = None
+
+                    if ready is None:
+                        # 非 socket 平台（Windows 管道）回退：后台线程阻塞读一行
+                        return self._read_line_via_thread(30.0)
 
                     if ready:
                         response_line = self._process.stdout.readline()
@@ -513,47 +522,62 @@ class McpClientManager:
                         self._last_error = "请求超时 (30秒)"
                         return None
                 except ImportError:
-                    # Windows 上 select 不支持管道，使用 threading.Timer 作为回退
-                    import threading
-                    import queue
-
-                    result_queue = queue.Queue()
-
-                    def read_response():
-                        try:
-                            line = self._process.stdout.readline()
-                            result_queue.put(line if line else "")
-                        except Exception as e:
-                            result_queue.put(None)
-
-                    # 在另一个线程中读取
-                    read_thread = threading.Thread(target=read_response, daemon=True)
-                    read_thread.start()
-
-                    # 等待最多 30 秒
-                    try:
-                        response_line = result_queue.get(timeout=30)
-                        if response_line and response_line.strip():
-                            response = json.loads(response_line.strip())
-                            if "error" in response:
-                                self._last_error = response["error"].get("message", "未知错误")
-                                return None
-                            return response.get("result")
-                        else:
-                            self._last_error = "读取响应为空"
-                            return None
-                    except queue.Empty:
-                        self._last_error = "请求超时 (30秒)"
-                        return None
-                    except json.JSONDecodeError as e:
-                        self._last_error = f"JSON 解析失败: {e}"
-                        return None
-                    except Exception as e:
-                        self._last_error = str(e)
-                        return None
+                    # select 模块都不可用：同样走线程回退
+                    return self._read_line_via_thread(30.0)
             else:
                 self._last_error = "进程未启动"
                 return None
+
+
+    def _read_line_via_thread(self, timeout: float) -> Optional[Any]:
+        """跨平台兜底：后台线程阻塞读一行 JSON-RPC 响应。
+
+        为什么需要：Windows 的 ``select`` 只支持 socket，对 subprocess 管道
+        会抛 ``OSError(WinError 10093/10038)``（2026-11-13 真机实测），
+        而 stdio MCP 通道全靠管道。这里用「后台线程 readline + queue 超时」
+        替代 select，超时口径与原来一致（30 秒）。
+
+        Args:
+            timeout: 等待响应秒数
+
+        Returns:
+            响应 result 字段；超时/空读/JSON 坏掉/远端报错返回 None（写 last_error）
+        """
+        import queue
+
+        result_queue: "queue.Queue" = queue.Queue()
+
+        def _read_response():
+            try:
+                line = self._process.stdout.readline() if self._process and self._process.stdout else ""
+                result_queue.put(line if line else "")
+            except Exception:
+                logger.debug("MCP 管道读取异常", exc_info=True)
+                result_queue.put(None)
+
+        read_thread = threading.Thread(target=_read_response, daemon=True)
+        read_thread.start()
+
+        try:
+            response_line = result_queue.get(timeout=timeout)
+        except queue.Empty:
+            self._last_error = f"请求超时 ({int(timeout)}秒)"
+            return None
+
+        if not response_line or not response_line.strip():
+            self._last_error = "读取响应为空"
+            return None
+
+        try:
+            response = json.loads(response_line.strip())
+        except json.JSONDecodeError as e:
+            self._last_error = f"JSON 解析失败: {e}"
+            return None
+
+        if "error" in response:
+            self._last_error = response["error"].get("message", "未知错误")
+            return None
+        return response.get("result")
 
 
 # ═══════════════════════════════════════════════════════════════

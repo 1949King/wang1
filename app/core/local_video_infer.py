@@ -1265,8 +1265,17 @@ def generate_video_local(
         fn_kwargs["steps"] = int(steps)
 
     try:
+        import time as _t0clock
+
+        _t0 = _t0clock.time()
         result = infer_fn(**fn_kwargs)
     except Exception as e:
+        try:
+            from app.core.ai import engine_telemetry as ET
+
+            ET.record(engine="local_video", model_arch=str(kind or ""), ok=False)
+        except Exception:
+            logger.debug("[local_video_infer] 失败遥测写入异常", exc_info=True)
         return {
             "ok": False,
             "message": f"本地 {kind} 推理失败: {type(e).__name__}: {e}",
@@ -1274,6 +1283,17 @@ def generate_video_local(
             "verification": _verification,
             "warnings": _fam_warnings,
         }
+
+    _elapsed = _t0clock.time() - _t0
+    try:
+        from app.core.ai import engine_telemetry as ET
+
+        # 遥测引擎名沿用注册表 telemetry="wan"（video.local_video_infer 的账本入口）；
+        # arch 记真实族（wan/cogvideox/…），决策器按族看成功率。
+        ET.record(engine="wan", model_arch=str(kind or ""), ok=bool(result.get("ok")),
+                  steady_ms=round(_elapsed * 1000.0, 1) if result.get("ok") else 0.0)
+    except Exception:
+        logger.debug("[local_video_infer] 遥测写入失败（不阻断）", exc_info=True)
 
     if result.get("ok"):
         result["model"] = f"local/{kind}/{model}" if model else f"local/{kind}"

@@ -47,11 +47,11 @@ CLIP_HEADER = '''"""时间线片段控件模块
 import os
 import logging
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtGui import (
     QColor, QPainter, QPen, QBrush, QFontMetrics, QPolygon, QPixmap,
 )
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolTip
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolTip
 
 from .editor_timeline_tools import (
     apply_batch_start_delta,

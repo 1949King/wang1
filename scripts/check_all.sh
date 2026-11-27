@@ -44,7 +44,7 @@ done
 # ── 步骤定义： 标识 | 人类可读名 | 命令 ────────────────────
 STEP_IDS=(GATES PYTEST COVRATCH VITEST ALLCHECKS)
 STEP_NAMES=(
-    "① 提交前 11 道门禁（ruff/format/冻结区/稳定性/契约/架构/双库/前端三卡点/规模/路由/pyqtSignal/不出域）"
+    "① 提交前 11 道门禁（ruff/format/冻结区/稳定性/契约/架构/双库/前端三卡点/规模/路由/Signal/不出域）"
     "② Python 单测（pytest 全量 + 覆盖率采样）"
     "③ 覆盖率棘轮（只增不减）"
     "④ 画布前端单测（vitest）"
@@ -69,7 +69,7 @@ step_cmd() {
                        echo "QT_QPA_PLATFORM=offscreen \"$PY\" -m pytest -q --cov=app --cov-report=term:skip-covered --cov-report=json:$COV_JSON"
                    fi ;;
         COVRATCH)  echo "\"$PY\" _verify/check_coverage.py --json $COV_JSON" ;;
-        VITEST)    echo '( cd vendor/shiguang-canvas && node node_modules/vitest/vitest.mjs run --reporter=dot --pool=threads )' ;;
+        VITEST)    echo '( cd vendor/packages/canvas-core && node node_modules/vitest/vitest.mjs run --reporter=dot --pool=threads )' ;;
         ALLCHECKS) echo "\"$PY\" _verify/run_all_checks.py" ;;
     esac
 }
@@ -116,8 +116,8 @@ if ! command -v node >/dev/null 2>&1; then
 else
     echo "   ✓ node $(node -v)"
 fi
-if [ ! -f vendor/shiguang-canvas/node_modules/vitest/vitest.mjs ]; then
-    echo "   ⚠️ 画布 node_modules 缺失 —— vitest 步骤会失败（先跑 npx install）"
+if [ ! -f vendor/packages/canvas-core/node_modules/vitest/vitest.mjs ]; then
+    echo "   ⚠️ 画布 node_modules 缺失 —— vitest 步骤会失败（先在 vendor 运行 pnpm install）"
 fi
 echo
 

@@ -153,6 +153,72 @@ class RoughCutChain:
             for p in items
         ]
 
+    # ── 提案注册：外部决策器（AI 精剪等）接入既有审核卡 / apply 链的唯一入口 ──
+    def register_proposal(self, proposal: Dict[str, Any], *,
+                          broadcast: bool = True) -> Dict[str, Any]:
+        """注册一份**外部生成**的提案，之后走与本链 plan() 完全相同的确认与写回路径。
+
+        设计依据（2026-11-14）：LLM 精剪不另造事务层。``apply()`` 已实现
+        confirmed=True 纪律、时间线陈旧守卫、波纹删除+合缝、一条 compound 撤销；
+        外部提案只要形状一致，就能原样复用，无需改 apply 一个字。
+
+        只校验**结构**不校验创作判断；缺字段诚实拒绝，不填默认值蒙混过关。
+        附加字段（intent / evidence_index 等）原样保留，供复核与记忆回流消费。
+        """
+        if not isinstance(proposal, dict):
+            return {"ok": False, "error": "proposal 必须是 dict"}
+        required = (
+            "clip_ids", "layout", "intervals",
+            "original_duration", "predicted_duration", "deleted_duration",
+        )
+        missing = [k for k in required if k not in proposal]
+        if missing:
+            return {"ok": False, "error": f"提案缺字段：{missing}"}
+        if not isinstance(proposal["intervals"], (list, tuple)):
+            return {"ok": False, "error": "intervals 必须是数组"}
+        for idx, iv in enumerate(proposal["intervals"]):
+            if not isinstance(iv, dict) or "timeline_in" not in iv or "timeline_out" not in iv:
+                return {"ok": False, "error": f"intervals[{idx}] 缺 timeline_in/timeline_out"}
+            try:
+                a, b = float(iv["timeline_in"]), float(iv["timeline_out"])
+            except (TypeError, ValueError):
+                return {"ok": False, "error": f"intervals[{idx}] 时间坐标非数值"}
+            if b <= a:
+                return {"ok": False, "error": f"intervals[{idx}] 为零宽/倒序区间"}
+
+        stored = dict(proposal)
+        stored.setdefault("plan_id", uuid.uuid4().hex[:12])
+        stored.setdefault("created_at", time.time())
+        stored.setdefault("mode", "timeline")
+        stored.setdefault("request_id", "")
+        stored.setdefault("label", "AI 精剪提案")
+        stored.setdefault("warnings", [])
+        # 「确认后执行」纪律不可由外部覆盖
+        stored["needs_confirmation"] = True
+        stored["status"] = "pending_confirmation"
+        stored["applied"] = False
+
+        with self._lock:
+            self._plans[stored["plan_id"]] = stored
+            while len(self._plans) > _MAX_PLANS:
+                self._plans.popitem(last=False)
+
+        if broadcast:
+            _broadcast("rough_cut_plan_ready", {
+                "plan_id": stored["plan_id"],
+                "request_id": stored["request_id"],
+                "summary": {
+                    "original_duration": stored["original_duration"],
+                    "predicted_duration": stored["predicted_duration"],
+                    "deleted_duration": stored["deleted_duration"],
+                    "interval_count": len(stored["intervals"]),
+                },
+                "intervals": stored["intervals"],
+                "warnings": stored["warnings"],
+                "message": "AI 精剪提案已生成，请审核后确认执行",
+            })
+        return {"ok": True, "plan_id": stored["plan_id"]}
+
     # ── ① plan：规则排轨 + B2 检测（只算不改）─────────────────────
     def plan(
         self,

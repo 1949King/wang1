@@ -20,6 +20,8 @@ export type TeamProject = {
   rev: number;
   owner: string;
   updated_at: number;
+  /** 认领者**人名**（后端 `list_projects()` 已 join member 表解析过；空串=没被占）。
+   *  2026-11-05 之前这里是 member_id，界面上显示成 `🔒 m_fb5c19f9… 在改`，没人读得懂。 */
   claimed_by: string;
   claim_expires_at: number;
 };

@@ -12,7 +12,7 @@ def test_list_local_models_shape_and_honesty() -> None:
     for mid in ("sd15-t2i", "sdxl-t2i", "svd-xt-i2v"):
         assert mid in ids
     for r in rows:
-        assert r["capability"] in ("image", "video")
+        assert r["capability"] in ("image", "video", "tool")
         assert isinstance(r["downloaded"], bool)
         assert r["verification"] in ("verified", "unverified", "blocked", "")
         assert set(r) >= {"id", "label", "family", "downloaded", "dir"}
@@ -81,10 +81,10 @@ def test_panel_renders_rows_offscreen():
     import pytest
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    pytest.importorskip("PyQt6")
-    from PyQt6.QtWidgets import QApplication
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
 
-    app = QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication(["local-models-test"])
     from app.modules.lego.local_models_panel import LocalModelsPanel
 
     p = LocalModelsPanel()

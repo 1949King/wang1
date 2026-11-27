@@ -9,7 +9,7 @@ import logging
 import os
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QGridLayout, QComboBox, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
@@ -17,8 +17,8 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit, QColorDialog, QLineEdit, QListWidget, QListWidgetItem,
     QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QThread, QPoint, QPointF
-from PyQt6.QtGui import QFont, QColor, QKeySequence, QPainter, QImage, QPen, QBrush, QConicalGradient, QRadialGradient
+from PySide6.QtCore import Qt, Signal, QSettings, QThread, QPoint, QPointF
+from PySide6.QtGui import QFont, QColor, QKeySequence, QPainter, QImage, QPen, QBrush, QConicalGradient, QRadialGradient
 import math
 import re
 import webbrowser
@@ -83,7 +83,7 @@ class ColorWheel(QWidget):
         wheel.color_changed.connect(lambda hex_color: print(hex_color))
         wheel.set_theme("dark")  # 或 "light"
     """
-    color_changed = pyqtSignal(str)  # 发射十六进制颜色字符串 "#rrggbb"
+    color_changed = Signal(str)  # 发射十六进制颜色字符串 "#rrggbb"
 
     def __init__(self, initial_color: str = "#ffffff", size: int = 200, parent=None):
         super().__init__(parent)
@@ -237,7 +237,7 @@ class SettingsModule(BaseModule):
     module_id = "settings"
     module_name = "设置"
     module_icon = "⚙️"
-    settings_changed = pyqtSignal(str, object)
+    settings_changed = Signal(str, object)
     
     DEFAULT_SHORTCUTS = [
         ShortcutItem("剪切", "cut", "Ctrl+X"),
@@ -944,7 +944,7 @@ class SettingsModule(BaseModule):
         self._login_window.show()
         
         while not login_done[0]:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             QApplication.processEvents()
         
         if login_success[0]:
@@ -1085,7 +1085,7 @@ class SettingsModule(BaseModule):
     def _export_settings(self):
         """导出所有设置为 JSON 文件"""
         import json
-        from PyQt6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog
 
         path, _ = QFileDialog.getSaveFileName(
             self, "导出设置", "拾光剪影_设置备份.json", "JSON 文件 (*.json)"
@@ -1116,7 +1116,7 @@ class SettingsModule(BaseModule):
     def _import_settings(self):
         """从 JSON 文件导入设置"""
         import json
-        from PyQt6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog
 
         path, _ = QFileDialog.getOpenFileName(
             self, "导入设置", "", "JSON 文件 (*.json)"
@@ -1196,8 +1196,10 @@ class SettingsModule(BaseModule):
             self._theme_combo.blockSignals(True)
             self._theme_combo.setCurrentIndex(index)
             self._theme_combo.blockSignals(False)
-            # 启动时同步设置面板自身容器样式（不触发全局事件）
-            self.set_theme(theme)
+        # 启动时按 ThemeManager 的当前主题刷新自身内联样式（单一机制：不再独立
+        # 读取第二份主题状态，避免与全局主题脱节；不触发全局事件）
+        from .theme_manager import ThemeManager
+        self.set_theme(ThemeManager.instance().theme_preference)
 
         # 导航栏显示模式回填（不触发即时生效事件）
         nav_mode = self._settings.value("nav_mode", "full")
@@ -1266,7 +1268,11 @@ class SettingsModule(BaseModule):
         # ── 第1步：保存通用设置到 QSettings（Windows 注册表） ──
         theme_key = list(self.THEMES.keys())[self._theme_combo.currentIndex()]
         self._settings.setValue("theme", theme_key)
-        self.set_theme(theme_key)  # 立即应用主题
+        # 主题只走 ThemeManager 单一机制：偏好有变才发 THEME_CHANGED，由主窗口应用
+        # 全局 QSS 并回调本模块 set_theme（直接调 set_theme 会让全局与设置页脱节）
+        from .theme_manager import ThemeManager
+        if theme_key != ThemeManager.instance().theme_preference:
+            self._on_theme_changed(self._theme_combo.currentIndex())
 
         # 导航栏显示模式（full=图标+名称 / compact=仅图标悬浮显名）
         if hasattr(self, "_nav_mode_combo"):
@@ -1447,7 +1453,7 @@ class SettingsModule(BaseModule):
     # ─────────────── 主题切换系统 ───────────────
     
     def set_theme(self, theme_key: str):
-        """切换主题（深色/浅色）- 仅更新设置面板自身 UI
+        """按主题刷新设置面板自身 UI（纯视图刷新：不发事件、不写 theme 属性）
         
         重要：不再在 set_theme 内部 emit THEME_CHANGED 事件！
         因为 main_window 的 _on_theme_changed 会反过来调用所有模块的 set_theme，
@@ -1460,6 +1466,11 @@ class SettingsModule(BaseModule):
         4. _apply_theme 调用 ThemeManager.apply_theme + 给所有模块 setProperty
         5. ThemeManager 内置 _applying 标志位防止二次触发
         """
+        # 契约（2026-11-27 单一机制）：本方法只负责「把本页内联样式画成指定主题」，
+        # 由 ThemeManager.apply_theme → 主窗口 refresh_module_themes 统一回调；
+        # 切换入口（标题栏按钮 / 本页下拉框 / 保存 / 按时间切换 / 画布设置页）
+        # 一律只走 ThemeManager，禁止在本方法里再触发全局切换或自行决定主题状态。
+        #
         # NOTE: 不要根据 current_theme 提前返回。set_theme 的职责是更新设置面板
         # 自身的局部样式（header、sidebar、content_stack 等），即使 ThemeManager 已经
         # 把全局主题应用过，这些局部样式仍然需要更新。
@@ -1514,10 +1525,19 @@ class SettingsModule(BaseModule):
         # 刷新颜色样本与颜色值标签
         self._update_color_swatches(is_light)
         
-        # 给所有子控件设置 theme 属性（让 ThemeManager 的全局 QSS 属性选择器生效）
-        self.setProperty("theme", actual_theme)
-        for child in self.findChildren(QWidget):
-            child.setProperty("theme", actual_theme)
+        # theme 属性与 repolish 统一交给 ThemeManager 的同一个例程（属性没变则跳过）：
+        # 本模块是懒加载的，创建时全局主题早已应用，新控件的 theme 属性必须在这里补上，
+        # 否则全局 QSS 的 [theme="..."] 选择器匹配不到（深色下出现黑字）。
+        ThemeManager._apply_theme_property(self, actual_theme)
+        # 主题下拉框跟随 ThemeManager 的偏好（单一真相源）：标题栏主题按钮、
+        # 按时间自动切换等入口改了主题后，这里只同步显示，不触发任何事件。
+        preference = ThemeManager.instance().theme_preference
+        combo = getattr(self, "_theme_combo", None)
+        if combo is not None and preference in self.THEMES:
+            if list(self.THEMES.keys())[combo.currentIndex()] != preference:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(list(self.THEMES.keys()).index(preference))
+                combo.blockSignals(False)
 
         if hasattr(self, "_theme_status_label"):
             display = "浅色" if actual_theme == "light" else "深色"
@@ -1553,27 +1573,52 @@ class SettingsModule(BaseModule):
         # 关于页面专用深色边框
         "#2a2a40": "#c8cce0", "#2a2f3a": "#ccd0dc",
     }
-    # GroupBox标题颜色映射（处理color:#fff等硬编码颜色）
-    _GROUPBOX_COLOR_MAP = {
-        "dark": {
-            "color:#fff": "color:#fff",  # 保持不变
-            "color:#ffffff": "color:#222222",
-            "color:#eeeeee": "color:#333333",
-            "color:#cccccc": "color:#555555",
-            "color:#888888": "color:#666666",
-        },
-        "light": {
-            "color:#fff": "color:#222222",
-            "color:#ffffff": "color:#222222",
-            "color:#eeeeee": "color:#333333",
-            "color:#cccccc": "color:#555555",
-            "color:#888888": "color:#666666",
-        }
-    }
+    # 2026-11-27：原 _GROUPBOX_COLOR_MAP 已移除 —— 它的键写成 "color:#fff"（无空格），
+    # 而源样式是 "color: #ffffff"（有空格），从未匹配成功，分组标题在浅色下一直是 #cccccc。
+    # GroupBox 与其它控件一样走下方 _map_declarations 的逐声明映射。
+
+    @classmethod
+    def _map_declarations(cls, ss: str, is_light: bool) -> str:
+        """把内联样式表里的颜色声明按主题逐条映射（可逆：切回时原样还原）。
+
+        只改「该声明自己的」十六进制色值：color 属文字色，background*/border* 属
+        底色/边框色。2026-11-27 之前是对整段样式表做子串替换，文字色与同值的
+        边框键互相污染（如 #333333 既是 #eeeeee 的浅色文字，又是深色边框键），
+        深浅来回切换后颜色错乱、切不回原样。
+        """
+        hex_token = re.compile(r"#[0-9a-fA-F]{3,8}")
+        # (声明属性判定, 依次使用的映射表名)
+        families = (
+            (lambda prop: prop == "color", ("_LIGHT_TEXT_MAP",)),
+            (lambda prop: prop.startswith(("background", "border", "outline", "gridline")),
+             ("_DARK_BG_MAP", "_DARK_BORDER_MAP")),
+        )
+        # 浅色：深色键 → 浅色值；深色：浅色值 → 深色键
+        tables = {}
+        for name in ("_LIGHT_TEXT_MAP", "_DARK_BG_MAP", "_DARK_BORDER_MAP"):
+            table = getattr(cls, name)
+            tables[name] = ({k.lower(): v for k, v in table.items()} if is_light
+                            else {v.lower(): k for k, v in table.items()})
+
+        def _map_decl(match):
+            prop, lead, val = match.group("prop"), match.group("lead"), match.group("val")
+            for is_family, names in families:
+                if not is_family(prop):
+                    continue
+                for name in names:
+                    lookup = tables[name]
+
+                    def _replace(token, _lookup=lookup):
+                        return _lookup.get(token.group(0).lower(), token.group(0))
+
+                    val = hex_token.sub(_replace, val)
+                break
+            return f"{prop}{lead}{val}"
+
+        return re.sub(r"(?P<prop>[a-zA-Z-]+)(?P<lead>\s*:\s*)(?P<val>[^;{}]*)", _map_decl, ss)
     
     def _force_theme_on_children(self, root: QWidget, is_light: bool):
         """智能递归替换：只换背景/文字/边框色，保留语义颜色(蓝#1e6bde/橙#f59e0b/绿#22c55e/红#ef4444)"""
-        from PyQt6.QtWidgets import QGroupBox
         children = root.findChildren(QWidget)
         for w in children:
             # ColorWheel单独处理主题
@@ -1583,16 +1628,7 @@ class SettingsModule(BaseModule):
             # 预览标签跳过，因为它有自己的颜色处理逻辑
             if w is self._preview_label:
                 continue
-            # QGroupBox单独处理标题颜色
-            if isinstance(w, QGroupBox):
-                ss = w.styleSheet()
-                if ss:
-                    theme_key = "light" if is_light else "dark"
-                    color_map = self._GROUPBOX_COLOR_MAP[theme_key]
-                    for old, new in color_map.items():
-                        ss = ss.replace(old, new)
-                    w.setStyleSheet(ss)
-                continue
+            # QGroupBox 不再特殊处理：其内联颜色走下方通用的逐声明映射
             if hasattr(w, 'objectName'):
                 name = w.objectName()
                 if name and ("navBtn" in name or "saveBtn" in name or "resetBtn" in name or name.startswith("colorSwatch_")):
@@ -1602,30 +1638,10 @@ class SettingsModule(BaseModule):
             if not ss:
                 continue
             
-            original = ss
-            if is_light:
-                for dk, lt in self._DARK_BG_MAP.items():
-                    ss = ss.replace(dk, lt)
-                for wt, dt in self._LIGHT_TEXT_MAP.items():
-                    # 使用 (?<![a-zA-Z-]) 确保只匹配独立 `color:` 属性，
-                    # 而不是 background-color / border-color 的一部分
-                    ss = re.sub(r'(?<![a-zA-Z-])color\s*:\s*' + re.escape(wt),
-                               f'color: {dt}', ss)
-                for db, lb in self._DARK_BORDER_MAP.items():
-                    ss = ss.replace(db, lb)
-            else:
-                # 深色恢复
-                for lt, dk in self._DARK_BG_MAP.items():
-                    ss = ss.replace(lt, dk)
-                for dt, wt in self._LIGHT_TEXT_MAP.items():
-                    # 使用 (?<![a-zA-Z-]) 确保只匹配独立 `color:` 属性
-                    ss = re.sub(r'(?<![a-zA-Z-])color\s*:\s*' + re.escape(dt),
-                               f'color: {wt}', ss)
-                for lb, db in self._DARK_BORDER_MAP.items():
-                    ss = ss.replace(lb, db)
-            
-            if ss != original:
-                w.setStyleSheet(ss)
+            # 按声明逐条映射（可逆）；不再对整段样式表做子串替换
+            new_ss = self._map_declarations(ss, is_light)
+            if new_ss != ss:
+                w.setStyleSheet(new_ss)
     
     def _update_nav_button_theme(self, is_light: bool):
         """更新左侧导航按钮的明/暗主题样式"""
@@ -1769,8 +1785,8 @@ class SettingsModule(BaseModule):
         except Exception as e:
             logger.debug("主题变更事件发送失败: %s", e)
 
-        # 2. 更新设置面板自身 UI
-        self.set_theme(theme_key)
+        # 2. 自身内联样式不在此直接刷新：主窗口 → ThemeManager.apply_theme →
+        #    回调 refresh_module_themes → 本模块 set_theme，保证全局与本页同一次生效
 
     def _on_nav_mode_changed(self, idx: int):
         """导航栏显示模式变化：持久化 + 即时通知主窗口应用（full=图标+名称 / compact=仅图标）"""
@@ -2102,7 +2118,7 @@ class SettingsModule(BaseModule):
         
         # QThread 异步测试（5秒超时）
         class _SMTPTestWorker(QThread):
-            result = pyqtSignal(bool, str)  # (success, message)
+            result = Signal(bool, str)  # (success, message)
             
             def __init__(self, config, verification_service):
                 super().__init__()
@@ -2447,7 +2463,7 @@ class SettingsModule(BaseModule):
 
         tags = [
             ("🐍", "Python 3.12"),
-            ("🖥️", "PyQt6"),
+            ("🖥️", "PySide6"),
             ("🤖", "OpenAI API"),
             ("🎞️", "MoviePy"),
             ("⚙️", "FFmpeg"),

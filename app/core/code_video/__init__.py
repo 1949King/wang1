@@ -12,7 +12,7 @@
     llm_html.py         LLM 生成镜头 HTML（V4.46）
 
 **延迟导出**：本文件只导出 spec（纯标准库零依赖），渲染面模块
-（V4.45 起）不在此处导入 —— 避免契约刀阶段拖入 PyQt6/ffmpeg 重依赖，
+（V4.45 起）不在此处导入 —— 避免契约刀阶段拖入 PyQt6/PySide6/ffmpeg 重依赖，
 也让 _verify/check_code_video.py 能独立 import 本域做静态断言。
 """
 from app.core.code_video.spec import (

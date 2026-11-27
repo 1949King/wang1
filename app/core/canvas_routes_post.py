@@ -662,6 +662,44 @@ class CanvasPostRoutesMixin:
         self._json(code, res)
         return
 
+    @_route_post("/host/gateway-edit")
+    def _p_host_gateway_edit(self, parsed, raw: bytes, ctype: str) -> None:
+        """T3 局部语义编辑（本地优先 + 可选网关）：inpaint/remove/outpaint。
+
+        调度在 core.semantic_inpaint.semantic_edit_via_host：
+        本地 SD1.5 语义 → 可选网关（默认关）→ LaMa/Telea 兜底（degraded）。
+        本 handler 只做 token 校验 + JSON 解析 + 薄调用（与 _p_host_inpaint 同纪律）。
+        """
+        cs = _cs()
+
+        if not cs._check_host_token(self):
+            self._json(401, {"ok": False, "message": "unauthorized"})
+            return
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"ok": False, "message": "invalid json"})
+            return
+        try:
+            from app.core.neural.semantic_inpaint import semantic_edit_via_host
+
+            res = semantic_edit_via_host(
+                str(data.get("image") or ""),
+                str(data.get("mask") or ""),
+                str(data.get("prompt") or ""),
+                mode=str(data.get("mode") or "inpaint"),
+                channel_id=str(data.get("channel_id") or ""),
+                megapixels=float(data.get("megapixels") or 1.0),
+                size=str(data.get("size") or "1024x1024"),
+            )
+        except Exception as e:
+            logger.exception("[/host/gateway-edit] 失败")
+            self._json(500, {"ok": False, "message": str(e)})
+            return
+        code = 200 if res.get("ok") else 400
+        self._json(code, res)
+        return
+
     @_route_post("/host/repair-image")
     def _p_host_repair_image(self, parsed, raw: bytes, ctype: str) -> None:
         """P4 局部重绘（抽卡闭环）：自动定位坏区 → 蒙版 → inpaint → 合成。
@@ -997,7 +1035,10 @@ class CanvasPostRoutesMixin:
         })
         return
 
-    # ── POST /host/interpolate：帧间插值（VFI）占位，记录参数后返回 ok ──
+    # ── POST /host/interpolate：RIFE v4.9 神经补帧（×2/×3/×4，异步任务）──
+    # 2026-11-20 T4 项二：原占位 stub 替换为真实后端。抽帧/插帧/编码/mux 在
+    # canvas_gen_jobs worker 线程执行，HTTP 立即返回 job_id；前端经
+    # /host/generation/status 轮询。模型缺失诚实 ok:false+guidance（绝不触网）。
     @_route_post("/host/interpolate")
     def _p_host_interpolate(self, parsed, raw: bytes, ctype: str) -> None:
         cs = _cs()
@@ -1010,16 +1051,20 @@ class CanvasPostRoutesMixin:
         except Exception:
             self._json(400, {"ok": False, "message": "invalid json"})
             return
-        mode = str(body.get("mode") or "smart")
-        target_fps = int(body.get("target_fps") or 24)
-        logger.info("[/host/interpolate] stub: mode=%s fps=%d title=%s", mode, target_fps, body.get("title"))
-        self._json(200, {
-            "ok": True,
-            "message": "帧间插值占位：后端暂未实现实际 VFI（可后续接 RIFE/EMA-VFI）",
-            "mode": mode,
-            "target_fps": target_fps,
-            "todo": "backend-vfi-integration",
-        })
+        from app.core import canvas_gen_jobs
+        from app.core.video_interpolate_job import parse_interpolate_request, run_interpolate
+
+        req = parse_interpolate_request(body)
+        if not req.get("ok"):
+            self._json(400, {"ok": False, "message": req.get("error", "请求无效")})
+            return
+        job = canvas_gen_jobs.submit(
+            "video",
+            lambda report: run_interpolate(req, report),
+            label=f"神经补帧×{req['multiplier']}",
+            meta={"kind_detail": "interpolate", "multiplier": req["multiplier"]},
+        )
+        self._json(200, {"ok": True, "job_id": job["job_id"], "status": job["status"]})
         return
 
     # ── POST /host/video-concat：批量任务结果拼接成片 ──

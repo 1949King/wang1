@@ -1710,30 +1710,12 @@ def register_builtin_handlers(dispatcher: CapabilityDispatcher,
     # 剪辑 Skill 扩容（LibTV 对标第二刀）：把 EditorModule 既有能力接进能力目录
     from app.core.capability_handlers_editor_skills import EditorSkillHandlers
     editor_skill_handlers = EditorSkillHandlers(editor_module_ref)
-    dispatcher.register("canvas.ai_upscale", CapabilityCategory.CANVAS,
-                        media_handlers.ai_upscale, "AI 超分放大（ESPCN/RealESRGAN，如实回报引擎）")
-    dispatcher.register("canvas.ai_matte", CapabilityCategory.CANVAS,
-                        media_handlers.ai_matte, "AI 抠像换背景（降级必标注）")
-    dispatcher.register("canvas.video_depth", CapabilityCategory.CANVAS,
-                        media_handlers.video_depth, "深度视频提取（模型缺失时诚实失败）")
-    dispatcher.register("canvas.reference_breakdown", CapabilityCategory.CANVAS,
-                        media_handlers.reference_breakdown, "逐帧拉片 L1（参考片→结构化镜头表）")
-    # 拉片 L2（2026-10-14 补缺）：深度运镜推断 + 可选云端视觉景别 enrich（素材出域显式开启）
-    dispatcher.register("canvas.reference_breakdown_l2", CapabilityCategory.CANVAS,
-                        media_handlers.reference_breakdown_l2,
-                        "逐帧拉片 L2（运镜深度推断+景别视觉 enrich，置信度门槛如实标注）")
-    # 指令式视频编辑（2026-10-15）：Seedance Base64 / Kling 公网 URL 双渠道，失败保原镜
-    dispatcher.register("canvas.video_edit", CapabilityCategory.CANVAS,
-                        media_handlers.video_edit,
-                        "指令式视频编辑（改原片不重生成；失败保原镜，诚实标注）")
-    dispatcher.register("canvas.segment_retake", CapabilityCategory.CANVAS,
-                        media_handlers.segment_retake, "片段重拍（保音轨/时长对齐）")
-    # LibTV 对标补强 刀2（2026-10-12）：文本生剧本 / 导演结果落时间线
-    # （DirectorSkill 同源薄委托 → script_writer / director_timeline 单一真源）
-    dispatcher.register("pipeline.script_write", CapabilityCategory.PIPELINE,
-                        media_handlers.script_write, "文本生剧本（主题→LLM 剧本，降级如实标注）")
-    dispatcher.register("pipeline.director_apply_timeline", CapabilityCategory.PIPELINE,
-                        media_handlers.director_apply_timeline, "导演结果落时间线（分镜+素材→入轨）")
+    # ── media 族注册收口（2026-10-29 刀 B 配套，防本文件破 2000 行守卫）──
+    # 超分/抠像/修脸/风格/深度/拉片/重拍/剧本/落轨等 media+pipeline 能力的注册语句
+    # 全部迁到 capability_handlers_media.register_media_capabilities()；
+    # 本处只保留一行调用（能力目录真源在 agent_capability_catalog.CAPABILITY_ROWS）。
+    from app.core.capability_handlers_media import register_media_capabilities
+    register_media_capabilities(dispatcher, media_handlers)
     # YuE（乐）全曲生成：符号规划 / 渲染整曲 / 翻唱转录（本地或远程执行端，非云付费）
     dispatcher.register("canvas.yue_plan", CapabilityCategory.CANVAS,
                         canvas_handlers.yue_plan, "YuE 规划可编辑乐谱（不出音频）")

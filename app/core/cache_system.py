@@ -625,7 +625,7 @@ def _read_configured_disk_cache_mb(default_mb: int = 2048) -> int:
     QSettings/Qt 尚不可用）时静默回退默认值，不影响缓存系统正常启动。
     """
     try:
-        from PyQt6.QtCore import QSettings
+        from PySide6.QtCore import QSettings
         value = QSettings("拾光剪影", "Settings").value("cache_size", default_mb, type=int)
         return int(value) if value else default_mb
     except Exception:

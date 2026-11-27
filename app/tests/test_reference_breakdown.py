@@ -143,7 +143,8 @@ def _make_test_video(path: str, colors=("red", "green", "blue")) -> bool:
             fh.write("file '%s'\n" % os.path.abspath(p).replace("\\", "/"))
     r = subprocess.run([ff, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", path],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     return r.returncode == 0 and os.path.isfile(path)
 
 

@@ -79,9 +79,9 @@ import logging
 import subprocess
 import threading
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent, QSize, QPoint
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QShortcut, QKeySequence, QDrag, QPixmap, QImage
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent, QSize, QPoint
+from PySide6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QShortcut, QKeySequence, QDrag, QPixmap, QImage
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
     QListWidgetItem, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,

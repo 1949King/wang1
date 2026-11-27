@@ -42,8 +42,8 @@ def show_first_run_notice(parent=None, *, force: bool = False) -> bool:
         if not force and not frm.should_show():
             return False
 
-        from PyQt6.QtCore import Qt
-        from PyQt6.QtWidgets import QMessageBox
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMessageBox
 
         box = QMessageBox(parent)
         box.setWindowTitle(frm.NOTICE_TITLE)

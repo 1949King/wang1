@@ -64,9 +64,9 @@ def _safe_unlink(path: str) -> None:
 def is_available() -> bool:
     """opentimelineio 是否已安装。
 
-    **只用 find_spec 探测，绝不真正 import** —— opentimelineio 的 C 扩展在
-    PyQt6 **之后**加载会段错误（access violation）；Qt GUI 进程必然先加载 PyQt6，
-    因此主进程绝不能 import 它。真正的读写在独立子进程完成（见 :func:`_run_worker`）。
+    **只用 find_spec 探测，绝不真正 import** —— PyQt6 时代实测其 C 扩展在
+    Qt **之后**加载会段错误（access violation）；迁移 PySide6 后继续遵守同一隔离纪律，
+    主进程绝不 import 它。真正的读写在独立子进程完成（见 :func:`_run_worker`）。
     """
     import importlib.util
 
@@ -96,9 +96,9 @@ _PROJECT_ROOT = os.path.dirname(
 def _run_worker(args: List[str], timeout: float = 180.0) -> Tuple[int, str, str]:
     """在**无 Qt 的独立子进程**里跑 OTIO 转换。
 
-    主进程（Qt GUI）绝不能 import opentimelineio —— 其 C 扩展在 PyQt6 之后加载
-    会段错误（`import PyQt6.QtCore, opentimelineio` → access violation；反序正常）。
-    故所有 OTIO 读写都交给子进程。返回 (returncode, stdout, stderr)。
+    主进程（Qt GUI）绝不能 import opentimelineio —— PyQt6 时代实测其 C 扩展在 Qt
+    之后加载会段错误（`import PyQt6.QtCore, opentimelineio` → access violation；反序正常）。
+    PySide6 迁移不取消隔离，所有 OTIO 读写仍交给子进程。返回 (returncode, stdout, stderr)。
     """
     import subprocess
     import sys
@@ -111,7 +111,7 @@ def _run_worker(args: List[str], timeout: float = 180.0) -> Tuple[int, str, str]
     #    `exe -m app.core.interchange._otio_worker formats` 不会被 Python 当成
     #    模块执行，main_qt6.py 直接把 -m 当普通参数忽略、拉起整个 GUI ——
     #    于是子进程永远不会返回，超时后 OTIO 导入导出在发布版里静默失效。
-    #    所以冻结版走 main_qt6.py 里同名的一个显式分流参数（在 import PyQt6
+    #    所以冻结版走 main_qt6.py 里同名的一个显式分流参数（在 import PySide6
     #    之前就 sys.exit），保证子进程里没有 Qt。
     if getattr(sys, "frozen", False):
         head = ["--otio-worker"]

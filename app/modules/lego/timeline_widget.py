@@ -12,12 +12,12 @@ import time
 import urllib.request
 import weakref
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QUrl, QPoint, QRect, QMimeData
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QTimer, QSize, QUrl, QPoint, QRect, QMimeData
+from PySide6.QtGui import (
     QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics,
     QPolygon, QShortcut, QKeySequence, QDrag, QPixmap, QImage,
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QSlider, QMenu, QToolTip
 )
@@ -69,15 +69,15 @@ from .clip_widget import ClipWidget
 class TimelineWidget(TimelineSelectionMixin, QWidget):
     """时间线主控件：轨道 / 片段 / 吸附 / 多选。"""
 
-    clip_selected = pyqtSignal(object)
-    playhead_moved = pyqtSignal(float)
+    clip_selected = Signal(object)
+    playhead_moved = Signal(float)
     # 补短 P1#8：转发 ClipWidget 的关键帧点击，方便 EditorModule 直接监听
-    clip_keyframe_clicked = pyqtSignal(object, dict)
-    files_dropped = pyqtSignal(list)
-    clip_context_action = pyqtSignal(str, object)  # action, clip_data
-    clip_trim_committed = pyqtSignal(object)  # 松手后规范化的 clip_data
-    razor_cut_at = pyqtSignal(float)  # 刀片工具：在时间线绝对时间切开
-    razor_mode_changed = pyqtSignal(bool)
+    clip_keyframe_clicked = Signal(object, dict)
+    files_dropped = Signal(list)
+    clip_context_action = Signal(str, object)  # action, clip_data
+    clip_trim_committed = Signal(object)  # 松手后规范化的 clip_data
+    razor_cut_at = Signal(float)  # 刀片工具：在时间线绝对时间切开
+    razor_mode_changed = Signal(bool)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -132,7 +132,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
 
     def snap_threshold_sec(self) -> float:
         """吸附阈值：按像素换算，放大后更精细；Alt 按下时关闭吸附。"""
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
         mods = QApplication.keyboardModifiers()
         if mods & Qt.KeyboardModifier.AltModifier:
             return 0.0
@@ -807,7 +807,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
             try:
                 widget.setGraphicsEffect(None)
                 if checked:
-                    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+                    from PySide6.QtWidgets import QGraphicsOpacityEffect
                     eff = QGraphicsOpacityEffect(widget)
                     eff.setOpacity(0.3)
                     widget.setGraphicsEffect(eff)
@@ -920,7 +920,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
     
     def _rename_track(self, track):
         """ """
-        from PyQt6.QtWidgets import QInputDialog
+        from PySide6.QtWidgets import QInputDialog
         new_name, ok = QInputDialog.getText(
             self, "Rename Track", "Track name:",
             text=track['name']
@@ -1116,7 +1116,7 @@ class TimelineWidget(TimelineSelectionMixin, QWidget):
         if vp is None:
             return 0.0
         try:
-            from PyQt6.QtCore import QPoint as _QP
+            from PySide6.QtCore import QPoint as _QP
             if not isinstance(global_pos, _QP):
                 global_pos = _QP(int(global_pos.x()), int(global_pos.y()))
             local = vp.mapFromGlobal(global_pos)

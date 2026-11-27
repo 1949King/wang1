@@ -164,6 +164,14 @@ def list_local_models() -> List[Dict[str, Any]]:
         logger.debug("[local_models_view] 社区来源链接组装失败", exc_info=True)
         for r in rows:
             r.setdefault("sources", [])
+    # 工具权重行自带 sources（仅 T0 已核链接），必须在 attach_sources 之后追加，
+    # 否则会被按「族」查表的 attach_sources 覆盖成空。
+    try:
+        from app.core.neural import tool_weights as TW
+
+        rows.extend(TW.tool_rows())
+    except Exception:
+        logger.debug("[local_models_view] 工具权重清单不可用", exc_info=True)
     return rows
 
 

@@ -33,9 +33,9 @@ import logging
 import subprocess
 import threading
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent, QSize, QPoint
-from PyQt6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QShortcut, QKeySequence, QDrag, QPixmap, QImage
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent, QSize, QPoint
+from PySide6.QtGui import QFont, QAction, QColor, QPainter, QPen, QBrush, QFontMetrics, QShortcut, QKeySequence, QDrag, QPixmap, QImage
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QGridLayout, QProgressBar, QListWidget,
     QListWidgetItem, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
@@ -1011,7 +1011,7 @@ class EditorUiBuilderMixin:
 
         # 首次刷新（如果已有缓存则立即显示）
         try:
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
             QTimer.singleShot(300, self._refresh_character_panel)
         except Exception as _e:
             logger.warning("操作异常（已忽略）: %s", _e)

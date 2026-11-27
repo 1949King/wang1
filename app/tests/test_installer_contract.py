@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -30,6 +31,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 NSI = ROOT / "scripts" / "installer.nsi"
+ISS = ROOT / "scripts" / "installer.iss"
 LICENSE = ROOT / "LICENSE.txt"
 
 
@@ -198,3 +200,165 @@ def test_license_text_is_real():
     txt = _text(LICENSE)
     assert len(txt) > 500, "LICENSE.txt 内容过短，不像真实的许可文本"
     assert "安装或使用本软件" in txt, "LICENSE.txt 不像许可协议"
+
+
+def test_inno_wizard_language_is_chinese():
+    """Inno 向导必须显式加载简体中文，否则界面是英文（NSI 侧同款契约）。
+
+    缺 [Languages] 段时 Inno 用内置英文 Default.isl：编译成功、装完才发现
+    向导全是 Next/Cancel/Install。语言文件随仓库携带（官方 6.5.0+ 翻译），
+    不依赖出包机 Inno 安装目录是否含该翻译（本机实测 Languages 目录无中文）。
+    """
+    txt = _text(ISS)
+    assert '[Languages]' in txt, "installer.iss 缺 [Languages] 段，向导将显示英文"
+    assert 'ChineseSimplified.isl' in txt, "未引用简体中文语言文件"
+    isl = ROOT / "scripts" / "ChineseSimplified.isl"
+    assert isl.exists(), "缺 scripts/ChineseSimplified.isl（官方简体中文翻译，需随仓库携带）"
+    assert 'LanguageID=$0804' in _text(isl), "语言文件不是简体中文（LanguageID 应为 $0804）"
+
+
+def test_inno_script_uses_version_truth_and_full_source():
+    """Inno 必须复用版本真源并打入完整 runtime，不能再写死版本或排除内核。"""
+    txt = _text(ISS)
+    assert '#ifndef APP_VERSION' in txt
+    assert '#error APP_VERSION' in txt
+    assert 'AppVersion={#APP_VERSION}' in txt
+    assert 'Source: "{#SRC_DIR}\\*"' in txt
+    assert 'recursesubdirs' in txt
+    assert 'Excludes:' in txt
+    excluded = next(line for line in txt.splitlines() if 'Excludes:' in line)
+    assert 'runtime' not in excluded.lower()
+
+
+def test_inno_script_excludes_private_outputs_and_preserves_user_data():
+    """不得携带本机作品；静默卸载必须保留用户数据，禁止递归删除整个安装目录。"""
+    txt = _text(ISS)
+    excluded = next(line for line in txt.splitlines() if 'Excludes:' in line)
+    for name in ('短剧AI剪辑输出', 'output', 'logs', 'debug.log'):
+        assert name in excluded
+    assert 'not UninstallSilent' in txt
+    assert "DelTree(ExpandConstant('{app}\\短剧AI剪辑输出')" in txt
+    assert "DelTree(ExpandConstant('{app}')," not in txt
+
+
+def test_inno_supports_single_file_and_disk_spanning():
+    """单文件受限时必须能用同一脚本分卷，每片 1 GiB，且不删减内容。"""
+    txt = _text(ISS)
+    assert 'DiskSpanning={#DISK_SPANNING}' in txt
+    assert 'DiskSliceSize=1073741824' in txt
+    assert 'LZMAUseSeparateProcess=yes' in txt
+
+
+# ── Lite 轻量版（2026-11-20：同一 iss 第二遍编译，排除 runtime 内核）──────
+
+def test_inno_lite_branch_excludes_runtime_and_keeps_private_excludes():
+    """Lite 分支必须排除 runtime\\*，且保留全量的四项私有排除。
+
+    全量行必须仍是第一条 Excludes 行（上面两条契约取「首行」断言不含
+    runtime）；Lite 行若漏掉任一私有排除，就会把本机作品/日志带进轻量包。
+    """
+    txt = _text(ISS)
+    assert '#ifdef LITE_BUILD' in txt, "缺 LITE_BUILD 编译期开关"
+    lines = [ln for ln in txt.splitlines() if 'Excludes:' in ln]
+    assert len(lines) >= 2, "应有全量与 Lite 两条 Excludes 行"
+    full, lite = lines[0], lines[1]
+    assert 'runtime' not in full.lower(), "第一条必须是全量行（不含 runtime）"
+    assert 'runtime\\*' in lite, "Lite 行必须排除 runtime\\*"
+    for name in ('短剧AI剪辑输出', 'output', 'logs', 'debug.log'):
+        assert name in lite, f"Lite 行漏掉私有排除项：{name}"
+
+
+def test_inno_lite_output_suffix_and_full_default():
+    """产物名后缀由 LITE_BUILD 决定：缺省全量无后缀，Lite 带 -Lite。
+
+    两版 AppId 与版本号相同，唯一区分就是文件名后缀；缺省分支若带后缀，
+    全量包会被误认成 Lite，两版产物还会互相覆盖。
+    """
+    txt = _text(ISS)
+    assert 'OutputBaseFilename=拾光剪影-Setup-{#APP_VERSION}{#SG_OUTPUT_SUFFIX}' in txt
+    assert '#define SG_OUTPUT_SUFFIX "-Lite"' in txt
+    assert '#define SG_OUTPUT_SUFFIX ""' in txt
+
+
+def test_inno_lite_installdelete_only_runtime():
+    """Lite 的 [InstallDelete] 只清 runtime 残骸，且只在 LITE_BUILD 分支内。
+
+    全量 → Lite 是同一 AppId 原地降级：旧内核约 4.37 GB 不清掉，轻量版
+    就白装了；但清理范围一旦扩到 output/素材库，就是删用户作品。
+    """
+    txt = _text(ISS)
+    assert '[InstallDelete]' in txt, "Lite 降级安装缺 [InstallDelete] 清残骸"
+    prev_lines = [ln for ln in txt[:txt.find('[InstallDelete]')].splitlines() if ln.strip()]
+    assert prev_lines[-1].strip() == '#ifdef LITE_BUILD', "[InstallDelete] 必须只在 LITE_BUILD 分支内"
+    body = txt.split('[InstallDelete]', 1)[1].split('\n[', 1)[0]
+    entries = [ln for ln in body.splitlines() if ln.strip().startswith('Type:')]
+    assert entries, "[InstallDelete] 没有清理条目"
+    for ln in entries:
+        assert 'filesandordirs' in ln, "清目录残骸必须用 filesandordirs"
+        assert '{app}\\runtime' in ln, f"清理范围越界（只许 runtime）：{ln}"
+
+
+def test_build_release_lite_wiring():
+    """--lite 必须真接线：参数校验 + /DLITE_BUILD 注入 + 按 -Lite 名精确校验。
+
+    只加参数不注入 define = 第二遍编译出的仍是全量包（静默错版）；
+    产物校验不带后缀 = 拿旧全量 exe 冒充 Lite 成功。
+    """
+    txt = (ROOT / "scripts" / "build_release.py").read_text(encoding="utf-8")
+    assert '"--lite"' in txt, "build_release.py 缺 --lite 参数"
+    assert 'lite: bool = False' in txt, "build_inno_installer 缺 lite 形参"
+    assert 'ap.error("--lite 只能与 --inno-installer 一起使用")' in txt
+    assert 'ap.error("--lite 是单文件轻量版，不与 --disk-spanning 同用")' in txt
+    assert 'args.append("/DLITE_BUILD")' in txt, "lite 模式没给 ISCC 注入 /DLITE_BUILD"
+    assert 'lite=args.lite' in txt, "main 没把 --lite 传进 build_inno_installer"
+    assert 'suffix = "-Lite" if lite else ""' in txt
+    assert '拾光剪影-Setup-{version}{suffix}.exe' in txt
+
+
+# ── VC++ 运行时随包（2026-11-19 实测：干净目标机弹「找不到 MSVCP140.dll」）──
+
+VC_DLLS = (
+    "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+    "vcruntime140.dll", "vcruntime140_1.dll", "concrt140.dll",
+)
+
+
+def test_vc_runtime_copied_next_to_exe_and_internal(tmp_path, monkeypatch):
+    """VC++ 运行时必须 app-local 放进 exe 根目录与 _internal 两处。
+
+    实测反例（2026-11-19）：构建机装了系统级 VC++ redist，PyInstaller 不收集
+    这些 CRT，自检也全过；但 dist 根与 _internal 均无 msvcp*/vcruntime*，
+    干净目标机安装后启动即弹「找不到 MSVCP140.dll」。Windows loader 优先搜
+    exe 所在目录：根目录一份修 exe 自身加载，_internal 一份覆盖各 .pyd 加载。
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import build_release as B
+
+    monkeypatch.setattr(B, "DIST", str(tmp_path / "app"))
+    monkeypatch.setattr(B, "INTERNAL", str(tmp_path / "app" / "_internal"))
+    B.ensure_vc_runtime()
+    system32 = Path(os.environ["SystemRoot"]) / "System32"
+    for base in (B.DIST, B.INTERNAL):
+        for name in VC_DLLS:
+            dst = Path(base) / name
+            assert dst.exists(), f"{name} 未随包放入 {base}"
+            assert dst.stat().st_size == (system32 / name).stat().st_size, (
+                f"{base} 下的 {name} 与 System32 源大小不一致"
+            )
+
+
+def test_vc_runtime_wired_after_complete_internal():
+    """ensure_vc_runtime 必须接进主流程：补包之后、自检之前。
+
+    函数存在但不接线 = 出包时不执行，产物依旧缺 CRT（静默坏掉）。
+    """
+    txt = (ROOT / "scripts" / "build_release.py").read_text(encoding="utf-8")
+    assert "def ensure_vc_runtime" in txt, "build_release.py 缺 ensure_vc_runtime 实现"
+    main_body = txt.split("def main(")[1]
+    i_complete = main_body.find("complete_internal()")
+    i_vc = main_body.find("ensure_vc_runtime()")
+    i_selftest = main_body.find("report = selftest()")
+    assert i_complete != -1 and i_vc != -1, "main 流程缺 complete_internal/ensure_vc_runtime 调用"
+    assert i_complete < i_vc < i_selftest, "补 CRT 必须在补包之后、自检之前"

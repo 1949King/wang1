@@ -4,6 +4,11 @@
 > 输入：用户提出将 DeepSeek 三项推理设计（MLA / PagedAttention / MoE 专家卸载缓存）移植进项目自营引擎，并适配其他模型与视频生成类模型，参考其他推理引擎理念。  
 > 本机基线：RTX 4060 Laptop **8GB** · sm89 (Ada) · CUDA 12.4 (torch 2.6.0+cu124) · 系统内存 15.3GB（可用约 5GB）· diffusers 0.40.0 · **torchao 实测未安装**（2026-10-25 复验：`pip list` 与 `find` 双证不存在；早前目录疑被并行会话/清理移除——矩阵中「已装未用」不成立，M4 第一锹 = 装回 + pin + 探针） · 无 triton / 无 xformers
 
+> **2026-10-27 基线更新（实测回填）**：torchao 已装回项目 venv —— **0.16.0**，torch 未动（仍 2.6.0+cu124）。
+> 版本墙实测：torchao **0.17.0 起要求 `torch >= 2.11`**（`torch.utils._pytree.register_constant` 缺失 ⇒ 直接 AttributeError），
+> 而 Windows 上 torch ≥2.11 只有 cu130 轮子（cu126/cu128 的 cp312/313 轮子止于 2.9.1）⇒ **想用 0.17+ 必须连 torch 一起升**。
+> 0.9.0~0.16.0 逐版本实测均可在 torch 2.6 上导入，**0.16.0 是上限**。⇒ M4-0 状态改为「已完成」。
+
 ---
 
 ## 1. 结论摘要（先看这一页）
@@ -373,6 +378,9 @@ CHANGELOG（V4.45 节）+ `app/version.py`（4.44.0 → 4.45.0）+ README/PROJEC
 | 矩阵单元格 | 矩阵口径 | 2026-10-25 实测 | 影响 |
 |---|---|---|---|
 | 低精度量化 | 「torchao 0.7.0 已装未用」 | **torchao 不在 venv**（`pip list`/`find` 双证；早前目录疑被并行会话/清理移除）；且 diffusers 0.40.0 全库无 `TorchAoConfig` | M4 第一锹 = 装回 + pin + 探针；量化路径 = torchao 原生 `quantize_()` 直作用 UNet，非 pipeline 配置 |
+
+> **2026-10-27 更新（本行已过期，以实测为准）**：torchao **0.16.0 已装入项目 venv**（`pip show torchao` 可验），
+> 探针不再返回 False。但「装得上」≠「用得了」——int8 实测画质崩，见新增 §12.3.1；INT4 在 Windows 上无可用内核。
 | 视频模型覆盖 | 「6 族已登记未验证」 | 注册表实为 **3 族**（`video_gen.py:214` VIDEO_MODELS：svd-xt-i2v / wan22-ti2v-5b / wan21-t2v-1.3b），仅 SVD 验证；混元/CogVideoX 只存在于注释 | 验收协议按 3 族跑，「6 族」数字不外引 |
 | 治理层数字 | 「12 切片 + 21 家云」 | 本次未能复验（backend_registry 无云厂商条目；渠道解析在 `execution_decider._resolve_aigc_channel`） | 对外材料引用前需复验，本文只用可证组件名（capability_catalog / engine_registry / execution_planner / draw_ledger / 渠道解析） |
 
@@ -391,6 +399,32 @@ CHANGELOG（V4.45 节）+ `app/version.py`（4.44.0 → 4.45.0）+ README/PROJEC
 | M4-2 INT4 weight-only（group 128） | 权重 ~1.8GB；Windows kernel 可用性实测（不可用则诚实记录并停在此档） | 质量 delta 可量化；反例（极端 rank/group）质量劣化被检出 |
 | M4-3 FP8 | sm89 + cu124 满足（device_profile fp8 位已认）；权重 ~3.2GB | 近无损判据同上；SVD/SDXL 双 arch 复测 |
 | M4-4 14B 点亮 | **组合拳验收，非单点银弹**：Wan2.1-T2V-1.3B（扩散权重 5.29GB）INT4/NF4 + P0-2 编码器缓存（T5 编码后卸，RAM 墙 13.7→~4GB）+ layer offload + DeepCache（降激活）⇒ 8GB 首次出片；Wan2.2-TI2V-5B 双专家 MoE 留 P2 | 真机出片 + 四档显存策略实测 + 质量档位标定 + 状态 unverified→verified |
+
+### 12.3.1 实测回填：M4-1 / M4-2 / M4-3 真机结论（2026-10-27）
+
+> 环境：RTX 4060 Laptop 8GB · torch 2.6.0+cu124 · torchao **0.16.0** · diffusers 0.40.0。
+> 方法：同 prompt / 同 seed=42 / 20 步，先跑 **fp16 自比对照组**（PSNR 99.00 ⇒ 严格可复现）再比 int8。
+> **结论：M4-1 → rejected（否决）；M4-2 → Windows 不可用；M4-3 → 能跑但无加速。**
+
+| 模型 | 方案 | UNet 权重 | 峰值显存 | 耗时比 | PSNR | 判定 |
+|---|---|---|---|---|---|---|
+| SD1.5 | fp16 基线 | 1.60 GB | 2.02 GB | 1.00 | 99.00（自比） | — |
+| SD1.5 | int8 v2（PerRow） | 1.35 GB（**-15.7%**） | 1.76 GB | 1.09 | 27.44 | rejected |
+| SDXL | fp16 基线 | 4.78 GB | 5.21 GB | 1.00 | 99.00（自比） | — |
+| SDXL | int8 v2（PerRow） | **2.71 GB（-43.4%）** | 4.07 GB | 0.96 | **5.29（整张全黑）** | **rejected** |
+
+- **覆盖率**：SDXL `Linear 743/743` 全部量化（Linear 2.08GB / Conv2d 0.62GB）；SD1.5 仅部分 Linear（0.50GB vs Conv2d 1.10GB）⇒ **Conv2d 不被 int8 weight-only 覆盖，是 SD1.5 收益只有 15.7% 的根因**。
+- **显存目标成立、画质失效**：本行 M4-1 写的「6.46GB → ~3.3GB」在量级上达成（实测 4.78 → 2.71），但按同行的「PSNR 不掉级」判据**不合格，不得接入主路径**。SDXL 输出像素 `mean=0 / std=0`，且不是覆盖率不足（Linear 全量化）。
+- **耗时无收益**（0.96~1.12x）：fp16 激活 × int8 权重要走反量化，吃不到 tensor core。
+- **M4-2 INT4 不可用**：torchao 0.16 的 int4 走 mslk，而 `mslk-1.3.0+cu130-py3-none-win_amd64.whl` 是 **351KB 纯 Python 空壳（0 个 .pyd/.dll）**，且强制 `import triton`；实测装上前者会让 **torchao 整体 import 失败**（`mslk.quantize.triton.fp8_quantize` → `ModuleNotFoundError: triton`）。已卸载恢复。
+- **M4-3 FP8 仅能跑**：本机 `torch._scaled_mm` 报 `CUBLAS_STATUS_NOT_SUPPORTED` ⇒ 反量化回退，**无加速**；画质/显存对照未做 ⇒ 状态 `unverified`。
+
+**落点**：以上数字已固化为代码资产 `app/core/neural/quant_descriptor.py`（量化描述符 + 实测证据台账 + 三态判定 + `is_admissible()` 准入裁决，`rejected` 的否决权高于门槛权）。复跑脚本在会话工作目录 `verify_int8_diffusers.py`。
+
+**三个测量陷阱**（写进来免得重犯）：
+1. 量化后 weight 是 `Int8Tensor`：`.dtype` 仍报 fp16、`.data` 返回 fp16 视图，真实存储是 `qdata`(int8) + `scale`。按 `parameters()` 的 `element_size` 求和会得出「零收益」的假结论，必须用 `torch.cuda.memory_allocated()` 差值。
+2. torchao 0.16 断言 `version=2` 只支持 `group_size=None`（传 32 直接 `AssertionError`）；`version=1` 在本组合下未产生可测压缩。
+3. `diffusers_image.local_dir()` 返回**相对路径**，外部脚本必须先 `os.chdir(项目根)`，否则误报「模型未下载」。
 
 ### 12.4 统一标准（六条契约——先立契约，再填细胞）
 
@@ -428,6 +462,11 @@ S5 M4-2/3/4：INT4 → FP8 → 14B 点亮        —— 硬指标验收
 S6 P1 三项：组件调度 → SageAttention 探针 → 抽卡连续批
 S7 模型验收协议跑通 Wan 2 族 unverified→verified（+ 混元/CogVideoX 是否扩登记由 S7 数据定）
 每步交付 = 契约登记 + 代码 + 测试 + _verify 门禁 + 真机标定 + CHANGELOG
+
+> **2026-10-27 路线图调整**：**S1 的 "M4-1 INT8" 已按实测否决**（见 §12.3.1），不可再按原计划推进。
+> 修订后的 S1 应收敛为：**M4-0 环境修复（已完成）+ M4-3 FP8 的画质/显存对照**（FP8 能跑但无加速，需先证明不掉级再看值不值得留）。
+> 若仍要打「8GB 点亮更大模型」这张牌，候选换成 **NF4 / GGUF 选路**（ComfyUI 生态成熟，项目已有 `comfy_provider` 可接），
+> 且必须先过 `quant_descriptor.is_admissible()` 这道闸再谈收益。
 ```
 
 ### 12.6 拍板项更新

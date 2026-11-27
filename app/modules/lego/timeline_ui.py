@@ -3,16 +3,16 @@
 =========================================================
 扁平化、无边框、清晰分层的轨道 UI
 """
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PySide6.QtCore import Signal, Qt
 
 
 class TrackRow(QWidget):
     """单条轨道行"""
     
-    mute_toggled = pyqtSignal(bool)
+    mute_toggled = Signal(bool)
     
     def __init__(self, name="轨道", track_type="video", index=0):
         super().__init__()

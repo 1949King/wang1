@@ -34,13 +34,32 @@ BASE = (
     "lowres, low quality, worst quality, blurry, jpeg artifacts",
     "bad anatomy, bad hands, extra fingers, extra limbs, fused fingers",
     "watermark, signature, text, logo, username",
+    # 2026-11-12 用户反馈"恐怖谷"：老人/近景脸最容易出蜡像感、五官不对称、比例畸变
+    "waxy skin, plastic skin, uncanny valley, doll-like, asymmetric face",
+    "distorted facial features, disproportionate features, malformed eyes",
 )
+
+#: CLIP 上下文 77 token 是硬上限；74 是实测留余量的安全线（1 个逗号片段 ≈ 词数+1 token）
+MAX_NEG_TOKENS_EST = 74
+
+#: 人种相关词：命中即视为「anchor 段」，在 build_negatives 里前置（丢了会直接跑成欧美脸）
+_ETHNIC_WORDS = ("western", "caucasian", "european", "american", "african", "asian")
+
+
+def _is_ethnic(segment: str) -> bool:
+    low = str(segment or "").lower()
+    return any(w in low for w in _ETHNIC_WORDS)
+
 
 GENRES: Dict[str, Dict[str, object]] = {
     "short_drama": {
         "label": "现代短剧",
+        # ★ 2026-11-01：人种负向词**只在 prompt_bridge.apply_face_bias 一处**出
+        #   （`western, caucasian, american, european face`）。此前这里也写了一份
+        #   `western face, caucasian, european features`，两处语义相同、字面不同 ⇒
+        #   去重逻辑（按逗号拆）去不掉，负向总长 80 token 超 CLIP 上限 77，
+        #   尾部 `western, american, european face` 被**静默截断**。
         "extra": (
-            "western face, caucasian, european features",
             "cartoon, anime, illustration, 3d render",
             "oversaturated, plastic skin, doll-like",
         ),
@@ -49,7 +68,6 @@ GENRES: Dict[str, Dict[str, object]] = {
         "label": "古装/国风",
         "extra": (
             "modern clothing, t-shirt, jeans, sneakers, sneaker, backpack",
-            "western face, caucasian",
             "modern city, car, phone, watch, glasses",
         ),
     },
@@ -126,8 +144,16 @@ def build_negatives(
     if str(user_negative or "").strip():
         chunks.append(str(user_negative))
     chunks.extend(BASE)
+    # ★ 2026-11-01：人种锚定段**前置**。它由 prompt_bridge.apply_face_bias 作为 extra
+    #   传进来，原本排在末尾 —— 一旦总长超 CLIP 的 77 token 就会被静默截掉，
+    #   而「人脸跑成欧美」比「皮肤塑料感」严重得多，顺序必须体现这个优先级。
+    _ethnic: List[str] = []
+    _rest: List[str] = []
+    for seg in (extra or ()):
+        (_ethnic if _is_ethnic(seg) else _rest).append(seg)
+    chunks.extend(_ethnic)
     chunks.extend(GENRES[key]["extra"])  # type: ignore[arg-type]
-    chunks.extend(extra or ())
+    chunks.extend(_rest)
     seen = set()
     merged: List[str] = []
     for word in _split(chunks):
@@ -136,7 +162,17 @@ def build_negatives(
             continue
         seen.add(low)
         merged.append(word)
-    return ", ".join(merged)
+    # ★ 硬上限守卫：CLIP 只吃 77 token，超了 diffusers **静默截断**（不报错、无提示）。
+    #   实测 1 个逗号片段 ≈ 词数+1 个 token（60 词 ≈ 80 token）⇒ 74 是留余量的安全线。
+    kept: List[str] = []
+    est = 0
+    for word in merged:
+        cost = len(word.split()) + 1
+        if kept and est + cost > MAX_NEG_TOKENS_EST:
+            break
+        kept.append(word)
+        est += cost
+    return ", ".join(kept)
 
 
 def describe(genre: str = "") -> Dict[str, object]:

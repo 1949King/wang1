@@ -10,7 +10,7 @@
 
 设计原则 / Design Principles
 --------------------------------
-1. **PyQt6 QSS 友好**：全部 token 是 hex / rgba 字面量，不依赖 CSS color-mix()
+1. **PySide6 QSS 友好**：全部 token 是 hex / rgba 字面量，不依赖 CSS color-mix()
 2. **向后兼容**：保留原 ThemeManager.COLORS_DARK/LIGHT 的所有旧 key（bg_main 等），
    新组件可直接用 brand / glass_bg / accent_amber 等新 key
 3. **项目主蓝优先**：accent 保留 #2f7bff（拾光剪影既有的主蓝，深度嵌入 modules.py
@@ -204,7 +204,7 @@ LIGHT_TOKENS: Dict[str, str] = {
 # 动效设计令牌 — Motion Design Tokens
 # ════════════════════════════════════════════════════════════════════
 # 来源: vendor/AI-Canvas-tauri/src/styles/base.css 行 195-224
-# PyQt6 用 QPropertyAnimation 时直接读这套字符串当 timingFunction/curveShape
+# PySide6 用 QPropertyAnimation 时直接读这套字符串当 timingFunction/curveShape
 
 MOTION_TOKENS: Dict[str, str] = {
     "ease_out_expo":     "cubic-bezier(0.16, 1, 0.3, 1)",

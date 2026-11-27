@@ -80,7 +80,8 @@ def probe_duration(video: str) -> float:
     if not ff:
         return 0.0
     try:
-        r = subprocess.run([ff, "-i", video], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([ff, "-i", video], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60)
         m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", r.stderr or "")
         if not m:
             return 0.0
@@ -142,7 +143,8 @@ def detect_scenes(video: str, *, threshold: float = DEFAULT_SCENE_THRESHOLD,
         cmd = [ff, "-hide_banner", "-i", video, "-an",
                "-vf", f"select='gt(scene,{threshold})',metadata=print",
                "-f", "null", "-"]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=1800)
         pts = parse_scene_points(r.stderr or "")
         dur = probe_duration(video)
         shots = merge_short_shots([p["time"] for p in pts], dur, min_shot)
@@ -205,7 +207,8 @@ def extract_frame(video: str, at: float, out_path: str) -> bool:
         r = subprocess.run([ff, "-y", "-hide_banner", "-loglevel", "error",
                             "-ss", f"{max(0.0, at):.3f}", "-i", video,
                             "-frames:v", "1", "-q:v", "3", out_path],
-                           capture_output=True, text=True, timeout=180)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
         return r.returncode == 0 and os.path.isfile(out_path)
     except Exception as e:
         logger.debug("[reference_breakdown] 导帧失败 %.3fs: %s", at, e)

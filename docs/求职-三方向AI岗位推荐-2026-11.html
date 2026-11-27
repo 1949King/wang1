@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三方向 AI 岗位推荐 · 成都 · 2026-11</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#ffffff; --ink:#1a1d23; --ink2:#4a5060; --ink3:#7a8291;
+    --line:#e3e6ec; --accent:#2f5fd0; --accent-soft:#eef3fd;
+    --good:#1f8a5b; --good-soft:#eaf7f0;
+    --warn:#b7791f; --warn-soft:#fdf6e7;
+    --bad:#c0392b; --bad-soft:#fdeeec;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:36px 20px 64px; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    font-size:15px; line-height:1.75;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header{margin-bottom:28px}
+  h1{font-size:26px;margin:0 0 8px;letter-spacing:-.3px}
+  .sub{color:var(--ink3);font-size:13.5px}
+  h2{font-size:19px;margin:40px 0 6px;padding-top:18px;border-top:2px solid var(--line)}
+  h2 .badge{font-size:12px;font-weight:600;padding:2px 9px;border-radius:20px;vertical-align:middle;margin-left:8px}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  p{margin:8px 0}
+  .lead{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:16px 18px;margin:16px 0}
+  .lead b{color:var(--accent)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--card);font-size:13.5px;border-radius:8px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.05)}
+  th,td{padding:9px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f6;font-weight:600;color:var(--ink2);font-size:12.5px;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td.salary{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+  .muted{color:var(--ink3);font-size:12.5px}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:4px;margin:1px 2px 1px 0;white-space:nowrap}
+  .t-good{background:var(--good-soft);color:var(--good)}
+  .t-warn{background:var(--warn-soft);color:var(--warn)}
+  .t-bad{background:var(--bad-soft);color:var(--bad)}
+  .t-info{background:var(--accent-soft);color:var(--accent)}
+  .box{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:14px 0;background:var(--card)}
+  .box.warn{background:var(--warn-soft);border-color:#f0e2c0}
+  .box.bad{background:var(--bad-soft);border-color:#f5d5d0}
+  .box.good{background:var(--good-soft);border-color:#cdeadd}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  .stars{color:var(--accent);letter-spacing:1px;white-space:nowrap}
+  .na{color:var(--ink3)}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink3);font-size:12.5px}
+  .kbd{background:#eef0f4;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12.5px;font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>成都 · 三方向 AI 岗位推荐</h1>
+  <div class="sub">基准：2026 年 10–11 月成都招聘平台挂牌信息 · 求职者条件：专科（建筑工程技术）· 零编程基础 · AI 原生交付 · 现薪 5–8K · 硬需求「成都 + 上五休二」</div>
+</header>
+
+<div class="lead">
+  <b>核心判断：</b>「拾光剪影」是<b>作品集型</b>敲门砖，不是<b>履历型</b>敲门砖。它证明的是「一个人能把创意生产链路从需求拆到跑通」，
+  不是「软件工程功底」。所以三条线的命中率差异很大：<br>
+  <b>方向二（AIGC 视觉内容）命中率最高</b> → 不考编程、不看学历、要的就是作品集；<br>
+  <b>方向一（AI 应用交付）天花板最高</b> → 但技术面必考 Python 与接口对接，是明确的短板；<br>
+  <b>方向三（建筑 + AI）学历门槛最低</b> → 你的专业就是对口专业，但薪资 4–8K，等于原地踏步。
+</div>
+
+<div class="box bad">
+  <b>⚠️ 2026-11 修正：必须叠加「泡沫出清」这个变量，结论要重排（详见下文「抗跌性」章节）</b>
+  <p style="margin:8px 0 4px">上面三句话只算了「能不能进」，没算「进去之后这行还在不在」。补上这一层之后：</p>
+  <ul>
+    <li><b>抗跌性排序 = 方向三 ≥ 方向一 &gt; 方向二</b>（和「命中率」排序完全相反）</li>
+    <li>方向二塌得最快：AI 漫剧承制方一季度 1216 家 → 二季度 698 家（<b>一个季度少 43%</b>）；承制价从每分钟 3000~5000 元跌到 <b>500~1000 元</b>；头部公司酱油文化半年从 1500 人缩到几百人。</li>
+    <li>但塌的是<b>「只会抽卡的执行层」</b>和<b>「按分钟卖产能的承制方」</b>，不是内容需求本身。这条线能不能待，取决于一年内能不能从抽卡爬到工作流/导演/剪辑那一层。</li>
+  </ul>
+</div>
+
+<!-- ============ 方向一 ============ -->
+<h2>方向一 · AI 应用交付 / 实施 <span class="badge t-info">天花板高 · 入职会被卡</span></h2>
+<p class="muted">干什么：把大模型、Coze/Dify、RPA 塞进传统企业的具体业务里——梳理流程、搭智能体、对接第三方 API、写个小内部工具、上线后运维。雇主多是「传统企业的数字化部门」或「系统集成商」，不是大厂。</p>
+
+<table>
+  <tr>
+    <th>岗位 / 公司</th><th>薪资</th><th>学历 / 经验</th><th>工时</th><th>福利</th><th>硬门槛</th>
+  </tr>
+  <tr>
+    <td><b>AI 应用工程师</b><br><span class="muted">四川佳海电子（通讯零售 1500 人，成都高新区）</span></td>
+    <td class="salary">8–15K</td>
+    <td>大专 / 2 年以上</td>
+    <td class="muted">未写明<br>零售行业需当场问单双休</td>
+    <td>五险一金、年终奖、绩效、带薪年假、生育补贴、加班补贴、技能培训</td>
+    <td>会用 Cursor / Claude Code；Python 或 JS 至少一种；第三方 API 对接；能独立交付小型 Web 工具</td>
+  </tr>
+  <tr>
+    <td><b>智能体应用工程师</b><br><span class="muted">成都一码当先（0–20 人，武侯）</span></td>
+    <td class="salary">6–9K<br><span class="muted">正文写 7–8K</span></td>
+    <td>大专 / 1–3 年<br><span class="tag t-good">JD 明写「学历专业不限」</span></td>
+    <td>朝九晚六 · <b>周末双休</b></td>
+    <td>五险一金、带薪年假、节日福利、定期团建；试用期 3 个月（前 2 个月 80%）</td>
+    <td>Coze / Dify / LangChain 任一有实战作品；Prompt 工程；基础接口调试</td>
+  </tr>
+  <tr>
+    <td><b>AI 应用开发工程师</b><br><span class="muted">成都聚立创智（&lt;50 人，锦江）</span></td>
+    <td class="salary">4–7K</td>
+    <td>大专及以上</td>
+    <td class="muted">未写明</td>
+    <td>绩效奖金、健康体检、带薪年假、交通补助、岗位晋升</td>
+    <td>Python、向量库、提示词工程、有落地项目；<span class="tag t-warn">初筛后有技术笔试</span></td>
+  </tr>
+  <tr>
+    <td><b>AI 应用开发专员</b><br><span class="muted">成都新光世界智能（2026-04 新成立，新津）</span></td>
+    <td class="salary">4.8–7.5K</td>
+    <td>大专 / 应届可</td>
+    <td class="muted">未写明</td>
+    <td>五险一金、项目奖金、节日福利、技术培训、技术岗晋升通道</td>
+    <td>了解基础编程或计算机基础；学习能力</td>
+  </tr>
+  <tr>
+    <td><b>智能实施工程师（实习）</b><br><span class="muted">用友网络四川分公司</span></td>
+    <td class="salary">2–3K</td>
+    <td>大专 / 实习</td>
+    <td class="muted">—</td>
+    <td class="muted">—</td>
+    <td class="muted">说明：大厂实施线的起点就是这个价，别被「用友」两个字迷惑</td>
+  </tr>
+</table>
+
+<div class="box warn">
+  <b>这条线的真相：</b>
+  <ul>
+    <li>薪资落差很大：<b>8–15K 那档要 2 年经验 + 真会写代码</b>；你能投的是 4.8–7.5K 那一档，也就是略低于或持平现在的收入。</li>
+    <li>面试一定问：Python 语法、<span class="kbd">requests</span> 怎么发请求、接口鉴权怎么做、数据库怎么查。这些是你能补的，但不是今天能答的。</li>
+    <li>公司普遍小（0–50 人），稳定性一般；好处是一人多职、接触面广，能快速攒「我做过什么」。</li>
+    <li>你的项目在这里能讲的是<b>「模型选型 + 显存约束 + 打包交付 + 验收」</b>，这几件事很多本科应届生讲不出来。</li>
+  </ul>
+</div>
+
+<!-- ============ 方向二 ============ -->
+<h2>方向二 · AIGC 视觉内容 / AI 视频制作 <span class="badge t-good">命中率最高 · 推荐主攻</span></h2>
+<p class="muted">干什么：把剧本/分镜拆成提示词 → 批量生图生视频 → 挑片修脸 → 剪映/PR/AE 成片。核心考核是「能不能稳定出片」，不是「会不会写代码」。学历普遍大专或不限，双休比例是三条线里最高的。</p>
+
+<table>
+  <tr>
+    <th>岗位 / 公司</th><th>薪资</th><th>学历 / 经验</th><th>工时</th><th>福利</th><th>硬门槛</th>
+  </tr>
+  <tr>
+    <td><b>AIGC 制作师</b><br><span class="muted">猎聘 · 成都高新区，<b>招 10 人</b></span></td>
+    <td class="salary">5–10K<br>+ 提成</td>
+    <td>大专 / 1 年以下<br><span class="tag t-good">学生可投</span></td>
+    <td>早 9 晚 6 · <b>周末双休</b> · 上下班不打卡</td>
+    <td><b>六险一金（公积金 8%）</b>、试用期即买商业保险、带薪年假、团队聚餐、扁平管理、岗位晋升</td>
+    <td>精通 1 款生图（SD / MJ）+ 1 款生视频（即梦 / Runway）；写提示词控角色一致性；懂景别/构图/光影；接受批量抽卡与赶工期</td>
+  </tr>
+  <tr>
+    <td><b>AIGC 制作（AI 短剧）</b><br><span class="muted">芯聆启悦（浩旺集团旗下，人瑞代招）</span></td>
+    <td class="salary">综合 5–8K<br><span class="muted">面试定薪，试用期 8 折</span></td>
+    <td>大专 / 经验不限</td>
+    <td>早 9 晚 6 · <b>周末双休</b> · 节假日正常休</td>
+    <td>五险一金、定期体检、加班补助、年终奖、<b>股票期权</b>、带薪年假、员工旅游、通讯/交通/住房补贴、零食下午茶</td>
+    <td><b>投递必须附 AI 作品集</b>（AI 分镜 / 短片 / 动画片段 / 真人短剧）；AI 原画数字资产设计</td>
+  </tr>
+  <tr>
+    <td><b>AI 制作师</b><br><span class="muted">绘唐科技（天使轮 20–99 人，锦江，自研 AI 影视工坊）</span></td>
+    <td class="salary">6–8K</td>
+    <td>大专 / 经验不限</td>
+    <td>10:00–19:00（午休 1.5h）· <b>周末双休</b></td>
+    <td>五险一金、带薪年假、全勤奖、底薪+提成、绩效</td>
+    <td>豆包 / 即梦 + 剪映；AI 漫剧、短剧成片；能把文档/文献转成视觉内容</td>
+  </tr>
+  <tr>
+    <td><b>AIGC 视觉内容工程师</b><br><span class="muted">云境清禾（双流天府新区，1–3 年）</span></td>
+    <td class="salary">4–8K<br><span class="muted">JD 写 3–10K，按实操定级 + 项目提成</span></td>
+    <td>大专 / 1–3 年</td>
+    <td class="muted">未写工时，JD 声称「无无效加班」</td>
+    <td>带薪培训、技术带教、完整工作流资料共享、定期技术复盘</td>
+    <td>Wan3 / Seedance、Prompt 调优、分镜逻辑、PS/PR/剪映精修；能解决崩坏/穿模/细节失真</td>
+  </tr>
+  <tr>
+    <td><b>AI 提示词工程师（漫剧抽卡）</b><br><span class="muted">阅上如涯文化（20–99 人，武侯）</span></td>
+    <td class="salary">5K–1 万</td>
+    <td>大专 / 1–3 年</td>
+    <td class="muted">未写明</td>
+    <td class="muted">JD 未列，需面谈</td>
+    <td>即梦 / 可灵 / 海螺 / Lovart / MJ；AE 或剪映；人设三视图五视图</td>
+  </tr>
+  <tr>
+    <td><b>AI 视频制作与拍摄剪辑</b><br><span class="muted">青年印象广告（天府软件园 B 区）</span></td>
+    <td class="salary">8–15K<br>+ 提成（上限可观）</td>
+    <td>大专 / 1 年以上</td>
+    <td>9:30–18:00 · <b>周末双休</b></td>
+    <td>五险一金、绩效奖金、带薪年假、餐费补贴、节日福利、出差补贴</td>
+    <td><span class="tag t-bad">门槛最高</span>要会实拍：PR/AE/达芬奇、单反/微单、布光；外加 AI 生成与后期全流程</td>
+  </tr>
+  <tr>
+    <td><b>AIGC 内容运营 / 提示词</b><br><span class="muted">初创工作室（AI 绘画方向，58 同城）</span></td>
+    <td class="salary">8–15K</td>
+    <td><span class="tag t-good">学历不限</span></td>
+    <td class="muted">未写明</td>
+    <td class="muted">未写明</td>
+    <td>作品集 + 主流出图工具参数；账号内容策划</td>
+  </tr>
+</table>
+
+<div class="box good">
+  <b>为什么这条线最适合你：</b>
+  <ul>
+    <li><b>不考编程、不卡学历</b>——筛人看作品集和工具实操。这两样恰好是你项目里真做过的事。</li>
+    <li><b>JD 第一条就在描述你的项目</b>：「多模型生图生视频 + 提示词控一致性 + 工作流搭建 + 成片」——你的画布就是这条链路的实现。</li>
+    <li><b>双休比例最高</b>：表里 7 个岗有 5 个明写周末双休，且多数写「朝九晚六 / 不打卡 / 无无效加班」。这是三条线里唯一能直接满足你硬需求的。</li>
+  </ul>
+</div>
+
+<div class="box bad">
+  <b>但要认清现实（这一节 2026-11 已按泡沫出清数据重写）：</b>
+  <ul>
+    <li><b>真实薪资中位数是 5–8K，不是 15K</b>。8–15K 那两档：一个要实拍功底（PR/AE/达芬奇 + 单反布光），一个是初创工作室画饼。别拿最高值当预期。</li>
+    <li><b>抽卡师这个岗位本身正在被压价</b>：正职抽卡师月薪 4000–7000 元，媒体原话是「从清晨干到凌晨，月薪只有数千元」，<b>涨薪空间有限</b>。原因很硬——一家制作公司算账：算力 3 万 + 人工 3 万 = 6 万，平台直接问「5.5 万能不能接」。<b>算力是刚性支出，人工是被压的那一项。</b></li>
+    <li><b>你在和被迫转型的老手抢岗</b>：2026 年真人短剧拍摄量减少约 80%，横店竖屏在拍剧组同比降 82.5%。这批有影视经验的编剧、导演、剪辑、摄影正在涌入 AI 短剧岗位。<b>不是和别的小白竞争，是和有经验的人竞争。</b></li>
+    <li><b>作品集是入场券，没有就免谈</b>。表里至少 3 个岗明写「投递请附 AI 作品集」。</li>
+  </ul>
+</div>
+
+<!-- ============ 方向三 ============ -->
+<h2>方向三 · 建筑 / 工程 + AI <span class="badge t-warn">学历最友好 · 薪资不动</span></h2>
+<p class="muted">先说清楚：你的「建筑工程技术」在这些岗位上是<b>对口专业</b>，不是跨行。这类岗是「学历墙」对你唯一敞开的方向。但代价是薪资 4–8K 起步、且大量岗位要 Revit。</p>
+
+<table>
+  <tr>
+    <th>岗位 / 公司</th><th>薪资</th><th>学历 / 经验</th><th>工时</th><th>福利</th><th>备注</th>
+  </tr>
+  <tr>
+    <td><b>售前技术人员</b>（智慧工地 / 智能化系统集成）<br><span class="muted">中瑞科技（11–20 人，武侯）</span></td>
+    <td class="salary">7–12K</td>
+    <td>大专 / 应届可<br><span class="muted">JD 另要求 2 年集成经验</span></td>
+    <td><b>周末双休</b></td>
+    <td>社保医保、绩效奖金、员工旅游、带薪年假、年终分红、全勤奖、交通补助</td>
+    <td><span class="tag t-good">方向三最优</span>弱电/通信/智慧园区方案、标书、讲标；考的是「能不能讲清楚」，能练</td>
+  </tr>
+  <tr>
+    <td><b>BIM 施工动画工程师</b>（3D 可视化）<br><span class="muted">成都工建数智（20–99 人，郫都）</span></td>
+    <td class="salary">6–9K</td>
+    <td>大专 / 3–5 年</td>
+    <td class="muted">未写明</td>
+    <td class="muted">未列</td>
+    <td><span class="tag t-info">最贴你项目</span>施工工艺演示、工程场景还原——和画布里的 3D 导演台/渲染能力同源</td>
+  </tr>
+  <tr>
+    <td><b>BIM 机电工程师</b><br><span class="muted">极智数科（20–99 人，武侯）</span></td>
+    <td class="salary">9–14K</td>
+    <td>大专 / 1–3 年</td>
+    <td class="muted">未写明</td>
+    <td class="muted">未列</td>
+    <td>楼宇自控 / 弱电全专业建模（综合布线、监控、门禁、BA、数据中心）</td>
+  </tr>
+  <tr>
+    <td><b>BIM 工程师</b><br><span class="muted">基准方中（5000–10000 人，东光）</span></td>
+    <td class="salary">4–8K·15 薪<br><span class="muted">另一条线 8–13K</span></td>
+    <td>大专<br><span class="muted">经验不限 / 1–3 年两档</span></td>
+    <td class="muted">未写明</td>
+    <td class="muted">未列</td>
+    <td>纯 Revit 建模岗，经验不限那一档是能进的门</td>
+  </tr>
+  <tr>
+    <td><b>技术服务工程师</b>（装配式/智能建造/BIM 售前）<br><span class="muted">宏业软件（建筑软件商，金牛）</span></td>
+    <td class="salary">3–4K</td>
+    <td><b>专科 / 建筑类专业</b></td>
+    <td>朝九晚五</td>
+    <td>五险一金、提成、旅游、技术培训</td>
+    <td><span class="tag t-bad">学历完全对口但薪资比你现在还低</span>做方案 PPT、宣讲、培训</td>
+  </tr>
+  <tr>
+    <td><b>智能化管理岗</b>（智慧工地运维）<br><span class="muted">龙泉驿某施工项目</span></td>
+    <td class="salary">底薪 3.5K 起</td>
+    <td>大专 / 3–5 年</td>
+    <td><span class="tag t-bad">驻场</span></td>
+    <td>五险一金、包三餐、包住、年终奖</td>
+    <td><b>本质是换个工地继续驻场</b>，直接违反你的第一诉求，不建议</td>
+  </tr>
+</table>
+
+<div class="box warn">
+  <b>方向三只有两条值得看：</b>
+  <ul>
+    <li><b>建筑软件商 / 系统集成商的「售前 · 实施」</b>（7–12K、双休）——吃「专业对口 + 会讲」。这是方向三里唯一薪资和作息都不亏的。</li>
+    <li><b>BIM 施工动画 / 三维可视化</b>（6–9K）——吃你项目里的 3D 能力，比纯建模岗有意思得多。</li>
+  </ul>
+  <b>不建议的：</b>纯 BIM 建模岗（4–8K，纯体力活，要 Revit，和你项目零关系）、智慧工地运维岗（驻场，等于原地转圈）。
+</div>
+
+<!-- ============ 兜底 ============ -->
+<h2>兜底池 · AI 训练师 / 标注质检 <span class="badge t-info">过渡用 · 不是方向</span></h2>
+<p class="muted">如果「3 个月内必须先回成都、先有双休」，这一池是门槛最低的：大专可投、经验不限、双休、写代码零要求。但它三年后能力会贬值，只适合当跳板。</p>
+
+<table>
+  <tr><th>岗位 / 公司</th><th>薪资</th><th>学历 / 经验</th><th>工时</th><th>备注</th></tr>
+  <tr>
+    <td><b>AI 模型训练师</b>（内容评估）<br><span class="muted">北京知道创宇（1000–9999 人，世纪城）</span></td>
+    <td class="salary">5–6K<br><span class="muted">3500 底薪 + 100 全勤 + 2000 浮动绩效</span></td>
+    <td>大专 / 经验不限<br>专业不限</td>
+    <td>10:00–19:00 · <b>周末双休</b></td>
+    <td>数据清洗标注、逻辑校验、质量自检</td>
+  </tr>
+  <tr>
+    <td><b>AIGC 视频生成训练标注</b><br><span class="muted">语言桥（500–999 人，武侯）</span></td>
+    <td class="salary">3–6K</td>
+    <td>大专 / 经验不限</td>
+    <td>早 10 晚 7 · <b>周末双休</b> · <span class="tag t-good">居家办公</span></td>
+    <td>图像/视频/语音/文本标注，需数据分析强</td>
+  </tr>
+  <tr>
+    <td><b>数据标注及质检</b>（具身智能多模态）<br><span class="muted">四川奇星训数（高新区 → 金牛）</span></td>
+    <td class="salary">8–10K</td>
+    <td>大专 / 1–3 年</td>
+    <td class="muted">未写明</td>
+    <td>多模态数据标注质检；后期会迁址金牛区，介意慎投</td>
+  </tr>
+  <tr>
+    <td><b>AI 视频标注</b>（外包）<br><span class="muted">上海仁联（锦江）</span></td>
+    <td class="salary">5–6K</td>
+    <td>大专 / 经验不限</td>
+    <td><b>周末双休</b></td>
+    <td>五险一金；外包性质，稳定性看项目</td>
+  </tr>
+</table>
+
+<!-- ============ 抗跌性 ============ -->
+<h2>抗跌性：AI 泡沫出清，三条线谁先塌 <span class="badge t-bad">2026-11 新增</span></h2>
+<p class="muted">这一节回答「泡沫破了，选方向二还行不行」。判断依据是 2025Q4–2026Q4 的实际数据，不是趋势判断。</p>
+
+<h3>先分清两件事：破的是「估值」，不是「技术」</h3>
+<ul>
+  <li><b>确实在出清</b>：Character.AI 破产（流量惊人、变现无门，最后把团队和技术卖给巨头续命）；OpenAI 的 Sora、Google 的 Pixel Studio 在 2026 年陆续退场或收缩；大量 AI 应用公司裁员、缩减甚至关门。</li>
+  <li><b>但巨头在加码</b>：微软累计裁员超 1.5 万人、同时单季资本开支 410 亿美元（同比 +70%）；亚马逊 2025-10 到 2026-10 裁掉超 3 万个企业岗，同年资本支出飙到约 2000 亿美元；Meta 裁 2.1 万人后又裁 8000 人，另调 7000 多人进 AI 团队。</li>
+  <li><b>结论</b>：钱没跑，钱从「人力」转到了「算力」。用行业原话说——<b>「37 度的身体，拼不过 300 度的芯片」</b>。这对求职者的含义是：<b>被砍的永远是「可被替代的执行层」，不是「能把 AI 变成产出的人」。</b></li>
+  <li><b>企业侧反而在加速</b>：德勤中国 2026-09 报告——进入生产部署阶段的企业占比从 56.0% 升到 <b>64.4%</b>，停留在探索试点的从 36.7% 降到 24.9%。<b>这是方向一最硬的反证：企业不再「试 AI」，而是在「上 AI」。</b></li>
+</ul>
+
+<h3>方向二（AIGC 内容）的塌方数据（最需要正视）</h3>
+<table>
+  <tr><th style="width:38%">指标</th><th>数据</th><th>含义</th></tr>
+  <tr><td>AI 漫剧活跃承制方</td><td class="salary">1216 家 → 698 家</td><td><b>一个季度少 43%</b>，玩家在成批退场</td></tr>
+  <tr><td>承制价（按分钟）</td><td class="salary">3000~5000 元 → 500~1000 元</td><td>跌 67%~83%，纯产能已经不值钱</td></tr>
+  <tr><td>AI 漫剧完播率</td><td class="salary">42% → 19%</td><td>观众审美疲劳，量产内容被抛弃</td></tr>
+  <tr><td>5000 万播放盈亏线达标率</td><td class="salary">1.3%</td><td>约 <b>每 77 部只有 1 部回本</b>；破亿的只占 0.48%</td></tr>
+  <tr><td>头部公司收缩</td><td class="salary">酱油文化 1500 人 → 几百人（半年）</td><td>靠堆量赌爆款的模式失效，150 部剧卡在平台，对应成本约 1200 万</td></tr>
+  <tr><td>平台治理</td><td class="salary">5–8 月下架低质漫剧 5.6 万部</td><td>低质产能被主动清出，不是「等风来」就能好</td></tr>
+  <tr><td>抽卡师薪资</td><td class="salary">4000–7000 元</td><td>链条最末端，<b>涨薪空间有限</b>，加班到凌晨是常态</td></tr>
+  <tr><td>存量竞争者涌入</td><td class="salary">真人短剧拍摄量 −80%<br>横店竖屏在拍剧组 −82.5%</td><td>大量有影视经验的从业者被迫转 AI 岗，<b>和你抢同一批 HC</b></td></tr>
+</table>
+
+<div class="box warn">
+  <b>但方向二不是「整条线死了」，而是内部裂成了两半：</b>
+  <table style="margin-top:10px">
+    <tr><th style="width:30%"></th><th>在下沉的一侧（避开）</th><th>在上升的一侧（往这里走）</th></tr>
+    <tr>
+      <td><b>角色</b></td>
+      <td>抽卡师 / 制作执行 / 按分钟计件的承制团队</td>
+      <td>工作流搭建、技术美术、AI 导演、AI 剪辑（8000–20000 元）、提示词体系负责人</td>
+    </tr>
+    <tr>
+      <td><b>雇主</b></td>
+      <td>靠平台分账、堆量赌爆款的流水线公司</td>
+      <td>工具/平台方（卖软件、卖工作流）、品牌方自建内容团队（不靠分账，靠自家营销预算）、精品制作团队</td>
+    </tr>
+    <tr>
+      <td><b>技能护城河</b></td>
+      <td>会用即梦、会写提示词（<b>模型一升级就贬值</b>）</td>
+      <td>能把「剧本→资产→分镜→生成→成片」串成可复用管线（<b>模型换了还在</b>）</td>
+    </tr>
+  </table>
+  <p style="margin:10px 0 0">行业原文说得很准：<b>「被淘汰和出清的不是用 AI 做短剧的人，而是只会用 AI 的人。」</b></p>
+</div>
+
+<h3>三条线的抗跌性打分</h3>
+<table>
+  <tr><th style="width:14%">方向</th><th style="width:12%">抗跌性</th><th style="width:12%">命中率</th><th>理由</th></tr>
+  <tr>
+    <td><b>方向三</b><br><span class="muted">建筑 + AI</span></td>
+    <td><span class="stars">★★★★</span></td>
+    <td><span class="stars">★★</span></td>
+    <td>吃的是基建数字化预算，<b>和 AI 叙事基本无关</b>，泡沫破不破它都在。代价是薪资天花板低（4–8K）、要 Revit。<b>最稳，也最不涨。</b></td>
+  </tr>
+  <tr>
+    <td><b>方向一</b><br><span class="muted">AI 应用交付 / 实施</span></td>
+    <td><span class="stars">★★★</span></td>
+    <td><span class="stars">★★</span></td>
+    <td><b>「帮企业省钱」的预算在收缩期反而刚性</b>——企业部署率 56.0%→64.4% 是硬证据。风险是：小公司多，自身也可能被洗掉；且技术面卡 Python。</td>
+  </tr>
+  <tr>
+    <td><b>方向二</b><br><span class="muted">AIGC 内容</span></td>
+    <td><span class="stars">★★</span></td>
+    <td><span class="stars">★★★</span></td>
+    <td><b>进门最容易，但门口正在收窄</b>：承制方一季度少 43%、抽卡师 4–7K 涨不上去、老手在抢岗。<b>能进，但必须带着「往上游走」的路线进</b>，否则 2–3 年后会重复被洗。</td>
+  </tr>
+</table>
+
+<div class="box">
+  <b>一个必须说清楚的残酷机制：泡沫期最危险的不是「行业没了」，是「入门岗位没了」。</b>
+  <p style="margin:8px 0 0">企业收缩时先砍的是「可培养的新人 HC」，留的是「能立刻产出的熟手」。你现在正好是「新人」那一档。
+  反过来——如果你能拿出「一个人跑通全链路」的作品集，你在新人池里是异类，因为绝大多数新人拿不出这个。
+  <b>所以泡沫期作品集的权重不是下降，是上升。</b>但前提是它能证明「串联能力」，不是「我会用即梦」。</p>
+</div>
+
+<!-- ============ 适配分析 ============ -->
+<h2>以「拾光剪影」为敲门砖：能适配哪个方向？</h2>
+<p>把项目拆成可售卖的 5 项资产，逐条对着三条线的 JD 打分：</p>
+
+<table>
+  <tr>
+    <th style="width:34%">项目资产（可对面试讲的东西）</th>
+    <th>方向一<br>AI 应用交付</th>
+    <th>方向二<br>AIGC 内容</th>
+    <th>方向三<br>建筑 + AI</th>
+  </tr>
+  <tr>
+    <td><b>多模型本地部署</b><br><span class="muted">GGUF 量化、ComfyUI、SVD 图生视频、显存约束下选型</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">能讲「模型选型 + 硬件约束」</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">直接对口 JD 第一条</span></td>
+    <td><span class="stars">★</span></td>
+  </tr>
+  <tr>
+    <td><b>提示词与一致性控制</b><br><span class="muted">输出尺寸随输入比例走、特写人脸第 10 帧畸变、批量出片参数模板</span></td>
+    <td><span class="stars">★★</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">这种细节面试里极少有人讲得出</span></td>
+    <td><span class="stars">★</span></td>
+  </tr>
+  <tr>
+    <td><b>无限画布 + 3D 导演台 + 时间轴</b><br><span class="muted">产品设计：分镜、镜头、角色、素材如何组织</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">讲「需求拆解到落地」</span></td>
+    <td><span class="stars">★★</span><br><span class="muted">讲分镜与镜头语言</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">BIM 三维可视化同源</span></td>
+  </tr>
+  <tr>
+    <td><b>工程约束与交付</b><br><span class="muted">打包发布、体积守卫、性能基准、验收清单</span></td>
+    <td><span class="stars">★★★</span><br><span class="muted">「能把东西交付出去」是稀缺品质</span></td>
+    <td><span class="stars">★</span></td>
+    <td><span class="stars">★</span></td>
+  </tr>
+  <tr>
+    <td><b>手写代码 / 算法 / 框架底层</b></td>
+    <td class="na">✗ 明显短板</td>
+    <td class="na">✗ 不考</td>
+    <td class="na">✗ 不考</td>
+  </tr>
+</table>
+
+<div class="box good">
+  <b>修正后的结论（2026-11，已叠加抗跌性）：不要三选一，要「入口 + 目的地」组合。</b>
+  <ul>
+    <li><b>入口 · 方向二</b>（先用它回成都、先有双休、先有一份 AI 岗）：项目里「多模型生成 + 一致性控制 + 成片链路」正好是 AIGC 制作岗 JD 的核心要求，不考编程、不看学历。<b>但入场时就要带着条件——</b>只去「工具/平台方」或「品牌方自建团队」，不去按分钟卖产能的承制流水线；岗位要能碰到工作流搭建，不能只是纯抽卡。</li>
+    <li><b>目的地 · 方向一</b>（这才是泡沫破了还更硬的那一面）：企业部署率 56.0%→64.4% 说明「上 AI」在加速，不是收缩。用方向二那份工作当跳板，补上 Python 基础语法、<span class="kbd">requests</span> 调接口、SQL、Git，2 年内转过去。不补，面试一问就穿。</li>
+    <li><b>兜底 · 方向三</b>：如果 2027 年方向二的门真的关到进不去，售前岗（7–12K、双休）是唯一既抗跌又不亏的选择——它吃「专业对口 + 会讲」，而这恰好是可以练的。</li>
+  </ul>
+  <p style="margin:10px 0 0"><b>一句话：用方向二进门，用方向一活下来，把方向三当保险。</b>单押任何一条都不对——单押方向二，赌的是自己一年内能爬出抽卡层；单押方向一，是拿短板直接撞技术面；单押方向三，是接受薪资原地踏步。</p>
+</div>
+
+<!-- ============ 红线 ============ -->
+<h2>表达红线（面试前必须背下来）</h2>
+<div class="box bad">
+  <ul>
+    <li><b>绝对不能说「我写了 29 万行代码」</b>——面试官打开代码库就崩，而且构成虚假陈述。</li>
+    <li><b>正确说法</b>：「我一个人用 AI 工具把一个创意生产工具从需求拆到跑通。代码是 AI 辅助生成的，我负责架构设计、链路打通和验收，我能读懂并定位问题。」</li>
+    <li><b>把「非科班」说在最前面</b>：主动说「我是建筑工程技术专科，没系统学过编程，我是靠 AI 工具做出来的」——先说，面试官就不会再拿它卡你；藏着，被问出来就是减分。</li>
+    <li><b>禁用形容词</b>：精通 / 熟练掌握 / 深入研究。改成「用过、做过、能跑通」。</li>
+    <li><b>作品集给 3 个 60 秒 demo，不给仓库地址</b>：① 一张图→一段视频的完整链路；② 同一角色多镜头保持一致；③ 3D 导演台摆位到出片。三段各 1 分钟，能播就行。</li>
+    <li><b>GitHub 不要整库开源</b>：私有仓库保提交记录，另开一个脱敏的最小 demo 放公开库。</li>
+  </ul>
+</div>
+
+<!-- ============ 外部报告核对 ============ -->
+<h2>附：对另一份报告的核对 <span class="badge t-warn">2026-11-12</span></h2>
+<p class="muted">对象：<span class="kbd">/workspace/AI岗位三方向推荐_2026.html</span>。结论：<b>它的「怎么卖」比本报告好，它的「卖给谁、在哪卖、这行还值不值」比本报告差。</b>可用部分约四成。下面逐条给证据。</p>
+
+<h3>① 三处引用你项目的事实是错的</h3>
+<table>
+  <tr><th style="width:26%">它写的</th><th style="width:34%">实际（已核对）</th><th>证据</th></tr>
+  <tr>
+    <td>「画布真源在 <span class="kbd">vendor/packages/libtv</span>」</td>
+    <td><b>该目录不存在</b>。实际只有 <span class="kbd">vendor/packages/canvas-core</span></td>
+    <td><span class="kbd">ls vendor/packages/</span> → 只有 <b>canvas-core</b>；<span class="kbd">ls vendor/packages/libtv</span> → No such file or directory。包在 2026-11-04（提交 <span class="kbd">fbfca1ae</span>）改名</td>
+  </tr>
+  <tr>
+    <td>「冻结区 <b>90 把锁</b>」</td>
+    <td><b>9 个 zone</b>；<span class="kbd">frozen_zones.json</span> 里 symbols 37 条 + files 62 条</td>
+    <td>直接读 <span class="kbd">docs/knowledge/frozen_zones.json</span>：zones 长度 = 9（playback-av / exit-media / clip-transform / transform-bake / canvas-transform / plugin-host-ui / plugin-store-catalog / stage3d-core / canvas-magnetic-intent）</td>
+  </tr>
+  <tr>
+    <td>通篇称「<b>AI 视频编辑器</b>」「短剧精剪时间轴」</td>
+    <td><b>踩了定位红线</b>：它是<b>通用创意生产工具 / 创意工作台</b>，短剧只是其中一个场景</td>
+    <td>2026-10-28 你本人纠正过这条。拿「短剧剪辑工具」去面试，等于主动把护城河讲小</td>
+  </tr>
+</table>
+
+<h3>② 一处致命错配：它的岗位一个都不在你的城市</h3>
+<div class="box bad">
+  <p style="margin:0">它推荐的落点：<b>深圳</b>（声图、万兴 Filmora、剪映）、<b>广州</b>（优迈）、<b>上海</b>、<b>长沙</b>（秦九）、<b>湖州</b>、<b>合肥</b>、<b>杭州</b>（群核/酷家乐）。<b>成都 = 0 条。</b>
+  它自己在最后一句露了底：「没查到你期望的城市」。</p>
+  <p style="margin:8px 0 0">你的硬需求是<b>成都</b>。这份报告里能直接用的条目，大概只剩两成——而它最有价值的两个方向（1-A 工作流工程师、1-B 客户端开发）恰好都在长三角和珠三角。</p>
+</div>
+
+<h3>③ 一处方向性错误：把 1-B 打成「★★★★★ 原生对口」是最危险的一条</h3>
+<ul>
+  <li><b>技术面考的是手写代码，不是聊项目。</b>客户端岗必问：Qt 信号槽的线程安全、对象生命周期、渲染管线、C++ 基础；前端岗必问事件循环与性能优化。<b>这是你明确的短板</b>，不是「补两周」能过的。</li>
+  <li><b>它自己说「岗位少，要靠内推」——而你没有 IT 人脉。</b>内推这条路对现在的你不成立。</li>
+  <li><b>「项目能帮你过技术面」这句是错的。</b>项目帮你过的是「聊」，过不了「写」。面试官一句「这个锁为什么加在这里」，就足以分辨。</li>
+  <li><b>正确用法</b>：1-B 是<b>2–3 年后的目标</b>，不是 90 天的目标。要吃它就得先补 C++/Qt 或 TS 基础，再用项目当放大器。</li>
+</ul>
+
+<h3>④ 一处时效盲区：通篇没有「泡沫出清」四个字</h3>
+<div class="box warn">
+  <p style="margin:0">它把「湖州 AIGC 短剧导演 12–24K、学历不限、双休」当机会列出。但同一时间：
+  AI 漫剧活跃承制方 <b>1216 → 698 家</b>（一季度 −43%）、承制价 <b>跌 67%~83%</b>、盈亏线达标率 <b>1.3%</b>、头部酱油文化 <b>1500 人缩到几百人</b>。</p>
+  <p style="margin:8px 0 0"><b>它给的是静态 JD 快照，不是动态市场。</b>「在招」不等于「这个岗明年还在」——这正是本报告新增「抗跌性」章的原因。</p>
+</div>
+
+<h3>⑤ 但它有三样确实比本报告强，应当直接采纳</h3>
+<table>
+  <tr><th style="width:26%">采纳项</th><th>为什么好</th><th style="width:30%">怎么落地</th></tr>
+  <tr>
+    <td><b>一个项目拆三份切片</b></td>
+    <td>比本报告原来写的「3 个 60 秒 demo」更准：<b>按岗位剪，不是按功能剪</b></td>
+    <td>投内容岗 → 只演示「提示词块 → 生成 → 精剪 → 出片」；投工具岗 → 加时间轴/画布交互；投建筑岗 → 只演示漫游那条链路</td>
+  </tr>
+  <tr>
+    <td><b>建筑漫游「变体 demo」</b></td>
+    <td>聪明。本报告原来只建议「投 BIM 岗」，直接投说服力弱；做一个分支 demo 才把建筑背景变成资产</td>
+    <td>户型图 → 3D 空间 → 复用 24 槽位灯光预设布光 → AI 生成漫游视频。<b>纯 IT 背景的人做不出这个</b></td>
+  </tr>
+  <tr>
+    <td><b>谈判与投递纪律</b></td>
+    <td>「薪资按下沿 +20% 谈」「内推优先、不海投大厂 HR 系统」——都对</td>
+    <td>补进本报告「投递前必问清单」</td>
+  </tr>
+</table>
+
+<h3>⑥ 一条必须纠正的说法</h3>
+<div class="box bad">
+  <p style="margin:0">它说：<b>「冻结区 90 把锁、13 项提交检查，这就是中型团队的开发纪律，面试讲出来比任何证书都硬。」</b></p>
+  <p style="margin:8px 0 0"><b>这个说法是反的。</b>面试官不知道什么叫「冻结区」、什么叫「体积守卫」。直接说这些词，只会让人觉得你在背术语。</p>
+  <p style="margin:8px 0 0"><b>要翻译成人话再讲</b>：「改高风险模块之前我先定好契约、把不该动的接口锁住，改完再跑一轮回归——所以我一个人改 20 多万行的东西，没把原来的功能改坏。」<b>讲的是结果和纪律，不是名词。</b></p>
+  <p style="margin:8px 0 0">另：它写的「你的 22 万行代码」这个说法<b>自己知道就好，别讲</b>——理由见上一节红线。</p>
+</div>
+
+<!-- ============ 时间表 ============ -->
+<h2>时间表（按你每周约 10 小时的可用时间排）</h2>
+<table>
+  <tr><th style="width:22%">阶段</th><th>动作</th><th style="width:22%">产出</th></tr>
+  <tr>
+    <td><b>2026-11 ~ 2027-01</b></td>
+    <td>做作品集：3 个 60 秒 demo（链路 / 一致性 / 3D 出片）+ 一页脱敏技术说明（不讲代码，只讲链路和取舍）</td>
+    <td>可播放的作品集</td>
+  </tr>
+  <tr>
+    <td><b>2027-01 ~ 2027-03</b></td>
+    <td>补基本功：Python 基础语法 → <span class="kbd">requests</span> 调接口 → SQL 基本查询 → Git；各写一个小东西（不是看完教程）</td>
+    <td>方向一的面试资格</td>
+  </tr>
+  <tr>
+    <td><b>2027-04 起</b></td>
+    <td><b>主投方向二，但带三条筛选条件</b>：① 雇主是工具/平台方或品牌自建团队，不是按分钟计价的承制厂；② 岗位能碰到工作流/资产库/分镜，不是纯抽卡；③ 面试反问你一句「这个岗位三年后还在吗」。目标 6–10K。同时投 3–5 家方向一小公司纯练面试。</td>
+    <td>第一份成都的 AI 岗</td>
+  </tr>
+  <tr>
+    <td><b>2028 – 2029</b></td>
+    <td><b>转向方向一</b>：自考本科到手 + 1–2 年真实经验 + 补完 Python/接口/SQL ⇒ 从「内容执行」转「AI 工具落地」，打 8–15K 档。这一步才是抗泡沫的位置。</td>
+    <td>薪资台阶 + 抗跌性</td>
+  </tr>
+</table>
+
+<footer>
+  岗位数据来源：猎聘、BOSS 直聘、智联招聘、鱼泡直聘、四川大学生就业服务平台、成都职业技术学院就业网等公开挂牌信息（2026-09 ~ 2026-11）。<br>
+  行业数据来源：界面新闻《郑州与横店之间：AI 沉浮，短剧工厂的残酷算术》（2026-11-02）、投资界《AI 短剧走到十字路口：从拼产能到拼内容》（2026-10-19）、
+  甘肃文化产业网《短剧人才市场重构》（2026-11-05）、德勤中国《决策者视角下的企业 AI 应用》（2026-09）、以及 AI 应用层出清的公开报道（Character.AI 破产、Sora/Pixel Studio 退场、微软/亚马逊/Meta 裁员与资本开支数据）。<br>
+  挂牌薪资与实际 offer 常有差异，投递前务必在沟通中确认：① 单双休；② 试用期折扣；③ 提成是否计入「综合薪资」；④ 是否外包/驻场；⑤ <b>公司主要收入来自平台分账还是自有客户</b>（前者是这轮出清的重灾区）。
+</footer>
+
+</div>
+</body>
+</html>

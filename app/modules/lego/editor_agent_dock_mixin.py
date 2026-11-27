@@ -23,13 +23,148 @@ from __future__ import annotations
 import logging
 import threading
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 logger = logging.getLogger("AI短剧编辑器.editor")
+
+
+class _AgentLoopStopped(Exception):
+    """用户中止多轮循环的信号（仅在 worker 内部传播，不外泄给 core）。"""
+
+
+class _AgentLoopToolBridge(QObject):
+    """跨线程工具调用桥。
+
+    worker 线程 emit request → 主线程槽执行 → 回填 payload["result"] 并 set Event。
+    Qt 的 AutoConnection 在「发射线程 ≠ 接收者线程」时自动走 QueuedConnection，
+    因此本对象必须在主线程创建（同 `tasks_module.py` 的既有做法）。
+    """
+
+    request = Signal(object)
+
+
+class EditorAgentLoopWorker(QThread):
+    """桌面剪辑 Agent 的多轮执行线程（复用 core `AgentLoop`，不重写循环）。
+
+    与 `EditingAgentWorker` 的分工：
+      - 后者 = 单轮模型调用（旧路径，保留不动）；
+      - 本类 = `agent_loop.run` 的 Qt 包装，每轮工具调用回主线程执行，
+        执行回执再喂回模型，形成「观察 → 行动 → 观察」闭环。
+    """
+
+    progress_ready = Signal(dict)
+    error_ready = Signal(str)
+    stopped_ready = Signal()
+    finished_loop = Signal(dict)
+
+    _TOOL_TIMEOUT_SEC = 120.0
+
+    def __init__(self, *, provider: str, model: str, goal: str, mode: str,
+                 thinking_level: str, system_prompt: str, tool_prompt: str,
+                 memory_context: str, tool_bridge, think=None, parent=None):
+        super().__init__(parent)
+        self._provider = provider
+        self._model = model
+        self._goal = goal
+        self._mode = mode
+        self._thinking_level = thinking_level
+        self._system_prompt = system_prompt
+        self._tool_prompt = tool_prompt
+        self._memory_context = memory_context
+        self._tool_bridge = tool_bridge
+        self._think = think
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """请求中止（模型流与工具等待都会尽快退出）。"""
+        self._stop_requested = True
+
+    def _model_fn(self, messages):
+        """单轮模型调用：复用 ai_engine 流式接口，聚合为完整文本。"""
+        from app.core.ai_engine import ai_engine
+
+        extra = {}
+        if self._provider == "ollama" and self._think is not None:
+            extra["think"] = self._think
+        chunks = []
+        if self._provider:
+            stream = ai_engine.chat(
+                self._provider, messages, model=self._model or None,
+                stream=True, use_cache=False, **extra,
+            )
+        else:
+            stream = ai_engine.chat_with_fallback(
+                messages=messages, model=self._model or None, use_cache=False,
+                template=lambda: "模型暂不可用，请检查云端 API Key 或本地 Ollama 服务是否正常。",
+            )
+        for chunk in stream:
+            if self._stop_requested:
+                raise _AgentLoopStopped("stopped")
+            if chunk:
+                chunks.append(str(chunk))
+        raw = "".join(chunks).strip()
+        # 引擎用 yield "错误: ..." 表示失败，不能当正常答复喂回循环（诚实失败）
+        if raw.startswith(("错误:", "API 错误")):
+            raise RuntimeError(raw)
+        return raw
+
+    def _tool_executor(self, action, params):
+        """把工具调用投回主线程执行，阻塞等待回执（仅本 worker 线程阻塞）。"""
+        bus = self._tool_bridge
+        if bus is None:
+            return {"ok": False, "error": "无主线程执行桥"}
+        payload = {
+            "action": action,
+            "params": params,
+            "event": threading.Event(),
+            "result": None,
+        }
+        bus.request.emit(payload)
+        if not payload["event"].wait(self._TOOL_TIMEOUT_SEC):
+            return {"ok": False, "error": "主线程执行超时"}
+        result = payload.get("result")
+        return result if isinstance(result, dict) else {"ok": False, "error": "主线程无回执"}
+
+    def _on_progress(self, info) -> None:
+        if self._stop_requested:
+            return
+        self.progress_ready.emit(dict(info or {}))
+
+    def run(self) -> None:
+        """执行多轮循环；成败如实上报，不把中止包装成成功。"""
+        try:
+            from app.core.agent_loop import agent_loop
+
+            result = agent_loop.run(
+                goal=self._goal,
+                mode=self._mode,
+                session_id="editor",
+                provider=self._provider,
+                model=self._model,
+                system_prompt=self._system_prompt,
+                tool_prompt=self._tool_prompt,
+                memory_context=self._memory_context,
+                tool_executor=self._tool_executor,
+                model_fn=self._model_fn,
+                thinking_level=self._thinking_level,
+                on_progress=self._on_progress,
+            )
+            if self._stop_requested:
+                self.stopped_ready.emit()
+                return
+            self.finished_loop.emit(result.to_dict())
+        except _AgentLoopStopped:
+            self.stopped_ready.emit()
+        except Exception as e:
+            logger.exception("[AgentLoop] 多轮执行异常")
+            if self._stop_requested:
+                self.stopped_ready.emit()
+                return
+            self.error_ready.emit(str(e))
 
 
 class EditorAgentDockMixin:
@@ -268,7 +403,7 @@ class EditorAgentDockMixin:
     def _agent_local_think_enabled(self) -> bool:
         """读取「本地思考」偏好（QSettings，跨会话，默认关闭=最快）。"""
         try:
-            from PyQt6.QtCore import QSettings
+            from PySide6.QtCore import QSettings
             return bool(QSettings("ShiguangEditor", "AgentPanel").value(
                 "local_think_enabled", False, type=bool))
         except Exception:
@@ -277,7 +412,7 @@ class EditorAgentDockMixin:
     def _on_agent_local_think_toggled(self, checked: bool) -> None:
         """持久化「本地思考」偏好并刷新提示。"""
         try:
-            from PyQt6.QtCore import QSettings
+            from PySide6.QtCore import QSettings
             QSettings("ShiguangEditor", "AgentPanel").setValue(
                 "local_think_enabled", bool(checked))
         except Exception as e:
@@ -346,3 +481,117 @@ class EditorAgentDockMixin:
             self._refresh_edit_agent_models()
         except Exception as e:
             logger.debug(f"[Agent] 探测完成后刷新模型下拉失败: {e}")
+
+    # ======================================================================
+    # 多轮自主闭环（2026-11-18）：面板 → core AgentLoop 的接线
+    # 循环/预算/确认闸门仍在 core（agent_loop.py），本文件只放 Qt 包装；
+    # 工具调用必须回主线程执行（时间线/控件只能主线程碰），故用
+    # signal + Event 做一次性阻塞往返（与 tasks_module 的既有做法一致）。
+    # ======================================================================
+    _AGENT_THINKING_OPTIONS = (
+        ("标准（默认）", "standard"),
+        ("关闭（最快，最多 1 轮）", "off"),
+        ("轻（4 轮内）", "light"),
+        ("重（20 轮，逐步核对）", "heavy"),
+    )
+
+    def _agent_loop_enabled(self) -> bool:
+        """是否走多轮自主闭环（默认开；关闭即完全回到旧单轮路径）。"""
+        try:
+            from PySide6.QtCore import QSettings
+            return bool(QSettings("ShiguangEditor", "AgentPanel").value(
+                "agent_loop_enabled", True, type=bool))
+        except Exception:
+            return True
+
+    def _on_agent_loop_toggled(self, checked: bool) -> None:
+        """持久化「多轮自主执行」开关。"""
+        try:
+            from PySide6.QtCore import QSettings
+            QSettings("ShiguangEditor", "AgentPanel").setValue(
+                "agent_loop_enabled", bool(checked))
+        except Exception as e:
+            logger.debug(f"[Agent] 保存多轮开关失败: {e}")
+
+    def _agent_thinking_level(self) -> str:
+        """当前思考等级（off/light/standard/heavy），非法值回落 standard。"""
+        try:
+            from PySide6.QtCore import QSettings
+            raw = str(QSettings("ShiguangEditor", "AgentPanel").value(
+                "agent_thinking_level", "standard"))
+        except Exception:
+            raw = "standard"
+        from app.core.agent_loop import normalize_thinking_level
+        return normalize_thinking_level(raw)
+
+    def _on_agent_thinking_level_changed(self, index: int) -> None:
+        """思考等级下拉变更 → 持久化（下一次发送生效）。"""
+        combo = getattr(self, "_agent_thinking_combo", None)
+        if combo is None or combo.currentIndex() != index:
+            return
+        value = str(combo.itemData(index) or "standard")
+        try:
+            from PySide6.QtCore import QSettings
+            QSettings("ShiguangEditor", "AgentPanel").setValue(
+                "agent_thinking_level", value)
+        except Exception as e:
+            logger.debug(f"[Agent] 保存思考等级失败: {e}")
+
+    def _build_agent_thinking_combo(self) -> QComboBox:
+        """构建思考等级下拉（四档 + 持久化），由调用方挂到界面并套样式。"""
+        combo = QComboBox(self)
+        for label, value in self._AGENT_THINKING_OPTIONS:
+            combo.addItem(label, value)
+        combo.setToolTip(
+            "思考等级（仅多轮模式生效）：标准=12 轮/24 工具（默认）；"
+            "关闭=最多 1 轮；轻=4 轮；重=20 轮并逐步核对"
+        )
+        combo.setMinimumWidth(96)
+        cur = self._agent_thinking_level()
+        for idx in range(combo.count()):
+            if combo.itemData(idx) == cur:
+                combo.setCurrentIndex(idx)
+                break
+        combo.currentIndexChanged.connect(self._on_agent_thinking_level_changed)
+        self._agent_thinking_combo = combo
+        return combo
+
+    def _add_agent_loop_menu_action(self, menu):
+        """把「多轮自主执行」开关挂到 ⋯ 菜单（关闭即回到旧单轮路径）。"""
+        action = menu.addAction("多轮自主执行（观察→行动闭环）")
+        action.setCheckable(True)
+        action.setChecked(self._agent_loop_enabled())
+        action.toggled.connect(self._on_agent_loop_toggled)
+        self._agent_loop_action = action
+        return action
+
+    def _ensure_agent_loop_bridge(self):
+        """惰性创建跨线程工具桥（必须在主线程创建，父对象=self）。"""
+        bridge = getattr(self, "_agent_loop_tool_bridge", None)
+        if bridge is not None:
+            return bridge
+        bridge = _AgentLoopToolBridge(self)
+        bridge.request.connect(self._on_agent_loop_tool_request)
+        self._agent_loop_tool_bridge = bridge
+        return bridge
+
+    def _on_agent_loop_tool_request(self, payload) -> None:
+        """主线程槽：执行一次多轮工具调用并把结果回填给 worker。
+
+        ⚠️ 本槽内禁止 worker.wait() / 嵌套事件循环 —— worker 正阻塞等 Event。
+        """
+        if not isinstance(payload, dict):
+            return
+        event = payload.get("event")
+        try:
+            from app.core.agent_loop import agent_loop
+            mode = self._get_agent_session_mode()
+            executor = agent_loop._make_dispatcher_executor(mode, "editor")
+            result = executor(str(payload.get("action") or ""),
+                              payload.get("params") or {})
+        except Exception as e:
+            logger.exception("[Agent] 多轮工具执行失败")
+            result = {"ok": False, "error": str(e)}
+        payload["result"] = result if isinstance(result, dict) else {"ok": bool(result)}
+        if event is not None:
+            event.set()

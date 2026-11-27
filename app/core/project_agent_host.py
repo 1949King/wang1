@@ -138,7 +138,7 @@ def get_editor_module() -> Any:
             return _editor_ref
     # 回退：从主窗口取已加载的 editor 实例
     try:
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
         if app is None:
@@ -228,10 +228,10 @@ def list_chat_models() -> Dict[str, Any]:
 def _run_on_ui(fn) -> Tuple[bool, Any, str]:
     """在 Qt 主线程执行；失败则返回错误。"""
     try:
-        from PyQt6.QtCore import QTimer
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
     except Exception as e:
-        return False, None, f"PyQt 不可用: {e}"
+        return False, None, f"PySide6 不可用: {e}"
 
     app = QApplication.instance()
     if app is None:

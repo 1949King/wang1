@@ -6,9 +6,9 @@
 
 import sys
 import os
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QVBoxLayout, QWidget, QLabel, QPushButton
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QVBoxLayout, QWidget, QLabel, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 # 直接导入授权管理模块的核心功能
 import sys
@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 import webbrowser
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QMessageBox, QTabWidget, QFormLayout, QComboBox,
     QGridLayout
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon
 
 
 class LicenseLevel(Enum):

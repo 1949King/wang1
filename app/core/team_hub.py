@@ -815,10 +815,15 @@ class Hub:
                 "SELECT p.*, m.name AS owner_name FROM project p"
                 " LEFT JOIN member m ON m.id = p.owner_id ORDER BY p.updated_at DESC"
             ).fetchall()
-            claims = {
-                r["project_id"]: r
-                for r in conn.execute("SELECT * FROM claim WHERE expires_at > ?", (_now(),)).fetchall()
-            }
+            # 认领人**要显示名字**：`claim` 表存的是 member_id，直接吐出来
+            # 界面上就是「🔒 m_fb5c19f919ff85c6 在改」—— 用户读不出这是谁
+            # （2026-11-05 端到端实测发现，画布面板与小窗同时中招）。
+            claim_rows = conn.execute(
+                "SELECT c.project_id, c.expires_at, c.member_id, m.name AS holder_name"
+                " FROM claim c LEFT JOIN member m ON m.id = c.member_id"
+                " WHERE c.expires_at > ?", (_now(),)
+            ).fetchall()
+            claims = {r["project_id"]: r for r in claim_rows}
         out = []
         for r in rows:
             c = claims.get(r["id"])
@@ -826,7 +831,7 @@ class Hub:
                 "project_id": r["id"], "name": r["name"], "rev": int(r["rev"]),
                 "owner": r["owner_name"] or r["owner_id"],
                 "updated_at": float(r["updated_at"]),
-                "claimed_by": c["member_id"] if c else "",
+                "claimed_by": (c["holder_name"] or c["member_id"]) if c else "",
                 "claim_expires_at": float(c["expires_at"]) if c else 0.0,
             })
         return out

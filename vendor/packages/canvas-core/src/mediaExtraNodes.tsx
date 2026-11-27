@@ -20,6 +20,8 @@ import {
 import { generateImageViaHost, generateAudioViaHost, readFileAsDataUrl, uploadAssetToHost, breakdownStoryboard, planStoryboardCameras } from "./bridge";
 import { runVideoEdit, type VideoEditChannel } from "./hostVideoEdit";
 import { useVideoBad, VideoUnplayable } from "./videoUnplayable";
+import { PanoramaViewer3D, type PanoramaViewer3DHandle } from "./PanoramaViewer3D";
+import { generatePanorama } from "./hostImageTo3d";
 
 function nodePropsEqual(prev: NodeProps, next: NodeProps): boolean {
   return (
@@ -584,11 +586,77 @@ function PanoramaViewport({
   );
 }
 
+/** T5 全景生成（可选网关 H3，默认关）：prompt + 按钮，未启用诚实 guidance。
+ *  合规：MiniMax H3 署名常驻可见（H3 Community License，用户已确认条件放行）。
+ *  解冻 canvas-magnetic-intent 获批（2026-11-20）；产物喂现有 PanoramaViewer3D 环视。 */
+function PanoramaGenerateAction({ id, imageUrl }: { id: string; imageUrl?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [msg, setMsg] = useState("");
+  const [guidance, setGuidance] = useState("");
+  const run = async () => {
+    if (busy) return;
+    const hasImg = !!imageUrl && imageUrl.startsWith("data:");
+    if (!prompt.trim() && !hasImg) {
+      setMsg("请先描述全景内容（或上传源图）");
+      return;
+    }
+    setBusy(true); setMsg(""); setGuidance("");
+    // PanoramaData 无 errorMessage 字段（node-factory 冻结）⇒ Record 宽类型写入，错误经 msg/guidance 展示
+    const update = (patch: Record<string, unknown>) => useCanvasStore.getState().updateNodeData(id, patch);
+    update({ status: "generating", errorMessage: undefined });
+    const res = await generatePanorama({ prompt: prompt.trim(), image: hasImg ? imageUrl : "" });
+    if (res.ok && res.imageDataUrl) {
+      update({ status: "success", imageUrl: res.imageDataUrl, errorMessage: undefined });
+      setMsg(`全景已生成（${res.attribution || "MiniMax H3"}）`);
+    } else {
+      update({ status: "failed", errorMessage: res.message || "全景生成失败" });
+      setMsg(res.message || "全景生成失败");
+      setGuidance(res.guidance || "");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="sg-anim-actions nodrag" style={{ flexDirection: "column", alignItems: "stretch" }}>
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <input
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="描述全景内容…"
+          disabled={busy}
+          style={{ flex: 1, minWidth: 0, fontSize: 11, padding: "2px 6px", background: "var(--bg-input, #1a2332)", color: "var(--text, #e2e8f0)", border: "1px solid var(--border, #2d3a4d)", borderRadius: 4 }}
+        />
+        <button type="button" className="sg-node-mini-btn" disabled={busy} onClick={() => void run()} title="可选网关 H3 全景生成（默认关，模型广场启用）">
+          {busy ? "生成中…" : "✦ 生成全景"}
+        </button>
+      </div>
+      <span className="sg-anim-hint">{msg || "MiniMax H3 · 可选网关（默认关）"}</span>
+      {guidance ? <div className="sg-anim-hint" style={{ whiteSpace: "pre-line", textAlign: "left" }}>{guidance}</div> : null}
+    </div>
+  );
+}
+
 export const PanoramaNode = memo(function PanoramaNode({ id, data, selected }: NodeProps) {
   const d = data as PanoramaData;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const setStatus = useCanvasStore((s) => s.setStatus);
+  const addNode = useCanvasStore((s) => s.addNode);
   const fileRef = useRef<HTMLInputElement>(null);
+  const viewerRef = useRef<PanoramaViewer3DHandle | null>(null);
+  const [captureHint, setCaptureHint] = useState("");
+  // yaw/pitch 写回（真 3D 与旧 2D fallback 共用，data 契约不变）
+  const handleYawPitch = (yaw: number, pitch: number) => updateNodeData(id, { yaw, pitch });
+  // 📷 取景：截当前环视画面 ⇒ 新建图像节点（只走 store 公开 API）；不可用诚实提示
+  const onCapture = () => {
+    const dataUrl = viewerRef.current?.capture() ?? null;
+    if (!dataUrl) {
+      setCaptureHint("取景不可用：WebGL 未就绪或截图失败");
+      return;
+    }
+    setCaptureHint("");
+    const nid = addNode("image");
+    updateNodeData(nid, { imageUrl: dataUrl, title: "全景取景", status: "success" });
+  };
 
   const onUpload = async (file: File | null) => {
     if (!file) return;
@@ -621,11 +689,20 @@ export const PanoramaNode = memo(function PanoramaNode({ id, data, selected }: N
       </div>
       <div className="body nodrag">
         {d.imageUrl ? (
-          <PanoramaViewport
+          <PanoramaViewer3D
+            ref={viewerRef}
             imageUrl={d.imageUrl}
             yaw={d.yaw || 0}
             pitch={d.pitch || 0}
-            onYawPitch={(yaw, pitch) => updateNodeData(id, { yaw, pitch })}
+            onYawPitch={handleYawPitch}
+            fallback={
+              <PanoramaViewport
+                imageUrl={d.imageUrl}
+                yaw={d.yaw || 0}
+                pitch={d.pitch || 0}
+                onYawPitch={handleYawPitch}
+              />
+            }
           />
         ) : (
           <div className="sg-director-empty">等距柱状全景图 · 拖拽环视</div>
@@ -637,7 +714,13 @@ export const PanoramaNode = memo(function PanoramaNode({ id, data, selected }: N
           <button type="button" className="sg-node-mini-btn" onClick={bindSelectedImage}>
             绑选中图
           </button>
+          <button type="button" className="sg-node-mini-btn" disabled={!d.imageUrl} onClick={onCapture} title="截取当前环视画面为图像节点">
+            📷 取景
+          </button>
         </div>
+        {/* T5 全景生成：可选网关 H3（解冻 canvas-magnetic-intent 获批，2026-11-20） */}
+        {!d.imageUrl || d.status === "failed" ? <PanoramaGenerateAction id={id} imageUrl={d.imageUrl} /> : null}
+        {captureHint && <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 4 }}>{captureHint}</div>}
         <input
           ref={fileRef}
           type="file"

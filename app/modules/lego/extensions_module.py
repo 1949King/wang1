@@ -22,13 +22,13 @@ import os
 import logging
 from typing import Dict, List, Any, Optional
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QScrollArea, QFrame, QMessageBox, QFileDialog,
     QDialog, QLineEdit, QListWidget, QListWidgetItem, QGroupBox,
     QTextEdit, QFormLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PySide6.QtCore import Qt, Signal
 
 from .base_module import BaseModule
 from .mcp_preset_autoconnect import auto_connect_blender_preset
@@ -98,9 +98,9 @@ class ExtensionsModule(BaseModule):
 
     # 子线程 → 主线程信号（修复 _run_selected_skill 主线程阻塞 + Blender 下载回调）
     # 遵守 .trae/rules/2.md §五.2：UI 更新必须在主线程
-    _skill_progress_signal = pyqtSignal(int, str)
-    _skill_finished_signal = pyqtSignal(bool, str)
-    _blender_download_signal = pyqtSignal(bool, str)
+    _skill_progress_signal = Signal(int, str)
+    _skill_finished_signal = Signal(bool, str)
+    _blender_download_signal = Signal(bool, str)
 
     def _setup_ui(self):
         """设置主界面"""
@@ -633,7 +633,7 @@ class ExtensionsModule(BaseModule):
         if not getattr(self, "_blender_autoconnect_done", False):
             self._blender_autoconnect_done = True
             try:
-                from PyQt6.QtCore import QTimer as _QTimer
+                from PySide6.QtCore import QTimer as _QTimer
 
                 # 稍等页面布局完成再连，避免抢首帧
                 _QTimer.singleShot(600, self._auto_connect_blender_preset)
@@ -1796,7 +1796,7 @@ class ExtensionsModule(BaseModule):
 
     def _show_tool_selector(self, ext):
         """显示工具选择对话框"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QListWidget, QPushButton
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QListWidget, QPushButton
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"选择工具 - {ext.info.name}")
@@ -1918,7 +1918,7 @@ class ExtensionsModule(BaseModule):
         2. 原用 skill_data.get('name') 在真实 Skill 实例上会 AttributeError
            （_refresh_skill_list 存的是 Skill 实例，不是 dict）
 
-        现改为：子线程同步执行 + pyqtSignal 回主线程更新 UI
+        现改为：子线程同步执行 + Signal 回主线程更新 UI
         """
         current = self._skill_list.currentItem()
         if not current:
@@ -2094,7 +2094,7 @@ class ExtensionsModule(BaseModule):
                 # ★ 自动连接（Blender 默认配置）失败时不弹窗打断——只在状态栏如实说；
                 #   用户手动点击连接才弹详细错误。
                 if not preset.get("_auto"):
-                    from PyQt6.QtWidgets import QMessageBox as QMB
+                    from PySide6.QtWidgets import QMessageBox as QMB
                     QMB.warning(self, "连接失败", f"无法连接到「{config['name']}」:\n{error}")
 
         thread = threading.Thread(target=do_connect, daemon=True)

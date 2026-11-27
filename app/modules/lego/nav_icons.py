@@ -137,7 +137,7 @@ def _probe_svg():
     global _SVG_RENDERER
     if _SVG_RENDERER is None:
         try:
-            from PyQt6.QtSvg import QSvgRenderer  # type: ignore
+            from PySide6.QtSvg import QSvgRenderer  # type: ignore
             _SVG_RENDERER = QSvgRenderer
         except Exception:
             _SVG_RENDERER = False
@@ -182,8 +182,8 @@ def make_nav_icon(key: str, color: str, size: int = 20, stroke_width: float = 2.
     if svg is None:
         return None
 
-    from PyQt6.QtCore import QByteArray, Qt
-    from PyQt6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
+    from PySide6.QtCore import QByteArray, Qt
+    from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 
     try:
         screen = QGuiApplication.primaryScreen()

@@ -227,7 +227,14 @@ class CapabilityDispatcher:
                         capability_id=request.capability_id,
                     )
             except Exception as e:
-                logger.debug("[CapabilityDispatcher] policy skip: %s", e)
+                # 策略链异常必须失败关闭：继续执行会让写能力绕过预算与审批。
+                logger.exception("[CapabilityDispatcher] policy failed closed: %s", e)
+                return CapabilityResult(
+                    request_id=request.request_id,
+                    success=False,
+                    error=f"Agent 策略校验失败，已阻止执行: {e}",
+                    capability_id=request.capability_id,
+                )
 
         # 广播调用开始
         self._safe_emit(

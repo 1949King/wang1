@@ -7,6 +7,26 @@ Qt6 主应用入口
 import sys
 import os
 
+# 冻结版 stdio 默认按控制台代码页（中文 Windows = GBK）编码：license_manager
+# 等处的 emoji print 会抛 UnicodeEncodeError，崩在 MainWindow 之前，表现为
+# 「双击后静默退出、无任何日志」（2026-11-20 C:\SGApp 实测根因）。
+# 实测 PYTHONIOENCODING=utf-8 对冻结引导器不生效，必须在代码里重配置；
+# 与 app/main_qt6.py main() 的同款处理对齐，置于入口最前、任何 print 之前。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass  # stability-gate: allow-swallow（重配置失败保持默认编码，不得阻止启动）
+
+# 与 app/main_qt6.py 保持一致：本机 Chromium 沙箱不可用时页面会直接
+# loadFinished=False；标志必须在任何 QtWebEngine 导入之前设置。
+_webengine_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+if "--no-sandbox" not in _webengine_flags:
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        f"{_webengine_flags} --no-sandbox".strip()
+    )
+del _webengine_flags
+
 # ===========================================================================
 # 启动序（顺序不能改）
 # ===========================================================================
@@ -17,22 +37,22 @@ from app.core.runtime_pack import ensure_runtime_path
 ensure_runtime_path()
 
 # ② 原生库导入顺序（历史坑，别踩回去）
-#    实测（2026-11-05 本机，可复现）：
+#    PyQt6 时代实测（2026-11-05 本机，可复现）：
 #        import PyQt6.QtWidgets; import sentencepiece   → 原生访问违例，exit 139
-#        import sentencepiece;   import PyQt6.QtWidgets  → 正常
+#        import sentencepiece;  import PyQt6.QtWidgets  → 正常
 #    sentencepiece 的 C 扩展在 Qt 已加载时创建模块就崩，Python 层没有栈。
 #    受影响路径是 gguf/vocab.py:12 → import sentencepiece，也就是「加载 GGUF
-#    量化模型」在 Qt 进程里必崩。
+#    量化模型」在 Qt 进程里必崩。迁移 PySide6 后不假定该冲突已消失。
 #    ⇒ 处理方式：**AI 内核里不带 sentencepiece**（scripts/make_runtime_pack.py
 #      的 SKIP_TOPLEVEL_DISTS）。它对 gguf 是 try/except 可选依赖，对
 #      transformers 是 is_sentencepiece_available() 门控的可选功能，缺了只是
 #      少数旧式分词器模型的退化，不会崩。相比之下「带了就崩进程」不可接受。
 #    所以这里**不做**预热导入 —— 曾经加过，在冻结版里反而让每次启动都崩。
 
-# ③ 自检分流：必须在 import PyQt6 **之前**。
-#    实测：PyQt6 先加载、再 import torch 系原生库，同进程会触发原生段错误
+# ③ 自检分流：必须在 import PySide6 **之前**。
+#    PyQt6 时代实测：Qt 先加载、再 import torch 系原生库，同进程会触发原生段错误
 #    （exit 139，无 Python 栈）。与本项目 app/core/interchange/_otio_worker.py
-#    拆子进程是同一类问题。自检不需要 GUI，绕开 Qt 即可。
+#    拆子进程是同一类问题。PySide6 继续保守隔离；自检不需要 GUI，绕开 Qt 即可。
 if "--selftest" in sys.argv:
     from app.core import ai_runtime_selftest as _st
 
@@ -50,7 +70,7 @@ if "--selftest" in sys.argv:
             _only = sys.argv[_i + 1]
     sys.exit(_st.emit(as_json="--json" in sys.argv, out_path=_out, only=_only))
 
-# ③b OTIO 转换子进程入口（冻结版专用，也必须在 import PyQt6 之前）。
+# ③b OTIO 转换子进程入口（冻结版专用，也必须在 import PySide6 之前）。
 #    背景：主进程绝不能 import opentimelineio —— 它的 C 扩展在 Qt 之后加载必
 #    段错误（见 app/core/interchange/_otio_worker.py 顶部实测记录）。开发态由
 #    `python -m app.core.interchange._otio_worker` 起子进程；冻结后 sys.executable
@@ -66,9 +86,9 @@ if "--otio-worker" in sys.argv:
 # ④ 之后才是 GUI 依赖。这里之所以可以安全地在 import 块之前插代码：
 #    历史上 spec 把 torch 全排除、进程里一个 torch 都没有也能正常启动，说明
 #    这些模块级 import 从不触达 torch（重型依赖全是函数内懒加载）。
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton, QGridLayout
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton, QGridLayout
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIcon
 
 # 导入独立授权管理模块
 from license.license_manager import LicenseManager, LicenseDialog, get_license_manager, check_permission
@@ -82,7 +102,7 @@ from app.modules.lego.login_window import LoginWindow, ActivationWindow
 
 class AppStartupThread(QThread):
     """应用启动线程"""
-    startup_finished = pyqtSignal()
+    startup_finished = Signal()
     
     def run(self):
         # 模拟启动过程
@@ -172,14 +192,14 @@ class AIShortDramaEditorApp:
 
 def main():
     """主函数"""
-    # 自检入口已在模块顶部（import PyQt6 之前）分流，这里不会走到 --selftest。
+    # 自检入口已在模块顶部（import PySide6 之前）分流，这里不会走到 --selftest。
     # WebEngine 必须在 QApplication 创建前设置此属性，否则报:
     # QtWebEngineWidgets must be imported or Qt.AA_ShareOpenGLContexts
     # must be set before a QCoreApplication instance is created
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     # 提前 import WebEngineWidgets，让 Qt 在创建 QApplication 前完成 OpenGL 上下文共享
     try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
     except ImportError:
         pass
 

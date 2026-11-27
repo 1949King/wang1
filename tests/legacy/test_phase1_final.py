@@ -42,12 +42,12 @@ def test_basic_imports():
         print_result("标准库导入", False, f"导入失败: {e}")
         all_passed = False
     
-    # 测试PyQt6导入
+    # 测试PySide6导入
     try:
-        from PyQt6.QtCore import QObject
-        print_result("PyQt6导入", True, "PyQt6导入成功")
+        from PySide6.QtCore import QObject
+        print_result("PySide6导入", True, "PySide6导入成功")
     except ImportError:
-        print_result("PyQt6导入", False, "PyQt6未安装，使用替代方案")
+        print_result("PySide6导入", False, "PySide6未安装，使用替代方案")
         all_passed = False
     
     return all_passed

@@ -139,8 +139,9 @@ def test_e2e_replace_middle_keeps_rest_and_audio(tmp_path):
     assert r1 > 180 and g1 > 180 and b1 < 80, f"1.5s 本该是黄（新段），实得 {b1:.0f}/{g1:.0f}/{r1:.0f}"
     assert b2 > 180 and r2 < 80, f"2.5s 本该是蓝，实得 {b2:.0f}/{g2:.0f}/{r2:.0f}"
 
-    # 音轨还在
-    info = subprocess.run([FF, "-i", out], capture_output=True, text=True).stderr or ""
+    # 音轨还在（UTF-8 容错解码：GBK 代码页下 text=True 会炸中文元数据）
+    info = subprocess.run([FF, "-i", out], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace").stderr or ""
     assert "Audio:" in info
 
     # ★ 纪律回归：项目根不许出现临时文件

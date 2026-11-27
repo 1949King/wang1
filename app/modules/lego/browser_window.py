@@ -3,15 +3,15 @@
 提供网页浏览功能，支持前进、后退、刷新、地址栏等基本操作
 """
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QMainWindow, QToolBar, QLineEdit, QPushButton,
     QVBoxLayout, QWidget, QProgressBar, QLabel
 )
-from PyQt6.QtCore import QUrl, Qt
-from PyQt6.QtGui import QAction, QIcon
+from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QAction, QIcon
 
 try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+    from PySide6.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
     WEBENGINE_AVAILABLE = True
 except ImportError:
     WEBENGINE_AVAILABLE = False
@@ -135,8 +135,8 @@ class BrowserWindow(QMainWindow):
         error_label = QLabel("""
             <center>
             <p style="font-size: 18px; color: #ff6b6b; margin-bottom: 20px;">WebEngine 组件不可用</p>
-            <p style="font-size: 14px; color: #aaa;">请安装 PyQt6-WebEngine 以使用内置浏览器功能</p>
-            <p style="font-size: 12px; color: #666; margin-top: 20px;">pip install PyQt6-WebEngine</p>
+            <p style="font-size: 14px; color: #aaa;">请安装 PySide6 Addons 以使用内置浏览器功能</p>
+            <p style="font-size: 12px; color: #666; margin-top: 20px;">pip install PySide6==6.10.2 PySide6-Addons==6.10.2</p>
             </center>
         """)
         layout.addWidget(error_label)

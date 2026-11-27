@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """QtWebEngine 可用性预检（2026-10-25，2026-10-25 二次修正）。
 
-背景：本机 PyQt6 6.10.2 + Qt 6.10.2，但 PyQt6-WebEngine 6.10.0 ⇒ 混装后
+背景：PyQt6 时代本机 Qt 6.10.2 + WebEngine 6.10.0 混装后，
 WebEngine 渲染进程 **fail-fast（0xC0000409）**，连 data: URL 都加载不了。
+PySide6 迁移后四包统一 6.10.2，仍保留子进程实载探针。
 这种崩溃无法 try/except，只能子进程试跑。
 
 🔴 2026-10-25 定案（本文件的**致命误判**，务必别改回去）：
@@ -29,9 +30,9 @@ import sys
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
 
 # 必须在 QApplication 之前导入（QtWebEngineWidgets 的硬要求）
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer, QUrl
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer, QUrl
 
 
 def _diag(msg: str) -> None:
@@ -69,7 +70,7 @@ if state["ok"]:
 else:
     _diag(
         "FAIL: data: URL 未能渲染（loadFinished=False 或超时）。"
-        "常见原因：PyQt6 / PyQt6-Qt6 / PyQt6-WebEngine 三者版本不齐，"
+        "常见原因：PySide6 / Essentials / Addons / shiboken6 四者版本不齐，"
         "或 Chromium 沙箱起不来（需 QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox）"
     )
 sys.exit(0 if state["ok"] else 3)

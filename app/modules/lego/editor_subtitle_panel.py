@@ -16,8 +16,8 @@ from typing import Any, Optional, Protocol
 logger = logging.getLogger(__name__)
 
 try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
         QCheckBox,
         QComboBox,
         QDialog,
@@ -649,7 +649,7 @@ class CleanupChecklistDialog(QDialog if QDialog is not None else object):  # typ
 
     def __init__(self, parent, plan):
         if QDialog is None:
-            raise RuntimeError("PyQt6 不可用")
+            raise RuntimeError("PySide6 不可用")
         super().__init__(parent)
         self._plan = plan
         self.setWindowTitle("确认后执行 — 勾选要删除的区间")

@@ -10,7 +10,7 @@ import inspect
 
 
 def _import_capability_handlers():
-    """延迟导入，避免 import 时拉起 PyQt6。"""
+    """延迟导入，避免 import 时拉起 PySide6。"""
     from app.core import capability_handlers
     return capability_handlers
 

@@ -7,19 +7,19 @@ import logging
 import time
 from typing import Dict, Any, Optional
 
-from PyQt6.QtCore import QThread, QObject, pyqtSignal
+from PySide6.QtCore import QThread, QObject, Signal
 
 logger = logging.getLogger("AI短剧编辑器.ffmpeg_service")
 
 
 class FFmpegDecodeThread(QThread):
-    frame_decoded = pyqtSignal(int, bytes)
-    waveform_extracted = pyqtSignal(list)
-    metadata_loaded = pyqtSignal(dict)
-    thumbnail_generated = pyqtSignal(int, bytes)
-    progress_updated = pyqtSignal(int)
-    error_occurred = pyqtSignal(str)
-    task_completed = pyqtSignal()
+    frame_decoded = Signal(int, bytes)
+    waveform_extracted = Signal(list)
+    metadata_loaded = Signal(dict)
+    thumbnail_generated = Signal(int, bytes)
+    progress_updated = Signal(int)
+    error_occurred = Signal(str)
+    task_completed = Signal()
 
     def __init__(self, ffmpeg_path: str, media_path: str, task_type: str = "metadata"):
         super().__init__()
@@ -179,12 +179,12 @@ class FFmpegDecodeThread(QThread):
 
 
 class FFmpegService(QObject):
-    metadata_ready = pyqtSignal(str, dict)
-    waveform_ready = pyqtSignal(str, list)
-    frame_ready = pyqtSignal(str, int, bytes)
-    thumbnail_ready = pyqtSignal(str, bytes)
-    decode_progress = pyqtSignal(str, int)
-    decode_error = pyqtSignal(str, str)
+    metadata_ready = Signal(str, dict)
+    waveform_ready = Signal(str, list)
+    frame_ready = Signal(str, int, bytes)
+    thumbnail_ready = Signal(str, bytes)
+    decode_progress = Signal(str, int)
+    decode_error = Signal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -292,8 +292,8 @@ class FFmpegService(QObject):
         width<=0 时只约束高度（scale=-2:h）；两者都 >0 时用 increase+crop 铺满目标框。
         """
         try:
-            from PyQt6.QtGui import QPixmap
-            from PyQt6.QtCore import QByteArray
+            from PySide6.QtGui import QPixmap
+            from PySide6.QtCore import QByteArray
 
             h = max(8, int(height))
             w = int(width)

@@ -237,3 +237,52 @@ body.sg-team-open .sg-pet { display: none; }
 .sg-team-role.owner { color: #ffd59a; border-color: rgba(255, 213, 154, 0.4); }
 .sg-team-role.viewer { color: rgba(150, 190, 255, 0.9); border-color: rgba(120, 170, 255, 0.36); }
 .sg-team-rolebtn { margin-left: 6px; font-size: 10px; padding: 1px 6px; }
+
+/* ── 2026-11-05：按「动作」重排（状态条 / 折叠区）────────────────────
+   旧版五段式 ①服务器 ②加入 ③项目 ④收件箱 ⑤素材 的问题是**排序**：
+   ①② 是「一辈子点一两次」的装机器动作却打了头，每天都要看的「谁交给我
+   什么了」被压到第四段。这里只补布局，不动任何接口。
+   颜色沿用本文件既有的深底口径（面板自己固定 rgba(22,24,30,.96)）。 */
+
+/* 状态条：连接 + 人数 + 检查连接，一行看完 */
+.sg-team-status {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 6px 9px; border-radius: 8px; font-size: 11.5px;
+  border: 1px solid rgba(255, 255, 255, 0.09); background: rgba(255, 255, 255, 0.04);
+}
+.sg-team-status b { font-weight: 600; color: rgba(235, 240, 248, 0.95); }
+.sg-team-status .sp { flex: 1; }
+/* 三态点：灰=还没探过（不谎报在线）、绿=通、红=断 */
+.sg-team-status .dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16);
+}
+.sg-team-status .dot.unknown { background: #94a3b8; box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16); }
+.sg-team-status .dot.down { background: #f87171; box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18); }
+.sg-team-status .sep { width: 1px; height: 11px; background: rgba(255, 255, 255, 0.14); }
+
+/* 折叠头：整行可点，右侧 hint 说明「这里面是什么 / 要不要管它」 */
+.sg-team-fold {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; padding: 2px 0; cursor: pointer;
+  color: #b9c2d4; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+  text-align: left;
+}
+.sg-team-fold:hover { color: #e9ecf1; }
+.sg-team-fold .caret { width: 10px; flex: 0 0 auto; opacity: 0.75; font-weight: 400; }
+.sg-team-fold .count {
+  font-weight: 500; font-size: 10.5px; padding: 0 5px; border-radius: 6px;
+  color: rgba(210, 216, 226, 0.75); background: rgba(255, 255, 255, 0.07);
+}
+.sg-team-fold .hint {
+  margin-left: auto; font-weight: 400; font-size: 10.5px;
+  color: #7f8a9d; max-width: 62%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 折叠体里的子段：折叠头已经是 h4 级别，子段降一级，别再抢视觉 */
+.sg-team-subsec { display: flex; flex-direction: column; gap: 6px; }
+.sg-team-subsec h5 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  color: rgba(190, 199, 214, 0.82); letter-spacing: 0.02em;
+}

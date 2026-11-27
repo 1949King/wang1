@@ -24,8 +24,8 @@ ComfyUI 的做法是**把底层原语暴露成节点**：要做「修脸」你�
 1. **诚实报告**：每一步都回报**实际用了哪个引擎**（gfpgan / espcn / realesrgan / bicubic /
    cpu-fallback），以及**是否降级**及原因。绝不把「双三次插值」说成「AI 超分」。
 2. **绝不抛异常**：任何一步失败只跳过该步、记进 `skipped`，主链路继续。
-3. **不静默下载大模型**：`high` 档才允许拉 RealESRGAN；其余档位用轻量路径，
-   避免用户第一次点「放大」就被下载几百 MB。
+3. **绝不自动下载模型**（T2，2026-11-20）：`high` 档也只认用户**自取放置**的
+   RealESRGAN 权重；缺失时诚实降级，获取方式见「下载中心」，绝不替用户下载几百 MB。
 
 边界（不做的事）
 ----------------
@@ -62,7 +62,7 @@ ENHANCE_INTENTS: Dict[str, Dict[str, Any]] = {
     },
     "sharpen": {
         "label": "超分放大",
-        "hint": "放大画面并补细节；高质量档更清晰但更慢、首次可能需下载",
+        "hint": "放大画面并补细节；高质量档更清晰但更慢，高清权重需自取（获取方式见下载中心）",
     },
     "style": {
         "label": "风格迁移",
@@ -75,8 +75,8 @@ ENHANCE_INTENTS: Dict[str, Dict[str, Any]] = {
 }
 
 # ── 质量档位 → 实现层参数（**用户不碰模型名**）──
-# 注：只有 high 档置 use_realesrgan=True ⇒ 只有它会触发 RealESRGAN 模型下载。
-# 其余档位走 OpenCV 内置 ESPCN，**不下载任何东西**（首次点「放大」不该被下几百 MB）。
+# 注：只有 high 档置 use_realesrgan=True ⇒ 只有它会尝试 RealESRGAN（T2：绝不自动下载，
+# 只认用户自取放置的权重，缺失诚实降级）。其余档位走 OpenCV 内置 ESPCN，不碰任何下载。
 QUALITY_TIERS: Dict[str, Dict[str, Any]] = {
     "fast": {"sr_scale": 2, "use_realesrgan": False},
     "standard": {"sr_scale": 2, "use_realesrgan": False},
@@ -167,11 +167,11 @@ def _step_sharpen(img, quality: str, params: Dict[str, Any]) -> Tuple[Dict[str, 
     model = getattr(engine, "_model_name", "") or ("bicubic" if not loaded else "unknown")
     # degraded 的判据必须与 reason **一致**：
     #  ① 落到双三次（未加载任何模型）= 降级
-    #  ② 要了 RealESRGAN 却没拿到（模型未下载/后端不支持）= 降级
+    #  ② 要了 RealESRGAN 却没拿到（权重未自取/后端不支持）= 降级
     degraded = (model == "bicubic") or (want_realesrgan and model != "realesrgan")
     reason = ""
     if want_realesrgan and model != "realesrgan":
-        reason = f"RealESRGAN 未就绪（模型未下载或后端不支持），已降级为 {model}"
+        reason = f"RealESRGAN 未就绪（权重未自取放置或后端不支持），已降级为 {model}；获取方式见下载中心"
     elif model == "bicubic":
         reason = "无可用超分模型，已降级为双三次插值（非 AI 放大）"
     return {"applied": True, "engine": model, "degraded": degraded,

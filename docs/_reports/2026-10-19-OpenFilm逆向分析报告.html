@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenFilm 项目逆向分析报告 · 2026-10-19</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#f5f7fa; color:#1e293b; font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; line-height:1.7; }
+  .wrap { max-width:1060px; margin:0 auto; padding:32px 20px 64px; }
+  header.hero { background:linear-gradient(135deg,#172033 0%,#1f3350 60%,#2563eb 130%); color:#fff; border-radius:16px; padding:36px 40px; margin-bottom:28px; }
+  header.hero .tag { display:inline-block; background:rgba(249,115,22,.18); color:#fdba74; border:1px solid rgba(249,115,22,.45); font-size:12px; padding:3px 12px; border-radius:99px; margin-bottom:14px; letter-spacing:1px; }
+  header.hero h1 { font-size:25px; font-weight:700; margin-bottom:8px; }
+  header.hero p.sub { color:#b6c2d9; font-size:13.5px; }
+  header.hero .meta { margin-top:16px; display:flex; flex-wrap:wrap; gap:18px; font-size:12.5px; color:#8fa3c4; }
+  header.hero .meta b { color:#e2e8f0; font-weight:600; }
+  section { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:26px 30px; margin-bottom:22px; }
+  h2 { font-size:19px; color:#172033; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
+  h2 .no { background:#2563eb; color:#fff; font-size:12px; min-width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; padding:0 6px; }
+  h2 .en { font-size:11px; color:#94a3b8; font-weight:400; letter-spacing:.5px; }
+  .lead { color:#475569; font-size:13.5px; margin-bottom:18px; }
+  .tldr { background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #2563eb; border-radius:10px; padding:16px 20px; margin-bottom:14px; font-size:13.5px; }
+  .tldr b { color:#1d4ed8; }
+  .tldr ul { margin:8px 0 0 18px; }
+  .tldr li { margin-bottom:6px; }
+  .warnbox { background:#fffbeb; border:1px solid #fde68a; border-left:4px solid #d97706; border-radius:10px; padding:14px 18px; font-size:13px; color:#78350f; margin-top:14px; }
+  .greenbox { background:#ecfdf5; border:1px solid #a7f3d0; border-left:4px solid #059669; border-radius:10px; padding:14px 18px; font-size:13px; color:#065f46; margin-top:14px; }
+  table { width:100%; border-collapse:collapse; font-size:12.8px; margin-top:6px; }
+  th { background:#f1f5f9; color:#334155; text-align:left; padding:9px 10px; border-bottom:2px solid #e2e8f0; white-space:nowrap; }
+  td { padding:9px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+  tr:hover td { background:#f8fafc; }
+  .pri { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; border-radius:6px; font-size:11px; font-weight:700; color:#fff; background:#2563eb; padding:0 5px; }
+  .pri.p0{ background:#dc2626; } .pri.p1{ background:#f97316; } .pri.p2{ background:#0ea5e9; }
+  .ev { font-family:Consolas,monospace; font-size:11px; color:#64748b; background:#f8fafc; padding:1px 6px; border-radius:5px; border:1px solid #e2e8f0; white-space:nowrap; }
+  .layer { border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; margin-bottom:8px; background:#fff; }
+  .layer b { color:#172033; }
+  .layer .files { font-size:11.5px; color:#64748b; font-family:Consolas,monospace; margin-top:2px; }
+  .arrow { text-align:center; color:#94a3b8; font-size:12px; margin:2px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:760px){ .grid2{ grid-template-columns:1fr; } }
+  .card { border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; background:#fff; }
+  .card h3 { font-size:14.5px; color:#172033; margin-bottom:6px; }
+  .card p, .card ul { font-size:12.8px; color:#334155; }
+  .card ul { margin:4px 0 0 16px; }
+  .quote { background:#f8fafc; border-left:3px solid #94a3b8; padding:8px 14px; font-size:12.5px; color:#475569; border-radius:0 8px 8px 0; margin:8px 0; font-family:Consolas,monospace; }
+  .foot { text-align:center; color:#94a3b8; font-size:11.5px; margin-top:26px; line-height:1.8; }
+  code { font-family:Consolas,monospace; background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:12px; color:#1d4ed8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="tag">开源项目逆向 · 全代码通读</span>
+  <h1>OpenFilm 项目逆向分析报告：网页即电影，时钟即协议</h1>
+  <p class="sub">github.com/openfilm/openfilm ｜ 全仓库 713 个文件、约 3.7 万行 TS/JS 代码 + 9 个官方技能 + SPEC 协议文档，已全部通读（核心文件逐行，桌面端/编辑器/技能体系分四路精读 + 关键证据亲自抽验）。</p>
+  <div class="meta">
+    <div>版本 <b>v0.2.0（2026，很新）</b></div>
+    <div>许可证 <b>MIT（可借鉴，需保留声明）</b></div>
+    <div>定位 <b>开源 AI 视频 Agent</b></div>
+    <div>结论 <b>不是竞品，是「下一代形态」的参照物；三大设计可直接移植</b></div>
+  </div>
+</header>
+
+<!-- ============ 1 结论 ============ -->
+<section>
+  <h2><span class="no">1</span>结论先行 <span class="en">TL;DR</span></h2>
+  <div class="tldr">
+    <b>OpenFilm 是什么（一句话）</b>
+    <ul>
+      <li>它把「一部电影」压缩成<b>一个 HTML 文件</b>（film.html），把「一个镜头」压缩成<b>一个函数</b>（网页里暴露 <code>window.film.frame(t)</code>，画出任意时刻），把「剪辑软件」做成<b>一个本地浏览器编辑器</b>（Studio）。你的编码 Agent（Claude Code/Codex 等 10 个）把电影写成网页，你亲手改，无头 Chromium + ffmpeg 逐帧渲染成片。</li>
+      <li><b>它对我们最大的帮助不是代码，是三个「协议级」设计</b>：① <b>frame(t) 纯函数契约 + 宿主时钟劫持</b>——AI 生成的任意画面可确定性重放、可并行渲染、可自动质检；② <b>统一 NLE 导出中间层</b>——AI 粗剪成果一键变 FCPXML/剪映工程，交回人工精修；③ <b>Agent 改动感知回执 + git 闭包版本史</b>——Agent 批量改片子不丢人审、随时可回滚。</li>
+      <li><b>它没有的，恰恰是我们有的</b>：多素材智能筛选、ABCD 融合矩阵、抽卡选优闭环（draw_book/gen_critic）、22 万行 Python 生产引擎——OpenFilm 是「生成型」工具，拾光剪影是「素材重组型」工厂。<b>别妄自菲薄，也别整体照搬。</b></li>
+    </ul>
+  </div>
+  <div class="greenbox">✅ <b>落地建议（详见第 6、7 节）</b>：按 P0/P1/P2 三档借鉴——P0 是「帧精确 seek + 双 shuffle 质检」（直接治我们预览-导出不一致的老毛病）；P1 是「NLE 导出中间层 + Agent 回执 + inverse undo」；P2 是「技能三段式 + Provider 密钥安全 + git 版本史」。全部是<b>设计借鉴，零依赖引入</b>，不触碰冻结区与 EditorModule._clips 真相源。</div>
+</section>
+
+<!-- ============ 2 项目概况 ============ -->
+<section>
+  <h2><span class="no">2</span>项目概况：它到底是什么 <span class="en">OVERVIEW</span></h2>
+  <table>
+    <thead><tr><th>维度</th><th>事实（附证据）</th></tr></thead>
+    <tbody>
+      <tr><td>定位</td><td>「The open source AI video agent」——让编码 Agent 拍电影，让人亲手改。<code>README.zh-CN.md:9-25</code></td></tr>
+      <tr><td>三位一体理念</td><td>一个 HTML 文件（film.html 剪轨道）+ 一个函数（frame(t) 画任意时刻）+ 一个真编辑器（Studio）。<code>README.md:11-25</code></td></tr>
+      <tr><td>技术栈</td><td>Node ≥22.18 + pnpm monorepo；核心包纯 ESM（.mjs）；桌面端 Electron；渲染用 playwright-core 驱动无头 Chromium（CDP）；编辑器 React+TSX+Vite；ffmpeg 编码；git 做版本史。<code>package.json / apps/desktop/src/main.mjs</code></td></tr>
+      <tr><td>规模</td><td>713 个文件；TS/JS 约 3.7 万行（核心包 src 6,476 行含测试、apps/desktop 25,746、packages 合计 11,234、scripts 416）；9 个官方技能；SPEC.md 协议 216 行；i18n 5 种语言。</td></tr>
+      <tr><td>成熟度</td><td><b>v0.2.0，2026 年新项目</b>（LICENSE: MIT, Copyright (c) 2026）。新，但工程纪律罕见地好：每个模块配 .test.mjs，test/ 目录放的是「Agent 典型错误」的网页样本。</td></tr>
+      <tr><td>分发</td><td><code>npx skills add openfilm/openfilm</code>（Agent Skills 标准生态）+ <code>npx -y openfilm@latest</code> CLI（open/look/render/get/skills/skill 六个命令）+ macOS/Windows 桌面端。</td></tr>
+      <tr><td>工作流</td><td>Agent 按技能（SKILL.md）生成影片网页 → Studio 实时显示成形 → 人手工改（拖拽/改字/时间线 trim）→ look 命令自动质检 → render 逐帧渲染 → 导出 mp4/ProRes/FCPXML/剪映草稿。</td></tr>
+    </tbody>
+  </table>
+  <div class="warnbox">📌 <b>先对齐认知</b>：OpenFilm 的「电影」是<b>生成型</b>内容（Agent 用代码画画面：three.js/CSS/GSAP），我们的「短剧」是<b>素材重组型</b>（已有视频素材的智能筛选/剪辑/合成）。这决定了：它的<b>协议和工程架构</b>值得我们学，它的<b>内容生产模型</b>不适用于我们。第 5 节逐条区分。</div>
+</section>
+
+<!-- ============ 3 架构总览 ============ -->
+<section>
+  <h2><span class="no">3</span>架构总览：五层，全部围绕一个协议 <span class="en">ARCHITECTURE</span></h2>
+  <p class="lead">它的整个系统围绕 <b>SPEC.md（OpenFilm Protocol 0.1）</b>展开——这份 216 行的协议用 RFC 2119 关键词写成，是「film.html 格式 + frame(t) 契约 + 宿主职责」的唯一权威。代码只是协议的参考实现。</p>
+
+  <div class="layer"><b>① 文档层 film-doc.mjs（965 行）—— 一部电影 = <code>{stage, tracks:[{clips}]}</code></b>
+    <div class="files">film-doc.mjs · film-doc.d.mts · timeline.mjs(965) · look.mjs(358) · shared.mjs(413)</div>
+    <p style="font-size:12.8px;margin-top:6px">film.html 只有两个顶层字段（多一个就报错，<span class="ev">film-doc.mjs:297</span>）；轨道 = <code>&lt;section&gt;</code>，片段 = 4 种原生 HTML 标签（iframe=网页镜头 / video / img / audio，<span class="ev">film-doc.mjs:473</span>）；<b>入点/出点不在字段里，编码在 URL 片段</b> <code>#t=2,6</code>（<span class="ev">film-doc.mjs:680</span>）；读写闭环保留未变片段的原始文本，AI 改片不产生垃圾 diff（<span class="ev">film-doc.mjs:916-964</span>）。</p></div>
+  <div class="arrow">▼ 被宿主托管</div>
+  <div class="layer"><b>② 宿主层 host.mjs（479 行）—— 时钟劫持 + CDP 逐帧驱动</b>
+    <div class="files">host.mjs · render.mjs(190) · seekable.mjs(101) · locations/overrides/media-links</div>
+    <p style="font-size:12.8px;margin-top:6px">在任何页面脚本前注入 <code>filmHost</code>（<span class="ev">host.mjs:26</span>）：劫持 performance.now / Date / rAF 时间戳 / CSS 动画 / <b>按 t 播种的 Math.random</b>（<span class="ev">host.mjs:24</span>）；frame 精确 seek 用 <code>currentTime+0.001</code> 补丁（<span class="ev">host.mjs:15</span>）；等视频新帧<b>上屏</b>（requestVideoFrameCallback）再截图（<span class="ev">timeline.mjs:157-199</span>）。</p></div>
+  <div class="arrow">▼ 产出帧序列</div>
+  <div class="layer"><b>③ 渲染层 render.mjs —— 多浏览器并行 + 零磁盘帧管道</b>
+    <div style="font-size:12.8px;margin-top:6px">worker 数 = min(8, CPU线程/2, 内存/3GB)（<span class="ev">render.mjs:153</span>）；每帧截图经 stdin 直喂 ffmpeg <code>image2pipe</code> 流式编码（<span class="ev">render.mjs:158-190</span>）；多采样用 tmix 做动态模糊；分片 concat -c copy 合并；音画同源于时间线（adelay 对齐 + apad/atrim 精确到时长）。</p></div>
+  <div class="arrow">▼ 被人编辑</div>
+  <div class="layer"><b>④ Studio 编辑器（React）—— 画布是真网页 + 逆操作 undo + Op 事务</b>
+    <div class="files">studio/ui/src/editor/* · studio/server/*（exports/fcpxml/jianying/captions/history/closure/providers）</div>
+    <p style="font-size:12.8px;margin-top:6px">画布就是 iframe 里跑的真网页；编辑收敛为不可变 Op 集，undo 从编辑前后两份文档<b>按 clip id 反推逆操作</b>（<span class="ev">editor/undo.ts:66-126</span>）；导出中间层把时间线规划成编辑器无关表格，再写 FCPXML/剪映/xmeml 三种工程（<span class="ev">nle.mjs + fcpxml.mjs + jianying.mjs</span>）。</p></div>
+  <div class="arrow">▼ 被 Agent 驱动</div>
+  <div class="layer"><b>⑤ 桌面端 apps/desktop（Electron）—— ACP 协议驱动 10 个编码 Agent</b>
+    <div class="files">agents.mjs · agent-roster/prompt/skills/logs/records · file-changes.mjs · chat/*</div>
+    <p style="font-size:12.8px;margin-top:6px">Claude/Codex/Gemini/Copilot/Cursor/OpenCode/CodeBuddy/Qwen/Kimi/MiniMax 十家注册（<span class="ev">agents.mjs:53-83</span>），stdio JSON-RPC 子进程；Agent 写文件 → 文件监视 → WebSocket 推 rev → 编辑器记 <code>ours</code> 集合过滤自己的回声（<span class="ev">use-film.ts:55-93</span>）；回合级全项目快照 diff 汇报「这轮改了什么」（<span class="ev">file-changes.mjs:39-126</span>）。</p></div>
+  <div class="arrow">▼ 方法论</div>
+  <div class="layer"><b>⑥ 技能体系 skills/（9 个官方技能）—— SKILL.md 三段式 + 三层解析</b>
+    <div style="font-size:12.8px;margin-top:6px">每个技能 = SKILL.md（frontmatter 双语触发词 + 「What has to be true / What you have / With the person」三段式方法论）+ openfilm.json（五语言元数据）；project/mine/official 三层解析，项目技能优先（<span class="ev">skills.mjs:6-13</span>）。</p></div>
+</section>
+
+<!-- ============ 4 六大创新 ============ -->
+<section>
+  <h2><span class="no">4</span>六大架构创新（带证据） <span class="en">INNOVATIONS</span></h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>创新 1：frame(t) 纯函数契约 + 宿主时钟劫持</h3>
+      <p>整个系统的地基。页面只暴露 <code>window.film = {frame(t), duration, ready}</code>（<span class="ev">SPEC.md:130-136</span>）；宿主把页面能读到时间的一切都改成 t（<span class="ev">host.mjs:24</span>），于是 frame(t) 退化为数学纯函数——<b>同一 t 永远同一帧，与之前画过什么无关</b>。</p>
+      <p style="color:#059669"><b>为什么是创新</b>：Remotion 等框架靠「约定」达到确定性；OpenFilm 用宿主强制保证，并配套机器验证（见创新 2）。这意味着：并行渲染、帧缓存、单镜头重渲、质检，全部只是「对不同的 t 求值再截图」。</p>
+      <div class="quote">SPEC.md:152 — "For the same t, frame MUST produce the same picture, whatever was drawn before it and in whatever order frames are requested."</div>
+    </div>
+    <div class="card">
+      <h3>创新 2：「同 t 双 shuffle」自动质检（look 命令）</h3>
+      <p><code>openfilm look</code> 把「渲染正确性」这个不可判定问题转成机器可验证规则：同一组 t 用<b>两种固定乱序各画一遍，逐帧比对</b>（<span class="ev">look.mjs:88-101</span>），不一致就精确报告「哪个 t 画出了两张不同的画」并列罪魁（时钟/未播种随机/帧间状态）。</p>
+      <p style="color:#059669"><b>附带一整套成片质检</b>：文字被裁切检测（cutText，<span class="ev">look.mjs:103-108</span>）、平色检测、EBU R128 响度波形（<span class="ev">look.mjs:248-267</span>）、轨道重叠检测。<b>test/ 目录放的就是「Agent 典型错误」网页样本</b>（clock/impure/subtle-shift/cut-text/throws）——测试哲学是「给 AI 会犯的错写样本，再断言工具输出」。</p>
+    </div>
+    <div class="card">
+      <h3>创新 3：帧精确 seek 双保险</h3>
+      <p>逐帧渲染的最大敌人是视频 seek：① <code>currentTime</code> setter 打 <code>+0.001</code> 补丁，修掉帧边界 seek 落到上一帧的问题（约 1/3 概率发生，<span class="ev">host.mjs:12-15</span>）；② 渲染前把慢 GOP 素材（关键帧 1–4 秒）转成<b>关键帧每 0.25s 的近乎无损副本</b>，按版本+路径+mtime 哈希缓存（<span class="ev">seekable.mjs:1-5, 67-91</span>）。</p>
+      <p style="color:#059669"><b>为什么重要</b>：这是「预览-导出一致性」的工程正解——预览、质检、导出三处走同一套帧定位逻辑，从根上消灭「预览对的、导出错的」。</p>
+    </div>
+    <div class="card">
+      <h3>创新 4：统一 NLE 导出中间层（FCPXML/剪映）</h3>
+      <p>内部时间线 → <code>planNleTimeline</code> 规划成<b>编辑器无关的表格</b>（帧边界 round 对齐消除一帧缝隙；隐藏轨转 disabled 不丢弃，<span class="ev">nle.mjs:9-19</span>）→ 写三种工程：FCPXML 1.10（音量转 dB、字幕作可编辑 Basic Title，<span class="ev">fcpxml.mjs:56,115-138</span>）、剪映/CapCut 草稿三件套（微秒时间、素材登记媒体库，<span class="ev">jianying.mjs:14-289</span>）、xmeml（PR/DaVinci 免插件）。</p>
+      <p style="color:#059669"><b>杀手细节</b>：网页镜头导出 NLE 时单独渲染成 <b>ProRes 4444 带 Alpha</b>（<span class="ev">exports.mjs:1178-1199</span>）——AI 生成的合成画面进专业软件后仍保留合成能力。「AI 粗剪 + 人工精修」工作流由此成立。</p>
+    </div>
+    <div class="card">
+      <h3>创新 5：Agent 改动感知回执 + git 闭包版本史</h3>
+      <p><b>回执</b>：Agent 写文件 → 服务端文件监视 → WebSocket 推 <code>{type:'film', rev}</code>；编辑器记 <code>ours</code> 集合，watcher 回来的同 rev 视为回声忽略；冲突以服务端为准重合并；文件写一半置 <code>broken</code> 暂停编辑而非崩溃（<span class="ev">use-film.ts:55-141</span>）。</p>
+      <p><b>版本史就是 git</b>：每项目独立 repo 于 <code>.film/history</code>，绝不碰用户自己的 .git（<span class="ev">history.mjs:1-5</span>）；版本内容 = 影片<b>闭包</b>（递归解析所有引用文件，<span class="ev">closure.mjs:1-21</span>）；大媒体按内容哈希外置、git 树里只放指针，APFS/Btrfs clone 秒存（<span class="ev">history-store.mjs:1-11</span>）；<b>系统绝不自动 commit，每次提交都是用户的</b>；未提交改动切分支时 park 到 <code>refs/openfilm/parked/</code>。</p>
+    </div>
+    <div class="card">
+      <h3>创新 6：技能体系 = 可执行的剪辑方法论</h3>
+      <p>SKILL.md 三段式：<b>What has to be true</b>（成片验收清单）/ <b>What you have</b>（工具边界）/ <b>With the person</b>（协作契约）（<span class="ev">collage/SKILL.md:11-34</span>）；description 写中英双语触发词让 Agent 匹配口语请求（<span class="ev">long-to-short/SKILL.md:3</span>）。</p>
+      <p><b>long-to-short 技能五条硬约束</b>（<span class="ev">long-to-short/SKILL.md:12-23</span>）：不断章取义（if/not 不能切掉、答案必须带问题）、每条独立成片、每刀落在停顿处、竖屏构图避让 App 按钮区、先自审再看（「a clip you would scroll past is not done」）。<b>lyric-video</b> 更要求「每字落在唱词时刻、误差两帧内、用数字汇报吻合度」（<span class="ev">lyric-video/SKILL.md:16-18</span>）。</p>
+    </div>
+  </div>
+
+  <div class="warnbox">🎩 <b>另一个值得注意的设计：overrides（人机协同修改保护）</b>。人在 Studio 里对网页镜头内元素的微调（位置/样式/文字）按 CSS selector 存在 clip 的 <code>overrides</code> 字段里，每帧绘制后应用（<span class="ev">SPEC.md:75-85</span>）；轨道可标 <code>locked</code>——「人专属，Agent 不许改」（<span class="ev">SPEC.md:49</span>）。MANUAL 要求 Agent「改之前重读 film.html，只改你打算改的」。<b>AI 重生成永不覆盖人工修改</b>——这正是我们「批量生成 + 单点修正」场景的解药。</div>
+</section>
+
+<!-- ============ 5 帮助映射 ============ -->
+<section>
+  <h2><span class="no">5</span>对拾光剪影的帮助：三档映射 <span class="en">MAPPING</span></h2>
+  <p class="lead">按「能不能直接用」分三档。全部是<b>设计借鉴</b>，零依赖引入——我们的真相源是 <code>EditorModule._clips</code>，任何借鉴都不得形成第二套时间线真相源（核心不变量 ①）。</p>
+
+  <div class="card" style="border-left:4px solid #059669;margin-bottom:12px">
+    <h3>🟢 A 档：直接可抄（改造成本低，命中现有痛点）</h3>
+    <table style="margin-top:8px">
+      <thead><tr><th>借鉴项</th><th>OpenFilm 做法（证据）</th><th>命中我们的什么问题</th></tr></thead>
+      <tbody>
+        <tr><td><b>帧精确 seek 双保险</b></td><td>currentTime+0.001 补丁 + 0.25s 关键帧副本缓存（<span class="ev">host.mjs:15 · seekable.mjs:67-91</span>）</td><td>预览-导出不一致（我们已有 exact/bake 转场分层，但帧定位层没有同款保证）；逐帧渲染/缩略图跳帧</td></tr>
+        <tr><td><b>「同 t 双 shuffle」质检</b></td><td>两种乱序重绘比对 + 文字裁切/平色/响度检测（<span class="ev">look.mjs:88-108, 248-267</span>）</td><td>画布/预览渲染不变式巡检（可挂 qt-visual-change-verification 技能）；成片质检自动化；「没测出来≠测出来了」铁律的落地工具</td></tr>
+        <tr><td><b>派生数据缓存 + 并发槽</b></td><td>ffmpeg/ffprobe 限并发（解码3/波形2），按 path+size+mtime 缓存（<span class="ev">derived.mjs:29-70</span>）</td><td>缩略图/波形/时长探测的缓存与并发治理</td></tr>
+        <tr><td><b>CJK 宽度预算 + i18n 五语言</b></td><td>汉字按宽 2 计（30 汉字=60 拉丁，<span class="ev">shared/title.ts:1-8</span>）；查不到 key 返回路径本身让拼写错误显形</td><td>UI 文案预算、出海多语言（我们 184 个 .qm 翻译文件的管理可参考其模式）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="border-left:4px solid #f97316;margin-bottom:12px">
+    <h3>🟠 B 档：需要适配（架构级借鉴，要改造成我们的形态）</h3>
+    <table style="margin-top:8px">
+      <thead><tr><th>借鉴项</th><th>OpenFilm 做法（证据）</th><th>我们的适配路径</th></tr></thead>
+      <tbody>
+        <tr><td><b>NLE 导出中间层</b></td><td>时间线 → 无关 plan → FCPXML/剪映/xmeml；网页镜头出 ProRes4444 Alpha（<span class="ev">nle.mjs · jianying.mjs · exports.mjs:1178</span>）</td><td>补「成片进剪映/FCP 精修」交付形态：以 <code>EditorModule._clips</code> 为输入写同一 plan → 剪映草稿三件套（draft_info/content/meta）。这是产品级能力，且与我们的「抽卡选优」互补（AI 出 N 版 → 人剪精修）</td></tr>
+        <tr><td><b>Agent 改动感知回执</b></td><td>rev 推送 + ours 回声过滤 + broken 态 + 冲突以服务端为准（<span class="ev">use-film.ts:55-141</span>）</td><td>MCP Server 兼任此 server 角色：Agent 改剧本/参数后推 rev，画布过滤回声、冲突重合并。直接治理我们「孤儿端点/半成品缺口」那类「改了没人知道」问题</td></tr>
+        <tr><td><b>inverse 自动 undo</b></td><td>一切编辑收敛为 Op 集，undo 从前后两份文档按 clip id 反推（<span class="ev">undo.ts:66-126</span>）</td><td>React Flow 画布编辑可复用：撤销一次移动不会把 Agent 并发改动一起撤销。<b>注意</b>：Op 是传输格式，落盘必须回到 <code>_clips</code>，不另存真相源</td></tr>
+        <tr><td><b>git 闭包版本史</b></td><td>.film/history 独立 repo + closure 依赖闭包 + 媒体内容寻址外置 + 绝不自动 commit（<span class="ev">history.mjs · closure.mjs · history-store.mjs</span>）</td><td><b>直接命中我们 project-snapshot 三大已知限制</b>（export 没调 push / list() 白名单无 clips / restore 不可再回滚）：闭包 git 方案三个问题一次解决</td></tr>
+        <tr><td><b>Provider 契约 + 密钥安全</b></td><td>一商一模块统一 run(verb,args,ctx)；密钥 0600/环境优先/错误响应抹密钥/余额归一（<span class="ev">contract.mjs · keys.mjs · common.mjs:30</span>）</td><td>我们已有 15 个 provider 类——借鉴其密钥安全实践（文件权限、env 优先、日志抹除）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="border-left:4px solid #0ea5e9">
+    <h3>🔵 C 档：只作参照（思想价值，不搬代码）</h3>
+    <ul style="margin-top:6px">
+      <li><b>「最小协议」思想</b>（SPEC.md:101-105）：一个属性只有「改变了电影、且不能由 CSS/页面/文件表达、且是人机共识」时才添加。我们的画布节点协议、MCP 能力目录都可以用这个标准做减法——<b>加行即注册的 agent_capability_catalog 正在反向膨胀，这条是刹车</b>。</li>
+      <li><b>技能三段式</b>：把 gen_critic 的审美标准、draw_book 的选优规则写成「What has to be true」验收清单，让 Agent 可执行、可检查。long-to-short 的硬约束清单可直接改成我们切条引擎的 prompt 模板。</li>
+      <li><b>「Agent 生成 → overrides 人工保护 → locked 人专属轨道」</b>：AI 重生成永不覆盖人工修改的人机协同契约。</li>
+      <li><b>测试哲学</b>：test/ = 「Agent 典型错误样本库」。我们的 <code>_verify/</code> 可以建同类样本（错误剪辑决策、错误抽卡、坏时间码）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 6 不适用 ============ -->
+<section>
+  <h2><span class="no">6</span>不适用与风险（诚实清单） <span class="en">LIMITS</span></h2>
+  <table>
+    <thead><tr><th>#</th><th>事实</th><th>影响</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><b>「网页即镜头」内容模型与我们基因不同</b>：OpenFilm 的镜头是 Agent 用代码画出来的（生成型），我们的镜头是已有素材的筛选重组（重组型）。它没有多素材智能筛选、ABCD 情绪矩阵、抽卡选优闭环。</td><td>内容生产模型不搬；只搬协议/工程/导出层。反过来说：<b>我们的抽卡闭环是它没有的，这是我们的独门优势</b>，继续按 ④抽卡→①编剧→②导演→③美术 顺序补齐</td></tr>
+      <tr><td>2</td><td><b>v0.2.0 很新</b>（2026 年项目），长期维护未知；SPEC 自称 0.1 draft。</td><td>只借鉴经过验证的设计（本次全部一手核实过行号），不做技术选型依赖</td></tr>
+      <tr><td>3</td><td><b>运行时要求</b>：Node ≥22.18（我们本机 node 22.22.2 ✓）、playwright-core 无头 Chromium（我们画布已用 Chromium，注意沙箱 <code>--no-sandbox</code> 老坑）。</td><td>若试其 seek/质检设计，先在 _verify/ 沙箱验证再进主链</td></tr>
+      <tr><td>4</td><td><b>许可证 MIT</b>：可自由使用/修改/分发，<b>需保留版权声明</b>（LICENSE: Copyright (c) 2026 OpenFilm contributors）。</td><td>若抄代码片段，在文件头注明来源；纯设计借鉴无需</td></tr>
+      <tr><td>5</td><td><b>它的时间线模型极简（两层扁平、无组合/无关键帧）</b>，因为我们有嵌套/联动/变速/磁吸等复杂需求。</td><td>只学它的「入点出点编码为 URL 片段」「错误信息带 clip id + 本地秒 + 行号」（<span class="ev">timeline.mjs:681</span>）这类<b>极简表达</b>，不学它的模型本身</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 7 行动建议 ============ -->
+<section>
+  <h2><span class="no">7</span>行动建议：P0/P1/P2 落地顺序 <span class="en">ACTION</span></h2>
+  <table>
+    <thead><tr><th>优先级</th><th>动作</th><th>落点（拾光剪影）</th><th>验收标准</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td><b>帧定位统一层</b>：+0.001 seek 补丁 + 渲染前 0.25s 关键帧副本缓存（path+mtime 哈希）</td><td>渲染/导出管线 + 缩略图服务</td><td>同一素材同一时间码，预览/导出/缩略图三处帧一致（LSB 漂移 ≤4，沿用 exact 口径）</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td><b>双 shuffle 质检命令</b>：两种乱序重绘同一组 t，比对 + 文字裁切/平色检测</td><td>_verify/ 新脚本（参考 qt-visual-change-verification 技能）</td><td>故意注入「帧间状态泄漏」样本必须报红；正常影片全绿</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><b>NLE 导出中间层</b>：_clips → 无关 plan → 剪映草稿三件套（再扩 FCPXML）</td><td>新模块（另开文件，不抬基线）</td><td>导出工程在剪映打开，时间码偏差 ≤1 帧；素材引用不拷贝可选</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><b>Agent 改动回执</b>：MCP server 推 rev + 画布 ours 回声过滤 + broken 态</td><td>canvas_server + 画布桥接层</td><td>Agent 连续改 10 次，画布无鬼影、无死锁、冲突可恢复</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><b>闭包 git 版本史</b>：替代/补强 project-snapshot 三局限</td><td>快照模块（注意冻结区，先查 zone 登记）</td><td>export→push 长栈可查；list() 含 clips；restore 可再回滚</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td><b>技能三段式资产化</b>：gen_critic/draw_book 方法论 → SKILL.md（验收清单/工具边界/协作契约）+ 双语触发词</td><td>docs/ 或 skills/ 目录（不进冻结区）</td><td>Agent 按技能执行，产出通过率可量化</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td><b>Provider 密钥安全</b>：0600 文件/env 优先/错误抹密钥</td><td>现有 15 个 provider 类</td><td>密钥不出现在任何日志/错误响应中</td></tr>
+    </tbody>
+  </table>
+  <div class="greenbox">🧭 <b>与项目北极星的关系</b>：以上全部服务于生产链补齐（S2 母版层/S1 长篇体系/G 治理闸门）——NLE 导出中间层直接增强「交付形态」（S5 成片），双 shuffle 质检是 G 治理闸门的机器验证手段，技能三段式是编剧生产端（S1）的方法论资产化。<b>不新开战线，只给现有缺口递工具。</b></div>
+</section>
+
+<!-- ============ 8 附录 ============ -->
+<section>
+  <h2><span class="no">8</span>附录：阅读清单与证据来源 <span class="en">SOURCES</span></h2>
+  <table>
+    <thead><tr><th>范围</th><th>已读文件（全部一手阅读）</th></tr></thead>
+    <tbody>
+      <tr><td>协议与文档</td><td>SPEC.md（216 行，全文）、MANUAL.md、README.md / README.zh-CN.md、CONTRIBUTING.md、LICENSE（MIT）</td></tr>
+      <tr><td>核心包 src（6,476 行）</td><td>film-doc.mjs(965)/film-doc.d.mts · timeline.mjs(965) · host.mjs(479) · shared.mjs(413) · look.mjs(358) · skills.mjs(348) · render.mjs(190) · seekable.mjs · locations/overrides/media-links · skills-cli.mjs</td></tr>
+      <tr><td>Studio 服务端</td><td>exports.mjs · fcpxml.mjs · jianying.mjs · nle.mjs · captions/film-subtitle · closure · derived · history/history-store · keys · contract/common · film · atomic</td></tr>
+      <tr><td>Studio 编辑器 UI</td><td>editor/（Preview.tsx / use-film.ts / undo.ts / player.ts / timeline-edit.ts）· components/（Timeline / InspectorPanel / ExportCenter / SettingsModal）· lib/（mg-transform / export-spec / chat-marks / project-history）· i18n/</td></tr>
+      <tr><td>桌面端（25,746 行）</td><td>main.mjs · studio.mjs · agents.mjs(ACR/ACP 适配) · agent-roster/prompt/skills/logs/records/usage · file-changes.mjs · chat-store/chat-ipc · ffmpeg-runtime/node-runtime · agent-prompt.md</td></tr>
+      <tr><td>技能体系</td><td>9 个官方技能 SKILL.md 全文（collage/keynote/long-to-short/lyric-video/motion-graphics/presenter-pip/replicate/screen-demo/vintage-film/whiteboard）+ openfilm.json + 顶层 skills/openfilm + sync-skills.mjs + official-skills.test.mjs</td></tr>
+      <tr><td>共享契约</td><td>packages/shared/src：contract.ts · video.ts · turn.ts · agent-activity.ts · prompt-reference.ts · markdown-blocks.ts · title.ts · modality.ts</td></tr>
+      <tr><td>版本锚点</td><td>openfilm v0.2.0（MIT）；技能同步 SOURCE = openfilm/skills@1111136608bfd7fda174ba0fe7c5b6f87138f8c7</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12.5px;color:#64748b;margin-top:12px">方法论声明：本报告所有结论均来自对上述文件的一手阅读（核心文件逐行 + 四路并行精读 + 关键证据亲自抽验复核），引用格式为 <span class="ev">文件:行号</span>，可在克隆的仓库中直接核对。仓库缓存在 <code>.workbuddy/tmp/openfilm-main/</code>。</p>
+</section>
+
+<div class="foot">
+  拾光剪影 · 开源项目逆向系列 ｜ OpenFilm 全代码分析 ｜ 2026-10-19<br>
+  同系列：《LibTV 网页功能逆向报告》（2026-10-12）。本报告只做设计借鉴，零依赖引入，不触碰冻结区与 EditorModule._clips 真相源。
+</div>
+
+</div>
+</body>
+</html>

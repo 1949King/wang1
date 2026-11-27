@@ -7,7 +7,7 @@ headerBar 右侧的头像按钮下方弹出。
 
 设计原则（V4.42.0 起）：
 - 完全复用既有 AuthService / ThemeManager / UpdateManager，不重写业务
-- 仅做 UI 编排；点击动作通过 pyqtSignal 让 main_window 接管实际导航
+- 仅做 UI 编排；点击动作通过 Signal 让 main_window 接管实际导航
 - 主题跟随主程序（属性选择器），关闭时由 main_window 控制生命周期
 - 自动关闭：点击面板外 / focusOut / ESC
 
@@ -19,7 +19,7 @@ headerBar 右侧的头像按钮下方弹出。
     [5] 退出登录         置底降级（仅登录态可见）
 
 落点约束（2026-10-11 用户二轮反馈）：
-- 这是 PyQt6 主程序顶 navbar 改造的一部分，**非画布模块**
+- 这是 PySide6 主程序顶 navbar 改造的一部分，**非画布模块**
 - 零冻结区触碰，零 CANVASDUAL 影响
 """
 
@@ -28,11 +28,11 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QEvent
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, Signal, QPoint, QEvent
+from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontMetrics
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QApplication, QSizePolicy, QGraphicsDropShadowEffect
 )
@@ -105,18 +105,18 @@ class UserCenterPanel(QFrame):
     """Trae IDE 风格用户中心下拉面板"""
 
     # ─────────── 业务信号 ───────────
-    login_requested = pyqtSignal()
-    register_requested = pyqtSignal()
-    activate_requested = pyqtSignal()
-    upgrade_requested = pyqtSignal()
-    notifications_requested = pyqtSignal()
-    check_update_requested = pyqtSignal()
-    settings_requested = pyqtSignal()
-    theme_requested = pyqtSignal()
-    help_requested = pyqtSignal()
-    feedback_requested = pyqtSignal()
-    logout_requested = pyqtSignal()
-    auth_state_changed = pyqtSignal(bool)  # True=已登录
+    login_requested = Signal()
+    register_requested = Signal()
+    activate_requested = Signal()
+    upgrade_requested = Signal()
+    notifications_requested = Signal()
+    check_update_requested = Signal()
+    settings_requested = Signal()
+    theme_requested = Signal()
+    help_requested = Signal()
+    feedback_requested = Signal()
+    logout_requested = Signal()
+    auth_state_changed = Signal(bool)  # True=已登录
 
     PANEL_WIDTH = 320
 

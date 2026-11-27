@@ -8,7 +8,7 @@
 - hover 显示操作按钮（重命名 / 复制 / 删除）
 - 空状态:EmptyProjectCard 「+ 新建项目」 CTA 卡（含新建/导入按钮）—— V4.43.3 新增
 
-PyQt6 实现，与 React/Tailwind 不同：
+PySide6 实现，与 React/Tailwind 不同：
 - 用 QFrame + QVBoxLayout 模拟卡片结构
 - 操作按钮默认隐藏，hover 显示（mouseMoveEvent）
 - 主题跟随主程序（属性选择器）
@@ -21,9 +21,9 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QColor
+from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QSizePolicy, QGraphicsDropShadowEffect,
 )
@@ -61,8 +61,8 @@ class EmptyProjectCard(QFrame):
         import_requested()  — 点「导入」
     """
 
-    create_requested = pyqtSignal()
-    import_requested = pyqtSignal()
+    create_requested = Signal()
+    import_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -144,10 +144,10 @@ class ProjectCard(QFrame):
         delete_requested(str)       — 删除 → 项目 id
     """
 
-    open_requested = pyqtSignal(str)
-    rename_requested = pyqtSignal(str)
-    duplicate_requested = pyqtSignal(str)
-    delete_requested = pyqtSignal(str)
+    open_requested = Signal(str)
+    rename_requested = Signal(str)
+    duplicate_requested = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(
         self,

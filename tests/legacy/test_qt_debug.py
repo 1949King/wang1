@@ -10,7 +10,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # 必须先创建 QApplication
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

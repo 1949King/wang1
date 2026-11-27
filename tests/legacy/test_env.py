@@ -39,10 +39,10 @@ except Exception as e:
     print(f"✗ Pillow 导入失败: {e}")
 
 try:
-    import PyQt6
-    print(f"✓ PyQt6 导入成功 (版本: {PyQt6.__version__})")
+    import PySide6
+    print(f"✓ PySide6 导入成功 (版本: {PySide6.__version__})")
 except Exception as e:
-    print(f"✗ PyQt6 导入失败: {e}")
+    print(f"✗ PySide6 导入失败: {e}")
 
 try:
     import cv2

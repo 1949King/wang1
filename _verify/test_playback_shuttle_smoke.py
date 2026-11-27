@@ -34,12 +34,12 @@ class MockHost:
 
 
 def main():
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(sys.argv)
 
     from app.modules.lego.playback_shuttle import PlaybackShuttle, _is_text_input_widget
-    from PyQt6.QtWidgets import QLineEdit, QWidget
+    from PySide6.QtWidgets import QLineEdit, QWidget
 
     errors = []
 

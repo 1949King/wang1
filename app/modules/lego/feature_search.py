@@ -15,9 +15,9 @@ from __future__ import annotations
 from typing import List, Dict, Optional, Callable, Any, Tuple
 from dataclasses import dataclass, field
 
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QColor, QPainter
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QEvent, Signal
+from PySide6.QtGui import QKeyEvent, QColor, QPainter
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QListWidget, QListWidgetItem, QFrame,
     QStyledItemDelegate, QStyle, QStyleOptionViewItem
@@ -340,7 +340,7 @@ class FeatureSearchBar(QFrame):
     - 选中结果后切换到对应 Tab 并执行回调
     """
 
-    feature_triggered = pyqtSignal(str)  # 功能名称
+    feature_triggered = Signal(str)  # 功能名称
 
     def __init__(self, parent=None, tabs_widget=None, feature_index: Optional[FeatureIndex] = None):
         super().__init__(parent)
@@ -495,7 +495,7 @@ class FeatureSearchBar(QFrame):
             tabs = self._tabs
             # fallback: 从父组件链中查找 QTabWidget
             if tabs is None:
-                from PyQt6.QtWidgets import QTabWidget
+                from PySide6.QtWidgets import QTabWidget
                 p = self.parent()
                 while p is not None:
                     if isinstance(p, QTabWidget):

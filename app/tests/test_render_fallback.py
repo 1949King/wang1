@@ -270,8 +270,8 @@ class TestProgressCallbackThreading:
             from app.core.render_manager import RenderManager
             import inspect
             src = inspect.getsource(RenderManager)
-            # 检查 pyqtSignal / Signal 使用
-            signal_indicators = ['pyqtSignal', 'Signal(', 'progress_signal', 'progress_callback']
+            # 检查 Signal 使用
+            signal_indicators = ['Signal(', 'progress_signal', 'progress_callback']
             has_signal = any(ind in src for ind in signal_indicators)
             # RenderManager 在 core 层，可能用回调而非信号
             # 但至少应有进度回调机制

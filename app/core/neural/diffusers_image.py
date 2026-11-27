@@ -262,6 +262,25 @@ def apply_fp8_quantization(pipe: Any) -> Tuple[bool, str]:
         return False, "fp8 量化失败，回落 fp16：%s: %s" % (type(e).__name__, e)
 
 
+def apply_int8_quantization(pipe: Any) -> Tuple[bool, str]:
+    """对 UNet/Transformer 应用 torchao int8 权重只量化；返回 (ok, 失败原因)。
+
+    T4（2026-11-20）：与 fp8 不同**不限 GPU 代际**（weight-only 在任意 CUDA 卡可用），
+    权重显存约减半 ⇒ 4GB 卡也能跑。组件取 unet（SD 系）或 transformer（Wan 系 DiT）。
+    独立成函数便于单测：注入假 torchao 即可验证调用链，不依赖 GPU/权重。
+    """
+    try:
+        component = getattr(pipe, "unet", None) or getattr(pipe, "transformer", None)
+        if component is None:
+            return False, "未找到 unet/transformer 组件"
+        from torchao.quantization import Int8WeightOnlyConfig, quantize_
+
+        quantize_(component, Int8WeightOnlyConfig())
+        return True, ""
+    except Exception as e:
+        return False, "int8 量化失败，回落 fp16：%s: %s" % (type(e).__name__, e)
+
+
 class DiffusersImageEngine:
     """自研图像生成引擎（diffusers 栈）。**模型不自动下载**，须先 `pull()`。"""
 
@@ -274,10 +293,34 @@ class DiffusersImageEngine:
         # 用法感知显存策略状态：pending→(promoted | kept_offload | disabled)
         self._promote_state = "pending"
         self._promote_note = ""
-        # 精度策略（2026-10-25）："" = 默认 fp16；"fp8" 需 Ada/Hopper/Blackwell + torchao + ≥6GB
+        # 精度策略（2026-10-25）："" = 默认 fp16；"fp8" 需 Ada/Hopper/Blackwell + torchao + ≥6GB；
+        # "int8"（T4）需 torchao + CUDA + ≥4GB（weight-only 不限代际）
         self._requested_precision = ""
         self._precision = "fp16"
         self._precision_reason = ""
+        # GGUF 权重源（2026-11-01 接线）："" = 用 base 权重；非空 = 从该 .gguf 装 UNet
+        self._requested_gguf = ""
+        self._gguf_report: Dict[str, Any] = {}
+
+    def request_gguf(self, value: str) -> str:
+        """指定 GGUF 权重文件（UNet 量化版）；传 "" 恢复 base 权重。
+
+        语义与 ``request_precision`` 一致：变了就卸载，下次 generate 走重载。
+        **不自动下载**：路径不存在只在 load 时报错，不在这里猜。
+        """
+        req = str(value or "").strip()
+        if req != self._requested_gguf:
+            self._requested_gguf = req
+            if self._pipe is not None:
+                self.unload()
+        return req
+
+    def gguf_status(self) -> Dict[str, Any]:
+        """当前 GGUF 装填快照（供 UI/Agent 判断「我到底跑的是不是量化权重」）。"""
+        return {"requested": self._requested_gguf,
+                "applied": bool(self._gguf_report.get("ok")),
+                "loaded": int(self._gguf_report.get("loaded") or 0),
+                "detail": self._gguf_report}
 
     def request_precision(self, value: str) -> str:
         """设置本次加载/下次重载要用的精度；已加载且变化 ⇒ 先卸载（下次 generate 重载）。"""
@@ -541,7 +584,29 @@ class DiffusersImageEngine:
                 feature_extractor=None,
             )
 
-            # ★ 精度策略（2026-10-25 接线）：fp8 需 Ada+torchao+≥6GB；
+            # ★ GGUF 权重源（2026-11-01 接线）：base 组件照常 from_single_file，
+            #   只把 **UNet 权重**换成 GGUF 里的量化版（GGUF 通常只含 UNet）。
+            #   顺序必须在显存策略之前：apply_to_unet 在 CPU 上反量化后 load_state_dict，
+            #   之后 offload/整卡策略接管放置。反过来先 offload 再换权重会放错设备。
+            _gguf_path = (self._requested_gguf or os.environ.get("SHIGUANG_GGUF") or "").strip()
+            self._gguf_report = {}
+            if _gguf_path:
+                if not os.path.isfile(_gguf_path):
+                    # 诚实失败：显式指定了量化权重却默默退回 fp16，用户会以为跑的是量化版
+                    return {"ok": False,
+                            "message": f"指定的 GGUF 不存在：{_gguf_path}"}
+                from app.core.neural import gguf_loader as _gl
+
+                _gr = _gl.apply_to_unet(pipe.unet, _gguf_path, dtype=torch.float16)
+                self._gguf_report = _gr
+                if not _gr.get("ok"):
+                    return {"ok": False,
+                            "message": "GGUF 装填失败：" + str(_gr.get("message")),
+                            "gguf": _gr}
+                logger.info("[diffusers_image] %s", _gr.get("message"))
+
+            # ★ 精度策略（2026-10-25 接线；T4 2026-11-20 加 int8）：fp8 需 Ada+torchao+≥6GB；
+            #   int8 需 torchao+CUDA+≥4GB（weight-only 不限代际）；
             #   不满足时默认回落 fp16 并带原因，严格模式（SHIGUANG_FP8_STRICT=1）直接失败。
             from app.core.neural import quant_policy as _qp
 
@@ -550,6 +615,7 @@ class DiffusersImageEngine:
             _prec = _qp.resolve_precision(
                 requested=self._requested_precision or os.environ.get("SHIGUANG_FP8", ""),
                 usable_fp8=bool(_probe.get("usable_fp8")),
+                usable_int8=bool(_probe.get("usable_int8")),
                 arch=str(_probe.get("arch") or ""),
                 vram_gb=float(_probe.get("vram_gb") or 0.0),
                 strict=_strict)
@@ -558,10 +624,29 @@ class DiffusersImageEngine:
                         "message": "精度要求无法满足：" + str(_prec.get("fallback") or "")}
             self._precision = _prec["precision"]
             self._precision_reason = _prec.get("fallback") or ""
+            # ★ GGUF 与 fp8/int8 互斥（T4 扩到 int8）：GGUF 已经把 UNet 换成量化权重，
+            #   再叠 fp8/int8 是二次量化（画质双层损失、显存收益还互相打架）。显式指定的 GGUF 优先 ——
+            #   它是用户手动挑的文件，不该被「顺手开个 fp8/int8」悄悄覆盖。
+            if self._gguf_report.get("ok") and self._precision in ("fp8", "int8"):
+                self._precision = "fp16"
+                self._precision_reason = "已装 GGUF 量化权重 ⇒ 跳过 fp8/int8（避免二次量化）"
+                logger.info("[diffusers_image] %s", self._precision_reason)
             if self._precision == "fp8":
                 _ok, _why = apply_fp8_quantization(pipe)
                 if _ok:
                     logger.info("[diffusers_image] fp8 权重只量化已应用（%s）", model_id)
+                else:
+                    self._precision = "fp16"
+                    self._precision_reason = _why
+                    if _strict:
+                        return {"ok": False, "message": self._precision_reason}
+                    logger.warning("[diffusers_image] %s", self._precision_reason)
+            # ★ T4（2026-11-20）：int8 weight-only 分支，镜像 fp8 的失败口径
+            #   （回落带原因；严格模式直接失败，绝不静默降级）。
+            if self._precision == "int8":
+                _ok, _why = apply_int8_quantization(pipe)
+                if _ok:
+                    logger.info("[diffusers_image] int8 权重只量化已应用（%s）", model_id)
                 else:
                     self._precision = "fp16"
                     self._precision_reason = _why
@@ -629,9 +714,12 @@ class DiffusersImageEngine:
             self._loaded_id = model_id
             logger.info("[diffusers_image] 已加载 %s（%s）· offload=%s",
                         model_id, spec["label"], self._offload)
-            return {"ok": True,
-                    "message": f"已加载 {spec['label']}（offload={self._offload}"
-                               f" · precision={self._precision}）"}
+            _m = (f"已加载 {spec['label']}（offload={self._offload}"
+                  f" · precision={self._precision}")
+            if self._gguf_report.get("ok"):
+                _m += f" · GGUF {self._gguf_report.get('summary', {}).get('dominant_type', '?')}"
+            return {"ok": True, "message": _m + "）",
+                    "gguf": self._gguf_report}
         except Exception as e:
             logger.debug("[diffusers_image] load 失败", exc_info=True)
             self._pipe = None
@@ -659,6 +747,8 @@ class DiffusersImageEngine:
         self._promote_note = ""
         self._precision = "fp16"
         self._precision_reason = ""
+        # 装填报告随卸载清空；_requested_gguf 保留 ⇒ 下次重载仍用同一份 GGUF
+        self._gguf_report = {}
         # 文本编码输出缓存随引擎卸载清空（键含 model_id，重载同模型也只是 miss 重编码；
         # 不清的代价 = 卸载后 GPU/CPU 上仍驻留编码张量，属于泄漏）
         try:

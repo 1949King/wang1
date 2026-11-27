@@ -25,6 +25,7 @@ import {
 } from "./localLibrary";
 import PromptLibraryPanel from "./PromptLibraryPanel";
 import AestheticPresetPanel from "./AestheticPresetPanel";
+import SgSelect from "./SgSelect";
 import type { PromptItem } from "./promptLibrary";
 import { useCanvasStore } from "./store";
 import { readProjectsIndex } from "./stores/project-storage";
@@ -440,22 +441,20 @@ export default function StudioPage({
               ? "（未检测到视觉模型，可在 Ollama 安装如 qwen3.5:4b）"
               : ""}
           </p>
-          <select
+          {/* 2026-11-21：原生 select 弹层在 QtWebEngine 现白块 ⇒ 换前端渲染下拉 */}
+          <SgSelect
             id="vision-model-select"
+            width="min(320px, 100%)"
             value={visionModel}
-            onChange={(e) => {
-              setVisionModel(e.target.value);
-              setVisionModelState(e.target.value);
+            options={[
+              { value: "", label: "自动（优先视觉模型）" },
+              ...visionModels.map((m) => ({ value: m.name, label: m.name })),
+            ]}
+            onChange={(v) => {
+              setVisionModel(v);
+              setVisionModelState(v);
             }}
-            style={{ maxWidth: 320 }}
-          >
-            <option value="">自动（优先视觉模型）</option>
-            {visionModels.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         <div className="ic-cta-row">

@@ -31,6 +31,7 @@ import { nextFreeSlot } from "./canvasSlot";
 import { applyBlueprint } from "./applyBlueprint";
 import ConfirmDialog from "./ConfirmDialog";
 import ExecutionBiasChip from "./ExecutionBiasChip";
+import SgSelect from "./SgSelect";
 import { refreshGenerationModels, useGenerationModelStore } from "./generationModels";
 import "./agentPanel.css";
 import {
@@ -1168,12 +1169,18 @@ export default function AgentPanel({
         <div className="sg-agent-brand">
           <strong>Agent-IM</strong>
           <span className="muted tiny">会话 {sid.slice(0, 10)}</span>
-          <select
-            className="sg-agent-mode"
+          {/* 2026-11-21：原生 select 弹层在 QtWebEngine 现白块 ⇒ 换前端渲染下拉 */}
+          <SgSelect
+            width={88}
             value={agentMode}
             title="Plan 只规划；协作 B 改画布需确认；自主 C 自动执行（生成不重试）"
-            onChange={(e) => {
-              const m = e.target.value as AgentMode;
+            options={[
+              { value: "collaborative", label: "协作 B" },
+              { value: "plan", label: "Plan" },
+              { value: "autonomous", label: "自主 C" },
+            ]}
+            onChange={(v) => {
+              const m = v as AgentMode;
               setAgentMode(m);
               saveAgentMode(m);
               void controlAgentSession({ session_id: sid, action: "mode", mode: m });
@@ -1186,11 +1193,7 @@ export default function AgentPanel({
                     : "已切协作 B：改画布/生成前会确认。",
               );
             }}
-          >
-            <option value="collaborative">协作 B</option>
-            <option value="plan">Plan</option>
-            <option value="autonomous">自主 C</option>
-          </select>
+          />
         </div>
         <span className={providers.some((p) => p.configured) ? "chip-ok" : "chip-warn"}>
           {providers.find((p) => p.active)?.name || "模型管理"}

@@ -16,11 +16,59 @@ AI 物体移除 / Inpainting 模块
 
 import numpy as np
 import logging
-from typing import Optional, Tuple
+import os
+from typing import List, Optional
 
 logger = logging.getLogger("AI短剧编辑器.inpainting")
 
+# 历史仓 id：不再用于下载（T3：绝不自动下载；仅留作历史标识）。
+# onnx-community/lama_dilated 仓已不存在（T0 许可核实），资源地址改 Carve/LaMa-ONNX。
 LAMA_ONNX = "onnx-community/lama_dilated"
+
+# ── T3（2026-11-20）：LaMa 本地优先 —— 绝不自动下载，只认用户自取放置的权重 ──
+
+LAMA_FILENAME = "lama_dilated.onnx"
+
+#: 权重缺失时给用户的自取指引（与 tool_weights 下载中心同一文案，单一真源）。
+LAMA_GUIDANCE = (
+    "未检测到 LaMa 局部修补权重（lama_dilated.onnx）。本软件绝不自动下载模型：\n"
+    "【资源地址（Apache-2.0，T0 已核；README 权重声明未核，请自行确认）】\n"
+    "  · https://huggingface.co/Carve/LaMa-ONNX\n"
+    "【部署步骤】\n"
+    "  1. 获取 LaMa dilated 的 ONNX 权重，放置时命名为 lama_dilated.onnx。\n"
+    "  2. 放到以下任一位置：\n"
+    "     ① 环境变量 SHIGUANG_LAMA_PATH 指向的完整文件路径；\n"
+    "     ② 仓库 thirdparty/models/lama_dilated.onnx。\n"
+    "  3. 重启画布桥后重试「局部修补」。缺失时诚实降级 Telea（degraded=True）。"
+)
+
+
+def lama_search_paths() -> List[str]:
+    """LaMa 权重的**候选路径**（按优先级，T3 本地优先）。
+
+    与 super_resolution.realesrgan_search_paths 同纪律：只找本地文件，绝不触发下载。
+      ① 环境变量 `SHIGUANG_LAMA_PATH` 指向的**整文件**路径
+      ② `<仓库>/thirdparty/models/lama_dilated.onnx`
+    """
+    paths = []
+    env_file = os.environ.get("SHIGUANG_LAMA_PATH", "").strip()
+    if env_file:
+        paths.append(env_file)
+    try:
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+        paths.append(os.path.join(repo, "thirdparty", "models", LAMA_FILENAME))
+    except Exception:  # stability-gate: allow-swallow（可选搜索根探测：算不出 repo 根就只是少一个候选路径，不影响正确性）
+        pass
+    return paths
+
+
+def find_lama_onnx() -> str:
+    """返回**实际存在**的 LaMa 权重路径；都没有则返回空串（绝不自动下载）。"""
+    for p in lama_search_paths():
+        if os.path.isfile(p):
+            return p
+    return ""
 
 
 class InpaintingEngine:
@@ -47,16 +95,22 @@ class InpaintingEngine:
             return False
 
         # ONNX 路径
+        # T3（2026-11-20）：**绝不自动下载** —— 只认用户自取放置的本地权重；
+        # 缺失时打 guidance 后诚实返 False（上层落 Telea 并如实标 degraded，不冒充 AI）。
         if eng.backend == InferenceBackend.ONNX:
-            try:
-                model_path = eng.download_model(LAMA_ONNX)
-                if model_path:
+            model_path = find_lama_onnx()
+            if model_path:
+                try:
                     if eng.load_onnx_model(model_path, self._model_name):
                         self._loaded = True
-                        logger.info("LaMa Inpainting ONNX 模型已加载")
+                        logger.info("LaMa Inpainting ONNX 模型已加载（本地自取权重: %s）", model_path)
                         return True
-            except Exception as e:
-                logger.debug(f"ONNX LaMa 加载失败: {e}")
+                    # 加载失败 ⇒ 不认领（与 A-6「回退冒充 AI」同纪律）
+                    logger.warning("LaMa 权重在盘但加载失败（%s），不认领 lama_inpaint", model_path)
+                except Exception as e:
+                    logger.debug(f"ONNX LaMa 加载失败: {e}")
+            else:
+                logger.info("LaMa 权重缺失，绝不自动下载。%s", LAMA_GUIDANCE)
 
         return False
 

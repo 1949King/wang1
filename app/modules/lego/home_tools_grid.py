@@ -7,7 +7,7 @@
 - 网格布局 4×2 或流式
 - 每个工具 = 图标 + 标题 + 副标题（一句话功能）
 
-PyQt6 实现：
+PySide6 实现：
 - QGridLayout 4 列
 - 每个 tool = QPushButton（#toolBtn 风格扩展，96×96）
 
@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame, QGridLayout, QVBoxLayout, QLabel, QPushButton, QWidget,
 )
 
@@ -103,7 +103,7 @@ class HomeToolsGrid(QFrame):
         tool_clicked(str)  — 工具被点击 → tool_id
     """
 
-    tool_clicked = pyqtSignal(str)
+    tool_clicked = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)

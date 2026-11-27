@@ -17,8 +17,8 @@ sys.path.insert(0, r"d:\拾光剪影")
 # 必须在 QApplication 之前设置环境变量
 os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout  # noqa: E402
-from PyQt6.QtCore import QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout  # noqa: E402
+from PySide6.QtCore import QTimer  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
